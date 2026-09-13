@@ -67,7 +67,11 @@ Two things depend on artifacts this script does not produce:
     exists. The images come from
     `cargo run -p teksilo-widgets-previewer -- --export-docs`, which needs a
     GPU adapter and so is not part of CI; a missing image degrades to a page
-    without a picture.
+    without a picture. A denser pass of the same command
+    (`--density=touch`) writes `img/<slug>-touch.png` beside it, and the
+    page then also carries a "Density" section showing it. The suffix table
+    is `DENSITY_IMAGE_SUFFIXES` below, mirroring
+    `teksilo_preview::PreviewPass::image_suffix` on the Rust side.
 
 Each page's API deep link is emitted as the crate's **docs.rs** URL, because
 the pages are committed and have to resolve for someone reading the Markdown on
@@ -1354,6 +1358,30 @@ def format_json(pfs: list[ParsedFile]) -> str:
 SUMMARY_BEGIN = "<!-- BEGIN GENERATED WIDGETS -->"
 SUMMARY_END = "<!-- END GENERATED WIDGETS -->"
 
+# Non-canonical preview densities, as `suffix -> heading label`.
+#
+# `Compact` is canonical and carries no suffix, so `img/<slug>.png` never
+# moves; every other density is additive and lands beside it. This table is
+# the Python half of `teksilo_preview::PreviewPass::image_suffix` — the two
+# sides never call each other, they only have to agree on the filename, so a
+# change to one is a change to both.
+DENSITY_IMAGE_SUFFIXES: list[tuple[str, str]] = [
+    ("-comfortable", "Comfortable"),
+    ("-touch", "Touch"),
+]
+
+
+def _density_image_stem(stem: str) -> str:
+    """`button-touch` -> `button`; a stem with no density suffix is itself.
+
+    Used to tell a legitimate per-density variant apart from an orphan when
+    reporting stale images.
+    """
+    for suffix, _ in DENSITY_IMAGE_SUFFIXES:
+        if stem.endswith(suffix):
+            return stem[: -len(suffix)]
+    return stem
+
 # Prepended to every generated page so they satisfy the SPDX pre-commit hook
 # (the catalog Markdown is committed). Matches the repo's `.md` header style.
 _MD_SPDX_HEADER = [
@@ -1613,6 +1641,29 @@ def format_catalog_markdown(
         out.append(pf.header_doc.rstrip())
         out.append("")
 
+    density_images = [
+        (suffix, label)
+        for suffix, label in DENSITY_IMAGE_SUFFIXES
+        if (img_dir / f"{slug}{suffix}.png").exists()
+    ]
+    if density_images:
+        out.append("## Density")
+        out.append("")
+        out.append(
+            "The picture above is the widget at `TargetDensity::Compact`, the "
+            "mouse-and-keyboard ladder. Below is the same subject on the same "
+            "canvas with only the ladder changed, so what moves is the density "
+            "and nothing else — where the subject no longer fits, that is what "
+            "the denser targets cost it at that size. "
+            "See `docs/density-and-targets.md`."
+        )
+        out.append("")
+        for suffix, label in density_images:
+            out.append(f"**{label}**")
+            out.append("")
+            out.append(f"![{title} at {label} density](img/{slug}{suffix}.png)")
+            out.append("")
+
     abilities = _catalog_abilities(pf, title)
     if abilities:
         out.append("## Builder methods at a glance")
@@ -1818,11 +1869,12 @@ def cmd_md_dir(
         out_dir, {f"{s}.md" for s in slugs.values()} | {"index.md"}
     )
     # Reported, never deleted: `img/` belongs to the previewer's --export-docs.
+    live_slugs = set(slugs.values())
     stale_img = (
         sorted(
             q.name
             for q in img_dir.glob("*.png")
-            if q.stem not in set(slugs.values())
+            if _density_image_stem(q.stem) not in live_slugs
         )
         if img_dir.is_dir()
         else []
@@ -1894,12 +1946,53 @@ def _test_prune() -> None:
         assert (img / "nested.md").exists(), "prune must not recurse below out_dir"
 
 
+def _test_density_images() -> None:
+    """A Compact image opens the page; a denser one adds a Density section.
+
+    And a per-density variant is never mistaken for an orphan — that is the
+    difference between `--export-docs --density=touch` producing artifacts
+    the next catalog run reports as stale, and it just working.
+    """
+    import tempfile
+
+    reg = build_registry()
+    fp = reg.module_to_file["button"]
+    pf = parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
+
+    with tempfile.TemporaryDirectory() as td:
+        img = Path(td)
+        (img / "button.png").write_bytes(b"\x89PNG")
+
+        page = format_catalog_markdown(
+            pf, title="Button", slug="button", api_base="../api", img_dir=img
+        )
+        assert "![Button preview](img/button.png)" in page
+        assert "## Density" not in page, "no denser image exists yet"
+
+        (img / "button-touch.png").write_bytes(b"\x89PNG")
+        page = format_catalog_markdown(
+            pf, title="Button", slug="button", api_base="../api", img_dir=img
+        )
+        assert "## Density" in page, "a -touch image must earn a Density section"
+        assert "![Button at Touch density](img/button-touch.png)" in page
+        # The canonical image still opens the page, unmoved.
+        assert "![Button preview](img/button.png)" in page
+
+    # The orphan rule, at the level the stale report applies it.
+    assert _density_image_stem("button-touch") == "button"
+    assert _density_image_stem("button-comfortable") == "button"
+    assert _density_image_stem("button") == "button"
+    # A slug that merely ends in a density word is not a variant of anything.
+    assert _density_image_stem("touch_target") == "touch_target"
+
+
 def run_self_tests() -> int:
     """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
     against the live source tree."""
     import tempfile
 
     _test_prune()
+    _test_density_images()
     reg = build_registry()
     fp = reg.module_to_file["button"]
     pf = parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))

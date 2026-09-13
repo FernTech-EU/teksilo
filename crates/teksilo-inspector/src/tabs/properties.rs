@@ -12,7 +12,7 @@
 //! returns `Some(menu)`. Returning `None` (e.g. when the click missed
 //! the row strip) falls through to the parent factory.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use teksilo_i18n::lit;
 
@@ -30,7 +30,7 @@ use teksilo_widgets::primitives::{HStack, Padding, VStack};
 use teksilo_widgets::{Button, MenuItem, MenuList};
 
 use crate::state::InspectorState;
-use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X, last_segment};
+use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X, last_segment, row_height};
 
 const KEY_COLUMN_WIDTH: f32 = 140.0;
 /// Single-line cap for the Debug repr row's *displayed* value. The
@@ -99,7 +99,13 @@ impl Widget for PropertiesTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // Deliberately empty: this node only composes real child widgets, which
+        // emit their own accessibility nodes. Emitting no property leaves the
+        // default `GenericContainer`, which the walker prunes while promoting
+        // those children — a wrapper that named itself would add an element the
+        // tab bar has already named.
+    }
 }
 
 struct PropertiesRows {
@@ -109,6 +115,10 @@ struct PropertiesRows {
     /// `paint` / `layout_response` methods (read via `&self`) can
     /// share the same data without ownership gymnastics.
     rows: Rc<RefCell<Vec<KvRow>>>,
+    /// The row height the last layout pass painted at, published for the
+    /// right-click factory: rows are pressed here, so their height follows the
+    /// density — and a context-menu factory has no theme to read it from.
+    row_height: Rc<Cell<f32>>,
 }
 
 impl PropertiesRows {
@@ -116,6 +126,7 @@ impl PropertiesRows {
         Self {
             state,
             rows: Rc::new(RefCell::new(Vec::new())),
+            row_height: Rc::new(Cell::new(ROW_HEIGHT)),
         }
     }
 }
@@ -141,10 +152,11 @@ impl Widget for PropertiesRows {
         // strip lets the framework fall through to a parent factory
         // (e.g. an outer panel's debug menu, if one is ever wired).
         let rows_for_factory = self.rows.clone();
+        let rh_handle = self.row_height.clone();
         let key_sig = self.state.properties_context_key.clone();
         let value_sig = self.state.properties_context_value.clone();
         let handlers = HandlerSet::new().context_menu(move |position, _ctx| {
-            let idx = (position.y / ROW_HEIGHT).floor() as usize;
+            let idx = (position.y / rh_handle.get()).floor() as usize;
             let row = {
                 let rows = rows_for_factory.borrow();
                 rows.get(idx).cloned()?
@@ -170,6 +182,10 @@ impl Widget for PropertiesRows {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        // Pressed rows, so the height follows the density — and the right-click
+        // factory divides by the value published here.
+        let rh = row_height(&ctx.theme.input);
+        self.row_height.set(rh);
         let mut rows: Vec<KvRow> = Vec::new();
         let mut full_debug = String::new();
         if let (Some(arena), Some(id)) = (ctx.arena(), self.state.selected_id.get()) {
@@ -197,33 +213,44 @@ impl Widget for PropertiesRows {
             self.state.properties_dump.set(dump);
         }
 
-        let height = rows.len() as f32 * ROW_HEIGHT;
+        let height = rows.len() as f32 * rh;
         *self.rows.borrow_mut() = rows;
         proposal.resolve(0.0, height).into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let rh = row_height(&ctx.theme.input);
         let theme = ctx.theme;
         let style = &theme.typography.body;
         let key_color = TextRole::Secondary.resolve(&theme.colors);
         let value_color = TextRole::Primary.resolve(&theme.colors);
 
         for (i, row) in self.rows.borrow().iter().enumerate() {
-            let y = bounds.y + (i as f32) * ROW_HEIGHT + 2.0;
-            let key_rect = Rect::new(bounds.x + ROW_PADDING_X, y, KEY_COLUMN_WIDTH, ROW_HEIGHT);
+            let y = bounds.y + (i as f32) * rh + 2.0;
+            let key_rect = Rect::new(bounds.x + ROW_PADDING_X, y, KEY_COLUMN_WIDTH, rh);
             let value_x = bounds.x + ROW_PADDING_X + KEY_COLUMN_WIDTH + ROW_PADDING_X;
-            let value_rect = Rect::new(
-                value_x,
-                y,
-                (bounds.x + bounds.width - value_x).max(0.0),
-                ROW_HEIGHT,
-            );
+            let value_rect =
+                Rect::new(value_x, y, (bounds.x + bounds.width - value_x).max(0.0), rh);
             canvas.draw_text(&row.key, key_rect, style, key_color);
             canvas.draw_text(&row.value, value_rect, style, value_color);
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The selected widget's properties, one `key: value` line per painted row.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(
+            self.rows
+                .borrow()
+                .iter()
+                .map(|row| format!("{}: {}", row.key, row.value))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 }
 
 fn collect_properties(

@@ -121,6 +121,50 @@ loop (a file dialog, menu tracking, a window drag) — the bridge replies
 `BRIDGE_TIMEOUT` and keeps serving, rather than blocking forever and holding
 the single connection slot for the life of the process.
 
+#### Time, and handing it back
+
+`advance_clock`, `settle` and `wait_for_condition` all move the tree's
+**simulated clock**. That clock drives two things: the input timeline — gesture
+deadlines, tap streaks, press-feedback delays, fling decay — and the animation
+scheduler. While an op runs, both read that clock and nothing else: two
+dispatches with no advance between them are stamped the same instant, and
+animations age by exactly what the op advanced. That is what makes the op
+deterministic on every host regardless of how long the main thread actually
+took.
+
+For a live window that freeze must not outlast the op, and it does not: the
+executor calls `WidgetTree::resume_real_time()` before it replies — once at the
+end of `execute`, so no op arm has to remember it, and once at the end of
+`run_settle`, so a caller that reaches the settle without going through
+`execute` is covered too. Both axes go back on the wall clock there, each in the
+way its own state requires (see
+[touch-and-pen.md § 2.2](touch-and-pen.md#22-the-epoch-is-shared)). For an
+animation that means it resumes from the phase the op left it at, driven by real
+frames again — not stuck at that phase, and not snapped to its end.
+
+For the input timeline, what was advanced is carried forward as an offset rather
+than discarded, so:
+
+- the timeline never runs backwards (a monotone event time is what every
+  velocity fit, tap streak and hold depends on, and re-issuing a time already
+  handed out corrupts all three);
+- the user's next real press, drag and hold are timed from the real clock
+  again, each with its own distinct timestamp;
+- a deadline the app arms afterwards is reported to the event loop as a
+  *future* instant, so `ControlFlow::WaitUntil` still ripens instead of waking
+  immediately, finding nothing due, and spinning.
+
+The visible consequence is that a jump you asked for is real: after
+`advance_clock(500)` the app's idea of elapsed time is permanently 500 ms
+further along than the wall clock. Timed UI that was already pending — a tooltip
+dwell, a long press, a coasting fling — resolves as if that half-second had
+passed, because from the app's point of view it did.
+
+`settle`'s `max_anim_frames` bounds the animation frames an op will advance
+through before it gives up waiting for the tree to go quiet; it bounds the op,
+not the app, and the app keeps animating on real frames once the op has
+returned.
+
 #### The endpoint descriptor
 
 ```jsonc
@@ -166,7 +210,7 @@ bridge — the method is the identity. The GUI-free DTO toolkit is available as
 
 The server binary builds from `cargo build -p teksilo-automation-mcp`.
 
-## Tool surface (27 tools)
+## Tool surface (34 tools)
 
 Every tool that changes the UI accepts an optional `settle` argument (see the
 settle model below), and so does `screenshot` — it is catalogued non-mutating,
@@ -174,9 +218,9 @@ but it settles before capturing, because a PNG of a half-run animation answers
 no question anyone asked. The two exceptions to the pattern are `advance_clock`,
 which takes only `millis` because it *is* the clock op, and the read-only query
 tools — `snapshot_tree`, `read_node`, `layout_tree`, `inspect_node`,
-`find_node`, `assert_node`, `list_windows`, `get_overlays`, `get_shortcuts`,
-`list_live_regions`, `pull_announcements` — which observe without touching the
-tree. Every tool's parameters are `deny_unknown_fields`, so sending `settle`
+`find_node`, `assert_node`, `list_windows`, `query_pointers`, `get_overlays`,
+`get_shortcuts`, `list_live_regions`, `pull_announcements` — which observe
+without touching the tree. Every tool's parameters are `deny_unknown_fields`, so sending `settle`
 where it is not accepted is a hard error, not a silent no-op; that is
 deliberate, since the alternative is a script that believes it settled and
 never did.
@@ -193,7 +237,7 @@ carries the usual label fragility) rather than reuse a possibly-stale id.
 
 **Query** — `snapshot_tree {window_id?, max_depth?}`, `read_node {node}`,
 `find_node {role?, label?}`, `assert_node {node, kind, value?/flag?}`,
-`list_windows {}`
+`list_windows {}`, `query_pointers {}`
 
 `max_depth` bounds the walk from the root, and on a real app it is usually the
 difference between a reply you can read and one you cannot: take a shallow
@@ -230,8 +274,19 @@ from a plain one — `WidgetEvent::Scroll` carries modifiers precisely so an app
 can implement Ctrl-wheel-to-zoom — so a probe for such a feature must be able
 to send one, not merely a bare wheel.
 
+The sample it injects reports `ScrollSource::Programmatic` — the app scrolled
+itself. A handler that branches on the source (one notch per item for a wheel,
+follow-exactly for a driver) therefore sees a driven scroll for what it is;
+it used to be told `Wheel`, because that is what a source-less legacy scroll
+event lowers to. The *route* is unchanged: only a `TouchPan` walks the pan
+claimants, so a programmatic scroll bubbles from the hovered widget exactly as
+a wheel notch does and no pan claimant competes for it. A probe that wants the
+wheel's own source should turn one — hover the target and inject a real one —
+rather than expect this tool to impersonate hardware.
+
 **Synthetic input** — `inject_pointer`, `right_click`, `inject_key`,
-`type_text`, `type_ime`, `drag_node`
+`type_text`, `type_ime`, `drag_node`, `inject_touch_sequence`, `pinch`,
+`fling`, `long_press`, `cancel_pointer`
 
 `inject_pointer` and `inject_key` take the same five modifier flags, and
 **`command` is the one to reach for whenever the chord means "the
@@ -283,6 +338,107 @@ the **same** node-id space as the AT tools, so when a widget appears in both,
 the two records share an `id` and can be correlated. (Coordinates are logical
 window-relative pixels, identical to the AT `bounds`.)
 
+### Touch, pen and the pointer queries
+
+A Teksilo app tunes hit targeting, gesture slop, hover and the whole
+cross-widget arbitration off *which device* is pointing, so a probe that can
+only be a mouse cannot reach any of it. Six tools plus one argument close that.
+
+**`inject_pointer` takes a `kind`** — `mouse` (the default), `touch` or `pen`.
+A mouse is the pre-touch path unchanged; a touch or pen builds a real pointer
+sample and enters through the tree's pointer door, so the kind reaches the
+hit test, the per-kind slop, the hover rules and the arbitration. `pen` also
+carries `pressure` (0.0–1.0) and `tilt` (`[tilt_x, tilt_y]` in degrees), the
+axes a digitizer reports. `pressure`, `tilt` and `pointer_id` are **refused on
+a mouse** rather than ignored: a silently-dropped `pressure` is the same defect
+as a silently-dropped misspelled field.
+
+**`inject_touch_sequence {steps}` is the multi-finger op**, and the one to
+reach for whenever the gesture is more than a single sample. Each step is
+`{contact?, phase, x, y, advance_ms?}`: `phase` is `down` / `move` / `up` /
+`cancel`, `contact` names a finger by **slot** (default `0`), and `advance_ms`
+advances the *simulated* clock before that sample.
+
+The op is self-contained on purpose. Contact identities are minted by the
+framework's allocator, not chosen by the client, and the executor holds no
+state between ops — so a gesture split across ops would have no way to name the
+same finger twice. Naming fingers by slot inside one op does, and the reply
+says which identity each slot got.
+
+The reply is where the arbitration becomes visible. For every step it returns
+that pointer's whole state: `touch_action` (the value frozen at the press,
+under the name it is declared by — `AUTO`, `NONE`, `PAN_X`, `PAN_Y`, `PAN`,
+`PINCH_ZOOM`, `MANIPULATION`), `sequence_members` (every competitor, innermost
+first, each with `node`, `role` — `gesture` / `pan` / `raw_drag` /
+`raw_preview` — and `state` — `possible` / `held` / `rejected` / `won`), and
+`sequence_winner` once one has been decided. A sequence that stops short of its
+`up` **leaves the finger down**, which is how a live arbitration stays
+observable at all.
+
+```jsonc
+// Press a list row and drag it 19 dp down, watching who wins.
+inject_touch_sequence { "steps": [
+  { "phase": "down", "x": 200, "y": 150 },
+  { "phase": "move", "x": 200, "y": 167 },
+  { "phase": "move", "x": 200, "y": 169 }
+] }
+// → steps[0].pointer.touch_action == "AUTO"
+//   steps[0].pointer.sequence_members == [row gesture/possible, scroller pan/possible]
+//   steps[1].pointer.sequence_winner == null      (nobody yet)
+//   steps[2].pointer.sequence_winner == <the row> (it latched)
+```
+
+**`pinch`, `fling` and `long_press` are the three named shapes**, each doing
+the one thing a hand-rolled sequence gets wrong. A `pinch` lands both fingers
+before either moves, because the recogniser's reference span is the distance
+between the two landings. A `fling` spreads its samples over `over_ms` of
+simulated time at one 60 Hz frame each — a drag latches on distance, a fling
+hands a *velocity* to the scroller, and a flick described by too few or
+too-far-apart samples yields no velocity at all and silently never flings. A
+`long_press` holds for exactly the device's own threshold, read off the active
+input profile, so the call means "hold long enough" without the script knowing
+the number.
+
+**`query_pointers`** lists every live pointer — id, kind, primary flag, whether
+it is down, position, pressure/tilt, capture, and the same arbitration fields
+listed above. An `inject_touch_sequence` reply already names the identity each
+of its own slots got; `query_pointers` is how to learn one otherwise, and is
+therefore what a script reaches for before addressing a contact with
+`inject_pointer {pointer_id}` or `cancel_pointer`. A mouse appears once it has
+produced a sample and stays for the life of the tree; a finger appears at its
+press and is gone after its up or cancel.
+
+**`cancel_pointer {pointer_id}`** revokes a pointer the way the system does — a
+compositor grab, a `wl_touch.cancel`, a lost capture. It is **not** an up: no
+tap completes, the end position carries no meaning, and every widget working on
+the pointer is told through the cancel funnel. It is how a probe tests the paths
+an app only meets when the OS takes a gesture away from it.
+
+**Determinism.** Every touch and pen op puts the tree on the simulated clock
+before its first sample, so a step that asked for no interval gets none. (An
+`inject_pointer` with `kind: mouse` does not: it is the pre-touch path, byte for
+byte, and nothing about it is timed.) On the
+wall clock two consecutive samples are stamped however many nanoseconds apart
+the host took to dispatch them, and a drag meaning "travel 200 dp, no time
+passes" would instead describe a flick at some thousands of dp per second —
+differently on every machine. The clock is handed back to the wall at the end of
+every op, so a *live* attached window keeps measuring real gestures.
+
+### Density
+
+**`set_density {density}`** switches the app between `compact` (desktop
+mouse-and-keyboard), `comfortable` (hybrid devices, large-cursor users) and
+`touch` (finger-first). It is how a probe checks that a layout still fits, and
+that its targets still clear their minimum, at the density a tablet user gets.
+
+**Treat every node id you hold as dead afterwards.** A density change rebuilds
+every root — a target size is baked in `build()`, and marking layout and paint
+cannot re-bake it — so every widget a `build()` created is destroyed and
+recreated with a fresh `WidgetId`, and therefore a fresh `NodeRef`. In a real
+app that is the whole tree below the roots. Re-`snapshot_tree` or re-`find_node`
+after it. Setting the density the app already has is a no-op and keeps the ids,
+so a script may set it defensively without paying for it.
+
 ### Right-click & context menus
 
 Teksilo context menus are attached with the `.context_menu(factory)` builder
@@ -329,12 +485,12 @@ fields optional) is:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `clock_millis` | `0` | Advance the simulation clock first (drives tooltip / overlay timers). |
-| `max_anim_frames` | `60` | Cap on 16 ms animation ticks (~1 s). A perpetually-looping animation hits the cap — expected. |
+| `clock_millis` | `0` | Advance the simulation clock first. One clock: gesture deadlines, press feedback, flings, animations, tooltip and overlay timers all move with it. |
+| `max_anim_frames` | `60` | Cap on 16 ms simulated frames (~1 s). A perpetually-looping animation hits the cap — expected. |
 | `layout_after` | `true` | Run a layout pass after ticking, so height-for-width / reflow settles before the AT re-walk. |
 | `settle_timeout_ms` | `500` | The budget. For a settle it is a hard **wall-clock** cap; exceeding it ends the settle (the live bridge reports `SETTLE_TIMEOUT`). For `wait_for_condition` the same field is a **simulated-time** budget — see below. |
 
-The settle loop is **simulation-clock-driven** (`tick_animations` doesn't wait
+The settle loop is **simulation-clock-driven** (`advance_time` doesn't wait
 on VSync or OS events), so it can't deadlock — it progresses to quiescence or
 the cap. `wait_for_condition` polls `snapshot → predicate` on the same clock
 until a `node_exists` / `node_value` / `node_gone` / `at_version_at_least`

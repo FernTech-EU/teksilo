@@ -26,7 +26,27 @@
 //! let _w = Link::new(lit!("Open documentation"))
 //!     .url("https://example.com/docs");
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The pressed state is the framework's (`docs/touch-and-pen.md` §7.1), so it
+//! survives a slide-off and comes back on re-entry, and a pan claimant winning
+//! the press clears it with no release. Following the link lands on the
+//! release, as it always did.
+//!
+//! A link is text-height, so it can fall under the 24 dp target floor. What
+//! carries it is WCAG 2.2 SC 2.5.8's *inline* exception — the target's size is
+//! constrained by the line height of the text it is set in — and **not** the
+//! miss-only slop pass, which this module used to claim as well. The pass
+//! re-attributes a near miss only where the exact hit's whole bubble path
+//! carries no eligible handler, so it is denied wherever the link sits inside a
+//! row that takes presses: a link in a list row, a link in an archived
+//! notification. Measured by the target-conformance gate (the
+//! `teksilo-target-conformance` crate): 112 × 17 dp beside a
+//! tappable row label and 32 × 17 dp as a notification's replay action both
+//! reach exactly their own 17 dp on the short axis, at all three densities.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
@@ -203,7 +223,11 @@ impl Widget for Link {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.link.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeLinkStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeLinkStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let root_id = style.make_body(
             &LinkStyleConfig {
                 text: self.text.clone().into(),
@@ -240,17 +264,35 @@ impl Widget for Link {
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
 
+        // The pointer press is the framework's, not this control's own: the
+        // router knows about a press that slid off its target, one that slid
+        // back on, and one a pan claimant took away with no release to reset
+        // from — none of which a `PointerDown` / `PointerUp` pair here can
+        // see. `docs/touch-and-pen.md` §7.1. `pointer_over` carries the hover
+        // truth across the press, so a press that ends without an activation
+        // rests on the right state.
+        let pointer_over = Rc::new(Cell::new(false));
+        crate::button::bind_press_interaction(ctx, interaction.clone(), pointer_over.clone());
+
         let handler_set = HandlerSet::new()
             .on_tap({
+                let hovering = pointer_over.clone();
                 move |_pos, ctx: &mut EventContext| {
                     if let Some(ref action) = *action_for_tap {
                         action(ctx);
                     }
-                    int_tap.set(InteractionState::Hovered);
+                    int_tap.set(if ctx.pointer_kind().hovers() {
+                        hovering.set(true);
+                        InteractionState::Hovered
+                    } else {
+                        InteractionState::Idle
+                    });
                 }
             })
             .on_hover({
+                let hovering = pointer_over.clone();
                 move |entered: bool, _ctx: &mut EventContext| {
+                    hovering.set(entered);
                     if entered {
                         int_hover.set(InteractionState::Hovered);
                     } else {
@@ -414,5 +456,125 @@ mod tests {
             1,
             "a matched KeyDown + KeyUp pair must activate exactly once",
         );
+    }
+
+    // -----------------------------------------------------------------
+    // The framework press (docs/touch-and-pen.md §7.1)
+    // -----------------------------------------------------------------
+
+    struct PressProbe(std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>>);
+
+    impl teksilo_core::styles::LinkStyle for PressProbe {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::LinkStyleConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            *self.0.borrow_mut() = Some((cfg.is_pressed.clone(), cfg.is_hovered.clone()));
+            ctx.add(crate::primitives::FixedSize::new().width(60.0).height(18.0))
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn probed_link_with_hover() -> (
+        WidgetTree,
+        WidgetId,
+        Signal<bool>,
+        Signal<bool>,
+        std::rc::Rc<Cell<u32>>,
+    ) {
+        let probe: std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
+        let hits = std::rc::Rc::new(Cell::new(0_u32));
+        let counter = hits.clone();
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.link = Some(std::rc::Rc::new(PressProbe(probe.clone())));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let link = tree.add(
+            Link::new(lit!("Read more")).on_activate_fn(move |_| counter.set(counter.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let (pressed, hovered) = probe.borrow().clone().expect("style ran");
+        (tree, link, pressed, hovered, hits)
+    }
+
+    fn probed_link() -> (WidgetTree, WidgetId, Signal<bool>, std::rc::Rc<Cell<u32>>) {
+        let (tree, link, pressed, _hovered, hits) = probed_link_with_hover();
+        (tree, link, pressed, hits)
+    }
+
+    /// Where the link comes to rest after it is followed — its own copy of the
+    /// button family's `on_tap` resting-state rule. A link's hover state is its
+    /// underline, so resting in the wrong one is not a subtle tint: a
+    /// finger-tapped link that rests hovered stays underlined with nothing
+    /// touching it.
+    #[test]
+    fn a_mouse_follow_rests_hovered_and_a_finger_follow_rests_idle() {
+        use crate::button::press_test_support::touch_tap;
+
+        let (mut tree, link, pressed, hovered, hits) = probed_link_with_hover();
+        let at = tree.bounds(link).center();
+        tree.pointer_move(at);
+        assert!(hovered.get(), "the pointer arrived over the link");
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(hits.get(), 1, "the release followed the link");
+        assert!(!pressed.get());
+        assert!(
+            hovered.get(),
+            "a mouse that clicked the link is still on it, so it rests hovered",
+        );
+
+        let (mut tree, link, pressed, hovered, hits) = probed_link_with_hover();
+        let at = tree.bounds(link).center();
+        touch_tap(&mut tree, at);
+        assert_eq!(hits.get(), 1, "the contact followed on its release");
+        assert!(!pressed.get());
+        assert!(
+            !hovered.get(),
+            "a finger leaves nothing behind, so the link must rest idle",
+        );
+    }
+
+    /// A mouse press lights the link's `is_pressed` — the state its style has
+    /// always been handed and which, before the controls sweep, only a keyboard
+    /// `Space` or `Enter` could set. Following the link still lands on the
+    /// release.
+    #[test]
+    fn a_mouse_press_lights_the_pressed_state_and_the_release_follows() {
+        let (mut tree, link, pressed, hits) = probed_link();
+        let at = tree.bounds(link).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(pressed.get());
+        assert_eq!(hits.get(), 0);
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(!pressed.get());
+        assert_eq!(hits.get(), 1);
+    }
+
+    /// A finger follows the link on the release, and a slide-off abandons it.
+    #[test]
+    fn a_touch_tap_follows_on_release_and_a_slide_off_abandons_it() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, link, pressed, hits) = probed_link();
+        let bounds = tree.bounds(link);
+        let at = bounds.center();
+        let away = teksilo_canvas::Point::new(at.x, bounds.y + bounds.height + 80.0);
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+        assert!(!pressed.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, away, 40));
+        assert_eq!(hits.get(), 0);
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 100));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 130));
+        assert_eq!(hits.get(), 1);
     }
 }

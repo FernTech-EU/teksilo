@@ -219,6 +219,7 @@ impl WidgetTree {
             shown_at_sink,
             promoted_by_focus: false,
             armed_by_focus: false,
+            armed_by_hold: false,
             suppressed_until_focus_leaves: false,
             placement,
         });
@@ -394,6 +395,7 @@ impl WidgetTree {
             e.overlay_id = None;
             e.is_sticky = false;
             e.promoted_by_focus = false;
+            e.armed_by_hold = false;
             e.shown_at_sim = None;
             e.shown_at_real = None;
             e.hover_origin = None;
@@ -474,6 +476,7 @@ impl WidgetTree {
                 entry.content_id,
                 entry.placement,
                 entry.armed_by_focus,
+                entry.armed_by_hold,
             ));
             entry.hover_start = None;
             entry.real_hover_start = None;
@@ -492,20 +495,24 @@ impl WidgetTree {
         } else {
             Some(self.theme.motion.duration_fast)
         };
-        for (anchor_id, content_id, placement, by_focus) in to_show {
+        for (anchor_id, content_id, placement, by_focus, by_hold) in to_show {
             self.arena.activate(content_id);
             // A tip the keyboard summoned has no pointer to leave, so the
             // pointer-leave grace would never fire and it would hang on screen.
             // It ends the way a keyboard user ends things: Escape, a click
-            // outside, or focus moving off the anchor.
-            let dismiss = if by_focus {
+            // outside, or focus moving off the anchor. A tip a **hold**
+            // summoned is in the same position — the finger has lifted by the
+            // time it appears — with one difference: nothing moves focus off it
+            // either, so it also carries its own expiry (see
+            // `super::touch_route::TOUCH_TOOLTIP_DISMISS`).
+            let dismiss = if by_focus || by_hold {
                 crate::overlay::DismissBehavior::EscapeOrClickOutside
             } else {
                 crate::overlay::DismissBehavior::PointerLeave {
                     delay: std::time::Duration::from_millis(100),
                 }
             };
-            let oid = self.show_overlay(crate::overlay::OverlayRequest {
+            let request = crate::overlay::OverlayRequest {
                 content_id,
                 anchor: anchor_id,
                 placement: Self::tooltip_overlay_placement(placement),
@@ -514,7 +521,12 @@ impl WidgetTree {
                 parent_overlay: None,
                 on_dismiss: None,
                 fade_duration,
-            });
+            };
+            let oid = if by_hold {
+                self.show_overlay_for(request, super::touch_route::TOUCH_TOOLTIP_DISMISS)
+            } else {
+                self.show_overlay(request)
+            };
             if by_focus && let Some(focused) = self.focused {
                 self.overlay_manager.set_top_focus_restore(focused);
             }
@@ -812,9 +824,18 @@ impl WidgetTree {
             | P::Above
             | P::TrailingEdge
             | P::AtPointer(_)
+            | P::AtPointerAvoiding { .. }
             | P::NearAnchor { .. }
             | P::BelowPreferred => true,
-            P::Centered | P::BottomCenter | P::ViewportCorner { .. } | P::FullViewport => false,
+            // `AboveSelection` joins the viewport-placed group: what it hangs
+            // off is a range of text, not the widget recorded as its anchor.
+            // Its lifetime belongs to the selection controller that raised it,
+            // which is also why it lives in the text-affordance band.
+            P::Centered
+            | P::BottomCenter
+            | P::ViewportCorner { .. }
+            | P::FullViewport
+            | P::AboveSelection { .. } => false,
         }
     }
 
@@ -1211,6 +1232,7 @@ impl WidgetTree {
                 entry.real_hover_start = Some(real_now);
                 entry.hover_origin = None;
                 entry.armed_by_focus = true;
+                entry.armed_by_hold = false;
             }
         }
     }
@@ -1428,9 +1450,14 @@ impl WidgetTree {
     /// "Innermost" is measured by arena depth from the hovered widget, so
     /// nesting order — not the order the anchors happened to be attached in —
     /// decides the winner.
-    pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
-        let innermost: Option<usize> = self
-            .tooltips
+    /// The tooltip entry a pointer over `widget_id` should surface: the
+    /// **innermost** one whose anchor is `widget_id` or an ancestor of it.
+    ///
+    /// Shared by the hover arm and by the tree-owned hold route
+    /// ([`super::touch_route`]) so a hold and a hover cannot pick different
+    /// tips for the same node.
+    pub(super) fn tooltip_index_for(&self, widget_id: WidgetId) -> Option<usize> {
+        self.tooltips
             .iter()
             .enumerate()
             .filter(|(_, entry)| self.tooltip_hover_targets_anchor(widget_id, entry.anchor_id))
@@ -1439,8 +1466,11 @@ impl WidgetTree {
                     .map(|depth| (depth, index))
             })
             .min()
-            .map(|(_, index)| index);
-        let Some(index) = innermost else {
+            .map(|(_, index)| index)
+    }
+
+    pub(super) fn tooltip_pointer_enter(&mut self, widget_id: WidgetId) {
+        let Some(index) = self.tooltip_index_for(widget_id) else {
             return;
         };
         // Don't restart a timer for a tip that is already showing.
@@ -1449,8 +1479,9 @@ impl WidgetTree {
         }
         self.tooltips[index].hover_start = Some(self.sim_clock);
         self.tooltips[index].real_hover_start = Some(std::time::Instant::now());
-        self.tooltips[index].hover_origin = self.last_pointer_position;
+        self.tooltips[index].hover_origin = self.hover_owner_position();
         self.tooltips[index].armed_by_focus = false;
+        self.tooltips[index].armed_by_hold = false;
         self.arena.mark_needs_paint(self.tooltips[index].anchor_id);
     }
 
@@ -1765,6 +1796,13 @@ impl WidgetTree {
         // user has walked away from stays on screen for as long as the app
         // stays idle.
         let pointer_leave_deadline = self.overlay_manager.next_pointer_leave_deadline();
+        // A fade-out defers the overlay's removal by the tween's duration, and
+        // that removal is what parks the content. The tween's own scheduler
+        // deadline usually wakes the loop at the same instant, but only while
+        // the tween is registered — a fade that is cancelled, completed early
+        // or never scheduled (reduced motion) leaves nothing else to wake for,
+        // and the surface stays on screen until unrelated input arrives.
+        let fade_dismiss_deadline = self.overlay_manager.next_fade_dismiss_deadline();
         let animation_deadline = self
             .animation_scheduler
             .next_deadline(&self.arena, self.paint_epoch);
@@ -1775,7 +1813,12 @@ impl WidgetTree {
         let animated_quad_deadline = self
             .animated_quads
             .next_deadline(&self.arena, self.paint_epoch);
-        let gesture_deadline = self.next_gesture_deadline();
+        // Every deadline the input layer owns — a pending long press, a
+        // press-feedback delay, a live fling simulation — folded into the one
+        // `WaitUntil` over the one clock. Without the fling term a coast would
+        // only advance on unrelated wakes, which is a list that scrolls when
+        // the mouse happens to move.
+        let gesture_deadline = self.next_input_deadline();
         let wake_at_deadline = self.pending_wake_at.get();
         // Per-frame-effect path (Pulse / Cycle / caret blink / drag
         // auto-scroll): a fixed 60 Hz deadline instead of the old
@@ -1790,6 +1833,7 @@ impl WidgetTree {
             delayed_overlay_deadline,
             auto_dismiss_deadline,
             pointer_leave_deadline,
+            fade_dismiss_deadline,
             animation_deadline,
             animated_quad_deadline,
             gesture_deadline,
@@ -1842,7 +1886,12 @@ impl WidgetTree {
     ) -> crate::overlay::OverlayId {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
         let id = self.overlay_manager.show(request);
+        self.cancel_pointers_for_modal(is_modal);
         // The overlay's content subtree just entered the active set;
         // the AT tree shape changed and the cached snapshot must be
         // rebuilt. The dismiss path already flips this; we must mirror
@@ -1850,6 +1899,35 @@ impl WidgetTree {
         // the pre-popup snapshot. The unconditional `a11y_dirty = true`
         // in `layout()` previously masked this gap; now this explicit
         // set is required.
+        self.a11y_dirty = true;
+        if let Some(duration) = fade_duration {
+            self.attach_overlay_fade(id, content_id, duration);
+        }
+        id
+    }
+
+    /// Show an overlay in an explicit z-band.
+    ///
+    /// [`show_overlay`](Self::show_overlay) is this with
+    /// [`OverlayBand::Standard`](crate::overlay::OverlayBand::Standard). The
+    /// other band is for the touch text affordances — selection handles, the
+    /// magnifier, the selection toolbar — which must render above the editor's
+    /// `clips_children` ancestor, below every menu, and outside the
+    /// outside-press dismissal that every caret-moving tap would otherwise
+    /// trigger. See [`crate::overlay::text_affordance`].
+    pub fn show_overlay_in_band(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        band: crate::overlay::OverlayBand,
+    ) -> crate::overlay::OverlayId {
+        let fade_duration = request.fade_duration;
+        let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
+        let id = self.overlay_manager.show_in_band(request, band);
+        self.cancel_pointers_for_modal(is_modal);
         self.a11y_dirty = true;
         if let Some(duration) = fade_duration {
             self.attach_overlay_fade(id, content_id, duration);
@@ -1873,8 +1951,13 @@ impl WidgetTree {
 
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
         let current_focus = self.focused;
         let id = self.overlay_manager.show(request);
+        self.cancel_pointers_for_modal(is_modal);
         self.a11y_dirty = true;
         if let Some(focus_id) = current_focus {
             self.overlay_manager.set_top_focus_restore(focus_id);
@@ -1892,7 +1975,12 @@ impl WidgetTree {
     ) -> crate::overlay::OverlayId {
         let fade_duration = request.fade_duration;
         let content_id = request.content_id;
+        let is_modal = matches!(
+            request.placement,
+            crate::overlay::OverlayPlacement::Centered
+        );
         let id = self.overlay_manager.show_for(request, duration);
+        self.cancel_pointers_for_modal(is_modal);
         self.overlay_manager.set_shown_at_sim(id, self.sim_clock);
         self.a11y_dirty = true;
         if let Some(fade) = fade_duration {
@@ -1959,6 +2047,24 @@ impl WidgetTree {
         self.dormant_dismissed_content(&dismissed, &mut *ops);
     }
 
+    /// A modal just opened. Every live pointer loses its interaction: the
+    /// surface it was working on is now behind a scrim it cannot reach, and
+    /// the `Up` that would have completed the press lands on the modal
+    /// instead.
+    ///
+    /// A modal is a `Centered` overlay — the same discriminator
+    /// [`modal_overlay_for_widget`](Self::modal_overlay_for_widget) uses, so
+    /// the two cannot drift. Every other placement (a menu, a popover, a
+    /// tooltip, a drag preview) opens *over* an interaction that legitimately
+    /// continues, and must not cancel anything.
+    fn cancel_pointers_for_modal(&mut self, is_modal: bool) {
+        if !is_modal {
+            return;
+        }
+        let mut noop = crate::window::NoopWindowOps;
+        self.cancel_all_pointers(crate::pointer::CancelReason::ModalOpened, &mut noop);
+    }
+
     pub(super) fn dormant_dismissed_content(
         &mut self,
         content_ids: &[WidgetId],
@@ -1988,6 +2094,7 @@ impl WidgetTree {
                 entry.shown_at_real = None;
                 entry.promoted_by_focus = false;
                 entry.armed_by_focus = false;
+                entry.armed_by_hold = false;
                 if let Some(sink) = entry.shown_at_sink.as_ref() {
                     sink.set(None);
                 }
@@ -2004,7 +2111,7 @@ impl WidgetTree {
                 .focused
                 .filter(|focused| self.is_descendant_of(*focused, id));
             let hovered_in_subtree = self
-                .hovered
+                .hovered_id()
                 .filter(|hovered| self.is_descendant_of(*hovered, id));
 
             if let Some(focused) = focused_in_subtree {
@@ -2021,10 +2128,20 @@ impl WidgetTree {
                 }
             }
 
-            self.arena.set_dormant(id);
+            // A pointer anchored inside the overlay about to be parked would
+            // be stranded on a widget that no longer takes events. Cancel it —
+            // but only if there is still a press to revoke, which is what lets
+            // a tap on a menu item whose own handler closes that menu complete
+            // instead of cancelling itself. See `press_is_revocable`.
+            self.cancel_pointers_in_subtree(
+                id,
+                crate::pointer::CancelReason::OverlayDismissed,
+                &mut *ops,
+            );
+            let _parked = self.arena.set_dormant(id);
 
             if hovered_in_subtree.is_some() {
-                let old = self.hovered;
+                let old = self.hovered_id();
                 self.set_hovered(None);
                 self.update_hover_within_signals(old, None);
             }
@@ -2382,11 +2499,11 @@ mod tests {
 
         assert_eq!(tree.active_overlays().len(), 1);
 
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(500.0, 500.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(500.0, 500.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(tree.active_overlays().is_empty());
         assert!(!tree.is_visible(content));
     }
@@ -2897,6 +3014,56 @@ mod tests {
         );
     }
 
+    /// A fading-out overlay must be a wake source in its own right.
+    ///
+    /// Its removal is deferred by the tween's duration and fires from
+    /// `process_overlay_fade_dismissals_*`, which only runs when something
+    /// wakes the loop. The tween's own scheduler deadline usually is that
+    /// something — but the scheduler withholds a deadline for an animation
+    /// whose owner is not being painted, and an overlay dismissed before it was
+    /// ever rendered is exactly that. Without a term of its own the surface
+    /// then stays on the stack, its content held active, until unrelated input
+    /// happens to redraw the window.
+    #[test]
+    fn a_fading_out_overlay_schedules_a_wake_for_its_deferred_removal() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Faded"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let id = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: content,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: Some(std::time::Duration::from_millis(200)),
+        });
+        tree.dismiss_overlay(id);
+        assert!(
+            tree.is_visible(content),
+            "precondition: the removal is deferred, so there is something to wake for"
+        );
+
+        // `is_some()` would pass on any of the eleven terms the fold carries,
+        // so assert the *value*: the deadline the loop will sleep to is this
+        // overlay's, at its fade start plus its duration. The tween's own
+        // scheduler term is absent here — the content has never been painted,
+        // which is the case this term exists for.
+        let expected = tree.overlay_manager.next_fade_dismiss_deadline();
+        assert!(
+            expected.is_some(),
+            "precondition: the fade start was stamped, so there is a deadline to compare against"
+        );
+        assert_eq!(
+            tree.next_timer_deadline(),
+            expected,
+            "the wake deadline must be the deferred removal's own, not merely some deadline"
+        );
+    }
+
     #[test]
     fn pressing_cancels_a_pending_dwell_and_dismisses_a_shown_tooltip() {
         let mut tree = WidgetTree::new();
@@ -3145,16 +3312,86 @@ mod tests {
             on_dismiss: None,
             fade_duration: Some(std::time::Duration::from_millis(100)),
         });
+        // Move the simulated clock **before** the dismiss. Without this the
+        // manager's mirror — seeded with `Instant::now()` at construction —
+        // happens to agree with the tree's sim clock, and the fade start is
+        // stamped correctly whether or not `advance_time` ever mirrors it.
+        // A second of virtual time is what makes the mirror load-bearing.
+        tree.advance_time(std::time::Duration::from_secs(1));
+
         tree.dismiss_overlay(id);
         assert!(
             tree.is_visible(content),
             "content stays active during fade-out"
         );
 
-        tree.advance_time(std::time::Duration::from_millis(150));
+        // Less than the tween: a stale mirror would have stamped the start a
+        // whole second in the past, and this advance would reap the content
+        // instead of leaving it up.
+        tree.advance_time(std::time::Duration::from_millis(60));
+        assert!(
+            tree.is_visible(content),
+            "60 ms into a 100 ms tween the content is still up"
+        );
+
+        tree.advance_time(std::time::Duration::from_millis(90));
         assert!(
             !tree.is_visible(content),
             "after sim-time past the tween window, deferred removal fires"
+        );
+    }
+
+    /// The sim-clock mirror is refreshed **before** the dismissing passes run,
+    /// not after them.
+    ///
+    /// The test above pins that `advance_time` mirrors the clock at all; this
+    /// one pins *where in the call* it does it. An overlay dismissed from
+    /// inside `advance_time` — by its own auto-dismiss timer — reads the
+    /// mirror as it stands at that moment. Refresh it after the dismissing
+    /// passes and the fade start is stamped one whole advance in the past, so
+    /// a fade longer than nothing is over before it began: the surface is
+    /// reaped in the same virtual frame that started fading it, and the tween
+    /// the caller asked for never plays.
+    #[test]
+    fn an_auto_dismissed_fade_starts_at_the_instant_the_dismiss_ran() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillWidget::new().label("Toast"));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.show_overlay_for(
+            crate::overlay::OverlayRequest {
+                content_id: content,
+                anchor,
+                placement: crate::overlay::OverlayPlacement::Below,
+                dismiss: crate::overlay::DismissBehavior::Manual,
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: Some(std::time::Duration::from_millis(100)),
+            },
+            std::time::Duration::from_millis(500),
+        );
+        assert_eq!(tree.active_overlays().len(), 1);
+
+        // One advance, well past the auto-dismiss deadline: the auto-dismiss
+        // pass fires the dismiss, and the fade pass right after it must find a
+        // tween that started *this* instant and has 100 ms to run.
+        tree.advance_time(std::time::Duration::from_millis(600));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "precondition: the auto-dismiss fired inside this advance"
+        );
+        assert!(
+            tree.is_visible(content),
+            "the fade must start at the instant the dismiss ran, so the \
+             content survives the frame that dismissed it"
+        );
+
+        tree.advance_time(std::time::Duration::from_millis(150));
+        assert!(
+            !tree.is_visible(content),
+            "and is reaped once the tween's own window has passed"
         );
     }
 }

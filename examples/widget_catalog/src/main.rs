@@ -104,7 +104,11 @@ fn main() {
                 .theme
                 .as_deref()
                 .and_then(theme_from_name)
-                .unwrap_or_else(teksilo::presets::intui::light),
+                .unwrap_or_else(teksilo::presets::intui::light)
+                // `--density`. Projected here, once, so every tab is built at
+                // the rung the flag names — see `CliOptions::density` for why
+                // this is not an in-app switch.
+                .with_density(options.density),
         )
         .i18n(i18n)
         .install_native_menu()

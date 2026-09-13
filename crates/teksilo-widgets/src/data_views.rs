@@ -26,9 +26,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use teksilo_core::ObserverHandle;
+use teksilo_core::build_context::BuildContext;
 use teksilo_core::drag_payload::{DragPayload, DropOutcome};
 use teksilo_core::widget::{EventContext, Widget};
 use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{
     DataChange, DropPosition, ItemKey, KeyedSelectionModel, SelectionMode, SelectionModel,
 };
@@ -1061,11 +1063,184 @@ impl<T: 'static> RowExport<T> {
     }
 }
 
-/// Shared deferred-selection press logic for a data-view row (the drift a code
-/// review caught: the `press_claimed` guard was missing in one view). Pressing
-/// an already-selected row DEFERS the collapse-to-single to a release WITHOUT a
-/// drag (an active drag consumes `PointerUp`), so grabbing a multi-selection
-/// drags the whole set. `pending` is a per-row cell shared by the two calls.
+/// A layout- and accessibility-transparent wrapper whose only job is to own a
+/// drag on a node that **strictly encloses** the node whose gesture arena takes
+/// the press.
+///
+/// # Why the drag cannot live on the pressed node
+///
+/// [`DragActivation`](teksilo_tokens::DragActivation) — the policy that holds a
+/// touch drag back until a long press so the scroll underneath can win first —
+/// is read in exactly one place: the ancestor walk of the tree's sequence
+/// enrolment. The node that *captures* the press is enrolled by a different
+/// path, which never arms a deferral. So a row that carries both its tap and
+/// its reorder `on_drag` latches that drag at `drag_slop` on the first sample
+/// past 18 dp, decides the arbitration, and the scrollable's `PanClaim` — which
+/// needs 36 dp — is never even evaluated. The view then neither scrolls nor
+/// reorders: the drag won and, for a marquee that declines a press on a tile,
+/// did nothing.
+///
+/// Hanging the drag one level out fixes both halves at once, with no change to
+/// the framework: the pressed node has no drag, so the walk reaches this
+/// wrapper and enrols it *with* its activation. A precise pointer resolves
+/// `Auto` to `Immediate` and latches at the same 5 dp it always did; a direct
+/// pointer resolves it to `AfterLongPress` and the pan wins unless the contact
+/// holds still.
+///
+/// # What must be true of the node inside
+///
+/// It must have a gesture arena of its own, or nothing captures the press and
+/// the enrolment walk never starts — the drag would then compete by no path at
+/// all. [`press_absorber`] is the no-op tap that guarantees one, for a row
+/// whose application wired no activation. This is the `primitives::dead_zone`
+/// precedent: a structural rule plus an absorber that makes the structure real.
+///
+/// Transparent in every other respect: it forwards the child's whole
+/// [`LayoutResponse`](teksilo_core::widget::LayoutResponse) (grow weight,
+/// shrink weight and compression floor, not
+/// just the size), places the child at its own bounds, and emits no
+/// accessibility properties, so the walker prunes it: a reorderable view's
+/// accessibility tree has the same *shape* as the same view without the
+/// wrapper, which is what
+/// `a_reorderable_view_has_the_same_accessibility_shape` asserts.
+pub(crate) struct DragSurface {
+    child: Option<WidgetId>,
+}
+
+impl DragSurface {
+    /// Wrap a pre-registered widget by id.
+    pub(crate) fn new(child: WidgetId) -> Self {
+        Self { child: Some(child) }
+    }
+}
+
+impl std::fmt::Debug for DragSurface {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DragSurface").finish()
+    }
+}
+
+impl Widget for DragSurface {
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: teksilo_canvas::SizeProposal,
+        ctx: &teksilo_core::widget::LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        self.child
+            .and_then(|id| ctx.child_layout_response(id, proposal))
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
+    }
+
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: teksilo_canvas::SizeProposal,
+        children: &mut [teksilo_core::widget::WidgetPlacement],
+        _ctx: &teksilo_core::widget::LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
+    }
+}
+
+/// The no-op tap that guarantees a node its own gesture arena.
+///
+/// Merged onto every row, tile or body pane a [`DragSurface`] encloses. Without
+/// an arena nothing captures the press, and the walk that enrols the surface's
+/// drag never runs — so the drag would compete by no path at all.
+///
+/// `GridView` merges it onto every tile whether or not one encloses it, and for
+/// a second reason: the grid's body pane carries an absorber too, so a tile with
+/// no arena of its own leaves the pane holding the press — and a release
+/// dispatched to the captor and bubbled target→root never reaches a tile
+/// *beneath* it. A plain selectable grid lost both its finger tap and, on a
+/// mouse, the release that collapses a multi-selection that way. The four row
+/// views have no pane-level absorber, so a plain row there is merely arena-less,
+/// which costs it nothing *so long as nothing above it competes for the press*.
+/// An application that wraps such a view in anything tappable puts an arena
+/// there itself, and the row loses its release the same way — see
+/// `docs/data-view-touch.md`'s second known limit.
+///
+/// Applied unconditionally rather than only where the node would otherwise have
+/// none: an extra no-op tap in an arena that already has one is inert (the
+/// arena builds one `TapRecognizer` however many closures are installed), while
+/// a condition enumerating the handlers a pane happens to attach today would
+/// silently stop guaranteeing anything the next time one is added. It absorbs
+/// nothing and answers nothing — the recognizer's existence is the whole point.
+pub(crate) fn press_absorber() -> HandlerSet {
+    HandlerSet::new().on_tap(|_tap, _ctx| {})
+}
+
+/// Whether the primary release being dispatched still completes the press it
+/// began — the question every **release-time commitment** in a data view's row
+/// body has to ask before committing.
+///
+/// A row body commits two things on release: the deferred collapse of a
+/// multi-selection ([`deferred_select::on_up`]), and — in `TreeView` — the
+/// expansion toggle of a branch row. Both are correct for a click and wrong for
+/// a finger that was scrolling, so both are gated on this.
+///
+/// It answers `false` in the two ways a row loses the press without a cancel it
+/// can see:
+///
+/// * **a peer claimed the contact.** The scrollable above the row won the
+///   arbitration with its `PanClaim` and the press is now a scroll. The row
+///   cannot rely on being told: it is enrolled as a sequence member only when
+///   it carries a drag (`reorderable` / `exportable`), and even then the
+///   loser's `CancelReason::PeerClaimed` is *member*-level — deliberately
+///   leaving the pointer alive so its winner can finish — so the `PointerUp`
+///   still arrives here either way. `WidgetTree::update_press` ends the press
+///   record on that claim, which is the fact this reads.
+/// * **the pointer left the press's tap boundary.** The same predicate that
+///   fails the tap and fires `cancel_taps`, so a release-time commit is
+///   abandoned exactly when the activation is.
+///
+/// It stays `true` through a press-feedback delay — a finger that lands and
+/// lifts before the delay elapses has still clicked — because the delay
+/// withholds the *visual*, not the press.
+///
+/// The older reasoning at these sites, that "an active drag consumes
+/// `PointerUp`", covers only a **drag**: a won pan claim is not an
+/// `active_drag`, so the release is not routed to `handle_drag_drop` and does
+/// reach the row.
+pub(crate) fn release_completes_the_press(ctx: &teksilo_core::widget::EventContext) -> bool {
+    ctx.press_is_inside()
+}
+
+/// Shared selection-on-press/release logic for a data-view row, and the type
+/// its two calls share.
+///
+/// # What a press decides, and when the decision is applied
+///
+/// A **precise** pointer (mouse) still selects on press, exactly as it always
+/// has — that is the click convention on every desktop, and a press that never
+/// becomes anything else is still a click. The one thing it defers is the
+/// *collapse* of an existing multi-selection: pressing an already-selected row
+/// keeps the whole set so it can be dragged, and collapses to the pressed row
+/// only on a release that still belongs to it.
+///
+/// A **direct** pointer (a finger, a pen) defers the *whole* decision to the
+/// release. A press from a finger is not yet a click: the same contact is the
+/// opening sample of a scroll, and a scrolling finger must leave the selection
+/// exactly as it found it. No release-time predicate can rescue a selection
+/// already written on `PointerDown`, so the write itself moves to the release —
+/// and a release the row has lost (a won `PanClaim`, a press that wandered out
+/// of the tap boundary) is refused by
+/// [`release_completes_the_press`], which is what makes a pan commit nothing.
+///
+/// The nav cursor travels with the selection rather than with the press, so the
+/// arrow-key origin and the selection can never point at different rows: both
+/// calls report whether the caller should move it *now*.
 pub(crate) mod deferred_select {
     use std::cell::Cell;
     use std::rc::Rc;
@@ -1075,53 +1250,110 @@ pub(crate) mod deferred_select {
 
     use super::RowSelection;
 
-    /// Handle a primary `PointerDown` on row `index`. Returns without selecting
-    /// if the press was claimed by an interactive child (also clearing a stale
-    /// `pending`). Ctrl/Shift select immediately; a plain press on an
-    /// already-selected row defers; otherwise selects.
+    /// The selection change a press decided but has not applied yet.
+    ///
+    /// `Collapse` is the one a mouse defers; a direct pointer defers whichever
+    /// of the three its modifiers chose.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum PendingSelect {
+        /// Replace the selection with this row — a plain click, and the
+        /// collapse of a multi-selection the press kept alive.
+        Collapse,
+        /// Accelerator-click: add or remove this row.
+        Toggle,
+        /// Shift-click: extend the range from the anchor.
+        Extend,
+    }
+
+    /// The per-row cell the two calls share. One per realized row.
+    pub(crate) type Pending = Rc<Cell<Option<PendingSelect>>>;
+
+    /// A fresh, empty pending cell.
+    pub(crate) fn pending_cell() -> Pending {
+        Rc::new(Cell::new(None))
+    }
+
+    fn apply(sel: &RowSelection, index: usize, what: PendingSelect) {
+        match what {
+            PendingSelect::Collapse => sel.select(index),
+            PendingSelect::Toggle => sel.toggle(index),
+            PendingSelect::Extend => sel.extend_to(index),
+        }
+    }
+
+    /// Handle a primary `PointerDown` on row `index`.
+    ///
+    /// Returns whether the caller should move its nav cursor to `index` now:
+    /// `false` when an interactive child claimed the press (nothing happened
+    /// here at all), and `false` for a direct pointer, whose decision — cursor
+    /// included — belongs to the release.
     pub(crate) fn on_down(
         sel: &RowSelection,
         index: usize,
         modifiers: Modifiers,
-        pending: &Rc<Cell<bool>>,
+        pending: &Pending,
         ctx: &mut EventContext,
     ) -> bool {
         if ctx.press_claimed_by_interactive_child() {
-            pending.set(false);
+            pending.set(None);
             return false;
         }
         // The accelerator-click that adds one row to a discontiguous selection:
         // Ctrl+click on Windows and Linux, ⌘-click on macOS — where ⌃-click is
         // the secondary click and would open a context menu instead.
-        if modifiers.command() {
-            sel.toggle(index);
-            pending.set(false);
+        let what = if modifiers.command() {
+            PendingSelect::Toggle
         } else if modifiers.shift() {
-            sel.extend_to(index);
-            pending.set(false);
-        } else if sel.is_selected(index) {
-            pending.set(true);
+            PendingSelect::Extend
         } else {
-            sel.select(index);
-            pending.set(false);
+            PendingSelect::Collapse
+        };
+        if ctx.pointer_kind().is_direct() {
+            // A finger's press is not yet a click — see the module header.
+            pending.set(Some(what));
+            return false;
+        }
+        if what == PendingSelect::Collapse && sel.is_selected(index) {
+            // Grab-the-set-and-drag: keep the multi-selection alive for the
+            // press, collapse it on a release without a drag.
+            pending.set(Some(what));
+        } else {
+            apply(sel, index, what);
+            pending.set(None);
         }
         true
     }
 
-    /// Handle a primary `PointerUp` on row `index` — reached only on a click
-    /// WITHOUT a drag. Collapses the deferred multi-selection, unless the
-    /// release belongs to an interactive child.
+    /// Handle a primary `PointerUp` on row `index`, applying whatever the press
+    /// deferred.
+    ///
+    /// Returns whether the caller should move its nav cursor to `index` now —
+    /// true exactly when a deferred decision was applied.
+    ///
+    /// Refuses when the release belongs to an interactive child, and when the
+    /// press it would complete is no longer this row's
+    /// ([`release_completes_the_press`](super::release_completes_the_press)).
     pub(crate) fn on_up(
         sel: &RowSelection,
         index: usize,
-        pending: &Rc<Cell<bool>>,
+        pending: &Pending,
         ctx: &mut EventContext,
-    ) {
+    ) -> bool {
         if ctx.press_claimed_by_interactive_child() {
-            return;
+            return false;
         }
-        if pending.replace(false) {
-            sel.select(index);
+        if !super::release_completes_the_press(ctx) {
+            // The deferred decision is abandoned, not postponed: clear the flag
+            // so it cannot fire on some later release this row does own.
+            pending.set(None);
+            return false;
+        }
+        match pending.replace(None) {
+            Some(what) => {
+                apply(sel, index, what);
+                true
+            }
+            None => false,
         }
     }
 }
@@ -1175,5 +1407,40 @@ mod payload_tests {
         let rd = payload.get_typed::<RowDragData<u64>>().unwrap();
         assert_eq!(rd.rows, vec![0, 2]);
         assert_eq!(rd.items.as_deref(), Some(&[0, 20][..]));
+    }
+}
+
+#[cfg(test)]
+mod drag_surface_tests {
+    use super::*;
+    use crate::primitives::{FixedSize, HStack, Shrinkable};
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::widget_tree::WidgetTree;
+
+    /// The wrapper's own doc says it forwards the child's *whole*
+    /// `LayoutResponse`, not just the size. Flattening it to a bare `Size` makes
+    /// the surface rigid, which over-constrains any tight container it sits in —
+    /// the failure `primitives::dead_zone` was written to avoid and
+    /// `primitives::touch_target::tests::the_wrapper_forwards_its_child_shrink_weight`
+    /// already pins for the other wrapper of this shape. Shrink is the
+    /// discriminating field: a rigid surface refuses to compress at all, so its
+    /// width stays at the child's ideal instead of yielding to the deficit.
+    #[test]
+    fn the_drag_surface_forwards_its_child_shrink_weight() {
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(
+            Shrinkable::new()
+                .min_width(20.0)
+                .child(FixedSize::new().width(100.0).height(20.0)),
+        );
+        let slot = tree.add(DragSurface::new(inner));
+        let rigid = tree.add(FixedSize::new().width(100.0).height(20.0));
+        tree.add(HStack::new().add_child(rigid).add_child(slot));
+        tree.layout(SizeProposal::exact(120.0, 20.0));
+        let w = tree.bounds(slot).width;
+        assert!(
+            w < 100.0,
+            "the DragSurface must forward the child's shrink weight (width was {w})"
+        );
     }
 }

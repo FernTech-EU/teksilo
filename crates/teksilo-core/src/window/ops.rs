@@ -106,13 +106,41 @@ pub trait WindowOps {
     /// a headless build, or a target with no drop-target implementation)
     /// returns `false`, in which case the framework cancels the drag
     /// — the pre-existing "pointer left the window ⇒ drag cancels" behavior.
+    /// `pointer` is the device carrying the drag. It is not decoration: on
+    /// Wayland `wl_data_device::start_drag` must be given the serial of the
+    /// input event that began the implicit grab, and a finger's grab was opened
+    /// by a `wl_touch::down`, not a `wl_pointer::button` — hand the wrong
+    /// serial over and the compositor rejects the request silently and sends no
+    /// terminal event at all.
     fn begin_os_drag(
         &mut self,
         _data: crate::drag_payload::OutboundDragData,
         _image: Option<crate::drag_payload::DragImageData>,
+        _pointer: teksilo_tokens::PointerKind,
     ) -> bool {
         false
     }
+
+    /// Tell the platform whether the widget under an **inbound** OS drag
+    /// accepts it, so the OS shows the right cursor and permits (or refuses)
+    /// the drop.
+    ///
+    /// An inbound backend must answer the drag source synchronously — XDND
+    /// requires an `XdndStatus` for every `XdndPosition`, and Wayland wants
+    /// `wl_data_offer::accept` + `set_actions` on the offer — which happens on
+    /// the backend's own thread, before the widget tree has seen the sample. So
+    /// the backend's first answer can only be about *format* compatibility;
+    /// this is how the widget's actual verdict gets back to the OS. Called by
+    /// the tree only when the answer changes.
+    ///
+    /// The negotiated *operation* follows from the bit: Copy when accepted,
+    /// none when refused. Copy is the only operation Teksilo advertises in
+    /// either direction, so there is nothing else for a widget to choose — see
+    /// `docs/drag-and-drop.md` §11.5.
+    ///
+    /// Default: no-op — the standalone sink and any platform without an
+    /// inbound backend.
+    fn set_drop_accepted(&mut self, _accepted: bool) {}
 
     /// Abandon an OS drag started by [`Self::begin_os_drag`] (the user pressed
     /// Escape).
@@ -126,6 +154,51 @@ pub trait WindowOps {
     ///
     /// Default: no-op.
     fn cancel_os_drag(&mut self) {}
+
+    /// What the host platform can do about an on-screen keyboard.
+    ///
+    /// Read by a widget that must decide whether a touch-only user can reach a
+    /// keyboard at all: where the answer is [`SoftKeyboardSupport::None`] the
+    /// framework will never raise one and promises nothing about whether the
+    /// platform will, so a text surface that expects a finger has to offer its
+    /// own affordance.
+    ///
+    /// Default: [`SoftKeyboardSupport::None`], which is the truth for a
+    /// standalone tree with no window under it.
+    fn soft_keyboard_support(&self) -> SoftKeyboardSupport {
+        SoftKeyboardSupport::None
+    }
+}
+
+/// What a platform can do about an on-screen keyboard.
+///
+/// Three answers, and the difference between them is what a caller may
+/// *promise a user*, not how much code stands behind them.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Hash)]
+#[non_exhaustive]
+pub enum SoftKeyboardSupport {
+    /// The framework has no keyboard request to send, and makes no promise
+    /// that anything will rise on its own. Either the platform has no software
+    /// keyboard at all, or it has one whose appearance is the platform's
+    /// business and not reliable enough to promise. A request is dropped, and a
+    /// text surface driven by touch needs its own affordance.
+    #[default]
+    None,
+    /// A keyboard exists and is **guaranteed** to rise when a text control
+    /// takes focus through the accessibility layer, so a touch-driven text
+    /// surface needs no affordance of its own. There is still nothing to ask:
+    /// the framework's ordinary IME-allowance reconcile is what summons it, and
+    /// an explicit ask would at best duplicate that and at worst re-assert
+    /// allowance, which cancels a live composition — so a request resolves to
+    /// "already done".
+    ///
+    /// The guarantee is what separates this from [`None`](Self::None), which
+    /// covers every platform where a keyboard may or may not appear.
+    ViaAccessibility,
+    /// A keyboard exists and can be shown and hidden on demand. Only a backend
+    /// that can honour **both** directions may report this: a toggle whose
+    /// current state is unknown cannot, because "show" would sometimes hide.
+    Explicit,
 }
 
 /// No-op implementation used by standalone `WidgetTree`s constructed

@@ -89,7 +89,21 @@ impl Widget for A11yTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The selected widget's accessibility node, one `key: value` line per row.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(
+            self.rows
+                .borrow()
+                .iter()
+                .map(|row| format!("{}: {}", row.key, row.value))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 }
 
 fn push_from_builder(builder: &AccessNodeBuilder, out: &mut Vec<KvRow>) {

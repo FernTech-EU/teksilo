@@ -279,6 +279,208 @@ impl PointerButtonDto {
     }
 }
 
+/// Which device an injected pointer op is pretending to be.
+///
+/// The three kinds are not interchangeable descriptions of the same event: a
+/// mouse is indirect and precise, a finger is direct and coarse, a pen is
+/// direct and precise, and the framework tunes slop, hit outset, hover and the
+/// whole cross-widget arbitration off exactly that classification. An op that
+/// says nothing is a [`Mouse`](Self::Mouse), which is what every automation op
+/// was before touch existed.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerKindDto {
+    /// An indirect precise pointer with a hover state. The default.
+    #[default]
+    Mouse,
+    /// A direct coarse pointer with no hover state — a finger.
+    Touch,
+    /// A direct precise pointer — a stylus tip.
+    Pen,
+}
+
+impl PointerKindDto {
+    /// The core kind this names. `Pen` maps to the generic
+    /// [`PenKind::Pen`](teksilo_tokens::PenKind::Pen) tip; the eraser and the
+    /// other tool ids are not addressable from the wire, because nothing in the
+    /// framework branches on them yet and a field no reader consults is a
+    /// promise this crate cannot keep.
+    pub fn to_core(self) -> teksilo_tokens::PointerKind {
+        match self {
+            PointerKindDto::Mouse => teksilo_tokens::PointerKind::Mouse,
+            PointerKindDto::Touch => teksilo_tokens::PointerKind::Touch,
+            PointerKindDto::Pen => teksilo_tokens::PointerKind::Pen(teksilo_tokens::PenKind::Pen),
+        }
+    }
+
+    /// The wire name for a core kind, so a reply and a request speak the same
+    /// vocabulary. An [`Unknown`](teksilo_tokens::PointerKind::Unknown) device
+    /// reports as `mouse`, which is how the framework tunes it.
+    pub fn from_core(kind: teksilo_tokens::PointerKind) -> Self {
+        match kind {
+            teksilo_tokens::PointerKind::Touch => PointerKindDto::Touch,
+            teksilo_tokens::PointerKind::Pen(_) => PointerKindDto::Pen,
+            _ => PointerKindDto::Mouse,
+        }
+    }
+}
+
+/// Which [`TargetDensity`](teksilo_tokens::TargetDensity) the app lays out at.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DensityDto {
+    /// Desktop mouse-and-keyboard density. The default.
+    #[default]
+    Compact,
+    /// The intermediate ladder for hybrid devices and large-cursor users.
+    Comfortable,
+    /// Finger-first density.
+    Touch,
+}
+
+impl DensityDto {
+    pub fn to_core(self) -> teksilo_tokens::TargetDensity {
+        match self {
+            DensityDto::Compact => teksilo_tokens::TargetDensity::Compact,
+            DensityDto::Comfortable => teksilo_tokens::TargetDensity::Comfortable,
+            DensityDto::Touch => teksilo_tokens::TargetDensity::Touch,
+        }
+    }
+
+    pub fn from_core(density: teksilo_tokens::TargetDensity) -> Self {
+        match density {
+            teksilo_tokens::TargetDensity::Compact => DensityDto::Compact,
+            teksilo_tokens::TargetDensity::Comfortable => DensityDto::Comfortable,
+            teksilo_tokens::TargetDensity::Touch => DensityDto::Touch,
+        }
+    }
+}
+
+/// One phase of a contact in an [`AutomationOp::InjectTouchSequence`].
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TouchPhaseDto {
+    /// The finger lands. Mints the slot's contact identity.
+    Down,
+    /// The finger moves, still down.
+    Move,
+    /// The finger lifts. A tap completes here.
+    Up,
+    /// The system revokes the contact (a `wl_touch.cancel`, a compositor grab).
+    /// The position carries no meaning and no tap completes.
+    Cancel,
+}
+
+/// One step of an [`AutomationOp::InjectTouchSequence`].
+///
+/// `advance_ms` is applied **before** the sample, on the simulated clock, so
+/// the interval between two steps is exactly what the script wrote and not how
+/// long the host took to run two lines of code. That is what makes a hold, a
+/// flick and a drag distinguishable at all: a drag is decided by distance and a
+/// flick by distance over time, and two samples stamped microseconds apart
+/// describe a flick at some thousands of dp per second on one machine and
+/// something else on the next.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TouchStep {
+    /// Which finger. A small slot number, not a pointer id: identities are
+    /// minted by the framework's allocator and the op reports back which one
+    /// each slot got. Defaults to `0`, the single-finger case.
+    #[serde(default)]
+    pub contact: u32,
+    /// What that finger does.
+    pub phase: TouchPhaseDto,
+    /// Where, in window-logical coordinates.
+    pub x: f32,
+    pub y: f32,
+    /// Simulated milliseconds to advance **before** this sample. Default `0`.
+    #[serde(default)]
+    pub advance_ms: u64,
+}
+
+/// One competitor in a pointer's cross-widget arbitration, as
+/// [`AutomationOp::QueryPointers`] and [`AutomationOp::InjectTouchSequence`]
+/// report it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SequenceMemberDto {
+    /// The competing node.
+    pub node: NodeRef,
+    /// What it competes as: `gesture`, `pan`, `raw_drag` or `raw_preview`.
+    pub role: String,
+    /// Where it stands: `possible`, `held`, `rejected` or `won`.
+    pub state: String,
+}
+
+/// What one pointer is doing right now.
+///
+/// The reply shape of [`AutomationOp::QueryPointers`], and the per-step
+/// observation [`AutomationOp::InjectTouchSequence`] returns. It carries the
+/// whole *observable* arbitration for that pointer — the frozen touch action,
+/// every competitor with its role and state, and the winner if one has been
+/// decided — because without them a scripted gesture can only assert that the
+/// op returned, which is green whatever the arbitration did.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PointerReport {
+    /// The pointer's identity, as a number a later op can hand back
+    /// (`cancel_pointer`, `inject_pointer { pointer_id }`).
+    pub pointer_id: u64,
+    /// Which device it is.
+    pub kind: PointerKindDto,
+    /// The W3C `isPrimary` flag — per kind, so two live pointers of different
+    /// kinds can both carry it.
+    pub primary: bool,
+    /// Whether any button is held (for a contact: whether it is down).
+    pub down: bool,
+    /// Where it last was, in window-logical coordinates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f32; 2]>,
+    /// Reported tip pressure, normalised `0.0..=1.0`, where the device gives
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pressure: Option<f32>,
+    /// Reported tilt `[tilt_x, tilt_y]` in degrees, where the device gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tilt: Option<[f32; 2]>,
+    /// The widget holding this pointer's capture, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_by: Option<NodeRef>,
+    /// The `TouchAction` frozen at this pointer's press, under the name it is
+    /// declared by: `AUTO`, `NONE`, `PAN`, `PAN_X`, `PAN_Y`, `PINCH_ZOOM`,
+    /// `MANIPULATION`, or `(composite)` for a combination none of those names.
+    pub touch_action: String,
+    /// Every competitor for this pointer's press, innermost first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sequence_members: Vec<SequenceMemberDto>,
+    /// The winner of the arbitration, once one has been decided.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence_winner: Option<NodeRef>,
+}
+
+/// What one step of an [`AutomationOp::InjectTouchSequence`] left behind.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TouchStepReport {
+    /// The slot this step drove.
+    pub contact: u32,
+    /// The identity that slot held for this step.
+    pub pointer_id: u64,
+    /// That pointer's whole state after the sample. `None` once the contact has
+    /// left the table — after its `Up` or `Cancel` a finger is simply gone, and
+    /// reporting a stale copy would let a script assert a winner for a pointer
+    /// that no longer exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pointer: Option<PointerReport>,
+}
+
+/// The reply to an [`AutomationOp::InjectTouchSequence`].
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TouchSequenceReport {
+    /// One entry per step, in the order the steps were given.
+    pub steps: Vec<TouchStepReport>,
+    /// Every pointer still live when the sequence ended — the fingers a
+    /// sequence that stops short of its `Up` deliberately leaves down.
+    pub live: Vec<PointerReport>,
+}
+
 /// An assertion evaluated against a single node by `assert_node`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -404,6 +606,11 @@ fn default_true() -> bool {
 fn default_settle_timeout() -> u64 {
     500
 }
+/// The default number of intermediate moves each finger of a
+/// [`AutomationOp::Pinch`] makes.
+fn default_pinch_steps() -> usize {
+    8
+}
 
 impl Default for SettleSpec {
     fn default() -> Self {
@@ -424,12 +631,11 @@ impl Default for SettleSpec {
 /// is a client's *instruction*, and serde's default is to ignore a field it
 /// does not recognise and take the `#[serde(default)]` for the one that was
 /// meant — so a misspelled argument does not fail, it silently performs a
-/// different action. `{"x": .., "y": .., "kind": "move"}` against `InjectPointer`
-/// took the default `action`, which is `Click`: a probe that asked to hover
-/// clicked every control it pointed at, quietly toggling real settings, and
-/// nothing anywhere said so. Replies are deliberately *not* strict, for the
-/// opposite reason: a client reading a newer app's richer output should keep
-/// working.
+/// different action. A misspelling of `action` against `InjectPointer` took
+/// that field's default, which is `Click`: a probe that asked to hover clicked
+/// every control it pointed at, quietly toggling real settings, and nothing
+/// anywhere said so. Replies are deliberately *not* strict, for the opposite
+/// reason: a client reading a newer app's richer output should keep working.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub enum AutomationOp {
@@ -530,6 +736,33 @@ pub enum AutomationOp {
         action: PointerAction,
         #[serde(default)]
         button: PointerButtonDto,
+        /// Which device is pointing. `mouse` (the default) is the pre-touch
+        /// path, byte for byte: a legacy `PointerDown`/`PointerUp` pair whose
+        /// pointer is the singular mouse. `touch` and `pen` build a real
+        /// [`PointerSample`](teksilo_core::PointerSample) and enter through the
+        /// tree's pointer door, so the kind reaches the hit test, the slop, the
+        /// hover rules and the arbitration.
+        #[serde(default)]
+        kind: PointerKindDto,
+        /// Which live contact to continue, from a `query_pointers` reply.
+        ///
+        /// It belongs on a `move` or an `up` — the phases that continue a
+        /// contact already on the glass. A `down` mints an identity and a
+        /// `click` is a whole contact's life, so both refuse it rather than let
+        /// a caller name a finger the op is about to replace. With no id, a
+        /// `move` or `up` addresses the sole live pointer of that kind and is
+        /// refused when there is more than one: a script driving two fingers
+        /// must say which. A mouse refuses it outright — it has one identity.
+        #[serde(default)]
+        pointer_id: Option<u64>,
+        /// Tip pressure, normalised `0.0..=1.0`, as a digitizer reports it.
+        /// Read by anything that consults
+        /// [`PointerInfo::effective_pressure`](teksilo_core::PointerInfo::effective_pressure).
+        #[serde(default)]
+        pressure: Option<f32>,
+        /// Tilt `[tilt_x, tilt_y]` in degrees, as a digitizer reports it.
+        #[serde(default)]
+        tilt: Option<[f32; 2]>,
         // Modifiers held for the press and the release, mirroring `Scroll`'s
         // and `InjectKey`'s. A modifier is not decoration on a click: Ctrl-click
         // to extend a selection is its own gesture, and until this existed no
@@ -610,6 +843,103 @@ pub enum AutomationOp {
         to_x: Option<f32>,
         #[serde(default)]
         to_y: Option<f32>,
+    },
+    /// A whole multi-touch gesture in one op, and the arbitration it produced
+    /// after every step.
+    ///
+    /// **Self-contained by construction.** Contact identities are minted by the
+    /// framework's allocator, not chosen by the client, and `execute` holds no
+    /// state between ops — so a gesture split across ops would have no way to
+    /// name the same finger twice. Naming fingers by *slot* inside one op does,
+    /// and the reply says which identity each slot got, which is what a later
+    /// `cancel_pointer` or `inject_pointer { pointer_id }` needs.
+    ///
+    /// A sequence that stops short of its `Up` leaves the finger down, which is
+    /// the point: an arbitration is only observable while the press is live.
+    InjectTouchSequence {
+        steps: Vec<TouchStep>,
+    },
+    /// Two fingers moving from one span to another — the pinch a zoomable
+    /// surface reads.
+    ///
+    /// Both contacts land before either moves, because the recognizer's
+    /// reference span is the distance between the two landings.
+    Pinch {
+        /// The first finger's start.
+        ax0: f32,
+        ay0: f32,
+        /// The second finger's start.
+        bx0: f32,
+        by0: f32,
+        /// The first finger's end.
+        ax1: f32,
+        ay1: f32,
+        /// The second finger's end.
+        bx1: f32,
+        by1: f32,
+        /// How many intermediate moves each finger makes. Default `8`; clamped
+        /// to at least 1.
+        #[serde(default = "default_pinch_steps")]
+        steps: usize,
+    },
+    /// One finger travelling `from` → `to` over `over_ms` of **simulated**
+    /// time, released while still moving — the shape a kinetic coast is handed
+    /// off from.
+    ///
+    /// The distinction from a drag is the clock, not the path: a drag latches
+    /// on distance, a fling hands a velocity to the scroller. Sampled at one
+    /// 60 Hz frame per step so the velocity tracker sees gaps under its stop
+    /// threshold and at least its minimum sample count; a flick described by
+    /// two far-apart samples yields no velocity and silently never flings.
+    Fling {
+        from_x: f32,
+        from_y: f32,
+        to_x: f32,
+        to_y: f32,
+        /// The flick's duration in simulated milliseconds.
+        over_ms: u64,
+    },
+    /// Press at a point, hold for exactly the device's long-press threshold,
+    /// release.
+    ///
+    /// The hold comes from the active input profile for `kind` rather than a
+    /// number the client picks, so the op means "hold long enough" on every
+    /// density and every device without the script knowing the threshold.
+    LongPress {
+        x: f32,
+        y: f32,
+        /// Which device holds. Default `mouse`.
+        #[serde(default)]
+        kind: PointerKindDto,
+    },
+    /// Revoke a live pointer the way the system does — a `wl_touch.cancel`, a
+    /// compositor grab, a `PointerCaptureLost`.
+    ///
+    /// Not an `up`: no tap completes, the end position carries no meaning, and
+    /// every widget working on the pointer is told through
+    /// [`CancelReason`](teksilo_core::CancelReason). The id comes from a
+    /// `query_pointers` reply.
+    CancelPointer {
+        pointer_id: u64,
+    },
+    /// Every live pointer, with its identity, kind, position, axes, capture and
+    /// whole arbitration state.
+    ///
+    /// Read-only. It is how a script learns the id of a contact left down by
+    /// anything other than an [`InjectTouchSequence`](Self::InjectTouchSequence),
+    /// whose reply already names its own. A mouse appears once it has produced
+    /// a sample and stays for the life of the tree; a contact appears at its
+    /// press and is gone after its up or cancel.
+    QueryPointers,
+    /// Switch the app's [`TargetDensity`](teksilo_tokens::TargetDensity).
+    ///
+    /// **Treat every node id a client holds as dead afterwards.** A density
+    /// change rebuilds every root, so every widget a `build()` created is
+    /// destroyed and recreated with a fresh `WidgetId` — and therefore a fresh
+    /// [`NodeRef`]. Re-`snapshot_tree` or re-`find_node` after it. Setting the
+    /// density it already has is a no-op and keeps the ids.
+    SetDensity {
+        density: DensityDto,
     },
     // ---- Introspection ----
     GetOverlays,

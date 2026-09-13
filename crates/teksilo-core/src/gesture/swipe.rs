@@ -1,45 +1,79 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use std::time::Instant;
-
 use teksilo_canvas::Point;
 
-use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, SwipeDirection};
+/// Only the unit tests still speak in wall-clock instants; the recognizers
+/// themselves read `RecognizerContext::now`.
+#[cfg(test)]
+use std::time::Instant;
+
+use crate::pointer::EventTime;
+
+use super::{
+    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, RecognizerContext,
+    SwipeDirection,
+};
 
 /// Recognizes a swipe gesture (quick directional movement above velocity threshold).
+///
+/// The velocity and distance it demands come from the active profile's
+/// `swipe_min_velocity` / `swipe_min_distance` — 200 dp/s and 30 dp for a
+/// mouse (exactly the pre-P06 constants), 300 dp/s and 40 dp for a finger,
+/// whose travel is less precise — unless [`min_velocity`](Self::min_velocity) /
+/// [`min_distance`](Self::min_distance) pin them. The cross-axis ratio is the
+/// recognizer's own: it describes the shape of a swipe, not the device.
 #[derive(Debug)]
 pub struct SwipeRecognizer {
-    min_velocity: f32,
-    min_distance: f32,
+    min_velocity: Option<f32>,
+    min_distance: Option<f32>,
     max_cross_ratio: f32,
     down_position: Option<Point>,
-    down_time: Option<Instant>,
+    down_time: Option<EventTime>,
+    /// Anchors the `Instant` timeline the pre-P06 unit tests drive this with.
+    #[cfg(test)]
+    test_epoch: Option<std::time::Instant>,
 }
 
 impl SwipeRecognizer {
     pub fn new() -> Self {
         Self {
-            min_velocity: 200.0,  // pixels per second
-            min_distance: 30.0,   // minimum swipe distance
+            min_velocity: None,
+            min_distance: None,
             max_cross_ratio: 0.5, // max perpendicular/parallel ratio
             down_position: None,
             down_time: None,
+            #[cfg(test)]
+            test_epoch: None,
         }
     }
 
+    /// Pin the velocity a swipe must reach, overriding the profile's
+    /// `swipe_min_velocity`.
     pub fn min_velocity(mut self, v: f32) -> Self {
-        self.min_velocity = v;
+        self.min_velocity = Some(v);
         self
     }
 
+    /// Pin the distance a swipe must cover, overriding the profile's
+    /// `swipe_min_distance`.
     pub fn min_distance(mut self, d: f32) -> Self {
-        self.min_distance = d;
+        self.min_distance = Some(d);
         self
     }
+}
 
-    /// Process with an explicit timestamp for testability.
-    pub fn process_at(&mut self, event: &RawPointerEvent, now: Instant) -> GestureResult {
+impl Default for SwipeRecognizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GestureRecognizer for SwipeRecognizer {
+    fn process(&mut self, event: &RawPointerEvent, cx: &RecognizerContext) -> GestureResult {
+        let min_velocity = self.min_velocity.unwrap_or(cx.profile.swipe_min_velocity);
+        let min_distance = self.min_distance.unwrap_or(cx.profile.swipe_min_distance);
+        let now = cx.now;
         match event {
             RawPointerEvent::Down { position, .. } => {
                 self.down_position = Some(*position);
@@ -47,6 +81,10 @@ impl SwipeRecognizer {
                 GestureResult::Pending
             }
             RawPointerEvent::Move { .. } => GestureResult::Pending,
+            RawPointerEvent::Cancel { .. } => {
+                self.reset();
+                GestureResult::Failed
+            }
             RawPointerEvent::Up { position, .. } => {
                 let (Some(down), Some(time)) = (self.down_position, self.down_time) else {
                     return GestureResult::Failed;
@@ -55,15 +93,15 @@ impl SwipeRecognizer {
                 let dx = position.x - down.x;
                 let dy = position.y - down.y;
                 let dist = (dx * dx + dy * dy).sqrt();
-                let elapsed = now.duration_since(time).as_secs_f32();
+                let elapsed = now.saturating_since(time).as_secs_f32();
 
-                if dist < self.min_distance || elapsed <= 0.0 {
+                if dist < min_distance || elapsed <= 0.0 {
                     self.reset();
                     return GestureResult::Failed;
                 }
 
                 let velocity = dist / elapsed;
-                if velocity < self.min_velocity {
+                if velocity < min_velocity {
                     self.reset();
                     return GestureResult::Failed;
                 }
@@ -101,18 +139,6 @@ impl SwipeRecognizer {
             }
         }
     }
-}
-
-impl Default for SwipeRecognizer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GestureRecognizer for SwipeRecognizer {
-    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
-        self.process_at(event, Instant::now())
-    }
 
     fn reset(&mut self) {
         self.down_position = None;
@@ -121,6 +147,22 @@ impl GestureRecognizer for SwipeRecognizer {
 
     fn priority(&self) -> u32 {
         30 // High priority — swipe is decisive
+    }
+}
+
+#[cfg(test)]
+impl SwipeRecognizer {
+    /// The pre-P06 call shape: an `Instant` timeline anchored at the first
+    /// call, mapped onto the [`EventTime`] one the recognizer now reads.
+    fn process_at(&mut self, event: &RawPointerEvent, now: std::time::Instant) -> GestureResult {
+        let epoch = *self.test_epoch.get_or_insert(now);
+        let cx = super::config::RecognizerContext::new(
+            EventTime::from_duration(now.saturating_duration_since(epoch)),
+            teksilo_tokens::GestureProfile::MOUSE,
+            teksilo_canvas::Rect::ZERO,
+            event.pointer(),
+        );
+        GestureRecognizer::process(self, event, &cx)
     }
 }
 

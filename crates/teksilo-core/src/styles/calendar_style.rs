@@ -24,8 +24,11 @@
 
 use std::rc::Rc;
 
+use teksilo_tokens::{InputTokens, TargetRole};
+
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
+use crate::styles::density::dp;
 use crate::widget_id::WidgetId;
 
 /// Selection-derived fill state for a day cell. The reactive signal in
@@ -132,6 +135,26 @@ pub trait CalendarStyle: 'static {
     fn make_day_cell(&self, cfg: &CalendarDayConfig, ctx: &mut BuildContext) -> WidgetId;
     fn make_zoom_cell(&self, cfg: &CalendarZoomCellConfig, ctx: &mut BuildContext) -> WidgetId;
     fn make_header(&self, cfg: &CalendarHeaderConfig, ctx: &mut BuildContext) -> WidgetId;
+
+    /// Footprint, in logical pixels, of one header navigation arrow — the
+    /// square each `‹` / `›` / `«` / `»` button occupies.
+    ///
+    /// The arrows are built by `Calendar` itself rather than by
+    /// [`make_header`](Self::make_header), which only lays the five finished
+    /// slots out, so their size cannot come from the recipe unless the trait
+    /// hands it over. A metrics accessor rather than a recipe field read,
+    /// because the widget holds an `Rc<dyn CalendarStyle>`.
+    ///
+    /// **Defaulted**, so a `CalendarStyle` implemented outside this workspace
+    /// keeps compiling and keeps the target ladder it had: the default is
+    /// `teksilo_widgets::styles::recipe_calendar_style::CALENDAR_NAV_ARROW_SIZE`
+    /// put through [`dp`] as a [`TargetRole::Target`] — restated as a literal
+    /// because `teksilo-core` cannot name a `teksilo-widgets` constant, and
+    /// pinned equal to it by
+    /// `the_calendar_trait_default_restates_the_module_constant`.
+    fn nav_arrow_size(&self, tokens: &InputTokens) -> f32 {
+        dp(24.0, TargetRole::Target, tokens)
+    }
 }
 
 pub type SharedCalendarStyle = Rc<dyn CalendarStyle>;

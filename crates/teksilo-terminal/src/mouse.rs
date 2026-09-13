@@ -18,6 +18,41 @@ pub enum MouseButton {
     WheelDown,
 }
 
+/// What a **direct** pointer (a finger, a pen tip) is reported to the child
+/// program as, while that program has mouse tracking enabled.
+///
+/// A mouse is not governed by this at all: it reports exactly what it has
+/// always reported, gated only by the `Shift` override.
+///
+/// The default is [`Off`](Self::Off), which is the decision the touch
+/// programme took for the shipped terminal, and it is a decision rather than a
+/// simplification. A finger has no hover, no buttons and no sub-cell
+/// resolution, so reporting it as a mouse gives a full-screen program a stream
+/// it cannot use well, while spending the only gesture vocabulary the *view*
+/// has: with the contact routed to the child there is no tap to select with,
+/// no hold to open a menu with, and no drag left to scroll the scrollback
+/// with. Terminals that do offer it (Termux, Blink) put it behind a setting,
+/// which is what this is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TouchReporting {
+    /// A direct pointer is never reported. It selects, scrolls and opens the
+    /// context menu locally, whatever mode the child has set.
+    #[default]
+    Off,
+    /// A single direct contact is reported as **mouse button 1** — the same
+    /// bytes a left mouse button produces, because that is what a child
+    /// program understands: `ESC [ < 0 ; col ; row M` on press, then `32`
+    /// (button 1 plus the motion bit) on each move, then `... m` on release
+    /// under SGR — and the legacy X10 triple otherwise. Nothing distinguishes it
+    /// from a mouse on the wire; there is no VT encoding for "this was a
+    /// finger".
+    ///
+    /// Two or more simultaneous contacts are **never** reported: a two-finger
+    /// pan stays local and scrolls the scrollback, which is the only way back
+    /// to the scrollback once one finger belongs to the child.
+    AsButton1,
+}
+
 /// The kind of pointer event being reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseKind {

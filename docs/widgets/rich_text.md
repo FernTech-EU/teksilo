@@ -32,6 +32,30 @@ let editor = RichTextEditor::editor(doc)
     .wrap_mode(WrapMode::Word);
 ```
 
+## Pan to scroll
+
+The surface installs `common::scrollable::ScrollableBehavior`
+— the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
+path is unchanged: no tween (these offsets are plain signals), 16 dp a line,
+`Ignored` at a hard boundary so the page around it takes the rest, and a
+repaint asked for exactly when an axis moved.
+
+**The claim serves this surface even though it also owns the press
+arena**, which its double- and triple-tap recognizers give it. The router
+stops its arbitration walk at the press owner only for a `Gesture` member,
+whose recognizer the capture dispatch is already driving; a `Pan` member is
+decided in that walk and nowhere else, so it is exempt. A finger on the
+text therefore scrolls the text, and hands the gesture outward only at this
+surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![RichTextEditor at Touch density](img/rich_text-touch.png)
+
 ## Builder methods at a glance
 
 `read_only`, `editor`, `style`, `content_padding`, `content_padding_symmetric`, `content_padding_each`, `content_padding_top`, `content_padding_right`, `content_padding_bottom`, `content_padding_left`, `wrap_mode`, `show_highlights`, `annotation_spans`, `set_highlight_mask`, `typography_defaults`, `background`, `selection_color`, `caret_color`, `text_color`, `v_scroll_policy`, `h_scroll_policy`, `estimate_height_before_layout`, `window_to_clip`, `scroll_policy`, `follow_caret_in_page`, `typewriter`, `overscroll_behavior`, `min_lines`, `max_lines`, `follow_text_scale`, `font_size_scale`, `context_menu`, `default_context_menu`, `font_registrar`, `on_change`, `on_text_inserted`, `document_version`, `cursor_position`, `cursor_anchor`, `is_composing`, `cursor_position_signal`, `cursor_anchor_signal`, `has_selection`, `can_undo`, `can_redo`, `caret_char_format`, `scroll_y`, `scroll_x`, `context_target_at`, `selected_text`, `select_all`, `deselect`, `insert_text`, `insert_html`, `insert_djot`, `insert_block`, `insert_image`, `delete_selection`, `select_word`, `select_line`, `set_caret_position`, `focused_signal`, `select_range`, `reveal_range`, `set_bold`, `set_italic`, `set_underline`, `set_strikethrough`, `set_font_size`, `set_font_family`, `toggle_bold`, `toggle_italic`, `toggle_underline`, `toggle_strikethrough`, `set_superscript`, `set_subscript`, `set_vertical_alignment`, `get_vertical_alignment`, `is_superscript`, `is_subscript`, `toggle_superscript`, `toggle_subscript`, `apply_block_format`, `apply_text_format`, `set_alignment`, `clear_direction`, `set_direction`, `set_heading_level`, `insert_list`, `create_list`, `indent`, `outdent`, `remove_from_list`, `is_in_blockquote`, `selection_spans_multiple_frames`, `toggle_blockquote`, `increase_blockquote_depth`, `decrease_blockquote_depth`, `insert_table`, `remove_current_table`, `insert_row_above`, `insert_row_below`, `insert_column_before`, `insert_column_after`, `remove_current_row`, `remove_current_column`, `is_in_table`, `is_bold`, `is_italic`, `set_link`, `clear_link`, `link_at_caret`, `is_link`, `is_underline`, `is_strikethrough`, `get_heading_level`, `get_alignment`, `get_direction`, `undo`, `break_undo_merge`, `redo`, `begin_edit_block`, `end_edit_block`, `edit_block`, `set_default_language`, `default_language`, `handle`, `copy`, `cut`, `paste`, `paste_unformatted`, `can_paste`, `set_font_size_scale`, `get_font_size_scale`, `set_typography_defaults`, `get_typography_defaults`, `set_typewriter`, `get_typewriter`, `set_command_filter`, `command_filter`, `set_caret_highlight`, `get_caret_highlight`, `caret_window_rect`, `format_version`, `document_loaded_count`, `on_link_activated`, `on_image_missing`, `on_files_dropped`, `on_image_resized`, `on_image_activated`

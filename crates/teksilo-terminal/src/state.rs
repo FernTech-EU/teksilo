@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use teksilo_canvas::Point;
+use teksilo_canvas::{Point, Rect};
+use teksilo_core::pointer::PointerId;
 use teksilo_core::window::TeksiloWindowId;
 use teksilo_core::{AppEventPoster, RepaintWindowRequest};
 
@@ -58,10 +59,11 @@ pub(crate) struct TerminalState {
     pub(crate) cols: usize,
     pub(crate) rows: usize,
     pub(crate) origin: Point,
-    /// Window-space top-left of the widget's own bounds, recorded alongside
-    /// [`Self::origin`] so the accessibility pass can report the grid's rects in
-    /// widget-local coordinates.
-    pub(crate) bounds_origin: Point,
+    /// The widget's own bounds, in window coordinates. Wider than the grid by
+    /// the chrome inset, which is why the touch affordances clamp into it
+    /// rather than into the grid: a handle hanging under the last row needs
+    /// that inset to sit in.
+    pub(crate) bounds: Rect,
     pub(crate) geom: PtyGeom,
 
     pub(crate) scheme: ColorScheme,
@@ -77,6 +79,36 @@ pub(crate) struct TerminalState {
     pub(crate) scroll_on_output: bool,
     pub(crate) read_only: bool,
     pub(crate) mouse_reporting: bool,
+    /// What a direct pointer is reported to the child as. See
+    /// [`crate::mouse::TouchReporting`].
+    pub(crate) touch_reporting: crate::mouse::TouchReporting,
+    /// How many direct contacts are on the surface right now. Counted here
+    /// because nothing on `EventContext` answers it, and because the
+    /// two-contact rules — never report a finger while a second one is down,
+    /// honour one pan session and not two — both need the number.
+    pub(crate) contacts: usize,
+    /// The contact whose pan is moving the scrollback. A second finger opens a
+    /// pan session of its own (sessions are per pointer), and honouring both
+    /// would scroll at twice the rate the fingers moved.
+    pub(crate) pan_owner: Option<PointerId>,
+    /// Sub-line scroll carried between samples.
+    ///
+    /// The scrollback is a ring position quantised to whole lines, so a pan
+    /// sample worth 7 px of a 16 px line is worth **no** lines. Dropping it
+    /// makes a slow finger — and a precise trackpad — move nothing at all,
+    /// which is what the hand-rolled `/ 16.0` did. Banking it here is what
+    /// turns a pixel stream into line steps without losing the remainder.
+    pub(crate) scroll_residue: f32,
+
+    /// Where the pointer last was, in **widget-local** space — the space
+    /// `WidgetTree::localize_event` hands every pointer event over in.
+    ///
+    /// Recorded for the wheel. A wheel notch is routed by hover and carries no
+    /// position of its own (`WidgetEvent::Scroll::window_position` is `None` for a
+    /// mouse), so the cell its VT report names can only come from where the
+    /// cursor last was. `None` until the pointer has been over the terminal at
+    /// all, which is the only case a report has no cell to name.
+    pub(crate) last_local_pointer: Option<Point>,
 
     pub(crate) drag: Option<DragState>,
     /// The button currently held for mouse *reporting* (drives drag reports),
@@ -109,7 +141,7 @@ impl TerminalState {
             cols: 80,
             rows: 24,
             origin: Point::ZERO,
-            bounds_origin: Point::ZERO,
+            bounds: Rect::ZERO,
             geom: PtyGeom::new(80, 24, 0, 0),
             scheme,
             focused: false,
@@ -122,6 +154,11 @@ impl TerminalState {
             scroll_on_output: false,
             read_only: false,
             mouse_reporting: true,
+            touch_reporting: crate::mouse::TouchReporting::Off,
+            contacts: 0,
+            pan_owner: None,
+            scroll_residue: 0.0,
+            last_local_pointer: None,
             drag: None,
             mouse_button_held: None,
             prev_cursor_line: 0,

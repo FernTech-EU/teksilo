@@ -71,6 +71,14 @@ Panels with no focusable descendants (a static text-only "About"
 tab, a chart-only metrics tab) are unreachable by Tab key unless
 opted in via `TabInfo::focusable_panel(true)`.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TabWidget at Touch density](img/tab_widget-touch.png)
+
 ## Builder methods at a glance
 
 `enabled`, `bar_visibility`, `tab_bar_height`, `compact_bar`, `vertical`, `horizontal`, `orientation`, `static_tab`, `tab`, `tab_id`, `static_tab_factory`, `static_tab_id`, `static_tab_with_id`, `static_tab_factory_with_id`, `dynamic_tab`, `dynamic_model`, `tab_sizing`, `sizing`, `tab_display`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `min_tab_width`, `max_tab_width`, `pinned_tab_width`, `show_scroll_arrows`, `overflow_button`, `show_overflow_dropdown`, `reorderable`, `on_close`, `on_reorder`, `on_pin_toggle`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`, `bar_leading_slot`, `bar_trailing_slot`, `bar_leading_slot_id`, `bar_trailing_slot_id`

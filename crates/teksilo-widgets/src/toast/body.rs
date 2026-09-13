@@ -44,10 +44,11 @@ use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacemen
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::{LocalizedString, tr_widget};
 use teksilo_platform::clipboard::ClipboardHandle;
-use teksilo_tokens::{TextRole, TextStyleRole};
+use teksilo_tokens::{InputTokens, TextRole, TextStyleRole};
 
 use crate::link::Link;
 use crate::primitives::{HStack, TextWidget, VStack};
+use teksilo_core::styles::density::spacing;
 
 /// How many lines of body text a toast shows before offering to unfold.
 ///
@@ -59,8 +60,20 @@ pub const TOAST_BODY_COLLAPSED_LINES: usize = 3;
 /// Vertical gap between the body text and its disclosure row.
 pub const TOAST_BODY_DISCLOSURE_GAP: f32 = 2.0;
 
+/// [`TOAST_BODY_DISCLOSURE_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn toast_body_disclosure_gap(tokens: &InputTokens) -> f32 {
+    spacing(TOAST_BODY_DISCLOSURE_GAP, tokens)
+}
+
 /// Horizontal gap between the disclosure row's actions.
 pub const TOAST_DISCLOSURE_ACTION_GAP: f32 = 12.0;
+
+/// [`TOAST_DISCLOSURE_ACTION_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn toast_disclosure_action_gap(tokens: &InputTokens) -> f32 {
+    spacing(TOAST_DISCLOSURE_ACTION_GAP, tokens)
+}
 
 /// Put `text` on the system clipboard and flip `copied` so the row can say so.
 ///
@@ -224,7 +237,7 @@ impl Widget for CollapsibleBody {
 
         let disclosure = ctx.add(
             HStack::new()
-                .spacing(TOAST_DISCLOSURE_ACTION_GAP)
+                .spacing(toast_disclosure_action_gap(&ctx.theme().input))
                 .add_child(show_more)
                 .add_child(show_less)
                 .add_child(copy)
@@ -236,7 +249,7 @@ impl Widget for CollapsibleBody {
 
         let column = ctx.add(
             VStack::new()
-                .spacing(TOAST_BODY_DISCLOSURE_GAP)
+                .spacing(toast_body_disclosure_gap(&ctx.theme().input))
                 .add_child(clamped)
                 .add_child(full)
                 .add_child(disclosure),

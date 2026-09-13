@@ -648,6 +648,113 @@ fn placeholder_is_leading_aligned() {
     );
 }
 
+/// The set of actions the field **advertises** to assistive technology.
+///
+/// An AT client acts on what a node advertises, not on what the widget can in
+/// fact do: `accesskit_consumer` filters by `supports_action`, VoiceOver's
+/// rotor and Narrator's scan build their verb lists from it, and an action
+/// that is serviced but never advertised is an action no screen reader will
+/// ever invoke. So the advertisement is a contract in its own right, and it
+/// was not covered — deleting any of the `builder.add_action(...)` lines in
+/// `primitives/text_input_field/widget_impl.rs` left the whole suite green,
+/// because every existing test drives the *handler* directly.
+///
+/// Asserted once here on the primitive's node rather than four times over the
+/// widgets built on it: `TextInput`, `PasswordField`, `SpinBox` and
+/// `SearchField` all embed the same `TextInputField` and emit this node from
+/// the same `accessibility()`. The two conditional pairs get their own case
+/// below, since it is those conditions the set turns on.
+#[test]
+fn the_field_advertises_the_actions_an_assistive_client_may_invoke() {
+    use teksilo_core::accesskit::Action;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(TextInput::new(Signal::new("hello".to_string())));
+    tree.layout(SizeProposal::exact(300.0, 40.0));
+    let field = tree
+        .find_by_role(teksilo_core::accesskit::Role::TextInput)
+        .expect("the composite builds a Role::TextInput field");
+    let actions = tree.accessibility_node(field).actions().to_vec();
+
+    for action in [
+        Action::Focus,
+        Action::SetValue,
+        Action::ReplaceSelectedText,
+        Action::SetTextSelection,
+    ] {
+        assert!(
+            actions.contains(&action),
+            "an editable field must advertise {action:?}; it advertises {actions:?}",
+        );
+    }
+
+    // `ScrollIntoView` is deliberately absent, and this is the assertion that
+    // keeps the omission a decision rather than a drift. `RichTextEditor` and
+    // `CodeEditor` do advertise it, being scrollable surfaces — though only
+    // `RichTextEditor` services it; `CodeEditor` and `LogView` advertise it and
+    // answer `Ignored`, an open defect recorded in `docs/a11y/a11y_issues.md`
+    // — whereas `handle_access_action` in `primitives/text_input_field.rs`
+    // answers `Ignored` to it, and advertising an action nothing performs is
+    // worse for a client than not advertising it: the verb appears in the
+    // rotor and does nothing when chosen.
+    assert!(
+        !actions.contains(&Action::ScrollIntoView),
+        "a field that does not service ScrollIntoView must not advertise it",
+    );
+}
+
+/// The two conditional pairs, each at the condition that removes it.
+///
+/// A read-only field cannot be written, so `SetValue` and
+/// `ReplaceSelectedText` come off — advertising them would offer a client a
+/// dictation target that silently drops what it inserts. A *protected* field
+/// (a masked `PasswordField`) additionally hides its caret model from AT, so
+/// `SetTextSelection` comes off with it: there are no character positions
+/// published for a client to select between.
+#[test]
+fn a_read_only_or_protected_field_withdraws_the_actions_it_cannot_service() {
+    use teksilo_core::accesskit::Action;
+
+    let read_only = {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(TextInput::new(Signal::new("hello".to_string())).read_only(true));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let field = tree
+            .find_by_role(teksilo_core::accesskit::Role::TextInput)
+            .expect("a read-only TextInput is still a Role::TextInput");
+        tree.accessibility_node(field).actions().to_vec()
+    };
+    assert!(
+        read_only.contains(&Action::Focus),
+        "a read-only field is still focusable; it advertises {read_only:?}",
+    );
+    assert!(
+        !read_only.contains(&Action::SetValue) && !read_only.contains(&Action::ReplaceSelectedText),
+        "a read-only field must not advertise a write; it advertises {read_only:?}",
+    );
+    assert!(
+        read_only.contains(&Action::SetTextSelection),
+        "but its caret model is still published, so selecting stays on offer",
+    );
+
+    let protected = {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(crate::PasswordField::new(Signal::new(
+            "hunter2".to_string(),
+        )));
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let field = tree
+            .find_by_role(teksilo_core::accesskit::Role::PasswordInput)
+            .expect("a PasswordField builds a Role::PasswordInput field");
+        tree.accessibility_node(field).actions().to_vec()
+    };
+    assert!(
+        !protected.contains(&Action::SetTextSelection),
+        "a masked field publishes no character positions, so it must not offer \
+         a selection action; it advertises {protected:?}",
+    );
+}
+
 /// `TextInput::label` must name the node a screen reader can actually see.
 ///
 /// The composite's outer node is a `Role::GenericContainer`, and
@@ -704,12 +811,16 @@ fn the_field_handle_names_the_node_that_takes_focus() {
         "the handle names the field, which is the node that survives the filter"
     );
 
-    tree.focus(field);
-    tree.request_frame();
+    // And focus can actually arrive there. Read off the traversal graph, not by
+    // focusing the field and reading focus back: `WidgetTree::focus` carries no
+    // focusable guard, so that assertion holds for the composite's own id too —
+    // the very thing this test exists to distinguish.
+    let stops = tree.tab_stops_within(outer);
     assert_eq!(
-        tree.focused(),
-        Some(field),
-        "and focus lands on it, which the composite's own id could not do"
+        stops,
+        vec![field],
+        "the field is the composite's only Tab stop, which is why it is the id \
+         a host must be handed; got {stops:?}"
     );
 }
 
@@ -734,4 +845,182 @@ fn the_composite_hints_at_its_own_field() {
         Some(field),
         "the hint has to be the field, not the container that cannot hold focus"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Touch: the clear affordance
+// ---------------------------------------------------------------------------
+
+/// The clear affordance is 16 dp of paint inside a field that takes presses of
+/// its own for the caret, so neither the miss-only slop pass (defeated by a
+/// bubble owner at distance zero) nor a bigger `MinSize` (pinned by the slot
+/// that reserves the row's space) can reach it. It earns its 24 dp from the
+/// pointer side: a finger 3 dp beside it still clears the field.
+#[test]
+fn a_finger_just_outside_the_clear_button_still_clears() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::PointerPhase;
+
+    let text = Signal::new("hello".to_string());
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+
+    let clear = clear_slot(&tree, field).expect("the clear slot is in the row");
+    assert!(
+        clear.width < 24.0,
+        "the slot is meant to stay at 16 dp, got {clear:?}"
+    );
+    // 3 dp above the affordance: inside the field's frame, outside the 16 dp
+    // slot, inside the 24 dp target the outset earns it.
+    let at = Point::new(clear.center().x, clear.y - 3.0);
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+    assert_eq!(
+        text.get(),
+        "",
+        "the clear affordance's outset did not take the press"
+    );
+    assert_eq!(row_taps.get(), 0, "and the row must not have taken it too");
+}
+
+/// …and a mouse there does not: an exact hot-spot 3 dp outside the affordance
+/// is a click in the text field, exactly as it was before the touch programme.
+#[test]
+fn a_mouse_just_outside_the_clear_button_does_not_clear() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::PointerButton;
+
+    let text = Signal::new("hello".to_string());
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+
+    let clear = clear_slot(&tree, field).expect("the clear slot is in the row");
+    let at = Point::new(clear.center().x, clear.y - 3.0);
+    tree.pointer_down_button(at, PointerButton::Primary);
+    tree.pointer_up_button(at, PointerButton::Primary);
+    assert_eq!(text.get(), "hello");
+    assert_eq!(row_taps.get(), 1, "the press belongs to the row");
+}
+
+/// An empty field's slot still reserves its room, so the row does not jump when
+/// the affordance appears — and it withdraws its outset, so an invisible
+/// affordance never swallows a press meant for the field.
+#[test]
+fn an_empty_fields_clear_slot_reserves_room_but_claims_nothing() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::PointerPhase;
+
+    let text = Signal::new(String::new());
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+    let clear = clear_slot(&tree, field).expect("the slot is still laid out");
+    assert!(clear.width > 0.0, "an empty field still reserves the slot");
+
+    let at = Point::new(clear.center().x, clear.y - 3.0);
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+    assert_eq!(text.get(), "", "nothing to clear, and nothing crashed");
+    // …and the withdrawn outset is what lets the press through: a widened slot
+    // that then refuses it would be a hole punched in the row behind it.
+    assert_eq!(
+        row_taps.get(),
+        1,
+        "the inactive slot kept the outset and swallowed the row's press",
+    );
+}
+
+/// The clear handler's own emptiness guard, pressed where it can be reached.
+///
+/// The slot keeps its 16 dp of room while the field is empty — that is what
+/// stops the row jumping when the affordance appears — and the node that
+/// reserves that room is the same node that carries `on_tap`. Only the glyph
+/// inside it goes dormant. So the handler *is* reachable on an empty field, by
+/// the obvious gesture of pressing where the clear button will be, and without
+/// the guard it answers by writing `String::new()` into the bound text signal.
+///
+/// The value does not change, so nothing on screen moves; what moves is the
+/// signal's observers. Every consumer of a `TextInput`'s text — a validation
+/// pass, a live search, a dirty flag on a settings page, the field's own
+/// external→internal effect — is told the text changed because a finger landed
+/// on a control that was showing nothing.
+///
+/// The neighbouring test presses 3 dp *above* the slot, which is the outset
+/// question, not this one: it never reaches the handler at all.
+#[test]
+fn pressing_an_empty_fields_clear_slot_notifies_nobody() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_core::pointer::PointerPhase;
+
+    let text = Signal::new(String::new());
+    let notifications = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let counter = notifications.clone();
+    let _observer = text.observe(move |_| counter.set(counter.get() + 1));
+
+    let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let (mut tree, field) = field_in_a_tappable_row(text.clone(), row_taps.clone());
+    let clear = clear_slot(&tree, field).expect("the slot is still laid out");
+
+    // Dead centre of the slot — not beside it. Nothing here is a near miss.
+    let at = clear.center();
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+
+    assert_eq!(text.get(), "", "there was nothing to clear");
+    assert_eq!(
+        notifications.get(),
+        0,
+        "pressing the empty field's clear slot wrote to the text signal",
+    );
+}
+
+/// A field with a clear affordance, inside a settings row that takes taps of
+/// its own — the shape the census names as the reason the miss-only slop pass
+/// cannot serve the affordance.
+///
+/// The row is what makes these two tests discriminate. The slop pass only wins
+/// when the exact hit's bubble path carries no eligible handler, or when its
+/// candidate is strictly closer than that path's owner; the row owns the press
+/// at distance zero, and a near-miss does not beat zero. So the only mechanism
+/// left that can carry a press beside the affordance onto it is the slot's own
+/// `HitTarget::hit_outset` — with a bare field, the slop pass served the press
+/// either way and the test could not tell the two apart.
+fn field_in_a_tappable_row(
+    text: Signal<String>,
+    row_taps: std::rc::Rc<std::cell::Cell<u32>>,
+) -> (WidgetTree, teksilo_core::widget_id::WidgetId) {
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let field = tree.add(TextInput::new(text).show_clear_button(true));
+    let row = tree.add(
+        crate::primitives::HStack::new()
+            .add_child(field)
+            .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
+    );
+    let _ = row;
+    tree.layout(SizeProposal::exact(240.0, 40.0));
+    (tree, field)
+}
+
+/// The `HitTarget` slot that carries the clear affordance, by type.
+fn clear_slot(
+    tree: &WidgetTree,
+    field: teksilo_core::widget_id::WidgetId,
+) -> Option<teksilo_canvas::Rect> {
+    let mut stack = vec![field];
+    while let Some(id) = stack.pop() {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.contains("HitTarget"))
+        {
+            return Some(tree.bounds(id));
+        }
+        stack.extend(tree.children(id).iter().copied());
+    }
+    None
 }

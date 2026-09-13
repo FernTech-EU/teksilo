@@ -12,16 +12,23 @@ use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
 use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use crate::widget_id::WidgetId;
 
+mod accessibility_emit_impl;
 mod accessibility_impl;
 mod drag_drop_impl;
-mod event_dispatch_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;
+#[cfg(test)]
+mod hit_targeting_tests;
 mod layout_impl;
 mod overlay_impl;
+pub mod pan_arbiter;
+mod pointer_cancel;
+mod pointer_router;
+mod pointer_state;
 mod query_impl;
 mod rendering_impl;
 mod test_api;
+pub mod touch_route;
 
 /// The main widget tree orchestrating arena, layout, events, accessibility, and paint.
 /// Provides both the runtime API and the headless test API.
@@ -63,7 +70,7 @@ impl AnimatedRegistration {
 
 #[allow(clippy::type_complexity)]
 pub struct WidgetTree {
-    arena: WidgetArena,
+    pub(crate) arena: WidgetArena,
     /// Current theme value cached for `&Theme` accessors used by layout/paint
     /// contexts and by widgets that need an immediate read. The reactive source
     /// of truth is `theme_signal`; both are updated in lockstep by `set_theme`.
@@ -74,6 +81,17 @@ pub struct WidgetTree {
     /// rebuilding the widget tree, so interaction state (focus, scroll, expanded
     /// panels, …) survives theme switches.
     theme_signal: crate::signal::Signal<Theme>,
+    /// How the active [`TargetDensity`](teksilo_tokens::TargetDensity) is chosen. `Fixed(Compact)` by default,
+    /// so nothing switches density unless the app asks.
+    ///
+    /// `FollowLastPointer` is **stored and read by nobody**. The pointer
+    /// ingress it was written for exists — the app event loop routes contacts
+    /// into `dispatch_pointer_with_ops` — but honouring the policy means
+    /// deciding what a stray tap costs (a density switch discards every widget
+    /// id in the tree), whether a pen counts as coarse, and how the hysteresis
+    /// commits when the user simply stops touching. None of that is settled, so
+    /// the policy is a declaration the framework does not yet act on.
+    density_policy: teksilo_tokens::DensityPolicy,
     /// User-controlled global text-scale factor (`1.0` = 100 %). Layered on top
     /// of the OS `text_scale_factor`: the two multiply. Set via
     /// `set_user_text_scale`; persisted by the application through
@@ -113,19 +131,26 @@ pub struct WidgetTree {
     /// — kept in sync via `set_focused`. Drives the inspector's Focus
     /// tab without polling.
     focused_signal: crate::signal::Signal<Option<WidgetId>>,
-    hovered: Option<WidgetId>,
-    /// Reactive mirror of `hovered`. Set whenever `hovered` changes
-    /// during dispatch / hit-test recovery so external observers
+    /// Every pointer the tree currently knows about, plus the primary and
+    /// hover-owner elections.
+    ///
+    /// Replaces the singular `hovered` / `last_pointer_position` /
+    /// `pointer_captured_by` this tree used to carry. Hover lives on the
+    /// **hover owner**'s entry (a contact never hovers), position and the
+    /// legacy singular accessors read the **primary**, and capture is per
+    /// pointer — two contacts hold independent captures, each released only by
+    /// its own Up or Cancel. See [`crate::pointer::table`].
+    pointers: crate::pointer::table::PointerTable,
+    /// Reactive mirror of the hover owner's hovered widget. Set whenever it
+    /// changes during dispatch / hit-test recovery so external observers
     /// (notably the debug inspector's hover tooltip) can react without
     /// polling. Held by handle so the field is a cheap clone.
     hovered_signal: crate::signal::Signal<Option<WidgetId>>,
-    /// Last known pointer position from `PointerMove`. Used by
-    /// `revalidate_interaction_state` to re-hit-test the hover after
-    /// a rebuild shifts content under a stationary cursor — without
-    /// this, the next `Scroll` event routes to `focused` (or falls
-    /// through to an ancestor scrollable) instead of the item the
-    /// user is actually pointing at.
-    last_pointer_position: Option<teksilo_canvas::Point>,
+    /// Reactive mirror of the kind of the pointer that most recently produced
+    /// a sample. Lets a widget switch an affordance between the mouse and the
+    /// touch form without a rebuild, and without every widget having to
+    /// remember an `on_pointer_event` of its own just to learn the modality.
+    last_pointer_kind_signal: crate::signal::Signal<teksilo_tokens::PointerKind>,
     /// The pointer position *before* the move currently being
     /// dispatched — i.e. the last sample that was still over the
     /// previously-hovered widget. Read when arming an overlay's safe
@@ -192,11 +217,95 @@ pub struct WidgetTree {
     binding_registry: crate::binding::BindingRegistry,
     idle_queue: crate::idle::IdleQueue,
     /// Simulated clock for deterministic time-dependent testing.
+    ///
+    /// Its initial value is the tree's **epoch**, and [`Self::input_clock`] is
+    /// seeded from the very same `Instant` — so `EventTime::ZERO` and this
+    /// field's starting value name one moment, and the input timeline and the
+    /// animation timeline are one axis. See
+    /// [`crate::pointer::clock`] for why that matters.
     sim_clock: std::time::Instant,
-    /// Whether [`tick_animations`](Self::tick_animations) has ever driven this
-    /// tree — i.e. whether [`Self::sim_clock`], rather than the wall clock, is
-    /// the one animations are measured against. See [`Self::animation_clock`].
-    sim_driven: bool,
+    /// The one source of [`EventTime`](crate::pointer::EventTime)s for this
+    /// tree. A [`MonotonicClock`](crate::pointer::clock::MonotonicClock)
+    /// anchored at the tree epoch by default; a test swaps in a
+    /// [`ManualClock`](crate::pointer::clock::ManualClock) via
+    /// [`set_input_clock`](Self::set_input_clock).
+    input_clock: std::rc::Rc<dyn crate::pointer::clock::InputClock>,
+    /// What is known about the sample currently being dispatched, snapshotted
+    /// onto every [`EventContext`] built while it
+    /// runs. Holds its default — a mouse at the epoch — outside a pointer or
+    /// scroll dispatch.
+    current_input: crate::pointer::InputSnapshot,
+    /// Whether simulated time is *currently* what this tree measures against —
+    /// i.e. whether [`Self::sim_clock`], rather than the wall clock, is what
+    /// [`Self::animation_clock`] answers with and what freezes the input
+    /// timeline.
+    ///
+    /// Set by `enter_simulated_mode`, which
+    /// [`advance_time`](Self::advance_time) calls before it moves anything, and
+    /// cleared by [`resume_real_time`](Self::resume_real_time). Both axes turn
+    /// on this one flag, so the tree has one notion of "is time simulated right
+    /// now" rather than two that can disagree.
+    ///
+    /// It is not a latch. A headless test never hands the clock back, so for a
+    /// test it behaves like one: an animation may then only progress by
+    /// advancing the clock, never by the test taking a long time. A host
+    /// sharing a live tree with a real event loop — the debug automation bridge
+    /// — hands it back after every operation, and real time drives the tree
+    /// again until the next advance.
+    ///
+    /// What each axis does across the two transitions differs, because the two
+    /// carry different state. The animation scheduler holds absolute instants,
+    /// so switching axes **rebases** them (`AnimationScheduler::rebase`) and the
+    /// reading itself is simply whichever clock is in charge. The input axis
+    /// holds none, so it is the *reading* that is carried: see
+    /// [`Self::sim_input_origin`] and [`Self::sim_input_offset`].
+    sim_time_frozen: bool,
+    /// Where the input timeline stood when this tree entered simulated mode,
+    /// as `(the reading then, the `sim_clock` then)`.
+    ///
+    /// The input axis cannot simply become `sim_clock - epoch`: samples
+    /// dispatched *before* the switch were stamped from the wall clock, which
+    /// by then is ahead of `sim_clock`, so every one of them would sit in the
+    /// virtual future and no interval measured from them would ever elapse.
+    /// Continuing the axis from where it stood instead makes every stamp taken
+    /// before the switch lie in the past and every interval after it exactly
+    /// the duration advanced.
+    ///
+    /// `None` while the tree runs on real time, and also under a clock that has
+    /// no wall-clock anchor — a
+    /// [`ManualClock`](crate::pointer::clock::ManualClock) *is* the virtual
+    /// axis already, and is moved directly by `advance_time`.
+    ///
+    /// Cleared by [`resume_real_time`](Self::resume_real_time), which hands the
+    /// axis back to the wall clock with what was advanced carried forward in
+    /// [`Self::sim_input_offset`].
+    sim_input_origin: Option<(crate::pointer::EventTime, std::time::Instant)>,
+    /// How far ahead of the raw input clock this tree's input timeline runs,
+    /// having been advanced and then handed back to real time.
+    ///
+    /// Added to every reading of the clock, and **re-measured** (not
+    /// accumulated) at each hand-back as `frozen reading − raw reading`, floored
+    /// at zero. That is what makes the axis monotone across the hand-back: the
+    /// reading at the instant of
+    /// [`resume_real_time`](Self::resume_real_time) is the later of the frozen
+    /// reading it had and the raw one, and it moves with the wall clock from
+    /// there. Without it
+    /// the axis would jump *backwards* by everything that was advanced, and a
+    /// monotone [`EventTime`](crate::pointer::EventTime) is a platform
+    /// conformance invariant.
+    ///
+    /// So it is not monotone in itself: a tree that spent longer on the wall
+    /// clock than it was ever advanced is already ahead of its frozen reading
+    /// and the right offset is then zero, which is what the floor is for. It is
+    /// also dropped outright by
+    /// [`set_input_clock`](Self::set_input_clock) — it is a distance measured
+    /// against one clock's readings and means nothing against another's.
+    ///
+    /// It is also what keeps a deadline schedulable: `instant_for` subtracts it
+    /// again, so a long press armed after an advance is reported to the event
+    /// loop at a *future* `Instant` rather than one in the past that can never
+    /// ripen.
+    sim_input_offset: std::time::Duration,
     /// Overlay manager for tooltips, menus, popovers.
     pub(crate) overlay_manager: crate::overlay::OverlayManager,
     /// Tooltip attachments: (anchor_id, content_id, text, delay, hover_start, overlay_id).
@@ -217,6 +326,10 @@ pub struct WidgetTree {
     highlight_tooltip: Option<(crate::overlay::OverlayId, WidgetId)>,
     /// How the currently focused widget gained focus.
     focus_origin: Option<crate::focus::FocusOrigin>,
+    /// Every live pointer press, keyed by the node whose gesture arena took it.
+    /// The framework's press visual — see [`crate::press`] for the four things
+    /// a widget's own `PointerDown`/`PointerUp` bookkeeping cannot see.
+    presses: crate::press::PressTable,
     /// Input-modality "focus-visible" state: `true` after keyboard input,
     /// `false` after pointer input. Focus rings (e.g. `StandardItem`'s current
     /// row) show only while this is `true`, the standard `:focus-visible`
@@ -230,7 +343,7 @@ pub struct WidgetTree {
     /// focus-aware selection + focus rings in `StandardItem`.
     view_focus_stack: Vec<crate::signal::Signal<bool>>,
     /// Layout direction for RTL/LTR support.
-    layout_direction: crate::environment::LayoutDirection,
+    pub(crate) layout_direction: crate::environment::LayoutDirection,
     /// Animation scheduler for smooth animated state and signal transitions.
     animation_scheduler: crate::animation::AnimationScheduler,
     /// Weakly tracked animated values from both state and signal APIs.
@@ -252,6 +365,19 @@ pub struct WidgetTree {
     /// `frame_tick_requested` if any subscriber's owner was painted
     /// this frame.
     pub(crate) frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler,
+    /// Live pans, live coasts, the window's pinch, and the palm watches — the
+    /// whole touch-motion layer, in one field. See
+    /// [`pan_arbiter`].
+    touch_motion: pan_arbiter::TouchMotion,
+    /// The claimant chain the next synthesised scroll is to walk.
+    ///
+    /// Armed immediately before that scroll is pushed through
+    /// [`dispatch_scroll`](Self::dispatch_scroll) and taken by the router arm
+    /// that routes it, because the two producers know different things: a pan
+    /// has a live session to read, a coast has only the chain it was launched
+    /// with. `None` for every scroll from a backend, which derives its own
+    /// chain from the sample's position.
+    armed_chain: Option<Vec<(WidgetId, crate::pointer::touch_action::PanClaim)>>,
     /// Monotonic counter bumped at the start of each `render()` call.
     /// Each widget's `last_painted_epoch` is set to this value whenever
     /// the paint pass (or the cache-hit early-out) confirms the widget
@@ -307,15 +433,31 @@ pub struct WidgetTree {
     /// common case — the caller usually drops the previous frame
     /// before calling render() again).
     cached_frame: Option<std::rc::Rc<RenderFrame>>,
-    /// Widget that has captured the pointer (receives all PointerMove/PointerUp
-    /// regardless of hit-test). Set via `EventContext::capture_pointer()`.
-    pointer_captured_by: Option<WidgetId>,
-    /// Strict ancestors of the captured widget that carry a drag/swipe
-    /// recognizer, armed on `PointerDown` so an ancestor drag can still start
-    /// while a descendant tap holds the capture (tap-vs-drag disambiguation
-    /// across the hit-path). Innermost-first. Drained when a drag latches or
-    /// the pointer sequence ends. See `arm_drag_observers`.
-    drag_observers: Vec<WidgetId>,
+    /// Dispatches that arrived while another dispatch was in flight, replayed
+    /// once the outer one completes.
+    ///
+    /// A handler that dispatches (a synthetic click, an AT action re-entering
+    /// the door) must not observe half-updated pointer state, and must not be
+    /// able to unwind the sample the outer dispatch is still standing on. So a
+    /// nested dispatch is queued here rather than run inline, and drained —
+    /// faithfully, event *and* input snapshot — after the outer sample
+    /// completes. From the caller's side nothing changes: the queue is empty
+    /// again before the top-level `dispatch_*` call returns.
+    pending_dispatch: std::collections::VecDeque<pointer_router::QueuedDispatch>,
+    /// How many dispatches are on the stack. Non-zero means "queue, do not
+    /// re-enter"; see [`Self::pending_dispatch`].
+    dispatch_depth: u32,
+    /// Pointers whose current press was cancelled and which have not pressed
+    /// again since.
+    ///
+    /// `PointerCancel` is terminal: the interaction was taken away, so an `Up`
+    /// arriving for the same press afterwards must not complete it. A platform
+    /// can genuinely send both (Windows delivers a `WM_POINTERUP` after a
+    /// capture loss), so the `Up` is swallowed rather than asserted against.
+    /// An entry is dropped by that swallowed `Up`, or by the pointer's next
+    /// press — a fresh press is a fresh interaction. Bounded by the contact
+    /// cap plus the mouse.
+    cancelled_pointers: Vec<crate::pointer::PointerId>,
     /// Current cursor selected by hover/interaction routing.
     current_cursor: crate::widget::CursorIcon,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
@@ -343,6 +485,30 @@ pub struct WidgetTree {
     prefers_high_contrast: bool,
     prefers_reduced_motion: bool,
     text_scale_factor: f64,
+    /// Whether an assistive technology is reading the tree, as reported by the
+    /// *operating system* — not by AccessKit. See
+    /// [`Self::set_screen_reader_state`] for why the distinction matters.
+    screen_reader: crate::environment::ScreenReaderState,
+    /// The app's explore-by-touch policy. See [`Self::set_explore_by_touch`].
+    explore_by_touch: crate::environment::ExploreByTouch,
+    /// Whether an AccessKit client is currently attached to this window's
+    /// adapter. Written by `teksilo-app` from the platform adapter's
+    /// activation / deactivation handlers.
+    at_client_attached: bool,
+    /// How a density switch should be worded to a screen reader, if the
+    /// application wants one announced. See
+    /// [`Self::set_density_announcement`].
+    density_announcement: Option<std::rc::Rc<dyn Fn(teksilo_tokens::TargetDensity) -> String>>,
+    /// How "a context menu opened" should be worded to a screen reader when a
+    /// **hold** opened it, if the application wants one announced. See
+    /// [`Self::set_context_menu_announcement`].
+    context_menu_announcement: Option<std::rc::Rc<dyn Fn() -> String>>,
+    /// The tree-owned long press the router is waiting out, if any. One at a
+    /// time: two fingers holding two different controls is not a gesture any
+    /// desktop idiom assigns a meaning to, and the second contact's arrival
+    /// replaces the first's route rather than racing it. See
+    /// [`touch_route`].
+    pending_touch_route: Option<touch_route::PendingTouchRoute>,
     /// Host window HiDPI device scale (physical px per logical px), fed by
     /// `teksilo-app` before each layout. Surfaced to widgets via
     /// `LayoutContext::scale_factor`. The widget tree is otherwise fully
@@ -350,6 +516,23 @@ pub struct WidgetTree {
     /// the escape hatch for widgets that must size a device-pixel OS resource
     /// (e.g. a `WebView`'s native subview). 1.0 in headless / test contexts.
     device_scale_factor: f32,
+    /// Platform safe-area insets for the host window — a notch, a rounded
+    /// corner, a home indicator — in logical pixels, fed by `teksilo-app`
+    /// after every window resize. Reaches overlay placement through
+    /// [`OverlayViewport::safe_area`](crate::overlay::OverlayViewport::safe_area).
+    /// `ZERO` on every platform that reports nothing, which is every desktop
+    /// platform but macOS.
+    safe_area: teksilo_canvas::EdgeInsets,
+    /// A rectangle of the window currently covered by something outside the
+    /// tree — a soft keyboard, a platform IME candidate window — in
+    /// window-logical pixels. Reaches overlay placement through
+    /// [`OverlayViewport::occluded`](crate::overlay::OverlayViewport::occluded).
+    /// `None` on every frame where nothing is covering the window.
+    occluded_inset: Option<Rect>,
+    /// A pending `EventContext::request_soft_keyboard` call, taken by the app
+    /// layer once per dispatch. `Some(true)` asks for the keyboard,
+    /// `Some(false)` asks it to go away.
+    soft_keyboard_request: Option<bool>,
     /// Active drag-and-drop session, if any.
     pub(crate) active_drag: Option<crate::drag_state::DragSession>,
     /// Source widget of an in-flight OS (outbound) drag that escalated past
@@ -365,6 +548,12 @@ pub struct WidgetTree {
     /// plain internal drag so leaving again re-stashes instead of starting a
     /// second OS drag, and dropping doesn't double-fire `on_drag_ended`.
     pub(crate) os_drag_reentered: bool,
+    /// The accept state last pushed to the platform for an inbound OS drag, so
+    /// the same answer is not re-sent on every motion sample.
+    ///
+    /// `None` outside an OS drag, and reset when one ends — a fresh drag must
+    /// push its first verdict even if it happens to match the last drag's.
+    pub(crate) os_drop_accepted: Option<bool>,
     /// Optional platform host for custom window chrome (set when the
     /// application opts in via `WindowConfig::custom_chrome(true)`). Stored
     /// here so that the root-builder closure has access during widget
@@ -612,6 +801,15 @@ struct TooltipEntry {
     /// dismisses on `Escape`/click-outside rather than on pointer-leave (there
     /// is no pointer in the story), and that it counts as focus-shown.
     armed_by_focus: bool,
+    /// Set while this entry's pending delay was started by a **hold** — the
+    /// tree-owned long-press route in [`touch_route`].
+    ///
+    /// Decides two things at show time that neither the hover nor the focus arm
+    /// wants: the surface dismisses on `Escape` / a press outside (a finger has
+    /// already lifted, so there is no pointer left to leave), and it carries an
+    /// auto-dismiss of [`touch_route::TOUCH_TOOLTIP_DISMISS`] — because with no
+    /// pointer to leave and no focus to move, nothing else would ever retire it.
+    armed_by_hold: bool,
     /// Set when the tip was dismissed while the focus that summoned it is
     /// still inside its anchor — i.e. Escape on a focus-promoted tooltip.
     ///
@@ -655,10 +853,19 @@ impl WidgetTree {
         // application reads must be the same one, or a host mirroring "is the
         // caret in a text widget" would never see focus move.
         let focused_signal = crate::signal::Signal::new(None);
+        // ONE epoch. `sim_clock` starts here and the input clock is anchored
+        // here, so a single `advance_time` moves gesture deadlines, tooltips,
+        // overlays and animations against the same origin.
+        let epoch = std::time::Instant::now();
+        // ONE scheduler. The fling pump shares the tree's per-frame table
+        // rather than making a second one, so a coast wakes the loop through
+        // the same path a `Pulse` does.
+        let scheduler = crate::frame_tick_scheduler::FrameTickScheduler::new();
         Self {
             arena: WidgetArena::new(),
             theme: initial_theme.clone(),
             theme_signal: crate::signal::Signal::new(initial_theme.clone()),
+            density_policy: teksilo_tokens::DensityPolicy::default(),
             user_text_scale: 1.0,
             effective_theme: initial_theme,
             effective_text_scale: 1.0,
@@ -670,11 +877,14 @@ impl WidgetTree {
             text_backend: None,
             focused: None,
             focused_signal: focused_signal.clone(),
-            hovered: None,
+            pointers: crate::pointer::table::PointerTable::new(),
             hovered_signal: crate::signal::Signal::new(None),
+            last_pointer_kind_signal: crate::signal::Signal::new(
+                teksilo_tokens::PointerKind::Mouse,
+            ),
             focus_visible: crate::signal::Signal::new(false),
+            presses: crate::press::PressTable::default(),
             view_focus_stack: Vec::new(),
-            last_pointer_position: None,
             previous_pointer_position: None,
             pending_focus_restore: None,
             last_proposal: SizeProposal::exact(800.0, 600.0),
@@ -687,8 +897,12 @@ impl WidgetTree {
             key_capture: None,
             binding_registry: crate::binding::BindingRegistry::new(),
             idle_queue: crate::idle::IdleQueue::new(),
-            sim_clock: std::time::Instant::now(),
-            sim_driven: false,
+            sim_clock: epoch,
+            input_clock: std::rc::Rc::new(crate::pointer::clock::MonotonicClock::new(epoch)),
+            current_input: crate::pointer::InputSnapshot::default(),
+            sim_time_frozen: false,
+            sim_input_origin: None,
+            sim_input_offset: std::time::Duration::ZERO,
             focus_origin: None,
             overlay_manager: crate::overlay::OverlayManager::new(),
             tooltips: Vec::new(),
@@ -699,7 +913,9 @@ impl WidgetTree {
             animation_scheduler: crate::animation::AnimationScheduler::new(),
             animated_values: Vec::new(),
             animated_quads: crate::animated_quad::AnimatedQuadRegistry::new(),
-            frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler::new(),
+            frame_tick_scheduler: scheduler.clone(),
+            touch_motion: pan_arbiter::TouchMotion::new(scheduler),
+            armed_chain: None,
             paint_epoch: 0,
             cached_a11y: None,
             a11y_dirty: true,
@@ -709,8 +925,9 @@ impl WidgetTree {
             synthetic_local_bounds: std::collections::HashMap::new(),
             a11y_walk_generation: 0,
             cached_frame: None,
-            pointer_captured_by: None,
-            drag_observers: Vec::new(),
+            pending_dispatch: std::collections::VecDeque::new(),
+            cancelled_pointers: Vec::new(),
+            dispatch_depth: 0,
             current_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
             active_ids_scratch: Vec::new(),
@@ -718,10 +935,20 @@ impl WidgetTree {
             prefers_high_contrast: false,
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
+            screen_reader: crate::environment::ScreenReaderState::default(),
+            explore_by_touch: crate::environment::ExploreByTouch::default(),
+            at_client_attached: false,
+            density_announcement: None,
+            context_menu_announcement: None,
+            pending_touch_route: None,
             device_scale_factor: 1.0,
+            safe_area: teksilo_canvas::EdgeInsets::ZERO,
+            occluded_inset: None,
+            soft_keyboard_request: None,
             active_drag: None,
             outbound_drag_source: None,
             os_drag_reentered: false,
+            os_drop_accepted: None,
             title_bar_host: None,
             app_context: Rc::new(crate::event_source::TreeAppContext::empty()),
             locale: None,
@@ -788,9 +1015,17 @@ impl WidgetTree {
             .with_app_context(self.app_context.clone())
             .with_window_context(ops, self.window_state.clone())
             .with_drag_external(drag_is_external)
-            .with_query_snapshot(self.last_pointer_position, overlay_snapshot, self.focused())
+            .with_query_snapshot(
+                self.last_pointer_position(),
+                overlay_snapshot,
+                self.focused(),
+            )
+            .with_pointer_captor(self.current_pointer_capture())
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
+            .with_input_snapshot(self.current_input.clone())
+            .with_touch_action(self.current_frozen_touch_action())
+            .with_press(self.current_press_snapshot())
             .with_focus_dispatch_flag(self.in_focus_dispatch.clone())
     }
 
@@ -1666,34 +1901,6 @@ impl WidgetTree {
         self.animation_scheduler.has_active()
     }
 
-    /// The clock a newly promoted animation must be stamped with: the same one
-    /// the scheduler will later be ticked against.
-    ///
-    /// Normally the wall clock. But once [`tick_animations`](Self::tick_animations)
-    /// has driven this tree, the scheduler is *only* ever ticked at
-    /// [`Self::sim_clock`] — so an animation stamped `Instant::now()` is measured
-    /// against a clock that may never reach its start. A headless test
-    /// interleaving `layout()` (which promotes) with `tick_animations()` (which
-    /// ticks) advances the two clocks independently: simulated time by whatever
-    /// the test asks for, real time by however long the test actually takes. The
-    /// moment real time overtakes simulated time, every animation armed from then
-    /// on has a start in the scheduler's future and its progress **freezes** —
-    /// not slowly, completely, and no number of further ticks recovers it.
-    ///
-    /// That made animated layout tests fail as a function of machine load rather
-    /// than of behaviour: green run alone or on a couple of threads, red once the
-    /// runner filled the cores and each test's wall-clock time stretched past the
-    /// simulated time it was asking for. The overlay manager already keeps its
-    /// real and simulated timestamps apart for this reason; animations now agree
-    /// on one clock the same way.
-    fn animation_clock(&self) -> std::time::Instant {
-        if self.sim_driven {
-            self.sim_clock
-        } else {
-            std::time::Instant::now()
-        }
-    }
-
     /// Pick up pending `animate_to` requests from registered signals
     /// and start them on the animation scheduler.
     fn process_pending_animations(&mut self) {
@@ -1768,13 +1975,47 @@ impl WidgetTree {
 
     /// strictly lighter than `set_theme`'s `mark_all_dirty` (layout + paint).
     pub fn set_window_active(&mut self, active: bool) {
-        let now = std::time::Instant::now();
-        self.animation_scheduler.set_window_active(active, now);
-        self.animated_quads.set_window_active(active, now);
+        let mut noop = crate::window::NoopWindowOps;
+        self.set_window_active_with_ops(active, &mut noop);
+    }
+
+    /// [`set_window_active`](Self::set_window_active) with the caller's
+    /// app-level [`WindowOps`](crate::window::WindowOps) sink, so the
+    /// `on_pointer_cancel` handlers a deactivation fires can reach the
+    /// multi-window API like any other handler.
+    pub fn set_window_active_with_ops(
+        &mut self,
+        active: bool,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        // The scheduler is measured on the tree's animation axis, so its pause
+        // mark has to be taken there too — a pause stamped on the wall clock
+        // while time is simulated would rebase every animation by the gap
+        // between the axes on resume. The shader-driven quad registry has no
+        // simulated door at all (it is ticked from `render()`), so it keeps the
+        // wall clock.
+        self.animation_scheduler
+            .set_window_active(active, self.animation_clock());
+        self.animated_quads
+            .set_window_active(active, std::time::Instant::now());
         if self.window_active_signal.get() != active {
             self.window_active_signal.set(active);
             self.arena.mark_all_needs_paint_only();
             if !active {
+                // A held pointer first, before any other state is cleared: a
+                // widget that captured the pointer for a drag (a column-resize
+                // grip, a splitter divider, a scrollbar thumb, a slider) will
+                // never see the matching `PointerUp` — the user releases the
+                // button over the window that took focus, and this window is
+                // told nothing. Releasing the capture silently, which is what
+                // this used to do, strands the widget instead: it keeps the
+                // half of the interaction it owns, with no event left that
+                // could clear it. The cancel funnel releases the capture *and*
+                // tells it, so it can let go.
+                self.cancel_all_pointers(
+                    crate::pointer::CancelReason::WindowDeactivated,
+                    &mut *ops,
+                );
                 // The pointer has left for another window; the OS sends no
                 // leave event we can rely on, so a tooltip shown at the moment
                 // of the switch would float over the newly-focused window's
@@ -1782,19 +2023,6 @@ impl WidgetTree {
                 // cancel pending dwells — but leave *sticky* ones, which the
                 // user pinned deliberately and expects to find on return.
                 self.tooltip_window_deactivated();
-                // Same reasoning for a held pointer: a widget that captured
-                // the pointer for a drag (a column-resize grip, a splitter
-                // divider, a scrollbar thumb, a slider) will never see the
-                // matching PointerUp — the user releases the button over the
-                // window that took focus, and this window is told nothing.
-                // Capture is otherwise cleared only by that Up or by the
-                // widget going inactive, so leaving it set strands the whole
-                // window: every subsequent PointerMove is redelivered to the
-                // abandoned widget instead of hit-testing (killing hover,
-                // cursor shapes and tooltips everywhere else), and the next
-                // click's Up is swallowed by it, so the first press on any
-                // release-activated control silently does nothing.
-                self.pointer_captured_by = None;
             }
         }
     }
@@ -1832,112 +2060,18 @@ impl WidgetTree {
         self.animated_quads.active_count()
     }
 
-    /// Advance time-driven gesture recognizers (currently only
-    /// [`crate::gesture::LongPressRecognizer`]) across every widget that
-    /// has a gesture arena. Must be called by the event loop on each
-    /// wake-up; otherwise long-press will never fire during an idle hold.
-    ///
-    /// When a recognizer transitions to `Recognized`, the corresponding
-    /// handler on the owning widget is invoked with a fresh
-    /// [`EventContext`], and any commands / overlay requests it emits are
-    /// collected through the normal post-event path.
-    pub fn tick_gestures(&mut self, now: std::time::Instant) {
-        let mut noop = crate::window::NoopWindowOps;
-        self.tick_gestures_with_ops(now, &mut noop);
-    }
-
-    /// App-facing variant of [`tick_gestures`](Self::tick_gestures)
-    /// that accepts a real [`WindowOps`](crate::window::WindowOps)
-    /// sink so gesture-recognized handlers can call the multi-window
-    /// API synchronously.
-    pub fn tick_gestures_with_ops(
-        &mut self,
-        now: std::time::Instant,
-        ops: &mut dyn crate::window::WindowOps,
-    ) {
-        // Snapshot the gesture-owners set into the reusable scratch.
-        // Previously this iterated every active widget; in practice
-        // only a tiny fraction carry a gesture arena, so visiting the
-        // rest was pure overhead.
-        // `mem::take` lets the loop borrow `&mut self` for
-        // `make_event_context` etc. without conflicting with the
-        // scratch buffer; we put the storage back at the end.
-        let mut ids = std::mem::take(&mut self.active_ids_scratch);
-        ids.clear();
-        ids.extend(
-            self.gesture_owners
-                .iter()
-                .copied()
-                .filter(|id| self.arena.is_active(*id)),
-        );
-        for &id in &ids {
-            let gesture = match self.arena.get_mut(id) {
-                Some(node) => node
-                    .handlers
-                    .gesture_arena
-                    .as_mut()
-                    .and_then(|arena| arena.tick(now)),
-                None => None,
-            };
-            let Some(gesture) = gesture else { continue };
-
-            let mut ctx = self.make_event_context(&mut *ops);
-            if let Some(node) = self.arena.get_mut(id) {
-                Self::dispatch_recognized_gesture(node, gesture, &mut ctx);
-            }
-            self.collect_from_ctx(ctx, id);
-            self.arena.mark_needs_paint(id);
-        }
-        self.active_ids_scratch = ids;
-    }
-
-    /// Earliest wall-clock deadline at which any active gesture arena
-    /// needs [`WidgetTree::tick_gestures`] called — typically a pending
-    /// long-press timeout. Returns `None` when no recognizer is waiting.
-    pub fn next_gesture_deadline(&self) -> Option<std::time::Instant> {
-        // Iterate just the widgets that actually carry a gesture arena.
-        // `filter` for `is_active` skips dormant entries that may still
-        // be in the set after a hide-without-detach.
-        self.gesture_owners
-            .iter()
-            .copied()
-            .filter(|id| self.arena.is_active(*id))
-            .filter_map(|id| self.arena.get(id))
-            .filter_map(|node| node.handlers.gesture_arena.as_ref())
-            .filter_map(|arena| arena.next_deadline())
-            .min()
-    }
-
     /// Advance animations by simulated time (for deterministic testing).
-    /// Pending `animate_to` requests are started at the current sim_clock,
-    /// then time advances by `duration`, and the scheduler ticks at the new time.
+    ///
+    /// An **alias** of [`advance_time`](Self::advance_time), not a second door.
+    /// It was one once, and the two moved disjoint halves of the tree from
+    /// clocks they each advanced independently: a caller that wanted both had
+    /// to call both, which advanced simulated time twice, and a caller that
+    /// wanted one silently froze the other — an animation and the fling it was
+    /// racing could not be moved to the same instant by any sequence of calls.
+    /// Kept as a name rather than folded away because it reads correctly at
+    /// its ~120 call sites, all of which mean "advance the clock".
     pub fn tick_animations(&mut self, duration: std::time::Duration) {
-        // From here on this tree is simulation-driven: `layout` must stamp the
-        // animations it promotes with `sim_clock` too, or they are measured
-        // against a clock that never reaches them. See `animation_clock`.
-        self.sim_driven = true;
-        self.process_pending_animations_at(self.sim_clock);
-
-        self.sim_clock += duration;
-        // Mirror onto the overlay manager so any fade-out tween
-        // started during this tick stamps its sim-time start in
-        // lockstep with real time.
-        self.overlay_manager.set_sim_clock(self.sim_clock);
-
-        if self.frame_tick_requested.get() {
-            self.frame_tick_requested.set(false);
-            let delta = duration.as_secs_f32().clamp(0.0, 0.1);
-            self.frame_tick.set(delta);
-        }
-
-        self.animation_scheduler
-            .tick(self.sim_clock, &self.arena, self.paint_epoch);
-
-        // Simulated-time test helper — use NoopWindowOps; tests that
-        // need a real sink call layout_with_ops / dispatch_event_with_ops
-        // themselves.
-        let mut noop = crate::window::NoopWindowOps;
-        self.process_state_changes(&mut noop);
+        self.advance_time(duration);
     }
 
     /// Switch the tree-level theme at runtime.
@@ -1959,6 +2093,219 @@ impl WidgetTree {
         // label's lines, and therefore its text runs, can be a different
         // set at the same size.
         self.a11y_dirty = true;
+    }
+
+    /// The [`TargetDensity`] the active theme was projected onto.
+    ///
+    /// [`TargetDensity`]: teksilo_tokens::TargetDensity
+    pub fn input_density(&self) -> teksilo_tokens::TargetDensity {
+        self.theme.input.density
+    }
+
+    /// Project the active theme onto another density and **rebuild** the tree.
+    ///
+    /// A rebuild, not [`Self::set_theme`]'s `mark_all_dirty()`: a target size is
+    /// baked in `build()` (a `MinSize` wrapper, a recipe's `Rc<dyn FooStyle>`,
+    /// the number of `Toolbar` items that fit), and marking layout + paint
+    /// cannot re-bake it. This reuses the exact path a
+    /// `BindingLevel::Rebuild` binding takes — `mark_needs_rebuild` on each
+    /// root plus `mark_ancestors_need_layout` — so the next layout pass drains
+    /// it through `process_rebuilds`, which already handles focus restoration,
+    /// the a11y re-walk and interaction-state revalidation.
+    ///
+    /// A no-op when the density is already the requested one: a density switch
+    /// throws away every widget id in the tree, so it must not fire on a
+    /// repeated set.
+    ///
+    /// [`TargetDensity`]: teksilo_tokens::TargetDensity
+    pub fn set_input_density(&mut self, density: teksilo_tokens::TargetDensity) {
+        if self.theme.input.density == density {
+            return;
+        }
+        // Exactly one utterance per switch, guaranteed by the guard above:
+        // every widget id in the tree is about to be thrown away, so a screen
+        // reader that was reading one is about to lose its place and needs to
+        // be told what happened.
+        if let Some(wording) = self.density_announcement.clone() {
+            self.announce(wording(density));
+        }
+        self.set_theme(self.theme.with_density(density));
+        // The `BindingLevel::Rebuild` arm of `apply_binding_dirty`
+        // (`widget_tree/layout_impl.rs`), applied at every root.
+        for root in self.arena.roots() {
+            self.arena.mark_needs_rebuild(root);
+            self.arena.mark_ancestors_need_layout(root);
+        }
+    }
+
+    /// Announce density switches to a screen reader, in the application's own
+    /// words.
+    ///
+    /// A density switch rebuilds the entire tree, so a screen reader loses its
+    /// place and the user hears no explanation for it. Registering a wording
+    /// makes [`Self::set_input_density`] speak once — and only once — per real
+    /// switch, through the same [`Self::announce`] path everything else uses.
+    ///
+    /// The wording is the application's because it cannot be the framework's:
+    /// `teksilo-i18n` depends on this crate, so nothing here can name
+    /// `LocalizedString` or reach a translation bundle, and a hardcoded English
+    /// sentence spoken into a French screen reader is worse than silence. Pass
+    /// a closure that resolves `tr!(…)`:
+    ///
+    /// ```ignore
+    /// tree.set_density_announcement(Some(std::rc::Rc::new(|d| match d {
+    ///     TargetDensity::Compact => tr!(layout_compact()).into(),
+    ///     TargetDensity::Comfortable => tr!(layout_comfortable()).into(),
+    ///     TargetDensity::Spacious => tr!(layout_spacious()).into(),
+    /// })));
+    /// ```
+    ///
+    /// `None` — the default — announces nothing.
+    pub fn set_density_announcement(
+        &mut self,
+        wording: Option<std::rc::Rc<dyn Fn(teksilo_tokens::TargetDensity) -> String>>,
+    ) {
+        self.density_announcement = wording;
+    }
+
+    /// How to word "a context menu opened" for a screen reader, when the menu
+    /// was opened by a **hold**.
+    ///
+    /// The other three routes need nothing: a secondary press, `Shift+F10` and
+    /// the AccessKit `ShowContextMenu` action are all deliberate, and the menu
+    /// takes focus, which is announcement enough. A hold is the one route whose
+    /// user cannot see the menu appear — a finger is on top of where it opens —
+    /// and which they may not have meant.
+    ///
+    /// The wording is the application's for the same reason
+    /// [`Self::set_density_announcement`]'s is: `teksilo-i18n` depends on this
+    /// crate, so nothing here can name a `LocalizedString`, and a hardcoded
+    /// English sentence spoken into a French screen reader is worse than
+    /// silence.
+    ///
+    /// ```ignore
+    /// tree.set_context_menu_announcement(Some(std::rc::Rc::new(|| {
+    ///     tr!(context_menu_opened()).into()
+    /// })));
+    /// ```
+    ///
+    /// `None` — the default — announces nothing. Where it is set, the
+    /// announcement is still suppressed if the **pressed node's** own subtree
+    /// already carries a live region — the widget speaking for itself, so the
+    /// framework does not speak over it — through
+    /// [`Self::announce_unless_widget_speaks`]. The menu's own subtree is not
+    /// consulted: it is raised by this very call and has not been walked yet.
+    pub fn set_context_menu_announcement(
+        &mut self,
+        wording: Option<std::rc::Rc<dyn Fn() -> String>>,
+    ) {
+        self.context_menu_announcement = wording;
+    }
+
+    /// Speak `message`, unless `widget` already speaks for itself.
+    ///
+    /// A framework announcement that lands beside a widget's own live region
+    /// says everything twice — the failure mode [`crate::announcer`] warns
+    /// about for `Toast`. This is the check that avoids it: if the last
+    /// accessibility tree carried a live region *inside* `widget`'s subtree
+    /// with text in it, the widget is already talking and this stays quiet.
+    /// Returns whether the message was queued.
+    ///
+    /// It necessarily reads **one tree behind**. An announcement is queued
+    /// during event dispatch; the live-region text it would duplicate is
+    /// whatever the *last* built update carried, because the next one has not
+    /// been built yet. A widget that speaks for the first time in the same
+    /// dispatch is therefore not yet visible here — which is the right bias:
+    /// it errs toward saying something rather than toward silence.
+    pub fn announce_unless_widget_speaks(
+        &mut self,
+        widget: WidgetId,
+        message: impl Into<String>,
+    ) -> bool {
+        if self.widget_subtree_speaks(widget) {
+            return false;
+        }
+        self.announce(message);
+        true
+    }
+
+    /// Whether the last built accessibility tree carried a non-empty live
+    /// region anywhere in `widget`'s subtree.
+    ///
+    /// Synthetic children count too, resolved to their owning widget through
+    /// the same parent map the AccessKit action router uses. `teksilo-scene`
+    /// can mark a scene item as a live region, and a live region is a live
+    /// region wherever it was emitted from.
+    fn widget_subtree_speaks(&self, widget: WidgetId) -> bool {
+        use accesskit::Live;
+        let Some(update) = &self.cached_a11y else {
+            return false;
+        };
+        let mut wanted: std::collections::HashSet<accesskit::NodeId> =
+            std::collections::HashSet::new();
+        let mut stack = vec![widget];
+        while let Some(id) = stack.pop() {
+            if self.arena.get(id).is_none() {
+                continue;
+            }
+            wanted.insert(crate::accessibility::widget_id_to_node_id(id));
+            stack.extend_from_slice(self.arena.children(id));
+        }
+        update.nodes.iter().any(|(node_id, node)| {
+            let owned_by_subtree = wanted.contains(node_id)
+                || self.synthetic_parent_map.get(node_id).is_some_and(|owner| {
+                    wanted.contains(&crate::accessibility::widget_id_to_node_id(*owner))
+                });
+            owned_by_subtree
+                && matches!(node.live(), Some(Live::Polite) | Some(Live::Assertive))
+                && !node
+                    .value()
+                    .or_else(|| node.label())
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+        })
+    }
+
+    /// How the active density is chosen. See [`DensityPolicy`].
+    ///
+    /// [`DensityPolicy`]: teksilo_tokens::DensityPolicy
+    pub fn density_policy(&self) -> teksilo_tokens::DensityPolicy {
+        self.density_policy
+    }
+
+    /// Set the density-selection policy.
+    ///
+    /// Storing a `Fixed(d)` policy does **not** by itself switch the density —
+    /// call [`Self::set_input_density`] for that. `FollowLastPointer` is not
+    /// acted on either: it is state and an accessor, and the field's own
+    /// documentation says what is still undecided about honouring it.
+    pub fn set_density_policy(&mut self, policy: teksilo_tokens::DensityPolicy) {
+        self.density_policy = policy;
+    }
+
+    /// Whether touch input is accepted. See
+    /// [`InputTokens::touch_enabled`](teksilo_tokens::InputTokens::touch_enabled).
+    pub fn touch_enabled(&self) -> bool {
+        self.theme.input.touch_enabled
+    }
+
+    /// The runtime touch kill switch. With `false`, the platform translator
+    /// drops touch input and the router installs no touch-only recognizers,
+    /// so an app can fall back to mouse-only behaviour at runtime.
+    ///
+    /// Repaint-level only: turning touch off changes which events are accepted,
+    /// never a dimension, so nothing is rebuilt or relaid out here. (The
+    /// translator and router honour it from P08 / P15; this is the state.)
+    pub fn set_touch_enabled(&mut self, enabled: bool) {
+        if self.theme.input.touch_enabled == enabled {
+            return;
+        }
+        let mut theme = self.theme.clone();
+        theme.input.touch_enabled = enabled;
+        self.theme = theme.clone();
+        self.theme_signal.set(theme);
+        self.recompute_effective_theme();
     }
 
     /// Recompute [`Self::effective_theme`] from the current `theme` and the
@@ -2066,10 +2413,10 @@ impl WidgetTree {
         if self.focused.is_none() {
             self.focus_origin = None;
         }
-        if let Some(id) = self.hovered
+        if let Some(id) = self.hovered_id()
             && !self.arena.is_active(id)
         {
-            let old = self.hovered;
+            let old = self.hovered_id();
             self.set_hovered(None);
             self.update_hover_within_signals(old, None);
         }
@@ -2078,11 +2425,7 @@ impl WidgetTree {
         // inactive targets. Drop the capture so events resume normal
         // hit-test dispatch. Same for any in-flight drag session whose
         // source was torn down: the user sees the drag "stick".
-        if let Some(id) = self.pointer_captured_by
-            && !self.arena.is_active(id)
-        {
-            self.pointer_captured_by = None;
-        }
+        self.pointers.retain_active(&self.arena);
         // External (OS) drags have no in-app source widget, so they are never
         // torn down by source destruction — only internal drags are salvaged.
         let source_gone = self
@@ -2465,8 +2808,8 @@ impl WidgetTree {
             self.update_focus_within_signals(old, None);
             self.update_view_focus_signals(old, None);
         }
-        if self.hovered == Some(widget_id) {
-            let old = self.hovered;
+        if self.hovered_id() == Some(widget_id) {
+            let old = self.hovered_id();
             self.set_hovered(None);
             self.update_hover_within_signals(old, None);
         }
@@ -2475,9 +2818,7 @@ impl WidgetTree {
         // Move/Up (dispatch rejects inactive targets) until the next layout
         // pass runs `revalidate_interaction_state`. Drop it eagerly so capture
         // never outlives its owner, even when a destroy happens mid-gesture.
-        if self.pointer_captured_by == Some(widget_id) {
-            self.pointer_captured_by = None;
-        }
+        self.pointers.release_captures_of(widget_id);
         // Single-node removal: this function already recursed into the
         // children above (honouring re-parenting when `reparent_aware`).
         // `arena.destroy` would re-recurse the now-stale `children` list and
@@ -2537,18 +2878,226 @@ impl WidgetTree {
         self.text_scale_factor
     }
 
+    /// Report whether the *operating system* says an assistive technology is
+    /// reading the screen.
+    ///
+    /// Fed by `teksilo-app` from `teksilo_platform::AccessibilityPreferences`,
+    /// which asks Windows for `SPI_GETSCREENREADER`, AT-SPI for
+    /// `org.a11y.Status.ScreenReaderEnabled`, and macOS for
+    /// `NSWorkspace::isVoiceOverEnabled`. A platform that cannot answer leaves
+    /// it [`ScreenReaderState::Unknown`], which behaves as "no".
+    ///
+    /// [`ScreenReaderState::Unknown`]: crate::environment::ScreenReaderState::Unknown
+    ///
+    /// **Not** AccessKit activation. An AccessKit adapter activates for
+    /// anything that walks the tree — a screen magnifier, a voice-control front
+    /// end, a UI-automation inspector, a tree browser like Accerciser — none of
+    /// which want a touch to become a probe. Treating activation as evidence of
+    /// a screen reader is how explore-by-touch gets switched on under an
+    /// inspector and makes the app untouchable.
+    ///
+    /// [`ScreenReaderState`]: crate::environment::ScreenReaderState
+    pub fn set_screen_reader_state(&mut self, state: crate::environment::ScreenReaderState) {
+        self.screen_reader = state;
+    }
+
+    /// The screen-reader state most recently reported by the platform.
+    ///
+    /// [`ScreenReaderState::Unknown`] until something reports one.
+    ///
+    /// [`ScreenReaderState::Unknown`]: crate::environment::ScreenReaderState::Unknown
+    pub fn screen_reader_state(&self) -> crate::environment::ScreenReaderState {
+        self.screen_reader
+    }
+
+    /// Choose how explore-by-touch is decided for this window.
+    ///
+    /// [`ExploreByTouch::Off`] is the default and today's behaviour;
+    /// [`ExploreByTouch::Auto`] follows [`Self::screen_reader_state`];
+    /// [`ExploreByTouch::On`] forces it regardless. Read the resolved answer
+    /// with [`Self::explore_by_touch_active`].
+    ///
+    /// [`ExploreByTouch::Off`]: crate::environment::ExploreByTouch::Off
+    /// [`ExploreByTouch::Auto`]: crate::environment::ExploreByTouch::Auto
+    /// [`ExploreByTouch::On`]: crate::environment::ExploreByTouch::On
+    pub fn set_explore_by_touch(&mut self, mode: crate::environment::ExploreByTouch) {
+        self.explore_by_touch = mode;
+    }
+
+    /// The explore-by-touch policy most recently set.
+    pub fn explore_by_touch(&self) -> crate::environment::ExploreByTouch {
+        self.explore_by_touch
+    }
+
+    /// Whether explore-by-touch is in force right now.
+    ///
+    /// `On` is unconditional; `Auto` requires the platform to have reported an
+    /// active screen reader; `Off` is never in force. Nothing in the framework
+    /// consumes this yet — the touch-as-probe interaction it gates has no
+    /// owner — so it is a supply, a policy and a query, and no pointer path
+    /// branches on it.
+    pub fn explore_by_touch_active(&self) -> bool {
+        use crate::environment::{ExploreByTouch, ScreenReaderState};
+        match self.explore_by_touch {
+            ExploreByTouch::Off => false,
+            ExploreByTouch::On => true,
+            ExploreByTouch::Auto => self.screen_reader == ScreenReaderState::Active,
+        }
+    }
+
+    /// Report whether an AccessKit client is attached to this window.
+    ///
+    /// Written by `teksilo-app` from the platform adapter's activation and
+    /// deactivation handlers, and used **asymmetrically** on purpose:
+    ///
+    /// * Attaching proves nothing. Magnifier, Voice Access and a UI-automation
+    ///   inspector all activate the adapter, so this never sets
+    ///   [`ScreenReaderState::Active`].
+    /// * Detaching proves something. When the last client goes away there is
+    ///   no screen reader either, so a `true` → `false` transition forces
+    ///   [`ScreenReaderState::Inactive`] and an
+    ///   [`ExploreByTouch::Auto`](crate::environment::ExploreByTouch::Auto)
+    ///   window stops exploring immediately, without waiting for the next OS
+    ///   query. A later OS query is free to say `Active` again.
+    ///
+    /// [`ScreenReaderState::Active`]: crate::environment::ScreenReaderState::Active
+    /// [`ScreenReaderState::Inactive`]: crate::environment::ScreenReaderState::Inactive
+    pub fn set_at_client_attached(&mut self, attached: bool) {
+        if self.at_client_attached && !attached {
+            self.screen_reader = crate::environment::ScreenReaderState::Inactive;
+        }
+        self.at_client_attached = attached;
+    }
+
+    /// Whether an AccessKit client is currently attached to this window.
+    pub fn at_client_attached(&self) -> bool {
+        self.at_client_attached
+    }
+
     /// Set the host window HiDPI device scale (physical px per logical px).
-    /// Called by `teksilo-app` before each layout from
-    /// `platform_window.scale_factor()`. Surfaced to widgets via
-    /// `LayoutContext::scale_factor`. No dirty-marking: it rides the layout
-    /// pass that follows, and a scale change already triggers a relayout.
+    /// Written by `teksilo-app` when the window is created and again on
+    /// `WindowEvent::ScaleFactorChanged`. Surfaced to widgets via
+    /// `LayoutContext::scale_factor`.
+    ///
+    /// Layout needs no dirty-marking here: it rides the layout pass that
+    /// follows, and a scale change already triggers a relayout. The
+    /// accessibility tree does, because the scale is the root node's
+    /// transform (AccessKit wants physical coordinates, the tree emits
+    /// logical ones) and a plain relayout does not invalidate the AT cache —
+    /// so dragging a window between a 1x and a 2x monitor would otherwise
+    /// leave every reported rectangle at the old display's scale.
     pub fn set_device_scale_factor(&mut self, scale_factor: f32) {
-        self.device_scale_factor = scale_factor;
+        if self.device_scale_factor != scale_factor {
+            self.device_scale_factor = scale_factor;
+            self.a11y_dirty = true;
+        }
     }
 
     /// The host window HiDPI device scale most recently set (1.0 by default).
     pub fn device_scale_factor(&self) -> f32 {
         self.device_scale_factor
+    }
+
+    /// Report the host window's platform safe-area insets — the region the
+    /// window owns but a person cannot fully see or touch (a display cutout, a
+    /// rounded corner, a home indicator).
+    ///
+    /// Fed by `teksilo-app` from
+    /// `teksilo_platform::safe_area`, which reads the window on macOS and
+    /// answers `ZERO` everywhere else because no other desktop platform
+    /// reports one. Overlays clamp into what is left; the root layout
+    /// proposal is deliberately **not** shrunk — a safe area moves what floats
+    /// over the content, not the content.
+    pub fn set_safe_area(&mut self, insets: teksilo_canvas::EdgeInsets) {
+        if self.safe_area != insets {
+            self.safe_area = insets;
+            // Overlay placement is recomputed from scratch by every layout
+            // pass, so the change reaches the screen as soon as one runs; the
+            // frame request is what guarantees one does.
+            self.request_frame();
+        }
+    }
+
+    /// The safe-area insets most recently set (`ZERO` by default).
+    pub fn safe_area(&self) -> teksilo_canvas::EdgeInsets {
+        self.safe_area
+    }
+
+    /// Report a rectangle of the window currently covered from outside the
+    /// tree — a soft keyboard, a platform IME candidate window — in
+    /// window-logical pixels, or `None` when nothing covers it.
+    ///
+    /// A **rectangle**, not a named edge, because that is what a platform
+    /// reports and because the placement code resolves it by keeping the
+    /// largest free slab rather than by insetting an edge: a keyboard at the
+    /// bottom gives the band above it, a candidate window at a side gives the
+    /// band beside it, and neither needs the platform to say which edge it
+    /// came from.
+    ///
+    /// Scope: like the safe area, this reaches **overlay placement only**. The
+    /// root layout proposal keeps the whole window, so a scroll container
+    /// still extends behind the keyboard and nothing reflows when one rises —
+    /// which is what the desktop convention wants, and what keeps a keyboard
+    /// appearing from being a full relayout of the document. Bringing a
+    /// focused field out from behind the band is a scroll, against
+    /// [`usable_viewport`](Self::usable_viewport), not a resize.
+    pub fn set_occluded_inset(&mut self, occluded: Option<Rect>) {
+        if self.occluded_inset != occluded {
+            self.occluded_inset = occluded;
+            self.request_frame();
+        }
+    }
+
+    /// The occluding rectangle most recently set (`None` by default).
+    pub fn occluded_inset(&self) -> Option<Rect> {
+        self.occluded_inset
+    }
+
+    /// The viewport overlays are placed into: the last laid-out window size,
+    /// less the safe area, less anything covering it.
+    ///
+    /// The same rectangle `position_overlays` clamps into, exposed so a
+    /// consumer that must put something *in front of* a keyboard — a
+    /// scroll-into-view for the focused field — can ask for it rather than
+    /// re-deriving it.
+    pub fn usable_viewport(&self) -> Rect {
+        let proposal = self.last_proposal();
+        let size = teksilo_canvas::Size::new(
+            proposal.width.unwrap_or(0.0),
+            proposal.height.unwrap_or(0.0),
+        );
+        self.overlay_viewport_for(size)
+            .usable(self.layout_direction)
+    }
+
+    /// Build the overlay viewport for a window of `size`, folding in the
+    /// safe area and the occluding rectangle.
+    pub(crate) fn overlay_viewport_for(
+        &self,
+        size: teksilo_canvas::Size,
+    ) -> crate::overlay::OverlayViewport {
+        crate::overlay::OverlayViewport::new(size)
+            .with_safe_area(self.safe_area)
+            .with_occluded(self.occluded_inset)
+    }
+
+    /// Ask the platform to show (`true`) or hide (`false`) its on-screen
+    /// keyboard.
+    ///
+    /// Recorded here rather than pushed straight at the window because the one
+    /// thing the request must not do is re-assert IME allowance while a
+    /// composition is live, and the IME-allowance state lives in the app
+    /// layer's per-window reconcile. `teksilo-app` takes the request once per
+    /// dispatch, after that reconcile, and applies it against the platform's
+    /// [`SoftKeyboardSupport`](crate::window::SoftKeyboardSupport) answer.
+    pub fn request_soft_keyboard(&mut self, visible: bool) {
+        self.soft_keyboard_request = Some(visible);
+    }
+
+    /// Take the pending soft-keyboard request, if any. Called by the app layer
+    /// once per dispatch.
+    pub fn take_soft_keyboard_request(&mut self) -> Option<bool> {
+        self.soft_keyboard_request.take()
     }
 
     /// Mark a widget as clipping its children to its bounds (scroll areas).
@@ -3122,11 +3671,35 @@ impl WidgetTree {
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
                         }
+                        if let Some(role) = handler_set.long_press_role {
+                            node.long_press_role = role;
+                        }
+                        if let Some(action) = handler_set.touch_action {
+                            node.touch_action = action;
+                        }
+                        if let Some(claim) = handler_set.pan_claim {
+                            node.pan_claim = Some(claim);
+                        }
+                        if let Some(behavior) = handler_set.overscroll_behavior {
+                            node.overscroll_behavior = behavior;
+                        }
+                        if let Some(activation) = handler_set.drag_activation {
+                            node.drag_activation = activation;
+                        }
+                        if let Some(policy) = handler_set.multi_contact {
+                            node.multi_contact = policy;
+                        }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;
                         }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;
+                        }
+                        if let Some(slop) = handler_set.hit_slop {
+                            node.hit_slop = Some(slop);
+                        }
+                        if let Some(no_slop) = handler_set.no_hit_slop {
+                            node.no_hit_slop = no_slop;
                         }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
@@ -3165,7 +3738,14 @@ impl WidgetTree {
                                     &self.binding_registry,
                                 );
                             }
-                            node.access_overrides = handler_set.access;
+                            // Merged, not assigned: a node can already carry a
+                            // block from its builder chain, and replacing it
+                            // drops everything in it (see
+                            // `AccessibilityOverrides::merge_from`).
+                            match (&mut node.access_overrides, handler_set.access) {
+                                (Some(existing), Some(incoming)) => existing.merge_from(*incoming),
+                                (slot, incoming) => *slot = incoming,
+                            }
                         }
                         if let Some(mode) = handler_set.access_subtree {
                             node.access_subtree = mode;
@@ -3279,11 +3859,35 @@ impl WidgetTree {
                         if let Some(dead_zone) = handler_set.gesture_dead_zone {
                             node.gesture_dead_zone = dead_zone;
                         }
+                        if let Some(role) = handler_set.long_press_role {
+                            node.long_press_role = role;
+                        }
+                        if let Some(action) = handler_set.touch_action {
+                            node.touch_action = action;
+                        }
+                        if let Some(claim) = handler_set.pan_claim {
+                            node.pan_claim = Some(claim);
+                        }
+                        if let Some(behavior) = handler_set.overscroll_behavior {
+                            node.overscroll_behavior = behavior;
+                        }
+                        if let Some(activation) = handler_set.drag_activation {
+                            node.drag_activation = activation;
+                        }
+                        if let Some(policy) = handler_set.multi_contact {
+                            node.multi_contact = policy;
+                        }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;
                         }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;
+                        }
+                        if let Some(slop) = handler_set.hit_slop {
+                            node.hit_slop = Some(slop);
+                        }
+                        if let Some(no_slop) = handler_set.no_hit_slop {
+                            node.no_hit_slop = no_slop;
                         }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
@@ -3319,7 +3923,14 @@ impl WidgetTree {
                                     &self.binding_registry,
                                 );
                             }
-                            node.access_overrides = handler_set.access;
+                            // Merged, not assigned: a node can already carry a
+                            // block from its builder chain, and replacing it
+                            // drops everything in it (see
+                            // `AccessibilityOverrides::merge_from`).
+                            match (&mut node.access_overrides, handler_set.access) {
+                                (Some(existing), Some(incoming)) => existing.merge_from(*incoming),
+                                (slot, incoming) => *slot = incoming,
+                            }
                         }
                         if let Some(mode) = handler_set.access_subtree {
                             node.access_subtree = mode;
@@ -3423,6 +4034,147 @@ impl WidgetTree {
             // Node missing (shouldn't happen in build) — hand back a
             // detached signal so the caller still gets a valid handle.
             crate::signal::Signal::new(true)
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // In-node target geometry
+    // -----------------------------------------------------------------
+
+    /// The interactive sub-regions the widget at `id` paints inside its own
+    /// single node, in absolute arena coordinates.
+    ///
+    /// The read side of [`Widget::target_regions`]:
+    /// a scroll bar's thumb, a slider's knob, a header cell's filter
+    /// affordance. Empty for the overwhelming majority of widgets, whose node
+    /// *is* their target and which therefore have nothing to add.
+    ///
+    /// Reporting only — reading this changes nothing. It exists so a
+    /// conformance audit, and a test of one, can see geometry that no layout
+    /// ever produced.
+    pub fn widget_target_regions(&self, id: WidgetId) -> Vec<crate::partition::TargetRegion> {
+        let Some(node) = self.arena.get(id) else {
+            return Vec::new();
+        };
+        node.widget.target_regions(self.arena.bounds(id))
+    }
+
+    /// The hit outset the **mounted** widget at `id` declares for `kind`,
+    /// against the tree's live input tokens.
+    ///
+    /// The read side of [`Widget::hit_outset`], and the companion of
+    /// [`widget_target_regions`](Self::widget_target_regions): both let a
+    /// conformance audit — and a test of one — see target geometry that no
+    /// layout ever produced.
+    ///
+    /// It has to read the mounted node rather than a freshly-built widget,
+    /// because an outset is usually derived from what the widget *painted*,
+    /// and an unmounted one has painted nothing. That is also what makes the
+    /// **gates** assertable: a decorative avatar, an inert twist arrow, a
+    /// disabled swatch and a breadcrumb's current crumb all take no press, so
+    /// each must declare `EdgeInsets::ZERO` — a widened node that then refuses
+    /// the press is a hole punched in whatever is behind it.
+    ///
+    /// The tokens are the **effective** theme's, not `theme`'s, because that
+    /// is what the hit path itself reads:
+    /// `hit_test_for_excluding` builds its `HitContext` from
+    /// `effective_theme.input`, as do the pointer profile and the touch-enabled
+    /// gate in `pointer_state.rs`. The two themes agree only for as long as
+    /// nothing between them touches `input` — `recompute_effective_theme`
+    /// currently projects typography alone — and an accessor that describes a
+    /// path has to read that path's source rather than one that happens to
+    /// match it.
+    ///
+    /// Reporting only — reading this changes nothing.
+    pub fn widget_hit_outset(
+        &self,
+        id: WidgetId,
+        kind: teksilo_tokens::PointerKind,
+    ) -> teksilo_canvas::EdgeInsets {
+        let Some(node) = self.arena.get(id) else {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        };
+        node.widget.hit_outset(kind, &self.effective_theme.input)
+    }
+
+    // -----------------------------------------------------------------
+    // Press state
+    // -----------------------------------------------------------------
+
+    /// Install (or reuse) the framework press signal on a node and return a
+    /// handle to it.
+    ///
+    /// `true` while the node holds a pointer press whose visual is showing:
+    /// between press and release, `false` once the pointer leaves the press's
+    /// tap boundary and `true` again on re-entry, cleared on a cancel or when
+    /// a peer wins the arbitration. See `docs/touch-and-pen.md` §7.
+    pub fn pressed_signal(&mut self, id: WidgetId) -> crate::signal::Signal<bool> {
+        let showing = self.is_pressed(id);
+        let Some(node) = self.arena.get_mut(id) else {
+            // Node missing (should not happen during build) — hand back a
+            // detached signal so the caller still gets a valid handle.
+            return crate::signal::Signal::new(false);
+        };
+        if let Some(existing) = node.pressed_signal.clone() {
+            return existing;
+        }
+        let sig = crate::signal::Signal::new(showing);
+        node.pressed_signal = Some(sig.clone());
+        sig
+    }
+
+    /// The press held by the pointer being dispatched, as `(inside, pending)`,
+    /// for [`EventContext`]'s per-dispatch
+    /// snapshot. `None` when that pointer holds no press.
+    pub(crate) fn current_press_snapshot(&self) -> Option<(bool, bool)> {
+        self.presses
+            .get(self.current_pointer_id())
+            .map(|p| (p.inside, p.pending()))
+    }
+
+    /// The contact holding `id`'s press, whether or not its visual is showing.
+    ///
+    /// `None` for a node nothing is pressing. A node held by a finger whose
+    /// press-feedback delay has not elapsed still answers with that finger:
+    /// the press is real, only its visual is waiting.
+    pub fn pressed_by(&self, id: WidgetId) -> Option<crate::pointer::PointerId> {
+        self.presses.owner_of(id)
+    }
+
+    /// Whether `id`'s press visual is showing — held, inside its tap boundary,
+    /// and past any press-feedback delay. What the node's
+    /// [`pressed_signal`](Self::pressed_signal) mirrors.
+    pub fn is_pressed(&self, id: WidgetId) -> bool {
+        self.presses
+            .for_node(id)
+            .is_some_and(crate::press::Press::showing)
+    }
+
+    /// Whether `id` is held and the pointer has not left the press's tap
+    /// boundary. True during a press-feedback delay, unlike
+    /// [`is_pressed`](Self::is_pressed).
+    pub fn press_is_inside(&self, id: WidgetId) -> bool {
+        self.presses.for_node(id).is_some_and(|p| p.inside)
+    }
+
+    /// Whether `id` is held but its press-feedback delay has not elapsed, so
+    /// the visual is deliberately withheld.
+    pub fn press_pending(&self, id: WidgetId) -> bool {
+        self.presses
+            .for_node(id)
+            .is_some_and(crate::press::Press::pending)
+    }
+
+    /// Publish `id`'s press signal from the table. The one place a press
+    /// signal is written, so "the table changed" and "the recipe was told"
+    /// cannot drift apart.
+    pub(crate) fn publish_pressed(&mut self, id: WidgetId) {
+        let showing = self.is_pressed(id);
+        if let Some(node) = self.arena.get(id)
+            && let Some(sig) = node.pressed_signal.clone()
+            && sig.get() != showing
+        {
+            sig.set(showing);
         }
     }
 
@@ -4335,6 +5087,56 @@ mod cross_window_redraw_signal_tests {
         );
     }
 
+    /// A layout pass on a simulated tree advances no animation.
+    ///
+    /// The mirror image of the test above, and the other half of the same
+    /// contract: `layout` both **promotes** a pending `animate_to` and
+    /// **ticks** the scheduler, and it has to do both against the same clock.
+    /// Promoting at `sim_clock` while ticking at `Instant::now()` hands the
+    /// freshly promoted animation an elapsed time equal to the tree's entire
+    /// wall-clock age — so it finishes inside the very layout pass that started
+    /// it, and how much of it a test ever observes depends on how long that
+    /// test took to get there.
+    ///
+    /// The 120 ms slept below is what the wall clock would contribute; the
+    /// tween is 100 ms, so under the old behaviour it is already over before
+    /// the caller advances anything.
+    #[test]
+    fn a_layout_pass_on_a_simulated_tree_advances_no_animation() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        // Put the tree on the simulated clock, then let real time run past the
+        // whole duration of the animation that is about to be armed.
+        tree.advance_time(std::time::Duration::from_millis(1));
+        std::thread::sleep(std::time::Duration::from_millis(120));
+
+        let anim = Signal::new_animated(0.0_f32);
+        tree.register_animated_signal(&anim, id);
+        anim.animate_to(
+            100.0,
+            std::time::Duration::from_millis(100),
+            teksilo_tokens::Easing::Linear,
+        );
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+
+        assert_eq!(
+            anim.get(),
+            0.0,
+            "a layout pass promotes the animation; it does not also age it by \
+             however long the tree has been alive"
+        );
+
+        // It moves when, and only when, the clock is advanced.
+        tree.advance_time(std::time::Duration::from_millis(50));
+        assert!(
+            (anim.get() - 50.0).abs() < 2.0,
+            "half of a 100 ms linear tween: {}",
+            anim.get()
+        );
+    }
+
     /// `needs_render()` (paint/layout dirt only) must stay `false` while a
     /// per-frame `Signal<f32>` animation is merely *running*, with nothing
     /// new to paint. `request_redraw_needing_render` filters on
@@ -4527,5 +5329,108 @@ mod effective_enabled_signal_tests {
             Signal::same(&a, &b),
             "must hand back the same signal handle"
         );
+    }
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::*;
+    use teksilo_tokens::{DensityPolicy, TargetDensity};
+
+    /// A fresh tree is Compact — today's behaviour — and reports it.
+    #[test]
+    fn a_fresh_tree_is_compact() {
+        let tree = WidgetTree::new();
+        assert_eq!(tree.input_density(), TargetDensity::Compact);
+        assert_eq!(tree.theme().input, teksilo_tokens::InputTokens::default());
+        assert!(tree.touch_enabled());
+        assert_eq!(
+            tree.density_policy(),
+            DensityPolicy::Fixed(TargetDensity::Compact)
+        );
+    }
+
+    /// A density switch changes what the tree reports **and** dirties it at the
+    /// rebuild level — a target size is baked in `build()`, so layout+paint
+    /// alone cannot re-bake it.
+    #[test]
+    fn switching_density_reports_and_dirties_at_rebuild_level() {
+        let mut tree = WidgetTree::new();
+        let root = tree.add(crate::test_widgets::FillWidget::new());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            tree.arena.collect_needs_rebuild().is_empty(),
+            "a laid-out tree starts clean"
+        );
+
+        tree.set_input_density(TargetDensity::Touch);
+
+        assert_eq!(tree.input_density(), TargetDensity::Touch);
+        assert_eq!(tree.theme().input.target_size, 44.0);
+        assert_eq!(tree.theme().input.grab_size, 16.0);
+        assert!(
+            tree.arena.collect_needs_rebuild().contains(&root),
+            "the root must be marked for rebuild, not merely relayout"
+        );
+    }
+
+    /// Re-setting the same density must not throw away every widget id in the
+    /// tree for nothing.
+    #[test]
+    fn re_setting_the_same_density_is_a_no_op() {
+        let mut tree = WidgetTree::new();
+        let _root = tree.add(crate::test_widgets::FillWidget::new());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.set_input_density(TargetDensity::Compact);
+
+        assert!(tree.arena.collect_needs_rebuild().is_empty());
+    }
+
+    /// The theme signal follows a density switch, so a `theme_signal`-bound
+    /// widget re-resolves without its own wiring.
+    #[test]
+    fn the_theme_signal_follows_a_density_switch() {
+        let mut tree = WidgetTree::new();
+        tree.set_input_density(TargetDensity::Comfortable);
+        assert_eq!(
+            tree.theme_signal().get().input.density,
+            TargetDensity::Comfortable
+        );
+        assert_eq!(tree.theme_signal().get().input.target_size, 32.0);
+    }
+
+    /// The kill switch is state on the theme, reachable both ways, and does
+    /// not rebuild — it changes which events are accepted, not a dimension.
+    #[test]
+    fn the_touch_kill_switch_round_trips_without_a_rebuild() {
+        let mut tree = WidgetTree::new();
+        let _root = tree.add(crate::test_widgets::FillWidget::new());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        tree.set_touch_enabled(false);
+
+        assert!(!tree.touch_enabled());
+        assert!(!tree.theme().input.touch_enabled);
+        assert!(!tree.theme_signal().get().input.touch_enabled);
+        assert!(tree.arena.collect_needs_rebuild().is_empty());
+
+        tree.set_touch_enabled(true);
+        assert!(tree.touch_enabled());
+    }
+
+    /// The policy is stored verbatim and does not itself move the density.
+    #[test]
+    fn setting_a_policy_does_not_switch_the_density() {
+        let mut tree = WidgetTree::new();
+        let policy = DensityPolicy::FollowLastPointer {
+            coarse: TargetDensity::Touch,
+            fine: TargetDensity::Compact,
+            hysteresis: std::time::Duration::from_secs(1),
+        };
+        tree.set_density_policy(policy);
+
+        assert_eq!(tree.density_policy(), policy);
+        assert_eq!(tree.input_density(), TargetDensity::Compact);
     }
 }

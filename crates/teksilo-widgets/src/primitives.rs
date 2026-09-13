@@ -33,6 +33,7 @@ pub mod switcher;
 /// third-party composites that need inline editable text.
 pub mod text_input_field;
 pub mod text_widget;
+pub mod touch_target;
 pub mod twist_arrow;
 pub mod validation_strip;
 pub mod vstack;
@@ -64,6 +65,7 @@ pub use text_input_field::{
     AtRevealPolicy, EchoMode, InputPurpose, TextFieldHandle, TextInputField,
 };
 pub use text_widget::TextWidget;
+pub use touch_target::TouchTarget;
 pub use twist_arrow::TwistArrow;
 pub use validation_strip::ValidationStrip;
 pub use vstack::VStack;

@@ -112,7 +112,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::VAlignment;
+use teksilo_tokens::{InputTokens, TargetRole, VAlignment};
 
 use crate::accordion::Accordion;
 use crate::button::{Button, ButtonVariant};
@@ -121,6 +121,7 @@ use crate::dialog::ModalContainer;
 use crate::primitives::{Expand, HStack, Spacer, TextWidget, VStack};
 use crate::scroll_area::ScrollArea;
 use crate::severity_badge::{SeverityBadge, SeverityIconKind};
+use teksilo_core::styles::density::dp;
 
 // ── Severity ────────────────────────────────────────────────────────
 
@@ -427,6 +428,12 @@ pub struct MessageBoxResult {
 }
 
 const SEVERITY_ICON_SIZE: f32 = 48.0;
+
+/// [`SEVERITY_ICON_SIZE`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn severity_icon_size(tokens: &InputTokens) -> f32 {
+    dp(SEVERITY_ICON_SIZE, TargetRole::Target, tokens)
+}
 
 /// How tall the expanded "Show details" pane is allowed to grow before it scrolls.
 ///
@@ -803,7 +810,10 @@ impl Widget for MessageBox {
                 HStack::new()
                     .spacing(16.0)
                     .alignment(VAlignment::Top)
-                    .child(SeverityBadge::new(kind, SEVERITY_ICON_SIZE))
+                    .child(SeverityBadge::new(
+                        kind,
+                        severity_icon_size(&ctx.theme().input),
+                    ))
                     .child(Expand::horizontal().child(header_text_stack)),
             )
         } else {

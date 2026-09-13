@@ -17,13 +17,29 @@ body) and the matched-bracket cells behind the text.
 `PlainTextEditor` is the same machinery with the code affordances off and
 wrapping on — a notes field, a commit message — so the two never drift.
 
+## Pan to scroll
+
+The surface installs `common::scrollable::ScrollableBehavior`
+— the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
+path is unchanged: no tween (these offsets are plain signals), 16 dp a line,
+`Ignored` at a hard boundary so the page around it takes the rest, and a
+repaint asked for exactly when an axis moved.
+
+**The claim serves this surface even though it also owns the press
+arena**, which its double- and triple-tap recognizers give it. The router
+stops its arbitration walk at the press owner only for a `Gesture` member,
+whose recognizer the capture dispatch is already driving; a `Pan` member is
+decided in that walk and nowhere else, so it is exempt. A finger on the
+text therefore scrolls the text, and hands the gesture outward only at this
+surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
+
 ## Builder methods at a glance
 
-`read_only`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
+`read_only`, `context_menu`, `default_context_menu`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/widget/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/index.html)
 
 ## `pub struct CodeEditor`
 
@@ -51,6 +67,28 @@ guesses a language.
 
 A read-only code viewer bound to `document`: no caret, navigation and
 copy only, `Role::Document`. Still gets the gutter and syntax colours.
+
+#### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
+
+Replace the built-in right-click menu with `factory`, called on each
+right-click with the **window** position of the click. Returning `None`
+shows no menu.
+
+A replacement is responsible for repositioning the caret if it wants the
+platform convention — the built-in menu does it through
+`context_menu::factory`.
+
+#### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
+
+Whether to install the built-in Cut / Copy / Paste / Select All menu
+(default `true`). `false` lets a right-click bubble past the editor, so an
+application can render its own menu from outside; a factory installed with
+`context_menu` wins over this either way.
+
+The **touch** selection toolbar is *not* affected. It is raised by the
+controller rather than by a right-click, its rows are the same four
+commands, and a surface with no menu still has to be usable by a finger —
+which has no second button and no chord.
 
 #### `pub fn wrap_mode(self, mode: WrapMode) -> Self`
 
@@ -253,6 +291,16 @@ A callback fired on each content-changing edit batch.
 #### `pub fn background(mut self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
 
 Override the background colour.
+
+#### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
+
+Replace the built-in right-click menu — see
+`CodeEditor::context_menu`.
+
+#### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
+
+Whether to install the built-in right-click menu — see
+`CodeEditor::default_context_menu`.
 
 #### `pub fn handle(&self) -> CodeEditorHandle`
 

@@ -10,6 +10,13 @@
 //! [`RadioGroup`](crate::radio_group::RadioGroup) to provide the AT "2 of 3"
 //! positional announcement required by ARIA.
 //!
+//! ## Touch and pen
+//!
+//! Same shape as [`Checkbox`](crate::Checkbox): the pressed state is the
+//! framework's (`docs/touch-and-pen.md` §7.1), selection lands on the release,
+//! and the 24 dp `MinSize` around the 19 dp dot already clears the conformance
+//! floor at Compact.
+//!
 //! ## Accessibility
 //!
 //! Reports `Role::RadioButton` with `set_toggled` mirroring the selected
@@ -29,7 +36,7 @@
 //! let _r2 = RadioButton::new(2, selected.clone()).label(lit!("System"));
 //! ```
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
@@ -220,7 +227,11 @@ impl Widget for RadioButton {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.radio.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeRadioStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeRadioStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let cfg = RadioStyleConfig {
             is_selected,
             is_hovered,
@@ -265,10 +276,11 @@ impl Widget for RadioButton {
             row = row.alignment(VAlignment::Top);
         }
 
+        // The hit box comes from the same recipe the chrome was built from, so
+        // a density switch moves both together.
+        let hit_area = crate::styles::RadioRecipe::for_tokens(&ctx.theme().input).hit_area;
         let row_id = ctx.add(row);
-        let root_id = ctx.add(
-            MinSize::new(radio_dims::RADIO_HIT_AREA, radio_dims::RADIO_HIT_AREA).child_id(row_id),
-        );
+        let root_id = ctx.add(MinSize::new(hit_area, hit_area).child_id(row_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
@@ -292,17 +304,35 @@ impl Widget for RadioButton {
         let int_key = interaction.clone();
         let int_focus = interaction.clone();
 
+        // The pointer press is the framework's, not this control's own: the
+        // router knows about a press that slid off its target, one that slid
+        // back on, and one a pan claimant took away with no release to reset
+        // from — none of which a `PointerDown` / `PointerUp` pair here can
+        // see. `docs/touch-and-pen.md` §7.1. `pointer_over` carries the hover
+        // truth across the press, so a press that ends without an activation
+        // rests on the right state.
+        let pointer_over = Rc::new(Cell::new(false));
+        crate::button::bind_press_interaction(ctx, interaction.clone(), pointer_over.clone());
+
         // Framework gates events on arena.is_enabled; no per-handler
         // snapshot guards anymore.
         let handler_set = HandlerSet::new()
             .on_tap({
-                move |_pos, _ctx: &mut EventContext| {
+                let hovering = pointer_over.clone();
+                move |_pos, ctx: &mut EventContext| {
                     sel_tap.set(value);
-                    int_tap.set(InteractionState::Hovered);
+                    int_tap.set(if ctx.pointer_kind().hovers() {
+                        hovering.set(true);
+                        InteractionState::Hovered
+                    } else {
+                        InteractionState::Idle
+                    });
                 }
             })
             .on_hover({
+                let hovering = pointer_over.clone();
                 move |entered: bool, _ctx: &mut EventContext| {
+                    hovering.set(entered);
                     if entered {
                         int_hover.set(InteractionState::Hovered);
                     } else {
@@ -392,6 +422,39 @@ impl Widget for RadioButton {
             child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y);
             child.size = Size::new(bounds.width, bounds.height);
         }
+    }
+
+    /// The first implementer of the hit-targeting **shape** hook: a labelled
+    /// radio is its whole row, but a bare one is a disc inside a square box.
+    ///
+    /// A `RadioButton` with a label is tappable across the label too — the row
+    /// *is* the target — so the default rectangular distance is exactly right
+    /// and this returns it unchanged. A **bare** radio (a cell in a table, a
+    /// tight option grid) is a 19 dp disc centred in a 24 dp box, and measuring
+    /// a near miss to the box would offer the same reach diagonally past its
+    /// corner as straight out from its edge — where the corner is 3 dp further
+    /// from the thing the user aimed at. Measuring to the disc makes the slop
+    /// follow the silhouette, so a miss past the corner loses to a neighbour
+    /// that is genuinely nearer.
+    ///
+    /// This is consulted **only** by the miss-only slop pass, never by the
+    /// exact one, so a click inside the box's corner still selects the radio
+    /// exactly as it always has — `hit_shape` is deliberately left alone.
+    fn hit_distance(&self, local_point: teksilo_canvas::Point, bounds: Rect) -> Option<f32> {
+        if self.label.is_some() {
+            return Some(teksilo_core::pointer::hit_slop::rect_distance(
+                bounds,
+                local_point,
+            ));
+        }
+        let diameter = crate::styles::recipe_radio_style::RADIO_VISUAL_SIZE
+            .min(bounds.width)
+            .min(bounds.height);
+        Some(teksilo_core::pointer::hit_slop::circle_distance(
+            bounds.center(),
+            diameter / 2.0,
+            local_point,
+        ))
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -510,5 +573,237 @@ mod tests {
             info.actions()
                 .contains(&teksilo_core::accesskit::Action::Click)
         );
+    }
+    // -----------------------------------------------------------------
+    // The framework press (docs/touch-and-pen.md §7.1)
+    // -----------------------------------------------------------------
+
+    struct PressProbe(std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>>);
+
+    impl teksilo_core::styles::RadioStyle for PressProbe {
+        fn make_body(
+            &self,
+            cfg: &teksilo_core::styles::RadioStyleConfig,
+            ctx: &mut BuildContext,
+        ) -> WidgetId {
+            *self.0.borrow_mut() = Some((cfg.is_pressed.clone(), cfg.is_hovered.clone()));
+            ctx.add(crate::primitives::FixedSize::new().width(19.0).height(19.0))
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn probed_radio_with_hover() -> (
+        WidgetTree,
+        WidgetId,
+        Signal<bool>,
+        Signal<bool>,
+        Signal<usize>,
+    ) {
+        let probe: std::rc::Rc<std::cell::RefCell<Option<(Signal<bool>, Signal<bool>)>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
+        let selected = Signal::new(9_usize);
+        let mut theme = teksilo_core::presets::intui::light();
+        theme.style_slots.radio = Some(std::rc::Rc::new(PressProbe(probe.clone())));
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let rb = tree.add(RadioButton::new(0, selected.clone()).label(lit!("One")));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let (pressed, hovered) = probe.borrow().clone().expect("style ran");
+        (tree, rb, pressed, hovered, selected)
+    }
+
+    fn probed_radio() -> (WidgetTree, WidgetId, Signal<bool>, Signal<usize>) {
+        let (tree, rb, pressed, _hovered, selected) = probed_radio_with_hover();
+        (tree, rb, pressed, selected)
+    }
+
+    /// Where the radio comes to rest after a selection — its own copy of the
+    /// button family's `on_tap` resting-state rule, which is duplicated per
+    /// control rather than shared, so it needs its own probe.
+    #[test]
+    fn a_mouse_selection_rests_hovered_and_a_finger_selection_rests_idle() {
+        use crate::button::press_test_support::touch_tap;
+
+        let (mut tree, rb, pressed, hovered, selected) = probed_radio_with_hover();
+        let at = tree.bounds(rb).center();
+        tree.pointer_move(at);
+        assert!(hovered.get(), "the pointer arrived over the dot");
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(selected.get(), 0, "the release selected");
+        assert!(!pressed.get());
+        assert!(
+            hovered.get(),
+            "a mouse that clicked the dot is still on it, so it rests hovered",
+        );
+
+        let (mut tree, rb, pressed, hovered, selected) = probed_radio_with_hover();
+        let at = tree.bounds(rb).center();
+        touch_tap(&mut tree, at);
+        assert_eq!(selected.get(), 0, "the contact selected on its release");
+        assert!(!pressed.get());
+        assert!(
+            !hovered.get(),
+            "a finger leaves nothing behind, so the dot must rest idle",
+        );
+    }
+
+    /// The mouse path: press lights the state the style has always been given,
+    /// release selects.
+    #[test]
+    fn a_mouse_press_lights_the_pressed_state_and_the_release_selects() {
+        let (mut tree, rb, pressed, selected) = probed_radio();
+        let at = tree.bounds(rb).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(pressed.get());
+        assert_eq!(selected.get(), 9, "the press selects nothing");
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert!(!pressed.get());
+        assert_eq!(selected.get(), 0);
+    }
+
+    /// And a finger, with the slide-off abort in the middle.
+    #[test]
+    fn a_touch_tap_selects_on_release_and_a_slide_off_abandons_it() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, rb, pressed, selected) = probed_radio();
+        let bounds = tree.bounds(rb);
+        let at = bounds.center();
+        let away = teksilo_canvas::Point::new(at.x, bounds.y + bounds.height + 80.0);
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert!(pressed.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, away, 20));
+        assert!(!pressed.get());
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, away, 40));
+        assert_eq!(
+            selected.get(),
+            9,
+            "a release off the control selects nothing"
+        );
+
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 100));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 130));
+        assert_eq!(selected.get(), 0);
+        assert!(!pressed.get());
+    }
+
+    /// A 24 dp hit box around a 19 dp dot: at the floor already, so no widening
+    /// mechanism is involved.
+    #[test]
+    fn the_radio_hit_box_clears_the_conformance_floor_at_compact() {
+        let theme = teksilo_core::presets::intui::light();
+        let floor = theme.input.min_target_conformance;
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let rb = tree.add(RadioButton::new(0, Signal::new(0_usize)));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let b = tree.bounds(rb);
+        assert!(b.width >= floor && b.height >= floor, "measured {b:?}");
+    }
+}
+
+#[cfg(test)]
+mod hit_distance_tests {
+    use super::*;
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::{EventTime, PointerId, PointerInfo};
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_i18n::lit;
+
+    fn finger() -> PointerInfo {
+        PointerInfo::touch(PointerId::MOUSE, EventTime::ZERO)
+    }
+
+    /// A **bare** radio measures a near miss to its disc, so a press past its
+    /// box's corner is further away than one past its edge.
+    ///
+    /// Measured on the widget directly, the way its labelled twin below is.
+    /// The tree-level version this replaced placed its probe points *outside*
+    /// the radio's box but within the disc's reach, and that arrangement only
+    /// existed while the box was smaller than the density's `target_size`:
+    /// P20's density projection makes a radio's box exactly `target_size` at
+    /// every density, so the miss-only slop pass — whose per-node top-up is
+    /// `(target_size - min(w, h)) / 2` — now has nothing left to add for this
+    /// control, and no point outside the box is in reach of a disc that stayed
+    /// 19 dp. What the test is actually about is the *shape* of the measure,
+    /// which this asserts without depending on the reach at all.
+    #[test]
+    fn a_bare_radio_measures_a_near_miss_to_its_disc() {
+        use teksilo_canvas::Rect;
+        use teksilo_core::widget::Widget;
+        let radio = RadioButton::new(0, Signal::new(0_usize));
+        let bounds = Rect::new(0.0, 0.0, 24.0, 24.0);
+
+        // Straight out from the edge, and diagonally past the corner at the
+        // same axis distance. A rectangle would call these equally far; a disc
+        // does not.
+        let side = Point::new(bounds.right() + 4.0, bounds.center().y);
+        let corner = Point::new(bounds.right() + 4.0, bounds.bottom() + 4.0);
+
+        let d_side = radio
+            .hit_distance(side, bounds)
+            .expect("a bare radio measures");
+        let d_corner = radio
+            .hit_distance(corner, bounds)
+            .expect("a bare radio measures");
+        assert!(
+            d_corner > d_side,
+            "the corner ({d_corner}) must be further from the disc than the edge ({d_side})"
+        );
+        // And it really is the disc, not the box: a point on the box's own edge
+        // is already a positive distance from the disc inside it.
+        let on_edge = Point::new(bounds.right(), bounds.center().y);
+        assert!(
+            radio.hit_distance(on_edge, bounds).expect("measures") > 0.0,
+            "a rectangular measure would call the box's edge zero"
+        );
+    }
+
+    /// A **labelled** radio is its whole row, so it keeps the rectangular
+    /// measure — the corner of a row is not further from the target than its
+    /// edge, because the row IS the target.
+    #[test]
+    fn a_labelled_radio_keeps_the_rectangular_measure() {
+        use teksilo_canvas::Rect;
+        use teksilo_core::widget::Widget;
+        let radio = RadioButton::new(0, Signal::new(0_usize)).label(lit!("Option"));
+        let bounds = Rect::new(0.0, 0.0, 200.0, 24.0);
+        let corner = Point::new(203.0, 28.0);
+        assert_eq!(
+            radio.hit_distance(corner, bounds),
+            Some(teksilo_core::pointer::hit_slop::rect_distance(
+                bounds, corner
+            ))
+        );
+    }
+
+    /// The exact pass is untouched: a click inside the box's corner still
+    /// selects the radio, exactly as it always has.
+    #[test]
+    fn the_exact_pass_still_accepts_the_corner_of_the_box() {
+        use crate::primitives::Center;
+        let selected = Signal::new(1_usize);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let radio = tree.add(RadioButton::new(0, selected.clone()));
+        tree.add(Center::new().child_id(radio));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        let b = tree.bounds(radio);
+        let corner = Point::new(b.x + 1.0, b.y + 1.0);
+        // The exact pass resolves to the deepest node, which is inside the
+        // radio's own subtree — what matters is that the corner is still hit at
+        // all, and that clicking it still selects.
+        let hit = tree.hit_test(corner);
+        assert!(
+            hit.is_some_and(
+                |id| std::iter::successors(Some(id), |id| tree.parent(*id)).any(|id| id == radio)
+            ),
+            "the corner of a bare radio's box resolved to {hit:?}"
+        );
+        tree.click(radio);
+        assert_eq!(selected.get(), 0);
     }
 }

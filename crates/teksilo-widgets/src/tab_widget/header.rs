@@ -22,6 +22,18 @@
 //! - Focus ring: 2 dp `focus_ring` stroke painted around the visual
 //!   rect, and only on keyboard focus (pointer focus does not paint
 //!   the ring — IntelliJ / VS Code convention).
+//!
+//! ## Touch and pen
+//!
+//! No press-time actuation and no target shortfall: a tab activates from
+//! `on_tap` (so already on the release), `TabHeaderInteraction` has no pressed
+//! state to move onto the framework press, and the close affordance is an
+//! `IconButton` at `IconButtonSize::Compact` — 24 dp at Compact, and it
+//! inherits the framework press from the button family. What is **not** solved
+//! here is that the close button is revealed by hover only, so a finger cannot
+//! see it at all; that is row 5 of `docs/hover-affordance-census.md` and
+//! belongs to the hover-reveal package, which gives it `RevealPolicy::Always`
+//! at Touch density plus an assistive "Close" action.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -41,17 +53,67 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::TextRole;
+use teksilo_tokens::{InputTokens, RevealPolicy, TargetRole, TextRole};
 
 use crate::primitives::{Expand, RectWidget, ZStack};
 use crate::{HStack, IconButton, IconButtonSize, IconWidget, TextWidget};
+use teksilo_core::styles::density::{dp, spacing};
+
+/// AccessKit custom-action id for **Close**.
+///
+/// The ids on a tab header are **explicit and fixed**, not positional: the list
+/// is built conditionally (a tab at the start advertises no "move earlier"), so
+/// an action's place in the vector says nothing about which action it is.
+/// `2` is historical and stays put — an assistive client's recorded id must keep
+/// meaning the same thing.
+const CLOSE_ACTION_ID: i32 = 2;
+
+/// The custom-action id of each of the four moves.
+///
+/// `0` and `1` are the two steps, which shipped before the far ends existed;
+/// `3` and `4` are the far ends, taking the next free ids rather than renumbering
+/// around `CLOSE_ACTION_ID`.
+fn move_action_id(mv: crate::common::ordered_move::OrderedMove) -> i32 {
+    use crate::common::ordered_move::OrderedMove;
+    match mv {
+        OrderedMove::Prev => 0,
+        OrderedMove::Next => 1,
+        OrderedMove::First => 3,
+        OrderedMove::Last => 4,
+    }
+}
+
+/// The inverse of [`move_action_id`].
+fn move_for_action_id(id: i32) -> Option<crate::common::ordered_move::OrderedMove> {
+    crate::common::ordered_move::OrderedMove::ALL
+        .into_iter()
+        .find(|mv| move_action_id(*mv) == id)
+}
 
 /// Minimum natural width when the label is empty / extremely short.
 const NATURAL_MIN_WIDTH: f32 = 72.0;
+
+/// [`NATURAL_MIN_WIDTH`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn natural_min_width(tokens: &InputTokens) -> f32 {
+    dp(NATURAL_MIN_WIDTH, TargetRole::Target, tokens)
+}
 /// Vertical padding around the label inside the tab.
 const HEADER_PADDING_V: f32 = 6.0;
+
+/// [`HEADER_PADDING_V`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn header_padding_v(tokens: &InputTokens) -> f32 {
+    spacing(HEADER_PADDING_V, tokens)
+}
 /// Spacing inside the inner row between icon, slots, and label.
 const INNER_GAP: f32 = 6.0;
+
+/// [`INNER_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn inner_gap(tokens: &InputTokens) -> f32 {
+    spacing(INNER_GAP, tokens)
+}
 /// Fallback char width for natural-size estimation when the text
 /// backend is unavailable (test contexts).
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
@@ -346,18 +408,19 @@ impl TabHeader {
         // `build()` has moved the icon / slots out, so reserve their width from
         // the construction-time snapshot (the real icon extent, not a constant —
         // an icon larger than `BUTTON_ICON_SIZE` was previously under-reserved).
+        let gap = inner_gap(&ctx.theme.input);
         let icon_size = if self.has_icon {
-            self.icon_extent + INNER_GAP
+            self.icon_extent + gap
         } else {
             0.0
         };
         let leading_size = if self.has_leading {
-            btn::BUTTON_ICON_SIZE + INNER_GAP
+            btn::BUTTON_ICON_SIZE + gap
         } else {
             0.0
         };
         let trailing_size = if self.has_trailing {
-            btn::BUTTON_ICON_SIZE + INNER_GAP
+            btn::BUTTON_ICON_SIZE + gap
         } else {
             0.0
         };
@@ -367,12 +430,12 @@ impl TabHeader {
         // places an `INNER_GAP` between the label and the spacer — so the
         // widest label needs `INNER_GAP` more than the text alone, or it
         // truncates by exactly that amount. Reserve it here.
-        let spacer_gap = if self.pinned { 0.0 } else { INNER_GAP };
+        let spacer_gap = if self.pinned { 0.0 } else { gap };
         // Bounds == visual rect now (no focus-ring envelope), so
         // natural width is purely content + horizontal padding.
         let content =
             text_width + icon_size + leading_size + trailing_size + spacer_gap + pad_h * 2.0;
-        content.max(NATURAL_MIN_WIDTH)
+        content.max(natural_min_width(&ctx.theme.input))
     }
 
     pub(crate) fn intrinsic_height(_ctx: &LayoutContext) -> f32 {
@@ -546,12 +609,18 @@ impl Widget for TabHeader {
                     .tooltip(teksilo_i18n::tr_widget!(tab_close_tooltip()))
                     .on_activate_fn(move |ctx| (close_fn)(ctx));
                 let close_id = ctx.add(close_button);
-                // Hover-only: the button is hidden when the
-                // surrounding tab header is in the Idle interaction
-                // state. The interaction signal flips to Hovered
-                // via the `on_hover` handler installed below.
-                let visible_when = interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
-                ctx.visible_when(close_id, visible_when);
+                // Hover-revealed, except at a density that reveals every
+                // affordance. `visible_when` culls the button from paint AND
+                // from the accessibility tree, so under a finger — which
+                // produces no hover, ever — a hidden close button is not a
+                // button that is hard to find, it is one that does not exist.
+                // At `RevealPolicy::Always` no gate is installed at all, so the
+                // `×` is simply there.
+                if ctx.theme().input.reveal != RevealPolicy::Always {
+                    let visible_when =
+                        interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
+                    ctx.visible_when(close_id, visible_when);
+                }
                 row = row.add_child(close_id);
             }
         }
@@ -571,10 +640,12 @@ impl Widget for TabHeader {
         let pad_h = crate::styles::recipe_tab_style::TAB_PADDING_HORIZONTAL;
         let inner_id = if self.pinned {
             let centered = crate::primitives::Center::new().child(row);
-            let padded = crate::Padding::symmetric(HEADER_PADDING_V, 0.0).child(centered);
+            let padded = crate::Padding::symmetric(header_padding_v(&ctx.theme().input), 0.0)
+                .child(centered);
             ctx.add(padded)
         } else {
-            let padded = crate::Padding::symmetric(HEADER_PADDING_V, pad_h).child(row);
+            let padded =
+                crate::Padding::symmetric(header_padding_v(&ctx.theme().input), pad_h).child(row);
             ctx.add(padded)
         };
 
@@ -613,7 +684,11 @@ impl Widget for TabHeader {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.tab.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTabStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeTabStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         let cfg = TabStyleConfig {
             label: inner_id,
@@ -708,6 +783,46 @@ impl Widget for TabHeader {
         let interaction_for_hover = interaction.clone();
         let focused_for_handler = focused.clone();
 
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // SC 2.5.7 wants the header drag reachable without a drag. One closure
+        // performs the move; the chord below, the header's context menu and its
+        // AccessKit custom actions all call it, so the routes cannot reach
+        // different end states. The commit is `on_reorder_to` — the bar's own
+        // handler, the same one a released drag calls.
+        let move_axis = match self.orientation {
+            super::delegate::TabBarOrientation::Horizontal => {
+                crate::common::ordered_move::MoveAxis::Horizontal
+            }
+            super::delegate::TabBarOrientation::Vertical => {
+                crate::common::ordered_move::MoveAxis::Vertical
+            }
+        };
+        // Suppressed for a pinned tab, whose order the pinned strip fixes —
+        // exactly the gate the custom actions already used.
+        let reorder_perform: Option<crate::common::ordered_move::PerformMove> = self
+            .on_reorder_to
+            .clone()
+            .filter(|_| self.initial_enabled && !self.pinned)
+            .map(|reorder| {
+                let total = self.shared.header_ids.clone();
+                let label = self.label.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::OrderedMove, ctx: &mut EventContext| {
+                        let count = total.borrow().len();
+                        let Some(dest) = mv.destination(index, count) else {
+                            return;
+                        };
+                        reorder(dest, ctx);
+                        ctx.announce(crate::common::ordered_move::move_announcement(
+                            Some(&label.resolve_now()),
+                            dest,
+                            count,
+                        ));
+                    },
+                ) as crate::common::ordered_move::PerformMove
+            });
+
         let mut handler_set = HandlerSet::new()
             .on_tap(move |_event, _ctx: &mut EventContext| {
                 selected.set(index);
@@ -734,10 +849,33 @@ impl Widget for TabHeader {
                 let panel_ids = panel_ids.clone();
                 let enabled_tabs = enabled_tabs.clone();
                 let on_close = self.on_close.clone();
+                let reorder_key = reorder_perform.clone();
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     let headers = header_ids.borrow();
                     if headers.is_empty() {
                         return EventResponse::Ignored;
+                    }
+                    // Alt plus the bar's own two arrows moves the tab; Alt+Home
+                    // and Alt+End take it to the ends. Read before the
+                    // navigation match below, whose arrow arms do not look at
+                    // the modifiers. Decoding and commit are both
+                    // `common::ordered_move`, shared with the header's context
+                    // menu and its custom actions.
+                    if let WidgetEvent::KeyDown { key, modifiers, .. } = event
+                        && let Some(ref perform) = reorder_key
+                        && let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
+                            *key,
+                            *modifiers,
+                            move_axis,
+                            ctx.is_rtl(),
+                        )
+                    {
+                        drop(headers);
+                        perform(mv, ctx);
+                        // The bar rebuilds around the moved tab, so the header
+                        // that had focus is gone; the reorder handler is what
+                        // re-establishes it.
+                        return EventResponse::Handled;
                     }
                     // ArrowLeft/Up = previous tab, ArrowRight/Down =
                     // next. We accept both axes regardless of bar
@@ -825,7 +963,8 @@ impl Widget for TabHeader {
             })
             .on_access_action_request({
                 let selected = self.selected.clone();
-                let on_reorder_to = self.on_reorder_to.clone();
+                let reorder_for_action = reorder_perform.clone();
+                let on_close_for_action = self.on_close.clone();
                 let header_ids_for_action = self.shared.header_ids.clone();
                 move |action, _node, data, ctx: &mut EventContext| -> EventResponse {
                     use teksilo_core::accesskit::{Action, ActionData};
@@ -844,27 +983,31 @@ impl Widget for TabHeader {
                             EventResponse::Handled
                         }
                         Action::CustomAction => {
-                            let Some(reorder) = on_reorder_to.as_ref() else {
-                                return EventResponse::Ignored;
-                            };
-                            // Custom action indices we advertise:
-                            //   0 = Move Left  (index → index - 1)
-                            //   1 = Move Right (index → index + 1)
+                            // Custom action ids we advertise: the four moves
+                            // (`MOVE_ACTION_IDS`) plus `CLOSE_ACTION_ID`.
                             let Some(ActionData::CustomAction(idx)) = data else {
                                 return EventResponse::Ignored;
                             };
-                            let total = header_ids_for_action.borrow().len();
-                            match idx {
-                                0 if index > 0 => {
-                                    reorder(index - 1, ctx);
-                                    EventResponse::Handled
-                                }
-                                1 if index + 1 < total => {
-                                    reorder(index + 1, ctx);
-                                    EventResponse::Handled
-                                }
-                                _ => EventResponse::Ignored,
+                            if idx == CLOSE_ACTION_ID {
+                                return match on_close_for_action.as_ref() {
+                                    Some(close) => {
+                                        close(ctx);
+                                        EventResponse::Handled
+                                    }
+                                    None => EventResponse::Ignored,
+                                };
                             }
+                            // The four moves route through the same closure the
+                            // chord and the context menu use, so an AT client
+                            // gets the announcement too.
+                            let Some(perform) = reorder_for_action.as_ref() else {
+                                return EventResponse::Ignored;
+                            };
+                            let Some(mv) = move_for_action_id(idx) else {
+                                return EventResponse::Ignored;
+                            };
+                            perform(mv, ctx);
+                            EventResponse::Handled
                         }
                         _ => EventResponse::Ignored,
                     }
@@ -932,6 +1075,23 @@ impl Widget for TabHeader {
 
         if let Some(factory) = self.context_menu_factory.clone() {
             handler_set = handler_set.context_menu(move |pos, ctx| (factory)(pos, ctx));
+        } else if let Some(ref perform) = reorder_perform {
+            // No delegate-supplied menu, so the framework's own carries the
+            // moves. A delegate that supplies one owns the menu: it is the
+            // application's tab, and `TabInfo::context_menu` is how it says so.
+            let perform = perform.clone();
+            let total = self.shared.header_ids.clone();
+            handler_set = handler_set.context_menu(move |_pos, _ctx| {
+                let count = total.borrow().len();
+                let (list, any) = crate::common::ordered_move::append_move_items(
+                    crate::menu_list::MenuList::new(),
+                    &perform,
+                    index,
+                    count,
+                    move_axis,
+                );
+                any.then(|| Box::new(list) as Box<dyn teksilo_core::widget::Widget>)
+            });
         }
 
         ctx.apply_self_handlers(handler_set);
@@ -1071,10 +1231,11 @@ impl Widget for TabHeader {
             builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(panel_id));
         }
 
-        // Advertise reorder custom actions for AT users who can't drag.
-        // Order matters: index 0 = "Move Left/Up", index 1 = "Move
-        // Right/Down" — `on_access_action_request` reads the index
-        // from `ActionData::CustomAction(idx)` and routes accordingly.
+        // Custom actions for AT users who cannot drag or hover. See
+        // [`CLOSE_ACTION_ID`] for why the ids are explicit rather than
+        // positional.
+        let mut actions: Vec<teksilo_core::accesskit::CustomAction> = Vec::new();
+
         // Suppressed for pinned tabs (whose order is conceptually fixed
         // by the pinned-strip layout — Firefox convention).
         if self.on_reorder_to.is_some() && self.initial_enabled && !self.pinned {
@@ -1083,33 +1244,37 @@ impl Widget for TabHeader {
             // would mislead a screen reader user. `LocalizedString`
             // resolves now; the locale signal binding in build()
             // dirties the AT cache on locale change so these refresh.
-            let (prev_label, next_label) = match self.orientation {
-                super::delegate::TabBarOrientation::Horizontal => (
-                    lit!("Move Left").resolve_now(),
-                    lit!("Move Right").resolve_now(),
-                ),
-                super::delegate::TabBarOrientation::Vertical => (
-                    lit!("Move Up").resolve_now(),
-                    lit!("Move Down").resolve_now(),
-                ),
+            let axis = match self.orientation {
+                super::delegate::TabBarOrientation::Horizontal => {
+                    crate::common::ordered_move::MoveAxis::Horizontal
+                }
+                super::delegate::TabBarOrientation::Vertical => {
+                    crate::common::ordered_move::MoveAxis::Vertical
+                }
             };
-            let mut actions = Vec::with_capacity(2);
-            if self.index > 0 {
+            for mv in crate::common::ordered_move::OrderedMove::available(self.index, total) {
                 actions.push(teksilo_core::accesskit::CustomAction {
-                    id: 0,
-                    description: prev_label,
+                    id: move_action_id(mv),
+                    description: mv.label(axis).resolve_now(),
                 });
             }
-            if self.index + 1 < total {
-                actions.push(teksilo_core::accesskit::CustomAction {
-                    id: 1,
-                    description: next_label,
-                });
-            }
-            if !actions.is_empty() {
-                builder.add_action(teksilo_core::accesskit::Action::CustomAction);
-                builder.set_custom_actions(actions);
-            }
+        }
+
+        // Close. The `×` is hover-revealed and deliberately not focusable, so
+        // the only routes to it were a pointer that hovers and a middle-click —
+        // neither available to an assistive technology, and the first not
+        // available to a finger. `Delete` on the focused header exists but is
+        // a keyboard route, not an AT action.
+        if self.on_close.is_some() && self.initial_enabled {
+            actions.push(teksilo_core::accesskit::CustomAction {
+                id: CLOSE_ACTION_ID,
+                description: lit!("Close").resolve_now(),
+            });
+        }
+
+        if !actions.is_empty() {
+            builder.add_action(teksilo_core::accesskit::Action::CustomAction);
+            builder.set_custom_actions(actions);
         }
     }
 

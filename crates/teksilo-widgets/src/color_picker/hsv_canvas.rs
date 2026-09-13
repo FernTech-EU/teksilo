@@ -33,15 +33,71 @@ use teksilo_canvas::{Canvas, Paint, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::Role;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::PointerButton;
+use teksilo_core::event::{EventResponse, Key, PointerButton, WidgetEvent};
 use teksilo_core::gesture::DragPhase;
+use teksilo_core::pointer::touch_action::TouchAction;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{
     CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
+use teksilo_i18n::{LocalizedString, lit};
 use teksilo_tokens::{Color, CornerRadius};
+
+/// One step of the 2-D value, in the four directions the arrows name.
+///
+/// A saturation-and-brightness field is the one control in the picker whose
+/// value is a *pair*, so `Action::Increment` cannot serve it: an assistive
+/// client asking to "increment" would not be saying which axis. Four named
+/// custom actions do say.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CanvasStep {
+    SaturationUp,
+    SaturationDown,
+    BrightnessUp,
+    BrightnessDown,
+}
+
+/// One arrow press, as a fraction of the axis.
+const FINE_STEP: f32 = 0.01;
+
+/// One arrow press with `Shift` held.
+const COARSE_STEP: f32 = 0.10;
+
+impl CanvasStep {
+    const ALL: [CanvasStep; 4] = [
+        Self::SaturationDown,
+        Self::SaturationUp,
+        Self::BrightnessDown,
+        Self::BrightnessUp,
+    ];
+
+    /// The arrow that means this step.
+    ///
+    /// Deliberately **not** mirrored under RTL, unlike `Slider`: the canvas
+    /// paints its saturation gradient left-to-right in every direction, so an
+    /// arrow that mirrored would disagree with the picture the user is looking
+    /// at. A slider mirrors because its paint does.
+    fn from_key(key: Key) -> Option<Self> {
+        match key {
+            Key::ArrowRight => Some(Self::SaturationUp),
+            Key::ArrowLeft => Some(Self::SaturationDown),
+            Key::ArrowUp => Some(Self::BrightnessUp),
+            Key::ArrowDown => Some(Self::BrightnessDown),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> LocalizedString {
+        match self {
+            Self::SaturationUp => lit!("Increase saturation"),
+            Self::SaturationDown => lit!("Decrease saturation"),
+            Self::BrightnessUp => lit!("Increase brightness"),
+            Self::BrightnessDown => lit!("Decrease brightness"),
+        }
+    }
+}
 
 pub(crate) struct HsvCanvas {
     hue: Signal<f32>,
@@ -136,8 +192,71 @@ impl Widget for HsvCanvas {
         };
 
         let mut handlers = HandlerSet::new()
-            .focusable(false)
-            .cursor(CursorIcon::Crosshair);
+            // Focusable, because the 2-D drag is the only way to reach a
+            // saturation-and-brightness pair on this control and WCAG 2.2
+            // SC 2.5.7 wants one that is not a drag. The arrows below are that
+            // route; the numeric entry beside the canvas is the other.
+            .focusable(true)
+            .cursor(CursorIcon::Crosshair)
+            // A continuous manipulator: the value it produces IS the press
+            // position, so no default touch behaviour may be run on it. `NONE`
+            // freezes the hit path's touch action at the press
+            // (`docs/touch-and-pen.md` §7.3); what it forbids, with a test on
+            // it, is a two-contact pinch started on this control reaching the
+            // surface underneath. The press capture the drag takes is what
+            // separately keeps a scroller the picker sits in from taking the
+            // gesture away.
+            .touch_action(TouchAction::NONE);
+
+        // The non-drag route: the arrows step saturation and brightness, Shift
+        // steps by ten times as much, and the same four steps are advertised as
+        // AccessKit custom actions for a client with no keyboard either. All of
+        // them go through one closure, so the routes cannot disagree, and each
+        // one announces the pair it produced — a screen-reader user pressing an
+        // arrow on a colour field otherwise hears nothing at all.
+        let step_hsv: Rc<dyn Fn(CanvasStep, bool, &mut teksilo_core::widget::EventContext)> = {
+            let set_hsv = set_hsv.clone();
+            let hue = self.hue.clone();
+            let saturation = self.saturation.clone();
+            let value_hsv = self.value_hsv.clone();
+            Rc::new(move |step, coarse, ctx| {
+                let delta = if coarse { COARSE_STEP } else { FINE_STEP };
+                let (mut sat, mut val) = (
+                    saturation.get().clamp(0.0, 1.0),
+                    value_hsv.get().clamp(0.0, 1.0),
+                );
+                match step {
+                    CanvasStep::SaturationUp => sat = (sat + delta).min(1.0),
+                    CanvasStep::SaturationDown => sat = (sat - delta).max(0.0),
+                    CanvasStep::BrightnessUp => val = (val + delta).min(1.0),
+                    CanvasStep::BrightnessDown => val = (val - delta).max(0.0),
+                }
+                (set_hsv)(hue.get(), sat, val);
+                ctx.announce(format!(
+                    "Saturation {}%, brightness {}%",
+                    (sat * 100.0).round() as i32,
+                    (val * 100.0).round() as i32
+                ));
+            })
+        };
+
+        {
+            let step_hsv = step_hsv.clone();
+            handlers = handlers.on_key(move |event, ctx| {
+                if let WidgetEvent::KeyDown { key, modifiers, .. } = event
+                    && let Some(step) = CanvasStep::from_key(*key)
+                {
+                    step_hsv(step, modifiers.shift(), ctx);
+                    return EventResponse::Handled;
+                }
+                EventResponse::Ignored
+            });
+        }
+        for step in CanvasStep::ALL {
+            let step_hsv = step_hsv.clone();
+            handlers =
+                handlers.access_custom_action(step.label(), move |ctx| step_hsv(step, false, ctx));
+        }
 
         {
             let dragging = dragging.clone();
@@ -146,6 +265,7 @@ impl Widget for HsvCanvas {
                 DragPhase::Started {
                     position,
                     button: PointerButton::Primary,
+                    ..
                 } => {
                     dragging.set(true);
                     apply(position.x, position.y);
@@ -260,10 +380,20 @@ impl Widget for HsvCanvas {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Placeholder role. The containing ColorPicker excludes this
-        // node's subtree from the AT tree via `.access_exclude_subtree()`,
-        // since 2D pointer gestures have no ARIA equivalent and AT users
-        // rely on the H/S/V/A sliders + RGB/HSV/hex spinners instead.
-        builder.set_role(Role::GenericContainer);
+        // A 2-D value has no ARIA role — there is no `slider2d` — so the node is
+        // a named group carrying the four steps as custom actions. It is NOT a
+        // `GenericContainer` with no properties: the walker prunes those, and a
+        // pruned node advertises nothing, which is what left this control
+        // undriveable by assistive technology.
+        //
+        // The value is on the node as text rather than as a number, because
+        // `numeric_value` holds one number and this control has two.
+        builder.set_role(Role::Group);
+        builder.set_name(lit!("Saturation and brightness").resolve_now());
+        builder.set_value(format!(
+            "Saturation {}%, brightness {}%",
+            (self.saturation.get().clamp(0.0, 1.0) * 100.0).round() as i32,
+            (self.value_hsv.get().clamp(0.0, 1.0) * 100.0).round() as i32
+        ));
     }
 }

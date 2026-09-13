@@ -98,6 +98,16 @@ impl CanvasTheme {
         }
     }
 
+    /// Resolve to a concrete theme at `density`.
+    ///
+    /// Every path that hands a theme to the tree goes through here, because a
+    /// theme carries the density: resolving one without it — as the theme
+    /// pickers used to — silently drops the previewer back to `Compact` on the
+    /// next theme click.
+    pub fn theme_at(self, density: teksilo_tokens::TargetDensity) -> teksilo_core::Theme {
+        self.theme().with_density(density)
+    }
+
     /// Resolve to a concrete theme. For `Native`, builds a theme that
     /// *adopts* the OS palette rather than picking between Teksilo's
     /// built-in Int UI light/dark — this is what gives a visibly
@@ -143,7 +153,19 @@ pub struct AppState {
 
     pub canvas_theme: Signal<CanvasTheme>,
     pub canvas_locale: Signal<Option<String>>,
-    #[allow(dead_code)]
+    /// The input density the whole previewer is projected onto.
+    ///
+    /// Bound by [`PreviewerRoot`] at
+    /// [`BindingLevel::Rebuild`](teksilo_core::binding::BindingLevel::Rebuild): a density
+    /// decides dimensions inside `build()` (a `MinSize` wrapper, a recipe's
+    /// metrics), so a relayout cannot re-bake them. The toolbar's switcher sets
+    /// this **and** hands the tree the re-projected theme; the two together are
+    /// what `WidgetTree::set_input_density` does in one call for a host that
+    /// can reach the tree.
+    pub density: Signal<teksilo_tokens::TargetDensity>,
+    /// Canvas zoom, in percent. Drives a content transform on the stage, so it
+    /// magnifies what is painted without changing what is laid out — a preview
+    /// zoomed to 200 % still reports the size the widget really is.
     pub zoom_percent: Signal<f32>,
     pub background_mode: Signal<BackgroundMode>,
 
@@ -166,6 +188,7 @@ impl AppState {
             // on frame 1.
             canvas_theme: Signal::new(CanvasTheme::Native),
             canvas_locale: Signal::new(None),
+            density: Signal::new(teksilo_tokens::TargetDensity::Compact),
             zoom_percent: Signal::new(100.0),
             background_mode: Signal::new(BackgroundMode::Themed),
             navigator_filter: Signal::new(String::new()),
@@ -255,6 +278,7 @@ pub struct PreviewerRoot {
     state: Option<AppState>,
     initial_widget: Option<String>,
     initial_variant: Option<String>,
+    initial_density: teksilo_tokens::TargetDensity,
     root_id: Option<WidgetId>,
 }
 
@@ -264,8 +288,26 @@ impl PreviewerRoot {
             state: None,
             initial_widget,
             initial_variant,
+            initial_density: teksilo_tokens::TargetDensity::Compact,
             root_id: None,
         }
+    }
+
+    /// Seed the density the first build runs at (the `--density` flag).
+    pub fn with_density(mut self, density: teksilo_tokens::TargetDensity) -> Self {
+        self.initial_density = density;
+        self
+    }
+
+    /// The shared state, once `build` has created it. `None` before the first
+    /// build.
+    ///
+    /// Test-only: the root is reached through `Widget::as_any` by the headless
+    /// tests, and nothing in the running previewer asks (each pane is handed the
+    /// state directly at build time).
+    #[cfg(test)]
+    pub fn state(&self) -> Option<&AppState> {
+        self.state.as_ref()
     }
 
     fn resolve_initial_widget(&self) -> Option<&'static str> {
@@ -295,7 +337,22 @@ impl std::fmt::Debug for PreviewerRoot {
 
 impl Widget for PreviewerRoot {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let first_build = self.state.is_none();
         let state = self.state.get_or_insert_with(AppState::new).clone();
+        if first_build {
+            state.density.set(self.initial_density);
+        }
+
+        // A density switch has to REBUILD: every dimension it moves is decided
+        // in a `build()` — a `MinSize` wrapper, a recipe's metrics, how many
+        // items a toolbar fits — and marking layout cannot re-bake those. This
+        // is `WidgetTree::set_input_density`'s own rule, applied from the one
+        // place an app can apply it: its own root.
+        state.density.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            teksilo_core::binding::BindingLevel::Rebuild,
+        );
 
         // Initial selection — only on first build, never overwrite an
         // existing selection on rebuild.
@@ -405,6 +462,10 @@ impl Widget for PreviewerRoot {
             Some(id) => vec![id],
             None => Vec::new(),
         }
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

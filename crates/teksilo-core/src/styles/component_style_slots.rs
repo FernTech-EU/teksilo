@@ -37,7 +37,8 @@ use crate::styles::{
     SharedScrollBarStyle, SharedSearchFieldStyle, SharedSegmentedControlStyle, SharedSliderStyle,
     SharedSnackbarStyle, SharedSpinBoxStyle, SharedSplitButtonStyle, SharedSplitterStyle,
     SharedStandardItemStyle, SharedTabStyle, SharedTableStyle, SharedTextInputStyle,
-    SharedToastStyle, SharedToggleStyle, SharedTooltipStyle, SharedWebViewStyle,
+    SharedTextSelectionStyle, SharedToastStyle, SharedToggleStyle, SharedTooltipStyle,
+    SharedWebViewStyle,
 };
 
 /// Typed slot bag living on [`crate::styles::Theme`]. One slot per
@@ -86,6 +87,140 @@ pub struct ComponentStyleSlots {
     pub drop_target: Option<SharedDropTargetStyle>,
     pub grid_view: Option<SharedGridViewStyle>,
     pub web_view: Option<SharedWebViewStyle>,
+    /// Touch text-selection chrome — the selection handles and the magnifier.
+    /// See [`TextSelectionStyle`](crate::styles::TextSelectionStyle).
+    pub text_selection: Option<SharedTextSelectionStyle>,
+}
+
+/// Every slot's name, written **once**, expanded through by each probe below.
+///
+/// Two hand-maintained copies of a forty-two-name list is how one of them loses
+/// a slot, which for [`ComponentStyleSlots::installed`] and
+/// [`ComponentStyleSlots::unchanged_against`] means an override that is silently
+/// never reported. The `Self { .. }`-less destructure inside each probe still
+/// makes a slot added to the struct a compile error; this makes a slot added
+/// *here* reach both askers at once.
+macro_rules! for_every_slot {
+    ($probe:ident) => {
+        $probe!(
+            button,
+            split_button,
+            splitter,
+            icon_button,
+            toggle,
+            checkbox,
+            radio,
+            radio_tile,
+            slider,
+            text_input,
+            combo_box,
+            menu_item,
+            panel,
+            card,
+            chart,
+            popover,
+            tooltip,
+            scroll_bar,
+            standard_item,
+            tab,
+            dialog,
+            snackbar,
+            toast,
+            banner,
+            badge,
+            progress_bar,
+            link,
+            segmented_control,
+            avatar,
+            calendar,
+            color_picker,
+            spin_box,
+            date_edit,
+            search_field,
+            rich_text_editor,
+            table,
+            list_container,
+            drop_zone,
+            drop_target,
+            grid_view,
+            web_view,
+            text_selection
+        )
+    };
+}
+
+impl ComponentStyleSlots {
+    /// The names of the slots that carry an override, in declaration order.
+    ///
+    /// The direct "what is installed here" question, kept for diagnostics and
+    /// tests. Its original consumer — the target-conformance audit's
+    /// [`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots)
+    /// — now asks [`unchanged_against`](Self::unchanged_against) instead,
+    /// comparing the theme derived at two densities.
+    ///
+    /// The body destructures `Self` **without** a `..` rest pattern, so adding a
+    /// slot to the struct and forgetting it in `for_every_slot!` is a compile
+    /// error rather than a silently unreported override.
+    pub fn installed(&self) -> Vec<&'static str> {
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {{
+                let Self { $($name),* } = self;
+                let mut out = Vec::new();
+                $(if $name.is_some() {
+                    out.push(stringify!($name));
+                })*
+                out
+            }};
+        }
+        for_every_slot!(probe)
+    }
+
+    /// The slots installed here that are **the same object** in `other` — the
+    /// ones a re-derivation left alone.
+    ///
+    /// One consumer, and it is the same one [`installed`](Self::installed)
+    /// has: the target-conformance audit's
+    /// [`unprojected_style_slots`](crate::accessibility::target_audit::unprojected_style_slots),
+    /// which asks a theme for the styles no
+    /// [`DensityProjection`](crate::styles::DensityProjection) rebuilds by
+    /// deriving it at two densities and comparing.
+    ///
+    /// `Rc::ptr_eq`, not any comparison of contents: a Tier-3 style is a trait
+    /// object with no equality of its own, and identity is the right question.
+    /// A projection that re-derives a slot builds a fresh `Rc` for it, so a slot
+    /// still pointing at the same allocation at two densities is one the ladder
+    /// did not reach — whoever installed it.
+    ///
+    /// The body destructures `self` without a `..` rest pattern, for the reason
+    /// [`installed`](Self::installed) does: adding a slot to the struct and
+    /// forgetting it in `for_every_slot!` is a compile error rather than a
+    /// silent omission. Both probes expand through that one roster, so neither
+    /// can be the copy that fell behind.
+    pub fn unchanged_against(&self, other: &Self) -> Vec<&'static str> {
+        fn same<T: ?Sized>(a: &Option<std::rc::Rc<T>>, b: &Option<std::rc::Rc<T>>) -> bool {
+            matches!((a, b), (Some(x), Some(y)) if std::rc::Rc::ptr_eq(x, y))
+        }
+        macro_rules! probe {
+            ($($name:ident),* $(,)?) => {{
+                // The destructure is what makes this exhaustive: a slot added
+                // to the struct and not listed below fails to compile here.
+                // `other` is then read field by field under the same names.
+                let Self { $($name),* } = self;
+                let mut out = Vec::new();
+                $(if same($name, &other.$name) {
+                    out.push(stringify!($name));
+                })*
+                out
+            }};
+        }
+        for_every_slot!(probe)
+    }
+
+    /// Whether no slot carries an override — the state every shipped preset
+    /// that ships raw tokens alone is in.
+    pub fn is_empty(&self) -> bool {
+        self.installed().is_empty()
+    }
 }
 
 impl std::fmt::Debug for ComponentStyleSlots {
@@ -135,6 +270,7 @@ impl std::fmt::Debug for ComponentStyleSlots {
             .field("drop_target", &self.drop_target.is_some())
             .field("grid_view", &self.grid_view.is_some())
             .field("web_view", &self.web_view.is_some())
+            .field("text_selection", &self.text_selection.is_some())
             .finish()
     }
 }
@@ -192,5 +328,6 @@ impl PartialEq for ComponentStyleSlots {
             && rc_eq(&self.drop_target, &other.drop_target)
             && rc_eq(&self.grid_view, &other.grid_view)
             && rc_eq(&self.web_view, &other.web_view)
+            && rc_eq(&self.text_selection, &other.text_selection)
     }
 }

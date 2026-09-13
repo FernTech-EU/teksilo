@@ -24,8 +24,10 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use teksilo_core::Signal;
+use teksilo_core::kinetic::KineticScroller;
 use teksilo_text::text_document::{DocumentEvent, Subscription, TextCursor, TextDocument};
 use teksilo_text::{CursorAffinity, RichTextEngine, WrapMode};
+use teksilo_tokens::OverscrollStyle;
 
 use super::config::CodeConfig;
 use crate::common::editor_runtime::{CaretBlink, CaretPolicy, Debounce, PolicyBundle};
@@ -114,6 +116,12 @@ pub(crate) struct CodeEditorState {
     pub max_scroll_y: Signal<f32>,
     pub viewport_ratio_x: Signal<f32>,
     pub viewport_ratio_y: Signal<f32>,
+    /// This surface's pan physics: the range a finger's pan is clamped to and
+    /// the offset it is currently holding. It lives beside the offsets it
+    /// moves, so [`sync_viewport`](Self::sync_viewport) — the one place the
+    /// viewport extent is known — can publish into it, and so it survives the
+    /// widget's rebuild along with the rest of the state.
+    pub scroller: Rc<RefCell<KineticScroller>>,
 
     // --- Viewport ----------------------------------------------------------
     /// Written only by [`sync_viewport`](Self::sync_viewport).
@@ -127,6 +135,34 @@ pub(crate) struct CodeEditorState {
     /// `position + node_origin - viewport_origin`; the body is inset within
     /// the wrapper, so the two origins differ.
     pub node_origin: teksilo_canvas::Point,
+
+    /// The live input tokens — the density ladder the kind-derived pointer
+    /// geometry reads.
+    ///
+    /// Snapshotted in `build()` rather than read per event, because
+    /// `EventContext` exposes no theme. `set_input_density` marks the tree at
+    /// `BindingLevel::Rebuild`, so a density change re-runs `build()` and
+    /// refreshes this.
+    pub input_tokens: teksilo_tokens::InputTokens,
+
+    /// The body's viewport got **smaller** on the last `sync_viewport`, and the
+    /// caret has not been re-revealed for it yet.
+    ///
+    /// Set by [`sync_viewport`](Self::sync_viewport) — the single writer of the
+    /// viewport, and so the only place that can see the two sizes at once — and
+    /// consumed by the body's paint *after* the relayout the shrink forces,
+    /// because a caret cannot be revealed against a layout that has not run.
+    /// `sync_viewport`'s `bool` return cannot carry this on its own: the body
+    /// calls it from `place_children` first, so by paint time the change has
+    /// already been absorbed and the return is `false`.
+    ///
+    /// A **shrink** only. Growing reveals more text and never pushes the caret
+    /// out, and re-revealing on every resize would drag a reader's scroll
+    /// position back to the caret every time a window edge moved. The
+    /// [`LogView`](super::LogView) never sets it: its follow-tail rule is
+    /// *derived* from the scroll offset, so a reveal that moved that offset would
+    /// silently switch following back on.
+    pub pending_caret_reveal: bool,
 
     // --- Layout strategy ---------------------------------------------------
     pub needs_full_layout: bool,
@@ -294,10 +330,13 @@ impl CodeEditorState {
             max_scroll_y: Signal::new(0.0),
             viewport_ratio_x: Signal::new(1.0),
             viewport_ratio_y: Signal::new(1.0),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             viewport_width: 0.0,
             viewport_height: 0.0,
             viewport_origin: teksilo_canvas::Point::ZERO,
             node_origin: teksilo_canvas::Point::ZERO,
+            input_tokens: teksilo_tokens::InputTokens::default(),
+            pending_caret_reveal: false,
             needs_full_layout: true,
             last_relayout_block_id: None,
             content_dirty: true,
@@ -362,9 +401,26 @@ impl CodeEditorState {
     /// apart is how a resize ends up laying text out at the old width.
     pub fn sync_viewport(&mut self, bounds: teksilo_canvas::Rect) -> bool {
         self.viewport_origin = teksilo_canvas::Point::new(bounds.x, bounds.y);
+        // Unconditional, unlike the engine write below: installing the scroll
+        // behaviour replaces the scroller object, so an extent published only
+        // on a size *change* would be lost at the next rebuild and never come
+        // back on a surface nobody resizes.
+        self.scroller
+            .borrow_mut()
+            .set_viewport(teksilo_canvas::Vec2::new(bounds.width, bounds.height));
         let changed = (self.viewport_width - bounds.width).abs() > 0.5
             || (self.viewport_height - bounds.height).abs() > 0.5;
         if changed {
+            // A viewport that got smaller can leave the caret outside it — the
+            // on-screen keyboard opening under a focused editor is the case that
+            // makes this a correctness matter rather than a nicety. Recorded
+            // rather than acted on: the shrink forces a relayout, and the caret
+            // cannot be revealed against a layout that has not run yet. A log
+            // view is exempt (`is_streaming`): its follow-tail rule is derived
+            // from the scroll offset a reveal would move.
+            self.pending_caret_reveal |= !self.is_streaming()
+                && (bounds.width < self.viewport_width - 0.5
+                    || bounds.height < self.viewport_height - 0.5);
             self.viewport_width = bounds.width;
             self.viewport_height = bounds.height;
             self.engine.set_viewport(bounds.width, bounds.height);

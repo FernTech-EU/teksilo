@@ -15,11 +15,13 @@
 //! paint (`effective_enabled`), so the frame is intentionally *not* dimmed
 //! here — `cfg.is_disabled` is available for custom styles that want to.
 
+use teksilo_canvas::Size;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::density_min_size;
 use teksilo_core::styles::{SplitButtonStyle, SplitButtonStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole, TargetAxes};
 
 use crate::button::{ButtonVariant, InteractionState};
 use crate::primitives::{MinSize, RectWidget, ZStack};
@@ -35,6 +37,20 @@ use crate::split_button::{
 /// (`theme.style_slots.split_button = Some(Rc::new(...))`).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeSplitButtonStyle;
+
+impl RecipeSplitButtonStyle {
+    /// This style resolved against a density's [`InputTokens`], as
+    /// `RecipeSplitButtonStyle::for_tokens(&ctx.theme().input)` at the widget's own
+    /// build site.
+    ///
+    /// The style is a unit struct: it borrows the `SPLIT_BUTTON_*`
+    /// dimensions from the widget module, and resolves them per density
+    /// inside [`make_body`](SplitButtonStyle::make_body) from
+    /// `ctx.theme().input`, so there is nothing to bake here.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
+        Self
+    }
+}
 
 impl SplitButtonStyle for RecipeSplitButtonStyle {
     fn make_body(&self, cfg: &SplitButtonStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -80,9 +96,17 @@ impl SplitButtonStyle for RecipeSplitButtonStyle {
         let frame_id = ctx.add(ZStack::new().add_child(bg_id).add_child(cfg.content));
 
         // Enforce the overall minimum: main min_width + divider + chevron.
+        // Only the height is a target floor — the width is the sum of three
+        // painted extents, and the chevron's own 22 dp zone reaches its floor
+        // through `partition_targets`, not by growing.
         let total_min_width =
             SPLIT_BUTTON_MIN_WIDTH + SPLIT_BUTTON_DIVIDER_WIDTH + SPLIT_BUTTON_CHEVRON_WIDTH;
-        ctx.add(MinSize::new(total_min_width, SPLIT_BUTTON_HEIGHT).child_id(frame_id))
+        let min = density_min_size(
+            Size::new(total_min_width, SPLIT_BUTTON_HEIGHT),
+            TargetAxes::HEIGHT,
+            &ctx.theme().input,
+        );
+        ctx.add(MinSize::new(min.width, min.height).child_id(frame_id))
     }
 }
 

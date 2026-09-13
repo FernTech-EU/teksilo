@@ -23,9 +23,10 @@ use teksilo_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, SurfaceRole};
+use teksilo_tokens::{CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
 use crate::primitives::RectWidget;
+use teksilo_core::styles::density::{dp, spacing};
 
 // IntUI design tokens for Dialog. The recipe owns its own dimensions.
 pub const DIALOG_CONTENT_PADDING: f32 = 24.0;
@@ -41,13 +42,24 @@ pub struct DialogRecipe {
     pub corner_radius: f32,
 }
 
-impl Default for DialogRecipe {
-    fn default() -> Self {
+impl DialogRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            content_padding: DIALOG_CONTENT_PADDING,
-            min_width: DIALOG_MIN_WIDTH,
+            content_padding: spacing(DIALOG_CONTENT_PADDING, tokens),
+            min_width: dp(DIALOG_MIN_WIDTH, TargetRole::Target, tokens),
             corner_radius: DIALOG_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for DialogRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -62,6 +74,18 @@ pub struct RecipeDialogStyle {
 impl RecipeDialogStyle {
     pub fn new(recipe: DialogRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeDialogStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: DialogRecipe::for_tokens(tokens),
+        }
     }
 }
 

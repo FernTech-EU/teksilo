@@ -807,16 +807,16 @@ fn make_standard_tree_view() -> (WidgetTree, WidgetId, teksilo_data::SelectionMo
 
 fn press_at(w: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    w.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    w.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    w.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    w.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 #[test]
@@ -913,19 +913,17 @@ fn chevron_tap_with_jitter_toggles_in_a_reorderable_tree() {
     // Down, drift to exactly 5px (arms an ancestor drag but keeps the tap
     // alive), then release back within tolerance — a valid tap that the drag
     // must not steal.
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(8.0, 10.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(8.0, 15.0), // exactly 5px from down
-    });
-    wtree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(8.0, 13.0), // 3px from down → within tap tolerance
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(8.0, 10.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(8.0, 15.0)));
+    wtree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(8.0, 13.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert_eq!(
@@ -941,20 +939,18 @@ fn chevron_tap_with_jitter_toggles_in_a_reorderable_tree() {
 /// Move to target, Up. Mirrors `list_view::tests::drag_item`.
 fn drag_item(tree: &mut WidgetTree, from: Point, to: Point) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: from,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(from.x + 10.0, from.y),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove { position: to });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: to,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)));
+    tree.dispatch_event(WidgetEvent::pointer_move(to));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        to,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 /// Build a reorderable TreeView at the tree root with three top-level
@@ -981,6 +977,84 @@ fn make_reorderable_tree_view() -> (
         .reorderable(true),
     );
     (wtree, tv_id, model, a, b, c)
+}
+
+/// The hover affordance reads the same drop bands as the drop itself.
+///
+/// `on_drag_hover` and `on_drop` each resolve the row's before / into / after
+/// bands from `common::drop_bands`, and they are the two halves that must
+/// agree: the first draws the line or the highlight the user aims by, the
+/// second decides where the row lands. A test that only watches the outcome
+/// cannot see them disagree — measured: unwiring the pointer kind at the hover
+/// site alone leaves every outcome test green.
+///
+/// So this asserts the affordance directly, at one offset that the two pointer
+/// kinds read differently: 10 dp into a 28 dp row is the middle third for a
+/// cursor (a `Rect`, "drop into this row") and inside the widened leading band
+/// for a finger (a `Line`, "insert before it").
+#[test]
+fn the_hover_affordance_reads_the_same_drop_bands_as_the_drop() {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+
+    fn feedback_at(finger: bool, y: f32) -> Option<crate::data_views::DropViz> {
+        let model = sample_tree();
+        let mut wtree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let view = TreeView::new(model.clone(), |_item, entry, _sel| {
+            Box::new(FixedLeaf(100.0 + entry.depth as f32 * 20.0, 28.0))
+        })
+        .item_height(28.0)
+        .reorderable(true);
+        let feedback = view.drop_feedback_signal().clone();
+        let _tv_id = wtree.add(view);
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+
+        // Row 2 spans 56..84; the latching sample stays inside it (a deferred
+        // drag whose first sample leaves the pressed row is revoked — see
+        // `a_finger_reorder_survives_its_first_sample_leaving_the_row`).
+        let from = Point::new(50.0, 60.0);
+        // 20 dp of travel, which clears the 18 dp touch `drag_slop`.
+        let latch = Point::new(50.0, 80.0);
+        let to = Point::new(50.0, y);
+        if finger {
+            let f = wtree.new_contact();
+            wtree.touch_down(f, from);
+            wtree.advance_input_time(
+                teksilo_tokens::GestureProfile::TOUCH.long_press
+                    + std::time::Duration::from_millis(10),
+            );
+            wtree.touch_move(f, latch);
+            wtree.touch_move(f, to);
+        } else {
+            wtree.dispatch_event(WidgetEvent::pointer_down(
+                from,
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ));
+            wtree.dispatch_event(WidgetEvent::pointer_move(latch));
+            wtree.dispatch_event(WidgetEvent::pointer_move(to));
+        }
+        // Read before the release: the drop clears the affordance.
+        feedback.get()
+    }
+
+    assert!(
+        matches!(
+            feedback_at(false, 10.0),
+            Some(crate::data_views::DropViz::Rect { .. })
+        ),
+        "a cursor 10 dp into a 28 dp row is in the `Into` third, so the \
+         affordance must be the drop-into highlight; got {:?}",
+        feedback_at(false, 10.0),
+    );
+    assert!(
+        matches!(
+            feedback_at(true, 10.0),
+            Some(crate::data_views::DropViz::Line { .. })
+        ),
+        "a finger at the same offset is inside the widened `Before` band, so \
+         the affordance must be an insertion line; got {:?}",
+        feedback_at(true, 10.0),
+    );
 }
 
 #[test]
@@ -1299,17 +1373,13 @@ fn spring_loaded_folder_expands_after_dwell() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Start a drag on C (y=70, row 2), then hover over B (row 1, y=42).
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 70.0),
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 42.0),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 70.0)));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 42.0)));
 
     // Confirm B is currently collapsed.
     assert!(tree.with_item(b, |_| ()).is_some());
@@ -1336,11 +1406,11 @@ fn spring_loaded_folder_expands_after_dwell() {
     let _ = a;
 
     // Clean up drag.
-    wtree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(60.0, 42.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(60.0, 42.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 #[test]
@@ -1372,17 +1442,13 @@ fn spring_loaded_folder_expand_then_drop_moves_the_originally_dragged_node() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Start a drag on C (y=70, row 2), then hover over B (row 1, y=42).
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 70.0),
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(60.0, 42.0),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 70.0)));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(60.0, 42.0)));
     assert_eq!(
         row_ids(&wtree, tv_id).len(),
         3,
@@ -1402,12 +1468,12 @@ fn spring_loaded_folder_expand_then_drop_moves_the_originally_dragged_node() {
     // Move to the top third of row 0 (A) — DropPosition::Before — and
     // release: drop the dragged node before A.
     let drop_at = Point::new(60.0, 2.0);
-    wtree.dispatch_event(WidgetEvent::PointerMove { position: drop_at });
-    wtree.dispatch_event(WidgetEvent::PointerUp {
-        position: drop_at,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_move(drop_at));
+    wtree.dispatch_event(WidgetEvent::pointer_up(
+        drop_at,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(
         tree.with_item(tree.root(0), |&v| v),
@@ -1666,10 +1732,10 @@ fn nested_tree_chains_to_outer_at_boundary() {
     use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
     let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Chain);
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     // The inner tree absorbed the big scroll (didn't chain) → outer at 0.
     assert!(
@@ -1678,10 +1744,10 @@ fn nested_tree_chains_to_outer_at_boundary() {
     );
 
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     assert!(
         outer_y.get() > 0.01,
@@ -1694,16 +1760,16 @@ fn nested_tree_contain_blocks_chaining() {
     use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
     let (mut tree, outer_y) = nested_tree_fixture(OverscrollBehavior::Contain);
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     tree.pointer_move(Point::new(50.0, 40.0));
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(200.0, 150.0));
     assert!(
         outer_y.get() < 0.01,
@@ -2223,6 +2289,14 @@ fn container_focus_ring_shows_when_tab_focused_without_selection() {
 
     // Tab in: focus the view under keyboard modality. `Tab` is ignored by the
     // tree's key handler, so the selection stays empty (no row ring).
+    //
+    // That there is a Tab to come in *by* is asserted rather than assumed —
+    // `WidgetTree::focus` has no focusable guard, so every assertion below
+    // would hold for a view no keyboard user could reach.
+    assert!(
+        tree.tab_stops_within(tv).contains(&tv),
+        "the view is no Tab stop, so there is no Tab-focus state to ring"
+    );
     tree.focus(tv);
     tree.press_key(Key::Tab, Modifiers::NONE);
     assert!(view_focused.get(), "view holds keyboard focus");
@@ -3048,18 +3122,14 @@ fn drag_over(target_row: usize, frac: f32) -> (WidgetTree, WidgetId, f32) {
 
     // Drag the last row (B) so no target is inside the dragged subtree.
     let src_y = 3.0 * 28.0 + 14.0;
-    wtree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, src_y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(62.0, src_y),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, src_y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(62.0, src_y)));
     let y = target_row as f32 * 28.0 + 28.0 * frac;
-    wtree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(62.0, y),
-    });
+    wtree.dispatch_event(WidgetEvent::pointer_move(Point::new(62.0, y)));
     (wtree, tv_id, y)
 }
 
@@ -3525,15 +3595,20 @@ fn a_tree_is_one_tab_stop_and_space_checks_the_focused_row() {
     );
     let p = SizeProposal::exact(400.0, 300.0);
     wtree.layout(p);
-    wtree.focus(tv);
 
-    let mut seen = std::collections::BTreeSet::new();
-    for _ in 0..12 {
-        wtree.press_key(Key::Tab, Modifiers::NONE);
-        wtree.layout(p);
-        seen.insert(wtree.focused());
-    }
-    assert_eq!(seen.len(), 1, "the tree is a single Tab stop");
+    // Read off the traversal graph, not by pressing Tab and counting where
+    // focus lands: `WidgetTree::focus` has no focusable guard, so a forced
+    // focus followed by keys that the tree consumes yields one distinct target
+    // whether the tree is a single Tab stop or no stop at all.
+    let stops = wtree.tab_stops_within(tv);
+    assert_eq!(
+        stops.len(),
+        1,
+        "a tree is one Tab stop; got {} — 0 means no keyboard user can reach \
+         it, more than 1 means a row control leaked into the Tab order",
+        stops.len()
+    );
+    wtree.focus(tv);
 
     // Cursor on the first root ("A", a branch) — Space checks it, and the
     // model aggregates that down to its children.

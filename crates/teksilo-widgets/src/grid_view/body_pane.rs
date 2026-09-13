@@ -84,6 +84,12 @@ pub(crate) struct GridBodyPane<T: 'static> {
     #[allow(clippy::type_complexity)]
     pub(crate) on_tile_activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>>,
     pub(crate) activate_on: crate::data_views::ActivateOn,
+    /// The non-drag reorder, bound once by the grid. `Some` exactly when the
+    /// grid is reorderable; each realized tile binds its own index into it and
+    /// gets the menu rows and custom actions SC 2.5.7 asks for.
+    #[allow(clippy::type_complexity)]
+    pub(crate) reorder_perform:
+        Option<Rc<dyn Fn(usize, usize, &mut teksilo_core::widget::EventContext)>>,
     #[allow(clippy::type_complexity)]
     pub(crate) tile_context_menu: Option<
         Rc<
@@ -151,6 +157,15 @@ pub(crate) struct GridBodyPane<T: 'static> {
 
     // Build state
     pub(crate) tile_entries: Vec<(usize, WidgetId)>,
+    /// The ids this pane hands the arena as its tile children, positionally
+    /// aligned with [`Self::tile_entries`].
+    ///
+    /// A tile that is a drag source is wrapped in a
+    /// [`DragSurface`](crate::data_views::DragSurface) — the drag has to
+    /// strictly enclose whatever captures the press — so its layout child is
+    /// the wrapper. `tile_entries` (and so `tile_map`) stays on the
+    /// accessibility node.
+    pub(crate) tile_roots: Vec<(usize, WidgetId)>,
     pub(crate) header_entries: Vec<(usize, WidgetId)>,
 
     /// Re-entrancy guard for `place_children`'s Relayout-bound signal
@@ -249,6 +264,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
 
         // Realize the visible tiles.
         self.tile_entries.clear();
+        self.tile_roots.clear();
         let total = (self.len_fn)();
         let (start, end) = self.visible();
         // Lazy: nudge the source to load the realized window, and fetch more
@@ -319,7 +335,9 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             // sees the PointerDown (drag-to-reorder / marquee). Deferred
             // collapse: pressing an already-selected tile (no modifiers)
             // keeps the whole (multi-)selection so it can be dragged; the
-            // collapse-to-single happens on release WITHOUT a drag. The
+            // collapse-to-single happens on release WITHOUT a drag, and only
+            // on a release the tile still owns (`release_completes_the_press`).
+            // The
             // press-claimed guard, Ctrl/Shift handling, and the defer rule
             // itself live in the shared `deferred_select` helper (mirrors
             // `ListView` / `TreeView`); only the focus-follows-selection
@@ -328,7 +346,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let sel_click = sel.clone();
                 let focused_set = self.focused_index.clone();
                 let idx = i;
-                let pending_collapse = Rc::new(Cell::new(false));
+                let pending_collapse = crate::data_views::deferred_select::pending_cell();
                 ctx.apply_handlers(
                     tile_id,
                     HandlerSet::new().on_pointer_event(move |event, ctx| match event {
@@ -352,12 +370,17 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                             button: PointerButton::Primary,
                             ..
                         } => {
-                            crate::data_views::deferred_select::on_up(
+                            // The nav cursor travels with the applied
+                            // selection, not with the press: for a direct
+                            // pointer the whole decision is made here.
+                            if crate::data_views::deferred_select::on_up(
                                 &sel_click,
                                 idx,
                                 &pending_collapse,
                                 ctx,
-                            );
+                            ) {
+                                focused_set.set(Some(idx));
+                            }
                             EventResponse::Ignored
                         }
                         _ => EventResponse::Ignored,
@@ -386,6 +409,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let idx = i;
                 extra = extra.context_menu(move |pos, ctx| factory(idx, pos, ctx));
             }
+            let mut tile_drag: Option<HandlerSet> = None;
             if self.export.is_drag_source(self.reorderable) {
                 let idx = i;
                 let model_id = self.model_id;
@@ -402,7 +426,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let export_for_drag = self.export.clone();
                 let read_for_drag = self.read_item_fn.clone();
                 let snapshot_for_drag = self.snapshot_out_fn.clone();
-                extra = extra.on_drag(move |phase, ctx| {
+                tile_drag = Some(HandlerSet::new().on_drag(move |phase, ctx| {
                     if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
                         // The source's per-tile transferable gate.
                         if (drag_gate)(idx) == DragEligibility::NoDrag {
@@ -449,7 +473,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                             ctx.start_drag(anchor, payload);
                         }
                     }
-                });
+                }));
             }
             // AT / automation `Action::Click`. `TileA11y` advertises it,
             // but every pointer handler above is `on_pointer_event` /
@@ -508,9 +532,63 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 });
             }
 
+            // The non-drag alternative to the tile drag: the four Move
+            // commands as AccessKit custom actions plus a context menu carrying
+            // the same rows, both calling the grid's own commit closure. See
+            // `common::ordered_move`.
+            //
+            // Installed BEFORE `extra`, so an application's own
+            // `tile_context_menu` — which rides in `extra` — replaces this menu
+            // rather than being replaced by it. The custom actions survive
+            // either way: `extra` sets no accessibility overrides.
+            if let Some(ref perform) = self.reorder_perform {
+                let count = (self.len_fn)();
+                let perform = perform.clone();
+                let idx = i;
+                crate::common::ordered_move::RowCommands {
+                    perform: Rc::new(move |mv: crate::common::ordered_move::OrderedMove, ctx| {
+                        if let Some(dest) = mv.destination(idx, count) {
+                            perform(idx, dest, ctx);
+                        }
+                    }),
+                    from: i,
+                    count,
+                    axis: crate::common::ordered_move::MoveAxis::Horizontal,
+                    extra: Vec::new(),
+                }
+                .install(ctx, tile_id);
+            }
             ctx.apply_handlers(tile_id, extra);
 
+            // The reorder drag goes on a wrapper that STRICTLY encloses this
+            // tile, never on the tile itself: a drag on the node that captures
+            // the press is driven by the capture dispatch, which runs before
+            // the arbitration advances, so it latches at `drag_slop` and
+            // decides the sequence before the grid's own `PanClaim` can win at
+            // `pan_slop`. Enclosing it is also the only shape the tree arms
+            // `DragActivation` for — `Immediate` for a mouse, `AfterLongPress`
+            // for a finger. The absorber guarantees the tile a gesture arena so
+            // something *inside* the wrapper takes the press; a tile whose
+            // application wired no activation and no context menu would
+            // otherwise have none, and the enrolment walk would never start.
+            //
+            // The absorber is applied **unconditionally**, unlike the row-level
+            // sites in the four other views: the grid's body pane carries one
+            // too, so a tile without an arena of its own is not merely
+            // arena-less — the pane above it is the captor, and a release
+            // dispatched to the captor and bubbled target→root never reaches a
+            // tile *below* it. That is not a drag concern at all: it cost a
+            // plain selectable grid both its finger tap and, on a mouse, the
+            // release that collapses a multi-selection.
+            ctx.apply_handlers(tile_id, crate::data_views::press_absorber());
+            let mut tile_root = tile_id;
+            if let Some(drag) = tile_drag {
+                tile_root = ctx.add(crate::data_views::DragSurface::new(tile_id));
+                ctx.apply_handlers(tile_root, drag);
+            }
+
             self.tile_entries.push((i, tile_id));
+            self.tile_roots.push((i, tile_root));
         }
         ctx.end_view_focus();
 
@@ -536,7 +614,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         }
 
         *self.tile_map.borrow_mut() = self.tile_entries.clone();
-        let mut ids: Vec<WidgetId> = self.tile_entries.iter().map(|(_, id)| *id).collect();
+        let mut ids: Vec<WidgetId> = self.tile_roots.iter().map(|(_, id)| *id).collect();
         ids.extend(self.header_entries.iter().map(|(_, id)| *id));
         ids
     }
@@ -607,8 +685,12 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         let measures = self.strategy.measures_tiles();
 
         // Lookups: tile id → model index, header id → section.
+        // Keyed on the layout child — the `DragSurface` when a tile is a drag
+        // source, the tile itself otherwise. A surface forwards the tile's
+        // measurement and places it at its own bounds, so both passes below
+        // read and write exactly what they did before the wrapper existed.
         let tile_of: std::collections::HashMap<WidgetId, usize> = self
-            .tile_entries
+            .tile_roots
             .iter()
             .map(|(idx, id)| (*id, *idx))
             .collect();
@@ -716,7 +798,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        let mut ids: Vec<WidgetId> = self.tile_entries.iter().map(|(_, id)| *id).collect();
+        let mut ids: Vec<WidgetId> = self.tile_roots.iter().map(|(_, id)| *id).collect();
         ids.extend(self.header_entries.iter().map(|(_, id)| *id));
         ids
     }

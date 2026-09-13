@@ -29,6 +29,14 @@ let _thumbnail = AspectRatio::new(16.0 / 9.0)
     .child(RectWidget::new());
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![AspectRatio at Touch density](img/aspect_ratio-touch.png)
+
 ## Builder methods at a glance
 
 `widescreen`, `square`, `child`, `child_id`

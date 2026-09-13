@@ -9,7 +9,7 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_i18n::lit;
 
-use super::{SpinBox, StepType, WrapMode};
+use super::{SpinBox, StepType, WheelMode, WrapMode};
 
 fn tick(tree: &mut WidgetTree) {
     tree.request_frame();
@@ -640,13 +640,14 @@ fn wheel(tree: &mut WidgetTree, spin_id: teksilo_core::widget_id::WidgetId, line
 
     // Scroll routes to the hovered widget, so park the pointer first.
     let b = tree.bounds(spin_id);
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5),
-    });
-    tree.dispatch_event(WidgetEvent::Scroll {
-        delta: ScrollDelta::Lines { x: 0.0, y: lines },
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+        b.x + b.width * 0.5,
+        b.y + b.height * 0.5,
+    )));
+    tree.dispatch_event(WidgetEvent::scroll(
+        ScrollDelta::Lines { x: 0.0, y: lines },
+        Modifiers::NONE,
+    ));
     tick(tree);
 }
 
@@ -1300,5 +1301,280 @@ fn a11y_set_value_on_the_inner_field_puts_a_refused_string_back() {
         shown.as_deref(),
         Some("10"),
         "a refused write must not leave its string in the field"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Touch: the step buttons
+// ---------------------------------------------------------------------------
+
+/// Find the step buttons by walking the SpinBox subtree for the nodes whose
+/// widget type name ends in `StepButton` — the stacked pair beside the field.
+/// Returns them top-first.
+fn step_buttons(
+    tree: &WidgetTree,
+    spin: teksilo_core::widget_id::WidgetId,
+) -> Vec<teksilo_canvas::Rect> {
+    let mut found: Vec<teksilo_canvas::Rect> = Vec::new();
+    let mut stack = vec![spin];
+    while let Some(id) = stack.pop() {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.ends_with("StepButton"))
+        {
+            found.push(tree.bounds(id));
+        }
+        stack.extend(tree.children(id).iter().copied());
+    }
+    found.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap());
+    found
+}
+
+/// The step buttons are the sweep's one unreachable target, and this pins the
+/// measurement so a later layout change is noticed. 18 x 13 dp, inside a column
+/// exactly their own width: no outset can grow into space its parent does not
+/// own, and the field beside them defeats the miss-only slop pass. See the
+/// `hit_outset` note on `StepButton` for why the fix is a layout, not a target.
+#[test]
+fn the_step_buttons_are_the_sweeps_named_sub_floor_residue() {
+    let (tree, _value, spin) = setup_int(5, 0, 10);
+    let buttons = step_buttons(&tree, spin);
+    assert_eq!(buttons.len(), 2, "a stacked SpinBox has two step buttons");
+    let floor = tree.theme().input.min_target_conformance;
+    for b in &buttons {
+        assert!(
+            b.width < floor && b.height < floor,
+            "a step button measured {b:?}; if it now clears {floor} dp the \
+             residue is gone and this test should be replaced by a conformance one",
+        );
+    }
+    // ...and the column that contains them is exactly as wide as they are,
+    // which is what leaves an outset nowhere to grow.
+    assert!(
+        (buttons[0].width - buttons[1].width).abs() < 0.01,
+        "the two steps share one column width",
+    );
+}
+
+/// The value is still fully reachable without the pointer, which is why the
+/// residue above costs no function.
+#[test]
+fn the_value_is_reachable_without_the_step_buttons() {
+    let (mut tree, value, spin) = setup_int(5, 0, 10);
+    focus_field(&mut tree, spin);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(value.get(), 6, "Up steps the value");
+    let node = tree.accessibility_node(spin);
+    let actions = node.actions();
+    assert!(
+        actions.contains(&teksilo_core::accesskit::Action::Increment)
+            && actions.contains(&teksilo_core::accesskit::Action::Decrement),
+        "and assistive technology can step it too: {actions:?}",
+    );
+}
+
+/// A cancel is terminal — no `PointerUp` follows it — so the arm that normally
+/// disarms hold-to-repeat never runs. Before the controls sweep a pan claimant
+/// winning the press left the box stepping for the rest of the session.
+#[test]
+fn a_cancelled_press_stops_the_auto_repeat() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::{CancelReason, PointerPhase};
+
+    let (mut tree, value, spin) = setup_int(5, 0, 100);
+    let buttons = step_buttons(&tree, spin);
+    let up = buttons[0];
+    let at = Point::new(up.center().x, up.center().y);
+    let id = finger();
+    tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+    assert_eq!(value.get(), 6, "the press steps once, Qt-style");
+
+    // The repeat is driven by the wall clock, so the only way to observe it is
+    // to let the wall clock run. Past the 400 ms initial delay the held press
+    // must have started stepping on its own — this half is the premise the
+    // second half needs, and without it the test below would pass for the
+    // uninteresting reason that nothing was ever repeating.
+    std::thread::sleep(std::time::Duration::from_millis(550));
+    for _ in 0..8 {
+        tick(&mut tree);
+    }
+    let while_held = value.get();
+    assert!(
+        while_held > 6,
+        "a press held past the initial delay must auto-repeat, got {while_held}",
+    );
+
+    tree.cancel_pointer(
+        id,
+        CancelReason::PeerClaimed,
+        &mut teksilo_core::window::NoopWindowOps,
+    );
+    let after_cancel = value.get();
+    std::thread::sleep(std::time::Duration::from_millis(550));
+    for _ in 0..8 {
+        tick(&mut tree);
+    }
+    assert_eq!(
+        value.get(),
+        after_cancel,
+        "the repeat kept running after the press was taken away",
+    );
+}
+
+/// A press that is released **off** the button stops the repeat too.
+///
+/// The finger slides away from a tiny 18 x 13 dp arrow before it lifts, which
+/// on a touchscreen is the common case rather than the exotic one. Without the
+/// press capture the release is hit-tested somewhere else entirely, the
+/// button's `PointerUp` arm never runs, and the value climbs for as long as the
+/// widget lives.
+#[test]
+fn a_release_away_from_the_button_stops_the_auto_repeat() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::PointerPhase;
+
+    let (mut tree, value, spin) = setup_int(5, 0, 100);
+    let buttons = step_buttons(&tree, spin);
+    let up = buttons[0];
+    let id = finger();
+    tree.dispatch_pointer(touch(
+        id,
+        PointerPhase::Down,
+        Point::new(up.center().x, up.center().y),
+        0,
+    ));
+    assert_eq!(value.get(), 6, "the press steps once, Qt-style");
+
+    std::thread::sleep(std::time::Duration::from_millis(550));
+    for _ in 0..8 {
+        tick(&mut tree);
+    }
+    assert!(
+        value.get() > 6,
+        "premise: a press held past the initial delay auto-repeats",
+    );
+
+    // Lift far outside the button — and outside the whole SpinBox.
+    tree.dispatch_pointer(touch(id, PointerPhase::Up, Point::new(280.0, 55.0), 600));
+    let after_release = value.get();
+    std::thread::sleep(std::time::Duration::from_millis(550));
+    for _ in 0..8 {
+        tick(&mut tree);
+    }
+    assert_eq!(
+        value.get(),
+        after_release,
+        "the repeat kept running after the finger lifted away from the button",
+    );
+}
+
+// ── Touch: what the box does about panning, it does by omission ──────
+
+/// Press on the spin box's field and drag `up` logical pixels, then lift.
+/// Returns how many scroll events the enclosing container saw.
+///
+/// The container is a real claimant — `scroll_container` + a vertical
+/// `PanClaim` — so the pan has somewhere legitimate to go. Whether it gets
+/// there is the question each caller asks.
+fn pan_over_a_spin_box(spin: SpinBox<i32>, up: f32) -> std::rc::Rc<std::cell::Cell<u32>> {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::event::EventResponse;
+    use teksilo_core::pointer::PointerPhase;
+    use teksilo_core::pointer::touch_action::{PanAxes, PanClaim};
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let scrolled = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let count = scrolled.clone();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(spin);
+    let _page = tree.add(
+        crate::primitives::VStack::new()
+            .add_child(spin)
+            .scroll_container(PanAxes::BOTH)
+            .pan_claim(PanClaim::vertical())
+            .on_scroll(move |_e, _c| {
+                count.set(count.get() + 1);
+                EventResponse::Handled
+            }),
+    );
+    tree.layout(SizeProposal::exact(400.0, 600.0));
+
+    // Start on the field itself, not on a step button: a press on a step
+    // button steps by design, and the question here is about the box's body.
+    let bounds = tree.bounds(spin);
+    let start = Point::new(bounds.x + bounds.width * 0.25, bounds.center().y);
+    let contact = finger();
+    tree.dispatch_pointer(touch(contact, PointerPhase::Down, start, 0));
+    for (i, dy) in [up / 3.0, up * 2.0 / 3.0, up].into_iter().enumerate() {
+        let at = Point::new(start.x, start.y - dy);
+        tree.dispatch_pointer(touch(contact, PointerPhase::Move, at, 20 + i as u64 * 20));
+    }
+    tree.dispatch_pointer(touch(
+        contact,
+        PointerPhase::Up,
+        Point::new(start.x, start.y - up),
+        100,
+    ));
+    scrolled
+}
+
+/// The spin box declares no `touch_action` and makes no pan claim, so its
+/// subtree stays at the default `TouchAction::AUTO` and a finger that comes to
+/// rest on it and then drags belongs to the enclosing scroller.
+///
+/// This is the behaviour the module header describes. It is asserted here
+/// rather than by reading a declaration off the node, because there is no
+/// declaration to read: the property is that the box gets out of the way, and
+/// the only way to see that is to put a scroller behind it and pan.
+///
+/// The value must not move either. A wheel notch steps the box (`on_scroll`),
+/// and a pan that reached that handler would step it once per sample.
+///
+/// **What this test does and does not see.** The box's default
+/// [`WheelMode::Focused`] makes its `on_scroll` decline before the pan question
+/// is reached, and this fixture never focuses the field — so a pan that DID
+/// reach the handler would still leave the value at 50 here. The value
+/// assertion below is therefore a guard against a regression in the wheel gate,
+/// not evidence about the claim. `a_finger_pan_over_a_hover_wheel_spin_box_
+/// scrolls_its_container` is the one that can see the claim, and it is the one
+/// to read for the module header's argument.
+#[test]
+fn a_finger_pan_over_the_spin_box_scrolls_its_container() {
+    let value = Signal::new(50);
+    let scrolled = pan_over_a_spin_box(SpinBox::new(value.clone(), 0, 100), 150.0);
+
+    assert!(
+        scrolled.get() > 0,
+        "the pan never reached the scroller — the spin box kept the contact",
+    );
+    assert_eq!(value.get(), 50, "and it stepped nothing on the way past");
+}
+
+/// The same pan over a box whose wheel is **not** gated on focus.
+///
+/// This is the case that can actually observe the claim. With
+/// [`WheelMode::Hover`] the `on_scroll` handler runs for any scroll that
+/// reaches the box, so if the box were on the pan's claimant chain the
+/// synthesised samples would step the value once each — 50 → 47 for the three
+/// samples this fixture sends. It stays at 50 because the box makes no claim
+/// and the claimant walk therefore never visits it, which is exactly what the
+/// module header argues and what adding a `PanClaim` here would break.
+#[test]
+fn a_finger_pan_over_a_hover_wheel_spin_box_scrolls_its_container() {
+    let value = Signal::new(50);
+    let spin = SpinBox::new(value.clone(), 0, 100).wheel_mode(WheelMode::Hover);
+    let scrolled = pan_over_a_spin_box(spin, 150.0);
+
+    assert!(
+        scrolled.get() > 0,
+        "the pan never reached the scroller — the spin box kept the contact",
+    );
+    assert_eq!(
+        value.get(),
+        50,
+        "an ungated wheel handler must still never see a finger's pan",
     );
 }

@@ -28,12 +28,13 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::{Prop, Signal};
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{RadioTileStyle, RadioTileStyleConfig, RadioTileVariant};
 use teksilo_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
 // IntUI design tokens for RadioTile. The recipe owns its own dimensions.
 // Corner radius matches Button (4 dp) / SegmentedControl (3 dp) — a control,
@@ -64,17 +65,28 @@ pub struct RadioTileRecipe {
     pub vertical_row_height: f32,
 }
 
-impl Default for RadioTileRecipe {
-    fn default() -> Self {
+impl RadioTileRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             corner_radius: RADIO_TILE_CORNER_RADIUS,
-            padding: RADIO_TILE_PADDING,
+            padding: spacing(RADIO_TILE_PADDING, tokens),
             border_width: RADIO_TILE_BORDER_WIDTH,
             selected_border_width: RADIO_TILE_SELECTED_BORDER_WIDTH,
             focus_ring_width: RADIO_TILE_FOCUS_RING_WIDTH,
             shadow_density: RADIO_TILE_SHADOW_DENSITY,
-            vertical_row_height: RADIO_TILE_VERTICAL_ROW_HEIGHT,
+            vertical_row_height: dp(RADIO_TILE_VERTICAL_ROW_HEIGHT, TargetRole::Target, tokens),
         }
+    }
+}
+
+impl Default for RadioTileRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -87,6 +99,18 @@ pub struct RecipeRadioTileStyle {
 impl RecipeRadioTileStyle {
     pub fn new(recipe: RadioTileRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeRadioTileStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: RadioTileRecipe::for_tokens(tokens),
+        }
     }
 }
 

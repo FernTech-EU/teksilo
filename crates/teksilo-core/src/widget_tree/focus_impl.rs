@@ -64,6 +64,19 @@ impl WidgetTree {
         }
         self.set_focused(Some(id));
         self.focus_origin = Some(origin);
+        // `:focus-visible` is one tree-level signal, so the assignment itself
+        // has to declare the modality: a direct pointer's focus lands on the
+        // release, an event kind the dispatch root's modality sniff does not
+        // name, and an assistive `Action::Focus` carries no input event at all.
+        // Keying the write on the origin makes "the ring moved" and "focus
+        // moved" the same event. `Programmatic` declares nothing — a scripted
+        // focus leaves the ring where the user's last real interaction left it,
+        // which is what `:focus-visible` does for `element.focus()`.
+        if let Some(visible) = origin.focus_visible()
+            && self.focus_visible.get() != visible
+        {
+            self.focus_visible.set(visible);
+        }
         self.a11y_dirty = true;
         self.update_focus_within_signals(previously_focused, Some(id));
         self.update_view_focus_signals(previously_focused, Some(id));
@@ -92,7 +105,7 @@ impl WidgetTree {
         // pointer sets the real caret *after* focus, and the widget's own
         // caret-chase then keeps it visible). Reveal only for keyboard /
         // programmatic focus, where the newly-focused target may be off-screen.
-        if origin != crate::focus::FocusOrigin::Pointer {
+        if !origin.is_pointer() {
             self.scroll_focused_into_view(id, &mut *ops);
         }
     }
@@ -676,14 +689,23 @@ impl WidgetTree {
         self.view_focus_stack.last().cloned()
     }
 
-    /// Single point of mutation for `self.hovered`. Updates both the
-    /// internal field and the externally-observable Signal so debug
-    /// tooling (the inspector's hover tooltip) doesn't have to poll.
-    /// Does **not** call `update_hover_within_signals` — call sites
-    /// remain in charge of dispatching enter/leave because some sites
-    /// (e.g. post-layout hover recovery) intentionally skip it.
+    /// Single point of mutation for the hovered widget. Writes it onto the
+    /// **hover owner**'s entry in the pointer table and updates the
+    /// externally-observable Signal so debug tooling (the inspector's hover
+    /// tooltip) doesn't have to poll.
+    ///
+    /// Hover is hover-owner-only, so this is a no-op on the table side when no
+    /// hovering-capable pointer is live — a touch-only device has nothing that
+    /// hovers, and writing a contact's target here would make every hover
+    /// affordance fire on tap. The signal is still kept honest.
+    ///
+    /// Does **not** call `update_hover_within_signals` — call sites remain in
+    /// charge of dispatching enter/leave because some sites (e.g. post-layout
+    /// hover recovery) intentionally skip it.
     pub(crate) fn set_hovered(&mut self, value: Option<WidgetId>) {
-        self.hovered = value;
+        if let Some(entry) = self.pointers.hover_owner_mut() {
+            entry.hovered = value;
+        }
         if self.hovered_signal.get() != value {
             self.hovered_signal.set(value);
         }
@@ -711,6 +733,12 @@ impl WidgetTree {
     ) {
         let old_chain = self.strict_ancestors_of(old);
         let new_chain = self.strict_ancestors_of(new);
+        // Record the chain on the hover owner's entry: it is the pointer that
+        // put those signals to `true`, so it is the one whose teardown (and
+        // whose post-rebuild scrub) has to know about them.
+        if let Some(entry) = self.pointers.hover_owner_mut() {
+            entry.hover_within = new_chain.clone();
+        }
         for &id in &old_chain {
             if !new_chain.contains(&id)
                 && let Some(node) = self.arena.get(id)
@@ -1208,6 +1236,34 @@ mod tests {
 
         tree.press_key(Key::Tab, Modifiers::NONE);
         assert_eq!(tree.focused(), Some(b));
+    }
+
+    /// `focus` is a command, not a query: it moves focus to the node it is
+    /// handed without asking whether traversal could ever land there.
+    ///
+    /// This is why a test claiming **keyboard reachability** has to read the
+    /// traversal graph — `tab_stops_within` — rather than focus its subject and
+    /// press a key. The latter is green for a control no keyboard user can
+    /// reach, which is how a widget once lost `focusable(true)` with all six of
+    /// its tests still passing. If this behaviour ever grows a guard, the
+    /// reachability recipe in `docs/a11y/non-drag-alternatives.md` and the
+    /// comments citing it are what to revisit.
+    #[test]
+    fn focus_does_not_check_that_the_node_is_focusable() {
+        let mut tree = WidgetTree::new();
+        let inert = tree.add(FillWidget::new()); // no `.focusable()`
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(
+            tree.tab_stops_within(inert).is_empty(),
+            "the subject has to be unreachable for the point to be made"
+        );
+
+        tree.focus(inert);
+        assert_eq!(
+            tree.focused(),
+            Some(inert),
+            "focus lands on a node Tab traversal can never offer"
+        );
     }
 
     #[test]

@@ -421,6 +421,19 @@ impl<'a> BuildContext<'a> {
         self.tree.theme()
     }
 
+    /// The active [`TargetDensity`] — the ladder `ctx.theme().input` was
+    /// projected onto.
+    ///
+    /// Read it in `build()` when a dimension must be chosen once per build
+    /// (a `MinSize` wrapper, a recipe's metrics). For the values themselves
+    /// prefer `ctx.theme().input` plus the
+    /// [`density`](crate::styles::density) helpers, which encode the floors.
+    ///
+    /// [`TargetDensity`]: teksilo_tokens::TargetDensity
+    pub fn density(&self) -> teksilo_tokens::TargetDensity {
+        self.tree.input_density()
+    }
+
     /// Reactive handle on the current theme. Fires observers when
     /// `tree.set_theme(...)` is called. Build implementations that want
     /// theme-driven values to update without a rebuild should use this
@@ -527,6 +540,26 @@ impl<'a> BuildContext<'a> {
     /// handle.set_visible(*a))` to hide/show the native surface in lockstep.
     pub fn activation_signal(&mut self, id: WidgetId) -> Signal<bool> {
         self.tree.activation_signal(id)
+    }
+
+    /// The framework press signal for the widget being built — `true` while it
+    /// holds a pointer press whose visual should show.
+    ///
+    /// The router owns the state, so this is correct for the four cases a
+    /// widget's own `PointerDown`/`PointerUp` bookkeeping gets wrong: a press
+    /// that slides off its target goes `false` and comes back `true` on
+    /// re-entry (WCAG 2.2 SC 2.5.2), a press a pan claimant or an ancestor drag
+    /// wins goes `false` with no release to hang it on, a cancel clears it, and
+    /// a press inside a scrollable withholds the visual for the profile's
+    /// `press_feedback_delay` so a finger that turns out to be scrolling never
+    /// flashes a highlight. The rules are written out in `docs/touch-and-pen.md`
+    /// §7.
+    ///
+    /// Bind it at [`BindingLevel::RepaintOnly`](crate::binding::BindingLevel) —
+    /// a press changes colour, never size.
+    pub fn pressed_signal(&mut self) -> Signal<bool> {
+        let id = self.self_id();
+        self.tree.pressed_signal(id)
     }
 
     /// Reactive `Signal<bool>` that is `true` while the *focus scope* containing

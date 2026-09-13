@@ -161,8 +161,25 @@ impl Widget for MacOsSwitchBody {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        Size::new(TRACK_W, TRACK_H).into()
+    /// The track keeps Apple's 38 × 22 dp; the **node** takes the conformance
+    /// floor on both axes.
+    ///
+    /// A 22 dp switch is 2 dp under WCAG 2.2 SC 2.5.8's floor, and neither hit
+    /// mechanism can make that up: the floor does not scale, so a projection
+    /// cannot reach it, and a `hit_outset` never escapes its parent. The
+    /// remedy the framework already uses for a control whose chrome is
+    /// deliberately smaller than its target is to grow the node and centre the
+    /// chrome in it — which is what the stock `RecipeToggleStyle` does with
+    /// the same floor, and what `paint` below assumes by centring the track in
+    /// whatever bounds it is given. Both axes, floored independently like the
+    /// icon button's conformance box (teksilo-widgets,
+    /// `common::conformance_box` — this widget floors its own node instead of
+    /// wrapping, but the per-axis rule is the same): the width is an identity
+    /// under every shipped floor, and flooring only the height would leave the
+    /// one axis a raised-floor theme could still fail.
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let floor = ctx.theme.input.min_target_conformance;
+        Size::new(TRACK_W.max(floor), TRACK_H.max(floor)).into()
     }
 
     fn place_children(
@@ -180,7 +197,7 @@ impl Widget for MacOsSwitchBody {
         let colors = TrackColors::resolve(ctx, state);
 
         let track = Rect::new(
-            bounds.x,
+            bounds.x + (bounds.width - TRACK_W) * 0.5,
             bounds.y + (bounds.height - TRACK_H) * 0.5,
             TRACK_W,
             TRACK_H,

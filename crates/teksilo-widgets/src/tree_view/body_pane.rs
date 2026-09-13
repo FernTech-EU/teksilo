@@ -60,6 +60,12 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
     pub(crate) focused_anchor: Rc<RefCell<Option<crate::data_views::RowAnchor>>>,
 
     pub(crate) reorderable: bool,
+    /// The non-drag sibling move and the non-drag reparent, bound once by the
+    /// root. `Some` exactly when the view is reorderable; each realized row
+    /// binds its own flat index into them and gets the menu rows and custom
+    /// actions SC 2.5.7 asks for.
+    pub(crate) reorder_perform: Option<crate::common::ordered_move::MoveRow>,
+    pub(crate) reparent_perform: Option<crate::common::ordered_move::TreeReparentRow>,
     /// Whether a row-body release on a branch row auto-toggles its expansion.
     pub(crate) row_click_expands: bool,
     /// Cross-widget export / foreign-receive machinery, cloned in from the
@@ -97,6 +103,15 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
 
     // Build state
     pub(crate) item_entries: Vec<(usize, WidgetId)>,
+    /// The ids this pane hands the arena as its children, positionally aligned
+    /// with [`Self::item_entries`].
+    ///
+    /// A row that is a drag source is wrapped in a
+    /// [`DragSurface`](crate::data_views::DragSurface) — the drag has to
+    /// strictly enclose whatever captures the press — so its layout child is
+    /// the wrapper. `item_entries` (and so `row_map`) stays on the
+    /// `Role::TreeItem` node.
+    pub(crate) row_roots: Vec<WidgetId>,
     /// The realized `(flat index -> row wrapper id)` map, shared with the
     /// owning [`TreeView`](crate::TreeView) so that its `&self` methods — the
     /// a11y walk, the context-menu key target — can resolve a row index to a
@@ -194,6 +209,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
         self.item_entries.clear();
+        self.row_roots.clear();
         // Lazy: nudge the source to load the realized window, and fetch more
         // as the viewport nears the end (append-only sources). This lives in
         // the pane, not the root, because the pane decides the realization
@@ -286,11 +302,16 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     let click_anchor = self.source.anchor(i);
                     let fi_click = self.focused_index.clone();
                     let fi_anchor_click = self.focused_anchor.clone();
+                    let fi_up = self.focused_index.clone();
+                    let fi_anchor_up = self.focused_anchor.clone();
+                    let source_up = self.source.clone();
                     let has_children = item_has_children && self.row_click_expands;
                     // Deferred collapse: pressing an already-selected row keeps
                     // the whole (multi-)selection so it can be dragged; the
-                    // collapse-to-single happens on release WITHOUT a drag.
-                    let pending_collapse = Rc::new(Cell::new(false));
+                    // collapse-to-single happens on release WITHOUT a drag,
+                    // and only on a release the row still owns (see
+                    // `release_completes_the_press`).
+                    let pending_collapse = crate::data_views::deferred_select::pending_cell();
 
                     ctx.apply_handlers(
                         child_id,
@@ -310,7 +331,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                                 // shared helper does the equivalent for its own
                                 // branch.)
                                 if ctx.press_claimed_by_interactive_child() {
-                                    pending_collapse.set(false);
+                                    pending_collapse.set(None);
                                     return teksilo_core::event::EventResponse::Ignored;
                                 }
                                 // The shared deferred-select helper owns the
@@ -357,21 +378,38 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                                 if ctx.press_claimed_by_interactive_child() {
                                     return teksilo_core::event::EventResponse::Ignored;
                                 }
-                                // Reached only on a click WITHOUT a drag (an
-                                // active drag consumes PointerUp). Collapse the
-                                // deferred multi-selection to the clicked row.
-                                if let Some(ref sel) = sel_click {
-                                    crate::data_views::deferred_select::on_up(
+                                // Collapse the deferred multi-selection to the
+                                // clicked row. The helper asks
+                                // `release_completes_the_press` for itself.
+                                // The nav cursor travels with the applied
+                                // selection, not with the press: for a direct
+                                // pointer the whole decision — cursor and
+                                // anchor included — is made here.
+                                if let Some(ref sel) = sel_click
+                                    && crate::data_views::deferred_select::on_up(
                                         sel,
                                         click_index,
                                         &pending_collapse,
                                         ctx,
-                                    );
+                                    )
+                                {
+                                    fi_up.set(Some(click_index));
+                                    *fi_anchor_up.borrow_mut() =
+                                        Some(source_up.anchor(click_index));
                                 }
-                                // Expand/collapse fires on release so a drag
-                                // gesture pre-empts it (once active_drag is
-                                // set, PointerUp is routed to handle_drag_drop
-                                // and never reaches this widget).
+                                // Expand/collapse fires on release, so the
+                                // release has to still belong to this row. An
+                                // `active_drag` is not the only way it stops
+                                // doing so: a finger's **pan claim** wins the
+                                // arbitration without ever raising a drag, so
+                                // the `PointerUp` is not routed to
+                                // `handle_drag_drop` and does arrive here — and
+                                // toggling from it expanded whatever branch row
+                                // the finger happened to start its scroll on.
+                                // See `release_completes_the_press`.
+                                if !crate::data_views::release_completes_the_press(ctx) {
+                                    return teksilo_core::event::EventResponse::Ignored;
+                                }
                                 // Anchored: rows above may have shifted since
                                 // this handler was built, so resolve the row's
                                 // current position rather than trusting the
@@ -513,11 +551,74 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     );
                 }
 
+                // The non-drag alternative to that drag: the sibling moves
+                // and the two reparents as AccessKit custom actions plus a
+                // context menu carrying the same rows, both calling the root's
+                // own commit closures. See `common::ordered_move`.
+                if let Some(ref sibling) = self.reorder_perform {
+                    let anchor = self.source.anchor(i);
+                    let live: Rc<dyn Fn() -> Option<usize>> = Rc::new(move || anchor.index());
+                    // Availability reads off the SIBLING set, not the flat one:
+                    // a row that is last among its siblings cannot move down
+                    // even with a hundred rows below it in the flattening.
+                    let (pos, size) = self.source.sibling_position(i);
+                    let mut extra: Vec<(
+                        teksilo_i18n::LocalizedString,
+                        Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>,
+                    )> = Vec::new();
+                    if let Some(ref reparent) = self.reparent_perform {
+                        for mv in crate::common::ordered_move::TreeMove::ALL {
+                            // Offered only where it can land: indent needs a
+                            // previous sibling, outdent needs a parent.
+                            let reachable = match mv {
+                                crate::common::ordered_move::TreeMove::Indent => pos > 1,
+                                crate::common::ordered_move::TreeMove::Outdent => {
+                                    self.source.meta(i).is_some_and(|m| m.depth > 0)
+                                }
+                            };
+                            if !reachable {
+                                continue;
+                            }
+                            let reparent = reparent.clone();
+                            let live = live.clone();
+                            extra.push((
+                                mv.label(),
+                                Rc::new(move |ctx: &mut teksilo_core::widget::EventContext| {
+                                    if let Some(flat) = live() {
+                                        reparent(mv, flat, ctx);
+                                    }
+                                }),
+                            ));
+                        }
+                    }
+                    crate::common::ordered_move::RowCommands {
+                        perform: crate::common::ordered_move::bind_row(sibling, live),
+                        from: pos.saturating_sub(1),
+                        count: size,
+                        axis: crate::common::ordered_move::MoveAxis::Vertical,
+                        extra,
+                    }
+                    .install(ctx, child_id);
+                }
+
                 // Drag handler when reorderable OR exportable, gated by the
                 // source's transferable verdict (`drag`). Emits the public
                 // `RowDragData<T>`; the source recovers the key + validates at
                 // hover/drop. The floating preview re-invokes the row delegate.
+                // The drag goes on a wrapper that STRICTLY encloses this row,
+                // never on the row itself: a drag on the node that captures the
+                // press is driven by the capture dispatch, which runs before the
+                // arbitration advances, so it latches at `drag_slop` and decides
+                // the sequence before the tree's own `PanClaim` can win at
+                // `pan_slop`. Enclosing it is also the only shape the tree arms
+                // `DragActivation` for — `Immediate` for a mouse,
+                // `AfterLongPress` for a finger. The absorber guarantees the row
+                // a gesture arena so something *inside* the wrapper takes the
+                // press.
+                let mut row_root = child_id;
                 if is_drag_source && (self.source.dnd.drag_fn)(i) == DragEligibility::CanDrag {
+                    ctx.apply_handlers(child_id, crate::data_views::press_absorber());
+                    row_root = ctx.add(crate::data_views::DragSurface::new(child_id));
                     let drag_view_id = tree_id;
                     let drag_self_id = root_id;
                     let row_delegate = self.row_delegate.clone();
@@ -532,7 +633,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     let read_for_drag = self.source.read_item_fn.clone();
                     let snapshot_for_drag = self.source.dnd.snapshot_out_fn.clone();
                     ctx.apply_handlers(
-                        child_id,
+                        row_root,
                         HandlerSet::new().on_drag(move |phase, ctx| {
                             if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
                                 // Selection-aware dragged set: the whole
@@ -577,6 +678,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                 }
 
                 self.item_entries.push((i, child_id));
+                self.row_roots.push(row_root);
             }
         }
         ctx.end_view_focus();
@@ -584,7 +686,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
         // Publish the realized (index -> wrapper id) map for the root.
         *self.row_map.borrow_mut() = self.item_entries.clone();
 
-        self.item_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn layout_response(
@@ -700,7 +802,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.item_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn clips_children(&self) -> bool {

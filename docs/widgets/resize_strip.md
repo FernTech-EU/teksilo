@@ -14,13 +14,43 @@ backend), `PlatformTitleBarHost::begin_resize` returns
 `PlatformError::Unsupported` and the strip becomes a silent no-op —
 macOS handles edge resize via its own native chrome.
 
+## Reaching a 6 dp edge with a finger
+
+The strip's thickness is fixed at every density — it is an overlay drawn
+*over* the window's own edge, so widening it would eat into content rather
+than into empty space, and the frame would start swallowing presses meant
+for the app.
+
+The grab is `Widget::hit_outset` instead: for a direct pointer the strip
+is offered the press against bounds inflated inward to the density's target
+size (24 dp Compact, 44 dp Touch), and the arena's outset pre-pass runs
+before the ordinary reverse-sibling walk, so the widened band beats the
+content underneath. An edge strip inflates only across its thickness; a
+corner cell inflates on all four sides, since both of its axes are the
+diagonal grab. For a precise pointer the outset is zero and a mouse press
+resolves exactly where it always did.
+
+Two strips whose bands overlap are settled by distance to their own
+uninflated rectangles, not by sibling order, so the midpoint between two
+adjacent edges belongs to the nearer one.
+
+## One resize per gesture
+
+`PlatformTitleBarHost::begin_resize` hands the window to the compositor
+for the rest of the gesture, so it must be asked once. The press that asks
+is gated on the pointer being the **primary** one: a second finger landing
+on the frame while a resize is already running would ask for a second
+interactive resize of the same window, which on Wayland means a second
+`xdg_toplevel::resize` against a live one. A mouse is always primary, so the
+gate never fires for one.
+
 ## Builder methods at a glance
 
 `horizontal`, `vertical`, `corner`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/resize_strip/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
 
 ## `pub struct ResizeStrip`
 

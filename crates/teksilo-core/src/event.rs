@@ -4,12 +4,18 @@
 use teksilo_canvas::{Point, Rect};
 
 use crate::gesture::GestureEvent;
+use crate::pointer::{CancelReason, EventTime, PointerInfo, ScrollPhase};
 
 /// Pointer button identifiers.
 ///
 /// `Forward` and `Back` correspond to the auxiliary mouse buttons (mouse
 /// 4 / mouse 5) typically labelled "browser back / forward". Platforms
 /// that don't have those buttons simply never emit them.
+///
+/// `#[non_exhaustive]`: a stylus barrel button and an eraser-end press are
+/// buttons this enum will have to name, and neither exists yet. A downstream
+/// `match` therefore needs a `_` arm.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PointerButton {
     /// Left-click (or main-action button on left-handed mice).
@@ -574,21 +580,69 @@ pub enum ScrollMotion {
 /// Events dispatched to widgets.
 #[derive(Debug, Clone)]
 pub enum WidgetEvent {
+    /// A button went down.
     PointerDown {
+        /// Where, in the receiving widget's own coordinate space (the router
+        /// localises it on delivery — see
+        /// [`WidgetTree::dispatch_pointer`](crate::WidgetTree::dispatch_pointer)).
         position: Point,
+        /// Which button. A direct pointer reports
+        /// [`PointerButton::Primary`] for a contact.
         button: PointerButton,
+        /// Modifier keys held when the press landed.
         modifiers: Modifiers,
+        /// Who pressed — identity, kind, buttons, axes and timestamp.
+        ///
+        /// Read it through [`EventContext::pointer`](crate::widget::EventContext::pointer)
+        /// or its `pointer_kind()` shorthand rather than by destructuring, so a
+        /// widget that only needs "was this a finger?" does not have to name
+        /// the whole struct. Defaults to
+        /// [`PointerInfo::mouse`] at the epoch for every legacy construction
+        /// site and for [`pointer_down`](Self::pointer_down), so a site that
+        /// says nothing about pointers keeps meaning what it meant before the
+        /// touch programme.
+        pointer: PointerInfo,
     },
+    /// A button came up.
     PointerUp {
+        /// Where, in the receiving widget's own coordinate space.
         position: Point,
+        /// Which button was released.
         button: PointerButton,
+        /// Modifier keys held when the release landed.
         modifiers: Modifiers,
+        /// Who released. See [`PointerDown::pointer`](Self::PointerDown).
+        pointer: PointerInfo,
     },
+    /// A pointer moved. Sent whether or not a button is held; a contact only
+    /// ever moves with its button held, since a finger cannot hover.
     PointerMove {
+        /// Where, in the receiving widget's own coordinate space.
         position: Point,
+        /// Modifier keys held during the move.
+        ///
+        /// A drag decides what it means from the modifiers at the *move*, not
+        /// at the press — Shift extends a selection and Ctrl makes a marquee
+        /// additive from the moment the key goes down, mid-drag included.
+        /// Defaults to [`Modifiers::NONE`] for
+        /// [`pointer_move`](Self::pointer_move) and for a producer that tracks
+        /// no modifier state.
+        modifiers: Modifiers,
+        /// Who moved. See [`PointerDown::pointer`](Self::PointerDown).
+        pointer: PointerInfo,
     },
-    PointerEnter,
-    PointerLeave,
+    /// The hover owner came onto this widget. Never sent for a contact: a
+    /// finger writes no hover (see
+    /// [`PointerTable::hover_owner`](crate::pointer::table::PointerTable::hover_owner)).
+    PointerEnter {
+        /// Who entered — a mouse, or a pen in proximity.
+        pointer: PointerInfo,
+    },
+    /// The hover owner left this widget.
+    PointerLeave {
+        /// Who left. See [`PointerEnter`](Self::PointerEnter).
+        pointer: PointerInfo,
+    },
     Scroll {
         delta: ScrollDelta,
         /// Modifier keys held at the time of the scroll event.
@@ -598,6 +652,77 @@ pub enum WidgetEvent {
         /// modifier state — apps detect Ctrl-wheel-to-zoom by
         /// inspecting `modifiers.ctrl()`.
         modifiers: Modifiers,
+        /// Where the pointer was when the scroll happened, in **window**-logical
+        /// coordinates, or `None` when the producer has no position for it.
+        ///
+        /// The frame is in the name because it is the one positional field a
+        /// handler receives that is *not* localised to the receiving widget
+        /// (`localize_event` deliberately has no `Scroll` arm), and a widget
+        /// that reads it as a local point silently lands a cell or a row out.
+        /// Convert with the receiver's own bounds before using it as content
+        /// coordinates.
+        ///
+        /// It is window-space because both of its frame-sensitive uses need it
+        /// to be. The router **routes** by it — `Some` hit-tests, `None` falls
+        /// back to the hovered (else focused) widget — and hit-testing is
+        /// necessarily window-space. And `common/scrollable.rs`'s
+        /// `handle_scroll_event` feeds it to `pan_step` →
+        /// [`KineticScroller::pan`](crate::kinetic::KineticScroller::pan),
+        /// whose tracker follows the *pointer*: localisation resolves against
+        /// the captor's **current** bounds on every event, so a localised
+        /// position would feed that tracker samples polluted by the motion of
+        /// the very widget being measured.
+        ///
+        /// A mouse wheel has always been positionless and stays so — hover is
+        /// under the cursor, so hit-testing would find the same widget anyway.
+        /// A pan synthesised from a direct pointer *must* carry one, because a
+        /// contact never writes hover and a positionless pan would route
+        /// nowhere.
+        window_position: Option<Point>,
+        /// Where in a continuous scroll gesture this sample sits.
+        /// [`ScrollPhase::Discrete`] — a self-contained wheel notch — for
+        /// everything Teksilo produced before the touch programme.
+        phase: ScrollPhase,
+        /// Who scrolled. Defaults to
+        /// [`PointerInfo::mouse`](crate::pointer::PointerInfo::mouse) at the
+        /// epoch for every legacy construction site; a real sample carries the
+        /// pointer's identity, kind and timestamp.
+        pointer: PointerInfo,
+    },
+    /// A pointer interaction was revoked by the system rather than completed by
+    /// the user — see [`CancelReason`].
+    ///
+    /// Distinct from [`PointerUp`](Self::PointerUp) on purpose: an Up means the
+    /// user finished, so a drag drops and a tap fires; a cancel means the
+    /// interaction is being taken away, so state must be unwound and nothing
+    /// may activate.
+    ///
+    /// **Terminal**: no `PointerUp` follows for that pointer, and one that
+    /// arrives anyway is swallowed. Delivered by the cancel funnel,
+    /// [`WidgetTree::cancel_pointer`](crate::WidgetTree::cancel_pointer), to
+    /// the widget holding the pointer — or, failing that, to the last one that
+    /// accepted an event from it. A widget receives it through
+    /// `.on_pointer_cancel(..)` or through its raw `on_pointer_event` hook.
+    PointerCancel {
+        /// Where the pointer was last seen, in **window**-logical coordinates,
+        /// when the revoking path knows. A platform cancel usually carries no
+        /// position at all.
+        ///
+        /// Window-space, and named for it, for the same reason as
+        /// [`Scroll::window_position`](Self::Scroll) — but kept there by a
+        /// different mechanism, worth knowing before "fixing" either. The cancel
+        /// funnel delivers through the router's **non**-localising route
+        /// (`dispatch_to_widget_direct`), so what puts this value in window space
+        /// is simply that the funnel records the pointer table's own position
+        /// verbatim; `localize_event` having no `PointerCancel` arm is true but
+        /// would not matter on this path. A widget whose
+        /// `PointerDown`/`Move`/`Up` handling works in local coordinates must
+        /// convert before feeding this to the same sink.
+        window_position: Option<Point>,
+        /// Why the interaction was revoked.
+        reason: CancelReason,
+        /// Which pointer was revoked.
+        pointer: PointerInfo,
     },
     KeyDown {
         key: Key,
@@ -676,6 +801,106 @@ pub enum WidgetEvent {
     Gesture {
         gesture: GestureEvent,
     },
+}
+
+impl WidgetEvent {
+    /// A wheel notch with no position — routed by the hovered (else focused)
+    /// widget, exactly as every scroll in Teksilo was before the touch
+    /// programme.
+    ///
+    /// It exists so that the three fields [`Scroll`](Self::Scroll) gained cost
+    /// each of its construction sites one line rather than five. The pointer
+    /// defaults to
+    /// [`PointerInfo::mouse`] at [`EventTime::ZERO`]: a free constructor has no
+    /// tree and therefore no clock, and nothing reads the timestamp of a
+    /// legacy-constructed event. A sample that has a real time enters through
+    /// [`WidgetTree::dispatch_scroll`](crate::WidgetTree::dispatch_scroll)
+    /// instead.
+    pub fn scroll(delta: ScrollDelta, modifiers: Modifiers) -> Self {
+        Self::Scroll {
+            delta,
+            modifiers,
+            window_position: None,
+            phase: ScrollPhase::Discrete,
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// A wheel notch routed by hit test at `position` rather than by hover.
+    ///
+    /// Use this where the producer genuinely knows where the pointer was; a
+    /// mouse-wheel translator should keep using [`scroll`](Self::scroll), whose
+    /// hover routing is what it has always had.
+    pub fn scroll_at(delta: ScrollDelta, modifiers: Modifiers, position: Point) -> Self {
+        Self::Scroll {
+            delta,
+            modifiers,
+            window_position: Some(position),
+            phase: ScrollPhase::Discrete,
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// A mouse press: [`PointerInfo::mouse`] at the epoch.
+    ///
+    /// This and its siblings are why adding `pointer` to the five `Pointer*`
+    /// variants was a one-line-per-site sweep rather than a rewrite. Use them
+    /// wherever the producer genuinely describes a mouse — every test that is
+    /// pinning mouse behaviour, and every synthesizer that has no pointer of
+    /// its own. A producer that *does* know which pointer it speaks for must
+    /// write the variant out and thread the real [`PointerInfo`], or
+    /// `ctx.pointer_kind()` reads `Mouse` for a finger and every direct-pointer
+    /// branch in the framework silently takes the indirect path.
+    pub fn pointer_down(position: Point, button: PointerButton, modifiers: Modifiers) -> Self {
+        Self::PointerDown {
+            position,
+            button,
+            modifiers,
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// A mouse release. See [`pointer_down`](Self::pointer_down).
+    pub fn pointer_up(position: Point, button: PointerButton, modifiers: Modifiers) -> Self {
+        Self::PointerUp {
+            position,
+            button,
+            modifiers,
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// A mouse move with no modifiers held. See
+    /// [`pointer_down`](Self::pointer_down); use
+    /// [`pointer_move_with`](Self::pointer_move_with) where the producer tracks
+    /// modifier state, since a drag reads Shift and Ctrl from the *move*.
+    pub fn pointer_move(position: Point) -> Self {
+        Self::pointer_move_with(position, Modifiers::NONE)
+    }
+
+    /// A mouse move carrying tracked modifier state. See
+    /// [`pointer_down`](Self::pointer_down).
+    pub fn pointer_move_with(position: Point, modifiers: Modifiers) -> Self {
+        Self::PointerMove {
+            position,
+            modifiers,
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// The mouse entered a widget. See [`pointer_down`](Self::pointer_down).
+    pub fn pointer_enter() -> Self {
+        Self::PointerEnter {
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
+
+    /// The mouse left a widget. See [`pointer_down`](Self::pointer_down).
+    pub fn pointer_leave() -> Self {
+        Self::PointerLeave {
+            pointer: PointerInfo::mouse(EventTime::ZERO),
+        }
+    }
 }
 
 /// The result of handling an event.

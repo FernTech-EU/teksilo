@@ -40,6 +40,12 @@
 //!     .format(TimeFormat::Hour24)
 //!     .seconds(SecondsMode::Hidden);
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! See [`DateEdit`](crate::date_edit)'s "Touch and pen" section: the whole
+//! date/time family carries `focus_within` and `on_key_preview` only, and its
+//! pointer surface is the embedded field, the trigger button and the popover.
 
 #[cfg(test)]
 mod tests;

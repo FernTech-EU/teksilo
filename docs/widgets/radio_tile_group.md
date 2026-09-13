@@ -34,6 +34,14 @@ RadioTileGroup::new(selected)
     .layout(TileLayout::Row)
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![RadioTileGroup at Touch density](img/radio_tile_group-touch.png)
+
 ## Builder methods at a glance
 
 `label`, `tile`, `tiles`, `layout`, `spacing`, `line_spacing`, `row_height`, `enabled`, `style`

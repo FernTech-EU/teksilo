@@ -89,6 +89,10 @@ pub enum ToastDismissCause {
     /// always fires once per toast — apps that track outstanding
     /// toasts via the callback don't leak.
     SlotPoolFull,
+    /// The user swiped the surface away. The touch counterpart of the close
+    /// button, which is small, hover-adjacent chrome; a swipe is the whole
+    /// surface and needs no aim.
+    SwipeDismissed,
 }
 
 // =====================================================================
@@ -1653,6 +1657,143 @@ mod tests {
         assert!(
             tree.find_by_role(teksilo_core::accesskit::Role::Alert)
                 .is_none()
+        );
+    }
+
+    use teksilo_canvas::Point;
+    use teksilo_core::widget_id::WidgetId;
+
+    // =====================================================================
+    // Row 7 of the hover census — the toast's auto-dismiss pause
+    // =====================================================================
+
+    /// Mount a real `ToastSurface` for a live registry entry, so the press the
+    /// framework publishes reaches the registry the way it does in an app.
+    fn toast_tree(
+        registry: &ToastRegistry,
+        entry_id: u64,
+    ) -> (teksilo_core::widget_tree::WidgetTree, WidgetId) {
+        use crate::toast::surface::{ToastSurface, ToastSurfaceData};
+
+        let mut tree = teksilo_core::widget_tree::WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light());
+        let data = ToastSurfaceData {
+            entry_id,
+            severity: ToastSeverity::Info,
+            priority: teksilo_core::styles::ToastPriority::Normal,
+            title: lit!("Saved"),
+            body: None,
+            announcement: None,
+            actions: Rc::new(Vec::new()),
+            show_close_button: false,
+            on_click: None,
+            style_override: None,
+            body_state: teksilo_core::signal::Signal::new(0),
+        };
+        let id = tree.add(ToastSurface::new(data, None, registry.clone(), false));
+        tree.layout(teksilo_canvas::SizeProposal::exact(600.0, 400.0));
+        (tree, id)
+    }
+
+    #[test]
+    fn a_held_toast_does_not_time_out() {
+        let registry = fresh_registry();
+        let (handle, _) = registry
+            .enqueue(Toast::info(lit!("Saved")).auto_dismiss_after(Duration::from_millis(200)));
+        let (mut tree, surface) = toast_tree(&registry, handle.entry_id());
+
+        let at = {
+            let b = tree.bounds(surface);
+            Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5)
+        };
+        let f = tree.new_contact();
+        tree.touch_down(f, at);
+        for _ in 0..10 {
+            registry.tick_timers(Duration::from_millis(100), false);
+        }
+        assert!(
+            registry.live_entry_ids().contains(&handle.entry_id()),
+            "a finger holding the toast holds its timer, the way a resting mouse does",
+        );
+
+        tree.touch_up(f, at);
+        registry.tick_timers(Duration::from_millis(250), false);
+        assert!(
+            !registry.live_entry_ids().contains(&handle.entry_id()),
+            "and the release lets it expire",
+        );
+    }
+
+    /// The failure mode a refcount would have had. A contact the system revokes
+    /// produces no release, so a hand-rolled increment/decrement pair would leave
+    /// the count above zero and freeze every toast in the application for the rest
+    /// of its run. Driving the flag from the framework press is what avoids it.
+    #[test]
+    fn a_cancelled_contact_releases_the_toast_hold() {
+        let registry = fresh_registry();
+        let (handle, _) = registry
+            .enqueue(Toast::info(lit!("Saved")).auto_dismiss_after(Duration::from_millis(200)));
+        let (mut tree, surface) = toast_tree(&registry, handle.entry_id());
+
+        let at = {
+            let b = tree.bounds(surface);
+            Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5)
+        };
+        let f = tree.new_contact();
+        tree.touch_down(f, at);
+        tree.touch_cancel(f, at);
+        registry.tick_timers(Duration::from_millis(250), false);
+        assert!(
+            !registry.live_entry_ids().contains(&handle.entry_id()),
+            "a revoked contact holds nothing",
+        );
+    }
+
+    #[test]
+    fn a_swipe_dismisses_a_toast_and_a_mouse_drag_does_not() {
+        use crate::toast::Toast;
+
+        let swipe = teksilo_tokens::GestureProfile::TOUCH.swipe_min_distance + 40.0;
+
+        // A finger.
+        let registry = fresh_registry();
+        let (handle, _) = registry.enqueue(Toast::info(lit!("Saved")));
+        let (mut tree, surface) = toast_tree(&registry, handle.entry_id());
+        let at = {
+            let b = tree.bounds(surface);
+            Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5)
+        };
+        let f = tree.new_contact();
+        tree.touch_down(f, at);
+        tree.touch_move(f, Point::new(at.x + swipe * 0.5, at.y));
+        tree.advance_input_time(Duration::from_millis(16));
+        tree.touch_move(f, Point::new(at.x + swipe, at.y));
+        tree.touch_up(f, Point::new(at.x + swipe, at.y));
+        assert!(
+            !registry.live_entry_ids().contains(&handle.entry_id()),
+            "a horizontal swipe dismisses it — the close button needs aim, this does not",
+        );
+
+        // A mouse doing the same thing, fast.
+        let registry = fresh_registry();
+        let (handle, _) = registry.enqueue(Toast::info(lit!("Saved")));
+        let (mut tree, surface) = toast_tree(&registry, handle.entry_id());
+        let at = {
+            let b = tree.bounds(surface);
+            Point::new(b.x + b.width * 0.5, b.y + b.height * 0.5)
+        };
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_move(Point::new(at.x + swipe * 0.5, at.y));
+        tree.advance_input_time(Duration::from_millis(16));
+        tree.pointer_move(Point::new(at.x + swipe, at.y));
+        tree.pointer_up_button(
+            Point::new(at.x + swipe, at.y),
+            teksilo_core::event::PointerButton::Primary,
+        );
+        assert!(
+            registry.live_entry_ids().contains(&handle.entry_id()),
+            "a mouse that happens to drag across a toast has not asked for anything",
         );
     }
 }

@@ -21,6 +21,26 @@ default `RecipeButtonStyle` implements the Int UI token ladder.
 - Danger: `ButtonVariant::Destructive` (IntUI maps this to Filled).
 - Text-only link: `ButtonVariant::Link` / `ButtonVariant::Ghost`.
 
+## Touch and pen
+
+The pressed visual is the **framework's**, not the button's own: the router
+keeps one press record per contact and `Button` mirrors it onto its
+`InteractionState` (`bind_press_interaction`). That buys four things a
+`PointerDown` / `PointerUp` pair inside a handler cannot see — a press that
+slides off its target goes out and comes back on re-entry (WCAG 2.2
+SC 2.5.2), a press a pan claimant or an ancestor drag wins is cleared with
+no release to hang the reset on, a cancel clears it, and a press inside a
+scrollable withholds the visual for 100 ms so a finger that turns out to be
+scrolling never flashes a highlight. `docs/touch-and-pen.md` §7.1.
+
+Activation has always been `on_tap`, so it already lands on the release.
+After a mouse or pen release the button rests hovered as it always has;
+after a finger release it rests idle, because a finger sends no
+hover-leave to correct a hovered state with.
+
+The whole family — `IconButton`, `CommandLinkButton`, every `Toolbar`
+command — shares `build_interaction_handlers` and gets all of this with it.
+
 ## Accessibility
 
 Announces as `Role::Button` with the resolved label as its AT name.
@@ -35,6 +55,14 @@ let _btn = Button::new(lit!("Save"))
     .variant(ButtonVariant::Filled)
     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.save")));
 ```
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Button at Touch density](img/button-touch.png)
 
 ## Builder methods at a glance
 

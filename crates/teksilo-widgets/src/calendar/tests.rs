@@ -363,16 +363,16 @@ fn calendar_title_button_click_demotes_mode() {
     // the top — that's where the header label sits ("May 2026").
     let bounds = tree.bounds(id);
     let click_pos = Point::new(bounds.x + bounds.width / 2.0, bounds.y + 20.0);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: click_pos,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: click_pos,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        click_pos,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        click_pos,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     // After the click, mode should have demoted to Months.
     assert_eq!(
@@ -462,16 +462,16 @@ fn calendar_title_button_clickable_across_centered_band() {
         // Reset mode each iteration (tests interact independently).
         mode.set(CalendarMode::Days);
         let click_pos = Point::new(bounds.x + bounds.width * pct, header_y);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: click_pos,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: click_pos,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            click_pos,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            click_pos,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(
             mode.get(),
             CalendarMode::Months,
@@ -588,4 +588,116 @@ fn zoom_cell_label_is_hidden_from_accessibility_tree() {
         ),
         "the zoom cell's embedded label must not survive as a duplicate-named node",
     );
+}
+
+// ---------------------------------------------------------------------------
+// Touch
+// ---------------------------------------------------------------------------
+
+/// A day cell is a tap target, not a manipulator: its activation is `on_tap`,
+/// so it already lands on the release, and its 32 dp box already clears the
+/// 24 dp floor and follows the density ladder above it. A finger tap selects a
+/// day, and that is the whole of what the controls sweep owes it.
+#[test]
+fn a_touch_tap_selects_a_day_on_release() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_core::pointer::PointerPhase;
+
+    let mut tree = light_tree();
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(Calendar::single(date.clone()));
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: None,
+    });
+    let cell = day_cell(&tree, id, 17).expect("the grid has day cells");
+    assert!(
+        cell.width >= 24.0 && cell.height >= 24.0,
+        "a Compact day cell measured {cell:?}",
+    );
+
+    let before = date.get();
+    let at = cell.center();
+    let contact = finger();
+    tree.dispatch_pointer(touch(contact, PointerPhase::Down, at, 0));
+    assert_eq!(date.get(), before, "the press selects nothing");
+    tree.dispatch_pointer(touch(contact, PointerPhase::Up, at, 30));
+    assert_ne!(date.get(), before, "the release selects the day under it");
+}
+
+/// And the calendar deliberately does **not** declare `touch_action(NONE)`: a
+/// finger that comes to rest on a day cell and then drags is scrolling the
+/// surface the calendar sits in, because a day cell produces no value from the
+/// press position and has no drag of its own to protect.
+#[test]
+fn a_finger_pan_over_the_calendar_scrolls_its_container() {
+    use crate::button::press_test_support::{finger, touch};
+    use teksilo_canvas::Point;
+    use teksilo_core::event::EventResponse;
+    use teksilo_core::pointer::PointerPhase;
+    use teksilo_core::pointer::touch_action::{PanAxes, PanClaim};
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let scrolled = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let count = scrolled.clone();
+    let mut tree = light_tree();
+    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let cal = tree.add(Calendar::single(date.clone()));
+    let _page = tree.add(
+        crate::primitives::VStack::new()
+            .add_child(cal)
+            .scroll_container(PanAxes::BOTH)
+            .pan_claim(PanClaim::vertical())
+            .on_scroll(move |_e, _c| {
+                count.set(count.get() + 1);
+                EventResponse::Handled
+            }),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(600.0),
+    });
+    let cell = day_cell(&tree, cal, 17).expect("the grid has day cells");
+    let before = date.get();
+
+    let contact = finger();
+    let start = cell.center();
+    tree.dispatch_pointer(touch(contact, PointerPhase::Down, start, 0));
+    for (i, dy) in [40.0_f32, 90.0, 150.0].into_iter().enumerate() {
+        let at = Point::new(start.x, start.y - dy);
+        tree.dispatch_pointer(touch(contact, PointerPhase::Move, at, 20 + i as u64 * 20));
+    }
+    tree.dispatch_pointer(touch(
+        contact,
+        PointerPhase::Up,
+        Point::new(start.x, start.y - 150.0),
+        100,
+    ));
+    assert!(scrolled.get() > 0, "the pan never reached the scroller");
+    assert_eq!(date.get(), before, "and it selected nothing on the way");
+}
+
+/// The nth `CalendarDayCell` in the grid, in layout order.
+fn day_cell(
+    tree: &WidgetTree,
+    calendar: teksilo_core::widget_id::WidgetId,
+    n: usize,
+) -> Option<teksilo_canvas::Rect> {
+    let mut cells: Vec<teksilo_canvas::Rect> = Vec::new();
+    let mut stack = vec![calendar];
+    while let Some(id) = stack.pop() {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|t| t.contains("DayCell"))
+        {
+            cells.push(tree.bounds(id));
+        }
+        stack.extend(tree.children(id).iter().copied());
+    }
+    cells.sort_by(|a, b| {
+        (a.y, a.x)
+            .partial_cmp(&(b.y, b.x))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    cells.into_iter().nth(n)
 }

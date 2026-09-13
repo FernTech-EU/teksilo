@@ -36,6 +36,12 @@
 //!         .auto_dismiss_after(std::time::Duration::from_secs(5)),
 //! );
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The trigger activates on the release, whether it is the default `Button` or a
+//! caller's widget, and the actions inside the surface are buttons and links with
+//! their own targets. Nothing here actuates on a press.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -149,7 +155,11 @@ impl Widget for SnackbarSurface {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.snackbar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSnackbarStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeSnackbarStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let root_id = style.make_body(
             &SnackbarStyleConfig {
                 content: content_id,
@@ -157,6 +167,36 @@ impl Widget for SnackbarSurface {
             ctx,
         );
         self.root_child_id = Some(root_id);
+        // Swipe-to-dismiss. A snackbar's only user-driven exits are Escape
+        // (which needs focus, and the surface takes none) and a press outside —
+        // which under a finger means aiming at whatever is behind it. A
+        // horizontal swipe across the surface itself needs no aim and no
+        // keyboard, and it is what a touch user reaches for.
+        //
+        // Coarse pointers only. The handler's *presence* is enough to widen
+        // this node's accepted buttons to all of them
+        // (`ArenaRecognizers::accepted_buttons` short-circuits on a swipe), but
+        // the surface reads no press state, and gating the action here keeps a
+        // fast mouse drag across the panel from dismissing it.
+        //
+        // There is deliberately **no** pause-while-pointed-at: the snackbar has
+        // never had one for any input kind, so there is nothing here for touch
+        // to reach parity with. See `docs/hover-affordance-census.md`.
+        //
+        // Dismissed by *chain*, not by content id: the overlay's content is the
+        // deferred host `Snackbar::build` registered, and this widget is the
+        // child that host materialised — so this node's own id is not the
+        // overlay's, and asking by it would find nothing.
+        ctx.apply_self_handlers(teksilo_core::widget_builder::HandlerSet::new().on_swipe(
+            move |direction, _velocity, ctx: &mut teksilo_core::widget::EventContext| {
+                use teksilo_core::gesture::SwipeDirection;
+                if ctx.pointer_kind().is_coarse()
+                    && matches!(direction, SwipeDirection::Left | SwipeDirection::Right)
+                {
+                    ctx.dismiss_self_overlay_chain();
+                }
+            },
+        ));
         vec![root_id]
     }
 

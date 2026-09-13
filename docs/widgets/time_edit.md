@@ -45,6 +45,20 @@ let _field = TimeEdit::new(value)
     .seconds(SecondsMode::Hidden);
 ```
 
+## Touch and pen
+
+See `DateEdit`'s "Touch and pen" section: the whole
+date/time family carries `focus_within` and `on_key_preview` only, and its
+pointer surface is the embedded field, the trigger button and the popover.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TimeEdit at Touch density](img/time_edit-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `required`, `format`, `seconds`, `format_pattern`, `min_time`, `max_time`, `step_minutes`, `placeholder`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `value`

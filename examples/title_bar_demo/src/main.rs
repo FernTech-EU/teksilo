@@ -10,10 +10,15 @@
 //! strips. Behaviors to verify by hand:
 //!   - Drag the title bar's middle band to move the window.
 //!   - Double-click the title bar to toggle maximize.
-//!   - Right-click the title bar to open the system window menu.
+//!   - Right-click the title bar to open the system window menu. A **hold**
+//!     asks the host for the same menu, on the platforms that have one.
 //!   - Click the trailing buttons (—, □, ×) to minimize / toggle maximize / close.
 //!   - Hover the very edge (6 px) of the window — the cursor should
-//!     change to a row / column resize cursor — and drag to resize.
+//!     change to a row / column resize cursor — and drag to resize. There is no
+//!     hover and no cursor to change with a finger, and the strip is only 6 px:
+//!     the grab is widened to the density's target size for a *coarse* pointer by
+//!     the strip's own hit outset, so what a finger can reach is larger than what
+//!     is painted, while a mouse's boundary stays exactly where it looks.
 //!
 //! Windows, macOS and Wayland all have real host backends, and X11 is
 //! supported whenever the window manager implements `_NET_WM_MOVERESIZE`.

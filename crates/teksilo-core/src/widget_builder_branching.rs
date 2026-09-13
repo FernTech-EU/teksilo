@@ -15,13 +15,197 @@
 //! produces a `PendingChild`, which Category A containers already know
 //! how to route through their `child()` / `add_child()` path.
 
-use teksilo_canvas::{Canvas, Rect, SizeProposal};
+use teksilo_canvas::{Canvas, Point, Rect, SizeProposal};
 
 use crate::accessibility::AccessNodeBuilder;
 use crate::build_context::BuildContext;
-use crate::widget::{LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement};
+use crate::widget::{
+    LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement, WidgetTreeView,
+};
 use crate::widget_builder::HandlerSet;
 use crate::widget_id::WidgetId;
+
+// ---------------------------------------------------------------------------
+// The delegation, written once
+// ---------------------------------------------------------------------------
+
+/// Emit `impl Widget` for one branch enum, forwarding every method to the
+/// active arm.
+///
+/// Each branch type occupies its arm's own arena node — the tree never sees the
+/// arm again — so a method absent from this list is not overridden, it is gone:
+/// the trait's default answers in its place and the arm silently loses the
+/// behaviour behind it. The three branch widths would be three copies of that
+/// hazard, so they share one list here, and each generated impl denies
+/// `missing_trait_methods` so a method added to `Widget` fails the lint rather
+/// than the app.
+///
+/// The variant names and the type-parameter names are the same identifiers by
+/// construction (`L`/`R`, `A`/`B`/`C`, …), which is what lets one repetition
+/// serve as both.
+macro_rules! impl_widget_for_branch {
+    ($branch:ident, $($arm:ident),+) => {
+        #[deny(clippy::missing_trait_methods)]
+        impl<$($arm: Widget),+> Widget for $branch<$($arm),+> {
+            fn type_name(&self) -> &'static str {
+                match self { $($branch::$arm(w) => w.type_name()),+ }
+            }
+
+            fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+                match self { $($branch::$arm(w) => w.build(ctx)),+ }
+            }
+
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                ctx: &LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                match self { $($branch::$arm(w) => w.layout_response(proposal, ctx)),+ }
+            }
+
+            fn cacheable_layout(&self) -> bool {
+                match self { $($branch::$arm(w) => w.cacheable_layout()),+ }
+            }
+
+            fn place_children(
+                &self,
+                bounds: Rect,
+                proposal: SizeProposal,
+                children: &mut [WidgetPlacement],
+                ctx: &LayoutContext,
+            ) {
+                match self {
+                    $($branch::$arm(w) => w.place_children(bounds, proposal, children, ctx)),+
+                }
+            }
+
+            fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+                match self { $($branch::$arm(w) => w.paint(bounds, canvas, ctx)),+ }
+            }
+
+            fn wants_after_paint(&self) -> bool {
+                match self { $($branch::$arm(w) => w.wants_after_paint()),+ }
+            }
+
+            fn after_paint(&self, view: &WidgetTreeView<'_>, ctx: &PaintContext) {
+                match self { $($branch::$arm(w) => w.after_paint(view, ctx)),+ }
+            }
+
+            fn wants_post_paint(&self) -> bool {
+                match self { $($branch::$arm(w) => w.wants_post_paint()),+ }
+            }
+
+            fn post_paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+                match self { $($branch::$arm(w) => w.post_paint(bounds, canvas, ctx)),+ }
+            }
+
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                match self { $($branch::$arm(w) => w.accessibility(builder)),+ }
+            }
+
+            fn wants_descendant_redirects(&self) -> bool {
+                match self { $($branch::$arm(w) => w.wants_descendant_redirects()),+ }
+            }
+
+            fn a11y_redirect_descendant(
+                &self,
+                self_id: WidgetId,
+                descendant: WidgetId,
+            ) -> Option<accesskit::NodeId> {
+                match self {
+                    $($branch::$arm(w) => w.a11y_redirect_descendant(self_id, descendant)),+
+                }
+            }
+
+            fn accessible_title_hint(&self) -> Option<String> {
+                match self { $($branch::$arm(w) => w.accessible_title_hint()),+ }
+            }
+
+            fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+                match self { $($branch::$arm(w) => w.accessible_title_node()),+ }
+            }
+
+            fn initial_focus_hint(&self) -> Option<WidgetId> {
+                match self { $($branch::$arm(w) => w.initial_focus_hint()),+ }
+            }
+
+            fn context_menu_key_target(&self) -> Option<WidgetId> {
+                match self { $($branch::$arm(w) => w.context_menu_key_target()),+ }
+            }
+
+            fn children(&self) -> Vec<WidgetId> {
+                match self { $($branch::$arm(w) => w.children()),+ }
+            }
+
+            fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+                match self { $($branch::$arm(w) => w.accessibility_children()),+ }
+            }
+
+            fn as_any(&self) -> Option<&dyn std::any::Any> {
+                match self { $($branch::$arm(w) => w.as_any()),+ }
+            }
+
+            fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+                match self { $($branch::$arm(w) => w.as_any_mut()),+ }
+            }
+
+            fn clips_children(&self) -> bool {
+                match self { $($branch::$arm(w) => w.clips_children()),+ }
+            }
+
+            fn focus_reveal_rect(&self, bounds: Rect) -> Option<Rect> {
+                match self { $($branch::$arm(w) => w.focus_reveal_rect(bounds)),+ }
+            }
+
+            fn hit_shape(&self, local_point: Point, bounds: Rect) -> bool {
+                match self { $($branch::$arm(w) => w.hit_shape(local_point, bounds)),+ }
+            }
+
+            fn hit_outset(
+                &self,
+                kind: teksilo_tokens::PointerKind,
+                tokens: &teksilo_tokens::InputTokens,
+            ) -> teksilo_canvas::EdgeInsets {
+                match self { $($branch::$arm(w) => w.hit_outset(kind, tokens)),+ }
+            }
+
+            fn hit_slop(
+                &self,
+                kind: teksilo_tokens::PointerKind,
+                tokens: &teksilo_tokens::InputTokens,
+            ) -> Option<crate::pointer::hit_slop::HitSlop> {
+                // Named on `WidgetBuilder` too, where it is a consuming builder
+                // method — spelled out so the arm's `Widget` impl is the one
+                // called no matter what is in scope at the expansion site.
+                match self { $($branch::$arm(w) => Widget::hit_slop(w, kind, tokens)),+ }
+            }
+
+            fn hit_distance(&self, local_point: Point, bounds: Rect) -> Option<f32> {
+                match self { $($branch::$arm(w) => w.hit_distance(local_point, bounds)),+ }
+            }
+
+            fn target_regions(&self, bounds: Rect) -> Vec<crate::partition::TargetRegion> {
+                match self { $($branch::$arm(w) => w.target_regions(bounds)),+ }
+            }
+
+            fn preserves_children_on_rebuild(&self) -> bool {
+                match self { $($branch::$arm(w) => w.preserves_children_on_rebuild()),+ }
+            }
+
+            fn tooltip_has_content(&self) -> bool {
+                match self { $($branch::$arm(w) => w.tooltip_has_content()),+ }
+            }
+
+            fn declare_shortcuts(&self) -> Vec<crate::shortcut::Shortcut> {
+                match self { $($branch::$arm(w) => w.declare_shortcuts()),+ }
+            }
+
+            fn take_handler_set(&mut self) -> Option<HandlerSet> {
+                match self { $($branch::$arm(w) => w.take_handler_set()),+ }
+            }
+        }
+    };
+}
 
 // ---------------------------------------------------------------------------
 // TeksiBranch — two-way sum type
@@ -33,94 +217,7 @@ pub enum TeksiBranch<L: Widget, R: Widget> {
     R(R),
 }
 
-impl<L: Widget, R: Widget> Widget for TeksiBranch<L, R> {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        match self {
-            TeksiBranch::L(w) => w.build(ctx),
-            TeksiBranch::R(w) => w.build(ctx),
-        }
-    }
-
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> crate::widget::LayoutResponse {
-        match self {
-            TeksiBranch::L(w) => w.layout_response(proposal, ctx),
-            TeksiBranch::R(w) => w.layout_response(proposal, ctx),
-        }
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
-    ) {
-        match self {
-            TeksiBranch::L(w) => w.place_children(bounds, proposal, children, ctx),
-            TeksiBranch::R(w) => w.place_children(bounds, proposal, children, ctx),
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        match self {
-            TeksiBranch::L(w) => w.paint(bounds, canvas, ctx),
-            TeksiBranch::R(w) => w.paint(bounds, canvas, ctx),
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        match self {
-            TeksiBranch::L(w) => w.accessibility(builder),
-            TeksiBranch::R(w) => w.accessibility(builder),
-        }
-    }
-
-    fn accessible_title_hint(&self) -> Option<String> {
-        match self {
-            TeksiBranch::L(w) => w.accessible_title_hint(),
-            TeksiBranch::R(w) => w.accessible_title_hint(),
-        }
-    }
-
-    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
-        match self {
-            TeksiBranch::L(w) => w.accessible_title_node(),
-            TeksiBranch::R(w) => w.accessible_title_node(),
-        }
-    }
-
-    fn initial_focus_hint(&self) -> Option<WidgetId> {
-        match self {
-            TeksiBranch::L(w) => w.initial_focus_hint(),
-            TeksiBranch::R(w) => w.initial_focus_hint(),
-        }
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        match self {
-            TeksiBranch::L(w) => w.children(),
-            TeksiBranch::R(w) => w.children(),
-        }
-    }
-
-    fn clips_children(&self) -> bool {
-        match self {
-            TeksiBranch::L(w) => w.clips_children(),
-            TeksiBranch::R(w) => w.clips_children(),
-        }
-    }
-
-    fn take_handler_set(&mut self) -> Option<HandlerSet> {
-        match self {
-            TeksiBranch::L(w) => w.take_handler_set(),
-            TeksiBranch::R(w) => w.take_handler_set(),
-        }
-    }
-}
+impl_widget_for_branch!(TeksiBranch, L, R);
 
 // ---------------------------------------------------------------------------
 // TeksiBranch3 — three-way sum type
@@ -133,105 +230,7 @@ pub enum TeksiBranch3<A: Widget, B: Widget, C: Widget> {
     C(C),
 }
 
-impl<A: Widget, B: Widget, C: Widget> Widget for TeksiBranch3<A, B, C> {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        match self {
-            TeksiBranch3::A(w) => w.build(ctx),
-            TeksiBranch3::B(w) => w.build(ctx),
-            TeksiBranch3::C(w) => w.build(ctx),
-        }
-    }
-
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> crate::widget::LayoutResponse {
-        match self {
-            TeksiBranch3::A(w) => w.layout_response(proposal, ctx),
-            TeksiBranch3::B(w) => w.layout_response(proposal, ctx),
-            TeksiBranch3::C(w) => w.layout_response(proposal, ctx),
-        }
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
-    ) {
-        match self {
-            TeksiBranch3::A(w) => w.place_children(bounds, proposal, children, ctx),
-            TeksiBranch3::B(w) => w.place_children(bounds, proposal, children, ctx),
-            TeksiBranch3::C(w) => w.place_children(bounds, proposal, children, ctx),
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        match self {
-            TeksiBranch3::A(w) => w.paint(bounds, canvas, ctx),
-            TeksiBranch3::B(w) => w.paint(bounds, canvas, ctx),
-            TeksiBranch3::C(w) => w.paint(bounds, canvas, ctx),
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        match self {
-            TeksiBranch3::A(w) => w.accessibility(builder),
-            TeksiBranch3::B(w) => w.accessibility(builder),
-            TeksiBranch3::C(w) => w.accessibility(builder),
-        }
-    }
-
-    fn accessible_title_hint(&self) -> Option<String> {
-        match self {
-            TeksiBranch3::A(w) => w.accessible_title_hint(),
-            TeksiBranch3::B(w) => w.accessible_title_hint(),
-            TeksiBranch3::C(w) => w.accessible_title_hint(),
-        }
-    }
-
-    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
-        match self {
-            TeksiBranch3::A(w) => w.accessible_title_node(),
-            TeksiBranch3::B(w) => w.accessible_title_node(),
-            TeksiBranch3::C(w) => w.accessible_title_node(),
-        }
-    }
-
-    fn initial_focus_hint(&self) -> Option<WidgetId> {
-        match self {
-            TeksiBranch3::A(w) => w.initial_focus_hint(),
-            TeksiBranch3::B(w) => w.initial_focus_hint(),
-            TeksiBranch3::C(w) => w.initial_focus_hint(),
-        }
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        match self {
-            TeksiBranch3::A(w) => w.children(),
-            TeksiBranch3::B(w) => w.children(),
-            TeksiBranch3::C(w) => w.children(),
-        }
-    }
-
-    fn clips_children(&self) -> bool {
-        match self {
-            TeksiBranch3::A(w) => w.clips_children(),
-            TeksiBranch3::B(w) => w.clips_children(),
-            TeksiBranch3::C(w) => w.clips_children(),
-        }
-    }
-
-    fn take_handler_set(&mut self) -> Option<HandlerSet> {
-        match self {
-            TeksiBranch3::A(w) => w.take_handler_set(),
-            TeksiBranch3::B(w) => w.take_handler_set(),
-            TeksiBranch3::C(w) => w.take_handler_set(),
-        }
-    }
-}
+impl_widget_for_branch!(TeksiBranch3, A, B, C);
 
 // ---------------------------------------------------------------------------
 // TeksiBranch4 — four-way sum type
@@ -245,116 +244,7 @@ pub enum TeksiBranch4<A: Widget, B: Widget, C: Widget, D: Widget> {
     D(D),
 }
 
-impl<A: Widget, B: Widget, C: Widget, D: Widget> Widget for TeksiBranch4<A, B, C, D> {
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        match self {
-            TeksiBranch4::A(w) => w.build(ctx),
-            TeksiBranch4::B(w) => w.build(ctx),
-            TeksiBranch4::C(w) => w.build(ctx),
-            TeksiBranch4::D(w) => w.build(ctx),
-        }
-    }
-
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> crate::widget::LayoutResponse {
-        match self {
-            TeksiBranch4::A(w) => w.layout_response(proposal, ctx),
-            TeksiBranch4::B(w) => w.layout_response(proposal, ctx),
-            TeksiBranch4::C(w) => w.layout_response(proposal, ctx),
-            TeksiBranch4::D(w) => w.layout_response(proposal, ctx),
-        }
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
-    ) {
-        match self {
-            TeksiBranch4::A(w) => w.place_children(bounds, proposal, children, ctx),
-            TeksiBranch4::B(w) => w.place_children(bounds, proposal, children, ctx),
-            TeksiBranch4::C(w) => w.place_children(bounds, proposal, children, ctx),
-            TeksiBranch4::D(w) => w.place_children(bounds, proposal, children, ctx),
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        match self {
-            TeksiBranch4::A(w) => w.paint(bounds, canvas, ctx),
-            TeksiBranch4::B(w) => w.paint(bounds, canvas, ctx),
-            TeksiBranch4::C(w) => w.paint(bounds, canvas, ctx),
-            TeksiBranch4::D(w) => w.paint(bounds, canvas, ctx),
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        match self {
-            TeksiBranch4::A(w) => w.accessibility(builder),
-            TeksiBranch4::B(w) => w.accessibility(builder),
-            TeksiBranch4::C(w) => w.accessibility(builder),
-            TeksiBranch4::D(w) => w.accessibility(builder),
-        }
-    }
-
-    fn accessible_title_hint(&self) -> Option<String> {
-        match self {
-            TeksiBranch4::A(w) => w.accessible_title_hint(),
-            TeksiBranch4::B(w) => w.accessible_title_hint(),
-            TeksiBranch4::C(w) => w.accessible_title_hint(),
-            TeksiBranch4::D(w) => w.accessible_title_hint(),
-        }
-    }
-
-    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
-        match self {
-            TeksiBranch4::A(w) => w.accessible_title_node(),
-            TeksiBranch4::B(w) => w.accessible_title_node(),
-            TeksiBranch4::C(w) => w.accessible_title_node(),
-            TeksiBranch4::D(w) => w.accessible_title_node(),
-        }
-    }
-
-    fn initial_focus_hint(&self) -> Option<WidgetId> {
-        match self {
-            TeksiBranch4::A(w) => w.initial_focus_hint(),
-            TeksiBranch4::B(w) => w.initial_focus_hint(),
-            TeksiBranch4::C(w) => w.initial_focus_hint(),
-            TeksiBranch4::D(w) => w.initial_focus_hint(),
-        }
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        match self {
-            TeksiBranch4::A(w) => w.children(),
-            TeksiBranch4::B(w) => w.children(),
-            TeksiBranch4::C(w) => w.children(),
-            TeksiBranch4::D(w) => w.children(),
-        }
-    }
-
-    fn clips_children(&self) -> bool {
-        match self {
-            TeksiBranch4::A(w) => w.clips_children(),
-            TeksiBranch4::B(w) => w.clips_children(),
-            TeksiBranch4::C(w) => w.clips_children(),
-            TeksiBranch4::D(w) => w.clips_children(),
-        }
-    }
-
-    fn take_handler_set(&mut self) -> Option<HandlerSet> {
-        match self {
-            TeksiBranch4::A(w) => w.take_handler_set(),
-            TeksiBranch4::B(w) => w.take_handler_set(),
-            TeksiBranch4::C(w) => w.take_handler_set(),
-            TeksiBranch4::D(w) => w.take_handler_set(),
-        }
-    }
-}
+impl_widget_for_branch!(TeksiBranch4, A, B, C, D);
 
 // ---------------------------------------------------------------------------
 // IntoTeksiChild — widget-or-id dispatch for #{ expr } child positions

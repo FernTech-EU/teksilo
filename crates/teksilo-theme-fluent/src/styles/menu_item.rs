@@ -24,9 +24,10 @@
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{MenuItemMetrics, MenuItemStyle, MenuItemStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, SurfaceRole};
+use teksilo_tokens::{CornerRadius, InputTokens, SurfaceRole, TargetRole};
 use teksilo_widgets::primitives::{RectWidget, ZStack};
 use teksilo_widgets::styles::{MenuItemRecipe, RecipeMenuItemStyle};
 
@@ -49,14 +50,23 @@ const SEPARATOR_HEIGHT: f32 = 3.0;
 /// The Fluent [`MenuItemRecipe`] — public so an app can start from it and
 /// tune one dimension without rebuilding the whole style.
 pub fn fluent_menu_item_recipe() -> MenuItemRecipe {
+    fluent_menu_item_recipe_for(&InputTokens::default())
+}
+
+/// [`fluent_menu_item_recipe`] resolved against a density's [`InputTokens`].
+///
+/// `[WinUI]` values throughout, raised where the density asks for a bigger
+/// target: `MenuFlyoutThemeMinHeight` already clears the 24 dp AA floor at
+/// Compact, so this is the identity there.
+pub fn fluent_menu_item_recipe_for(tokens: &InputTokens) -> MenuItemRecipe {
     MenuItemRecipe {
-        item_height: ITEM_HEIGHT,
-        padding_horizontal: PADDING_H,
-        padding_leading: PADDING_H,
+        item_height: dp(ITEM_HEIGHT, TargetRole::Target, tokens),
+        padding_horizontal: spacing(PADDING_H, tokens),
+        padding_leading: spacing(PADDING_H, tokens),
         icon_column_width: ICON_COLUMN,
-        icon_label_gap: ICON_LABEL_GAP,
-        shortcut_left_gap: SHORTCUT_GAP,
-        separator_height: SEPARATOR_HEIGHT,
+        icon_label_gap: spacing(ICON_LABEL_GAP, tokens),
+        shortcut_left_gap: spacing(SHORTCUT_GAP, tokens),
+        separator_height: spacing(SEPARATOR_HEIGHT, tokens),
         item_corner_radius: FLUENT_CONTROL_CORNER_RADIUS,
     }
 }
@@ -94,7 +104,8 @@ impl MenuItemStyle for FluentMenuItemStyle {
             is_disabled: cfg.is_disabled.clone(),
             is_highlighted: quiet,
         };
-        let row = RecipeMenuItemStyle::new(fluent_menu_item_recipe()).make_body(&inner_cfg, ctx);
+        let row = RecipeMenuItemStyle::new(fluent_menu_item_recipe_for(&ctx.theme().input))
+            .make_body(&inner_cfg, ctx);
 
         ctx.add(ZStack::new().add_child(backdrop).add_child(row))
     }

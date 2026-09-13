@@ -247,6 +247,56 @@ fn present_in_tree_modal_request(
     }
 }
 
+/// How often the on-screen keyboard's rectangle is re-read. See
+/// [`TeksiloAppHandler::refresh_occluded_band`].
+const OSK_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Convert a screen-space physical rectangle into the part of `window`'s client
+/// area it covers, in window-logical pixels.
+///
+/// `None` when the rectangle misses the window entirely, which is the common
+/// case for every window a keyboard is not in front of.
+fn occluded_band_in_window(
+    window: &winit::window::Window,
+    screen: (i32, i32, i32, i32),
+) -> Option<teksilo_canvas::Rect> {
+    let origin = window.inner_position().ok()?;
+    let size = window.inner_size();
+    occluded_band_in_client(
+        (origin.x, origin.y),
+        (size.width, size.height),
+        window.scale_factor() as f32,
+        screen,
+    )
+}
+
+/// The arithmetic behind [`occluded_band_in_window`], with the window replaced
+/// by the three numbers it contributes — so the clipping can be checked on a
+/// host with no keyboard, no display and no window.
+fn occluded_band_in_client(
+    client_origin: (i32, i32),
+    client_size: (u32, u32),
+    scale_factor: f32,
+    (left, top, right, bottom): (i32, i32, i32, i32),
+) -> Option<teksilo_canvas::Rect> {
+    if scale_factor <= 0.0 {
+        return None;
+    }
+    let x0 = (left - client_origin.0).max(0) as f32;
+    let y0 = (top - client_origin.1).max(0) as f32;
+    let x1 = (right - client_origin.0).min(client_size.0 as i32) as f32;
+    let y1 = (bottom - client_origin.1).min(client_size.1 as i32) as f32;
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    Some(teksilo_canvas::Rect::new(
+        x0 / scale_factor,
+        y0 / scale_factor,
+        (x1 - x0) / scale_factor,
+        (y1 - y0) / scale_factor,
+    ))
+}
+
 fn apply_cursor_to_window(
     platform_window: &teksilo_platform::PlatformWindow,
     cursor: teksilo_core::CursorIcon,
@@ -268,8 +318,67 @@ fn apply_cursor_to_window(
     platform_window.window().set_cursor(winit_cursor);
 }
 
+/// The real window behind [`crate::input_loop::InputChrome`].
+///
+/// Holds the platform window and, when one is running, the idle trace — the
+/// two things the input half of a turn reaches for that a headless test has no
+/// equivalent of. Everything with a decision in it lives in `input_loop`; this
+/// is the adapter, and it is deliberately without one.
+pub(crate) struct WindowChrome<'a> {
+    window: &'a teksilo_platform::PlatformWindow,
+    trace: Option<&'a mut IdleTrace>,
+}
+
+impl<'a> WindowChrome<'a> {
+    /// Wrap `window`, optionally noting redraw reasons into `trace`.
+    pub(crate) fn new(
+        window: &'a teksilo_platform::PlatformWindow,
+        trace: Option<&'a mut IdleTrace>,
+    ) -> Self {
+        Self { window, trace }
+    }
+}
+
+impl crate::input_loop::InputChrome for WindowChrome<'_> {
+    fn set_cursor(&mut self, icon: teksilo_core::CursorIcon) {
+        apply_cursor_to_window(self.window, icon);
+    }
+
+    fn request_redraw(&mut self, reason: &'static str) {
+        if let Some(trace) = &mut self.trace {
+            trace.note_redraw_request(reason);
+        }
+        self.window.request_redraw();
+    }
+
+    fn safe_area(&self) -> teksilo_platform::safe_area::SafeAreaSides {
+        teksilo_platform::window_safe_area(self.window.window())
+    }
+
+    fn occluded_band(&self, screen: (i32, i32, i32, i32)) -> Option<teksilo_canvas::Rect> {
+        occluded_band_in_window(self.window.window(), screen)
+    }
+
+    fn set_soft_keyboard_visible(&mut self, visible: bool) {
+        teksilo_platform::soft_keyboard::set_visible(self.window.window(), visible);
+    }
+
+    fn set_ime(&mut self, purpose: Option<teksilo_core::ImePurpose>, allowed: Option<bool>) {
+        // The adapter, and nothing else: which of the two to push, and whether
+        // to push at all, is `input_loop::settle_ime`'s decision.
+        if let Some(purpose) = purpose {
+            self.window
+                .window()
+                .set_ime_purpose(TeksiloAppHandler::map_ime_purpose(purpose));
+        }
+        if let Some(allowed) = allowed {
+            self.window.window().set_ime_allowed(allowed);
+        }
+    }
+}
+
 #[derive(Debug)]
-struct IdleTrace {
+pub(crate) struct IdleTrace {
     last_report: Instant,
     resume_time_reached: u64,
     redraw_requested: u64,
@@ -348,7 +457,7 @@ impl IdleTrace {
         self.maybe_report();
     }
 
-    fn note_redraw_request(&mut self, reason: &'static str) {
+    pub(crate) fn note_redraw_request(&mut self, reason: &'static str) {
         match reason {
             "cursor" => self.cursor_redraw_requests += 1,
             "mouse_input" => self.mouse_input_redraw_requests += 1,
@@ -479,6 +588,16 @@ struct TeksiloAppHandler {
     /// Read in `update_control_flow` to force `ControlFlow::Poll`; when clear,
     /// the loop sleeps until the next event (off-thread wakes via the proxy).
     loop_tick_poll: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+    /// Whether the last loop turn was started by the OS rather than by our own
+    /// `WaitUntil`. Read by the pen pump: an external wake with a digitizer
+    /// attached is the moment a packet may be one shim-poll away.
+    woken_externally: bool,
+    /// One-shot catch-up deadline for the pen shim. See
+    /// [`TeksiloAppHandler::pen_deadline`].
+    pen_recheck_at: Option<Instant>,
+    /// When the on-screen keyboard's rectangle was last read. See
+    /// [`TeksiloAppHandler::refresh_occluded_band`].
+    osk_polled_at: Option<Instant>,
 }
 
 impl TeksiloAppHandler {
@@ -526,6 +645,9 @@ impl TeksiloAppHandler {
             _settings_watcher: settings_watcher,
             loop_tick: None,
             loop_tick_poll: None,
+            woken_externally: true,
+            pen_recheck_at: None,
+            osk_polled_at: None,
         }
     }
 
@@ -674,12 +796,23 @@ impl TeksiloAppHandler {
             }
         }
 
-        // The ONLY remaining consumer that forces true `ControlFlow::Poll`:
-        // an installed loop-tick owner (e.g. the `teksilo-async` executor)
-        // with runnable work. Async task processing wants to run as fast as
-        // possible and is not an animation, so it is deliberately *not*
-        // 60 Hz-capped. Every per-frame *animation* effect now paces through
-        // the `WaitUntil` deadline instead.
+        // The digitizer, whose packets arrive on a thread of its own and so
+        // cannot wake the loop by themselves. A bounded `WaitUntil` term, not
+        // a `Poll`: see `input_loop::pen_deadline` for when each of its two
+        // terms applies and when neither does.
+        if let Some(pen) = self.pen_deadline(now) {
+            earliest_deadline = Some(match earliest_deadline {
+                Some(current) => current.min(pen),
+                None => pen,
+            });
+        }
+
+        // The ONLY consumer that forces true `ControlFlow::Poll`: an installed
+        // loop-tick owner (e.g. the `teksilo-async` executor) with runnable
+        // work. Async task processing wants to run as fast as possible and is
+        // not an animation, so it is deliberately *not* 60 Hz-capped. Every
+        // per-frame *animation* effect paces through the `WaitUntil` deadline
+        // instead.
         let force_poll = self.loop_tick_poll.as_ref().is_some_and(|poll| poll.get());
 
         if force_poll {
@@ -698,6 +831,67 @@ impl TeksiloAppHandler {
                 tooltip_timers,
             );
         }
+    }
+
+    /// Read the window's platform safe area and hand it to the tree.
+    ///
+    /// The take-aside; the reading and the mapping are
+    /// [`crate::input_loop::refresh_safe_area`].
+    fn refresh_safe_area(managed: &mut crate::window_manager::ManagedWindow) {
+        let chrome = WindowChrome::new(&managed.platform_window, None);
+        crate::input_loop::refresh_safe_area(&chrome, &mut managed.tree);
+    }
+
+    /// Re-read the on-screen keyboard's rectangle and report it to every
+    /// window it covers.
+    ///
+    /// Whether this turn is the one that re-reads is
+    /// [`crate::input_loop::osk_poll_due`]; what each window makes of the
+    /// rectangle is [`crate::input_loop::refresh_occluded_band`].
+    fn refresh_occluded_band(&mut self) {
+        let now = Instant::now();
+        if !crate::input_loop::osk_poll_due(
+            teksilo_platform::soft_keyboard::support(),
+            self.osk_polled_at,
+            now,
+            OSK_POLL_INTERVAL,
+        ) {
+            return;
+        }
+        self.osk_polled_at = Some(now);
+        let screen = teksilo_platform::soft_keyboard::keyboard_screen_rect();
+        for managed in self.wm.iter_mut() {
+            let chrome = WindowChrome::new(&managed.platform_window, None);
+            crate::input_loop::refresh_occluded_band(&chrome, &mut managed.tree, screen);
+        }
+    }
+
+    /// Whether any window's pen shim fills its buffer from a thread of its own.
+    ///
+    /// The Wayland tablet listener does; the Windows `WM_POINTER` subclass does
+    /// not — its packets are already in the buffer by the time the turn that
+    /// carried the message reaches the pump. Only the first kind needs the
+    /// loop to look a second time.
+    fn any_pen_source_polls_off_thread(&self) -> bool {
+        self.wm
+            .iter()
+            .any(|managed| managed.translation_state.pen_polls_off_thread())
+    }
+
+    /// When the pen shim next has to be looked at, if ever.
+    ///
+    /// The take-aside; the folding is [`crate::input_loop::pen_deadline`],
+    /// which is where the two terms and their bounds are described.
+    fn pen_deadline(&mut self, now: Instant) -> Option<Instant> {
+        let windows: Vec<_> = self
+            .wm
+            .iter()
+            .map(|managed| crate::input_loop::PenWindow {
+                off_thread: managed.translation_state.pen_polls_off_thread(),
+                in_proximity: managed.translation_state.pen_in_proximity(),
+            })
+            .collect();
+        crate::input_loop::pen_deadline(now, windows.into_iter(), &mut self.pen_recheck_at)
     }
 
     fn post_event(&mut self, event_loop: &ActiveEventLoop) {
@@ -793,8 +987,134 @@ impl TeksiloAppHandler {
             current.tree.dispatch_event_with_ops(event, &mut ops);
         }
 
-        Self::reconcile_ime(&mut current);
+        Self::settle_ime(&mut current);
         self.wm.reinsert_managed(window_id, current);
+    }
+
+    /// Take the window aside and run `f` with its translator, its tree and a
+    /// real [`WindowOps`](teksilo_core::WindowOps) sink all borrowed at once.
+    ///
+    /// The pointer path needs all three — the backend to translate, the tree
+    /// to receive, the ops sink so a handler can still open a window — and the
+    /// only way to hold them together is the same take-aside
+    /// [`Self::dispatch_in_window`] uses. Returns `f`'s value, or `None` when
+    /// the window is gone.
+    fn with_input_in_window<R>(
+        &mut self,
+        window_id: WindowId,
+        event_loop: &ActiveEventLoop,
+        f: impl FnOnce(
+            &mut WindowChrome<'_>,
+            &mut teksilo_platform::TranslationState,
+            &mut teksilo_core::WidgetTree,
+            &mut crate::window_manager::WindowOpsImpl<'_>,
+        ) -> R,
+    ) -> Option<R> {
+        let mut current = self.wm.take_managed(window_id)?;
+        let current_id = current.teksilo_id;
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = current
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(current.platform_window.window_arc());
+
+        let result = {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                current_id,
+                #[cfg(not(target_os = "macos"))]
+                current_handle,
+                current_arc,
+            );
+            let mut chrome = WindowChrome::new(&current.platform_window, self.idle_trace.as_mut());
+            f(
+                &mut chrome,
+                &mut current.translation_state,
+                &mut current.tree,
+                &mut ops,
+            )
+        };
+
+        Self::settle_ime(&mut current);
+        self.wm.reinsert_managed(window_id, current);
+        Some(result)
+    }
+
+    /// Route one pointer / gesture winit event into the named window.
+    ///
+    /// Nothing but the take-aside: the routing and the chores it owes are
+    /// [`crate::input_loop::dispatch_input`], which a test can drive with a
+    /// hand-written winit event, a bare tree and a recording chrome.
+    fn dispatch_input_in_window(
+        &mut self,
+        window_id: WindowId,
+        event: &WindowEvent,
+        event_loop: &ActiveEventLoop,
+    ) {
+        self.with_input_in_window(window_id, event_loop, |chrome, backend, tree, ops| {
+            crate::input_loop::dispatch_input(chrome, backend, tree, ops, event);
+        });
+    }
+
+    /// Drain every window's pen shim.
+    ///
+    /// Once per event-loop turn, which is what
+    /// [`TranslationState::poll_pen`](teksilo_platform::TranslationState::poll_pen)
+    /// asks for. What it costs is decided by what
+    /// [`create_pen_source`](teksilo_platform::create_pen_source) answered when
+    /// the window was made, and **no platform's answer depends on a digitizer
+    /// being attached**: the shim is installed whenever the platform has a pen
+    /// *path* — a compositor advertising `zwp_tablet_manager_v2`, or a Win32
+    /// window whose subclass installs — and on X11 and macOS there is no path,
+    /// so the null source is answered and `has_pen_source()` is false for every
+    /// window. Where no shim was installed this returns before it allocates;
+    /// where one was, a walk and one empty poll per window per turn are paid
+    /// even on a machine that has never seen a stylus. What that shim costs
+    /// *between* those polls is its own business and is bounded there —
+    /// `WaylandPenSource::poll_interval` stands its dispatch thread down to a
+    /// quarter-second tick until the seat announces a tool.
+    fn pump_pen_sources(&mut self, event_loop: &ActiveEventLoop) {
+        let winit_ids: Vec<_> = self
+            .wm
+            .windows_map()
+            .iter()
+            .filter(|(_, managed)| managed.translation_state.has_pen_source())
+            .map(|(id, _)| *id)
+            .collect();
+        if winit_ids.is_empty() {
+            self.pen_recheck_at = None;
+            return;
+        }
+
+        // An external wake with a shim installed means a packet may be one
+        // shim-poll away. Arm a single catch-up look; a session that produces
+        // more will keep the loop ticking through `pen_deadline` on its own.
+        if self.woken_externally && self.any_pen_source_polls_off_thread() {
+            self.pen_recheck_at = Some(Instant::now() + teksilo_platform::pen::PEN_POLL_INTERVAL);
+        }
+        for winit_id in winit_ids {
+            self.with_input_in_window(winit_id, event_loop, |chrome, backend, tree, ops| {
+                crate::input_loop::pump_pen(chrome, backend, tree, ops)
+            });
+        }
+    }
+
+    /// Flip a window's active state, revoking every live pointer at both the
+    /// backend and the tree when it goes inactive.
+    fn set_window_active_in_window(
+        &mut self,
+        window_id: WindowId,
+        active: bool,
+        reason: teksilo_core::pointer::CancelReason,
+        event_loop: &ActiveEventLoop,
+    ) {
+        self.with_input_in_window(window_id, event_loop, |_chrome, backend, tree, ops| {
+            crate::input_routing::set_window_active(backend, tree, ops, active, reason);
+        });
     }
 
     /// Apply a [`MenubarAction`](teksilo_core::window::MenubarAction)
@@ -870,62 +1190,53 @@ impl TeksiloAppHandler {
                         current.tree.layout_with_ops(proposal, &mut ops);
                     }
                     current.tree.focus_ops(trigger_id, &mut ops);
-                    let pointer = current.tree.bounds(trigger_id).center();
+                    // A keyboard chord (F10, Alt+letter) opened this menu, so
+                    // there is no pointer to describe: the constructors' mouse
+                    // default is the honest answer, and it is what the trigger
+                    // saw before the press carried a pointer at all.
+                    let at = current.tree.bounds(trigger_id).center();
                     current.tree.dispatch_event_with_ops(
-                        WidgetEvent::PointerDown {
-                            position: pointer,
-                            button: teksilo_core::event::PointerButton::Primary,
-                            modifiers: teksilo_core::event::Modifiers::NONE,
-                        },
+                        WidgetEvent::pointer_down(
+                            at,
+                            teksilo_core::event::PointerButton::Primary,
+                            teksilo_core::event::Modifiers::NONE,
+                        ),
                         &mut ops,
                     );
                     current.tree.dispatch_event_with_ops(
-                        WidgetEvent::PointerUp {
-                            position: pointer,
-                            button: teksilo_core::event::PointerButton::Primary,
-                            modifiers: teksilo_core::event::Modifiers::NONE,
-                        },
+                        WidgetEvent::pointer_up(
+                            at,
+                            teksilo_core::event::PointerButton::Primary,
+                            teksilo_core::event::Modifiers::NONE,
+                        ),
                         &mut ops,
                     );
                 }
             }
         }
 
-        Self::reconcile_ime(&mut current);
+        Self::settle_ime(&mut current);
         self.wm.reinsert_managed(window_id, current);
     }
 
     /// Bring the winit window's OS-IME state in line with the focused
-    /// widget's descriptor. Enablement + purpose are declarative: a focused
-    /// text widget carries `Some(ImeContext { purpose })`, everything else
-    /// `None`. Applied only on change vs. the per-window cache — repeated
-    /// `set_ime_allowed(true)` can cancel an active composition. The caret
+    /// widget's descriptor, then apply any pending
+    /// `EventContext::request_soft_keyboard`.
+    ///
+    /// The take-aside; the decision — including why a turn at an unmoved focus
+    /// must push nothing at all, and why the request half can never reach
+    /// `set_ime_allowed` — is [`crate::input_loop::settle_ime`]. The caret
     /// area is reported separately (and idempotently) by the focused widget
     /// via `WindowOps::set_ime_cursor_area`.
-    fn reconcile_ime(managed: &mut crate::window_manager::ManagedWindow) {
-        match managed.tree.ime_context_for_focused() {
-            Some(ctx) => {
-                if managed.ime_purpose != Some(ctx.purpose) {
-                    managed
-                        .platform_window
-                        .window()
-                        .set_ime_purpose(Self::map_ime_purpose(ctx.purpose));
-                    managed.ime_purpose = Some(ctx.purpose);
-                }
-                if managed.ime_allowed != Some(true) {
-                    managed.platform_window.window().set_ime_allowed(true);
-                    managed.ime_allowed = Some(true);
-                }
-            }
-            None => {
-                if managed.ime_allowed != Some(false) {
-                    managed.platform_window.window().set_ime_allowed(false);
-                    managed.ime_allowed = Some(false);
-                    // Force the purpose to re-apply when IME is next enabled.
-                    managed.ime_purpose = None;
-                }
-            }
-        }
+    fn settle_ime(managed: &mut crate::window_manager::ManagedWindow) {
+        let mut chrome = WindowChrome::new(&managed.platform_window, None);
+        crate::input_loop::settle_ime(
+            &mut chrome,
+            &mut managed.tree,
+            crate::input_loop::host_soft_keyboard_support(),
+            &mut managed.ime_purpose,
+            &mut managed.ime_allowed,
+        );
     }
 
     /// Map the core `ImePurpose` onto winit's enum at the platform boundary.
@@ -1665,6 +1976,9 @@ impl TeksiloAppHandler {
                 ExternalDragEvent::Left => {
                     current.tree.cancel_external_drag(&mut ops);
                 }
+                ExternalDragEvent::Cancelled => {
+                    current.tree.abort_external_drag(&mut ops);
+                }
                 ExternalDragEvent::Dropped { data, position } => {
                     current.tree.end_external_drag(position, data, &mut ops);
                 }
@@ -1829,6 +2143,17 @@ impl TeksiloAppHandler {
             }
         }
 
+        // Whether an assistive technology is attached to this window's adapter.
+        // The adapter's handlers run off the UI thread and can only leave a
+        // flag, so this is where the tree learns of it; both handlers request a
+        // redraw, so a change never waits for unrelated activity. Attaching
+        // proves nothing about screen readers (a magnifier or an automation
+        // harness activates the adapter too) — detaching does, and
+        // `set_at_client_attached` is where that asymmetry lives.
+        current
+            .tree
+            .set_at_client_attached(current.platform_window.accessibility_active());
+
         // Kept unconditional: `sync_accessibility` is not a pure builder —
         // it steps the framework's live-region announcers, fills the
         // automation announcement ring and maintains `at_version` — and all
@@ -1886,7 +2211,7 @@ impl TeksiloAppHandler {
         // (access actions, programmatic focus, rebuild) that didn't go
         // through `dispatch_in_window`. Layout has settled, so the focused
         // node's descriptor is current. Cheap + deduped, safe every frame.
-        Self::reconcile_ime(&mut current);
+        Self::settle_ime(&mut current);
 
         let mut frame = {
             let mut ops = crate::window_manager::WindowOpsImpl::new(
@@ -2038,19 +2363,41 @@ impl TeksiloAppHandler {
     ) {
         let teksilo_id = self.wm.teksilo_id_for_winit(window_id);
 
+        // A window blocked by a modal child swallows the user's *input* and
+        // bounces it to the child, while still hearing everything the OS says
+        // about the window itself. Which is which — and which of the swallowed
+        // events is worth raising the child for — is
+        // `input_loop::blocked_disposition`.
         if let Some(fid) = teksilo_id
             && self.wm.is_blocked(fid)
-            && !matches!(
-                event,
-                WindowEvent::CloseRequested | WindowEvent::ActivationTokenDone { .. }
-            )
         {
-            self.wm.refocus_modal_child(fid);
-            self.update_control_flow(event_loop);
-            return;
+            use crate::input_loop::BlockedDisposition;
+            match crate::input_loop::blocked_disposition(&event) {
+                BlockedDisposition::Deliver => {}
+                BlockedDisposition::Swallow => {
+                    self.update_control_flow(event_loop);
+                    return;
+                }
+                BlockedDisposition::SwallowAndRaise => {
+                    self.wm.refocus_modal_child(fid);
+                    self.update_control_flow(event_loop);
+                    return;
+                }
+            }
         }
 
         self.handle_accessibility_actions(window_id, &event, event_loop);
+
+        // The pointer, touch and OS-gesture family goes through the platform
+        // backend and the tree's sample doors rather than through an arm of
+        // its own. One place, one clock, one set of suppressors — and the arms
+        // themselves are `crate::input_routing`, which a test can drive with a
+        // hand-written winit event and a bare tree.
+        if crate::input_routing::is_pointer_input_event(&event) {
+            self.dispatch_input_in_window(window_id, &event, event_loop);
+            self.post_event(event_loop);
+            return;
+        }
 
         match event {
             WindowEvent::CloseRequested => {
@@ -2082,6 +2429,11 @@ impl TeksiloAppHandler {
                     managed.state.set_size_from_os((logical_w, logical_h));
                     let placement = query_window_placement(managed.platform_window.window());
                     managed.state.set_placement_from_os(placement);
+                    // A resize is when the safe area changes: on the one
+                    // desktop platform that has one, it is zero in a window
+                    // and non-zero once the window covers the camera housing,
+                    // which is a resize into full screen.
+                    Self::refresh_safe_area(managed);
                     if let Some(trace) = &mut self.idle_trace {
                         trace.note_redraw_request("resize");
                     }
@@ -2102,6 +2454,9 @@ impl TeksiloAppHandler {
                     managed.translation_state.set_scale_factor(scale_factor);
                     managed.platform_window.set_scale_factor(scale_factor);
                     managed.tree.set_device_scale_factor(scale_factor as f32);
+                    // The safe area is reported in points; moving between
+                    // displays can change both the scale and the housing.
+                    Self::refresh_safe_area(managed);
                     teksilo_id = Some(managed.teksilo_id);
                 }
                 // Keep the external-DnD backend's idea of the scale current:
@@ -2122,70 +2477,6 @@ impl TeksiloAppHandler {
                 #[cfg(feature = "text")]
                 {
                     self.typesetter.set_scale_factor(scale_factor as f32);
-                }
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    event_translation::translate_cursor_moved(
-                        position.x,
-                        position.y,
-                        &mut managed.translation_state,
-                    )
-                } else {
-                    None
-                };
-                if let Some(evt) = maybe_evt {
-                    self.dispatch_in_window(window_id, evt, event_loop);
-                }
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    apply_cursor_to_window(&managed.platform_window, managed.tree.current_cursor());
-                    if managed.tree.needs_redraw() {
-                        if let Some(trace) = &mut self.idle_trace {
-                            trace.note_redraw_request("cursor");
-                        }
-                        managed.platform_window.request_redraw();
-                    }
-                }
-            }
-            WindowEvent::MouseInput { state, button, .. } => {
-                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    event_translation::translate_mouse_input(
-                        state,
-                        button,
-                        &managed.translation_state,
-                    )
-                } else {
-                    None
-                };
-                if let Some(evt) = maybe_evt {
-                    self.dispatch_in_window(window_id, evt, event_loop);
-                }
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    apply_cursor_to_window(&managed.platform_window, managed.tree.current_cursor());
-                    if let Some(trace) = &mut self.idle_trace {
-                        trace.note_redraw_request("mouse_input");
-                    }
-                    managed.platform_window.request_redraw();
-                }
-            }
-            WindowEvent::MouseWheel { delta, phase, .. } => {
-                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    event_translation::translate_mouse_wheel(
-                        delta,
-                        phase,
-                        &managed.translation_state,
-                    )
-                } else {
-                    None
-                };
-                if let Some(evt) = maybe_evt {
-                    self.dispatch_in_window(window_id, evt, event_loop);
-                }
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    if let Some(trace) = &mut self.idle_trace {
-                        trace.note_redraw_request("mouse_wheel");
-                    }
-                    managed.platform_window.request_redraw();
                 }
             }
             WindowEvent::ModifiersChanged(mods) => {
@@ -2368,11 +2659,25 @@ impl TeksiloAppHandler {
             // — no separate minimize event — so this path covers it.
             WindowEvent::Focused(focused) => {
                 let mut newly_focused = None;
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.focused = focused;
-                    let active = managed.focused && !managed.occluded;
-                    managed.tree.set_window_active(active);
                     managed.state.set_focused_from_os(focused);
+                    Some(managed.focused && !managed.occluded)
+                } else {
+                    None
+                };
+                // Every live pointer is revoked at both ends on the way out —
+                // the user releases the button over whatever took focus, and
+                // this window is never told. See `input_routing`.
+                if let Some(active) = active {
+                    self.set_window_active_in_window(
+                        window_id,
+                        active,
+                        teksilo_core::pointer::CancelReason::WindowDeactivated,
+                        event_loop,
+                    );
+                }
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     // Drive a redraw on every focus transition so the
                     // window-active observers (caret hide/restore, selection
                     // desaturation, DimWhenInactive) reach a paint pass
@@ -2408,10 +2713,24 @@ impl TeksiloAppHandler {
             // that is hidden behind another window — still focused —
             // also parks its animations.
             WindowEvent::Occluded(occluded) => {
-                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+                let active = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     managed.occluded = occluded;
-                    let active = managed.focused && !managed.occluded;
-                    managed.tree.set_window_active(active);
+                    Some(managed.focused && !managed.occluded)
+                } else {
+                    None
+                };
+                // `Occluded`, not `WindowDeactivated`: a widget told its
+                // pointer was revoked is told *why*, and "the window went
+                // behind something" is not "the user went elsewhere".
+                if let Some(active) = active {
+                    self.set_window_active_in_window(
+                        window_id,
+                        active,
+                        teksilo_core::pointer::CancelReason::Occluded,
+                        event_loop,
+                    );
+                }
+                if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     // Drive a redraw on both directions. On reveal
                     // (`!occluded`) the render loop stopped pinging while we
                     // were occluded, so without this nudge the window stays
@@ -2477,6 +2796,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     }
 
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        // Whether the OS woke us or our own timer did. A pen shim reads the
+        // digitizer on a thread of its own and buffers what it sees, so an
+        // external wake is the signal that a packet may be in flight: the
+        // event that woke us and the packet came from the same source, but the
+        // shim has not necessarily dispatched it yet. `about_to_wait` arms one
+        // catch-up look for exactly that case — see `Self::pen_deadline`.
+        self.woken_externally = !matches!(cause, StartCause::ResumeTimeReached { .. });
         if matches!(cause, StartCause::ResumeTimeReached { .. }) {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_resume_time_reached();
@@ -2762,6 +3088,11 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         {
             self.wm.request_redraw_all();
         }
+        // Once per event-loop turn, which is what the shim's own contract
+        // asks for. A digitizer reads on its own thread and buffers; this is
+        // the only place that asks it what it saw.
+        self.pump_pen_sources(event_loop);
+        self.refresh_occluded_band();
         self.process_pending(event_loop);
         self.maybe_exit(event_loop);
         self.update_control_flow(event_loop);
@@ -3616,7 +3947,36 @@ impl TeksiloAppBuilder {
     }
 
     /// Build and run the application with windowed rendering.
-    pub fn run(mut self) {
+    pub fn run(self) {
+        self.run_with(
+            || {
+                winit::event_loop::EventLoop::<AppEvent>::with_user_event()
+                    .build()
+                    .expect("winit event loop creation failed")
+            },
+            |event_loop, app| {
+                event_loop
+                    .run_app(app)
+                    .expect("winit event loop exited with error");
+            },
+        );
+    }
+
+    /// The whole of [`Self::run`] except how the loop is built and how the
+    /// finished handler is driven.
+    ///
+    /// Those two are parameters for exactly one reason: nothing else in the
+    /// workspace can construct an `&ActiveEventLoop`, so nothing else can
+    /// witness a single one of `TeksiloAppHandler`'s winit callbacks. A test
+    /// supplies an off-main-thread loop (`with_any_thread`) and a
+    /// `run_app_on_demand` driver that wraps the handler in a script; the
+    /// production path supplies `EventLoop::build` and `run_app`, which never
+    /// returns. See `crate::app::winit_loop_tests`.
+    fn run_with(
+        mut self,
+        build_loop: impl FnOnce() -> winit::event_loop::EventLoop<AppEvent>,
+        drive: impl FnOnce(winit::event_loop::EventLoop<AppEvent>, &mut TeksiloAppHandler),
+    ) {
         // Install the tooltip registry before the window manager
         // starts building trees — rich tooltips read from it during
         // their first build.
@@ -3660,9 +4020,7 @@ impl TeksiloAppBuilder {
             install_i18n_manager(cfg);
         }
 
-        let event_loop = winit::event_loop::EventLoop::<AppEvent>::with_user_event()
-            .build()
-            .expect("winit event loop creation failed");
+        let event_loop = build_loop();
         event_loop.set_control_flow(ControlFlow::Wait);
 
         // Always create a proxy: it's needed by both `on_ready` (if set)
@@ -3841,9 +4199,7 @@ impl TeksiloAppBuilder {
         app.loop_tick = self.loop_tick;
         app.loop_tick_poll = self.loop_tick_poll;
 
-        event_loop
-            .run_app(&mut app)
-            .expect("winit event loop exited with error");
+        drive(event_loop, &mut app);
 
         // Flush any pending settings writes synchronously before the
         // process exits. The `DebouncedWriter` background threads also
@@ -3857,6 +4213,13 @@ impl TeksiloAppBuilder {
         }
     }
 }
+
+// Linux-only: it reaches for winit's X11 extension traits (`with_x11`,
+// `with_any_thread`), which exist on the free-unix backends and nowhere else.
+// The Windows and macOS jobs therefore never build it, which is also why the
+// claims below can only ever be judged against what a Linux host answers.
+#[cfg(all(test, target_os = "linux"))]
+mod winit_loop_tests;
 
 impl Default for TeksiloAppBuilder {
     fn default() -> Self {
@@ -4844,5 +5207,45 @@ mod tests {
             Some(first),
             "focus_target outside content subtree must be rejected",
         );
+    }
+}
+
+#[cfg(test)]
+mod occluded_band_tests {
+    use super::occluded_band_in_client;
+
+    /// A keyboard across the bottom of the screen, under a window that starts
+    /// 100 physical pixels down. The band reported to the tree is in the
+    /// window's own logical coordinates, clipped to its client area.
+    #[test]
+    fn a_keyboard_band_is_clipped_and_delogicalised() {
+        let band = occluded_band_in_client(
+            (0, 100),
+            (800, 600),
+            2.0,
+            // Screen-space: the bottom 400 physical pixels, wider than the
+            // window on both sides.
+            (-50, 400, 1000, 900),
+        )
+        .expect("the band covers the window");
+        // x clips to 0..800 physical → 0..400 logical; y is 300..600 physical
+        // (400-100 .. clipped at 600) → 150..300 logical.
+        assert_eq!(band.x, 0.0);
+        assert_eq!(band.width, 400.0);
+        assert_eq!(band.y, 150.0);
+        assert_eq!(band.height, 150.0);
+    }
+
+    #[test]
+    fn a_keyboard_that_misses_the_window_reports_nothing() {
+        // Below a window that ends at y = 100 + 600.
+        assert!(occluded_band_in_client((0, 100), (800, 600), 1.0, (0, 800, 800, 1000)).is_none());
+        // Beside it.
+        assert!(occluded_band_in_client((0, 0), (800, 600), 1.0, (900, 0, 1200, 600)).is_none());
+    }
+
+    #[test]
+    fn a_degenerate_scale_reports_nothing_rather_than_dividing_by_it() {
+        assert!(occluded_band_in_client((0, 0), (800, 600), 0.0, (0, 0, 800, 600)).is_none());
     }
 }

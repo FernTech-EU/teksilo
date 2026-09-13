@@ -5,6 +5,14 @@
 //! the app-facing [`DockWidget`] declaration, the content-factory registry,
 //! and the widgets that render a side's tabs → Splitter/ToolBox arrangement →
 //! draggable dock panels (with five-zone drop targets).
+//!
+//! ## Touch and pen
+//!
+//! The pane's five split/stack zones are the reusable
+//! [`crate::drop_target::DropTarget`]'s, not a hand-computed set of
+//! fifths, which is what makes them inherit its per-axis floor: on a narrow pane an
+//! edge zone is raised to the density's target size instead of staying a fifth no
+//! finger can land in.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -24,10 +32,7 @@ use teksilo_i18n::{LocalizedString, lit};
 use teksilo_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
 use crate::DropRegion;
-use crate::accordion::{
-    ACCORDION_FILL_HEADER_EXTENT, ACCORDION_HEADER_PADDING_HORIZONTAL, Accordion,
-    AccordionOrientation,
-};
+use crate::accordion::{Accordion, AccordionOrientation};
 use crate::drop_target::DropTarget;
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::popover_widget::PopoverIconButton;
@@ -982,11 +987,22 @@ impl DockTabContentWidget {
             row = row.add_child(trailing);
         }
         let row_id = ctx.add(row);
-        let padded =
-            ctx.add(Padding::symmetric(2.0, ACCORDION_HEADER_PADDING_HORIZONTAL).child_id(row_id));
+        let padded = ctx.add(
+            Padding::symmetric(
+                2.0,
+                crate::accordion::accordion_header_padding_horizontal(&ctx.theme().input),
+            )
+            .child_id(row_id),
+        );
         // Fixed-height header bar (matching the Accordion header extent) with a
         // 1 dp divider beneath it, above the content.
-        let header = ctx.add(MinSize::new(0.0, ACCORDION_FILL_HEADER_EXTENT).child_id(padded));
+        let header = ctx.add(
+            MinSize::new(
+                0.0,
+                crate::accordion::accordion_fill_header_extent(&ctx.theme().input),
+            )
+            .child_id(padded),
+        );
         let divider = ctx.add(Divider::horizontal());
         ctx.add(
             VStack::new()

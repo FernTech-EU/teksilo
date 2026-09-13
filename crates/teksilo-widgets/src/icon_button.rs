@@ -76,6 +76,14 @@
 //!         .child(IconButton::browse().embedded().on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.browse"))))
 //!     );
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! Shares [`build_interaction_handlers`](crate::button) with `Button`, so it
+//! gets the framework press, release activation and slide-off abort with it —
+//! see that module's "Touch and pen" section. Every shipped size clears the
+//! 24 dp target floor at Compact (`Compact` and `Default` are both 24 dp) and
+//! follows the density ladder above it.
 
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -95,8 +103,9 @@ use crate::primitives::icon_widget::IconWidget;
 
 /// Size variant for [`IconButton`]. See [`teksilo_core::styles::IconButtonSize`]
 /// for the canonical definition. Variants are calibrated to the
-/// IntelliJ Int UI scale (Compact 22 dp, Default 24 dp, Toolbar 30 dp,
-/// Large 40 dp, Hero 50 dp).
+/// IntelliJ Int UI scale (Compact 24 dp, Default 24 dp, Toolbar 30 dp,
+/// Large 40 dp, Hero 50 dp); `IconButtonRecipe::for_tokens` puts every rung
+/// on the density ladder.
 pub use teksilo_core::styles::IconButtonSize;
 
 use crate::button::InteractionState;
@@ -712,7 +721,11 @@ impl teksilo_core::widget::Widget for IconButton {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.icon_button.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeIconButtonStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeIconButtonStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         // `:focus-visible`: reveal the focus ring during keyboard navigation
@@ -779,8 +792,12 @@ impl teksilo_core::widget::Widget for IconButton {
         // The focus walker skips disabled subtrees on its own; the static
         // `self.focusable` flag is the caller's intent (e.g. a
         // close-button-inside-tab wants `false`).
-        let handler_set =
-            crate::button::build_interaction_handlers(interaction, on_activate, self.focusable);
+        let handler_set = crate::button::build_interaction_handlers(
+            ctx,
+            interaction,
+            on_activate,
+            self.focusable,
+        );
 
         ctx.apply_self_handlers(handler_set);
 
@@ -1128,11 +1145,11 @@ mod tests {
         // Pointer-down inside the button → pressed flash.
         let b = tree.bounds(btn);
         let center = teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: center,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            center,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         tree.layout(teksilo_canvas::SizeProposal::exact(100.0, 100.0));
         let frame = tree.render();
         assert!(

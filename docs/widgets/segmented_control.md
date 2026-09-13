@@ -77,6 +77,26 @@ chevron adds a second, because an overflow menu that no keyboard can
 reach is not an overflow menu; it cannot join the arrow sequence,
 since here arrows move *selection* rather than a roving focus.
 
+## Touch and pen
+
+Nothing changed for the controls sweep, and the reasons are worth recording.
+A segment activates from `on_tap`, so it already lands on the release and a
+finger that slides off one selects nothing. The recipe's own 24 dp height
+meets the WCAG 2.2 SC 2.5.8 floor at Compact and follows the density ladder
+above it, and the 12 dp horizontal padding puts every segment's width over
+it too — so none of the three hit-targeting mechanisms is involved. And
+`teksilo_core::styles::SegmentedControlStyleConfig`
+carries no pressed state, so there is no press visual to move onto the
+framework press.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![SegmentedControl at Touch density](img/segmented_control-touch.png)
+
 ## Builder methods at a glance
 
 `indexed`, `segment`, `segments`, `segment_ids`, `enabled`, `label`, `on_change`, `style`, `text_style`, `display`, `sizing`, `overflow`, `is_overflowing`, `fill_width`

@@ -516,7 +516,12 @@ impl Widget for PasswordField {
             RevealMode::Hold => {
                 let icon = (BuiltInIcons::global().eye)();
                 let revealed_hold = revealed.clone();
-                let hold = MinSize::new(24.0, 24.0)
+                let reveal_hit = teksilo_core::styles::density::density_min_size(
+                    teksilo_canvas::Size::new(24.0, 24.0),
+                    teksilo_tokens::TargetAxes::BOTH,
+                    &ctx.theme().input,
+                );
+                let hold = MinSize::new(reveal_hit.width, reveal_hit.height)
                     .child(Center::new().child(icon))
                     .on_pointer_event(move |event, ctx| match event {
                         WidgetEvent::PointerDown { .. } => {
@@ -524,7 +529,7 @@ impl Widget for PasswordField {
                             ctx.request_frame();
                             EventResponse::Handled
                         }
-                        WidgetEvent::PointerUp { .. } | WidgetEvent::PointerLeave => {
+                        WidgetEvent::PointerUp { .. } | WidgetEvent::PointerLeave { .. } => {
                             revealed_hold.set(false);
                             ctx.request_frame();
                             EventResponse::Handled
@@ -559,7 +564,11 @@ impl Widget for PasswordField {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.text_input.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTextInputStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeTextInputStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         let cfg = TextInputStyleConfig {
             editor: row_id,
@@ -572,8 +581,13 @@ impl Widget for PasswordField {
         let chrome_id = style.make_body(&cfg, ctx);
 
         let min_w = self.min_width.unwrap_or(65.0);
-        let frame_id =
-            ctx.add(MinSize::new(min_w, field_dims::TEXT_FIELD_HEIGHT).child_id(chrome_id));
+        let frame_id = ctx.add(
+            MinSize::new(
+                min_w,
+                crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
+            )
+            .child_id(chrome_id),
+        );
 
         // ── Inline validation strip ─────────────────────────────────
         let strip_id = ctx.add(ValidationStrip::new(inner_feedback));

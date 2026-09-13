@@ -29,19 +29,38 @@ struct OutboundStash {
     /// The parked typed payload, present whenever no window currently holds it
     /// as a re-entered session.
     payload: Option<crate::drag_payload::DragPayload>,
+    /// The pointer that started the drag.
+    ///
+    /// Parked beside the payload because **no OS drag protocol names the
+    /// dragging device to the destination**: `wl_data_device`, XDND, OLE
+    /// `IDropTarget` and `NSDraggingDestination` all describe the data and the
+    /// position and say nothing about the hand. So for a drag from another
+    /// application the kind is genuinely unknown — but for our OWN drag
+    /// re-entering one of our windows it is not, and this is where the window
+    /// that recovers the payload also recovers the device, which is what makes
+    /// the re-entered session's hover slop, drop bands and preview clearance
+    /// read the finger rather than a mouse.
+    pointer: Option<crate::pointer::PointerInfo>,
 }
 
 thread_local! {
-    static OUTBOUND: std::cell::RefCell<OutboundStash> =
-        const { std::cell::RefCell::new(OutboundStash { live: false, payload: None }) };
+    static OUTBOUND: std::cell::RefCell<OutboundStash> = const {
+        std::cell::RefCell::new(OutboundStash {
+            live: false,
+            payload: None,
+            pointer: None,
+        })
+    };
 }
 
-/// Begin an outbound drag: mark live and park the typed payload.
-fn outbound_begin(payload: crate::drag_payload::DragPayload) {
+/// Begin an outbound drag: mark live and park the typed payload plus the
+/// pointer that is carrying it.
+fn outbound_begin(payload: crate::drag_payload::DragPayload, pointer: crate::pointer::PointerInfo) {
     OUTBOUND.with(|s| {
         let mut s = s.borrow_mut();
         s.live = true;
         s.payload = Some(payload);
+        s.pointer = Some(pointer);
     });
 }
 
@@ -52,6 +71,22 @@ fn outbound_take_if_live() -> Option<crate::drag_payload::DragPayload> {
         let mut s = s.borrow_mut();
         if s.live { s.payload.take() } else { None }
     })
+}
+
+/// The pointer of the in-flight outbound drag, while it is live. Read by the
+/// window a re-entered drag lands in, so its session names the real device.
+fn outbound_pointer_if_live() -> Option<crate::pointer::PointerInfo> {
+    OUTBOUND.with(|s| {
+        let s = s.borrow();
+        if s.live { s.pointer } else { None }
+    })
+}
+
+/// Whether an app-originated OS drag is still in flight. A window holding a
+/// re-entered session whose stash has gone reads it to notice that the drag it
+/// is showing feedback for has ended elsewhere.
+fn outbound_is_live() -> bool {
+    OUTBOUND.with(|s| s.borrow().live)
 }
 
 /// Return a re-entered payload to the stash so another window can recover it —
@@ -79,10 +114,65 @@ fn outbound_end() {
         let mut s = s.borrow_mut();
         s.live = false;
         s.payload = None;
+        s.pointer = None;
     });
 }
 
+/// The pointer an **inbound OS drag from another application** is credited to.
+///
+/// `PointerKind::Unknown` is the truthful answer, not a hedge: no OS drag
+/// protocol tells the destination which device the source is dragging with, and
+/// `Unknown` reads as precise everywhere a kind is consulted — the same
+/// behaviour every OS drop had before pointers were distinguishable. The id is
+/// the mouse's because the drag is following the system cursor and because an
+/// external session never enters the pointer table.
+fn unknown_external_pointer() -> crate::pointer::PointerInfo {
+    let mut info = crate::pointer::PointerInfo::mouse(crate::pointer::EventTime::ZERO);
+    info.kind = teksilo_tokens::PointerKind::Unknown;
+    info
+}
+
+/// Which half of the drag pipeline [`WidgetTree::drive_drag_session`] runs.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum DragDrive {
+    /// Re-target and re-feedback at `position` (`handle_drag_move`).
+    Move,
+    /// Complete the drag at `position` (`handle_drag_drop`).
+    Drop,
+}
+
 impl WidgetTree {
+    /// Run one half of the drag pipeline with the **drag's own pointer**
+    /// installed as the input snapshot.
+    ///
+    /// Every entry point that is not a pointer sample goes through here: an OS
+    /// drag's phases (delivered from a platform thread) and the per-layout drag
+    /// tick. Without it `current_input` holds its default — a mouse — so
+    /// `on_drag_hover` / `on_drag_tick` / `on_drop` were told they were serving
+    /// a mouse for the whole of a finger drag, and the hit test that picks the
+    /// target used a mouse's slop. Saved and restored around the call the same
+    /// way every dispatch site treats the snapshot, so a nested dispatch cannot
+    /// leak it.
+    fn drive_drag_session(
+        &mut self,
+        position: teksilo_canvas::Point,
+        which: DragDrive,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let Some(pointer) = self.active_drag.as_ref().map(|d| d.pointer) else {
+            return;
+        };
+        let saved = std::mem::replace(
+            &mut self.current_input,
+            crate::pointer::InputSnapshot::for_drag_session(pointer),
+        );
+        match which {
+            DragDrive::Move => self.handle_drag_move(position, ops),
+            DragDrive::Drop => self.handle_drag_drop(position, ops),
+        }
+        self.current_input = saved;
+    }
+
     /// Clean up drag preview overlay (if any).
     pub(super) fn cleanup_drag_preview(&mut self) {
         if let Some(ref drag) = self.active_drag {
@@ -105,15 +195,32 @@ impl WidgetTree {
         // originator via `on_drag_ended(Cancelled)`. External drags carry no
         // source (`None`), so they never fire it.
         let source = self.active_drag.as_ref().and_then(|d| d.source_widget);
+        // Serve the teardown as the drag's own pointer. Every route into here is
+        // one where the current snapshot is about something else or nothing at
+        // all — an Escape key, a layout-pass reap, a platform abort — and a
+        // handler that branches on the device must get the same answer at the end
+        // of a drag as it did in the middle of it. Saved and restored, so a
+        // teardown reached from inside another dispatch leaves that dispatch's
+        // snapshot as it found it.
+        let saved = self.active_drag.as_ref().map(|d| d.pointer).map(|p| {
+            std::mem::replace(
+                &mut self.current_input,
+                crate::pointer::InputSnapshot::for_drag_session(p),
+            )
+        });
         self.cleanup_drag_preview();
         self.active_drag = None;
-        self.pointer_captured_by = None;
+        self.os_drop_accepted = None;
+        self.release_drag_capture(source);
         self.current_cursor = crate::widget::CursorIcon::Default;
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
         }
         if let Some(src) = source {
             self.fire_on_drag_ended(src, crate::drag_payload::DropOutcome::Cancelled, &mut *ops);
+        }
+        if let Some(saved) = saved {
+            self.current_input = saved;
         }
     }
 
@@ -135,6 +242,19 @@ impl WidgetTree {
 
     /// Begin an external drag session at `position` carrying OS-delivered
     /// `data`. Establishes the initial hover target and feedback immediately.
+    ///
+    /// # Which device is dragging
+    ///
+    /// A drag from **another application** does not say: none of
+    /// `wl_data_device`, XDND, OLE `IDropTarget` or `NSDraggingDestination`
+    /// carries the source's device to the destination, so the session reports
+    /// [`PointerKind::Unknown`](teksilo_tokens::PointerKind::Unknown) — which
+    /// resolves as precise everywhere a kind is read, i.e. exactly the
+    /// behaviour every OS drop had before pointers were distinguishable.
+    ///
+    /// Our OWN escalated drag re-entering a window is the case that *is*
+    /// knowable, and it does not go through this door blind: the pointer is
+    /// recovered from the outbound stash alongside the typed payload.
     pub fn begin_external_drag(
         &mut self,
         position: teksilo_canvas::Point,
@@ -162,8 +282,12 @@ impl WidgetTree {
             // so the re-entered drag satisfies external-style targets (DropZone)
             // in addition to typed in-app targets.
             payload.enrich_external_from_mime();
+            // The device is recoverable here and nowhere else: this is our own
+            // drag coming home, and the stash kept the pointer that armed it.
+            let pointer = outbound_pointer_if_live().unwrap_or_else(unknown_external_pointer);
             self.active_drag = Some(crate::drag_state::DragSession {
                 payload,
+                pointer,
                 source_widget: None,
                 is_external: false,
                 current_position: position,
@@ -173,12 +297,13 @@ impl WidgetTree {
                 preview_overlay_id: None,
             });
             self.os_drag_reentered = true;
-            self.handle_drag_move(position, &mut *ops);
+            self.drive_drag_session(position, DragDrive::Move, &mut *ops);
             return;
         }
 
         self.active_drag = Some(crate::drag_state::DragSession {
             payload: crate::drag_payload::DragPayload::external(data),
+            pointer: unknown_external_pointer(),
             source_widget: None,
             is_external: true,
             current_position: position,
@@ -189,7 +314,7 @@ impl WidgetTree {
         });
         // No pointer capture, no Grabbing cursor — the OS owns the drag image
         // and cursor during an external drag.
-        self.handle_drag_move(position, &mut *ops);
+        self.drive_drag_session(position, DragDrive::Move, &mut *ops);
     }
 
     /// Update an in-flight external drag as the OS reports pointer motion.
@@ -203,7 +328,7 @@ impl WidgetTree {
         // (now an internal session). `handle_drag_move` re-stashes and re-exits
         // if a re-entered drag leaves the window again.
         if self.active_drag.as_ref().is_some_and(|d| d.is_external) || self.os_drag_reentered {
-            self.handle_drag_move(position, &mut *ops);
+            self.drive_drag_session(position, DragDrive::Move, &mut *ops);
         }
     }
 
@@ -226,7 +351,7 @@ impl WidgetTree {
         // stash so that trailing event treats the drag as finished.
         if self.os_drag_reentered {
             self.os_drag_reentered = false;
-            self.handle_drag_drop(position, &mut *ops);
+            self.drive_drag_session(position, DragDrive::Drop, &mut *ops);
             outbound_end();
             return;
         }
@@ -238,7 +363,32 @@ impl WidgetTree {
         {
             drag.payload = crate::drag_payload::DragPayload::external(data);
         }
-        self.handle_drag_drop(position, &mut *ops);
+        self.drive_drag_session(position, DragDrive::Drop, &mut *ops);
+    }
+
+    /// End an external drag over this window **for good**: the OS aborted the
+    /// operation, or the app-originated drag this window was holding as a
+    /// re-entered session has finished elsewhere. No drop will follow.
+    ///
+    /// The difference from [`cancel_external_drag`](Self::cancel_external_drag)
+    /// is the re-entered case, and it is the whole reason both exist: a leave
+    /// *re-stashes* the typed payload so the next window the drag enters can
+    /// pick it up, because the OS drag is still in flight. An abort must not —
+    /// re-stashing a dead drag leaves a payload that the next genuine external
+    /// drag from another application could misclaim.
+    ///
+    /// `on_drag_leave` fires on the current target so no highlight is stranded.
+    /// `on_drag_ended` fires **only** for a session with an in-app source, so a
+    /// re-entered session is silent here: the window that started the drag owns
+    /// that notification and fires it once from
+    /// [`handle_os_drag_ended`](Self::handle_os_drag_ended).
+    pub fn abort_external_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        if self.active_drag.is_none() {
+            self.os_drag_reentered = false;
+            return;
+        }
+        self.os_drag_reentered = false;
+        self.cancel_active_drag(&mut *ops);
     }
 
     /// Cancel an in-flight external drag (the pointer left the window or the
@@ -261,10 +411,12 @@ impl WidgetTree {
     /// receives the pointer position in the target's local coordinates.
     /// Fires from both external and own handler buckets.
     pub(super) fn process_drag_tick(&mut self, ops: &mut dyn crate::window::WindowOps) {
-        let Some((target_id, position)) = self
+        // First: a re-entered OS drag whose OS session has ended elsewhere.
+        self.reap_dead_reentered_drag(&mut *ops);
+        let Some((target_id, position, pointer)) = self
             .active_drag
             .as_ref()
-            .and_then(|d| d.current_target.map(|t| (t, d.current_position)))
+            .and_then(|d| d.current_target.map(|t| (t, d.current_position, d.pointer)))
         else {
             return;
         };
@@ -283,6 +435,14 @@ impl WidgetTree {
         if ext_handler.is_none() && own_handler.is_none() {
             return;
         }
+        // The tick fires from `layout()`, outside any sample, so the snapshot
+        // has to be installed here or the handler is told it is serving a mouse
+        // — which is what made the coarse auto-scroll band unreachable for the
+        // whole of a finger drag.
+        let saved = std::mem::replace(
+            &mut self.current_input,
+            crate::pointer::InputSnapshot::for_drag_session(pointer),
+        );
         let mut ctx = self.make_event_context(&mut *ops);
         if let Some(h) = ext_handler.as_mut() {
             h(local, &mut ctx);
@@ -301,6 +461,33 @@ impl WidgetTree {
         if self.active_drag.is_some() {
             self.handle_drag_move(position, &mut *ops);
         }
+        self.current_input = saved;
+    }
+
+    /// End a re-entered OS drag whose OS session has finished somewhere else.
+    ///
+    /// The terminal `DragEnded` is posted to the window that **started** the
+    /// drag, and that window is not necessarily the one currently showing the
+    /// re-entered session: drag a row out of window A, over window B, and let
+    /// the compositor abort it, and B is left holding a live `active_drag`, a
+    /// highlighted drop target and an `os_drag_reentered` flag for a drag that
+    /// no longer exists — for the rest of the process, since the OS will send B
+    /// nothing further. The outbound stash is process-wide and is cleared by
+    /// the terminal event, so "I hold a re-entered session and the stash is
+    /// dead" is the exact condition, and every window runs a layout pass.
+    ///
+    /// Deliberately *not* a fan-out from the terminal event: reaching every
+    /// window's tree from the one being routed to needs the window manager, and
+    /// the condition is already visible from inside each tree.
+    fn reap_dead_reentered_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        if !self.os_drag_reentered || outbound_is_live() {
+            return;
+        }
+        crate::trace_input!(
+            Gestures,
+            "the OS drag this window held as re-entered has ended elsewhere: dropping the session"
+        );
+        self.abort_external_drag(&mut *ops);
     }
 
     /// Fire `on_drag_leave` on the given widget (if it has one), mark it
@@ -439,7 +626,11 @@ impl WidgetTree {
         // Ask the platform to start a native OS drag. If it can't (no backend
         // / test sink), leave the in-app session intact — current
         // behavior: the drag can still come back into the window.
-        if !ops.begin_os_drag(data, None) {
+        let dragging = match self.active_drag.as_ref() {
+            Some(d) => d.pointer,
+            None => return false,
+        };
+        if !ops.begin_os_drag(data, None, dragging.kind) {
             return false;
         }
 
@@ -453,13 +644,32 @@ impl WidgetTree {
             .active_drag
             .take()
             .expect("active_drag present (matched above)");
-        self.pointer_captured_by = None;
+        self.os_drop_accepted = None;
+        self.release_drag_capture(drag.source_widget);
         self.current_cursor = crate::widget::CursorIcon::Default;
         self.outbound_drag_source = drag.source_widget;
-        outbound_begin(drag.payload);
+        outbound_begin(drag.payload, dragging);
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
         }
+        // The OS owns the pointer from here: this window will see no further
+        // move and no `Up` for it, because the release happens over whatever
+        // the drag was dropped on. The source is told through
+        // `on_drag_ended(OsCopy | OsMove | Cancelled)` when the OS reports back,
+        // but anything *else* this press had going — a recognizer mid-drag, an
+        // ancestor still competing — has to be revoked now.
+        //
+        // The pointer to revoke is the **session's**, not `current_pointer_id`:
+        // escalation can also be reached from a drag tick (a tick that scrolls
+        // can move the reported position outside the window), and a tick runs
+        // outside any sample, where the singular accessor names the mouse.
+        // Cancelling the mouse there would leave the real contact armed.
+        self.cancel_pointer_to(
+            dragging.id,
+            crate::pointer::CancelReason::OsDragStarted,
+            self.outbound_drag_source,
+            &mut *ops,
+        );
         true
     }
 
@@ -469,11 +679,13 @@ impl WidgetTree {
     fn reexit_outbound(&mut self, ops: &mut dyn crate::window::WindowOps) {
         let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
         self.cleanup_drag_preview();
+        let source = self.active_drag.as_ref().and_then(|d| d.source_widget);
         if let Some(drag) = self.active_drag.take() {
             outbound_restash(drag.payload);
         }
         self.os_drag_reentered = false;
-        self.pointer_captured_by = None;
+        self.os_drop_accepted = None;
+        self.release_drag_capture(source);
         self.current_cursor = crate::widget::CursorIcon::Default;
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
@@ -514,6 +726,7 @@ impl WidgetTree {
             outbound_restash(drag.payload);
         }
         self.os_drag_reentered = false;
+        self.os_drop_accepted = None;
     }
 
     /// Update the drag session on pointer move: find the drop target under the
@@ -545,10 +758,19 @@ impl WidgetTree {
             .as_ref()
             .and_then(|d| Some((d.preview_overlay_id?, d.preview_content_id?)));
         if let Some((overlay_id, content_id)) = preview_content {
-            self.overlay_manager.update_placement(
-                overlay_id,
-                crate::overlay::OverlayPlacement::AtPointer(position),
-            );
+            // Never *under* the contact for a coarse pointer: a preview pinned
+            // to the point a finger reported is behind the hand that is
+            // carrying it, so the user drags a card they cannot see. One branch,
+            // in `OverlayPlacement::at_pointer_for`, shared with every
+            // point-anchored panel — a mouse keeps `AtPointer` byte for byte.
+            let dragging = self.active_drag.as_ref().map(|d| d.pointer);
+            let placement = match dragging {
+                Some(pointer) => {
+                    crate::overlay::OverlayPlacement::at_pointer_for(position, &pointer)
+                }
+                None => crate::overlay::OverlayPlacement::AtPointer(position),
+            };
+            self.overlay_manager.update_placement(overlay_id, placement);
             self.arena.mark_needs_layout(content_id);
         }
 
@@ -557,8 +779,12 @@ impl WidgetTree {
         // of actual drop targets.
         let exclude_overlay = self.active_drag.as_ref().and_then(|d| d.preview_overlay_id);
         let exclude_widget = self.active_drag.as_ref().and_then(|d| d.preview_content_id);
+        // Routed for the pointer dragging: a finger reaches a small drop target
+        // through the same widening its press would have used, so hover and
+        // drop agree with each other and with a plain tap.
+        let dragging = self.current_input.pointer;
         let target =
-            self.hit_test_excluding_overlay_and_widget(position, exclude_overlay, exclude_widget);
+            self.hit_test_for_excluding(position, &dragging, exclude_overlay, exclude_widget);
 
         // Drop-target bubbling: walk up from the hit target through successive
         // drop targets, firing each one's `on_drag_hover`, and stop at the first
@@ -615,9 +841,31 @@ impl WidgetTree {
         {
             self.fire_on_drag_leave(prev, &mut *ops);
         }
+        let engaged_now = new_feedback.is_engaged();
+        // A re-entered app drag counts: the OS still owns it, its offer is still
+        // negotiating, and a refusal there must still show the refusing cursor.
+        // It is not `is_external` — the session was rebuilt as an internal one so
+        // in-app targets see the typed payload — which is exactly why the flag
+        // alone would have missed the app's own cross-window drag.
+        let is_os_drag =
+            self.os_drag_reentered || self.active_drag.as_ref().is_some_and(|d| d.is_external);
         if let Some(ref mut drag) = self.active_drag {
             drag.current_target = new_target;
             drag.feedback = new_feedback;
+        }
+        // Revise the OS's own accept state from the widget's verdict.
+        //
+        // An inbound backend has to answer the source *synchronously* — XDND
+        // requires an `XdndStatus` per position and Wayland wants an
+        // `accept` + `set_actions` on the offer — long before the widget tree
+        // has seen the sample, so its first answer can only be about format
+        // compatibility. That is why the cursor showed "will accept" over a
+        // target that rejects: nothing ever told the OS otherwise. Pushed only
+        // on a change, because the OS side is a round trip per call and a
+        // motion stream would otherwise re-send the same answer every sample.
+        if is_os_drag && self.os_drop_accepted != Some(engaged_now) {
+            self.os_drop_accepted = Some(engaged_now);
+            ops.set_drop_accepted(engaged_now);
         }
     }
 
@@ -712,7 +960,8 @@ impl WidgetTree {
             .and_then(|d| d.current_target)
             .filter(|&t| self.arena.is_active(t));
         if drop_target.is_none() {
-            let hit = self.hit_test(position);
+            let dropping = self.current_input.pointer;
+            let hit = self.hit_test_for(position, &dropping);
             let mut candidate = hit.and_then(|t| self.find_drop_target_at_or_above(t));
             while let Some(cand) = candidate {
                 if self
@@ -734,7 +983,8 @@ impl WidgetTree {
             Some(d) => d,
             None => return,
         };
-        self.pointer_captured_by = None;
+        self.os_drop_accepted = None;
+        self.release_drag_capture(drag.source_widget);
         self.current_cursor = crate::widget::CursorIcon::Default;
         // Source widget so an in-app drop notifies its originator via
         // `on_drag_ended`. External drags carry no source.
@@ -861,9 +1111,7 @@ mod tests {
         assert!(tree.active_drag.is_some());
 
         // Move the pointer
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(50.0, 30.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(50.0, 30.0)));
 
         let drag = tree.active_drag.as_ref().unwrap();
         assert!((drag.current_position.x - 50.0).abs() < 0.01);
@@ -913,11 +1161,11 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Drop at a position over the target
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
         assert!(dropped.get(), "on_drop should have been called");
@@ -935,11 +1183,11 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Drop outside any widget
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(999.0, 999.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(999.0, 999.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
     }
@@ -984,9 +1232,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Hover over the foreground target → it becomes `current_target`.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(
             tree.active_drag.as_ref().unwrap().current_target,
             Some(fg),
@@ -999,11 +1245,11 @@ mod tests {
 
         // Drop where fg used to be → must fall through to the live bg, not
         // vanish into the destroyed fg id.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session cleared");
         assert!(
@@ -1012,11 +1258,27 @@ mod tests {
         );
     }
 
+    /// Every competitor the current mouse press enrolled, innermost first.
+    ///
+    /// The successor to the deleted `armed_drag_observers()`: the same
+    /// question, asked of the `PointerSequence` that replaced
+    /// `drag_observers`.
+    fn mouse_members(
+        tree: &WidgetTree,
+    ) -> Vec<(
+        WidgetId,
+        crate::gesture::MemberRole,
+        crate::gesture::MemberState,
+    )> {
+        tree.sequence_members(crate::pointer::PointerId::MOUSE)
+    }
+
     #[test]
     fn drag_arming_walks_to_an_ancestor_without_a_dead_zone() {
-        // Baseline: pressing a button inside a draggable ancestor arms the
-        // ancestor's drag recognizer (so a press-drag can start the ancestor
-        // drag — the cross-widget tap/drag disambiguation).
+        // Baseline: pressing a button inside a draggable ancestor enrols the
+        // ancestor as a `Gesture` member (so a press-drag can start the
+        // ancestor drag — the cross-widget tap/drag disambiguation).
+        use crate::gesture::{MemberRole, MemberState};
         let mut tree = WidgetTree::new();
         let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
         let inner = tree.add(StackWidget::new().add_child(button));
@@ -1033,9 +1295,9 @@ mod tests {
             PointerButton::Primary,
         );
         assert_eq!(
-            tree.drag_observers,
-            vec![ancestor],
-            "the draggable ancestor is armed when the button press is not in a dead zone"
+            mouse_members(&tree),
+            vec![(ancestor, MemberRole::Gesture, MemberState::Possible)],
+            "the draggable ancestor competes when the button press is not in a dead zone"
         );
         tree.pointer_up_button(
             Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
@@ -1046,9 +1308,9 @@ mod tests {
     #[test]
     fn gesture_dead_zone_blocks_ancestor_drag_arming() {
         // The fix: a `gesture_dead_zone` boundary between the button and the
-        // draggable ancestor stops the arming walk — the ancestor is NEVER
-        // armed, so no amount of pointer jitter while clicking the button can
-        // start the ancestor's drag (capture-release-proof, unlike a
+        // draggable ancestor stops the enrolment walk — the ancestor is NEVER
+        // a member, so no amount of pointer jitter while clicking the button
+        // can start the ancestor's drag (capture-release-proof, unlike a
         // recognizer-shadowing absorber).
         use crate::widget_builder::WidgetBuilder;
         let mut tree = WidgetTree::new();
@@ -1067,13 +1329,60 @@ mod tests {
             PointerButton::Primary,
         );
         assert!(
-            tree.drag_observers.is_empty(),
-            "a dead zone blocks the draggable ancestor from being armed"
+            mouse_members(&tree).is_empty(),
+            "a dead zone blocks the draggable ancestor from competing"
         );
         tree.pointer_up_button(
             Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
             PointerButton::Primary,
         );
+    }
+
+    #[test]
+    fn a_dead_zone_boundary_blocks_a_mouse_exactly_as_it_blocks_a_finger() {
+        // `gesture_dead_zone` is NOT sugar for `touch_action(NONE)`: a mouse
+        // ignores touch actions entirely, so the substitution would delete the
+        // mouse behaviour the flag exists for. Same tree, same press, two
+        // pointer kinds, one answer.
+        use crate::pointer::{
+            BackendDeviceKey, PointerIdAllocator, PointerInfo, PointerPhase, PointerSample,
+        };
+        use crate::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new();
+        let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
+        let dead_zone = tree.add(StackWidget::new().add_child(button).gesture_dead_zone(true));
+        tree.add(
+            StackWidget::new()
+                .add_child(dead_zone)
+                .on_drag(|_phase, _ctx| {}),
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        let b = tree.bounds(button);
+        let at = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+
+        tree.pointer_down_button(at, PointerButton::Primary);
+        assert!(
+            mouse_members(&tree).is_empty(),
+            "the mouse enrols no ancestor across the dead zone"
+        );
+        tree.pointer_up_button(at, PointerButton::Primary);
+
+        let contact = PointerIdAllocator::global().begin(BackendDeviceKey::DEFAULT, 41);
+        let sample = |phase| PointerSample {
+            pointer: PointerInfo::touch(contact, crate::pointer::EventTime::from_millis(1)),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        };
+        tree.dispatch_pointer(sample(PointerPhase::Down));
+        assert!(
+            tree.sequence_members(contact).is_empty(),
+            "and neither does a finger"
+        );
+        tree.dispatch_pointer(sample(PointerPhase::Up));
     }
 
     #[test]
@@ -1105,9 +1414,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Move over the target
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(150.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 50.0)));
 
         assert!(
             hover_count.get() > 0,
@@ -1158,9 +1465,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Frame 1: nothing engages → child becomes the tracked (rejecting) target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(
             tree.active_drag.as_ref().unwrap().current_target,
             Some(child)
@@ -1169,9 +1474,7 @@ mod tests {
 
         // Frame 2: ancestor engages while child still rejects.
         engage.set(true);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(101.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(101.0, 50.0)));
 
         assert_eq!(
             leaves.get(),
@@ -1192,11 +1495,11 @@ mod tests {
         assert!(tree.active_drag.is_some());
 
         // PointerUp far outside any widget
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(-100.0, -100.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(-100.0, -100.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag should be cleared");
     }
@@ -1240,11 +1543,11 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
         tree.collect_from_ctx(ctx, source);
 
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(!accepted.get(), "on_drop should reject wrong payload type");
     }
@@ -1284,11 +1587,11 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Drop on target
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(
             received_value.get(),
@@ -1326,11 +1629,11 @@ mod tests {
 
         // Drop at the child's center. Hit test lands on the child; drop
         // should bubble up to the parent StackWidget.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             parent_fired.get(),
@@ -1377,14 +1680,12 @@ mod tests {
 
         // Hover over the child (its on_drag_hover runs → NoFeedback → bubble),
         // then release there.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(parent_drop.get(), "drop bubbles to the accepting ancestor");
         assert!(
@@ -1426,11 +1727,11 @@ mod tests {
         );
 
         // Drop outside any target — cleanup should remove the overlay.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(999.0, 999.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(999.0, 999.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(tree.active_drag.is_none(), "drag session should be cleared");
         assert_eq!(
@@ -1454,9 +1755,7 @@ mod tests {
         );
         tree.collect_from_ctx(ctx, source);
 
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(73.0, 41.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(73.0, 41.0)));
 
         let drag = tree.active_drag.as_ref().expect("active drag");
         assert!(
@@ -1508,9 +1807,7 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Move over the target to establish feedback.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(150.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 50.0)));
 
         assert!(tree.active_drag.is_some());
         assert_eq!(tree.overlay_manager().len(), overlay_count_before + 1);
@@ -1551,14 +1848,12 @@ mod tests {
 
         // Move over and release on the `on_tap` widget. Normally this would
         // synthesize a Tap gesture — but an active drag short-circuits.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(150.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             !tap_fired.get(),
@@ -1603,18 +1898,14 @@ mod tests {
         tree.collect_from_ctx(ctx, source);
 
         // Pointer inside the inset (where the target lives).
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(leave.get(), 0, "no leave yet — target just became active");
 
         // Pointer in the inset area, outside the target's bounds — the
         // only hit is the InsetWidget which has no drag handlers, so
         // drop_target becomes None. Target changed → leave fires on the
         // old target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(10.0, 10.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(10.0, 10.0)));
         assert_eq!(
             leave.get(),
             1,
@@ -1622,12 +1913,8 @@ mod tests {
         );
 
         // Moving back in shouldn't fire again.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(
             leave.get(),
             1,
@@ -1635,9 +1922,7 @@ mod tests {
         );
 
         // Leaving again fires a second time.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(10.0, 10.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(10.0, 10.0)));
         assert_eq!(leave.get(), 2);
     }
 
@@ -1667,14 +1952,12 @@ mod tests {
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(leave.get(), 1, "on_drag_leave fires exactly once on drop");
     }
@@ -1705,9 +1988,7 @@ mod tests {
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         tree.press_key(Key::Escape, Modifiers::NONE);
 
         assert_eq!(
@@ -1743,9 +2024,7 @@ mod tests {
         let mut ctx = crate::widget::EventContext::new();
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
 
         tree.arena.destroy(source);
         // revalidate_interaction_state runs on the next process_pending_rebuilds
@@ -1790,9 +2069,7 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
         // Move over the target so it becomes the current drop target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
         assert_eq!(ticks.get(), 0, "tick shouldn't have fired yet");
 
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1802,11 +2079,11 @@ mod tests {
         assert_eq!(ticks.get(), 3);
 
         // End the drag; ticks stop.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(100.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(100.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         let after_drop = ticks.get();
         tree.layout(SizeProposal::exact(200.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1861,9 +2138,7 @@ mod tests {
         // Move pointer to (100, 60) in tree coords — inside the inset
         // target whose origin is (40, 40). Local position should be
         // (60, 20).
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 60.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 60.0)));
         let hov = hover_local.get();
         assert!(
             (hov.x - 60.0).abs() < 0.01 && (hov.y - 20.0).abs() < 0.01,
@@ -1872,11 +2147,11 @@ mod tests {
         );
 
         // Drop at (110, 55) tree coords → local (70, 15).
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(110.0, 55.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(110.0, 55.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         let drp = drop_local.get();
         assert!(
             (drp.x - 70.0).abs() < 0.01 && (drp.y - 15.0).abs() < 0.01,
@@ -1907,11 +2182,11 @@ mod tests {
         assert_eq!(tree.current_cursor(), CursorIcon::Grabbing);
 
         // Drop somewhere.
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(50.0, 25.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(50.0, 25.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert_eq!(tree.current_cursor(), CursorIcon::Default);
     }
 
@@ -2015,9 +2290,7 @@ mod tests {
 
         // A subsequent PointerMove must remark the preview so its
         // overlay bounds get repositioned on the next layout pass.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(75.0, 120.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(75.0, 120.0)));
         assert!(
             tree.needs_layout(),
             "PointerMove during drag must mark preview for layout"
@@ -2057,16 +2330,14 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(0_u32));
         tree.collect_from_ctx(ctx, source);
         // Make target the current drop target.
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(100.0, 50.0),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 50.0)));
 
         // A wheel event during drag should reach the drop target (not the
         // stale hover from before the drag started).
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: crate::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            crate::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+            Default::default(),
+        ));
         assert_eq!(
             scroll_count.get(),
             1,
@@ -2253,16 +2524,22 @@ mod tests {
     /// configurable success, standing in for the platform backend.
     struct RecordingWindowOps {
         started: std::rc::Rc<std::cell::RefCell<Vec<crate::drag_payload::OutboundDragData>>>,
+        /// The pointer kind each `begin_os_drag` was told about, in order.
+        started_kinds: std::rc::Rc<std::cell::RefCell<Vec<teksilo_tokens::PointerKind>>>,
         succeed: bool,
         cancels: std::rc::Rc<std::cell::Cell<usize>>,
+        /// Every `set_drop_accepted` the tree pushed, in order.
+        accepts: std::rc::Rc<std::cell::RefCell<Vec<bool>>>,
     }
 
     impl RecordingWindowOps {
         fn new(succeed: bool) -> Self {
             Self {
                 started: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+                started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 succeed,
                 cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+                accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             }
         }
     }
@@ -2291,12 +2568,17 @@ mod tests {
             &mut self,
             data: crate::drag_payload::OutboundDragData,
             _image: Option<crate::drag_payload::DragImageData>,
+            pointer: teksilo_tokens::PointerKind,
         ) -> bool {
             self.started.borrow_mut().push(data);
+            self.started_kinds.borrow_mut().push(pointer);
             self.succeed
         }
         fn cancel_os_drag(&mut self) {
             self.cancels.set(self.cancels.get() + 1);
+        }
+        fn set_drop_accepted(&mut self, accepted: bool) {
+            self.accepts.borrow_mut().push(accepted);
         }
     }
 
@@ -2309,8 +2591,10 @@ mod tests {
         let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started: started.clone(),
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: true,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let mut tree = WidgetTree::new();
@@ -2350,8 +2634,10 @@ mod tests {
         let started = Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started,
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: true,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let mut tree = WidgetTree::new();
@@ -2436,8 +2722,10 @@ mod tests {
         let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started: started.clone(),
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: false,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let mut tree = WidgetTree::new();
@@ -2459,8 +2747,10 @@ mod tests {
         let started = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started: started.clone(),
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: true,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let mut tree = WidgetTree::new();
@@ -2496,11 +2786,11 @@ mod tests {
         ctx.start_drag(source, crate::drag_payload::DragPayload::typed(42_u32));
         tree.collect_from_ctx(ctx, source);
 
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: Point::new(150.0, 50.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(150.0, 50.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert_eq!(outcome.get(), Some(DropOutcome::InApp { accepted: true }));
     }
@@ -2540,8 +2830,10 @@ mod tests {
         let started = Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started,
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: true,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let got_typed = Rc::new(Cell::new(0_u32));
@@ -2633,8 +2925,10 @@ mod tests {
         let started = Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started,
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: true,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         // Window A: starts and escalates.
@@ -2705,8 +2999,10 @@ mod tests {
         let started = Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started: started.clone(),
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: true,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let mut tree = WidgetTree::new();
@@ -2752,8 +3048,10 @@ mod tests {
         let started = Rc::new(std::cell::RefCell::new(Vec::new()));
         let mut ops = RecordingWindowOps {
             started,
+            started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             succeed: true,
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
+            accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
 
         let mut tree = WidgetTree::new();
@@ -2800,6 +3098,606 @@ mod tests {
         assert_eq!(d.payload.files(), &[PathBuf::from("/tmp/real")]);
     }
 
+    // ---------------------------------------------------------------
+    // P31: the drag's own pointer, outside any sample
+    // ---------------------------------------------------------------
+
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    /// A leaf that arms a drag on its own `PointerDown`, the way a real widget's
+    /// long-press or `on_drag` handler does.
+    ///
+    /// The drag HAS to be armed from inside the contact's own dispatch: that is
+    /// the only place `current_input` names the finger, so it is the only place
+    /// the session can record it. Building the payload from a factory keeps
+    /// `DragPayload` (not `Clone`) out of the closure's captured state.
+    fn drag_arming_leaf(
+        slot: Rc<Cell<Option<WidgetId>>>,
+        payload: impl Fn() -> crate::drag_payload::DragPayload + 'static,
+    ) -> impl crate::widget::Widget {
+        let armed = Cell::new(false);
+        FillWidget::new().on_pointer_event(move |event, ctx| {
+            if matches!(event, crate::event::WidgetEvent::PointerDown { .. })
+                && !armed.replace(true)
+                && let Some(id) = slot.get()
+            {
+                ctx.start_drag(id, payload());
+            }
+            crate::event::EventResponse::Ignored
+        })
+    }
+
+    /// Press a fresh touch contact at `at`, returning its id.
+    fn touch_press(
+        tree: &mut WidgetTree,
+        at: Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> crate::pointer::PointerId {
+        use crate::pointer::{
+            BackendDeviceKey, PointerIdAllocator, PointerInfo, PointerPhase, PointerSample,
+        };
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(91_000);
+        let contact = PointerIdAllocator::global().begin(
+            BackendDeviceKey::DEFAULT,
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        );
+        tree.dispatch_pointer_with_ops(
+            PointerSample {
+                pointer: PointerInfo::touch(contact, crate::pointer::EventTime::from_millis(1)),
+                phase: PointerPhase::Down,
+                position: at,
+                button: None,
+                modifiers: Modifiers::NONE,
+                coalesced: Vec::new(),
+            },
+            ops,
+        );
+        contact
+    }
+
+    /// The placement an overlay currently carries.
+    fn placement_of(
+        tree: &WidgetTree,
+        id: crate::overlay::OverlayId,
+    ) -> crate::overlay::OverlayPlacement {
+        tree.overlay_manager
+            .stack
+            .iter()
+            .find(|o| o.id == id)
+            .map(|o| o.placement.clone())
+            .expect("the overlay is in the stack")
+    }
+
+    /// The drag tick fires from `layout()`, outside any sample — and it must
+    /// still tell its handler which device is dragging.
+    ///
+    /// This is the whole of the coarse auto-scroll band's reachability: every
+    /// data view's `on_drag_tick` asks `ctx.pointer_kind()` for the band, and
+    /// before the session carried a pointer the answer was `Mouse` for the whole
+    /// of a finger drag, so the wider band could never apply.
+    #[test]
+    fn a_drag_tick_reports_the_device_that_started_the_drag() {
+        let seen: Rc<RefCell<Vec<teksilo_tokens::PointerKind>>> = Rc::new(RefCell::new(Vec::new()));
+        let s = seen.clone();
+
+        let mut tree = WidgetTree::new();
+        let target = tree.add(
+            FillWidget::new()
+                .on_drop(|_, _, _| true)
+                .on_drag_tick(move |_pos, ctx| s.borrow_mut().push(ctx.pointer_kind())),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        // A mouse drag first: the pre-existing answer, unchanged.
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(target, crate::drag_payload::DragPayload::typed(1_u8));
+        tree.collect_from_ctx(ctx, target);
+        tree.handle_drag_move(Point::new(50.0, 50.0), &mut crate::window::NoopWindowOps);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            *seen.borrow(),
+            vec![teksilo_tokens::PointerKind::Mouse],
+            "a mouse drag still reports the mouse"
+        );
+        tree.cancel_active_drag(&mut crate::window::NoopWindowOps);
+        seen.borrow_mut().clear();
+
+        // Now a finger, arming its drag from inside its own press. The same node
+        // is source, drop target and tick owner — a row of a reorderable list.
+        let mut ops = crate::window::NoopWindowOps;
+        let s = seen.clone();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let armed = Cell::new(false);
+        let s2 = slot.clone();
+        let mut tree = WidgetTree::new();
+        let row = tree.add(
+            FillWidget::new()
+                .on_pointer_event(move |event, ctx| {
+                    if matches!(event, crate::event::WidgetEvent::PointerDown { .. })
+                        && !armed.replace(true)
+                        && let Some(id) = s2.get()
+                    {
+                        ctx.start_drag(id, crate::drag_payload::DragPayload::typed(2_u8));
+                    }
+                    crate::event::EventResponse::Ignored
+                })
+                .on_drop(|_, _, _| true)
+                .on_drag_tick(move |_pos, ctx| s.borrow_mut().push(ctx.pointer_kind())),
+        );
+        slot.set(Some(row));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        touch_press(&mut tree, Point::new(50.0, 50.0), &mut ops);
+        assert!(tree.active_drag.is_some(), "the finger armed a drag");
+        tree.handle_drag_move(Point::new(50.0, 50.0), &mut ops);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            *seen.borrow(),
+            vec![teksilo_tokens::PointerKind::Touch],
+            "and a finger drag reports the finger, from a tick that has no sample"
+        );
+    }
+
+    /// The preview is placed clear of a coarse contact and byte-identically at
+    /// the point for a mouse.
+    ///
+    /// A preview pinned to the pixel a finger reported sits under the hand
+    /// carrying it, so the user drags something they cannot see. `AtPointer`
+    /// stays exactly `AtPointer` for a cursor, which is what keeps mouse
+    /// placement unchanged.
+    #[test]
+    fn the_preview_avoids_a_coarse_contact_and_still_pins_a_cursor() {
+        use crate::overlay::OverlayPlacement;
+
+        let mut ops = crate::window::NoopWindowOps;
+        let at = Point::new(60.0, 40.0);
+
+        // Mouse.
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(1_u8),
+            Box::new(FillWidget::new()),
+        );
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_move(at, &mut ops);
+        let overlay = tree
+            .active_drag
+            .as_ref()
+            .and_then(|d| d.preview_overlay_id)
+            .expect("the preview overlay exists");
+        assert!(
+            matches!(placement_of(&tree, overlay), OverlayPlacement::AtPointer(p) if p == at),
+            "a mouse keeps AtPointer at the reported point, unchanged",
+        );
+
+        // Finger: the same drag, armed from inside a contact's press so the
+        // session records it, with a preview attached the way the router does.
+        let mut tree = WidgetTree::new();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let source = tree.add(drag_arming_leaf_with_preview(slot.clone()));
+        slot.set(Some(source));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        touch_press(&mut tree, at, &mut ops);
+        assert_eq!(
+            tree.active_drag.as_ref().map(|d| d.pointer.kind),
+            Some(teksilo_tokens::PointerKind::Touch),
+            "the session recorded the finger",
+        );
+        tree.handle_drag_move(at, &mut ops);
+        let overlay = tree
+            .active_drag
+            .as_ref()
+            .and_then(|d| d.preview_overlay_id)
+            .expect("the preview overlay exists");
+        match placement_of(&tree, overlay) {
+            OverlayPlacement::AtPointerAvoiding { point, avoid } => {
+                assert_eq!(point, at);
+                assert!(
+                    avoid.contains(at),
+                    "the rectangle to clear is centred on the contact, so no \
+                     placement that honours it can put the preview under the hand",
+                );
+            }
+            other => panic!("a coarse pointer must avoid its own contact, got {other:?}"),
+        }
+    }
+
+    /// The `drag_arming_leaf` above, but with a preview — the shape
+    /// `ListView`/`TreeView` use.
+    fn drag_arming_leaf_with_preview(
+        slot: Rc<Cell<Option<WidgetId>>>,
+    ) -> impl crate::widget::Widget {
+        let armed = Cell::new(false);
+        FillWidget::new().on_pointer_event(move |event, ctx| {
+            if matches!(event, crate::event::WidgetEvent::PointerDown { .. })
+                && !armed.replace(true)
+                && let Some(id) = slot.get()
+            {
+                ctx.start_drag_with_preview(
+                    id,
+                    crate::drag_payload::DragPayload::typed(1_u8),
+                    Box::new(FillWidget::new()),
+                );
+            }
+            crate::event::EventResponse::Ignored
+        })
+    }
+
+    /// Escalation revokes the pointer that was **dragging**, not whichever
+    /// pointer the singular accessor happens to name.
+    ///
+    /// A drag tick can move the reported position outside the window (it
+    /// scrolls the content under a stationary finger), and a tick runs outside
+    /// any sample — where `current_pointer_id` answers "the mouse". Cancelling
+    /// the mouse there would leave the real contact armed with a sequence for a
+    /// drag the OS had taken over.
+    #[test]
+    fn an_os_drag_started_by_a_finger_cancels_that_finger() {
+        let cancelled: Rc<RefCell<Vec<(crate::pointer::PointerId, crate::pointer::CancelReason)>>> =
+            Rc::new(RefCell::new(Vec::new()));
+        let c = cancelled.clone();
+
+        let mut ops = RecordingWindowOps::new(true);
+        let kinds = ops.started_kinds.clone();
+
+        let mut tree = WidgetTree::new();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let armed = Cell::new(false);
+        let s2 = slot.clone();
+        let source = tree.add(
+            FillWidget::new()
+                .on_pointer_event(move |event, ctx| {
+                    if matches!(event, crate::event::WidgetEvent::PointerDown { .. })
+                        && !armed.replace(true)
+                        && let Some(id) = s2.get()
+                    {
+                        ctx.start_drag(id, exportable_payload());
+                    }
+                    crate::event::EventResponse::Ignored
+                })
+                .on_pointer_cancel(move |pointer, reason, _ctx| {
+                    c.borrow_mut().push((pointer.id, reason));
+                }),
+        );
+        slot.set(Some(source));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let contact = touch_press(&mut tree, Point::new(20.0, 50.0), &mut ops);
+        assert!(tree.active_drag.is_some());
+
+        // Out of the window: the drag escalates.
+        tree.handle_drag_move(Point::new(-40.0, 50.0), &mut ops);
+        assert_eq!(tree.outbound_drag_source, Some(source));
+        assert_eq!(
+            *kinds.borrow(),
+            vec![teksilo_tokens::PointerKind::Touch],
+            "the platform is told which device is dragging — Wayland needs the \
+             touch-down serial, not a button serial"
+        );
+        assert_eq!(
+            *cancelled.borrow(),
+            vec![(contact, crate::pointer::CancelReason::OsDragStarted)],
+            "the finger is the pointer revoked"
+        );
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+    }
+
+    /// An Escape-cancelled finger drag still reports the finger to the source.
+    ///
+    /// The Escape arrives as a key dispatch, which serves no pointer at all, so
+    /// without the drag's own pointer installed the source's `on_drag_ended`
+    /// would be told a mouse cancelled the drag a finger had been carrying —
+    /// the same divergence as the tick, at the other end of the same drag.
+    #[test]
+    fn an_escape_cancelled_finger_drag_reports_the_finger_to_its_source() {
+        let seen: Rc<RefCell<Vec<teksilo_tokens::PointerKind>>> = Rc::new(RefCell::new(Vec::new()));
+        let s = seen.clone();
+
+        let mut ops = crate::window::NoopWindowOps;
+        let mut tree = WidgetTree::new();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let armed = Cell::new(false);
+        let s2 = slot.clone();
+        let source = tree.add(
+            FillWidget::new()
+                .on_pointer_event(move |event, ctx| {
+                    if matches!(event, crate::event::WidgetEvent::PointerDown { .. })
+                        && !armed.replace(true)
+                        && let Some(id) = s2.get()
+                    {
+                        ctx.start_drag(id, crate::drag_payload::DragPayload::typed(1_u8));
+                    }
+                    crate::event::EventResponse::Ignored
+                })
+                .on_drag_ended(move |_outcome, ctx| s.borrow_mut().push(ctx.pointer_kind())),
+        );
+        slot.set(Some(source));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        touch_press(&mut tree, Point::new(50.0, 50.0), &mut ops);
+        assert!(tree.active_drag.is_some());
+        tree.dispatch_event_with_ops(
+            crate::event::WidgetEvent::KeyDown {
+                key: crate::event::Key::Escape,
+                modifiers: crate::event::Modifiers::NONE,
+                text: None,
+            },
+            &mut ops,
+        );
+        assert_eq!(*seen.borrow(), vec![teksilo_tokens::PointerKind::Touch]);
+    }
+
+    /// The widget's verdict reaches the platform, and only when it changes.
+    ///
+    /// An inbound backend has to answer the drag source before the tree has seen
+    /// the position, so its first answer is about formats alone; without this the
+    /// OS showed "will accept" over a target that refuses the payload.
+    #[test]
+    fn the_accept_setter_receives_the_widget_verdict() {
+        use crate::drag_state::DropFeedback;
+
+        let verdict = Rc::new(Cell::new(false));
+        let v = verdict.clone();
+        let mut ops = RecordingWindowOps::new(true);
+        let accepts = ops.accepts.clone();
+
+        let mut tree = WidgetTree::new();
+        tree.add(
+            FillWidget::new()
+                .on_drag_hover(move |_p, _pos, _ctx| {
+                    if v.get() {
+                        DropFeedback::Accept
+                    } else {
+                        DropFeedback::NoFeedback
+                    }
+                })
+                .on_drop(|_, _, _| true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.begin_external_drag(
+            Point::new(50.0, 50.0),
+            crate::drag_payload::ExternalDropData {
+                files: vec![std::path::PathBuf::from("/tmp/a.png")],
+                ..Default::default()
+            },
+            &mut ops,
+        );
+        assert_eq!(
+            *accepts.borrow(),
+            vec![false],
+            "a refusing target is reported to the OS as a refusal"
+        );
+
+        // Same answer again: nothing more is pushed. The OS side is a round trip
+        // per call and a motion stream would repeat it every sample.
+        tree.update_external_drag(Point::new(52.0, 50.0), &mut ops);
+        assert_eq!(
+            *accepts.borrow(),
+            vec![false],
+            "an unchanged answer is not re-sent"
+        );
+
+        // The target changes its mind.
+        verdict.set(true);
+        tree.update_external_drag(Point::new(54.0, 50.0), &mut ops);
+        assert_eq!(
+            *accepts.borrow(),
+            vec![false, true],
+            "and a change is pushed once"
+        );
+    }
+
+    /// An in-app drag is not an OS drag, and must not push an accept state to a
+    /// platform that has nothing in flight to revise.
+    #[test]
+    fn an_in_app_drag_pushes_no_os_accept_state() {
+        let mut ops = RecordingWindowOps::new(true);
+        let accepts = ops.accepts.clone();
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.add(FillWidget::new().on_drop(|_, _, _| true));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, crate::drag_payload::DragPayload::typed(1_u8));
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_move(Point::new(50.0, 50.0), &mut ops);
+
+        assert!(accepts.borrow().is_empty());
+    }
+
+    /// A cancelled OS drag tears the source down **exactly once**, whichever
+    /// order the platform reports it in.
+    ///
+    /// Two independent paths could fire the source's `on_drag_ended`: the
+    /// terminal `DragEnded` on the window that started the drag, and the abort
+    /// delivered to whichever window was holding the re-entered session. Only
+    /// the first owns it, and a backend that reports a terminal twice (some
+    /// compositors send both `dnd_finished` and `cancelled`) must not double it.
+    #[test]
+    fn a_cancelled_os_drag_tears_the_source_down_exactly_once() {
+        use crate::drag_payload::{DragPayload, DropOutcome};
+
+        let ended = Rc::new(RefCell::new(Vec::new()));
+        let e = ended.clone();
+        let mut ops = RecordingWindowOps::new(true);
+
+        // Window A starts and escalates.
+        let mut tree_a = WidgetTree::new();
+        let src = tree_a.add(
+            FillWidget::new().on_drag_ended(move |outcome, _ctx| e.borrow_mut().push(outcome)),
+        );
+        tree_a.layout(SizeProposal::exact(200.0, 100.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(
+            src,
+            DragPayload::typed(5_u32).with_mime("text/plain", b"x".to_vec()),
+        );
+        tree_a.collect_from_ctx(ctx, src);
+        tree_a.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+        assert!(super::outbound_is_live());
+
+        // Window B picks the drag up as a re-entered session.
+        let left = Rc::new(Cell::new(0_u32));
+        let l = left.clone();
+        let mut tree_b = WidgetTree::new();
+        tree_b.add(
+            FillWidget::new()
+                .on_drag_hover(|_, _, _| crate::drag_state::DropFeedback::Accept)
+                .on_drag_leave(move |_ctx| l.set(l.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        tree_b.layout(SizeProposal::exact(200.0, 100.0));
+        let accepts = ops.accepts.clone();
+        accepts.borrow_mut().clear();
+        tree_b.begin_external_drag(
+            Point::new(50.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert!(tree_b.os_drag_reentered);
+        assert_eq!(
+            *accepts.borrow(),
+            vec![true],
+            "a re-entered app drag still negotiates with the OS: its offer is \
+             live and a refusal must still reach the compositor's cursor",
+        );
+
+        // The OS aborts. B is told, and clears without claiming the source's
+        // notification — B has no source widget.
+        tree_b.abort_external_drag(&mut ops);
+        assert!(tree_b.active_drag.is_none(), "B's session is gone");
+        assert!(!tree_b.os_drag_reentered);
+        assert_eq!(left.get(), 1, "B's highlighted target was cleared");
+        assert!(
+            ended.borrow().is_empty(),
+            "the abort must not fire the source's on_drag_ended — the source \
+             window owns that"
+        );
+
+        // A's terminal event fires it, once.
+        tree_a.handle_os_drag_ended(DropOutcome::Cancelled, &mut ops);
+        assert_eq!(*ended.borrow(), vec![DropOutcome::Cancelled]);
+
+        // A second terminal from a backend that reports both must add nothing.
+        tree_a.handle_os_drag_ended(DropOutcome::Cancelled, &mut ops);
+        assert_eq!(
+            *ended.borrow(),
+            vec![DropOutcome::Cancelled],
+            "exactly once"
+        );
+    }
+
+    /// A window holding a re-entered OS drag notices when the drag ends
+    /// elsewhere, and drops the session on its next layout pass.
+    ///
+    /// The terminal `DragEnded` goes to the window that *started* the drag, and
+    /// that is not necessarily the one showing the re-entered session — so
+    /// without this the other window kept a live `active_drag`, a highlighted
+    /// drop target and an `os_drag_reentered` flag for a drag that no longer
+    /// existed, for the rest of the process. Nothing further ever arrives for
+    /// it from the OS, so the condition has to be noticed from the inside.
+    #[test]
+    fn a_reentered_session_is_reaped_when_the_os_drag_ends_elsewhere() {
+        use crate::drag_payload::{DragPayload, DropOutcome};
+
+        let mut ops = RecordingWindowOps::new(true);
+
+        let mut tree_a = WidgetTree::new();
+        let src = tree_a.add(FillWidget::new());
+        tree_a.layout(SizeProposal::exact(200.0, 100.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(
+            src,
+            DragPayload::typed(9_u32).with_mime("text/plain", b"x".to_vec()),
+        );
+        tree_a.collect_from_ctx(ctx, src);
+        tree_a.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+
+        let left = Rc::new(Cell::new(0_u32));
+        let l = left.clone();
+        let mut tree_b = WidgetTree::new();
+        tree_b.add(
+            FillWidget::new()
+                .on_drag_hover(|_, _, _| crate::drag_state::DropFeedback::Accept)
+                .on_drag_leave(move |_ctx| l.set(l.get() + 1))
+                .on_drop(|_, _, _| true),
+        );
+        tree_b.layout(SizeProposal::exact(200.0, 100.0));
+        tree_b.begin_external_drag(
+            Point::new(50.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert!(tree_b.active_drag.is_some() && tree_b.os_drag_reentered);
+
+        // A's window reports the terminal outcome. B hears nothing.
+        tree_a.handle_os_drag_ended(DropOutcome::Cancelled, &mut ops);
+        assert!(
+            tree_b.active_drag.is_some(),
+            "B has not been told anything yet"
+        );
+
+        // B's next layout pass notices the stash is dead.
+        tree_b.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(tree_b.active_drag.is_none(), "the dead session was reaped");
+        assert!(!tree_b.os_drag_reentered);
+        assert_eq!(left.get(), 1, "and its highlighted target was cleared");
+    }
+
+    /// A re-entered app drag carries the device that started it, so the window
+    /// it lands in reads the finger — the one case where an inbound OS drag's
+    /// kind is knowable at all.
+    #[test]
+    fn a_reentered_app_drag_recovers_the_device_that_started_it() {
+        let mut ops = RecordingWindowOps::new(true);
+
+        let mut tree_a = WidgetTree::new();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let src = tree_a.add(drag_arming_leaf(slot.clone(), exportable_payload));
+        slot.set(Some(src));
+        tree_a.layout(SizeProposal::exact(200.0, 100.0));
+        touch_press(&mut tree_a, Point::new(20.0, 50.0), &mut ops);
+        tree_a.handle_drag_move(Point::new(-5.0, 50.0), &mut ops);
+        assert!(super::outbound_is_live());
+
+        let mut tree_b = WidgetTree::new();
+        tree_b.add(FillWidget::new().on_drop(|_, _, _| true));
+        tree_b.layout(SizeProposal::exact(200.0, 100.0));
+        tree_b.begin_external_drag(
+            Point::new(50.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert_eq!(
+            tree_b.active_drag.as_ref().map(|d| d.pointer.kind),
+            Some(teksilo_tokens::PointerKind::Touch),
+        );
+
+        // A foreign drag, by contrast, is credited to no device at all.
+        let mut tree_c = WidgetTree::new();
+        tree_c.add(FillWidget::new().on_drop(|_, _, _| true));
+        tree_c.layout(SizeProposal::exact(200.0, 100.0));
+        tree_a.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+        tree_c.begin_external_drag(
+            Point::new(50.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert_eq!(
+            tree_c.active_drag.as_ref().map(|d| d.pointer.kind),
+            Some(teksilo_tokens::PointerKind::Unknown),
+            "no OS names the source's device to a destination",
+        );
+    }
+
     /// A re-stash that races in *after* the drag's terminal event must not
     /// resurrect a finished drag (cross-window drop-on-nothing race). Tests the
     /// liveness gate directly. (Regression for the HIGH race finding.)
@@ -2807,7 +3705,10 @@ mod tests {
     fn restash_after_drag_ended_is_noop() {
         use crate::drag_payload::DragPayload;
 
-        super::outbound_begin(DragPayload::typed(1_u32).with_mime("text/plain", b"x".to_vec()));
+        super::outbound_begin(
+            DragPayload::typed(1_u32).with_mime("text/plain", b"x".to_vec()),
+            crate::pointer::PointerInfo::mouse(crate::pointer::EventTime::ZERO),
+        );
         assert!(super::has_outbound_typed());
         // A window re-entered and took the payload.
         let held = super::outbound_take_if_live().expect("payload taken while live");

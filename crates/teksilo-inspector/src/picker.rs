@@ -76,6 +76,10 @@ impl Widget for PickerOverlay {
         let state_for_handler = self.state.clone();
         let handlers = HandlerSet::new()
             .focusable(false)
+            // A hold while picking is still a pick, not a context menu: the
+            // tree-owned long-press route would otherwise walk up from here and
+            // resolve to a tooltip or a menu on the inspector's own chrome.
+            .long_press_role(teksilo_core::widget_tree::touch_route::LongPressRole::None)
             .on_pointer_event(move |event, ctx| match event {
                 WidgetEvent::PointerDown {
                     position,
@@ -118,7 +122,14 @@ impl Widget for PickerOverlay {
         canvas.fill_rounded_rect(bounds, teksilo_tokens::CornerRadius::ZERO, tint);
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // While it is mounted this surface takes every press in the window, so
+        // it says so. Not decoration: an assistive-technology user who cannot
+        // see the tint has no other way to learn why the application stopped
+        // responding.
+        builder.set_role(teksilo_core::accesskit::Role::Group);
+        builder.set_name("Widget picker — press a widget to select it in the inspector");
+    }
 }
 
 /// Invisible leaf widget. On every layout pass, if
@@ -213,7 +224,11 @@ impl Widget for PickResolver {
         proposal.resolve(0.0, 0.0).into()
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // A zero-size helper that resolves the pending pick during layout. It
+        // draws nothing and answers nothing; hidden so no AT walk stops on it.
+        builder.set_hidden();
+    }
 }
 
 /// Bridge from the picker's `PointerUp` handler to the chain-menu

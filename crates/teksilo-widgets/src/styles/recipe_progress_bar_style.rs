@@ -26,7 +26,7 @@ use teksilo_core::signal::Prop;
 use teksilo_core::styles::{ProgressBarStyle, ProgressBarStyleConfig, ProgressKind};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, Orientation, SurfaceRole};
+use teksilo_tokens::{CornerRadius, InputTokens, Orientation, SurfaceRole};
 
 // IntUI design tokens for ProgressBar. The recipe owns its own dimensions.
 pub const PROGRESS_BAR_CORNER_RADIUS: f32 = 2.0;
@@ -37,11 +37,27 @@ pub struct ProgressBarRecipe {
     pub corner_radius: f32,
 }
 
-impl Default for ProgressBarRecipe {
-    fn default() -> Self {
+impl ProgressBarRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    ///
+    /// Every dimension this recipe carries is a decoration (a corner radius, a
+    /// hairline, a glyph metric), so the parameter is unused: the density
+    /// ladder never moves any of them. It is taken all the same, so every
+    /// recipe is constructed the same way at its widget's build site.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
         Self {
             corner_radius: PROGRESS_BAR_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for ProgressBarRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -55,6 +71,18 @@ pub struct RecipeProgressBarStyle {
 impl RecipeProgressBarStyle {
     pub fn new(recipe: ProgressBarRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeProgressBarStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: ProgressBarRecipe::for_tokens(tokens),
+        }
     }
 }
 

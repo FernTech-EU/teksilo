@@ -24,6 +24,43 @@
 //! .spacing(8.0)
 //! .selection(selection_model)
 //! ```
+//!
+//! ## Pan to scroll
+//!
+//! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
+//! which gives it the shared wheel arithmetic, a finger's pan and the
+//! `PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+//! release coasts, and a pan it cannot absorb hands the **whole** event to the
+//! container outside — never a residual. Vertical only, despite the grid: this
+//! view owns no horizontal offset, so a horizontal pan is declined and chains
+//! outward. A pan that starts on a tile scrolls rather than activating it.
+//!
+//! ## The rubber band, and why it is not on this node
+//!
+//! In [`teksilo_data::SelectionMode::Multi`] a drag on the empty background
+//! sweeps a selection rectangle. That drag deliberately does **not** live on
+//! this view's own node, which is the one carrying the `PanClaim`: the node that
+//! captures a press has its gesture arena driven by the capture dispatch, which
+//! runs *before* the arbitration advances, so a drag there latches at
+//! `drag_slop` and decides the sequence before a claim can win at `pan_slop`.
+//! While it did, a `Multi`-selection grid did not scroll under a finger from
+//! anywhere at all, and a finger on the background swept a band immediately
+//! rather than after a hold — a press on a tile got neither, since the marquee
+//! declines such a press only after winning the arbitration for it.
+//!
+//! So the body pane carries a no-op tap that gives it an arena of its own (the
+//! press is captured *inside* the claimant, not by it) and the marquee's drag
+//! hangs on a `DragSurface` that strictly encloses the pane. That is the one
+//! shape the tree arms [`teksilo_tokens::DragActivation`] for, which is what
+//! makes the marquee wait for a long press under a finger and latch at 5 dp
+//! under a mouse.
+//!
+//! Every **tile** carries that same no-op tap as well, for a reason with nothing
+//! to do with dragging. With the pane holding one, a tile without an arena of
+//! its own leaves the *pane* as the press captor — and a release is dispatched
+//! to the captor and then bubbled target→root, which never reaches a tile
+//! beneath it. A plain selectable grid lost both its finger tap and, under a
+//! mouse, the release that collapses a multi-selection that way.
 
 pub(crate) mod a11y;
 pub(crate) mod body_pane;
@@ -35,7 +72,7 @@ pub(crate) mod selection;
 #[cfg(test)]
 mod tests;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -44,7 +81,9 @@ use teksilo_core::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::drag_payload::DragPayload;
-use teksilo_core::event::{EventResponse, ScrollDelta, WidgetEvent};
+use teksilo_core::event::{EventResponse, WidgetEvent};
+use teksilo_core::kinetic::KineticScroller;
+use teksilo_core::pointer::touch_action::PanAxes;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::GridViewStyle;
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
@@ -53,7 +92,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{
     DataChange, DropPosition, DropResponse, ListModel, SelectionMode, SelectionModel,
 };
-use teksilo_tokens::{Easing, SurfaceRole};
+use teksilo_tokens::{OverscrollStyle, SurfaceRole};
 
 use std::time::Duration;
 
@@ -297,6 +336,12 @@ pub struct GridView<T: 'static> {
     // Geometry (synchronous cells, read within the layout pass)
     viewport_width: Rc<Cell<f32>>,
     viewport_height: Rc<Cell<f32>>,
+    /// This surface's pan physics: the range a finger's pan is clamped to and
+    /// the offset it is currently holding. Owned by the view rather than by
+    /// the [`ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
+    /// so it survives a rebuild, and so `place_children` — the only pass that
+    /// knows the viewport extent — can publish into it.
+    scroller: Rc<RefCell<KineticScroller>>,
     /// The grid body pane's absolute (window) origin, published by
     /// `GridBodyPane::place_children` (`None` until laid out). Shared into the
     /// keyboard handler so it can chase the focused tile into any enclosing
@@ -400,6 +445,7 @@ impl<T: 'static> GridView<T> {
             style: None,
             viewport_width: Rc::new(Cell::new(400.0)),
             viewport_height: Rc::new(Cell::new(400.0)),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             viewport_origin: Rc::new(Cell::new(None)),
             last_needs_scrollbar: Cell::new(false),
             body_pane_id: None,
@@ -1176,38 +1222,111 @@ impl<T: 'static> Widget for GridView<T> {
         // Self handlers: scroll wheel + keyboard.
         let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
         {
-            let scroll_y = self.scroll_y.clone();
-            let max_scroll = self.max_scroll_y.clone();
-            let line_height = strategy.estimated_row_height().max(1.0);
-            let overscroll = self.overscroll_behavior;
-            let smooth_scrolling = self.smooth_scrolling;
-            let smooth_scroll_duration = self.smooth_scroll_duration;
-            handlers = handlers.on_scroll(move |event, _ctx| match event {
-                WidgetEvent::Scroll { delta, .. } => {
-                    let dy = match delta {
-                        ScrollDelta::Lines { y, .. } => y * line_height,
-                        ScrollDelta::Pixels { y, .. } => *y,
-                    };
-                    // Base off the animation target so successive notches
-                    // accumulate instead of restarting mid-animation.
-                    let base = scroll_y.animation_target().unwrap_or(scroll_y.get());
-                    let (new_y, moved) =
-                        crate::common::scroll::scroll_clamp_axis(base, dy, max_scroll.get());
-                    if moved {
-                        if smooth_scrolling {
-                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
-                        } else {
-                            scroll_y.set(new_y);
-                        }
-                    }
-                    crate::common::scroll::scroll_response(
-                        moved,
-                        overscroll == OverscrollBehavior::Contain,
-                    )
-                }
-                _ => EventResponse::Ignored,
-            });
+            // The wheel arithmetic, the pan and the claim that puts this node
+            // on a finger's claimant chain all come from `common::scrollable`.
+            // A wheel still takes the path it always did —
+            // `handle_scroll_event` branches on the scroll *source*, not the
+            // phase.
+            //
+            // The notch size is snapshotted from the strategy in force at
+            // build, which is what the hand-rolled handler did: a strategy
+            // swapped after mount keeps the notch it was built with until the
+            // next rebuild.
+            let behavior = crate::common::scrollable::ScrollableBehavior::new(
+                crate::common::scrollable::ScrollableAxes::vertical(
+                    self.scroll_y.clone(),
+                    self.max_scroll_y.clone(),
+                ),
+            )
+            .with_scroller(self.scroller.clone())
+            // Vertical only: this view owns no horizontal offset, so a
+            // horizontal pan is declined and chains outward.
+            .axes(PanAxes::Y)
+            .overscroll(self.overscroll_behavior)
+            .smooth(self.smooth_scrolling)
+            .smooth_duration(self.smooth_scroll_duration)
+            .line_height(strategy.estimated_row_height().max(1.0))
+            .reduced_motion(ctx.prefers_reduced_motion())
+            .physics(ctx.theme().input.scroll_physics);
+            handlers = behavior.install(handlers);
         }
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // SC 2.5.7 wants the tile drag reachable without a drag. One closure
+        // performs the move; the chord below, the tile's context menu and the
+        // tile's AccessKit custom actions all call it, so the routes cannot
+        // reach different end states. The move travels the source's own
+        // drop-accept path — see `common::ordered_move`.
+        #[allow(clippy::type_complexity)]
+        let reorder_perform: Option<
+            Rc<dyn Fn(usize, usize, &mut teksilo_core::widget::EventContext)>,
+        > = self.reorderable.then(|| {
+            let mover = Rc::new(crate::common::ordered_move::RowMover {
+                len: self.source.len_fn.clone(),
+                stash: self.source.dnd.stash_drag_keys_fn.clone(),
+                payload: {
+                    let model_id = self.model_id;
+                    Rc::new(move |idx: usize| {
+                        DragPayload::typed(RowDragData::<T> {
+                            source: model_id,
+                            rows: vec![idx],
+                            items: None,
+                        })
+                    })
+                },
+                accept: self.source.dnd.accept_drop_fn.clone(),
+                view: self.model_id,
+                name: {
+                    // The type-ahead label resolver, where the application
+                    // gave one; routed through the source's string accessor
+                    // so an unloaded row yields no name rather than a
+                    // fabricated one.
+                    let with_item_str = self.source.with_item_str_fn.clone();
+                    let label = self.type_ahead_label.clone();
+                    Rc::new(move |index: usize| {
+                        let label = label.as_ref()?;
+                        // `label` is index-keyed here (a grid's delegate
+                        // is), but the read still goes through the source so
+                        // an unloaded tile yields no name rather than one
+                        // computed for an absent item.
+                        (with_item_str)(index, &|_item: &T| label(index))
+                    })
+                },
+            });
+            let focused = self.focused_index.clone();
+            let selection = self.selection.clone();
+            let strategy = strategy.clone();
+            let scroll_y = self.scroll_y.clone();
+            let max_scroll_y = self.max_scroll_y.clone();
+            let viewport_height = self.viewport_height.clone();
+            let viewport_width = self.viewport_width.clone();
+            let viewport_origin = self.viewport_origin.clone();
+            Rc::new(
+                move |from: usize,
+                      destination: usize,
+                      ctx: &mut teksilo_core::widget::EventContext| {
+                    let Some((dest, utterance)) = mover.commit_to(from, destination) else {
+                        return;
+                    };
+                    focused.set(Some(dest));
+                    if let Some(ref sel) = selection {
+                        sel.select(dest);
+                    }
+                    keyboard::reveal_tile(
+                        &strategy,
+                        &scroll_y,
+                        &max_scroll_y,
+                        &viewport_height,
+                        &viewport_width,
+                        &viewport_origin,
+                        dest,
+                        ctx,
+                    );
+                    ctx.announce(utterance);
+                },
+            ) as Rc<dyn Fn(usize, usize, &mut teksilo_core::widget::EventContext)>
+        });
+
         handlers = handlers.on_key(build_grid_key_handler(GridKeyConfig {
             len_fn: self.source.len_fn.clone(),
             col_count: self.column_count.clone(),
@@ -1222,24 +1341,7 @@ impl<T: 'static> Widget for GridView<T> {
             wrap_navigation: self.wrap_navigation,
             tab_traversal: self.tab_traversal,
             on_tile_activate: self.on_tile_activate.clone(),
-            reorderable: self.reorderable,
-            accept_drop_fn: self.source.dnd.accept_drop_fn.clone(),
-            view_id: self.model_id,
-            make_reorder_payload: {
-                let model_id = self.model_id;
-                let stash = self.source.dnd.stash_drag_keys_fn.clone();
-                Rc::new(move |idx| {
-                    // Synthetic same-view payloads must stash the dragged
-                    // row's key at construction — the accept path resolves
-                    // identity from the stash, never from `rows`.
-                    (stash)(&[idx]);
-                    DragPayload::typed(RowDragData::<T> {
-                        source: model_id,
-                        rows: vec![idx],
-                        items: None,
-                    })
-                })
-            },
+            reorder_perform: reorder_perform.clone(),
             type_ahead_timeout: self.type_ahead_timeout,
             type_ahead: self.type_ahead.clone(),
             tile_map: self.tile_map.clone(),
@@ -1259,7 +1361,9 @@ impl<T: 'static> Widget for GridView<T> {
 
         // Rubber-band marquee (Multi mode only). A container pointer handler
         // records the modifier state at press time for additive selection;
-        // the drag handler sweeps the rectangle.
+        // the drag handler sweeps the rectangle — from the `DragSurface` that
+        // wraps the body pane, not from this root. See below.
+        let mut marquee_drag: Option<_> = None;
         let marquee_on = self.marquee_selection
             && self
                 .selection
@@ -1277,7 +1381,18 @@ impl<T: 'static> Widget for GridView<T> {
                     EventResponse::Ignored
                 });
             }
-            handlers = handlers.on_drag(build_marquee_handler(MarqueeConfig {
+            // The marquee's `on_drag` does NOT go on this root, and that is
+            // load-bearing rather than tidy. This root is the `PanClaim`
+            // holder, and a drag on the node that also captures the press
+            // latches at `drag_slop` (18 dp) before a claim can win at
+            // `pan_slop` (36) — the claim is then never evaluated at all, so a
+            // `Multi`-selection grid did not scroll under a finger *and* did
+            // not marquee (the drag declines a press that lands on a tile).
+            // Hanging it on the `DragSurface` below instead makes it a strict
+            // ancestor of whatever takes the press, which is the one shape the
+            // tree arms `DragActivation` for: `Immediate` for a mouse (5 dp,
+            // exactly as before), `AfterLongPress` for a finger.
+            marquee_drag = Some(build_marquee_handler(MarqueeConfig {
                 marquee: self.marquee.clone(),
                 selection: self.selection.clone().unwrap(),
                 strategy: strategy.clone(),
@@ -1307,8 +1422,11 @@ impl<T: 'static> Widget for GridView<T> {
                 let Some(st) = marquee_for_tick.get() else {
                     return;
                 };
-                let step =
-                    selection::marquee_auto_scroll_step(st.current.y, viewport_h_for_tick.get());
+                let step = selection::marquee_auto_scroll_step(
+                    st.current.y,
+                    viewport_h_for_tick.get(),
+                    st.kind,
+                );
                 if step != 0.0 {
                     let max = max_scroll_for_tick.get();
                     let new_y = (scroll_for_tick.get() + step).clamp(0.0, max);
@@ -1469,6 +1587,7 @@ impl<T: 'static> Widget for GridView<T> {
                 focused_index: self.focused_index.clone(),
                 on_tile_activate: self.on_tile_activate.clone(),
                 activate_on: self.activate_on,
+                reorder_perform: reorder_perform.clone(),
                 tile_context_menu: self.tile_context_menu.clone(),
                 tile_a11y_label: self.tile_a11y_label.clone(),
                 reorderable: self.reorderable,
@@ -1492,10 +1611,25 @@ impl<T: 'static> Widget for GridView<T> {
                 prev_built_end: Rc::new(Cell::new(0)),
                 total_refresh: pane_total_refresh,
                 tile_entries: Vec::new(),
+                tile_roots: Vec::new(),
                 header_entries: Vec::new(),
                 in_place_children: Cell::new(false),
             };
-            self.body_pane_id = Some(ctx.add(pane));
+            let pane_id = ctx.add(pane);
+            // A no-op tap gives the pane its own gesture arena, so a press on
+            // the background *between* tiles is captured inside the
+            // `DragSurface` rather than by it. Without that the surface would be
+            // the captor and its own drag would win the arbitration at 18 dp,
+            // which is the bug the surface exists to fix. A press on a tile is
+            // captured by the tile's own absorber, deeper still — which it must
+            // be, or the release would be dispatched here and bubbled outward,
+            // never reaching the tile that recorded the press.
+            ctx.apply_handlers(pane_id, crate::data_views::press_absorber());
+            let surface_id = ctx.add(crate::data_views::DragSurface::new(pane_id));
+            if let Some(drag) = marquee_drag.take() {
+                ctx.apply_handlers(surface_id, HandlerSet::new().on_drag(drag));
+            }
+            self.body_pane_id = Some(surface_id);
 
             let overlay = GridOverlay {
                 focused_index: self.focused_index.clone(),
@@ -1619,6 +1753,12 @@ impl<T: 'static> Widget for GridView<T> {
         };
         let len = self.source.len();
         let vp_h = bounds.height;
+        // The rubber band's resistance is a fraction of the viewport. This
+        // view does not band, but the scroller reads the extent either way and
+        // this is the only pass that knows it.
+        self.scroller
+            .borrow_mut()
+            .set_viewport(teksilo_canvas::Vec2::new(bounds.width, vp_h));
 
         // Query the strategy at a SINGLE, stable body width per frame (using
         // the previous frame's scrollbar decision). Querying at two widths

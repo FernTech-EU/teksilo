@@ -275,12 +275,21 @@ projects scene → screen and is bound via
 `BuildContext::set_transform` so the renderer pushes it around the
 entire subtree.
 
-OS gestures plug in directly:
+Pointer and gesture input plugs in directly:
 
 - **Trackpad two-finger pan** and **mouse-wheel scroll** drive
   `pan_x` / `pan_y` (Ctrl+wheel = zoom-about-pointer).
 - **Pinch** drives `zoom` and `rotation` anchored on the gesture
-  center.
+  center. Both producers deliver the same thing, which is what makes the one
+  ingress worth having: `PinchChanged`'s `scale` is the factor **since the
+  previous sample** and its `rotation` the twist since the previous sample in
+  **radians**, so the handler multiplies the one in and adds the other. A
+  touchscreen spread to twice the starting span leaves the zoom at exactly twice,
+  whatever the sample rate, and a one-degree trackpad twist turns the scene one
+  degree — winit's degrees are converted at the platform seam, not here. Both are
+  pinned by tests in `view/tests/touch_camera.rs`.
+- **One finger** pans the camera; see the touch model below for when it
+  does and when the marquee takes the gesture instead.
 - **Reduced-motion** is honoured: pan / zoom snap instead of
   animating.
 
@@ -314,9 +323,11 @@ scene.pan_axes(PanAxes::None | PanAxes::Horizontal | PanAxes::Vertical | PanAxes
 scene.zoomable(false);   // disables Ctrl+wheel, pinch, +/-
 ```
 
-The View reads these at gesture-handler wiring time. Pan deltas on a
-restricted axis pass through to ancestor scrollables (correct event
-propagation).
+The View captures these as `Signal` handles when it wires its gesture
+handlers and reads their **values on every event**, so a runtime change
+to `pan_axes`, `zoomable`, the zoom range or the pan bounds takes effect
+on the next gesture with no rebuild. Pan deltas on a restricted axis
+pass through to ancestor scrollables (correct event propagation).
 
 For inline embeddings of a scene that fills its slot exactly, the
 view itself sizes to the scene:
@@ -357,12 +368,112 @@ item's `scene_rect` (broad-phase) plus its `shape_contains` predicate
 (narrow-phase) and scene transform, sorted topmost-first. A press lands on an
 item only when it falls inside the *shape* (a thin diagonal `PathItem`, a
 ring, a rotated rect) — a press in the AABB but off the shape, or over a
-non-draggable backdrop / heavyweight card, falls through to a **marquee**. This
+non-draggable backdrop / heavyweight card, falls through to a **marquee**.
+A pointer with a slop radius of its own gets one further offer once that
+test has missed, which is bounded and does not reach the middle of a large
+AABB; see the touch model below. This
 is why dragging from on top of a select-only (non-`IS_DRAGGABLE`) card still
 rubber-bands instead of nudging the scene: the card is not in the draggable
 snapshot, and the cross-widget tap/drag disambiguation (see
 [events-and-gestures.md](events-and-gestures.md)) lets the view's `on_drag`
 start even though the card carries an `on_tap`.
+
+---
+
+## The touch model
+
+A scene is navigated the same way whatever is pointing at it, but a finger
+and a mouse do not have the same reach, the same idea of "still", or the
+same way of asking for a menu. What follows is what differs, and what
+deliberately does not.
+
+### One finger pans the camera
+
+An interactive `SceneView` declares a kinetic
+[`PanClaim`](../crates/teksilo-core/src/pointer/touch_action.rs) on both
+axes, so a contact's pan arrives at the same `on_scroll` handler a
+trackpad pan does, tagged `ScrollSource::TouchPan`. The camera is `set`
+rather than tweened — a finger is already the animation — and the coast
+that follows a flick arrives as further scrolls along the same claimant
+chain, hard-clamped, so a bounded scene stops at its edge instead of
+rubber-banding. A pan the scene's own `pan_axes` has closed is declined,
+which re-offers the gesture to whatever scrolls outside the view.
+
+**A view that registers the marquee/item-drag handler does not pan under a
+finger** — which it does whenever selection is on or magnetism is
+configured. That handler puts a drag recognizer on the same node as the
+pan claim, and a node can hold only one role in a
+pointer sequence: it is enrolled as the pan claimant, so its own drag is
+never enrolled as a competitor and the deferral that makes a `GridView`'s
+marquee wait for a hold cannot reach it. The drag recognizer is then
+driven from the capture dispatch, which runs before the arbitration walk,
+and it latches at the touch **drag** slop — half the touch **pan** slop —
+so the sequence has an owner before the pan is ever eligible. Fixing that
+means letting the press owner's own `DragActivation` speak when it also
+holds an eligible pan claim, which is core arbitration rather than the
+scene's to change. Until then, a scene that must pan under a finger *and*
+select can offer `DragMode::ScrollHandDrag` on a toolbar toggle, which is
+read live.
+
+### The grab tolerances a finger earns
+
+Three numbers change with the pointing device, and all three come from
+[`HitSlop::for_pointer`](../crates/teksilo-core/src/pointer/hit_slop.rs)
+or the pointer's own gesture profile rather than from a scene-specific
+token — so the mouse's values are the ones it always had, by arithmetic
+and not by a branch (the mouse profile's slop radius is `0.0`).
+
+- **Item grab and item tap.** The exact-shape test above runs first and
+  unchanged. Only when it finds nothing does a pointer whose profile
+  declares a slop radius — a finger, and a pen by a much smaller amount —
+  get a second offer, against each item's bounding box widened by the slop that
+  item's *screen* size earns — nearest box wins rather than topmost, so a
+  near stroke is preferred to a further box. An item already at least the
+  density's target size on its smaller axis earns nothing, so a scene of
+  large cards acquires no halo; a two-pixel connector stroke earns the
+  full offer, which is what makes it grabbable at all. The offer cannot
+  outrank an exact hit: an exact hit is inside its own box, so its
+  distance is zero.
+- **Magnet handles.** `MagnetismConfig::capture_px` is the whole radius
+  for a mouse and a floor for everything else, which adds what a disc of
+  that diameter earns from its own profile. The four snap-*arrival* radii are left
+  alone: they decide how close a dragged thing has to come before it
+  snaps, which is feel, not reach.
+- **Tap versus drag.** The movement a press may carry and still be a tap
+  is measured in **view pixels**, so it is the same physical distance at
+  every zoom; a scene-unit comparison shrinks it as the view zooms out
+  until an ordinary click cannot land. A precise pointer keeps the view's
+  own `TAP_MOVEMENT_THRESHOLD` floor; a coarse one is allowed the travel
+  its gesture profile already calls a tap.
+
+### Hover, tips and menus
+
+The hover seam — an item's `on_hover`, its tooltip, the cursor shape — is
+only run for a pointer that hovers. A contact is dispatched moves like
+any other pointer but has no hover to give, and running the seam for one
+both schedules tips nobody asked for and strands them, because a lift
+produces no pointer-leave to retract them with.
+
+A finger reaches an item's tooltip by **holding still on it**: the press
+arms a delayed show at the pointer's own long-press duration, travel past
+the tap tolerance disarms it, and a lift before the deadline drops it —
+so a tap leaves nothing behind. A tip the hold did show stays up after
+the lift, because a finger cannot keep pointing at what it is reading;
+the next press anywhere in the view retracts it.
+
+**A hold does not yet open an item's context menu.** The obvious
+implementation — an `on_long_press` handler on the view — cannot be used:
+it installs a long-press recognizer in the view's own gesture arena, a
+recognizer that wins resets its peers, and it outranks drag, so a *mouse*
+press held past the deadline would lose the marquee its drag recognizer
+was waiting to start. `a_mouse_press_held_past_the_hold_deadline_still_marquees`
+guards that. The framework's tree-owned hold route is the mechanism that
+does not have this problem, but it resolves against the *node* under the
+press, and a scene item has no node: it carries its handlers on the
+scene, not the arena. Reaching an item's menu from a hold therefore needs
+a way for a widget to answer what a hold at a given point means for it.
+Right-click still opens an item's menu, and a finger can reach the same
+command through whatever the app puts on the item's tap.
 
 ---
 

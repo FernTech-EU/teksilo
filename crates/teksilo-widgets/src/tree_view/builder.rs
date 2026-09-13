@@ -188,6 +188,7 @@ impl<T: 'static> TreeView<T> {
             scrollbar_id: None,
             viewport_height: Rc::new(Cell::new(600.0)),
             viewport_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             placed_content_width: Rc::new(Cell::new(0.0)),
             tree_id: view_id,
             enabled: Prop::Static(true),
@@ -595,6 +596,20 @@ impl<T: 'static> TreeView<T> {
             self.source.visible_count(),
             BUFFER_ITEMS,
         )
+    }
+
+    /// Test-only accessor: the reactive drop-feedback signal — `Line` for a
+    /// between-rows insertion, `Rect` for the drop-into-this-row highlight,
+    /// `None` once the drag leaves or ends.
+    ///
+    /// The affordance and the drop itself resolve the row's bands separately
+    /// (`on_drag_hover` and `on_drop` each call
+    /// [`crate::common::drop_bands`]), so a test that only watches the outcome
+    /// cannot see the two disagreeing. The `ListView` twin is
+    /// `ListView::drop_feedback_signal`.
+    #[cfg(test)]
+    pub(crate) fn drop_feedback_signal(&self) -> &teksilo_core::signal::Signal<Option<DropViz>> {
+        &self.drop_feedback
     }
 
     pub(super) fn clamp_scroll(&self) {

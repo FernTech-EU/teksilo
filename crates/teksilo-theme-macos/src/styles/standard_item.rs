@@ -40,10 +40,11 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{StandardItemStyle, StandardItemStyleConfig};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius, TextRole};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, TargetRole, TextRole};
 use teksilo_widgets::styles::{RecipeStandardItemStyle, StandardItemRecipe};
 
 use crate::shape::MACOS_FOCUS_RING_WIDTH;
@@ -80,19 +81,26 @@ const _: () = assert!(PADDING_H > CAPSULE_INSET);
 /// The macOS [`StandardItemRecipe`] — public so an app can tune one
 /// dimension without rebuilding the style.
 pub fn macos_standard_item_recipe() -> StandardItemRecipe {
+    macos_standard_item_recipe_for(&InputTokens::default())
+}
+
+/// [`macos_standard_item_recipe`] resolved against a density's
+/// [`InputTokens`]. `[measured]` `NSTableView` metrics at Compact; the row
+/// heights rise to the density's target size above it.
+pub fn macos_standard_item_recipe_for(tokens: &InputTokens) -> StandardItemRecipe {
     StandardItemRecipe {
         icon_size: ICON_SIZE,
-        padding_horizontal: PADDING_H,
-        padding_vertical: 2.0,
-        min_height_single_line: ROW_HEIGHT,
-        min_height_two_line: ROW_HEIGHT_TWO_LINE,
+        padding_horizontal: spacing(PADDING_H, tokens),
+        padding_vertical: spacing(2.0, tokens),
+        min_height_single_line: dp(ROW_HEIGHT, TargetRole::Target, tokens),
+        min_height_two_line: dp(ROW_HEIGHT_TWO_LINE, TargetRole::Target, tokens),
         tree_indent_step: 16.0,
         item_corner_radius: CAPSULE_RADIUS,
         bg_horizontal_inset: CAPSULE_INSET,
         focus_ring_width: MACOS_FOCUS_RING_WIDTH,
         // The delegate paints no chrome at all here — see the module doc.
         selection_edge_width: 0.0,
-        ..StandardItemRecipe::default()
+        ..StandardItemRecipe::for_tokens(tokens)
     }
 }
 
@@ -127,8 +135,8 @@ impl StandardItemStyle for MacOsStandardItemStyle {
             is_disabled: cfg.is_disabled.clone(),
             is_window_active: cfg.is_window_active.clone(),
         };
-        let row =
-            RecipeStandardItemStyle::new(macos_standard_item_recipe()).make_body(&inner_cfg, ctx);
+        let row = RecipeStandardItemStyle::new(macos_standard_item_recipe_for(&ctx.theme().input))
+            .make_body(&inner_cfg, ctx);
 
         ctx.add(MacOsRowFrame { capsule, row })
     }

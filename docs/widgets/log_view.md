@@ -27,13 +27,37 @@ What it adds over the read-only code viewer:
   error line red). Language-agnostic: the view colours a line, the
   application decides what an error looks like.
 
+## Pan to scroll
+
+The surface installs `common::scrollable::ScrollableBehavior`
+— the shared wheel arithmetic, a finger's pan, and the `PanClaim`. The wheel
+path is unchanged: no tween (these offsets are plain signals), 16 dp a line,
+`Ignored` at a hard boundary so the page around it takes the rest, and a
+repaint asked for exactly when an axis moved.
+
+**The claim serves this surface even though it also owns the press
+arena**, which its double- and triple-tap recognizers give it. The router
+stops its arbitration walk at the press owner only for a `Gesture` member,
+whose recognizer the capture dispatch is already driving; a `Pan` member is
+decided in that walk and nowhere else, so it is exempt. A finger on the
+text therefore scrolls the text, and hands the gesture outward only at this
+surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![LogView at Touch density](img/log_view-touch.png)
+
 ## Builder methods at a glance
 
-`follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
+`context_menu`, `default_context_menu`, `follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/log_view/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/index.html)
 
 ## `pub struct LogView`
 
@@ -53,6 +77,21 @@ pub struct LogView { /* fields */ }
 
 A fresh, empty log view: read-only, no caret, no wrapping, following the
 tail, unbounded. Attach a `handle` and append to it.
+
+#### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
+
+Replace the built-in right-click menu with `factory`, called on each
+right-click with the **window** position of the click. Returning `None`
+shows no menu.
+
+#### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
+
+Whether to install the built-in Copy / Select All menu (default `true`).
+`false` lets a right-click bubble past the view.
+
+The **touch** selection toolbar is *not* affected: it is raised by the
+controller rather than by a right-click, and a log a finger cannot copy
+from is a log a finger cannot use.
 
 #### `pub fn follow_tail(self, follow: bool) -> Self`
 

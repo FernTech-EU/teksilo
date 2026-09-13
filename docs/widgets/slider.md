@@ -48,6 +48,39 @@ let volume = Signal::new(0.5_f32);
 let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 ```
 
+## Touch and pen
+
+A slider is a **continuous manipulator**: the value it produces *is* the
+press position, so a finger that lands on it adjusts it — even inside a
+scrolling form, and from the first movement rather than after a long-press
+timer. Two separate things deliver that. The press *capture* the drag takes
+makes the slider the innermost member of the pointer's sequence, which is
+what stops an enclosing scroller winning the gesture. `touch_action(NONE)`
+is the declaration on top: it forbids every default touch behaviour on the
+hit path, which in practice means a **two-contact pinch** started on the
+slider never reaches the surface under it. `docs/touch-and-pen.md` §7.3.
+
+`teksilo_core::widget::Widget::target_regions`
+reports what the style painted inside the slider's one node: the whole node
+as the press surface, and the knob as the grab affordance, sized through the
+resolved style's density-aware `thumb_diameter_for`. Nothing else in the
+tree can see the knob — it is drawn on the same canvas as the track — so
+this is the only way a conformance audit or a coarse-press router learns it
+is there.
+
+**Right-to-left.** A horizontal slider's minimum sits at the *leading* edge,
+which is the right-hand one in an RTL UI, so both the painted fill and the
+position→value map mirror. They were previously mirrored in neither, so an
+RTL slider's knob moved away from the finger dragging it.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Slider at Touch density](img/slider-touch.png)
+
 ## Builder methods at a glance
 
 `step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
@@ -55,6 +88,23 @@ let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/slider/index.html)
+
+## `pub const SLIDER_PART_BODY`
+
+`Widget::target_regions` part id for the whole press surface — the track
+plus everything either side of it, which is what a tap or a drag acts on.
+
+```rust
+pub const SLIDER_PART_BODY: u16 = 0;
+```
+
+## `pub const SLIDER_PART_THUMB`
+
+`Widget::target_regions` part id for the knob.
+
+```rust
+pub const SLIDER_PART_THUMB: u16 = 1;
+```
 
 ## `pub struct Slider`
 

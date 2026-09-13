@@ -18,6 +18,12 @@
 //!   file: it is authored for the page, whereas a catalog default variant
 //!   is chosen for the previewer's editing form.
 //!
+//! The render itself happens in one [`DocExportOptions::pass`]. `Compact`
+//! is the canonical pass and writes `img/<slug>.png`; a denser pass is
+//! **additive** and writes `img/<slug>-touch.png` beside it, never in
+//! place of it — [`teksilo_preview::PreviewPass`] owns that rule, because
+//! `extract_widget_api.py` has to agree with it from the other side.
+//!
 //! Three guards keep the output honest:
 //!
 //! - a slug with no `<docs>/<slug>.md` page is reported, not written
@@ -57,6 +63,11 @@ pub struct DocExportOptions {
     pub scale: f32,
     /// Only export subjects whose slug is in this list (empty = all).
     pub only: Vec<String>,
+    /// The pass to render in. `Compact` is canonical and writes
+    /// `img/<slug>.png`; every other density is **additive** and writes
+    /// `img/<slug>-<density>.png` beside it, so a Touch run can never
+    /// disturb a committed Compact image.
+    pub pass: teksilo_preview::PreviewPass,
 }
 
 impl Default for DocExportOptions {
@@ -67,6 +78,7 @@ impl Default for DocExportOptions {
             dark: false,
             scale: 2.0,
             only: Vec::new(),
+            pass: teksilo_preview::PreviewPass::compact(),
         }
     }
 }
@@ -208,8 +220,12 @@ fn render_subject(
     theme: &Theme,
     opts: &DocExportOptions,
 ) -> SubjectOutcome {
-    let mut shot_opts = ShotOptions::default();
+    let mut shot_opts = ShotOptions::default().with_pass(opts.pass);
     if let Some((w, h)) = subject.exact_size {
+        // The pin does NOT follow the pass. A denser render on the same
+        // canvas is a controlled comparison — one variable, the ladder —
+        // and scaling the canvas with it would confound the two. Where a
+        // subject then no longer fits, that IS what the density did to it.
         shot_opts = shot_opts.with_exact_size(w, h);
     }
 
@@ -238,7 +254,7 @@ fn render_subject(
         return SubjectOutcome::Blank;
     }
 
-    let path = opts.out_dir.join(format!("{}.png", subject.slug));
+    let path = image_path(&opts.out_dir, &subject.slug, opts.pass);
     match write_png(&path, &shot.rgba, shot.width, shot.height) {
         Ok(()) => SubjectOutcome::Written {
             bytes: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
@@ -247,6 +263,15 @@ fn render_subject(
         },
         Err(e) => SubjectOutcome::Failed(e),
     }
+}
+
+/// Where one subject's image lands.
+///
+/// The pass names the file: `Compact` keeps the bare slug, so a default
+/// export reproduces the committed filenames exactly and a denser pass
+/// lands beside them rather than over them.
+fn image_path(out_dir: &Path, slug: &str, pass: teksilo_preview::PreviewPass) -> PathBuf {
+    out_dir.join(format!("{}.png", pass.image_stem(slug)))
 }
 
 fn panic_msg(err: &Box<dyn std::any::Any + Send>) -> String {
@@ -272,9 +297,11 @@ pub fn print_report(report: &DocExportReport, opts: &DocExportOptions) -> i32 {
         }
     }
     println!(
-        "\n{} image(s) written to {}  ({} blank, {} without a page, {} failed)",
+        "\n{} image(s) written to {} at {} density  \
+         ({} blank, {} without a page, {} failed)",
         report.written(),
         opts.out_dir.display(),
+        opts.pass.label(),
         report.blank(),
         report.no_page(),
         report.failed(),
@@ -299,6 +326,40 @@ mod tests {
         assert_eq!(
             slug_for("crates\\teksilo-widgets\\src\\notification\\log.rs").as_deref(),
             Some("log")
+        );
+    }
+
+    /// The default batch is the one CI-adjacent invocation whose output is
+    /// committed, so it must keep writing the filenames already in the
+    /// repository — a suffix creeping into the default would orphan every
+    /// committed image at once.
+    #[test]
+    fn the_default_export_writes_the_committed_filenames() {
+        let opts = DocExportOptions::default();
+        assert_eq!(opts.pass, teksilo_preview::PreviewPass::compact());
+        assert_eq!(
+            image_path(&opts.out_dir, "color_picker", opts.pass),
+            PathBuf::from("docs/widgets/img/color_picker.png")
+        );
+    }
+
+    /// …and a denser pass is additive: same directory, same page, a new file.
+    #[test]
+    fn a_touch_pass_lands_beside_the_compact_image() {
+        let opts = DocExportOptions {
+            pass: teksilo_preview::PreviewPass::new(teksilo_tokens::TargetDensity::Touch),
+            ..DocExportOptions::default()
+        };
+        assert_eq!(
+            image_path(&opts.out_dir, "color_picker", opts.pass),
+            PathBuf::from("docs/widgets/img/color_picker-touch.png")
+        );
+        // The page the image hangs off is the unsuffixed one; a Touch run
+        // must not start looking for `color_picker-touch.md`.
+        assert_eq!(
+            opts.pages_dir.as_deref(),
+            Some(Path::new("docs/widgets")),
+            "the page-existence check is keyed by slug, not by pass"
         );
     }
 }

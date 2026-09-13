@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Containers tab — Panel, Card, GroupBox, GroupHeader, Accordion, ToolBox,
-//! ScrollArea, ScrollBar, SplitView.
+//! ScrollArea, ScrollBar, Splitter.
 
 use teksilo::prelude::*;
 use teksilo::tokens::Orientation;
@@ -240,7 +240,7 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // chained method calls are unavoidable. ToolBox::add takes
     // ToolBoxItem; chained .add() calls don't translate to one
     // property per call, so pre-register the whole ToolBox. Same for
-    // ScrollArea (loop body) and SplitView (multi-arg first/second
+    // ScrollArea (loop body) and Splitter (multi-arg first/second
     // wrapping a chained Panel).
     let card_widget = ctx.add(
         Card::new()

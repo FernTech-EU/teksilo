@@ -69,6 +69,12 @@ pub struct ShotOptions {
     /// Pin the canvas instead of measuring the widget. Needed for greedy
     /// widgets that fill whatever they are given.
     pub exact_size: Option<(f32, f32)>,
+    /// The pass this capture belongs to. Its
+    /// [density](teksilo_preview::PreviewPass::density) is projected onto
+    /// the theme *and* onto the tree before the subject is built, because a
+    /// widget reads its dimensions out of `theme.input` during `build()` —
+    /// setting it afterwards would measure the old ladder.
+    pub pass: teksilo_preview::PreviewPass,
 }
 
 impl Default for ShotOptions {
@@ -79,6 +85,7 @@ impl Default for ShotOptions {
             max_size: (880.0, 620.0),
             preferred_width: 520.0,
             exact_size: None,
+            pass: teksilo_preview::PreviewPass::compact(),
         }
     }
 }
@@ -88,6 +95,13 @@ impl ShotOptions {
     /// inside it).
     pub fn with_exact_size(mut self, width: f32, height: f32) -> Self {
         self.exact_size = Some((width, height));
+        self
+    }
+
+    /// Render this capture in `pass` (its density) instead of the
+    /// canonical `Compact` one.
+    pub fn with_pass(mut self, pass: teksilo_preview::PreviewPass) -> Self {
+        self.pass = pass;
         self
     }
 }
@@ -145,6 +159,9 @@ impl Shooter {
     }
 
     /// Render one widget against `theme` and read the result back.
+    ///
+    /// `theme` may be a base theme or one already projected onto
+    /// [`ShotOptions::pass`]'s density; the capture projects it either way.
     pub fn capture(
         &mut self,
         widget: Box<dyn Widget>,
@@ -169,6 +186,12 @@ impl Shooter {
         // Glyphs rasterize at `scale`; widgets that consult
         // `LayoutContext::scale_factor` must agree with the typesetter.
         tree.set_device_scale_factor(self.scale);
+        // Before anything is added: a density decides dimensions inside
+        // `build()`, so it has to be in place while the subtree is built.
+        // `set_input_density` is a guarded no-op when `theme` already
+        // carries the requested density, so a caller may hand over either
+        // a base theme or an already-projected one.
+        tree.set_input_density(opts.pass.density());
 
         let inner = tree.add_boxed(widget);
         // The insets are *bound*, not fixed: `Padding` stretches its child

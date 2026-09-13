@@ -94,7 +94,7 @@ fn menu_metrics(theme: &teksilo_core::Theme) -> teksilo_core::styles::MenuItemMe
         .menu_item
         .as_ref()
         .map(|s| s.metrics())
-        .unwrap_or_else(|| crate::styles::RecipeMenuItemStyle::default().metrics())
+        .unwrap_or_else(|| crate::styles::RecipeMenuItemStyle::for_tokens(&theme.input).metrics())
 }
 
 /// A 1 dp horizontal divider line between groups of menu items.
@@ -643,12 +643,12 @@ impl Widget for MenuList {
         // active popover style instead of a hand-rolled bg `RectWidget`
         // + `MenuList::paint`. The full-halo vs trigger-attached
         // shadow choice is derived from `attached_side`.
-        let popover_style: teksilo_core::styles::SharedPopoverStyle = ctx
-            .theme()
-            .style_slots
-            .popover
-            .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let popover_style: teksilo_core::styles::SharedPopoverStyle =
+            ctx.theme().style_slots.popover.clone().unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipePopoverStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let surface_cfg = PopoverStyleConfig {
             content: visible_cap_id,
             variant: PopoverVariant::Menu,

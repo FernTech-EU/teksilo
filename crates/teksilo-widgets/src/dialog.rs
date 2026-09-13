@@ -39,6 +39,18 @@
 //!             .supporting_text(lit!("Adjust your preferences below."))
 //!     });
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The trigger is a `Button` (or, with `.trigger(..)`, the caller's widget wrapped
+//! in the same activation handlers), and both actuate on the release. The footer's
+//! buttons are buttons.
+//!
+//! The scrim is the one full-viewport node that has to receive exactly the presses
+//! that land on it, so it says `no_hit_slop` outright rather than relying on the
+//! slop pass's size formula to exclude it by arithmetic — see
+//! `scrim_hit_targeting_tests` below. Its dismissal is a tap, so it too waits for
+//! the release.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -198,7 +210,11 @@ impl Widget for ModalContainer {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeDialogStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let cfg = DialogStyleConfig {
             content: content_id,
             has_scrim: true,
@@ -345,18 +361,28 @@ impl Widget for ModalScrim {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.dialog.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeDialogStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeDialogStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let chrome_id = style.make_scrim(ctx);
 
+        // A scrim is never re-attributed to and never widens. The size formula
+        // already excludes a full-viewport node from the slop pass by
+        // arithmetic, but a scrim's whole contract is that it receives exactly
+        // the presses that land on it — saying so outright means the guarantee
+        // does not quietly depend on how large the scrim happens to be.
+        let mut handlers = HandlerSet::new().no_hit_slop();
         if self.click_to_dismiss {
             let target = self.dismiss_target.clone();
-            let handlers = HandlerSet::new().on_tap(move |_event, ctx| {
+            handlers = handlers.on_tap(move |_event, ctx| {
                 if let Some(modal_id) = target.get() {
                     ctx.dismiss_overlay(modal_id);
                 }
             });
-            ctx.apply_self_handlers(handlers);
         }
+        ctx.apply_self_handlers(handlers);
 
         self.root_child_id = Some(chrome_id);
         vec![chrome_id]
@@ -1310,5 +1336,56 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         tree.add(Dialog::new(lit!("Open dialog")));
         tree.layout(SizeProposal::exact(800.0, 600.0));
+    }
+}
+
+#[cfg(test)]
+mod scrim_hit_targeting_tests {
+    use super::*;
+    use teksilo_canvas::Point;
+    use teksilo_core::pointer::{EventTime, PointerId, PointerInfo};
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_tokens::TargetDensity;
+
+    /// A scrim never participates in hit widening: it receives exactly the
+    /// presses that land on it.
+    ///
+    /// A real scrim fills the viewport, and the slop pass's size formula
+    /// already excludes anything that large by arithmetic. The point of the
+    /// explicit `no_hit_slop` — and of shrinking the scrim here to make it
+    /// observable — is that the guarantee must not depend on how big the scrim
+    /// happens to be.
+    #[test]
+    fn a_modal_scrim_never_participates_in_hit_widening() {
+        use crate::primitives::{FixedSize, ZStack};
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_input_density(TargetDensity::Touch);
+        let scrim = tree.add(
+            FixedSize::new()
+                .width(20.0)
+                .height(20.0)
+                .child(ModalScrim::new().click_to_dismiss(true)),
+        );
+        tree.add(ZStack::new().add_child(scrim));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        let b = tree.bounds(scrim);
+        assert_eq!(
+            b.size(),
+            Size::new(20.0, 20.0),
+            "the fixture needs a SMALL scrim"
+        );
+        let finger = PointerInfo::touch(PointerId::MOUSE, EventTime::ZERO);
+        // 4 dp outside, well inside the 8 dp a 20 dp node would otherwise earn
+        // at Touch. Nothing in the scrim's subtree may claim it.
+        let probe = Point::new(b.right() + 4.0, b.center().y);
+        let hit = tree.hit_test_for(probe, &finger);
+        let claimed_by_scrim = hit.is_some_and(|id| {
+            std::iter::successors(Some(id), |id| tree.parent(*id)).any(|id| id == scrim)
+        });
+        assert!(
+            !claimed_by_scrim,
+            "a press outside the scrim reached {hit:?}, inside the scrim subtree"
+        );
     }
 }

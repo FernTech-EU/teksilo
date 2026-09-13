@@ -25,6 +25,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [Shrinkable](shrinkable.md) — Shrinkable — a layout modifier that allows its child to compress under an over-constraint
 - [Spacer](spacer.md) — Spacer — an invisible, flexible gap that claims all available space on the
 - [Switcher](switcher.md) — Switcher — a container that shows exactly one child page at a time
+- [TouchTarget](touch_target.md) — `TouchTarget` — the last resort of the three hit-targeting mechanisms:
 - [VStack](vstack.md) — VStack — a vertical layout container that distributes children top-to-bottom
 - [Wrap](wrap.md) — Wrap — a horizontal flow layout that wraps children to the next line when
 - [ZStack](zstack.md) — ZStack — a layout container that layers children on top of each other
@@ -52,7 +53,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [GroupBox](group_box.md) — GroupBox — titled cluster of controls in Int UI / Jewel style
 - [GroupHeader](group_header.md) — GroupHeader — a horizontal section header: label followed by a trailing
 - [Panel](panel.md) — Panel — a themed single-child container that provides a background, border,
-- [ScrollArea](scroll_area.md) — ScrollArea — a clipping viewport that scrolls its content on wheel, touch,
+- [ScrollArea](scroll_area.md) — ScrollArea — a clipping viewport that scrolls its content on wheel, on a
 - [ScrollBar](scroll_bar.md) — ScrollBar — pointer and keyboard affordance for a `ScrollArea`
 - [Splitter](splitter.md) — N-pane split container with draggable, collapsible dividers
 - [StatusBar](status_bar.md) — StatusBar — a horizontal chrome bar at the bottom of a window for status
@@ -175,7 +176,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [CodeEditorHandle](code_editor.md) — Multi-line plain-text and code editing surfaces
 - [CommandPalette](command_palette.md) — CommandPalette — type-to-run access to every command an app has registered
 - [NotificationEntry](notification.md) — Persistent notification archive — the storage and data-model layer
-- [OverlayTrigger](overlay_trigger.md)
+- [OverlayTrigger](overlay_trigger.md) — `OverlayTrigger` — the shared "this widget opens that overlay" wrapper
 - [PopoverSurface](popover_surface.md) — `PopoverSurface` — the themed panel a popover's content sits in
 - [PopoverWidget](popover_widget.md) — `PopoverWidget<T>` — a generic trigger that opens a popover when
 - [TreeRowMeta](tree_source.md) — Type-erased data source adapter for `TreeView`

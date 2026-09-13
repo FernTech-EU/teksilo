@@ -37,6 +37,14 @@ Endonyms come from ICU4X CLDR data via
 raw BCP-47 tag. When no `I18nManager` is configured the switcher
 renders an empty, placeholder ComboBox.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![LanguageSwitcher at Touch density](img/language_switcher-touch.png)
+
 ## Builder methods at a glance
 
 `variant`, `label`, `locales`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

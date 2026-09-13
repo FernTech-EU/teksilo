@@ -28,6 +28,20 @@
 //! presentational root. The slots and the overflow trigger are likewise
 //! siblings, never tab-list children. Each composite is its own single Tab stop
 //! with its own roving Arrow/Home/End cycle; Tab/Shift+Tab crosses between them.
+//!
+//! ## Touch and pen
+//!
+//! A rail item is an icon-button-sized target that activates on its tap, drags to
+//! reorder or relocate its activity, and opens its context menu from a hold — three
+//! gestures on one node, told apart by the framework rather than by the widget.
+//!
+//! The rail's item extent does **not** follow the density ladder, deliberately: the
+//! same two constants feed the strip's layout, its overflow-capacity estimate and
+//! its drop-insertion geometry, two of them from pure functions with no theme in
+//! scope, and scaling one without the others makes the rail's capacity disagree
+//! with its layout. Every `IconButtonSize` a rail can carry already clears the
+//! conformance floor at every density, so what is left is comfort rather than
+//! reach.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

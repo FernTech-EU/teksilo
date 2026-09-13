@@ -16,6 +16,18 @@
 //!    *into* the rich-tooltip chain — multi-tier mixing). One sample
 //!    embeds an internal `TabWidget`. One sample includes a rare
 //!    `Button` to prove keyboard-focus reachability post-promotion.
+//!
+//! # Touch
+//!
+//! Every "hover" below is a mouse or a pen in proximity. **A touch contact never
+//! hovers**, so a finger reaches a tooltip through a different route: hold the
+//! control. The tree recognises the hold itself and shows the tooltip attached to
+//! whatever was held, and the tip retires on Escape, on the next press anywhere
+//! else, or by its own expiry — there is no pointer to leave and no focus to
+//! move, so neither of the two routes that retire a hovered tip applies. That
+//! route is the only one for the plain tier and for a composite tooltip that has
+//! not opted into promotion: neither takes focus, so neither has a keyboard
+//! route. See [docs/tooltips.md](../../docs/tooltips.md).
 
 use teksilo::prelude::*;
 use teksilo::widgets::tooltip::TooltipContent;
@@ -43,7 +55,7 @@ fn build_tooltip_registry() -> Vec<TooltipContent> {
     vec![
         TooltipContent::new(
             KEY_A,
-            lit!("Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.",),
+            lit!("Level 1 of the cascade. Hover \u{2014} or hold, with a finger \u{2014} the [next link](:tip-b) to open level 2.",),
         )
         .with_more(lit!(
             "Open the Accordion to read this long-form body without leaving the tooltip.",
@@ -51,7 +63,7 @@ fn build_tooltip_registry() -> Vec<TooltipContent> {
         .with_shortcut_label("F1"),
         TooltipContent::new(
             KEY_B,
-            lit!("Level 2 of the cascade. Hover the [final link](:tip-c) for one more.",),
+            lit!("Level 2 of the cascade. Hover \u{2014} or hold \u{2014} the [final link](:tip-c) for one more.",),
         )
         .with_more(lit!(
             "Each nested tooltip parents its overlay to the previous one (OverlayLayer::InTree).",
@@ -102,15 +114,15 @@ fn rich_column() -> impl Widget {
             .child(TextWidget::new(lit!("Rich tooltips")).style(TextStyleRole::BodyBold))
             .child(TextWidget::new(lit!("(:key cascade, dwell-to-sticky)")))
             .child(Spacer::new())
-            .child(Button::new(lit!("Hover for level 1")).rich_tooltip(KEY_A))
-            .child(Button::new(lit!("Hover for level 2")).rich_tooltip(KEY_B))
-            .child(Button::new(lit!("Hover for level 3")).rich_tooltip(KEY_C))
+            .child(Button::new(lit!("Hover or hold \u{2014} level 1")).rich_tooltip(KEY_A))
+            .child(Button::new(lit!("Hover or hold \u{2014} level 2")).rich_tooltip(KEY_B))
+            .child(Button::new(lit!("Hover or hold \u{2014} level 3")).rich_tooltip(KEY_C))
             .child(Button::new(lit!("Plain among rich")).tooltip(lit!(
                 "Plain tooltip living in the rich column — diagnostic."
             )))
             .child(Spacer::new())
             .child(TextWidget::new(lit!(
-                "Tip: dwell ~2 s to pin, then click links to chain."
+                "Tip: dwell ~2 s to pin, then click links to chain. A finger gets here by holding the button."
             ))),
     )
 }
@@ -263,11 +275,11 @@ fn menu_and_vtabs_column() -> impl Widget {
             .child(Spacer::new())
             .child(menu_area)
             .child(TextWidget::new(lit!(
-                "Open it: no wall. Hover one item, or arrow-key through — one tooltip, to the side."
+                "Open it: no wall. Hover one item, hold it, or arrow-key through \u{2014} one tooltip, to the side."
             )))
             .child(Spacer::new())
             .child(TextWidget::new(lit!(
-                "Vertical tabs — hover a tab; the tooltip opens beside it, not over the next tab:"
+                "Vertical tabs \u{2014} hover or hold a tab; the tooltip opens beside it, not over the next tab:"
             )))
             .child(Expand::new().child(vtabs)),
     )

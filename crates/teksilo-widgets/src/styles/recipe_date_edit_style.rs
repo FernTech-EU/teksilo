@@ -14,8 +14,10 @@
 //! wrap the body or surround it with siblings.
 
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{DateEditStyle, DateEditStyleConfig, SharedDateEditStyle};
 use teksilo_core::widget_id::WidgetId;
+use teksilo_tokens::{InputTokens, TargetRole};
 
 // ─── IntUI design tokens for the date-edit family ──────────────────
 
@@ -42,13 +44,24 @@ pub struct DateEditRecipe {
     pub segment_gap: f32,
 }
 
+impl DateEditRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            calendar_button_width: dp(CALENDAR_BUTTON_WIDTH, TargetRole::Target, tokens),
+            calendar_icon_size: CALENDAR_ICON_SIZE,
+            segment_gap: spacing(SEGMENT_GAP, tokens),
+        }
+    }
+}
+
 impl Default for DateEditRecipe {
     fn default() -> Self {
-        Self {
-            calendar_button_width: CALENDAR_BUTTON_WIDTH,
-            calendar_icon_size: CALENDAR_ICON_SIZE,
-            segment_gap: SEGMENT_GAP,
-        }
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -64,6 +77,18 @@ pub struct RecipeDateEditStyle {
 impl RecipeDateEditStyle {
     pub fn new(recipe: DateEditRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeDateEditStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: DateEditRecipe::for_tokens(tokens),
+        }
     }
 }
 
@@ -87,5 +112,8 @@ pub fn resolve_date_edit_style(
         .style_slots
         .date_edit
         .clone()
-        .unwrap_or_else(|| std::rc::Rc::new(RecipeDateEditStyle::default()) as SharedDateEditStyle)
+        .unwrap_or_else(|| {
+            std::rc::Rc::new(RecipeDateEditStyle::for_tokens(&ctx.theme().input))
+                as SharedDateEditStyle
+        })
 }

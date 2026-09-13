@@ -37,6 +37,13 @@
 //! (true)`. This is the one place a widget must explicitly mirror framework
 //! visibility onto an OS resource, and it is wired automatically here.
 //!
+//! # Who owns the pointer over the page
+//!
+//! A native subview is above the wgpu pass for *input* as well as for pixels:
+//! the OS routes a press over its rectangle to the engine, and Teksilo is not
+//! told. [`WebViewInput`] is the declaration of which side owns that
+//! rectangle, and it decides four things at once — see the enum's docs.
+//!
 //! [`Switcher`]: https://docs.rs/teksilo-widgets
 
 mod backend;
@@ -115,7 +122,10 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::Role;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
-use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use teksilo_core::widget::{
+    EventContext, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
+    WidgetTreeView,
+};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::window::TeksiloWindowId;
 
@@ -174,6 +184,88 @@ pub struct DownloadOutcome {
     pub success: bool,
 }
 
+/// Who owns pointer input over the page's rectangle.
+///
+/// The engine's subview sits above the wgpu surface, so this is not a
+/// preference the toolkit can enforce on its own: in [`Native`](Self::Native)
+/// the OS hands a press over that rectangle to the engine and Teksilo never
+/// sees it, and in [`Transparent`](Self::Transparent) the engine has to be
+/// asked to stop taking it ([`WebViewHandle::set_input_passthrough`]) — which
+/// not every engine can do.
+///
+/// What Teksilo does on its own side follows from the declaration:
+///
+/// | | `Native` | `Transparent` |
+/// |---|---|---|
+/// | `touch_action` over the region | `NONE` | unset (`AUTO`) |
+/// | miss-only slop / grip outsets | off (`no_hit_slop`) | as any other widget |
+/// | a pointer event that does reach the node | answered, and the pointer's live sequence revoked | declined, so it bubbles |
+/// | the engine is asked to pass input through | no | yes |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WebViewInput {
+    /// The page owns its rectangle: links, form fields, its own scrolling and
+    /// its own long-press menus. The default, and what a browser-shaped view
+    /// wants.
+    ///
+    /// Teksilo therefore claims nothing over the region. `touch_action(NONE)`
+    /// stops a pan, a pinch or a tree-owned hold forming on the hit path (the
+    /// page scrolls itself; an enclosing `ScrollArea` must not also move under
+    /// the finger), and `no_hit_slop` makes the painted rectangle the exact
+    /// contract in both directions — no neighbouring control may claim a press
+    /// that landed on the page, and the page claims none that missed it.
+    #[default]
+    Native,
+    /// Teksilo owns the rectangle; the page is a display surface.
+    ///
+    /// For a view that renders rather than interacts — a document preview, a
+    /// rendered chart, a kiosk banner — and the mode to reach for when app
+    /// widgets, menus or a dialog have to be operable *over* the page: with the
+    /// engine passing input through, an overlay above the view receives the tap
+    /// instead of the engine swallowing it.
+    ///
+    /// The engine half is a request, not a guarantee. A backend that cannot
+    /// make its surface input-transparent reports so as a
+    /// [`WebViewEvent::ConsoleMessage`]; the Teksilo half (no `touch_action`
+    /// declaration, ordinary hit widening, pointer events declined so they
+    /// bubble) applies either way.
+    Transparent,
+}
+
+impl WebViewInput {
+    /// Whether the engine owns pointer input over the page.
+    pub fn is_native(self) -> bool {
+        matches!(self, WebViewInput::Native)
+    }
+}
+
+/// Why the engine subview is hidden, if it is.
+///
+/// Three independent reasons, resolved into one `set_visible` call so the
+/// engine is never told a visibility that only accounts for one of them: a
+/// `WebView` parked in an unselected tab AND scrolled out of view must not
+/// reappear when only the scroll changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EngineVisibility {
+    /// The framework's per-node activation (a `Switcher` branch, a tab).
+    active: bool,
+    /// Whether any of the widget's bounds survives its clipping ancestors.
+    in_view: bool,
+    /// Whether an interactive overlay is standing over the page.
+    uncovered: bool,
+}
+
+impl EngineVisibility {
+    const VISIBLE: Self = Self {
+        active: true,
+        in_view: true,
+        uncovered: true,
+    };
+
+    fn resolved(self) -> bool {
+        self.active && self.in_view && self.uncovered
+    }
+}
+
 /// Shared slot holding the live engine handle once opened. Cloned into the
 /// activation-signal effect so the visibility bridge can reach the handle
 /// created later in `build`.
@@ -201,6 +293,10 @@ pub struct WebView {
     /// Window id captured from `BuildContext::window()` (the post-mount
     /// `EventContext` has no direct window-id accessor).
     window_id: Cell<Option<TeksiloWindowId>>,
+    /// This widget's own arena id, captured in `build`. `place_children` needs
+    /// it to walk its clipping ancestors, and the engine-focus event needs it
+    /// to move the toolkit's focus onto the frame.
+    self_id: Cell<Option<WidgetId>>,
     style_override: Option<SharedWebViewStyle>,
     root_child_id: Option<WidgetId>,
     /// Internal lifecycle state driving the overlay chrome.
@@ -217,6 +313,19 @@ pub struct WebView {
     /// focus, instead of waiting for Enter. Off by default — see
     /// [`enter_page_on_focus`](Self::enter_page_on_focus).
     enter_page_on_focus: bool,
+    /// Who owns pointer input over the page's rectangle. See [`WebViewInput`].
+    input: WebViewInput,
+    /// Whether the *page* holds the engine's keyboard focus, as the engine
+    /// reports it. Distinct from [`focused`](Self::focused), which is the
+    /// toolkit's own focus on the frame.
+    page_focused: Signal<bool>,
+    /// The three reasons the subview may be hidden, resolved into one
+    /// `set_visible`. Shared with the post-mount open action and the
+    /// activation effect.
+    visibility: Rc<Cell<EngineVisibility>>,
+    /// The last `set_visible` value actually issued, so a layout pass that
+    /// changes nothing issues nothing.
+    visible_applied: Rc<Cell<bool>>,
 
     // Optional bindings.
     /// Two-way: the engine writes the resolved URL on navigation-finish, and
@@ -270,12 +379,17 @@ impl WebView {
             scale: Rc::new(Cell::new(1.0)),
             mount_queued: Cell::new(false),
             window_id: Cell::new(None),
+            self_id: Cell::new(None),
             style_override: None,
             root_child_id: None,
             state_signal: Signal::new(WebViewVisualState::Loading),
             registry: Rc::new(RefCell::new(None)),
             focused: Signal::new(false),
             enter_page_on_focus: false,
+            input: WebViewInput::default(),
+            page_focused: Signal::new(false),
+            visibility: Rc::new(Cell::new(EngineVisibility::VISIBLE)),
+            visible_applied: Rc::new(Cell::new(true)),
             url_signal: None,
             title_signal: None,
             loading_signal: None,
@@ -431,6 +545,27 @@ impl WebView {
         self
     }
 
+    /// Declare who owns pointer input over the page's rectangle.
+    ///
+    /// [`WebViewInput::Native`] — the default — gives it to the engine;
+    /// [`WebViewInput::Transparent`] keeps it for Teksilo. See
+    /// [`WebViewInput`] for everything the choice decides.
+    pub fn input_mode(mut self, input: WebViewInput) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// Whether the *page* currently holds the engine's keyboard focus.
+    ///
+    /// Written from [`WebViewEvent::EngineFocusChanged`], which is the only
+    /// thing that can know: once the native subview owns the keyboard, the
+    /// toolkit is told nothing more about what happens inside it. Distinct
+    /// from [`focused_signal`](Self::focused_signal), which reports Teksilo's
+    /// own focus on the *frame*.
+    pub fn page_focused_signal(&self) -> Signal<bool> {
+        self.page_focused.clone()
+    }
+
     /// Hand keyboard focus to the engine subview, entering the page.
     ///
     /// The programmatic form of the frame's Enter key. No-op before the engine
@@ -492,6 +627,27 @@ impl WebView {
         self.with_handle(|h| h.close_devtools());
     }
 
+    /// The part of `bounds` that survives every `clips_children` ancestor, or
+    /// `None` when nothing does.
+    ///
+    /// Walks the arena rather than reading `PaintContext::clip_bounds` because
+    /// the paint walker skips a subtree it has clipped away entirely — which is
+    /// exactly the case that has to reach the engine.
+    fn visible_rect(&self, bounds: Rect, ctx: &LayoutContext) -> Option<Rect> {
+        let (Some(arena), Some(id)) = (ctx.arena(), self.self_id.get()) else {
+            return Some(bounds);
+        };
+        let mut rect = bounds;
+        let mut cursor = arena.parent(id);
+        while let Some(ancestor) = cursor {
+            if arena.get(ancestor).is_some_and(|node| node.clips_children) {
+                rect = intersect(rect, arena.bounds(ancestor))?;
+            }
+            cursor = arena.parent(ancestor);
+        }
+        Some(rect)
+    }
+
     fn with_handle(&self, f: impl FnOnce(&dyn WebViewHandle)) {
         if let Some(h) = self.handle.borrow().as_ref() {
             f(h.as_ref());
@@ -499,7 +655,11 @@ impl WebView {
     }
 
     /// Build the JS→Rust / lifecycle event callback handed to the registry.
-    fn make_event_callback(&self) -> impl FnMut(WebViewEvent, &mut EventContext) + 'static {
+    fn make_event_callback(
+        &self,
+        self_id: WidgetId,
+    ) -> impl FnMut(WebViewEvent, &mut EventContext) + 'static {
+        let page_focused = self.page_focused.clone();
         let url_signal = self.url_signal.clone();
         let title_signal = self.title_signal.clone();
         let loading_signal = self.loading_signal.clone();
@@ -587,6 +747,23 @@ impl WebView {
                 // Diagnostics only (backend init / unsupported-op reports);
                 // not surfaced to a dedicated app callback today.
             }
+            WebViewEvent::EngineFocusChanged(has_focus) => {
+                page_focused.set(has_focus);
+                // The OS has moved the keyboard into the page. Teksilo's own
+                // focus must follow, or whatever held it — a text field, with
+                // a blinking caret and an open IME — goes on believing it
+                // still does. Moving it onto the frame is the honest answer:
+                // the frame is the deepest node Teksilo owns, and the page's
+                // own focus ring lives in a tree the toolkit cannot see.
+                //
+                // Guarded, because the two-step entry path (Enter on the frame
+                // → `set_focus`) arrives here with the frame already focused,
+                // and a redundant focus request would re-run the whole focus
+                // machinery on every engine focus event.
+                if has_focus && ctx.focused() != Some(self_id) {
+                    ctx.request_focus(self_id);
+                }
+            }
         }
     }
 }
@@ -614,6 +791,8 @@ impl Widget for WebView {
             ctx,
         );
         self.root_child_id = Some(body);
+
+        self.self_id.set(Some(self_id));
 
         // --- Keyboard: put the frame in the Tab cycle, then let Enter in ---
         //
@@ -679,6 +858,63 @@ impl Widget for WebView {
             EventResponse::Ignored
         });
 
+        // --- Who owns the pointer over the page ---
+        //
+        // In `Native` mode the engine does, and the two declarations below say
+        // so to the framework: no default touch behaviour may form on the hit
+        // path (`TouchAction::NONE`), and the painted rectangle is the exact
+        // contract in both directions (`no_hit_slop`). The handler closes the
+        // third gap — a pointer Teksilo *does* see over the page, which is a
+        // pointer it will stop seeing samples for the moment the engine takes
+        // it. Leaving that interaction alive strands whatever it belonged to:
+        // an arbitration waiting for movement that never arrives, a press
+        // record waiting for an Up the OS will deliver to the page instead.
+        //
+        // In `Transparent` mode none of this applies: Teksilo owns the region,
+        // so the node widens and bubbles like any other widget and the engine
+        // is asked to keep its hands off.
+        //
+        // One honest note on `Handled` below: it is the correct statement that
+        // the page consumed the event, but it is **not** what keeps an ancestor
+        // out of the press — the revocation is. An ancestor's own
+        // `on_pointer_event` fires in the *preview* pass, before the target's,
+        // and is unreachable from here; its recognizers are denied by the
+        // cancel. Measured: returning `Ignored` instead leaves every test in
+        // `tests/input_and_clip.rs` green.
+        if self.input.is_native() {
+            use teksilo_core::event::EventResponse;
+            use teksilo_core::pointer::CancelReason;
+            use teksilo_core::pointer::touch_action::TouchAction;
+
+            handlers = handlers
+                .touch_action(TouchAction::NONE)
+                .no_hit_slop()
+                .on_pointer_event(move |event, ctx| {
+                    use teksilo_core::event::WidgetEvent;
+                    match event {
+                        WidgetEvent::PointerDown { .. } | WidgetEvent::PointerUp { .. } => {
+                            // `Deactivated` is the taxonomy's explicit
+                            // catch-all, and it is what this is: the pointer
+                            // was not revoked by the platform, by a peer or by
+                            // a modal — an embedded native surface simply owns
+                            // it from here on. See `docs/web-view.md`.
+                            ctx.cancel_pointer_sequence(CancelReason::Deactivated);
+                            EventResponse::Handled
+                        }
+                        WidgetEvent::PointerMove { .. } => {
+                            if ctx.press_is_inside() {
+                                ctx.cancel_pointer_sequence(CancelReason::Deactivated);
+                            }
+                            EventResponse::Handled
+                        }
+                        // Hover transitions are left to bubble: a hover-owner
+                        // change is how ancestors keep their `hover_within`
+                        // chains honest, and swallowing one buys nothing.
+                        _ => EventResponse::Ignored,
+                    }
+                });
+        }
+
         ctx.apply_self_handlers(handlers);
 
         // Capture the window id now — the post-mount EventContext has no
@@ -692,10 +928,13 @@ impl Widget for WebView {
         // no-ops until the engine handle exists (opened post-mount below).
         let vis = ctx.activation_signal(self_id);
         let effect_handle = self.handle.clone();
+        let effect_visibility = self.visibility.clone();
+        let effect_applied = self.visible_applied.clone();
         ctx.effect(&vis, move |active| {
-            if let Some(h) = effect_handle.borrow().as_ref() {
-                h.set_visible(*active);
-            }
+            let mut state = effect_visibility.get();
+            state.active = *active;
+            effect_visibility.set(state);
+            apply_visibility(&effect_handle, &effect_visibility, &effect_applied);
         });
 
         // --- Inbound navigation: external `url_signal.set()` → load_url ---
@@ -736,7 +975,10 @@ impl Widget for WebView {
             let scale_slot = self.scale.clone();
             let registry_slot = self.registry.clone();
             let activation = vis;
-            let on_event = self.make_event_callback();
+            let on_event = self.make_event_callback(self_id);
+            let input = self.input;
+            let visibility = self.visibility.clone();
+            let visible_applied = self.visible_applied.clone();
 
             ctx.run_after_mount(move |ectx| {
                 // Guard against a double-open if a rebuild ever re-queues.
@@ -759,16 +1001,22 @@ impl Widget for WebView {
                 if let Some(b) = bounds_slot.get() {
                     handle.set_bounds(b, scale_slot.get());
                 }
-                // The engine subview opens visible by default, so only act on
-                // the parked case: a view mounted while its tab is dormant must
-                // be hidden at birth (no visible-then-hidden flash). Active
-                // opens need no redundant set_visible(true).
-                if !activation.get() {
-                    handle.set_visible(false);
+                if input == WebViewInput::Transparent {
+                    handle.set_input_passthrough(true);
                 }
 
                 *handle_slot.borrow_mut() = Some(handle);
                 *registry_slot.borrow_mut() = Some(registry);
+                // The engine subview opens visible, so only a hidden target is
+                // issued: a view mounted while its tab is parked, or already
+                // scrolled out of its viewport, must be hidden at birth rather
+                // than flashing once. `visible_applied` starts `true` for
+                // exactly that reason, so an ordinary active open issues
+                // nothing at all.
+                let mut state = visibility.get();
+                state.active = activation.get();
+                visibility.set(state);
+                apply_visibility(&handle_slot, &visibility, &visible_applied);
             });
         }
 
@@ -804,10 +1052,64 @@ impl Widget for WebView {
         if scale_changed {
             self.scale.set(scale);
         }
-        if self.last_bounds.get() != Some(bounds) || scale_changed {
-            self.last_bounds.set(Some(bounds));
-            self.with_handle(|h| h.set_bounds(bounds, scale));
+
+        // The rectangle the engine may occupy is not this widget's bounds — it
+        // is what survives every clipping ancestor. A subview is parented to
+        // the top-level window, so nothing clips it for us: a `WebView` inside
+        // a scrolled `ScrollArea` would otherwise keep the page painted over
+        // whatever sits outside the viewport, at full size, for as long as it
+        // stayed mounted.
+        //
+        // Mirroring the *intersection* is the only geometric channel there is
+        // (`set_bounds` positions and sizes; no engine here exposes a clip
+        // region), so a partially-clipped page is laid out to the visible strip
+        // rather than cropped to it, and one clipped away entirely is hidden.
+        let visible = self.visible_rect(bounds, ctx);
+        let mut state = self.visibility.get();
+        state.in_view = visible.is_some();
+        self.visibility.set(state);
+
+        if let Some(rect) = visible
+            && (self.last_bounds.get() != Some(rect) || scale_changed)
+        {
+            self.last_bounds.set(Some(rect));
+            self.with_handle(|h| h.set_bounds(rect, scale));
         }
+        apply_visibility(&self.handle, &self.visibility, &self.visible_applied);
+    }
+
+    fn wants_after_paint(&self) -> bool {
+        true
+    }
+
+    fn after_paint(&self, view: &WidgetTreeView<'_>, _ctx: &PaintContext) {
+        // An interactive overlay — a menu, a popover, a modal dialog — renders
+        // in the wgpu pass, i.e. *under* the engine subview, and the OS routes
+        // a press over that region to the engine, not to the overlay. Standing
+        // the subview down while one covers the page is what makes such an
+        // overlay both visible and operable; nothing else in the toolkit can
+        // reach over a native child.
+        //
+        // This is the one thing that cannot be decided in `place_children`:
+        // overlays are positioned *after* the main tree is laid out, so a
+        // layout pass reads the bounds an overlay had before it opened, and
+        // nothing marks the tree dirty again once they are known. The paint
+        // walk runs after both and is handed the frame's own rects.
+        let Some(id) = self.self_id.get() else {
+            return;
+        };
+        let bounds = view.bounds(id);
+        let covered = view
+            .overlay_rects()
+            .iter()
+            .any(|r| intersect(*r, bounds).is_some());
+        let mut state = self.visibility.get();
+        if state.uncovered == !covered {
+            return;
+        }
+        state.uncovered = !covered;
+        self.visibility.set(state);
+        apply_visibility(&self.handle, &self.visibility, &self.visible_applied);
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -862,5 +1164,44 @@ impl Widget for EmptyOverlayContent {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_hidden();
+    }
+}
+
+/// The overlapping part of two rectangles, or `None` when they do not overlap.
+///
+/// Zero-area contact counts as no overlap: a page scrolled exactly to its
+/// viewport's edge is not visible, and an overlay whose edge merely touches the
+/// page's is not standing over it.
+fn intersect(a: Rect, b: Rect) -> Option<Rect> {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    let right = a.right().min(b.right());
+    let bottom = a.bottom().min(b.bottom());
+    if right > x && bottom > y {
+        Some(Rect::new(x, y, right - x, bottom - y))
+    } else {
+        None
+    }
+}
+
+/// Resolve the three reasons a subview may be hidden into one `set_visible`,
+/// and issue it only when the answer changed.
+///
+/// A no-op before the engine opens: the post-mount open path applies the
+/// resolved value once the handle exists, so a view whose tab was already
+/// parked (or whose viewport had already scrolled past it) opens hidden instead
+/// of flashing.
+fn apply_visibility(
+    handle: &SharedHandle,
+    visibility: &Rc<Cell<EngineVisibility>>,
+    applied: &Rc<Cell<bool>>,
+) {
+    let want = visibility.get().resolved();
+    if applied.get() == want {
+        return;
+    }
+    if let Some(h) = handle.borrow().as_ref() {
+        h.set_visible(want);
+        applied.set(want);
     }
 }

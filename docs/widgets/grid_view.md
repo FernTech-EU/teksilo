@@ -29,6 +29,51 @@ GridView::new(model, |tc| {
 .selection(selection_model)
 ```
 
+## Pan to scroll
+
+The view installs `common::scrollable::ScrollableBehavior`,
+which gives it the shared wheel arithmetic, a finger's pan and the
+`PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+release coasts, and a pan it cannot absorb hands the **whole** event to the
+container outside — never a residual. Vertical only, despite the grid: this
+view owns no horizontal offset, so a horizontal pan is declined and chains
+outward. A pan that starts on a tile scrolls rather than activating it.
+
+## The rubber band, and why it is not on this node
+
+In `teksilo_data::SelectionMode::Multi` a drag on the empty background
+sweeps a selection rectangle. That drag deliberately does **not** live on
+this view's own node, which is the one carrying the `PanClaim`: the node that
+captures a press has its gesture arena driven by the capture dispatch, which
+runs *before* the arbitration advances, so a drag there latches at
+`drag_slop` and decides the sequence before a claim can win at `pan_slop`.
+While it did, a `Multi`-selection grid did not scroll under a finger from
+anywhere at all, and a finger on the background swept a band immediately
+rather than after a hold — a press on a tile got neither, since the marquee
+declines such a press only after winning the arbitration for it.
+
+So the body pane carries a no-op tap that gives it an arena of its own (the
+press is captured *inside* the claimant, not by it) and the marquee's drag
+hangs on a `DragSurface` that strictly encloses the pane. That is the one
+shape the tree arms `teksilo_tokens::DragActivation` for, which is what
+makes the marquee wait for a long press under a finger and latch at 5 dp
+under a mouse.
+
+Every **tile** carries that same no-op tap as well, for a reason with nothing
+to do with dragging. With the pane holding one, a tile without an arena of
+its own leaves the *pane* as the press captor — and a release is dispatched
+to the captor and then bubbled target→root, which never reaches a tile
+beneath it. A plain selectable grid lost both its finger tap and, under a
+mouse, the release that collapses a multi-selection that way.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![GridView at Touch density](img/grid_view-touch.png)
+
 ## Builder methods at a glance
 
 `from_source`, `enabled`, `sizing`, `tile_size`, `column_count`, `variable_row_heights`, `item_height`, `waterfall`, `column_spacing`, `row_spacing`, `spacing`, `content_inset`, `selection`, `on_selection_changed`, `marquee_selection`, `wrap_navigation`, `tab_traversal`, `show_scrollbar`, `overscroll_behavior`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_bar_style`, `scroll_y_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `ensure_index_visible`, `scroll_to_index`, `sections`, `section_header_delegate`, `section_header_height`, `pinned_section_headers`, `a11y_label`, `style`, `empty_view`, `loading_view`, `is_loading`, `reorderable`, `exportable`, `export_external`, `on_rows_transferred_out`, `accept_foreign_rows`, `on_rows_received`, `on_item_drop`, `on_tile_activate`, `activate_on`, `tile_context_menu`, `type_ahead_label`, `tile_a11y_label`, `type_ahead_timeout`

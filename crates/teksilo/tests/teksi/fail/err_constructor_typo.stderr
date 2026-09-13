@@ -1,5 +1,5 @@
 error[E0433]: cannot find type `Buton` in this scope
-  --> tests/teksu/fail/err_constructor_typo.rs:12:19
+  --> tests/teksi/fail/err_constructor_typo.rs:12:20
    |
 12 |     let _ = teksu!(Buton("oops"));
-   |                   ^^^^^ use of undeclared type `Buton`
+   |                    ^^^^^ use of undeclared type `Buton`

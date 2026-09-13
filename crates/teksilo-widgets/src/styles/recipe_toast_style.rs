@@ -18,9 +18,10 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::styles::{ToastStyle, ToastStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, VAlignment};
+use teksilo_tokens::{CornerRadius, InputTokens, VAlignment};
 
 use crate::primitives::{Expand, HStack, Padding, RectWidget, ZStack};
+use teksilo_core::styles::density::spacing;
 
 /// Outer horizontal padding inside the toast surface.
 pub const TOAST_PADDING_HORIZONTAL: f32 = 14.0;
@@ -65,17 +66,28 @@ pub struct ToastRecipe {
     pub body_actions_gap: f32,
 }
 
-impl Default for ToastRecipe {
-    fn default() -> Self {
+impl ToastRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            padding_horizontal: TOAST_PADDING_HORIZONTAL,
-            padding_vertical: TOAST_PADDING_VERTICAL,
+            padding_horizontal: spacing(TOAST_PADDING_HORIZONTAL, tokens),
+            padding_vertical: spacing(TOAST_PADDING_VERTICAL, tokens),
             corner_radius: TOAST_CORNER_RADIUS,
             glyph_size: TOAST_GLYPH_SIZE,
-            content_gap: TOAST_CONTENT_GAP,
-            title_body_gap: TOAST_TITLE_BODY_GAP,
-            body_actions_gap: TOAST_BODY_ACTIONS_GAP,
+            content_gap: spacing(TOAST_CONTENT_GAP, tokens),
+            title_body_gap: spacing(TOAST_TITLE_BODY_GAP, tokens),
+            body_actions_gap: spacing(TOAST_BODY_ACTIONS_GAP, tokens),
         }
+    }
+}
+
+impl Default for ToastRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -92,6 +104,18 @@ pub struct RecipeToastStyle {
 impl RecipeToastStyle {
     pub fn new(recipe: ToastRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeToastStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: ToastRecipe::for_tokens(tokens),
+        }
     }
 }
 

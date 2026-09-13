@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "touch-playground"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+teksilo = { workspace = true, features = ["automation"] }
+
+[dev-dependencies]
+# The scenario tests drive the playground the way an agent would: real
+# `AutomationOp`s through `teksilo_automation::execute`, rather than the tree's
+# own touch helpers. What they assert is the outcome string each scenario
+# published, so a scenario that stops reporting fails here rather than in a
+# hardware session.
+teksilo-automation = { workspace = true }
+serde_json = { workspace = true }

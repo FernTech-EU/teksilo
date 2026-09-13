@@ -31,7 +31,7 @@ use teksilo_core::widget::{
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{ChartModel, SeriesId};
-use teksilo_tokens::{TextRole, TextStyleRole};
+use teksilo_tokens::{InputTokens, TargetDensity, TextRole, TextStyleRole};
 
 use crate::palette::ChartPalette;
 use crate::pattern::{self, LegendSwatch, PatternPolicy};
@@ -145,7 +145,9 @@ impl<T: Clone + 'static> Widget for LegendRow<T> {
             .unwrap_or_default();
         let label_w = measure_text_width_via(ctx.text_backend, &name, &label_style);
         let w = cs::LEGEND_SWATCH_SIZE + 4.0 + label_w;
-        let h = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
+        // A `LegendRow` only exists inside an interactive legend, so it
+        // always asks for the interactive extent.
+        let h = legend_row_extent(&label_style, true, &ctx.theme.input);
         Size::new(proposal.width.unwrap_or(w), proposal.height.unwrap_or(h)).into()
     }
 
@@ -181,8 +183,12 @@ impl<T: Clone + 'static> Widget for LegendRow<T> {
         };
         let label_style = TextStyleRole::Tiny.resolve(&theme.typography);
         let label_color = TextRole::Primary.resolve(&theme.colors);
-        let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
-        let center_y = bounds.y + line_height * 0.5;
+        let line_height = legend_painted_line_height(&label_style);
+        // Centred in the room the row was GIVEN, not in the room its
+        // content needs: at a density that raises the row to a 44 dp
+        // target, content centred on the painted line height would hug the
+        // top of a target twice its size.
+        let center_y = bounds.y + bounds.height.max(line_height) * 0.5;
 
         let swatch = Rect::new(
             bounds.x,
@@ -228,6 +234,67 @@ impl<T: Clone + 'static> Widget for LegendRow<T> {
         }
         builder.add_action(Action::Focus);
     }
+}
+
+/// The extent one legend row occupies along the axis its rows stack on —
+/// the height of a horizontal legend's strip, the pitch of a vertical
+/// one's rows.
+///
+/// A row's **painted** content is a 10 dp swatch beside an 11 pt label, so
+/// it draws about 13 dp tall, and it draws that at every density: this
+/// function never changes what a row looks like, only how much room it is
+/// given.
+///
+/// An **interactive** row is a real target — `Role::CheckBox`, focusable,
+/// tap-toggles its series — and 13 dp is under the 24 dp WCAG 2.2 SC 2.5.8
+/// floor. Neither of the framework's two hit-widening mechanisms can lift
+/// it where it sits:
+///
+/// * `Widget::hit_outset` never escapes its parent's rectangle, and the
+///   parent here is a legend band reserved at exactly one row's extent, so
+///   vertically there is no space for an outset to claim. In a vertical
+///   legend the rows are contiguous besides, so an outset could only take
+///   space from the row above or below it.
+/// * The miss-only slop pass is short-circuited before it runs: it yields
+///   only when the exact hit's bubble path carries no eligible handler or
+///   the candidate is strictly closer than the bubble owner, and a chart
+///   with a readout — the default — installs a pointer handler, so a press
+///   anywhere inside it already has an owner at distance zero. (A chart
+///   built with `hover_tooltip(false)` and no selection installs none, so
+///   the pass could serve its legend rows; a legend whose conformance
+///   depended on the enclosing chart being inert would be a worse contract
+///   than one that gives the row room.)
+///
+/// So the only mechanism left is giving the row and the band it sits in
+/// more room together, and that is a **layout** change. At
+/// [`TargetDensity::Compact`] the programme's invariant is that layout is
+/// byte-identical, so Compact keeps the 13 dp row and its shortfall is
+/// recorded in `docs/charts.md` rather than silently fixed; Comfortable
+/// and Touch raise the row to the density's `target_size` (32 / 44 dp).
+/// A non-interactive legend has no target at all and is never raised, at
+/// any density.
+///
+/// Three sites must agree on this number or the legend breaks visibly:
+/// [`ChartLegend::layout_response`] (what the legend asks for),
+/// [`ChartLegend::place_children`] (what each row is given), and
+/// [`legend_main_axis_size`] (what the embedding chart reserves). They all
+/// call here.
+pub(crate) fn legend_row_extent(
+    label_style: &teksilo_tokens::TextStyle,
+    interactive: bool,
+    tokens: &InputTokens,
+) -> f32 {
+    let painted = legend_painted_line_height(label_style);
+    if !interactive || tokens.density == TargetDensity::Compact {
+        painted
+    } else {
+        painted.max(tokens.target_size)
+    }
+}
+
+/// What a legend row paints, independent of the room it is given.
+pub(crate) fn legend_painted_line_height(label_style: &teksilo_tokens::TextStyle) -> f32 {
+    crate::style::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2)
 }
 
 /// Series swatch + label list. Bound to a [`ChartModel`] shared with the
@@ -380,7 +447,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         }
         let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
         let item_widths = self.item_widths(ctx.text_backend, &label_style);
-        let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
+        let line_height = legend_row_extent(&label_style, self.interactive, &ctx.theme.input);
 
         match self.orientation {
             LegendOrientation::Horizontal => {
@@ -416,7 +483,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
         use crate::style as cs;
         let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
         let item_widths = self.item_widths(ctx.text_backend, &label_style);
-        let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
+        let line_height = legend_row_extent(&label_style, self.interactive, &ctx.theme.input);
 
         match self.orientation {
             LegendOrientation::Horizontal => {
@@ -586,14 +653,21 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
 /// time, layout context at layout time) — `None` falls back to the same
 /// `chars * size * 0.7 + 4` heuristic used by `measure_text_width` so
 /// reservation matches what the painter will later request.
+///
+/// `interactive` and `tokens` are what [`legend_row_extent`] needs: an
+/// interactive legend's rows are targets and may be given more room than
+/// they paint, and the band has to be reserved at the same extent the rows
+/// will be placed at or they are clipped by their own container.
 pub(crate) fn legend_main_axis_size<T: Clone + 'static>(
     backend: Option<&std::rc::Rc<std::cell::RefCell<dyn teksilo_canvas::TextBackend>>>,
     model: &ChartModel<T>,
     label_style: &teksilo_tokens::TextStyle,
     orientation: LegendOrientation,
+    interactive: bool,
+    tokens: &InputTokens,
 ) -> f32 {
     use crate::style as cs;
-    let line_height = cs::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2);
+    let line_height = legend_row_extent(label_style, interactive, tokens);
     match orientation {
         LegendOrientation::Horizontal => line_height,
         LegendOrientation::Vertical => {
@@ -630,6 +704,113 @@ mod tests {
             ChartSeries::<String>::new("B"),
             ChartSeries::<String>::new("C"),
         ])
+    }
+
+    // ── Interactive rows as targets ───────────────────────────────────────
+    //
+    // An interactive row is a real target — `Role::CheckBox`, focusable,
+    // tap-toggles its series — and paints about 13 dp tall, under the 24 dp
+    // WCAG 2.2 SC 2.5.8 floor. See `legend_row_extent` for why neither of the
+    // framework's hit-widening mechanisms can reach it and why Compact keeps
+    // the shortfall.
+
+    fn row_height(interactive: bool, density: TargetDensity) -> f32 {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_input_density(density);
+        let id = tree.add(ChartLegend::new(three_series()).interactive(interactive));
+        // Unspecified, so the legend reports its own extent rather than
+        // filling a band a test invented for it.
+        tree.layout(SizeProposal::unspecified());
+        if interactive {
+            let row = tree.children(id)[0];
+            tree.bounds(row).height
+        } else {
+            tree.bounds(id).height
+        }
+    }
+
+    #[test]
+    fn a_compact_interactive_row_is_exactly_the_size_it_paints() {
+        let h = row_height(true, TargetDensity::Compact);
+        let painted = legend_painted_line_height(
+            &TextStyleRole::Tiny.resolve(&teksilo_core::presets::intui::light().typography),
+        );
+        assert!(
+            (h - painted).abs() < 0.01,
+            "Compact layout is byte-identical by invariant: {h} vs {painted}"
+        );
+        assert!(
+            h < 24.0,
+            "and that is a recorded 2.5.8 shortfall, not a passing target"
+        );
+    }
+
+    #[test]
+    fn an_interactive_row_reaches_the_target_floor_where_the_density_asks() {
+        for density in [TargetDensity::Comfortable, TargetDensity::Touch] {
+            let want = InputTokens::for_density(density).target_size;
+            let h = row_height(true, density);
+            assert!(
+                h >= want,
+                "{density:?}: an interactive legend row must reach {want} dp, got {h}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_interactive_row_never_grows_at_any_density() {
+        let painted = legend_painted_line_height(
+            &TextStyleRole::Tiny.resolve(&teksilo_core::presets::intui::light().typography),
+        );
+        for density in [
+            TargetDensity::Compact,
+            TargetDensity::Comfortable,
+            TargetDensity::Touch,
+        ] {
+            let h = row_height(false, density);
+            assert!(
+                (h - painted).abs() < 0.01,
+                "{density:?}: a legend with no targets has nothing to grow, got {h}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_legends_own_band_grows_with_the_rows_it_places() {
+        // Three sites have to agree or the rows are clipped by their own
+        // container: what the legend asks for, what it gives each row, and
+        // what an embedding chart reserves. This pins the first two.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_input_density(TargetDensity::Touch);
+        let id = tree.add(ChartLegend::new(three_series()).interactive(true));
+        tree.layout(SizeProposal::unspecified());
+        let band = tree.bounds(id).height;
+        let row = tree.bounds(tree.children(id)[0]).height;
+        assert!(
+            band >= row,
+            "a band shorter than its rows clips them: band {band}, row {row}"
+        );
+        assert!(row >= InputTokens::for_density(TargetDensity::Touch).target_size);
+    }
+
+    #[test]
+    fn a_vertical_interactive_legend_stacks_at_the_grown_pitch() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_input_density(TargetDensity::Touch);
+        let id = tree.add(
+            ChartLegend::new(three_series())
+                .orientation(LegendOrientation::Vertical)
+                .interactive(true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        let kids = tree.children(id);
+        let first = tree.bounds(kids[0]);
+        let second = tree.bounds(kids[1]);
+        assert!(
+            second.y - first.y >= InputTokens::for_density(TargetDensity::Touch).target_size,
+            "contiguous rows must not overlap once they are targets: \
+             {first:?} then {second:?}"
+        );
     }
 
     #[test]

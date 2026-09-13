@@ -23,10 +23,11 @@
 
 use std::rc::Rc;
 
-use teksilo_tokens::BorderRole;
+use teksilo_tokens::{BorderRole, InputTokens};
 
 use crate::build_context::BuildContext;
 use crate::signal::Signal;
+use crate::styles::density::spacing;
 use crate::widget_id::WidgetId;
 
 /// Sort direction for header cells.
@@ -95,6 +96,31 @@ pub trait TableStyle: 'static {
     /// Grid-line + frozen-column-shadow recipe — the table's own paint
     /// pass batches over the virtualized viewport using this data.
     fn grid(&self) -> TableGridRecipe;
+
+    /// Horizontal padding inside a cell, in logical pixels — the same gutter
+    /// on the leading and trailing edge of every header and body cell.
+    ///
+    /// A metrics accessor for the same reason [`grid`](Self::grid) is one: the
+    /// header cell composes its own `Padding` and the table computes its
+    /// filter-affordance zone from this number, and neither can reach a
+    /// recipe field through an `Rc<dyn TableStyle>`. Without it a preset's
+    /// gutter is written and never rendered.
+    ///
+    /// **Defaulted**, so a `TableStyle` implemented outside this workspace
+    /// keeps compiling and keeps the ladder it had. The default is
+    /// `teksilo_widgets::styles::recipe_table_style::CELL_PADDING_HORIZONTAL`
+    /// put through [`spacing`] — restated as a literal because `teksilo-core`
+    /// cannot name a `teksilo-widgets` constant, and pinned equal to it by
+    /// `the_table_trait_defaults_restate_the_module_constants`.
+    fn cell_padding_horizontal(&self, tokens: &InputTokens) -> f32 {
+        spacing(8.0, tokens)
+    }
+
+    /// Vertical padding inside a cell, in logical pixels. Defaulted on the
+    /// same terms as [`cell_padding_horizontal`](Self::cell_padding_horizontal).
+    fn cell_padding_vertical(&self, tokens: &InputTokens) -> f32 {
+        spacing(4.0, tokens)
+    }
 }
 
 pub type SharedTableStyle = Rc<dyn TableStyle>;

@@ -27,11 +27,19 @@ default = ["fonts-arabic", "fonts-hebrew"]
 # typesetter in `register_default_font` so text-typeset's automatic
 # `.notdef` fallback loop can cover mixed-script text without any
 # locale awareness.
+#
+# A face is embedded only if its file is actually in `fonts/`. `build.rs`
+# probes for it and emits the `font_*` cfg the `include_bytes!` is gated on,
+# so enabling a feature whose file is absent is a build **warning** naming
+# the path to drop it at, not a build error. It used to be an error, which
+# made every feature below permanently unbuildable — and `--all-features`
+# with them, on every revision of the workspace.
 fonts-arabic = []
 fonts-hebrew = []
-# Defined but the font files are not yet in the fonts/ directory.
-# Enable one of these features and the build will fail loudly with a
-# missing-file error, making it obvious to drop the file in place.
+# The files for these five are not in the fonts/ directory. Each feature is
+# therefore inert and says so at build time; drop the face in and it starts
+# working with no code change. Until then, an app needing one of these
+# scripts registers its own face with `register_font(bytes)`.
 fonts-thai = []
 fonts-devanagari = []
 fonts-cjk-sc = []

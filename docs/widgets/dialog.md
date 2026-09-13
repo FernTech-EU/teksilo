@@ -44,6 +44,26 @@ let _d = Dialog::new(lit!("Open settings"))
     });
 ```
 
+## Touch and pen
+
+The trigger is a `Button` (or, with `.trigger(..)`, the caller's widget wrapped
+in the same activation handlers), and both actuate on the release. The footer's
+buttons are buttons.
+
+The scrim is the one full-viewport node that has to receive exactly the presses
+that land on it, so it says `no_hit_slop` outright rather than relying on the
+slop pass's size formula to exclude it by arithmetic — see
+`scrim_hit_targeting_tests` below. Its dismissal is a tap, so it too waits for
+the release.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Dialog at Touch density](img/dialog-touch.png)
+
 ## Builder methods at a glance
 
 `content`, `variant`, `enabled`, `presentation`, `close_behavior`, `trigger`, `trigger_id`

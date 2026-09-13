@@ -306,6 +306,6 @@ printing happens in the library crates.
   language for the DSL the formatter operates on.
 - [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — design spec
   with worked translations of widget-catalog examples.
-- [crates/teksilo/tests/teksu/pass/](../crates/teksilo/tests/teksu/pass/)
+- [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
   — trybuild fixtures that double as canonical examples of well-
   formatted `teksu!` blocks.

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-target-conformance"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "The named fixture list the SC 2.5.8 target-conformance gates measure, and the gate for every shipped preset."
+# Not published: it exists to fail this workspace's build, and a published
+# copy would put a test scaffold on docs.rs as library API. It also
+# dev-depends on all three preset crates, which a consumer of the fixture
+# list has no reason to pull in.
+publish = false
+
+[dependencies]
+teksilo-widgets = { workspace = true }
+teksilo-core = { workspace = true }
+teksilo-canvas = { workspace = true }
+teksilo-data = { workspace = true }
+teksilo-i18n = { workspace = true }
+teksilo-tokens = { workspace = true }
+jiff = { workspace = true, features = ["serde"] }
+# The two editor fixtures build a `TextDocument`, which teksilo-widgets
+# re-exports from here. `default-features = false` for the same reason
+# teksilo-widgets sets it: font selection is an app-level decision, and a
+# fixture list has no business embedding fallback bundles.
+teksilo-text = { path = "../teksilo-text", version = "0.9.4", default-features = false }
+
+[dev-dependencies]
+teksilo-theme-macos = { workspace = true }
+teksilo-theme-fluent = { workspace = true }
+teksilo-theme-material3 = { workspace = true }

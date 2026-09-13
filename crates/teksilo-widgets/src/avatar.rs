@@ -35,6 +35,15 @@
 //! border / presence directly via `Canvas`. Hash-derived background
 //! tints come from `theme.colors.chart_palette` (Okabe-Ito), so they
 //! track the active theme automatically.
+//!
+//! ## Touch and pen
+//!
+//! A tappable avatar activates on the release, like every other tap target.
+//! The four shipped sizes (24 / 32 / 48 / 64 dp) already clear the 24 dp target
+//! floor, but [`AvatarSize::Custom`] need not, so a clickable avatar declares a
+//! `Widget::hit_outset` that lifts an undersized one to the density's target —
+//! zero for the shipped sizes, and zero for a decorative avatar, which takes no
+//! press and must not punch a hole in what it sits on.
 
 use std::rc::Rc;
 
@@ -796,7 +805,11 @@ impl Widget for Avatar {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.avatar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeAvatarStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeAvatarStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let root = style.make_body(
             &AvatarStyleConfig {
                 shape: self.shape,
@@ -851,6 +864,28 @@ impl Widget for Avatar {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    /// A tappable avatar is a target like any other, and the four shipped sizes
+    /// (24 / 32 / 48 / 64 dp) all clear the floor — but
+    /// [`AvatarSize::Custom`] does not have to, and a 20 dp avatar in a dense
+    /// comment list is the case this covers. The outset returns `EdgeInsets::ZERO`
+    /// for any size already at or above the density's target, so the shipped
+    /// sizes pay nothing.
+    ///
+    /// Zero for a decorative avatar: without an `on_tap` there is nothing to
+    /// widen the target of, and widening it anyway would punch a hole in
+    /// whatever the avatar sits on.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        if self.action.is_none() {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        }
+        let side = avatar_pixel_size(self.size);
+        crate::button::target_outset(Size::new(side, side), kind, tokens)
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -1950,6 +1985,102 @@ mod tests {
         assert_ne!(
             bg_jd, bg_jd2,
             "different bound names must hash to different palette buckets"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Touch targets
+    // -----------------------------------------------------------------
+
+    /// A 20 dp avatar beside a name, both inside a comment-list row that takes
+    /// taps of its own — the shape the census names as the reason the miss-only
+    /// slop pass cannot serve the avatar.
+    ///
+    /// The row is what makes this test discriminate. The slop pass only wins
+    /// when the exact hit's bubble path carries no eligible handler, or when
+    /// its candidate is strictly closer than that path's owner; the row owns
+    /// the press at distance zero, and a near-miss does not beat zero. So the
+    /// only mechanism left that can carry the press to the avatar is its own
+    /// `hit_outset`, and deleting it turns this red.
+    fn avatar_in_a_tappable_row(
+        hits: std::rc::Rc<std::cell::Cell<u32>>,
+        row_taps: std::rc::Rc<std::cell::Cell<u32>>,
+    ) -> (WidgetTree, teksilo_core::widget_id::WidgetId) {
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let av = tree.add(
+            Avatar::with_initials(lit!("JD"))
+                .size(AvatarSize::Custom(20.0))
+                .on_activate_fn(move |_| hits.set(hits.get() + 1)),
+        );
+        let name = tree.add(crate::primitives::TextWidget::new(lit!("Jane Doe")));
+        let _row = tree.add(
+            crate::primitives::HStack::new()
+                .add_child(av)
+                .add_child(name)
+                .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        (tree, av)
+    }
+
+    /// The four shipped sizes all clear the floor, but `AvatarSize::Custom` need
+    /// not: a 20 dp avatar in a dense comment list earns the difference from the
+    /// pointer side rather than from the layout.
+    #[test]
+    fn a_finger_just_outside_a_small_custom_avatar_still_activates_it() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let hits = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let (mut tree, av) = avatar_in_a_tappable_row(hits.clone(), row_taps.clone());
+        let b = tree.bounds(av);
+        assert!(
+            b.width < 24.0,
+            "the avatar is meant to be under the floor: {b:?}"
+        );
+        // 1.5 dp past the disc, inside the 24 dp target the outset earns it.
+        let at = teksilo_canvas::Point::new(b.right() + 1.5, b.center().y);
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+        assert_eq!(hits.get(), 1, "the avatar's outset did not take the press");
+        assert_eq!(row_taps.get(), 0, "and the row must not have taken it too");
+    }
+
+    /// A mouse is exact: the same press lands on the row, exactly as it did
+    /// before the touch programme.
+    #[test]
+    fn a_mouse_just_outside_a_small_custom_avatar_lands_on_the_row() {
+        let hits = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let row_taps = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let (mut tree, av) = avatar_in_a_tappable_row(hits.clone(), row_taps.clone());
+        let b = tree.bounds(av);
+        let at = teksilo_canvas::Point::new(b.right() + 1.5, b.center().y);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(
+            hits.get(),
+            0,
+            "a mouse must not be given the avatar's outset"
+        );
+        assert_eq!(row_taps.get(), 1);
+    }
+
+    /// A decorative avatar takes no press, so it claims no widened target —
+    /// widening a node that then ignores the press is a hole punched in
+    /// whatever it sits on.
+    #[test]
+    fn a_decorative_avatar_declares_no_outset() {
+        use teksilo_core::widget::Widget;
+        use teksilo_tokens::{InputTokens, PointerKind};
+
+        let plain = Avatar::with_initials(lit!("JD")).size(AvatarSize::Custom(20.0));
+        assert_eq!(
+            plain.hit_outset(PointerKind::Touch, &InputTokens::default()),
+            teksilo_canvas::EdgeInsets::ZERO,
         );
     }
 }

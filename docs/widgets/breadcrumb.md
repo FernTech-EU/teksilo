@@ -35,6 +35,23 @@ The current crumb sets `aria-current="page"`. The decorative separator
 chevrons are hidden from the AT tree. The `…` overflow button declares
 `HasPopup::Menu`.
 
+## Touch and pen
+
+A crumb navigates on the release. It is as wide as its label, so a short one
+("A / B / C", a drive letter) can land under the 24 dp target floor; it
+declares a `Widget::hit_outset` that makes the shortfall up between the
+pointer and the arena, so the trail's own geometry never moves. The current
+crumb and a trail with no navigation action declare none — a widened node
+that then refuses the press is a hole in whatever is behind it.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Breadcrumb at Touch density](img/breadcrumb-touch.png)
+
 ## Builder methods at a glance
 
 `label`, `item`, `item_id`, `trailing_slot`, `trailing_slot_id`, `is_overflowing`
@@ -59,12 +76,30 @@ Horizontal inner padding of each segment pill in logical pixels.
 pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
 ```
 
+## `pub fn breadcrumb_item_padding_horizontal(...)`
+
+`BREADCRUMB_ITEM_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn breadcrumb_item_padding_horizontal(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const BREADCRUMB_SEPARATOR_GAP`
 
 Gap reserved for the chevron separator between adjacent segments.
 
 ```rust
 pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;
+```
+
+## `pub fn breadcrumb_separator_gap(...)`
+
+`BREADCRUMB_SEPARATOR_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn breadcrumb_separator_gap(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const BREADCRUMB_CORNER_RADIUS`

@@ -15,12 +15,13 @@
 use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::styles::density::spacing;
 use teksilo_core::styles::{TooltipStyle, TooltipStyleConfig};
 use teksilo_core::widget::{
     LayoutContext, LayoutResponse, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, InputTokens};
 
 // IntUI design tokens for plain Tooltip + CompositeTooltip. The recipe
 // and tooltip widget own these constants.
@@ -54,15 +55,26 @@ pub struct TooltipRecipe {
     pub shadow_density: f32,
 }
 
-impl Default for TooltipRecipe {
-    fn default() -> Self {
+impl TooltipRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            padding_horizontal: TOOLTIP_PADDING_HORIZONTAL,
-            padding_vertical: TOOLTIP_PADDING_VERTICAL,
+            padding_horizontal: spacing(TOOLTIP_PADDING_HORIZONTAL, tokens),
+            padding_vertical: spacing(TOOLTIP_PADDING_VERTICAL, tokens),
             corner_radius: TOOLTIP_CORNER_RADIUS,
             max_width: TOOLTIP_MAX_WIDTH,
             shadow_density: TOOLTIP_SHADOW_DENSITY,
         }
+    }
+}
+
+impl Default for TooltipRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -76,6 +88,18 @@ pub struct RecipeTooltipStyle {
 impl RecipeTooltipStyle {
     pub fn new(recipe: TooltipRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeTooltipStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: TooltipRecipe::for_tokens(tokens),
+        }
     }
 }
 

@@ -30,9 +30,10 @@ use teksilo_core::styles::{
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, TargetRole};
 
 use crate::primitives::ZStack;
+use teksilo_core::styles::density::dp;
 
 // IntUI design tokens for ScrollBar. The recipe owns its own dimensions.
 pub const SCROLLBAR_THICKNESS_IDLE: f32 = 4.0;
@@ -89,18 +90,37 @@ fn resolve_thumb_color(
 pub struct ScrollBarRecipe {
     pub thickness_idle: f32,
     pub thickness_hover: f32,
+    /// The density-resolved floor a thumb may not be shorter than.
+    ///
+    /// The **widget** decides the number the painters actually use — it resolves
+    /// the same `dp(SCROLLBAR_MIN_THUMB_LENGTH, Target, ..)` unless the caller
+    /// named a floor of their own, and passes the answer down as
+    /// `ScrollBarStyleConfig::min_thumb_length`. This field is the same value,
+    /// kept here so a custom style building its own painters has it in hand
+    /// without reaching for the tokens again.
     pub min_thumb_length: f32,
     pub corner_radius: f32,
 }
 
-impl Default for ScrollBarRecipe {
-    fn default() -> Self {
+impl ScrollBarRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             thickness_idle: SCROLLBAR_THICKNESS_IDLE,
             thickness_hover: SCROLLBAR_THICKNESS_HOVER,
-            min_thumb_length: SCROLLBAR_MIN_THUMB_LENGTH,
+            min_thumb_length: dp(SCROLLBAR_MIN_THUMB_LENGTH, TargetRole::Target, tokens),
             corner_radius: SCROLLBAR_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for ScrollBarRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -114,6 +134,18 @@ pub struct RecipeScrollBarStyle {
 impl RecipeScrollBarStyle {
     pub fn new(recipe: ScrollBarRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeScrollBarStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: ScrollBarRecipe::for_tokens(tokens),
+        }
     }
 }
 

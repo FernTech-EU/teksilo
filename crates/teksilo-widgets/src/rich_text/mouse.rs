@@ -12,24 +12,53 @@
 //!    Returns `EventResponse::Ignored` for PointerDown so the
 //!    gesture arena's `DoubleTapRecognizer` / `TripleTapRecognizer`
 //!    also see the event.
-//!  * [`handle_scroll`] — mouse wheel / trackpad translation into
-//!    `scroll_x` / `scroll_y` signal updates.
 //!  * [`handle_double_tap`] / [`handle_triple_tap`] — word and
 //!    paragraph selection on successive clicks. The independent
 //!    cooperative recognizers in `teksilo-core::gesture` guarantee that
 //!    both fire in an escalating click sequence.
+//!  * [`handle_long_press`] — a hold selects the word under a finger and
+//!    raises the touch affordances.
+//!
+//! # Two devices, two commit points
+//!
+//! A **precise** pointer commits on the press, exactly as it always has: a
+//! click is a click, and a press that never becomes anything else is still one.
+//!
+//! A **direct** pointer — a finger, a pen — defers the whole decision to the
+//! release, because the same contact is the opening sample of a *pan* and a
+//! panning finger must leave the caret and the selection exactly as it found
+//! them. No release-time predicate can rescue a caret already written on
+//! `PointerDown`, so the write itself moves to the release, gated on
+//! [`release_completes_the_press`](crate::data_views::release_completes_the_press)
+//! — the same rule, and the same predicate, that the five data views adopted for
+//! their row selection and the single-line stack for its caret.
+//!
+//! Three press-time commitments therefore have no direct-pointer form, and each
+//! is a deliberate limitation rather than an oversight:
+//!
+//! * **Drag-select.** A finger's drag pans; the range is chosen with the
+//!   selection handles the hold raises.
+//! * **Picking up selected text.** Dragging a passage out of the editor stays a
+//!   precise-pointer gesture.
+//! * **Resizing an inline picture.** The corner grip latches on a press, and a
+//!   press is what the pan needs. Its hit rectangle is nonetheless widened for
+//!   *every* pointer kind — see [`grip_reach`] — because the target has to clear
+//!   the 24 dp floor for the pointer that can reach it.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect};
-use teksilo_core::event::{EventResponse, PointerButton, ScrollDelta, WidgetEvent};
+use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::widget::{CursorIcon, EventContext};
 use teksilo_text::text_document::{MoveMode, SelectionType};
+
+use teksilo_tokens::{InputTokens, PointerKind, TargetRole};
 
 use super::hit_test;
 use super::state::{DragState, SharedState};
 use super::sync_cursor_signals;
+use super::touch_mount::{EditorTouch, ToolbarIntent};
 
 /// Convert a **wrapper-node-local** pointer position (as delivered by the
 /// framework dispatch) into the **engine/body-local** space that
@@ -60,6 +89,40 @@ const RESIZE_MIN_EDGE: f32 = 24.0;
 /// the cost of undershooting is a feature that feels broken.
 const RESIZE_HANDLE_SLOP: f32 = 5.0;
 
+/// Half-extent of a grip's hit square at the live density.
+///
+/// Two mechanisms, layered, and the order is what makes the mouse's behaviour
+/// survive: [`handle_at`]'s own reach — the painted square plus
+/// [`RESIZE_HANDLE_SLOP`] — is tried first and is unchanged, and this is the
+/// **miss-only** top-up consulted after it. That is the same division of labour
+/// `Widget::hit_outset` and the hit-test's slop pass keep: a grip that already
+/// answers keeps answering, and a near miss is re-attributed rather than a
+/// neighbour being beaten.
+///
+/// Widened for **every** pointer kind, not only a direct one: WCAG 2.2 SC 2.5.8
+/// asks for a 24 dp target whatever the pointer is, and a 9 dp painted square is
+/// a long way under it. Nothing sits behind the grip but the picture it belongs
+/// to and the editor's own node, so the widened band punches no hole in a
+/// neighbour — which is the reason a widened *node* usually has to be gated on
+/// the press it will accept.
+///
+/// The top-up is clamped to a quarter of the picture's shorter side, so the four
+/// grips can never grow into each other or over the middle of the picture: on a
+/// thumbnail, `Touch`'s 44 dp projection would otherwise leave nothing to click
+/// but grips. The clamp never lowers the reach below [`handle_at`]'s own.
+///
+/// It takes **no pointer kind**, deliberately. A widening that applied to a
+/// finger alone would be a parameter nothing in a mounted editor could vary —
+/// the grip's press arm is precise-pointer-only — and a conformance floor that
+/// only one device gets is not a floor. The density is the whole input.
+fn grip_reach(tokens: &InputTokens, rect: [f32; 4]) -> f32 {
+    use teksilo_core::styles::density::dp;
+    let base = super::paint::RESIZE_HANDLE_SIZE / 2.0 + RESIZE_HANDLE_SLOP;
+    let projected = dp(super::paint::RESIZE_HANDLE_SIZE, TargetRole::Target, tokens) / 2.0;
+    let quarter = rect[2].min(rect[3]) / 4.0;
+    base.max(projected.min(quarter))
+}
+
 /// The corner grip under `local`, if the selected image has one there.
 ///
 /// Returns the image's name, its rect, its offset, and which corner was taken.
@@ -67,9 +130,41 @@ fn grabbed_handle(
     state: &SharedState,
     local: Point,
 ) -> Option<(String, [f32; 4], usize, (f32, f32))> {
-    let selected = state.borrow().selected_image.borrow().clone()?;
-    let corner = handle_at(selected.rect, local)?;
+    let (selected, tokens) = {
+        let st = state.borrow();
+        (st.selected_image.borrow().clone()?, st.input_tokens)
+    };
+    let corner = corner_at(selected.rect, local, &tokens)?;
     Some((selected.name, selected.rect, selected.offset, corner))
+}
+
+/// Which corner of `rect` a press at `local` takes, over both mechanisms.
+///
+/// [`handle_at`]'s own reach first — the painted square plus
+/// [`RESIZE_HANDLE_SLOP`], unchanged — and, only when that missed, the
+/// density-projected [`grip_reach`]. Miss-only, in that order, which is what
+/// keeps the aiming a precise pointer already had byte for byte while the target
+/// as a whole reaches the conformance floor.
+fn corner_at(rect: [f32; 4], local: Point, tokens: &InputTokens) -> Option<(f32, f32)> {
+    handle_at(rect, local).or_else(|| handle_near(rect, local, grip_reach(tokens, rect)))
+}
+
+/// The corner of `rect` whose centre is **nearest** `local`, within `reach`.
+///
+/// Nearest rather than first-declared, because a widened reach makes adjacent
+/// grips overlap on a small picture and sibling order is not an aiming rule —
+/// the same tie-break the hit test's slop pass uses between adjacent grips.
+fn handle_near(rect: [f32; 4], local: Point, reach: f32) -> Option<(f32, f32)> {
+    let [x, y, w, h] = rect;
+    super::paint::RESIZE_CORNERS
+        .into_iter()
+        .filter_map(|(fx, fy)| {
+            let (cx, cy) = (x + w * fx, y + h * fy);
+            let (dx, dy) = (local.x - cx, local.y - cy);
+            (dx.abs() <= reach && dy.abs() <= reach).then_some(((fx, fy), dx * dx + dy * dy))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(corner, _)| corner)
 }
 
 /// Which corner of `rect` a press at `local` grabs, if any.
@@ -120,9 +215,45 @@ fn proportional_resize(origin: [f32; 4], corner: (f32, f32), local: Point) -> [f
     [x, y, (w * scale).max(1.0), (h * scale).max(1.0)]
 }
 
+/// Whether a press on a link **follows** it rather than placing a caret in its
+/// text.
+///
+/// One rule, consulted by both pointer paths, because the two answers only
+/// differ in what they can ask for:
+///
+/// * **A direct pointer always follows.** There is no Ctrl to hold on a touch
+///   screen, so the precise pointer's split has no direct form — and a link a
+///   finger cannot follow by tapping it reads as broken. The way to reach a
+///   link's *text* with a finger is the hold, which selects the word under it.
+/// * **A precise pointer follows a link in a read-only surface** and needs
+///   Ctrl(⌘) in an editable one. The reason for the split is an *authoring* one:
+///   the writer who clicks their own link is far more often trying to edit its
+///   text than to leave the document, and intercepting every click left the text
+///   inside a link unreachable by pointer entirely. On a viewer that reason has
+///   no force — the text cannot be edited, and the caret the click places is
+///   `CaretPolicy::Hidden` — while a link a plain click ignores reads as broken.
+fn link_follows(kind: PointerKind, read_only: bool, command_held: bool) -> bool {
+    kind.is_direct() || read_only || command_held
+}
+
 /// How far the pointer must travel from a press inside the selection before it
 /// counts as dragging that text rather than as a click that happened to wobble.
-const TEXT_DRAG_THRESHOLD: f32 = 4.0;
+///
+/// The pointer's **own** `drag_slop` — 5 dp for a mouse, 2 dp for a pen, 18 dp
+/// for a finger — rather than one hardcoded distance for every device. It used
+/// to be a local `4.0`, which is a mouse figure invented here; `GestureProfile`
+/// carries the framework's, and the mouse's 5 dp is documented there as the
+/// constant Teksilo already used elsewhere. A finger needs far more: 4 dp of
+/// travel is inside the jitter of holding still.
+///
+/// The touch and pen answers are **not reachable from a mounted editor today**:
+/// `DragState::PendingTextDrag` is armed only on the precise-pointer press arm,
+/// because a direct pointer's press belongs to the pan. Dragging a passage with
+/// a finger is P31's. So this is a pure function with its own test rather than a
+/// value only one device can observe.
+fn text_drag_threshold(kind: PointerKind, tokens: &InputTokens) -> f32 {
+    tokens.profile(kind).drag_slop
+}
 
 /// Whether `offset` falls inside the current selection.
 ///
@@ -242,22 +373,40 @@ pub(super) fn apply_text_drop(
 
 pub(super) fn handle_pointer_event(
     state: &SharedState,
+    touch: &Rc<EditorTouch>,
     v_scrollbar_bounds: &Rc<Cell<Rect>>,
     h_scrollbar_bounds: &Rc<Cell<Rect>>,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
+    if ctx.pointer_kind().is_direct() {
+        return handle_direct_pointer_event(
+            state,
+            touch,
+            v_scrollbar_bounds,
+            h_scrollbar_bounds,
+            event,
+            ctx,
+        );
+    }
     match event {
         WidgetEvent::PointerDown {
             position,
             button,
             modifiers,
+            ..
         } => {
             if *button != PointerButton::Primary {
                 // Secondary / middle are for the application's own
                 // context menu; let them bubble.
                 return EventResponse::Ignored;
             }
+            // A cursor has taken over. Touch chrome — handles, the selection
+            // toolbar — is standing on the text it is trying to reach, and the
+            // affordance band is exempt from outside-press dismissal, so nothing
+            // else on a hybrid machine would ever remove it. Free when there is
+            // nothing raised; see `EditorTouch::dismiss`.
+            touch.dismiss();
             // The wrapper's `on_pointer_event` runs in the preview
             // pass on every event aimed at a descendant, including
             // the overlay scrollbars. A press here would otherwise
@@ -308,7 +457,9 @@ pub(super) fn handle_pointer_event(
             // Ctrl(⌘). See the arm below for why the two differ.
             let read_only = state.borrow().policy.is_read_only();
             match &hit.region {
-                teksilo_text::HitRegion::Link { href } if modifiers.command() || read_only => {
+                teksilo_text::HitRegion::Link { href }
+                    if link_follows(ctx.pointer_kind(), read_only, modifiers.command()) =>
+                {
                     // Follow the link: do not move the caret. Dispatch to the
                     // widget's installed `on_link_activated` callback (if any)
                     // so applications can open the link / route to their
@@ -328,9 +479,10 @@ pub(super) fn handle_pointer_event(
                     //   unreachable by pointer entirely.
                     // * **Read-only.** A plain click follows it. The rationale
                     //   above is an *authoring* rationale and simply does not
-                    //   apply: there is no caret to place and no text to edit,
-                    //   so a link the reader cannot follow by clicking it is a
-                    //   link that reads as broken. This is the browser default,
+                    //   apply: there is no text to edit, and the caret the click
+                    //   would otherwise place is hidden — while a link the reader
+                    //   cannot follow by clicking it is a link that reads as
+                    //   broken. This is the browser default,
                     //   and a viewer can afford it for the same reason a browser
                     //   can — its text is not editable.
                     let callback = state.borrow().on_link_activated.clone();
@@ -432,6 +584,13 @@ pub(super) fn handle_pointer_event(
             // click-placement is consistent with keyboard caret motion (no-op
             // when the caret is already visible / follow disabled).
             super::keyboard::chase_caret_into_view(state, ctx);
+            // The caret moved, so the OS IME candidate window has to move with
+            // it — every *keyboard* caret move already reports this and a
+            // pointer placement did not, which left the candidate list beside
+            // wherever the caret last was typed to. The editor's own reporter,
+            // never the controller's: this one holds the focus / read-only /
+            // layout guard and the ibus-feedback-loop dedup.
+            super::keyboard::report_ime_cursor_area(state, ctx);
             ctx.request_frame();
             // Return Ignored so the gesture arena (DoubleTap /
             // TripleTap) also sees this PointerDown. Returning
@@ -439,7 +598,7 @@ pub(super) fn handle_pointer_event(
             // would never fire `on_double_tap` / `on_triple_tap`.
             EventResponse::Ignored
         }
-        WidgetEvent::PointerMove { position } => {
+        WidgetEvent::PointerMove { position, .. } => {
             // Drag-select extension. The `drag_state` field tells us
             // whether a primary button is still held; if it isn't,
             // we ignore the move.
@@ -463,7 +622,11 @@ pub(super) fn handle_pointer_event(
             if let Some(origin) = pending {
                 let dx = position.x - origin[0];
                 let dy = position.y - origin[1];
-                if dx * dx + dy * dy < TEXT_DRAG_THRESHOLD * TEXT_DRAG_THRESHOLD {
+                let threshold = {
+                    let st = state.borrow();
+                    text_drag_threshold(ctx.pointer_kind(), &st.input_tokens)
+                };
+                if dx * dx + dy * dy < threshold * threshold {
                     return EventResponse::Handled;
                 }
                 start_text_drag(state, ctx);
@@ -613,55 +776,179 @@ pub(super) fn handle_pointer_event(
     }
 }
 
-pub(super) fn handle_scroll(
+/// A finger or a pen: nothing on the press, everything on a release that still
+/// belongs to it.
+///
+/// `drag_state` is deliberately never armed here, so the precise-pointer
+/// `PointerMove` arm above stays inert for a direct pointer without needing a
+/// second guard of its own — and with it go the drag-select session, the
+/// pending text drag and the image-resize latch, all three of which are press-
+/// time commitments a pan cannot coexist with. See the module docs.
+///
+/// Every arm answers `Ignored`: the press has to keep reaching the gesture arena
+/// (the hold that selects a word, the double and triple taps), the release has
+/// to keep reaching the tap recognizer, and the whole contact has to stay
+/// available to the pan claim the surface installs.
+fn handle_direct_pointer_event(
     state: &SharedState,
-    overscroll: crate::common::scroll::OverscrollBehavior,
+    touch: &Rc<EditorTouch>,
+    v_scrollbar_bounds: &Rc<Cell<Rect>>,
+    h_scrollbar_bounds: &Rc<Cell<Rect>>,
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    let WidgetEvent::Scroll { delta, .. } = event else {
+    match event {
+        WidgetEvent::PointerDown { position, .. } => {
+            // The overlay scroll bars run their own drags; a press on one is
+            // theirs, and must not clear this contact's hold record.
+            if v_scrollbar_bounds.get().contains(*position)
+                || h_scrollbar_bounds.get().contains(*position)
+            {
+                return EventResponse::Ignored;
+            }
+            // A fresh press: forget any hold this contact's id carried from a
+            // previous gesture, so a stale record can never eat a real tap.
+            touch.take_hold_consumed(ctx.pointer().id);
+            // …and remember where it landed, so the release can tell a tap from
+            // a pan. See `EditorTouch::press_is_still_a_tap` for why the
+            // framework's coarse tap boundary cannot answer that here.
+            touch.mark_press(ctx.pointer().id, ctx.pointer_position());
+            // …and take the toolbar down now rather than on the release. Its
+            // commands are aimed at a selection this press is about to replace,
+            // and a menu that lingers under the finger through the whole press
+            // reads as the press having missed.
+            touch.hide_toolbar();
+            EventResponse::Ignored
+        }
+        WidgetEvent::PointerUp { button, .. } => {
+            if *button != PointerButton::Primary {
+                return EventResponse::Ignored;
+            }
+            // A hold fires from the gesture timer, so its release arrives here
+            // after the word is already selected. Placing a caret now would
+            // collapse it.
+            if touch.take_hold_consumed(ctx.pointer().id) {
+                return EventResponse::Ignored;
+            }
+            // A contact whose press a scrollable above claimed was panning.
+            // Nothing it did is a caret placement.
+            if !crate::data_views::release_completes_the_press(ctx) {
+                return EventResponse::Ignored;
+            }
+            // The sample's own window position: what the arm above receives is
+            // already wrapper-local, and the engine wants body-local.
+            let Some(window) = ctx.pointer_position() else {
+                return EventResponse::Ignored;
+            };
+            // …and a contact that travelled further than a tap of its kind may
+            // was panning *this* surface, which the predicate above cannot see:
+            // the surface is both the press's owner and the pan's claimant, so
+            // nothing was claimed elsewhere, and a coarse pointer's tap boundary
+            // is the node's whole rectangle.
+            let tap_slop = {
+                let st = state.borrow();
+                st.input_tokens.profile(ctx.pointer_kind()).tap_slop
+            };
+            if !touch.press_is_still_a_tap(ctx.pointer().id, window, tap_slop) {
+                return EventResponse::Ignored;
+            }
+            let hit = {
+                let st = state.borrow();
+                let local = super::touch::window_to_engine_local(&st, window);
+                hit_test::hit_test_at(&st.engine, local, 0.0, 0.0)
+            };
+            let Some(hit) = hit else {
+                return EventResponse::Ignored;
+            };
+            match &hit.region {
+                // No modifier, in the editable face too — see [`link_follows`].
+                // The guard is spelled out rather than assumed, so the one rule
+                // stays the only place the decision is made.
+                teksilo_text::HitRegion::Link { href }
+                    if link_follows(
+                        ctx.pointer_kind(),
+                        state.borrow().policy.is_read_only(),
+                        false,
+                    ) =>
+                {
+                    let callback = state.borrow().on_link_activated.clone();
+                    if let Some(cb) = callback {
+                        cb(href.as_str(), ctx);
+                    }
+                    ctx.request_frame();
+                    return EventResponse::Ignored;
+                }
+                teksilo_text::HitRegion::Image { name } => {
+                    let callback = state.borrow().on_image_activated.clone();
+                    if let Some(cb) = callback {
+                        cb(
+                            &super::ImageActivation {
+                                name: name.clone(),
+                                offset: hit.position,
+                            },
+                            ctx,
+                        );
+                    }
+                    ctx.request_frame();
+                    return EventResponse::Ignored;
+                }
+                _ => {}
+            }
+            {
+                let mut st = state.borrow_mut();
+                st.cursor.set_position(hit.position, MoveMode::MoveAnchor);
+                st.cursor_affinity = hit.affinity;
+                st.preferred_x = None;
+                st.select_all_level = 0;
+                st.select_all_anchor_cell = None;
+                st.mouse_anchored = true;
+            }
+            sync_cursor_signals(state);
+            super::keyboard::chase_caret_into_view(state, ctx);
+            super::keyboard::report_ime_cursor_area(state, ctx);
+            // A tap places a caret; it does not ask for a menu. The toolbar
+            // belongs to a deliberate selection — a hold, a multi-tap, or the
+            // end of a handle drag.
+            touch.raise(ctx, ToolbarIntent::Hide);
+            ctx.request_frame();
+            EventResponse::Ignored
+        }
+        _ => EventResponse::Ignored,
+    }
+}
+
+/// Select the word under `event` and raise the affordances — the touch hold.
+///
+/// The mouse refusal is
+/// [`TouchSelection::on_long_press`](teksilo_core::text_touch::TouchSelection::on_long_press)'s,
+/// not a second copy here: the gesture's own pointer is handed to it and it
+/// guards on that rather than on the context, which on a timer-recognised
+/// gesture used to answer for the wrong device entirely.
+///
+/// What stays here is the part core cannot do: the coordinate conversion. No
+/// sample is being dispatched, so `pointer_position` is `None`; the tap's own
+/// position is wrapper-local and the *editor* does not move mid-press, so
+/// `local + node_origin` is exact — the same arithmetic
+/// [`to_engine_local`] already does in the other direction.
+pub(super) fn handle_long_press(
+    state: &SharedState,
+    touch: &Rc<EditorTouch>,
+    event: &teksilo_core::gesture::TapEvent,
+    ctx: &mut EventContext,
+) -> EventResponse {
+    let window = {
+        let st = state.borrow();
+        Point::new(
+            event.position.x + st.node_origin.x,
+            event.position.y + st.node_origin.y,
+        )
+    };
+    if !touch.select_word_at(event.pointer, window, ctx) {
         return EventResponse::Ignored;
-    };
-    // Match `ScrollArea`'s sign convention: `delta.y` is the scroll
-    // distance in document pixels per unit of wheel / trackpad
-    // movement, already oriented so that positive means "scroll
-    // content up" (i.e. increase scroll_y). For line-based events
-    // the line_height multiplier is 16 px to match ScrollArea's
-    // default.
-    let (dx, dy) = match delta {
-        ScrollDelta::Lines { x, y } => (*x * 16.0, *y * 16.0),
-        ScrollDelta::Pixels { x, y } => (*x, *y),
-    };
-    let st = state.borrow();
-    // Clamp each axis and learn whether it could absorb any of the delta.
-    // Using the shared helper keeps the editor's boundary behaviour bit-for-bit
-    // identical to `ScrollArea` / `ListView` / `TableView`.
-    let (new_x, moved_x) =
-        crate::common::scroll::scroll_clamp_axis(st.scroll_x.get(), dx, st.max_scroll_x.get());
-    let (new_y, moved_y) =
-        crate::common::scroll::scroll_clamp_axis(st.scroll_y.get(), dy, st.max_scroll_y.get());
-    // Guard each `set` on an actual change: `Signal::set` fans out to every
-    // observer unconditionally, so skipping the no-op write matters.
-    if moved_x {
-        st.scroll_x.set(new_x);
     }
-    if moved_y {
-        st.scroll_y.set(new_y);
-    }
-    drop(st);
-    if moved_x || moved_y {
-        ctx.request_frame();
-    }
-    // Decline (`Ignored`) when the editor is fully clamped on both axes so the
-    // wheel chains to an ancestor scrollable — the editor embedded in a
-    // scrolling form/page hands the leftover scroll to the page. Absorbing any
-    // movement (`Handled`) keeps the event. `OverscrollBehavior::Contain`
-    // always keeps the event at the editor. Shared boundary rule with every
-    // other scrollable via `scroll_response`.
-    crate::common::scroll::scroll_response(
-        moved_x || moved_y,
-        overscroll == crate::common::scroll::OverscrollBehavior::Contain,
-    )
+    touch.mark_hold_consumed(event.pointer.id);
+    ctx.request_frame();
+    EventResponse::Handled
 }
 
 /// Select word under the caret on double-click.
@@ -939,3 +1226,48 @@ mod resize_tests {
         assert_eq!(handle_at(IMG, mid_left), None);
     }
 }
+
+/// Test doors onto the pure geometry above, so the aiming rules can be checked
+/// without a widget tree, a window, or a pointer device.
+#[cfg(test)]
+mod test_support {
+    use super::*;
+
+    pub(crate) fn grip_reach_for_test(tokens: &InputTokens, rect: [f32; 4]) -> f32 {
+        grip_reach(tokens, rect)
+    }
+
+    pub(crate) fn handle_near_for_test(
+        rect: [f32; 4],
+        local: Point,
+        reach: f32,
+    ) -> Option<(f32, f32)> {
+        handle_near(rect, local, reach)
+    }
+
+    pub(crate) fn corner_at_for_test(
+        rect: [f32; 4],
+        local: Point,
+        tokens: &InputTokens,
+    ) -> Option<(f32, f32)> {
+        corner_at(rect, local, tokens)
+    }
+
+    pub(crate) fn text_drag_threshold_for_test(kind: PointerKind, tokens: &InputTokens) -> f32 {
+        text_drag_threshold(kind, tokens)
+    }
+
+    pub(crate) fn link_follows_for_test(
+        kind: PointerKind,
+        read_only: bool,
+        command_held: bool,
+    ) -> bool {
+        link_follows(kind, read_only, command_held)
+    }
+}
+
+#[cfg(test)]
+pub(super) use test_support::{
+    corner_at_for_test, grip_reach_for_test, handle_near_for_test, link_follows_for_test,
+    text_drag_threshold_for_test,
+};

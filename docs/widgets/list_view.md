@@ -21,6 +21,17 @@ deterministic per-row sizes), and **auto-measured** (`auto_item_height` —
 height-for-width measurement with scroll anchoring so content above the
 viewport stays put while estimates converge).
 
+## Pan to scroll
+
+The view installs `common::scrollable::ScrollableBehavior`,
+which gives it the shared wheel arithmetic, a finger's pan and the
+`PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+release coasts, and a pan it cannot absorb hands the **whole** event to the
+container outside — never a residual. Vertical only: this view owns no
+horizontal offset, so a horizontal pan is declined and chains outward. A pan
+that starts on a row scrolls rather than activating it or collapsing a
+multi-selection onto it.
+
 ## When to use
 
 - Large or dynamically-loaded lists (thousands of rows) — use `ListView`.
@@ -71,6 +82,14 @@ let _w = ListView::new(model, |_i, item, _selected| {
 .item_height(32.0)
 .selection(sel);
 ```
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ListView at Touch density](img/list_view-touch.png)
 
 ## Builder methods at a glance
 

@@ -70,6 +70,7 @@ pub enum ToastDismissCause { /* variants */ }
 - **`Programmatic`** — `ToastHandle::dismiss` was called from app code.
 - **`HostShutdown`** — The host's window is being torn down.
 - **`SlotPoolFull`** — The host's slot pool was at `max_visible` and this toast was dropped (Normal priority overflow) or was evicted by a higher-priority arrival. Reported synthetically so `on_dismiss` always fires once per toast — apps that track outstanding toasts via the callback don't leak.
+- **`SwipeDismissed`** — The user swiped the surface away. The touch counterpart of the close button, which is small, hover-adjacent chrome; a swipe is the whole surface and needs no aim.
 
 ## `pub struct ToastAudience`
 

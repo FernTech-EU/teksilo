@@ -28,19 +28,25 @@ pub mod gesture;
 pub mod idle;
 pub mod ime;
 pub mod intent;
+pub mod kinetic;
 pub mod menu_item_id;
 pub mod modal;
 pub mod motion_visibility;
 pub mod overlay;
 pub mod overscroll;
 pub mod paint_prop;
+pub mod partition;
+pub mod pointer;
 pub mod presets;
+/// Per-node press state — see the module docs for why the router owns it.
+pub(crate) mod press;
 pub mod raw_handle;
 pub mod shortcut;
 pub mod signal;
 pub mod styles;
 pub mod telemetry;
 pub mod text_surface;
+pub mod text_touch;
 pub mod widget;
 pub mod widget_builder;
 pub mod widget_builder_branching;
@@ -70,7 +76,7 @@ pub use drag_payload::{
     OutboundDragData,
 };
 pub use drag_state::DropFeedback;
-pub use environment::{Environment, LayoutDirection};
+pub use environment::{Environment, ExploreByTouch, LayoutDirection, ScreenReaderState};
 pub use event::{
     ButtonMask, EventResponse, Key, Modifiers, PointerButton, ScrollDelta, WidgetEvent,
 };
@@ -80,13 +86,18 @@ pub use event_source::{
 pub use focus::{FocusOrigin, TraversalScopePolicy};
 pub use frame_tick_scheduler::{FrameTickScheduler, FrameTickSubscription};
 pub use gesture::{
-    DoubleTapRecognizer, DragRecognizer, GestureArena, GestureEvent, GestureRecognizer,
-    GestureResult, LongPressRecognizer, RawPointerEvent, SwipeDirection, SwipeRecognizer, TapEvent,
-    TapRecognizer, TripleTapRecognizer,
+    DoubleTapRecognizer, DragRecognizer, GestureArena, GestureArenaSet, GestureEvent, GestureProto,
+    GestureRecognizer, GestureResult, LongPressRecognizer, MultiContact, RawPointerEvent,
+    RecognizerContext, SwipeDirection, SwipeRecognizer, TapEvent, TapRecognizer, TapStreak,
+    TripleTapRecognizer,
 };
 pub use idle::IdleDeadline;
 pub use ime::{ImeContext, ImePurpose};
 pub use intent::{Intent, IntentKind, IntentResponse};
+pub use kinetic::{
+    BouncingSimulation, ClampingSimulation, FlingDriver, KineticScroller, ScrollSimulation,
+    ScrollStep, VelocityEstimate, VelocityTracker, rubber_band,
+};
 pub use menu_item_id::MenuItemId;
 pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,
@@ -97,6 +108,14 @@ pub use overlay::{
 };
 pub use overscroll::{OverscrollBehavior, SCROLL_MOVE_EPSILON};
 pub use paint_prop::{GradientStopProp, PaintProp, angle_to_endpoints};
+pub use partition::{TargetRegion, partition_targets};
+pub use pointer::clock::{InputClock, ManualClock, MonotonicClock};
+pub use pointer::hit_slop::{HitCandidate, HitContext, HitSlop};
+pub use pointer::touch_action::{Axis, PanAxes, PanClaim, TouchAction};
+pub use pointer::{
+    BackendDeviceKey, CancelReason, EventTime, PointerAxes, PointerId, PointerIdAllocator,
+    PointerInfo, PointerPhase, PointerSample, ScrollPhase, ScrollSample, ScrollSource,
+};
 pub use raw_handle::ParentHandle;
 pub use shortcut::{
     CaptureHandle, EffectiveShortcut, KeyCaptureCallback, KeyStroke, KeyStrokeOverride, Shortcut,
@@ -116,6 +135,8 @@ pub use widget_builder_branching::{
 };
 pub use widget_id::WidgetId;
 pub use widget_tree::WidgetTree;
+pub use widget_tree::pan_arbiter::ScrollDelivery;
+pub use widget_tree::touch_route::LongPressRole;
 pub use window::state::WindowStateInit;
 pub use window::{
     CloseBlockedCallback, CloseGuard, CloseResponse, DecorationsMode, ModalConfig, NoopWindowOps,

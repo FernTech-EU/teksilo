@@ -40,6 +40,26 @@ RadioTileGroup::new(selected)
     .tile(RadioTile::new().icon(icon2).title(tr!(bundle())).description(tr!(bundle_desc())))
 ```
 
+## Touch and pen
+
+A tile is a whole-card target, comfortably past the floor at every density, and
+it activates on the release. What the touch sweep changed is its **pressed**
+appearance: it was written by the `Space` path alone, so the recipe painted a
+state no pointer reached — on the one control where a press visual matters
+most, because there is no smaller affordance inside the card to look at.
+
+A tap by a contact also rests the tile idle rather than hovered, for the reason
+`ToolBox`'s header does: a finger sends no hover-leave, and the stale tint
+becomes visible as soon as the selection moves to another tile.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![RadioTile at Touch density](img/radio_tile-touch.png)
+
 ## Builder methods at a glance
 
 `selection`, `icon`, `icon_boxed`, `title`, `description`, `body`, `body_boxed`, `trailing`, `trailing_slot`, `compact`, `title_style`, `title_color`, `description_style`, `description_color`, `enabled`, `variant`, `show_indicator`, `indicator_side`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

@@ -14,6 +14,24 @@
 //!
 //! Supports sort, resize, reuse across pinned panes, per-column filter
 //! popovers, and column-reorder drag.
+//!
+//! ## Touch and pen
+//!
+//! A header cell paints three things inside one node and tells them apart by
+//! coordinate: the label (whose press cycles the sort or starts the column
+//! reorder), the filter-popover trigger, and the resize band on its trailing edge.
+//!
+//! The label and filter zones come from
+//! [`partition_targets`](teksilo_core::partition::partition_targets), which gives
+//! the filter zone the density's target floor by clamp-and-redistribute — the glyph
+//! and its padding are below the conformance floor at every density — answers in
+//! reading order so nothing mirrors for RTL, and splits evenly when the two floors
+//! cannot both be met. The same function answers
+//! [`teksilo_core::widget::Widget::target_regions`], so the
+//! geometry an audit measures is the geometry the press test uses.
+//!
+//! The plain press stays `Ignored` so a finger can pan the table from its header
+//! strip, and a coarse pointer's column reorder waits for a hold.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -315,6 +333,11 @@ pub(crate) struct HeaderCell {
     /// vector is shorter than the cell list and `HeaderRow` falls back to an
     /// even split).
     cell_window_w: Rc<Cell<f32>>,
+    /// The partition floor and reading direction, so `target_regions` — which
+    /// is handed a rectangle and nothing else — can carve the same zones the
+    /// press test carves. Written in `build` and `place_children`.
+    zone_floor: Cell<f32>,
+    zone_rtl: Cell<bool>,
     /// This cell's resolved height, written by `place_children` and read
     /// by `on_pointer_event` to reject pointer events that bubble up from
     /// the in-tree filter popover (a descendant overlay anchored below the
@@ -373,6 +396,8 @@ impl HeaderCell {
             table_id: spec.table_id,
             cell_window_x: Rc::new(Cell::new(0.0)),
             cell_window_w: Rc::new(Cell::new(0.0)),
+            zone_floor: Cell::new(0.0),
+            zone_rtl: Cell::new(false),
             cell_window_h: Rc::new(Cell::new(0.0)),
             filterable: spec.filterable,
             filter_zone_width: if spec.filterable {
@@ -405,6 +430,67 @@ impl std::fmt::Debug for HeaderCell {
             .field("current_sort", &self.current_sort)
             .finish()
     }
+}
+
+/// `part` discriminator: the sort / reorder zone carrying the column label.
+pub const HEADER_PART_LABEL: u16 = 0;
+/// `part` discriminator: the filter-popover trigger zone.
+pub const HEADER_PART_FILTER: u16 = 1;
+/// `part` discriminator: the column-resize band on the cell's trailing edge.
+pub const HEADER_PART_RESIZE: u16 = 2;
+
+/// The label / filter partition of one header cell, in the frame of `bounds`.
+///
+/// One function for the two questions a split cell has to answer the same way:
+/// where the press test draws the boundary, and what
+/// [`teksilo_core::widget::Widget::target_regions`]
+/// reports. Both used to be open-coded — the press test as a physical-x
+/// comparison with its own RTL branch, the report not at all — and a cell
+/// painting two targets inside one node is exactly what `target_regions`
+/// exists for.
+///
+/// The trailing resize grip is excluded: the resize test above owns that band,
+/// on **both** of the cell's edges. What is left is split by
+/// [`partition_targets`](teksilo_core::partition::partition_targets), which
+/// gives the filter affordance its `floor` by
+/// clamp-and-redistribute, answers in reading order (so nothing here mirrors
+/// for RTL), and — when the two floors cannot both be met — splits evenly
+/// rather than letting either zone vanish.
+///
+/// Returns `None` for a cell with no filter affordance: there is one zone, it
+/// is the cell, and there is nothing to partition.
+fn header_cell_zones(
+    bounds: Rect,
+    filter_zone_w: f32,
+    grip: f32,
+    floor: f32,
+    rtl: bool,
+) -> Option<[Rect; 2]> {
+    if filter_zone_w <= 0.0 || bounds.width <= 0.0 {
+        return None;
+    }
+    let usable_w = (bounds.width - grip).max(0.0);
+    // The grip sits at the reading-order trailing edge, which is the physical
+    // left one under RTL, so the usable band starts past it there.
+    let usable = Rect::new(
+        if rtl { bounds.x + grip } else { bounds.x },
+        bounds.y,
+        usable_w,
+        bounds.height,
+    );
+    let label_w = (usable_w - filter_zone_w).max(0.0);
+    let direction = if rtl {
+        teksilo_core::environment::LayoutDirection::RightToLeft
+    } else {
+        teksilo_core::environment::LayoutDirection::LeftToRight
+    };
+    let zones = teksilo_core::partition::partition_targets(
+        usable,
+        &[label_w, filter_zone_w],
+        floor,
+        direction,
+    );
+    Some([zones[0], zones[1]])
 }
 
 impl Widget for HeaderCell {
@@ -474,23 +560,26 @@ impl Widget for HeaderCell {
             let popover_id = ctx.add(popover);
             row = row.add_child(popover_id);
         }
-        let row_id = ctx.add(row);
-        let padded = ctx.add(
-            Padding::symmetric(cp::CELL_PADDING_VERTICAL, cp::CELL_PADDING_HORIZONTAL)
-                .child_id(row_id),
-        );
-
         // Route the header cell's chrome through `TableStyle::make_header_cell`.
         // The default `RecipeTableStyle` returns a `ZStack` that overlays
         // a hover/resize background behind the label — apps install a
         // theme-wide `style_slots.table` or pass their own when wrapping
         // the table to swap the chrome wholesale.
-        let style: SharedTableStyle = ctx
-            .theme()
-            .style_slots
-            .table
-            .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeTableStyle::default()));
+        let style: SharedTableStyle = crate::styles::recipe_table_style::resolve_table_style(ctx);
+        let row_id = ctx.add(row);
+        // The gutter comes from the style, not from `cp::CELL_PADDING_*`: a
+        // preset writes its own on the recipe (Fluent's 12 dp `ListViewItem`
+        // gutter) and reading the module constant here rendered 8 dp whatever
+        // the theme had decided. The two views measure their filter zone from
+        // the same accessor, so the padding and the hit zone agree.
+        let tokens = ctx.theme().input;
+        let padded = ctx.add(
+            Padding::symmetric(
+                style.cell_padding_vertical(&tokens),
+                style.cell_padding_horizontal(&tokens),
+            )
+            .child_id(row_id),
+        );
         let cell_cfg = TableHeaderCellConfig {
             label: padded,
             sort: self.current_sort.map(style_sort),
@@ -526,7 +615,16 @@ impl Widget for HeaderCell {
         let cell_window_w = self.cell_window_w.clone();
         let cell_window_h = self.cell_window_h.clone();
         let filter_zone_w = self.filter_zone_width;
+        // The zone floor is a build-time read: a density change marks the tree
+        // at `BindingLevel::Rebuild`, so a dimension baked here cannot go stale.
+        let zone_floor = ctx.theme().input.target_size;
+        self.zone_floor.set(zone_floor);
         let is_hovered = self.is_hovered.clone();
+        // A coarse pointer's column reorder waits for a hold; see the escalation
+        // arm in `PointerMove` for why the raw path cannot read
+        // `DragActivation` and what this stands in for.
+        let hold_armed: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+        let hold_for_press = hold_armed.clone();
 
         let handlers = HandlerSet::new()
             .on_hover({
@@ -534,6 +632,24 @@ impl Widget for HeaderCell {
                 move |entered, _ctx| {
                     is_hovered.set(entered);
                 }
+            })
+            // Arms the coarse-pointer reorder. A `long_press` recognizer is the
+            // hold source this cell has: the reorder is a raw `start_drag` out
+            // of `PointerMove` rather than an `on_drag` member of the pointer
+            // sequence, so the tree resolves no `DragActivation` for it and
+            // nothing defers it on the cell's behalf, and nothing on
+            // `EventContext` hands a handler the input clock to time a hold
+            // itself.
+            //
+            // Two consequences, both load-bearing. Installing it gives the cell
+            // a gesture arena and so the implicit press capture, which is why
+            // the escalation arm below must refuse a coarse pointer that has not
+            // held — the cell now receives the moves of a pan that has left the
+            // strip entirely. And it makes the hold this cell's: a header cell
+            // has no context menu today, but anything that wants one has to
+            // share a gesture the column reorder has already claimed.
+            .on_long_press(move |_event, _ctx| {
+                hold_for_press.set(true);
             })
             .on_pointer_event(move |event, ctx: &mut EventContext| {
                 // Pointer events now deliver `position` in cell-local
@@ -613,7 +729,7 @@ impl Widget for HeaderCell {
                 };
 
                 match event {
-                    WidgetEvent::PointerMove { position } => {
+                    WidgetEvent::PointerMove { position, .. } => {
                         let local_x = position.x;
                         // 1. Active resize: advance regardless of pointer
                         //    location (the pointer is captured). Only the
@@ -622,9 +738,13 @@ impl Widget for HeaderCell {
                         //    capture was lost, and moving a column then would
                         //    look like the table resizing itself with no
                         //    button held.
+                        // …and only while this cell still *owns* the press:
+                        // capture is an arbitration act, so a grip that lost it
+                        // must stop resizing even though its own state is set.
                         let active = resize_state.borrow().clone();
                         if let Some(state) = active
                             && state.anchor_index == width_index
+                            && ctx.owns_pointer()
                         {
                             // Window-space delta — stable across the
                             // relayouts a Live resize triggers (see
@@ -666,7 +786,20 @@ impl Widget for HeaderCell {
                         // 2. Press state set, no resize: if movement
                         //    crosses the threshold, escalate to a
                         //    reorder drag.
-                        if reorderable && let Some(p) = press_state.get() {
+                        //    A coarse pointer must have held first: a
+                        //    horizontal swipe along the strip is a horizontal
+                        //    pan, and at 5 dp the reorder used to take it
+                        //    (measured: `max_scroll_x` 512, `scroll_x` 0, and
+                        //    the columns swapped). A held contact is picking the
+                        //    column up, which is the same ruling the row reorder
+                        //    settles with `DragActivation` — reached here by a
+                        //    `long_press` recognizer, because a raw `start_drag`
+                        //    is not a sequence member and has no activation to
+                        //    resolve.
+                        if reorderable
+                            && (hold_armed.get() || !ctx.pointer_kind().is_coarse())
+                            && let Some(p) = press_state.get()
+                        {
                             let dx = local_x - p.pointer_x;
                             let dy = position.y - p.pointer_y;
                             if (dx * dx + dy * dy).sqrt() > DRAG_REORDER_THRESHOLD {
@@ -757,22 +890,51 @@ impl Widget for HeaderCell {
                         // trailing inner edge — physical-right under LTR,
                         // physical-left under RTL (the header HStack
                         // reverses), just inside the resize handle.
-                        let in_filter_zone = if rtl {
-                            local_x < grip_base + filter_zone_w
-                        } else {
-                            local_x > cell_w - grip_base - filter_zone_w
-                        };
-                        if filter_zone_w > 0.0 && cell_w > 0.0 && in_filter_zone {
+                        let in_filter_zone = header_cell_zones(
+                            Rect::new(0.0, 0.0, cell_w, cell_h),
+                            filter_zone_w,
+                            grip_base,
+                            zone_floor,
+                            rtl,
+                        )
+                        .is_some_and(|[_, filter]| {
+                            local_x >= filter.x && local_x <= filter.right()
+                        });
+                        if in_filter_zone {
                             return EventResponse::Ignored;
                         }
                         // Record press: PointerUp without movement →
                         // sort cycle; PointerMove past threshold →
-                        // reorder drag.
+                        // reorder drag. A fresh press has not held yet,
+                        // whatever the last one did.
+                        hold_armed.set(false);
                         press_state.set(Some(PressState {
                             pointer_x: local_x,
                             pointer_y: position.y,
                         }));
-                        EventResponse::Handled
+                        // **`Ignored`, deliberately, and it is what lets a
+                        // finger scroll the table from its header strip.**
+                        //
+                        // This handler runs in the root-first preview pass for
+                        // every press that lands on one of the cell's own
+                        // children (its label, its indicators), and the first
+                        // `Handled` there is step 1 of the decision procedure:
+                        // the router reads it as a preview claim and *decides
+                        // the sequence* for this cell. A decided sequence yields
+                        // no candidates, so the table's own `PanClaim` was never
+                        // evaluated and neither axis moved — measured, on the
+                        // same 120 dp pan from the header of a table scrolled to
+                        // 400: offset stayed 400 with `Handled`, reached 557
+                        // with `Ignored`. It was not the reorder drag: the same
+                        // 0 was measured with every column `reorderable(false)`.
+                        //
+                        // Nothing needed the claim. The two things this cell
+                        // commits are the sort (which rides `press_state` and
+                        // the framework's own press record) and the reorder
+                        // (which escalates from `PointerMove`); the resize grip
+                        // above still answers `Handled` and takes an explicit
+                        // capture of its own.
+                        EventResponse::Ignored
                     }
                     WidgetEvent::PointerUp { position, .. } => {
                         // Resize commit / release. Delta is window-space
@@ -809,9 +971,38 @@ impl Widget for HeaderCell {
                             resize_target.set(None);
                             resize_preview_x.set(None);
                         }
-                        // Click without significant movement → sort
-                        // cycle.
-                        if press_state.replace(None).is_some() && sortable {
+                        // Click without significant movement → sort cycle,
+                        // and the `Down` arm's comment promises exactly that.
+                        //
+                        // Both halves come from
+                        // [`release_completes_the_press`]. A press is closed
+                        // when a peer claim takes it — which is how a header
+                        // press that a scrollable's `PanClaim` won stops sorting
+                        // the table it just scrolled — *and* when the pointer
+                        // leaves the press's `TapBoundary`, which is the
+                        // movement check, sized for the pointer holding it: a
+                        // `tap_slop` radius for a mouse (5 dp — the same figure
+                        // this cell's reorder threshold uses), the pressed
+                        // node's own bounds for a finger. Measuring it here as
+                        // well, against `PressState`, would be a second
+                        // hardcoded radius for the framework's own question, and
+                        // no case in the suite can tell the two apart.
+                        //
+                        // That delegation needs the press to *have* an owner,
+                        // which it has because the `long_press` recognizer above
+                        // gives this cell a gesture arena. Removing that
+                        // recognizer without restoring a local distance check
+                        // would leave the sort firing on a press dragged across
+                        // the window;
+                        // `a_mouse_click_on_a_column_header_sorts_it_and_a_wander_off_does_not`
+                        // is what fails if anyone does.
+                        //
+                        // [`release_completes_the_press`]: crate::data_views::release_completes_the_press
+                        let recorded_press = press_state.replace(None).is_some();
+                        if recorded_press
+                            && sortable
+                            && crate::data_views::release_completes_the_press(ctx)
+                        {
                             let next = match sort_signal.get() {
                                 None => Some((col_id.clone(), SortDirection::Ascending)),
                                 Some((id, SortDirection::Ascending)) if id == col_id => {
@@ -904,7 +1095,7 @@ impl Widget for HeaderCell {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         // Snapshot the cell's window-space physical-left edge so the
         // pointer-event handler can convert window x to cell-local x
@@ -913,10 +1104,55 @@ impl Widget for HeaderCell {
         self.cell_window_x.set(bounds.x);
         self.cell_window_w.set(bounds.width);
         self.cell_window_h.set(bounds.height);
+        // `target_regions` is handed a rectangle and no context, so the
+        // direction it must partition in is recorded here.
+        self.zone_rtl.set(ctx.is_rtl());
         for child in children.iter_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    /// The label zone, the filter zone, and the resize band on the cell's
+    /// reading-order trailing edge.
+    ///
+    /// All three are geometry inside one node — the cell's chrome is one
+    /// composed subtree and its parts are told apart by coordinate at press
+    /// time — so without this report the filter affordance and the grip do not
+    /// exist to anything outside the press handler: not to a conformance audit,
+    /// and not to a router that would route a coarse press to the nearest
+    /// target. The rectangles come from [`header_cell_zones`], the same
+    /// function the press test asks, so the report and the routing cannot
+    /// drift.
+    ///
+    /// A cell with no filter affordance reports nothing: its one target is its
+    /// own node, which every consumer can already see.
+    fn target_regions(&self, bounds: Rect) -> Vec<teksilo_core::partition::TargetRegion> {
+        use teksilo_core::partition::TargetRegion;
+        let Some([label, filter]) = header_cell_zones(
+            bounds,
+            self.filter_zone_width,
+            self.resize_grip,
+            self.zone_floor.get(),
+            self.zone_rtl.get(),
+        ) else {
+            return Vec::new();
+        };
+        let grip = if self.zone_rtl.get() {
+            Rect::new(bounds.x, bounds.y, self.resize_grip, bounds.height)
+        } else {
+            Rect::new(
+                bounds.right() - self.resize_grip,
+                bounds.y,
+                self.resize_grip,
+                bounds.height,
+            )
+        };
+        vec![
+            TargetRegion::target(label, HEADER_PART_LABEL),
+            TargetRegion::target(filter, HEADER_PART_FILTER),
+            TargetRegion::grab(grip, HEADER_PART_RESIZE),
+        ]
     }
 
     // No `paint()` — the cell's visual chrome is composed via

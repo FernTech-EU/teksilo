@@ -19,9 +19,10 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::styles::{PopoverStyle, PopoverStyleConfig, PopoverVariant};
 use teksilo_core::widget::PendingChild;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::SurfaceRole;
+use teksilo_tokens::{InputTokens, SurfaceRole};
 
 use crate::popover_surface::PopoverSurface;
+use teksilo_core::styles::density::spacing;
 
 // IntUI design tokens for Popover. The recipe and surface own their
 // own dimensions.
@@ -52,15 +53,26 @@ pub struct PopoverRecipe {
     pub shadow_density: f32,
 }
 
-impl Default for PopoverRecipe {
-    fn default() -> Self {
+impl PopoverRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            padding: POPOVER_PADDING,
+            padding: spacing(POPOVER_PADDING, tokens),
             corner_radius: POPOVER_CORNER_RADIUS,
             border_width: POPOVER_BORDER_WIDTH,
             menu_popup_corner_radius: MENU_POPUP_CORNER_RADIUS,
             shadow_density: POPOVER_SHADOW_DENSITY,
         }
+    }
+}
+
+impl Default for PopoverRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -77,6 +89,18 @@ pub struct RecipePopoverStyle {
 impl RecipePopoverStyle {
     pub fn new(recipe: PopoverRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipePopoverStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: PopoverRecipe::for_tokens(tokens),
+        }
     }
 }
 

@@ -630,12 +630,32 @@ fn caret_at(st: &mut CodeEditorState, i: usize) -> &mut teksilo_text::text_docum
 /// apart), and the primary is the one the user last placed.
 pub(super) fn ensure_caret_visible(state: &SharedState) {
     let mut st = state.borrow_mut();
+    ensure_caret_visible_locked(&mut st);
+}
+
+/// [`ensure_caret_visible`] for a caller that already holds the borrow — the
+/// body's paint, which reveals the caret again after a viewport **shrink** and
+/// has the state open around the relayout that shrink forced.
+pub(super) fn ensure_caret_visible_locked(st: &mut CodeEditorState) {
     if !st.engine.has_full_layout() {
         return;
     }
+    // Forward the current wheel-driven scroll so the correction is computed
+    // relative to where the viewport actually is, not where it was at the last
+    // paint.
     let current = st.scroll_y.get();
     st.engine.set_scroll_offset(current);
-    if let Some(new_off) = st.engine.ensure_caret_visible() {
+    // **Name the position** rather than letting the engine read its own cached
+    // cursor. That cache is refreshed at paint, so inside a key handler it still
+    // holds the caret from *before* the keystroke: `ensure_caret_visible` then
+    // corrects against the old caret, which for a motion that leaves the
+    // viewport in one step (`Ctrl+End`, `PageDown`) answers "already visible"
+    // and scrolls nothing at all. The rich-text editor names its position for
+    // exactly this reason; this one did not, and that is what left a
+    // document-end jump showing the top of the file.
+    let pos = st.cursor.position();
+    let affinity = st.cursor_affinity;
+    if let Some(new_off) = st.engine.ensure_position_visible(pos, affinity) {
         st.scroll_y.set_if_changed(new_off);
     }
 }

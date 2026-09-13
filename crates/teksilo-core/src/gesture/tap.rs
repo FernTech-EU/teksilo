@@ -5,7 +5,9 @@ use teksilo_canvas::Point;
 
 use crate::event::{ButtonMask, PointerButton};
 
-use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, TapEvent};
+use super::{
+    GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, RecognizerContext, TapEvent,
+};
 
 /// Recognizes a single tap (pointer down + up without significant movement).
 ///
@@ -14,9 +16,17 @@ use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, Tap
 /// [`accept`](TapRecognizer::accept_buttons). Default `accept` is
 /// [`ButtonMask::PRIMARY`] — left-click only — which is what users
 /// expect from a "tap" and keeps right-click free for context menus.
+///
+/// The travel a tap tolerates is the press's
+/// [`TapBoundary`](super::TapBoundary): a radius of the active profile's
+/// `tap_slop` for a precise pointer — 5 dp for a mouse, exactly the pre-P06
+/// constant — and the pressed node's **own bounds** for a coarse one, because a
+/// finger's reported centre wanders several device pixels while resting inside
+/// the control it is pressing, and a tap that stayed on its target is a tap.
+/// [`max_distance`](Self::max_distance) pins a radius for either.
 #[derive(Debug)]
 pub struct TapRecognizer {
-    max_distance: f32,
+    max_distance: Option<f32>,
     accept: ButtonMask,
     down_position: Option<Point>,
     down_button: Option<PointerButton>,
@@ -25,16 +35,32 @@ pub struct TapRecognizer {
 impl TapRecognizer {
     pub fn new() -> Self {
         Self {
-            max_distance: 5.0,
+            max_distance: None,
             accept: ButtonMask::PRIMARY,
             down_position: None,
             down_button: None,
         }
     }
 
+    /// Pin the travel a tap tolerates, overriding the profile's `tap_slop`.
     pub fn max_distance(mut self, d: f32) -> Self {
-        self.max_distance = d;
+        self.max_distance = Some(d);
         self
+    }
+
+    /// Where this press stops being a tap. One predicate, shared with the
+    /// arbitration's `cancel_taps` trigger, so the recognizer and the router
+    /// cannot disagree about whether a press has slid off.
+    fn boundary(&self, cx: &RecognizerContext) -> super::TapBoundary {
+        match self.max_distance {
+            Some(d) => super::TapBoundary::Radius(d),
+            None => super::TapBoundary::for_pointer(&cx.pointer, &cx.profile),
+        }
+    }
+
+    fn left_boundary(&self, cx: &RecognizerContext, down: Point, at: Point) -> bool {
+        self.boundary(cx)
+            .left(down, at, Some(cx.local_bounds), &cx.profile)
     }
 
     /// Restrict (or extend) the set of buttons that can fire this
@@ -57,7 +83,7 @@ impl Default for TapRecognizer {
 }
 
 impl GestureRecognizer for TapRecognizer {
-    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
+    fn process(&mut self, event: &RawPointerEvent, cx: &RecognizerContext) -> GestureResult {
         match event {
             RawPointerEvent::Down {
                 position, button, ..
@@ -69,15 +95,13 @@ impl GestureRecognizer for TapRecognizer {
                 self.down_button = Some(*button);
                 GestureResult::Pending
             }
-            RawPointerEvent::Move { position } => {
-                if let Some(down) = self.down_position {
-                    let dx = position.x - down.x;
-                    let dy = position.y - down.y;
-                    if (dx * dx + dy * dy).sqrt() > self.max_distance {
-                        self.down_position = None;
-                        self.down_button = None;
-                        return GestureResult::Failed;
-                    }
+            RawPointerEvent::Move { position, .. } => {
+                if let Some(down) = self.down_position
+                    && self.left_boundary(cx, down, *position)
+                {
+                    self.down_position = None;
+                    self.down_button = None;
+                    return GestureResult::Failed;
                 }
                 GestureResult::Pending
             }
@@ -85,6 +109,8 @@ impl GestureRecognizer for TapRecognizer {
                 position,
                 button,
                 modifiers,
+                pointer,
+                ..
             } => {
                 let Some(down) = self.down_position.take() else {
                     return GestureResult::Failed;
@@ -95,15 +121,19 @@ impl GestureRecognizer for TapRecognizer {
                 if *button != down_button {
                     return GestureResult::Failed;
                 }
-                let dx = position.x - down.x;
-                let dy = position.y - down.y;
-                if (dx * dx + dy * dy).sqrt() <= self.max_distance {
+                if !self.left_boundary(cx, down, *position) {
                     return GestureResult::Recognized(GestureEvent::Tap(TapEvent {
                         position: *position,
                         button: *button,
                         modifiers: *modifiers,
+                        pointer: *pointer,
                     }));
                 }
+                GestureResult::Failed
+            }
+            RawPointerEvent::Cancel { .. } => {
+                self.down_position = None;
+                self.down_button = None;
                 GestureResult::Failed
             }
         }
@@ -116,6 +146,21 @@ impl GestureRecognizer for TapRecognizer {
 
     fn priority(&self) -> u32 {
         10
+    }
+
+    fn tap_family(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+impl TapRecognizer {
+    /// Drive the recognizer with the shipped profile for the event's own
+    /// pointer kind. The pre-P06 call shape, kept so the migration is checked
+    /// against unchanged tests.
+    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
+        let cx = super::config::RecognizerContext::for_event(event);
+        GestureRecognizer::process(self, event, &cx)
     }
 }
 

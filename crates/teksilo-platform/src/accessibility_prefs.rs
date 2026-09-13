@@ -14,6 +14,19 @@
 //! | High contrast    | portal `contrast` key + GTK theme check | `accessibilityDisplayShouldIncreaseContrast` | `SPI_GETHIGHCONTRAST` |
 //! | Reduced motion   | portal `reduced-motion` key + `enable-animations` | `accessibilityDisplayShouldReduceMotion` | `UISettings.AnimationsEnabled` |
 //! | Text scale       | gsettings `text-scaling-factor` | N/A (uses DPI scaling) | `UISettings.TextScaleFactor` |
+//! | Screen reader    | AT-SPI `org.a11y.Status.ScreenReaderEnabled` | `NSWorkspace.isVoiceOverEnabled` | `SPI_GETSCREENREADER` |
+//!
+//! # Why the screen-reader flag is asked of the OS and not of AccessKit
+//!
+//! An AccessKit adapter activates for anything that walks the accessibility
+//! tree: a screen magnifier, a voice-control front end, a UI-automation
+//! inspector, a tree browser. None of those want a touch to turn into an
+//! explore-by-touch probe. The OS flag is the only
+//! signal that distinguishes *reading the screen aloud* from *inspecting the
+//! tree*, so it is the one the framework asks. Each platform's flag is
+//! advisory in its own way, documented at its query below.
+
+use teksilo_core::ScreenReaderState;
 
 /// Accessibility preferences read from the operating system.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +38,12 @@ pub struct AccessibilityPreferences {
     /// Text scaling factor (1.0 = normal, 1.25 = GNOME "Large Text", up to 2.25 on Windows).
     /// On macOS this is always 1.0 — text scaling is handled via display DPI.
     pub text_scale_factor: f64,
+    /// Whether the OS says a screen reader is reading the screen.
+    ///
+    /// [`ScreenReaderState::Unknown`] when the platform does not expose the
+    /// state or the query failed — which every consumer must read as "no", not
+    /// as "yes".
+    pub screen_reader: ScreenReaderState,
 }
 
 impl Default for AccessibilityPreferences {
@@ -33,6 +52,7 @@ impl Default for AccessibilityPreferences {
             high_contrast: false,
             reduced_motion: false,
             text_scale_factor: 1.0,
+            screen_reader: ScreenReaderState::Unknown,
         }
     }
 }
@@ -60,8 +80,8 @@ impl AccessibilityPreferences {
 // and it avoids adding zbus as a direct dependency.
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::AccessibilityPreferences;
-    use crate::linux_helpers::{read_gsettings, read_portal_u32};
+    use super::{AccessibilityPreferences, ScreenReaderState};
+    use crate::linux_helpers::{read_dbus_bool_property, read_gsettings, read_portal_u32};
 
     pub(super) fn query() -> AccessibilityPreferences {
         let mut prefs = AccessibilityPreferences::default();
@@ -103,14 +123,39 @@ mod platform {
             prefs.text_scale_factor = scale;
         }
 
+        prefs.screen_reader = query_screen_reader();
+
         prefs
+    }
+
+    /// The AT-SPI status object's `ScreenReaderEnabled` flag, read off the
+    /// same object `accesskit_unix` watches — `atspi-proxies`' `StatusProxy`
+    /// on `org.a11y.Bus` at `/org/a11y/bus`. (AccessKit itself watches the
+    /// neighbouring `IsEnabled` there, which says whether *any* client wants a
+    /// tree; this is the narrower question.)
+    ///
+    /// Advisory: Orca sets it, and an assistive technology that never touches
+    /// the status object will not. A machine with no a11y bus at all — no
+    /// `busctl`, a sandbox with no session bus, a desktop that does not run
+    /// one — answers `Unknown`, which behaves as "no".
+    fn query_screen_reader() -> ScreenReaderState {
+        match read_dbus_bool_property(
+            "org.a11y.Bus",
+            "/org/a11y/bus",
+            "org.a11y.Status",
+            "ScreenReaderEnabled",
+        ) {
+            Some(true) => ScreenReaderState::Active,
+            Some(false) => ScreenReaderState::Inactive,
+            None => ScreenReaderState::Unknown,
+        }
     }
 }
 
 // ── macOS: NSWorkspace accessibility APIs ───────────────────────────────────
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::AccessibilityPreferences;
+    use super::{AccessibilityPreferences, ScreenReaderState};
 
     pub(super) fn query() -> AccessibilityPreferences {
         let mut prefs = AccessibilityPreferences::default();
@@ -126,6 +171,17 @@ mod platform {
         // macOS has no text-scaling API separate from DPI scaling.
         // text_scale_factor stays at 1.0 — winit's scale_factor handles DPI.
 
+        // VoiceOver is the only screen reader on macOS, and `NSWorkspace`
+        // answers for it directly (available since 10.13). There is no
+        // "unknown" here: the call cannot fail, and a `false` really does mean
+        // VoiceOver is off. Magnifier / Zoom and Voice Control do not set it,
+        // which is exactly the discrimination we want.
+        prefs.screen_reader = if workspace.isVoiceOverEnabled() {
+            ScreenReaderState::Active
+        } else {
+            ScreenReaderState::Inactive
+        };
+
         prefs
     }
 }
@@ -133,7 +189,7 @@ mod platform {
 // ── Windows: SystemParametersInfo + WinRT UISettings ────────────────────────
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::AccessibilityPreferences;
+    use super::{AccessibilityPreferences, ScreenReaderState};
 
     pub(super) fn query() -> AccessibilityPreferences {
         let mut prefs = AccessibilityPreferences::default();
@@ -142,8 +198,42 @@ mod platform {
         let (reduced_motion, text_scale) = query_ui_settings();
         prefs.reduced_motion = reduced_motion;
         prefs.text_scale_factor = text_scale;
+        prefs.screen_reader = query_screen_reader();
 
         prefs
+    }
+
+    /// `SPI_GETSCREENREADER` — the flag Narrator, NVDA and JAWS set while they
+    /// are running.
+    ///
+    /// Two documented caveats, both in the direction that matters:
+    /// Magnifier does not set it (so a magnifier user is not mistaken for a
+    /// screen-reader user), and Windows does not reliably clear it if an
+    /// assistive technology terminates without doing so itself. A stale `true`
+    /// is the failure mode; nothing here can detect it, which is why the
+    /// framework treats a live AccessKit *deactivation* as separate, harder
+    /// evidence that no client is attached.
+    fn query_screen_reader() -> ScreenReaderState {
+        use windows::Win32::Foundation::BOOL;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SPI_GETSCREENREADER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+        };
+
+        unsafe {
+            let mut on = BOOL(0);
+            let ok = SystemParametersInfoW(
+                SPI_GETSCREENREADER,
+                0,
+                Some(&mut on as *mut BOOL as *mut _),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            );
+            match ok {
+                Ok(()) if on.as_bool() => ScreenReaderState::Active,
+                Ok(()) => ScreenReaderState::Inactive,
+                // The call itself failed: we genuinely do not know.
+                Err(_) => ScreenReaderState::Unknown,
+            }
+        }
     }
 
     /// Query high-contrast mode via Win32 SystemParametersInfoW.
@@ -202,6 +292,9 @@ mod platform {
 mod platform {
     use super::AccessibilityPreferences;
 
+    /// Every field keeps its default, `screen_reader` included: this platform
+    /// exposes no accessibility settings we know how to read, so `Unknown` is
+    /// the honest answer rather than `Inactive`.
     pub(super) fn query() -> AccessibilityPreferences {
         AccessibilityPreferences::default()
     }
@@ -218,6 +311,10 @@ mod tests {
         assert!(!prefs.reduced_motion);
         assert!((prefs.text_scale_factor - 1.0).abs() < f64::EPSILON);
         assert!(!prefs.prefers_large_text());
+        // Not `Inactive`: nobody has asked the OS yet, and the two answers
+        // differ for a consumer that wants to distinguish "no screen reader"
+        // from "this platform cannot say".
+        assert_eq!(prefs.screen_reader, ScreenReaderState::Unknown);
     }
 
     #[test]
@@ -237,5 +334,24 @@ mod tests {
         // Should never panic regardless of environment — graceful fallback.
         let prefs = AccessibilityPreferences::query();
         assert!(prefs.text_scale_factor > 0.0);
+        // Whatever the host says, it is one of the three states and the query
+        // returned rather than blowing up on a missing bus / API.
+        assert!(matches!(
+            prefs.screen_reader,
+            ScreenReaderState::Unknown | ScreenReaderState::Inactive | ScreenReaderState::Active
+        ));
+    }
+
+    #[test]
+    fn preferences_compare_on_the_screen_reader_too() {
+        // `refresh_accessibility_preferences` early-returns on `==`, so a
+        // screen reader starting or stopping must count as a change or the
+        // refresh would swallow it.
+        let a = AccessibilityPreferences::default();
+        let b = AccessibilityPreferences {
+            screen_reader: ScreenReaderState::Active,
+            ..AccessibilityPreferences::default()
+        };
+        assert_ne!(a, b);
     }
 }

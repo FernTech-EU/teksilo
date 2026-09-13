@@ -64,6 +64,14 @@ the column *count* from the width and lets the height run free (a
 `ScrollArea` absorbs it). No CSS `column-fill` mode does that, so don't read
 this as a CSS multicol port.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ColumnFlow at Touch density](img/column_flow-touch.png)
+
 ## Builder methods at a glance
 
 `min_column_width`, `max_column_width`, `max_columns`, `column_spacing`, `item_spacing`, `alignment`, `column_rule`, `semantic_list`, `add_child`, `child`, `children`, `child_opt`, `column_count_signal`

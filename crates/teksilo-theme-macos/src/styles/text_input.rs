@@ -35,17 +35,18 @@
 //! past the control height and stops lining up with the button beside it.
 //! The height comes from the `MinSize` floor instead.
 
-use teksilo_canvas::{Canvas, Rect, SizeProposal};
+use teksilo_canvas::{Canvas, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{density_min_size, spacing};
 use teksilo_core::styles::{
     TextInputStyle, TextInputStyleConfig, TextInputValidationLevel, TextInputVariant,
 };
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, TargetAxes};
 use teksilo_widgets::primitives::{MinSize, Padding, ZStack};
 
 use crate::palette::MacOsPalette;
@@ -68,6 +69,8 @@ impl TextInputStyle for MacOsTextInputStyle {
         if cfg.variant == TextInputVariant::Bare {
             return cfg.editor;
         }
+        let input = ctx.theme().input;
+        let tokens = &input;
 
         let chrome = ctx.add(MacOsFieldChrome {
             is_focused: cfg.is_focused.clone(),
@@ -76,9 +79,17 @@ impl TextInputStyle for MacOsTextInputStyle {
             variant: cfg.variant,
         });
         // Horizontal only — see the module doc.
-        let padded = ctx.add(Padding::new(0.0, PADDING_H, 0.0, PADDING_H).child_id(cfg.editor));
+        let pad_h = spacing(PADDING_H, tokens);
+        let padded = ctx.add(Padding::new(0.0, pad_h, 0.0, pad_h).child_id(cfg.editor));
         let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
-        ctx.add(MinSize::new(0.0, MACOS_CONTROL_HEIGHT).child_id(stack))
+        // See `styles::button` — the same 22 → 24 dp floor, for the same
+        // reason: a `MinSize` is a hit box, and the floor governs hit boxes.
+        let min = density_min_size(
+            Size::new(0.0, MACOS_CONTROL_HEIGHT),
+            TargetAxes::HEIGHT,
+            tokens,
+        );
+        ctx.add(MinSize::new(0.0, min.height).child_id(stack))
     }
 }
 

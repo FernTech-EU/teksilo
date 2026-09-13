@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+use crate::pointer::touch_action::TouchAction;
 use crate::widget_id::WidgetId;
 
 use super::CursorIcon;
@@ -72,6 +73,19 @@ pub struct EventContext<'ops> {
     /// reusable tooltip surface) — the symmetric companion to
     /// [`cancel_delayed_overlay`](EventContext::cancel_delayed_overlay).
     pub(crate) overlay_content_dismissals: Vec<crate::widget_id::WidgetId>,
+    /// Overlay requests that name a z-band other than the default. Kept apart
+    /// from [`overlay_requests`](Self::overlay_requests) rather than carried on
+    /// `OverlayRequest` itself: the band is a property of the *show*, not of
+    /// the request, and every existing construction site of the struct would
+    /// otherwise have to name it.
+    pub(crate) overlay_band_requests:
+        Vec<(crate::overlay::OverlayRequest, crate::overlay::OverlayBand)>,
+    /// New placements for overlays named by their content root. A
+    /// caret-anchored overlay has to be re-placed as the caret moves, and
+    /// `position_overlays` re-reads the placement it was shown with — so
+    /// without this an affordance follows nothing.
+    pub(crate) overlay_placement_updates:
+        Vec<(crate::widget_id::WidgetId, crate::overlay::OverlayPlacement)>,
     /// Overlay ids whose `auto_dismiss_after` timer should be paused
     /// or resumed after the handler returns (`true` = pause, `false`
     /// = resume). Drained by `WidgetTree::collect_from_ctx` against
@@ -86,8 +100,42 @@ pub struct EventContext<'ops> {
     /// last setter wins. `None` falls through to draining the
     /// per-id `overlay_dismissals` vec instead.
     pub(crate) dismiss_scope: Option<DismissScope>,
-    /// Request to capture or release the pointer.
-    pub(crate) pointer_capture: Option<bool>,
+    /// Request to capture (`true`) or release (`false`) a pointer, and which
+    /// one. `None` for the pointer means the one whose sample this handler is
+    /// serving — the default, and what every pre-multi-touch call site means.
+    pub(crate) pointer_capture: Option<(Option<crate::pointer::PointerId>, bool)>,
+    /// The widget currently holding the capture of the pointer being
+    /// dispatched, as the tree knew it when this context was made. Read by
+    /// [`owns_pointer`](EventContext::owns_pointer).
+    pub(crate) pointer_captor: Option<WidgetId>,
+    /// Whether the capture request above came from a **widget handler** rather
+    /// than from framework plumbing.
+    ///
+    /// The distinction is the whole of A4's "explicit capture is an
+    /// arbitration act": the gesture arena and the drag pipeline both capture
+    /// the pointer for their own bookkeeping, and neither is a widget staking
+    /// a claim. Only a `capture_pointer()` written in a handler enrols its
+    /// caller as a [`MemberRole::RawDrag`](crate::gesture::MemberRole::RawDrag)
+    /// competitor.
+    pub(crate) explicit_capture: bool,
+    /// A recognizer on this node produced a gesture that **owns the rest of
+    /// the press** — a drag or a swipe, as opposed to a tap, which completes
+    /// the press rather than claiming it. Set by `dispatch_recognized_gesture`
+    /// and read by `collect_from_ctx`, which decides the pointer's sequence in
+    /// the recognizer's favour.
+    pub(crate) recognized_owning_gesture: bool,
+    /// Arbitration acts the handler performed on the sequence owning the
+    /// pointer it is serving, in the order it performed them. Applied by
+    /// `WidgetTree::collect_from_ctx` against that sequence.
+    pub(crate) gesture_acts: Vec<GestureAct>,
+    /// The handler asked for its pointer's whole interaction to be revoked.
+    /// Queued by `WidgetTree::collect_from_ctx` onto the cancel funnel, so it
+    /// runs after this dispatch rather than under it. Last reason wins.
+    pub(crate) cancel_pointer_request: Option<crate::pointer::CancelReason>,
+    /// The node whose handler is running, when the dispatcher knows it.
+    /// `None` for a context made outside per-node dispatch (a gesture timer, a
+    /// key-capture callback, an async completion).
+    pub(crate) dispatch_node: Option<WidgetId>,
     /// Delayed overlay requests (request, delay, optional focus target,
     /// whether to dismiss sibling overlays when it finally shows).
     pub(crate) delayed_overlay_requests: Vec<(
@@ -278,6 +326,12 @@ pub struct EventContext<'ops> {
     /// composing widget that restructured its subtree in a way that changes the AT tree
     /// (relayout alone no longer re-walks AT).
     pub(crate) request_a11y_update: bool,
+    /// Set by [`request_soft_keyboard`](EventContext::request_soft_keyboard);
+    /// drained in `collect_from_ctx` onto the tree, from where the app layer
+    /// takes it once per dispatch — after the IME-allowance reconcile, which
+    /// is the only place that knows whether re-asserting would cancel a live
+    /// composition.
+    pub(crate) soft_keyboard_request: Option<bool>,
     /// Messages queued by [`announce`](EventContext::announce) /
     /// [`announce_with`](EventContext::announce_with), drained into the tree's
     /// own live regions by `collect_from_ctx`. See [`crate::announcer`].
@@ -290,11 +344,46 @@ pub struct EventContext<'ops> {
     /// must be read here rather than captured at `build()` time.
     /// Defaults to `LeftToRight` for hand-constructed (test) contexts.
     pub(crate) layout_direction: crate::environment::LayoutDirection,
+    /// What the tree knows about the sample being dispatched: which pointer
+    /// produced it, where it was, and — for a scroll — its phase and source.
+    /// Snapshotted by `make_event_context` from the tree's in-flight sample.
+    /// Holds its default (a mouse at the epoch) for hand-constructed contexts
+    /// and for handlers run outside a pointer dispatch (a timer, an
+    /// accessibility action).
+    pub(crate) input: crate::pointer::InputSnapshot,
+    /// The frozen [`TouchAction`] for the gesture being handled. Defaults to
+    /// [`TouchAction::AUTO`] for a hand-constructed context and for every
+    /// handler today, since no dispatch path populates this yet — see
+    /// [`touch_action`](EventContext::touch_action) and
+    /// `crate::pointer::touch_action`.
+    pub(crate) touch_action: TouchAction,
+    /// The framework press held by the pointer being dispatched, as the router
+    /// tracks it: `(inside, pending)`. `None` when that pointer holds no press
+    /// — every handler outside a press, and every hand-constructed context.
+    /// Read by [`is_pressed`](EventContext::is_pressed) and its two siblings.
+    pub(crate) press: Option<(bool, bool)>,
     /// Debug-only WCAG 3.2.1 guard: `Some(flag)` where `flag` is set while a
     /// focus-change dispatch is running. `open_window` / `focus_window` warn if
     /// invoked while it reads `true` (a focus handler changing context). `None`
     /// for hand-constructed (test) contexts.
     pub(crate) in_focus_dispatch: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+}
+
+/// One arbitration act a handler performed on its pointer's sequence.
+///
+/// Queued on the context and applied in order by
+/// `WidgetTree::collect_from_ctx`, so a handler that claims and then rejects
+/// leaves the sequence in the state its last word describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GestureAct {
+    /// [`EventContext::claim_gesture`].
+    Claim,
+    /// [`EventContext::reject_gesture`].
+    Reject,
+    /// [`EventContext::hold_gesture`].
+    Hold,
+    /// [`EventContext::release_gesture`].
+    Release,
 }
 
 /// Deferred edit to the tree's shortcut registry, queued on an
@@ -378,9 +467,13 @@ impl<'ops> EventContext<'ops> {
             overlay_requests: Vec::new(),
             overlay_dismissals: Vec::new(),
             overlay_content_dismissals: Vec::new(),
+            overlay_band_requests: Vec::new(),
+            overlay_placement_updates: Vec::new(),
             overlay_pause_requests: Vec::new(),
             dismiss_scope: None,
             pointer_capture: None,
+            pointer_captor: None,
+            dispatch_node: None,
             delayed_overlay_requests: Vec::new(),
             timed_overlay_requests: Vec::new(),
             reveal_overlay_requests: Vec::new(),
@@ -411,6 +504,7 @@ impl<'ops> EventContext<'ops> {
             close_window_requested: false,
             force_close_requested: false,
             request_a11y_update: false,
+            soft_keyboard_request: None,
             announcements: Vec::new(),
             window_ops: None,
             current_window: None,
@@ -420,8 +514,144 @@ impl<'ops> EventContext<'ops> {
             overlay_bounds_snapshot: Vec::new(),
             focused_widget: None,
             layout_direction: crate::environment::LayoutDirection::LeftToRight,
+            input: crate::pointer::InputSnapshot::default(),
+            touch_action: TouchAction::AUTO,
+            press: None,
             in_focus_dispatch: None,
+            explicit_capture: false,
+            recognized_owning_gesture: false,
+            gesture_acts: Vec::new(),
+            cancel_pointer_request: None,
         }
+    }
+
+    /// Record the [`TouchAction`] frozen at press for the sequence owning the
+    /// pointer being dispatched. Called by `make_event_context`.
+    pub(crate) fn with_touch_action(mut self, action: TouchAction) -> Self {
+        self.touch_action = action;
+        self
+    }
+
+    /// Record the framework press held by the pointer being dispatched, as
+    /// `(inside, pending)`. Called by `make_event_context`.
+    pub(crate) fn with_press(mut self, press: Option<(bool, bool)>) -> Self {
+        self.press = press;
+        self
+    }
+
+    /// Whether the pointer being dispatched holds a press whose visual is
+    /// showing — inside its tap boundary and past any press-feedback delay.
+    ///
+    /// The framework already drives the pressed node's own
+    /// [`pressed_signal`](crate::BuildContext::pressed_signal) from the same
+    /// state; this is for a handler that has to *branch* on the press rather
+    /// than paint it. `false` outside a press.
+    pub fn is_pressed(&self) -> bool {
+        matches!(self.press, Some((true, false)))
+    }
+
+    /// Whether the pointer being dispatched holds a press that has not left
+    /// its tap boundary. Unlike [`is_pressed`](Self::is_pressed) this is still
+    /// true during the press-feedback delay: the press is real, only its
+    /// visual is being withheld.
+    pub fn press_is_inside(&self) -> bool {
+        matches!(self.press, Some((true, _)))
+    }
+
+    /// Whether the pointer being dispatched holds a press whose feedback delay
+    /// has not elapsed — the press is inside a pan claimant and the framework
+    /// is waiting to see whether it becomes a scroll.
+    pub fn press_pending(&self) -> bool {
+        matches!(self.press, Some((_, true)))
+    }
+
+    /// Record what the tree knows about the sample being dispatched. Called by
+    /// `make_event_context` once per event batch.
+    pub(crate) fn with_input_snapshot(mut self, input: crate::pointer::InputSnapshot) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// Record who holds the capture of the pointer being dispatched, so
+    /// [`owns_pointer`](Self::owns_pointer) can answer without a tree lookup.
+    pub(crate) fn with_pointer_captor(mut self, captor: Option<WidgetId>) -> Self {
+        self.pointer_captor = captor;
+        self
+    }
+
+    /// Record which node's handler is about to run.
+    pub(crate) fn with_dispatch_node(mut self, node: WidgetId) -> Self {
+        self.dispatch_node = Some(node);
+        self
+    }
+
+    /// The pointer that produced the event being handled.
+    ///
+    /// Two dispatches have a pointer without having a sample, and both report
+    /// it: a gesture the timer recognised — a hold — reports the **contact that
+    /// held**, and a drag-and-drop handler (`on_drag_hover` / `on_drag_tick` /
+    /// `on_drag_leave` / `on_drop`) reports the pointer **that started the
+    /// drag**, which is what makes it right inside a tick fired from a layout
+    /// pass or an OS drag phase delivered from a platform thread. Outside any
+    /// pointer, scroll, gesture or drag dispatch — an assistive-technology
+    /// action, a hand-constructed test context — this is the mouse at the tree
+    /// epoch, which is the same answer every such handler got before pointers
+    /// were distinguishable.
+    pub fn pointer(&self) -> crate::pointer::PointerInfo {
+        self.input.pointer
+    }
+
+    /// What kind of device is pointing: mouse, finger, stylus.
+    ///
+    /// The one question most handlers actually need — it is what decides
+    /// whether a hover affordance is reachable, whether a target needs slop,
+    /// and which gesture profile governs.
+    pub fn pointer_kind(&self) -> teksilo_tokens::PointerKind {
+        self.input.pointer.kind
+    }
+
+    /// Where the pointer was, in window-logical coordinates, when the event
+    /// being handled was produced.
+    ///
+    /// `None` for an event that carries no position — a keyboard-driven
+    /// scroll, a wheel notch (which routes by hover rather than by position),
+    /// anything dispatched outside a pointer sample. Distinct from
+    /// [`tree_pointer_position`](Self::tree_pointer_position), which reports
+    /// where the pointer is *at this instant* regardless of what is being
+    /// dispatched.
+    pub fn pointer_position(&self) -> Option<teksilo_canvas::Point> {
+        self.input.position
+    }
+
+    /// Where in a continuous scroll gesture the event being handled sits.
+    ///
+    /// [`ScrollPhase::Discrete`](crate::pointer::ScrollPhase::Discrete) — a
+    /// self-contained wheel notch — for everything that is not a phased
+    /// gesture, which is every scroll Teksilo produced before the touch
+    /// programme.
+    pub fn scroll_phase(&self) -> crate::pointer::ScrollPhase {
+        self.input.scroll_phase
+    }
+
+    /// What produced the scroll being handled: a notched wheel, a precision
+    /// trackpad, a synthesised touch pan, or the app itself.
+    pub fn scroll_source(&self) -> crate::pointer::ScrollSource {
+        self.input.scroll_source
+    }
+
+    /// The [`TouchAction`] governing the gesture being handled.
+    ///
+    /// The value is **frozen at press** for the whole gesture's lifetime: the
+    /// router computes it once, from `WidgetTree::effective_touch_action` of
+    /// the pressed target, and stores it on that pointer's
+    /// [`PointerSequence`](crate::gesture::PointerSequence), so a handler never
+    /// re-reads a subtree that may have rebuilt mid-gesture.
+    ///
+    /// [`TouchAction::AUTO`] — the neutral value — outside a press, and for a
+    /// hand-constructed context. A mouse never consults this at all. See
+    /// `crate::pointer::touch_action`.
+    pub fn touch_action(&self) -> TouchAction {
+        self.touch_action
     }
 
     /// Snapshot the hosting tree's layout direction. Called by
@@ -1057,6 +1287,51 @@ impl<'ops> EventContext<'ops> {
         self.request_a11y_update = true;
     }
 
+    /// Ask the platform to raise its on-screen keyboard.
+    ///
+    /// For the case the desktop convention has no answer for: a *finger*
+    /// landing in a text field, where there is no physical keyboard and no
+    /// focus change the accessibility layer would notice on its own.
+    ///
+    /// The request is honoured **only where it can do no harm**. Where the
+    /// platform's keyboard follows the framework's IME-allowance reconcile
+    /// ([`SoftKeyboardSupport::ViaAccessibility`](crate::window::SoftKeyboardSupport::ViaAccessibility)),
+    /// the request resolves to nothing — always, not merely while a composition
+    /// happens to be live. That reconcile *is* the request, and the only thing
+    /// an explicit ask could add is a re-assertion of IME allowance, which is
+    /// what cancels a composition mid-word. Nothing on this path calls
+    /// `set_ime_allowed`, and that is what makes placing a caret with a finger
+    /// mid-composition safe. Where the framework has no keyboard request to
+    /// send at all the request is dropped; ask
+    /// [`soft_keyboard_support`](Self::soft_keyboard_support) first if the
+    /// widget needs to offer a fallback.
+    pub fn request_soft_keyboard(&mut self) {
+        self.soft_keyboard_request = Some(true);
+    }
+
+    /// Ask the platform to dismiss its on-screen keyboard.
+    ///
+    /// Only a platform reporting
+    /// [`SoftKeyboardSupport::Explicit`](crate::window::SoftKeyboardSupport::Explicit)
+    /// can honour this; elsewhere there is no dismiss request to send, and a
+    /// keyboard that rose on the IME enable goes away on the matching disable
+    /// when focus leaves the text surface.
+    pub fn dismiss_soft_keyboard(&mut self) {
+        self.soft_keyboard_request = Some(false);
+    }
+
+    /// What the host platform can do about an on-screen keyboard.
+    ///
+    /// [`SoftKeyboardSupport::None`](crate::window::SoftKeyboardSupport::None)
+    /// on a standalone tree and on every platform the framework has no keyboard
+    /// request to send on — which, on the desktop, is most of them.
+    pub fn soft_keyboard_support(&self) -> crate::window::SoftKeyboardSupport {
+        self.window_ops
+            .as_deref()
+            .map(|ops| ops.soft_keyboard_support())
+            .unwrap_or_default()
+    }
+
     /// Speak `message` to the screen reader, politely.
     ///
     /// For anything the user needs told that is not the name of a widget: a
@@ -1099,6 +1374,41 @@ impl<'ops> EventContext<'ops> {
     /// Show an overlay (tooltip, menu, popover).
     pub fn show_overlay(&mut self, request: crate::overlay::OverlayRequest) {
         self.overlay_requests.push(request);
+    }
+
+    /// Show an overlay in an explicit z-band.
+    ///
+    /// [`show_overlay`](Self::show_overlay) is this with
+    /// [`Standard`](crate::overlay::OverlayBand::Standard). The other band is
+    /// for the touch text affordances, which must render above the editor's
+    /// `clips_children` ancestor, below every menu, and outside the
+    /// outside-press dismissal that every caret-moving tap would otherwise
+    /// trigger. Their lifetime is the controller's — see
+    /// [`TouchSelection::dismiss`](crate::text_touch::TouchSelection::dismiss).
+    ///
+    /// Showing content that is already up is a no-op, so a host may call this
+    /// on every raise without tracking whether it has.
+    pub fn show_overlay_in_band(
+        &mut self,
+        request: crate::overlay::OverlayRequest,
+        band: crate::overlay::OverlayBand,
+    ) {
+        self.overlay_band_requests.push((request, band));
+    }
+
+    /// Re-place the currently-shown overlay whose content root is `content_id`.
+    ///
+    /// Content-keyed for the same reason
+    /// [`dismiss_overlay_by_content`](Self::dismiss_overlay_by_content) is:
+    /// [`show_overlay`](Self::show_overlay) returns nothing, so a handler
+    /// cannot learn the [`OverlayId`](crate::overlay::OverlayId) it created. A
+    /// no-op when no overlay is showing that content.
+    pub fn update_overlay_placement_by_content(
+        &mut self,
+        content_id: crate::widget_id::WidgetId,
+        placement: crate::overlay::OverlayPlacement,
+    ) {
+        self.overlay_placement_updates.push((content_id, placement));
     }
 
     /// Show an overlay whose reveal/dismiss is animated by a
@@ -1563,17 +1873,118 @@ impl<'ops> EventContext<'ops> {
         self.safe_region_arm_requests.push(content_id);
     }
 
-    /// Capture the pointer: all subsequent `PointerMove` and `PointerUp`
-    /// events will be routed to the capturing widget until the capture is
-    /// released. Use this when starting a drag operation.
+    /// Capture **the pointer this handler is serving**: its subsequent
+    /// `PointerMove` and `PointerUp` are routed to this widget regardless of
+    /// hit test, until the capture is released.
+    ///
+    /// Capture is per pointer. Two fingers pressing two widgets hold two
+    /// independent captures, and each is released only by its own Up or
+    /// Cancel — so a second contact lifting can no longer steal the first
+    /// one's stream. A mouse call site is unaffected: there is one mouse, and
+    /// this captures it.
+    /// **Also an arbitration act.** Taking the pointer from an undecided
+    /// [`PointerSequence`](crate::gesture::PointerSequence) enrols this widget
+    /// as a [`MemberRole::RawDrag`](crate::gesture::MemberRole::RawDrag)
+    /// competitor, and for a precise pointer with no eligible pan competitor
+    /// it decides the sequence outright — which is what makes the splitter
+    /// handle, the dock resize handle and the table column grip (all of which
+    /// answer `Ignored` from `on_pointer_event` and work from `PointerMove`
+    /// with no recognizer at all) first-class competitors rather than widgets
+    /// the arbitration cannot see.
     pub fn capture_pointer(&mut self) {
-        self.pointer_capture = Some(true);
+        self.pointer_capture = Some((None, true));
+        self.explicit_capture = true;
     }
 
-    /// Release a previously captured pointer. Pointer events resume normal
-    /// hit-test dispatch.
+    /// Capture a *named* pointer, for a handler driving a pointer other than
+    /// the one whose sample it is serving.
+    pub fn capture_pointer_id(&mut self, pointer: crate::pointer::PointerId) {
+        self.pointer_capture = Some((Some(pointer), true));
+        self.explicit_capture = true;
+    }
+
+    /// Capture the pointer as **framework plumbing**, without staking an
+    /// arbitration claim.
+    ///
+    /// The gesture arena takes the pointer for the Down..Up window so a
+    /// recognizer keeps seeing moves that leave the widget's bounds, and the
+    /// drag pipeline takes it for the life of a drag. Neither is a widget
+    /// saying "this press is mine"; routing them through the public
+    /// [`capture_pointer`](Self::capture_pointer) would enrol every
+    /// arena-bearing node as a `RawDrag` member and decide every mouse
+    /// sequence at press.
+    pub(crate) fn capture_pointer_implicit(&mut self) {
+        self.pointer_capture = Some((None, true));
+    }
+
+    /// Claim the pointer sequence for the widget whose handler is running:
+    /// arbitration ends, every other competitor is cancelled.
+    ///
+    /// The explicit form of what a recognizer does when it recognizes. Use it
+    /// from an application recognizer that decides by its own rules.
+    pub fn claim_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Claim);
+    }
+
+    /// Withdraw the widget whose handler is running from the sequence. It can
+    /// no longer win this press; its peers carry on.
+    pub fn reject_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Reject);
+    }
+
+    /// Defer this widget's own decision without withdrawing: no peer may win
+    /// while a member is holding.
+    ///
+    /// **The framework never holds.** This exists for an application
+    /// recognizer awaiting an answer it does not have yet (a hit test against
+    /// an off-thread model, a network round trip). The hold auto-releases at
+    /// [`GestureProfile::max_hold`](teksilo_tokens::GestureProfile::max_hold)
+    /// — 250 ms — so a holder that never answers cannot strand the press.
+    pub fn hold_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Hold);
+    }
+
+    /// End this widget's hold, putting it back in the running.
+    pub fn release_gesture(&mut self) {
+        self.gesture_acts.push(GestureAct::Release);
+    }
+
+    /// Revoke the whole interaction of the pointer this handler is serving,
+    /// for `reason`.
+    ///
+    /// The widget's own way into the cancel funnel, for a widget that knows
+    /// the interaction can no longer mean anything — the document under a text
+    /// drag was reloaded, the row being reordered was deleted by a peer. Every
+    /// competitor is cancelled, the capture is given back, and a
+    /// [`PointerCancel`](crate::event::WidgetEvent::PointerCancel) is
+    /// delivered, all **after** this handler returns: a cancel taken inline
+    /// would unwind the very sample the handler is standing on.
+    ///
+    /// Distinct from [`reject_gesture`](Self::reject_gesture), which withdraws
+    /// only *this* widget and lets its peers carry on with a pointer that is
+    /// still perfectly alive.
+    pub fn cancel_pointer_sequence(&mut self, reason: crate::pointer::CancelReason) {
+        self.cancel_pointer_request = Some(reason);
+    }
+
+    /// Release the capture of the pointer this handler is serving. Its events
+    /// resume normal hit-test dispatch.
     pub fn release_pointer(&mut self) {
-        self.pointer_capture = Some(false);
+        self.pointer_capture = Some((None, false));
+    }
+
+    /// Whether the widget whose handler is running already holds the capture
+    /// of the pointer it is serving.
+    ///
+    /// `true` also immediately after a [`capture_pointer`](Self::capture_pointer)
+    /// in the same handler, even though the tree does not apply the request
+    /// until the handler returns — asking "do I own this pointer?" after
+    /// claiming it must not answer no.
+    pub fn owns_pointer(&self) -> bool {
+        match self.pointer_capture {
+            Some((None, capture)) => capture,
+            _ => self.dispatch_node.is_some() && self.dispatch_node == self.pointer_captor,
+        }
     }
 
     /// Start a drag-and-drop operation from the given source widget.

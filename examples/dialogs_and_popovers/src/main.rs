@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
+//! Dialogs & popovers — the overlay presentations, side by side.
+//!
+//! Run with: `cargo run -p dialogs-and-popovers`
+//!
+//! Dialogs open centred and dismiss on Escape or an outside press unless the
+//! severity forbids it; popovers anchor to the control that opened them and
+//! reposition when they would leave the viewport.
+//!
+//! One thing worth knowing about an outside press: it dismisses on the
+//! **release**, and the press that dismissed does not also reach whatever is
+//! beneath it. So dismissing an overlay and activating the control under it are
+//! two presses, on every pointer kind.
+
 use std::time::Duration;
 
 use teksilo::core::WidgetPlacement;

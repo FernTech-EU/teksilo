@@ -13,6 +13,424 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Touch, pen and density
+
+The framework's input model was a mouse: one pointer, always hovering, always
+precise, always present. It is now a pointer model, and a mouse behaves exactly as
+it always has.
+
+- **Touch input, end to end.** A touchscreen's contacts reach widgets as real
+  pointers with their own identities, and a finger scrolls, selects, reorders,
+  edits text, pinches, drags to and from the OS, and reaches a 24 dp target. Each
+  contact gets a fresh identity per press, so an OS that reuses slot numbers cannot
+  make two gestures look like one, and up to a documented cap of simultaneous
+  contacts are tracked at once.
+- **Pen and stylus.** Pressure, tilt, barrel rotation, the eraser end, the barrel
+  button, and proximity as a first-class state — a stylus hovers before it touches.
+  Wayland through `zwp_tablet_v2`, Windows through a `WM_POINTER*` window subclass;
+  no winit upgrade required.
+- **Trackpad gestures.** Pinch, rotate and two-finger scroll reach the widget tree.
+- **`TargetDensity` — Compact, Comfortable and Touch.** One knob resizes every
+  interactive target, gap and padding in the application: 24 / 32 / 44 dp targets,
+  6 / 10 / 16 dp grab handles, spacing ×1.00 / 1.15 / 1.30. Compact is the default
+  and is today's layout unchanged. Set it with `Theme::with_density` or
+  `WidgetTree::set_input_density`; the shipped Material 3, Fluent and macOS presets
+  project their own dimensions onto the ladder rather than inheriting Teksilo's.
+- **A 24 dp conformance floor at every density, never scaled** — WCAG 2.2 SC 2.5.8
+  (level AA). A build-breaking test measures every named widget fixture against it
+  at all three densities.
+- **Three hit mechanisms with disjoint jobs**, so a small control is reachable
+  without being redrawn: `Widget::hit_outset` widens a target for one pointer kind
+  only, `Widget::target_regions` lets a self-painting widget say where its parts
+  are, and a miss-only slop pass re-attributes a near miss for a coarse pointer.
+  None of them moves a painted pixel.
+- **Kinetic scrolling.** A fling coasts and settles on the platform's own curve —
+  Android's `OverScroller` or iOS's bouncing simulation, chosen per host by default
+  — with rubber-band overscroll available per surface. Nine scrollable surfaces
+  adopt it from one implementation.
+- **Touch text editing** in every editing surface: the caret lands on the release,
+  a hold selects the word under the finger, two draggable handles adjust the range,
+  a magnifier shows the text under the handle, and a selection toolbar offers the
+  clipboard. `RichTextEditor`, `CodeEditor`, `PlainTextEditor`, `LogView`,
+  `TextInput`, `PasswordField`, `SearchField`, `SpinBox` and the date/time family.
+- **A hold is a route.** Where a widget installs no long-press handler of its own,
+  the tree resolves a hold to the node's context menu, else its tooltip, else
+  nothing — so a finger reaches both affordances that were previously mouse-only.
+  `LongPressRole` overrides the choice per subtree.
+- **`touch_action` and `pan_claim` node declarations**, the CSS `touch-action`
+  model: a subtree can forbid panning or pinching over itself, and a scrollable
+  declares which axes it claims. A press freezes the effective value, so nothing
+  a widget does mid-gesture can change what that gesture was allowed to become.
+- **A runtime kill switch.** With `InputTokens::touch_enabled` off, the platform
+  translator drops touch input and the router installs no touch-only recognizers —
+  a mouse-only fallback with no rebuild of the binary.
+- **Input tracing.** `TEKSILO_TRACE_INPUT=samples|gestures|all` prints every
+  sample, every arbitration decision and every cancellation, guarded so that a
+  normal run formats nothing.
+- **`examples/touch_playground`** — a live pointer inspector (identity, kind,
+  primary flag, pressure, tilt, twist, contact patch, speed, the frozen touch
+  action, the press and the capture), five arbitration scenarios each naming which
+  contender won the press, a density toggle, an editable kinetic-constants panel,
+  and a touch-text surface.
+- **A Touch tab in `examples/widget_catalog`**, and `--density compact|comfortable|touch`
+  on the catalog itself.
+- **[docs/touch-verification.md](docs/touch-verification.md)** — the hardware
+  procedure, and [its sign-off sheet](docs/touch-verification-signoff.md).
+
+#### Automation
+
+- **An agent can drive touch, a stylus and two contacts.** New operations:
+  a whole multi-touch sequence in one call (reporting the arbitration after every
+  step), a two-finger pinch, a fling described in simulated time, a long press
+  held for the active profile's own threshold, a pointer cancelled the way the
+  system cancels one, a query of every live pointer with its capture and
+  arbitration state, and a density switch. `inject_pointer`, `inject_key` and
+  `type_text` take a `command` modifier beside `ctrl`, because a chord declared
+  `Ctrl+S` resolves to ⌘S on macOS.
+
+#### Accessibility
+
+- **The target-size gate measures every shipped preset**, not the default theme
+  alone: Int UI, macOS, Fluent and Material 3, each at all three densities, with
+  light and dark compared for identical geometry. The fixtures moved into a
+  crate the theme crates can reach, so a preset is audited by the same 68
+  fixtures the default theme is.
+
+#### Previewer
+
+- **`--export-docs` renders at a chosen density**: `--density=compact,touch`
+  writes `docs/widgets/img/<slug>-touch.png` beside the canonical image, and a
+  catalog page grows a `## Density` section when one exists. Compact stays
+  canonical and keeps every existing filename, so nothing committed moves.
+- `teksilo_preview::PreviewPass` — the density a preview renders at, and the
+  image-naming rule that follows from it.
+
+#### Documentation
+
+- **`docs/porting-widgets-to-the-pointer-model.md`** — the contract for moving a
+  widget onto the pointer model, as numbered clauses, each stating the rule, how
+  to comply, and what checks it.
+- Documented constants are asserted against the pages that document them. The
+  density ladder, all three gesture profiles and the kinetic constants are read
+  back from their own tables by a test, so a number lives in one place.
+
+### Changed
+
+#### Core
+
+**The pointer-model behaviour changes.** Each is a token or a knob an application
+can override, and none of them changes what a mouse does.
+
+- **A mouse drag never pans.** Dragging the content of a scrollable surface
+  scrolls it only for a touch or a stylus; a mouse scrolls with its wheel, exactly
+  as before. Widen it per surface with `ScrollHandlingOptions::pan_devices`.
+- **A touch or pen drag of an *item* waits for a long press.** Reordering a list
+  row, a grid tile, a tab or a table column with a finger means holding it first,
+  because the surface underneath has first refusal on a direct pointer's press. A
+  mouse still drags from the first few pixels. `DragActivation` on the node decides;
+  `Auto` is the default and resolves per pointer kind.
+- **A touch or pen press commits on the release.** Selection, activation and caret
+  placement happen when the contact lifts, not when it lands — so a press that
+  slides off its target commits nothing. A mouse commits on the press, unchanged.
+- **A press outside an overlay dismisses it on the release, and the dismissing
+  press does not reach what is under it.** Dismissing a menu and activating the
+  control beneath it are now two presses, on every pointer kind.
+- **`on_hover` never fires for a touch contact,** and neither do `hover_within`
+  and the hovered signals. A contact does not hover — that is what a contact is —
+  so an affordance revealed only on hover is unreachable with a finger.
+  `InputTokens::reveal` promotes those affordances to always-visible at the Touch
+  density, and the tree's hold route reaches a tooltip regardless.
+- **A pen in proximity hovers, and hover belongs to one pointer.** On a machine
+  with both a mouse and a stylus, each one's hover follows its own device instead
+  of a single shared "hovered" notion.
+- **`advance_time` ticks gesture recognizers.** A test that advances the virtual
+  clock now sees a long press ripen, a fling coast and a hold dispatch; the clock
+  is one axis for animation, gestures and kinetics rather than three.
+- **`WidgetEvent::PointerDown`, `PointerUp`, `PointerMove`, `PointerEnter` and
+  `PointerLeave` now carry `pointer: PointerInfo`**, so a handler can tell a
+  finger from a stylus from a mouse without reaching for the context.
+  `PointerEnter` and `PointerLeave` become struct variants; a pattern that named
+  them bare now needs `{ .. }`.
+- **`PointerMove` also carries `modifiers: Modifiers`.** A drag reads Shift and
+  Ctrl from the move rather than from the press, so a modifier pressed mid-drag
+  reaches the widget.
+- New constructors keep a mouse-describing call site to one line and default the
+  pointer to `PointerInfo::mouse` at the epoch: `WidgetEvent::pointer_move_with`,
+  `pointer_enter`, `pointer_leave`, beside the existing `pointer_down`,
+  `pointer_up`, `pointer_move`.
+- **`WidgetEvent::Scroll::position` and `PointerCancel::position` are renamed
+  `window_position`.** Both stay in window-logical coordinates — the router
+  routes by the first, and the kinetic tracker behind a pan follows the pointer
+  rather than the widget — and they are the only positional fields a handler
+  receives that are not localised to it. The frame is now in the name, so a
+  reader that needs content coordinates is told to convert at every use.
+- **`GestureEvent::PinchChanged` carries deltas, and says so.** `scale` is the
+  factor since the *previous* sample and `rotation` the twist since the previous
+  sample, in radians; fold each in rather than assigning it.
+- **A drag handler is told which device carries the drag at every stage**,
+  including the per-layout tick. Those previously reported the mouse, so a finger
+  never got the wider auto-scroll band.
+- **A coarse pointer's drag preview is placed clear of the contact patch**; a
+  mouse's is unchanged.
+- **The widget under an inbound OS drag revises the OS accept state**, so the
+  cursor no longer promises a drop the target refuses. An OS drag aborted over a
+  second window of the same application tears that window's session down, and a
+  drag exported from a finger on Wayland uses that finger's press serial.
+- **`WindowOps::begin_os_drag` and `ExternalDndGuard::begin_drag` take the
+  device's `PointerKind`**, and both gain `set_drop_accepted`.
+  `ExternalDragEvent` gains a `Cancelled` variant.
+- **`TouchSelection::on_long_press` takes a `pointer: PointerInfo`.** A hold is
+  recognised by a timer, so the context it is dispatched under had no device to
+  report; the holding contact's identity is now an argument.
+- **`WebViewHandle::set_input_passthrough` is a new required trait method**, for
+  out-of-tree backends. `WebViewEvent::EngineFocusChanged` is new.
+- **`MemoryShared` is `#[non_exhaustive]`** and gained four fields.
+- `InspectorState::toggle()` is public. New:
+  `teksilo_widgets::drop_target::{band_depth, region_at_floored, region_rect_floored}`,
+  `styles::recipe_menu_item_style::menu_item_height`.
+
+#### Widgets
+
+- **Nine surfaces pan under a finger** from one implementation: `ScrollArea`, the
+  five data views and the three text surfaces, plus `Terminal` and `SceneView`,
+  which claim their own axes.
+- **The window chrome answers a finger.** A resize strip stays 6 dp of paint and
+  reaches the density's target size for a coarse pointer; a hold on the title bar
+  asks the OS for its window menu where the platform has one.
+- **A `SplitButton` chevron takes a direct pointer's press up to the conformance
+  floor**, borrowing from the action half; a mouse's boundary stays where it is
+  painted.
+- **A `TableView` header cell's filter zone is the density's target size**, and
+  the cell reports its three parts through `Widget::target_regions`.
+- **A `DropTarget`'s edge zones — and a docking pane's five — are floored per
+  axis and capped at a third of the extent.** Not pointer-kind-gated: the acting
+  zone and the painted one must be one rectangle.
+- **List and tree row minimum heights, combo-box dropdown rows, calendar
+  navigation arrows, menu rows and code-editor completion rows follow the
+  density ladder.**
+- **A finger's tap on a `ToolBox` header or a `RadioTile` leaves it untinted**
+  rather than resting hovered.
+- **A toast pauses on a press-and-hold and dismisses on a horizontal swipe** for a
+  coarse pointer, because hover-to-pause is unreachable with a finger.
+- **Every reorder a drag can do, a keyboard and a menu can do too** — WCAG 2.5.7.
+- **`WebView` in the default `Native` input mode** answers a press itself and
+  revokes the pointer's interaction, declares no touch default over its rectangle,
+  and opts out of hit widening; `Transparent` asks the engine to stop taking
+  input. Its subview is mirrored at the intersection with every clipping ancestor,
+  hidden when out of view, and stood down while an interactive overlay covers it.
+  Engine focus moves the toolkit's focus onto the frame.
+- **The debug inspector opens from `InspectorState::toggle()` or a corner-grip
+  hold**, its pressed rows take the density's target size, and it has a Pointers
+  tab listing every pointer declaration in the application's tree.
+- **The widget previewer takes `--density`, switches it live, and its canvas zoom
+  works** (pinch and Ctrl-wheel).
+
+#### Terminal
+
+- **A finger pans the scrollback with a kinetic hand-off**, quantised to lines so
+  a sub-line sample is banked rather than dropped. Double- and triple-tap select
+  the word and the line, a hold opens the terminal's own menu, and selection
+  handles snap to cell boundaries.
+- **A finger is never reported to the child program as a mouse.** Touch reporting
+  is its own policy, separate from the mouse reporting a program requests.
+
+### Fixed
+
+#### Core
+
+- **A two-finger pinch reaches the zoom it asked for instead of running into
+  `max_zoom`.** A spread to twice the starting span now leaves a `SceneView` at
+  exactly twice, whatever the sample rate; before, each sample carried the ratio
+  to the *start* of the gesture and the handler multiplied every one of them in,
+  so a single spread compounded to the product of its intermediate ratios.
+- **A trackpad twist turns content by the angle the user twisted.** One degree of
+  rotation on the trackpad rotated a `SceneView` by one radian — about 57° —
+  because winit reports degrees and the payload is read as radians. The
+  conversion now happens where the incoming unit is known.
+- `GestureEvent::PinchChanged` and `PinchPhase::Changed` now document `scale` and
+  `rotation`: both are deltas against the previous sample, and `rotation` is in
+  radians. Fold each sample in (`zoom *= scale`, `rotation += rotation`) rather
+  than assigning it.
+- **`TouchPinchRecognizer::scale` and `rotation` are renamed
+  `cumulative_scale` and `cumulative_rotation`.** They report the totals since
+  the gesture started, which is not what a `PinchChanged` carries; the names now
+  say which of the two a caller is reading.
+- **A `PointerCancel` for a touch contact reported the mouse, with no position**,
+  so an application branching on the cancelled pointer's kind behaved wrongly.
+- **A container that preserves its children across a rebuild destroyed and rebuilt
+  its whole subtree instead**, whenever any builder method wrapped it. That covers
+  every `Switcher`, `TabWidget`, `SceneView`, `DockingLayout`, `Repeater` and
+  `PopoverWidget` with a handler attached.
+- **A wrapped widget's declared shortcuts never reached the registry**, so they
+  were missing from the rebinding UI as well as from the keyboard; a wrapped widget
+  that opts out of layout memoisation was memoised anyway; a wrapped title bar
+  stopped publishing its OS caption regions — a defect its own documentation had
+  written up as a rule. Wrapped dialog content stopped lending its title to its
+  shell and stopped directing initial focus; the context-menu key opened the
+  view's menu rather than the selected row's; a table read its body to assistive
+  technology before its header; a scene stopped grafting its items into the
+  application's accessibility tree; empty tooltip content still raised a bubble.
+- **A coarser density could lower a grip's reach**: an outset and the miss-only
+  slop pass were combined in the wrong order.
+- **A caret could be left outside a viewport that shrank**; a shrink now records a
+  reveal.
+- **Two overlay-dismissal defects a mouse could feel**, and a hold dispatched
+  under a mouse identity that was never there.
+- **A target-size allow-list entry is held to the floor the audit judged against,
+  not to the generic 24 dp table.** Under a theme raising
+  `InputTokens::min_target_conformance`, a `PinnedDp::ClearsFloor` axis excused
+  the very failures the raised floor exists to report.
+  `TargetMeasurement`/`TargetViolation` carry the measured floor as
+  `conformance_floor`, and every consumer reads it instead of re-deriving one.
+
+#### Widgets
+
+- **A Fluent list or tree row can be clicked again.** The preset's selection pill
+  spans the whole row and was hit-tested ahead of the row's contents, so nothing
+  inside a Fluent row — a checkbox, a disclosure arrow, a trailing button — took
+  a press, by mouse or by finger.
+- **A macOS switch and an icon button meet the 24 dp target floor.** Both are
+  drawn at the size the preset asks for, Apple's 22 dp track and the 18 dp
+  compact icon button among them; the node around the chrome is what grew.
+- **Three controls showed no pressed appearance for a pointer at all** — the
+  `ToolBox` header, `RadioTile`, and the calendar's month/year cell, the last only
+  ever writing `false` into its own state.
+- **A declared row height inside the row-metrics dead band was silently refused**,
+  so an exact-height list reported a different total height from a uniform one.
+- **A leaf row in a tree table no longer carries an invisible pointer target.**
+- **The previewer's knob rows were unreachable by any pointer, mouse included**: an
+  infinite height cap inside a scroll area measured `inf` tall, its `y` resolved to
+  `NaN`, and a rectangle containing `NaN` contains no point.
+- **With the debug inspector installed, switching density destroyed the wrapped
+  application's tree.**
+- **Four dimensions a shipped theme sets now reach the screen.** A table header
+  cell pads by the Fluent gutter (12 dp, not 8); a calendar's navigation arrows
+  are drawn the size macOS asks for (20 dp, not 24); a search field's suggestion
+  rows carry the macOS row gutters (8 x 3 dp, not 10 x 4). Each was written on
+  the theme's recipe and discarded, because the widget measured the shipped
+  Int UI constant instead of asking the style. `TableStyle`, `CalendarStyle` and
+  `SearchFieldStyle` now hand the dimension over, and a custom style keeps the
+  ladder it had unless it says otherwise. Int UI at the default density is
+  unchanged.
+- **A theme may draw a control below the 24 dp target floor without costing the
+  app its WCAG 2.2 SC 2.5.8 conformance.** A calendar's navigation arrow keeps
+  whatever size the theme asks for and sits inside a box that reaches the floor,
+  so macOS's 20 dp stepper is drawn at 20 dp and still answers a 24 dp press —
+  from a mouse as much as from a finger. Under Int UI, whose arrow is already
+  the floor, nothing moves at any density.
+
+#### Terminal
+
+- **A terminal placed anywhere but the window's top-left corner accepted no
+  pointer input at all.**
+- **The wheel scrolled the scrollback backwards**, and its report to the child
+  program named cell (0, 0) instead of the cell under the pointer — so a
+  full-screen program that splits its window scrolled the wrong pane.
+- **Dragging a selection handle moved the selection to the neighbouring row.**
+
+#### Previewer
+
+- **The toolbar's Export PNG ignored the live density**, so exporting while the
+  previewer was set to Touch produced a Compact image — over the Compact
+  filename. The density now reaches both the render and the name.
+
+#### Text
+
+- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
+  not in the repository, and because `include_bytes!` resolves at compile time,
+  enabling one was a hard build error — so those five features, both
+  `fonts-all` meta-features, and any `--all-features` build of the workspace
+  had never compiled on any revision. A face is now embedded only if its file
+  is present; enabling a feature without it warns and names the path to drop it
+  at, rather than failing the build.
+- **Dragging the caret handle moves the on-screen keyboard's candidate window
+  with it.** Every editing surface reported the caret's position when a press
+  placed it, and none did when a finger *dragged* it, so composing Japanese,
+  Chinese or Korean after a handle drag put the candidate list at the caret's
+  old position. `RichTextEditor`, `CodeEditor`, `PlainTextEditor`, `TextInput`,
+  `PasswordField`, `SearchField`, `SpinBox` and the date/time family; the
+  assistive-technology route onto the same handle reports it too.
+- **The code editor's gutter returned from inside a clip scope when no text
+  backend was installed**, leaving the render frame unbalanced.
+- **A `PlainTextEditor` could neither replace nor suppress the context menu its
+  documentation offered it**, and the `CodeEditor` family gained the right-click
+  menu it never had.
+- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
+  not in the repository, and because `include_bytes!` resolves at compile time,
+  enabling one was a hard build error — so those five features, both
+  `fonts-all` meta-features, and any `--all-features` build of the workspace
+  had never compiled on any revision. A face is now embedded only if its file
+  is present; enabling a feature without it warns and names the path to drop it
+  at, rather than failing the build.
+
+#### Documentation
+
+- **A `ScrollArea` in the `Thin` scroll-bar mode documented a keyboard route it
+  does not have.** The bar's arrow / `Home` / `End` / `Page` handlers sit on a node
+  that cannot take focus, under every mode — the same limit the
+  `ScrollBarPolicy::AlwaysOff` documentation states from the other side.
+- **`PointerInfo::primary`'s documentation described the wrong one of three
+  similarly-named things.** The field is the W3C *per-kind* flag — a mouse and a
+  first finger are both primary at once on a hybrid machine — and the rule it
+  carried ("exactly one live pointer, a mouse always wins") belongs to the pointer
+  table's own election.
+- **`StandardListItem`'s documentation claimed the row reads its recipe's
+  projected heights.** It projects the module constants instead; those two recipe
+  fields have no reader.
+- **The soft-keyboard documentation claimed a touch-placed caret leaves a stale
+  IME area standing.** Each editing stack reports the area from its own touch path;
+  the unused core method is superseded rather than missing.
+- **Two committed catalog images had gone stale**, one of them contradicting a
+  safety fix: the message-box preview showed **Yes** as the accented default
+  after the widget had switched to **No**, and the colour-picker preview predated
+  the widget growing its HSV row.
+- **Catalog pages linked to rustdoc module pages that do not exist on docs.rs**,
+  because the module is crate-internal; each link now resolves to the nearest
+  published module.
+
+#### teksu
+
+- **`teksu!` bodies could not place `gesture_dead_zone` or `keyboard_capture`
+  before a child**; both failed with "no method named `child`". A compile-time
+  guard now keeps the DSL's builder-method list complete.
+- **31 `teksu!` UI fixtures had never run** — a glob naming a directory that does
+  not exist, which trybuild reports as "no tests enabled yet" and then passes —
+  and one of them was asserting a caret column rustc does not emit.
+- **A bare child in any popover produced the generic error** instead of the slot
+  hint.
+
+### Known limitations
+
+- **The hardware sign-off is not done.** Everything above that a headless Linux
+  host can check is checked by the suite;
+  [docs/touch-verification.md](docs/touch-verification.md) is the procedure for
+  the rest, and its [sign-off sheet](docs/touch-verification-signoff.md) is empty.
+  One question in it can only be answered on a macOS trackpad: whether a positive
+  trackpad rotation delta should be negated at the platform seam.
+- **A running application does not switch density because a finger arrived.**
+  `DensityPolicy::FollowLastPointer` has an ingress and no writer; what a stray
+  tap should cost and when hysteresis commits are unanswered.
+- **Overscroll is published but not painted.** `ScrollableAxes::overscroll`
+  carries the value; nothing renders a stretch or a glow.
+- **A plain `ScrollArea` has no keyboard scroll route.** Assistive technology can
+  scroll it and the data views bring their own key handling, but a keyboard user
+  facing a scroll region whose content holds no focus has none — a pre-existing
+  WCAG 2.1.1 gap, now written down.
+- **A finger cannot drag a window on Wayland.** No protocol for it exists.
+- **The target-size gate is green for three crates' named fixtures**, not for the
+  framework: four crates that own targets have no fixture list, and the lists
+  install one preset.
+- **Reordering a data-view row with a finger is unreliable on short rows.** A
+  deferred drag is revoked if the first sample after the hold leaves the pressed
+  row, and the touch drag slop is wider than a default tree row.
+- **`cargo check --workspace --all-features` does not build on any revision**,
+  including before this release: five of the seven optional fallback font faces
+  are named by the build and were never committed.
+- The full ledger, each entry with its measurement, is
+  [Touch & pen](docs/touch-and-pen.md) §10.
+
 ## [0.9.5] - 2026-09-11
 
 Three main strands: text ranges on every visible label, one chord table for

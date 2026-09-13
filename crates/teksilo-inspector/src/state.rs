@@ -16,7 +16,7 @@ use crate::shell::InspectorShell;
 /// Number of tabs registered by `build_panel` in `shell.rs`. Single
 /// source of truth so persistence can clamp loaded values that would
 /// otherwise leave the panel showing nothing.
-pub(crate) const NUM_TABS: usize = 9;
+pub(crate) const NUM_TABS: usize = 10;
 
 /// How the bounds-overlay layer renders.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,7 +152,8 @@ pub struct InspectorState {
     /// local state so the tab survives panel rebuilds and persists via
     /// `__teksilo_inspector.active_tab`. Indexes the same tab list the
     /// panel registers (Tree / Properties / Accessibility / Theme /
-    /// Locale / Focus / Shortcuts / Overlays / Models — slots 0..9).
+    /// Locale / Focus / Shortcuts / Overlays / Models / Pointers — slots
+    /// `0..NUM_TABS`).
     pub active_tab: Signal<usize>,
     /// Stable [`TabId`](teksilo_widgets::TabId) for each of the
     /// `NUM_TABS` panel tabs, allocated once at construction. The
@@ -247,6 +248,24 @@ pub struct InspectorState {
     /// Key (column-name) of the row the user just right-clicked.
     /// Drives the dynamic menu label, e.g. `Copy "bounds"`.
     pub(crate) properties_context_key: Signal<String>,
+    /// Whether the most recent pointer sample came from a **coarse** device
+    /// (a finger). Mirrored from `WidgetTree::last_pointer_kind_signal` by
+    /// `state::install`'s post-root closure, the same way `hover_id` is.
+    ///
+    /// It gates the long-press grip (see `shell.rs`): F12 is the inspector's
+    /// only gesture-free door, and a tablet has no F12. The grip therefore
+    /// appears once the session has actually seen a finger — so a
+    /// mouse-driven app never grows one, and the bottom-trailing corner it
+    /// reserves is never taken from a user who cannot use it.
+    pub coarse_pointer: Signal<bool>,
+    /// Live pointer rows sampled by the Pointers tab's watch probe. Empty
+    /// unless [`pointer_watch`](Self::pointer_watch) is armed.
+    pub(crate) pointer_rows: Signal<Vec<crate::tabs::pointers::PointerRow>>,
+    /// Whether the Pointers tab's watch probe is armed. While it is, a
+    /// full-window surface takes every pointer event so the tab can report
+    /// live contacts — which is also why it is off by default and named for
+    /// what it costs.
+    pub pointer_watch: Signal<bool>,
 }
 
 /// Default panel height in logical pixels. Used as the initial value
@@ -332,7 +351,29 @@ impl InspectorState {
             properties_dump: Signal::new(String::new()),
             properties_context_value: Signal::new(String::new()),
             properties_context_key: Signal::new(String::new()),
+            coarse_pointer: Signal::new(false),
+            pointer_rows: Signal::new(Vec::new()),
+            pointer_watch: Signal::new(false),
         }
+    }
+
+    /// Flip the panel open or closed.
+    ///
+    /// The public door to the inspector, and the reason it is public: F12 is a
+    /// keyboard chord, and an app running on a touchscreen — or one that has
+    /// bound F12 to something of its own — needs a way in that is its to
+    /// place. Reach the state through `app_state`:
+    ///
+    /// ```ignore
+    /// if let Some(inspector) = ctx.app_state::<InspectorState>() {
+    ///     inspector.toggle();
+    /// }
+    /// ```
+    ///
+    /// The framework's own two doors go through here as well: the F12
+    /// shortcut, and the long-press grip a touch session grows.
+    pub fn toggle(&self) {
+        self.open.set(!self.open.get());
     }
 }
 
@@ -361,7 +402,7 @@ fn initial_open_from_env() -> bool {
 pub(crate) fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     let state = InspectorState::new(initial_open_from_env());
 
-    let toggle_for_post_root = state.open.clone();
+    let state_for_shortcut = state.clone();
     let state_for_post_root = state.clone();
     let persistence_wired = std::rc::Rc::new(std::cell::Cell::new(false));
     let hover_bridge_wired = std::rc::Rc::new(std::cell::Cell::new(false));
@@ -369,13 +410,12 @@ pub(crate) fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     let post_root = DefaultPostRoot::new(move |tree, root_id| {
         // Register F12 toggle. Owner is the user's root widget so the
         // shortcut is automatically removed when the window closes.
-        let toggle = toggle_for_post_root.clone();
+        let toggle = state_for_shortcut.clone();
         let shortcut = Shortcut::new("__teksilo_inspector.toggle")
             .name("Toggle Inspector")
             .primary(KeyStroke::new(Key::F12, Modifiers::empty()))
             .on_activate(move |_ks, _ctx| {
-                let next = !toggle.get();
-                toggle.set(next);
+                toggle.toggle();
                 Intent::new("__teksilo_inspector.toggle")
             })
             .build();
@@ -425,6 +465,22 @@ pub(crate) fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
                 }
             });
             sc_version.attach_keepalive(h);
+
+            let coarse_target = state_for_post_root.coarse_pointer.clone();
+            let kind_signal = tree.last_pointer_kind_signal();
+            let h = kind_signal.observe(move |kind| {
+                let coarse = kind.is_coarse();
+                // Latching: a session that has seen a finger keeps its grip
+                // even while a mouse is being used in the same session. The
+                // alternative — following the last sample — makes the grip
+                // appear and vanish under the user's hand, and a
+                // touchscreen-plus-mouse machine is exactly where the
+                // inspector needs to stay reachable.
+                if coarse && !coarse_target.get() {
+                    coarse_target.set(true);
+                }
+            });
+            kind_signal.attach_keepalive(h);
 
             let ov_target = state_for_post_root.overlay_version.clone();
             let ov_version = tree.overlay_manager().version().clone();

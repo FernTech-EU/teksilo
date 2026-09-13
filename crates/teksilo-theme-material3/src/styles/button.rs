@@ -25,14 +25,23 @@
 use std::collections::HashMap;
 
 use teksilo_canvas::{EdgeInsets, Size};
+use teksilo_core::styles::density::{density_min_size, spacing};
 use teksilo_core::styles::{
     BorderRecipe, ButtonRecipe, ButtonVariant, FillRecipe, PerStateRecipe, RecipeColor, ShapeRecipe,
 };
-use teksilo_tokens::{BorderRole, SurfaceRole, TextRole};
+use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetAxes, TextRole};
 use teksilo_widgets::styles::RecipeButtonStyle;
 
 /// M3 button height (dp).
 const HEIGHT: f32 = 40.0;
+
+/// [`HEIGHT`] raised to the density's `target_size`. Under Material 3 that is
+/// **48 dp** at Touch rather than the generic ladder's 44 (see
+/// [`crate::input_tokens`]); the identity at Compact and Comfortable, both of
+/// which sit below M3's own 40 dp button.
+fn height(tokens: &InputTokens) -> f32 {
+    density_min_size(Size::new(0.0, HEIGHT), TargetAxes::HEIGHT, tokens).height
+}
 /// M3 horizontal padding for container buttons (dp).
 const PADDING_H: f32 = 24.0;
 /// M3 horizontal padding for text buttons (dp).
@@ -41,17 +50,17 @@ const PADDING_H_TEXT: f32 = 16.0;
 const FOCUS_WIDTH: f32 = 3.0;
 
 /// Build the Material 3 `RecipeButtonStyle`.
-pub fn m3_button_style() -> RecipeButtonStyle {
+pub fn m3_button_style(tokens: &InputTokens) -> RecipeButtonStyle {
     let mut recipes = HashMap::new();
-    recipes.insert(ButtonVariant::Filled, filled());
-    recipes.insert(ButtonVariant::Destructive, destructive());
-    recipes.insert(ButtonVariant::Tinted, tonal());
+    recipes.insert(ButtonVariant::Filled, filled(tokens));
+    recipes.insert(ButtonVariant::Destructive, destructive(tokens));
+    recipes.insert(ButtonVariant::Tinted, tonal(tokens));
     // The default variant reads as an M3 outlined button (a clear,
     // medium-emphasis neutral button rather than an invisible text one).
-    recipes.insert(ButtonVariant::Plain, outlined());
-    recipes.insert(ButtonVariant::Outlined, outlined());
-    recipes.insert(ButtonVariant::Ghost, text());
-    recipes.insert(ButtonVariant::Link, text());
+    recipes.insert(ButtonVariant::Plain, outlined(tokens));
+    recipes.insert(ButtonVariant::Outlined, outlined(tokens));
+    recipes.insert(ButtonVariant::Ghost, text(tokens));
+    recipes.insert(ButtonVariant::Link, text(tokens));
 
     // Outlined / text / default buttons read in the accent color (M3);
     // Destructive reads in `OnError` (the M3 on-error color, now a
@@ -71,7 +80,7 @@ pub fn m3_button_style() -> RecipeButtonStyle {
 }
 
 /// Filled (primary) — high emphasis.
-fn filled() -> ButtonRecipe {
+fn filled(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::Pill,
         fill: PerStateRecipe {
@@ -93,13 +102,13 @@ fn filled() -> ButtonRecipe {
         },
         border: PerStateRecipe::uniform(BorderRecipe::none()),
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(PADDING_H, 0.0),
-        min_size: Size::new(0.0, HEIGHT),
+        padding: EdgeInsets::symmetric(spacing(PADDING_H, tokens), 0.0),
+        min_size: Size::new(0.0, height(tokens)),
     }
 }
 
 /// Filled (error) — destructive actions.
-fn destructive() -> ButtonRecipe {
+fn destructive(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::Pill,
         fill: PerStateRecipe {
@@ -113,13 +122,13 @@ fn destructive() -> ButtonRecipe {
         },
         border: PerStateRecipe::uniform(BorderRecipe::none()),
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(PADDING_H, 0.0),
-        min_size: Size::new(0.0, HEIGHT),
+        padding: EdgeInsets::symmetric(spacing(PADDING_H, tokens), 0.0),
+        min_size: Size::new(0.0, height(tokens)),
     }
 }
 
 /// Filled tonal — medium emphasis container.
-fn tonal() -> ButtonRecipe {
+fn tonal(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::Pill,
         fill: PerStateRecipe {
@@ -134,13 +143,13 @@ fn tonal() -> ButtonRecipe {
         },
         border: PerStateRecipe::uniform(BorderRecipe::none()),
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(PADDING_H, 0.0),
-        min_size: Size::new(0.0, HEIGHT),
+        padding: EdgeInsets::symmetric(spacing(PADDING_H, tokens), 0.0),
+        min_size: Size::new(0.0, height(tokens)),
     }
 }
 
 /// Outlined — low/medium emphasis with an outline.
-fn outlined() -> ButtonRecipe {
+fn outlined(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::Pill,
         fill: PerStateRecipe {
@@ -162,13 +171,13 @@ fn outlined() -> ButtonRecipe {
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(PADDING_H, 0.0),
-        min_size: Size::new(0.0, HEIGHT),
+        padding: EdgeInsets::symmetric(spacing(PADDING_H, tokens), 0.0),
+        min_size: Size::new(0.0, height(tokens)),
     }
 }
 
 /// Text — lowest emphasis.
-fn text() -> ButtonRecipe {
+fn text(tokens: &InputTokens) -> ButtonRecipe {
     ButtonRecipe {
         shape: ShapeRecipe::Pill,
         fill: PerStateRecipe {
@@ -189,7 +198,7 @@ fn text() -> ButtonRecipe {
             disabled: None,
         },
         shadow: PerStateRecipe::uniform(None),
-        padding: EdgeInsets::symmetric(PADDING_H_TEXT, 0.0),
-        min_size: Size::new(0.0, HEIGHT),
+        padding: EdgeInsets::symmetric(spacing(PADDING_H_TEXT, tokens), 0.0),
+        min_size: Size::new(0.0, height(tokens)),
     }
 }

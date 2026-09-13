@@ -29,10 +29,12 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::environment::LayoutDirection;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{StandardItemStyle, StandardItemStyleConfig};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, InputTokens, TargetRole};
 use teksilo_widgets::styles::{RecipeStandardItemStyle, StandardItemRecipe};
 
 use crate::shape::{FLUENT_CONTROL_CORNER_RADIUS, FLUENT_FOCUS_RING_WIDTH};
@@ -57,11 +59,18 @@ const _: () = assert!(ROW_HEIGHT < ROW_HEIGHT_TWO_LINE);
 /// The Fluent [`StandardItemRecipe`] — public so an app can tune one
 /// dimension without rebuilding the style.
 pub fn fluent_standard_item_recipe() -> StandardItemRecipe {
+    fluent_standard_item_recipe_for(&InputTokens::default())
+}
+
+/// [`fluent_standard_item_recipe`] resolved against a density's
+/// [`InputTokens`]. `[WinUI]` `ListViewItem` metrics at Compact; the row
+/// heights rise to the density's target size above it.
+pub fn fluent_standard_item_recipe_for(tokens: &InputTokens) -> StandardItemRecipe {
     StandardItemRecipe {
         icon_size: ICON_SIZE,
-        padding_horizontal: 12.0,
-        min_height_single_line: ROW_HEIGHT,
-        min_height_two_line: ROW_HEIGHT_TWO_LINE,
+        padding_horizontal: spacing(12.0, tokens),
+        min_height_single_line: dp(ROW_HEIGHT, TargetRole::Target, tokens),
+        min_height_two_line: dp(ROW_HEIGHT_TWO_LINE, TargetRole::Target, tokens),
         tree_indent_step: 16.0,
         item_corner_radius: FLUENT_CONTROL_CORNER_RADIUS,
         bg_horizontal_inset: 4.0,
@@ -69,7 +78,7 @@ pub fn fluent_standard_item_recipe() -> StandardItemRecipe {
         // The pill replaces the always-on selection outline; see the
         // module doc.
         selection_edge_width: 0.0,
-        ..StandardItemRecipe::default()
+        ..StandardItemRecipe::for_tokens(tokens)
     }
 }
 
@@ -79,17 +88,34 @@ pub struct FluentStandardItemStyle;
 
 impl StandardItemStyle for FluentStandardItemStyle {
     fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
-        let row = RecipeStandardItemStyle::new(fluent_standard_item_recipe()).make_body(cfg, ctx);
-        let pill = ctx.add(FluentSelectionPill {
-            is_selected: cfg.is_selected.clone(),
-            is_disabled: cfg.is_disabled.clone(),
-        });
+        let row = RecipeStandardItemStyle::new(fluent_standard_item_recipe_for(&ctx.theme().input))
+            .make_body(cfg, ctx);
+        let pill = ctx.add(
+            FluentSelectionPill {
+                is_selected: cfg.is_selected.clone(),
+                is_disabled: cfg.is_disabled.clone(),
+            }
+            // The pill spans the whole row and is listed last, so the
+            // reverse-sibling hit walk reaches it first and it would own every
+            // press in the row -- a checkbox in a Fluent list could not be
+            // ticked by a mouse, let alone a finger. `hit_transparent` prunes
+            // the subtree from the walk, so the press falls through to the
+            // delegated row beneath. NOT `event_pass_through`, which keeps the
+            // node in the walk and means something else; and not reordering to
+            // `[pill, row]`, because this pill paints an accent bar OVER the
+            // row and the row's own selection wash would cover it.
+            .hit_transparent(true),
+        );
         ctx.add(FluentRowFrame { row, pill })
     }
 }
 
 /// Stacks the selection pill over the delegated row, stretching **both** to
 /// the frame's bounds.
+///
+/// Painting over the row is what makes the pill the topmost sibling in the hit
+/// walk as well, so the pill declares `hit_transparent` at the point it is
+/// added. Anything else placed over this row owes the same declaration.
 ///
 /// The obvious composition — a `ZStack` — is wrong here, and silently so.
 /// `ZStack::layout_response` measures its children at an *unspecified* width

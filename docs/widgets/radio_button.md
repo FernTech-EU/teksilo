@@ -14,6 +14,13 @@ indices into the caller's choice list. Wrap related buttons in a
 `RadioGroup` to provide the AT "2 of 3"
 positional announcement required by ARIA.
 
+## Touch and pen
+
+Same shape as `Checkbox`: the pressed state is the
+framework's (`docs/touch-and-pen.md` §7.1), selection lands on the release,
+and the 24 dp `MinSize` around the 19 dp dot already clears the conformance
+floor at Compact.
+
 ## Accessibility
 
 Reports `Role::RadioButton` with `set_toggled` mirroring the selected
@@ -32,6 +39,14 @@ let _r0 = RadioButton::new(0, selected.clone()).label(lit!("Light"));
 let _r1 = RadioButton::new(1, selected.clone()).label(lit!("Dark"));
 let _r2 = RadioButton::new(2, selected.clone()).label(lit!("System"));
 ```
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![RadioButton at Touch density](img/radio_button-touch.png)
 
 ## Builder methods at a glance
 

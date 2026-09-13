@@ -45,10 +45,18 @@ reconcile independently on every mutation.
   arrive as further `Pixels` deltas; the existing animation
   pipeline turns this into smooth inertial fling without a custom
   recognizer.
-- **`on_pinch`** — OS trackpad pinch (`PinchPhase::Changed`) feeds
-  `scale` into the zoom signal and `rotation` into the rotation
-  signal, anchored around the gesture center so the scene point
-  under the user's fingers stays put.
+- **`on_pinch`** — a pinch (`PinchPhase::Changed`) feeds `scale` into
+  the zoom signal and `rotation` into the rotation signal, anchored
+  around the gesture center so the scene point under the user's
+  fingers stays put. Two producers reach the one handler: the OS
+  trackpad stream and the two-contact touch recognizer, and both
+  satisfy the contract on
+  `GestureEvent::PinchChanged`
+  — `scale` is the factor **since the previous sample** (folded in with
+  `zoom *= scale`) and `rotation` the **radian** delta since the previous
+  sample (`rotation += delta`). Degrees never reach here: winit's unit is
+  converted at the platform seam. `view::tests::touch_camera` holds both
+  halves.
 - **Reduced-motion** — at build time, captures
   `BuildContext::prefers_reduced_motion`.
   When set, scroll handlers `set` the signals directly instead of
@@ -56,6 +64,19 @@ reconcile independently on every mutation.
 - **Drag-to-move** for items carrying `IS_DRAGGABLE`; **marquee**
   selection on the empty viewport surface (or under
   `DragMode::ScrollHandDrag`, pan-on-drag).
+- **Pan to scroll** — an interactive view declares a
+  `PanClaim`, so a finger's
+  pan reaches the same `on_scroll` handler as a
+  `ScrollSource::TouchPan` sample and moves the camera with no tween (a
+  finger is already the animation), hard-clamped on the coast that follows
+  the lift, and declined at a bound so the gesture chains to whatever
+  scrolls outside the view. Deliberately **not** routed through
+  `teksilo_widgets::common::scrollable`: that models a surface as an offset
+  in `[0, max]`, and a scene's pan is negated, bounded by a zoom-dependent
+  rectangle, and centre-pinned where that rectangle is smaller than the
+  viewport. With selection or magnetism on, the view's own drag recognizer
+  is the competitor a finger meets first and it wins at the smaller drag
+  slop — the marquee, not the camera.
 
 ## Example
 

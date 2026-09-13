@@ -24,10 +24,11 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::spacing;
 use teksilo_core::styles::{ToggleStyle, ToggleStyleConfig, ToggleVariant};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, InputTokens};
 
 // IntUI design tokens for the Toggle chrome — the `Default` source for
 // [`ToggleRecipe`]. Custom design languages either construct a
@@ -48,14 +49,25 @@ pub struct ToggleRecipe {
     pub thumb_inset: f32,
 }
 
-impl Default for ToggleRecipe {
-    fn default() -> Self {
+impl ToggleRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             track_width: TOGGLE_TRACK_WIDTH,
             track_height: TOGGLE_TRACK_HEIGHT,
             thumb_diameter: TOGGLE_THUMB_DIAMETER,
-            thumb_inset: TOGGLE_THUMB_INSET,
+            thumb_inset: spacing(TOGGLE_THUMB_INSET, tokens),
         }
+    }
+}
+
+impl Default for ToggleRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -71,6 +83,18 @@ impl RecipeToggleStyle {
     /// Construct with custom dimensions.
     pub fn new(recipe: ToggleRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeToggleStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: ToggleRecipe::for_tokens(tokens),
+        }
     }
 }
 
@@ -106,7 +130,7 @@ impl ToggleStyle for RecipeToggleStyle {
                     Some(if *visible {
                         FocusOrigin::Keyboard
                     } else {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     })
                 } else {
                     None

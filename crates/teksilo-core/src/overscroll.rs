@@ -3,9 +3,9 @@
 
 //! [`OverscrollBehavior`] — boundary scroll-chaining policy.
 //!
-//! Shared by every scrollable surface (the `teksilo-widgets` scrollables —
-//! `ScrollArea` / `ListView` / `TreeView` / `TableView` — and the
-//! `teksilo-scene` `SceneView` pan handler). It lives in `teksilo-core` so
+//! Shared by every scrollable surface: each `teksilo-widgets` scrollable (they
+//! reach it through `common::scrollable`) and the `teksilo-scene` `SceneView`
+//! pan handler. It lives in `teksilo-core` so
 //! both tiers can name it without `teksilo-scene` depending on
 //! `teksilo-widgets`. `teksilo-widgets` re-exports it as
 //! `teksilo_widgets::OverscrollBehavior` for backwards compatibility.

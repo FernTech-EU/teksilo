@@ -5,9 +5,12 @@
 //! delegate-built preview passed to `EventContext::start_drag_with_preview`.
 //!
 //! The wrapper:
-//! - Fixes the preview's width/height so it has a stable footprint while
-//!   floating at the pointer (otherwise a `Spacer` inside the delegate would
-//!   collapse under the unbounded overlay proposal).
+//! - Fixes the preview's width/height so it has a stable footprint while it
+//!   follows the pointer (otherwise a `Spacer` inside the delegate would
+//!   collapse under the unbounded overlay proposal). The footprint is also what
+//!   the framework's placement needs: a coarse pointer's preview is positioned
+//!   *clear* of the contact patch rather than on it, and a panel with no settled
+//!   size has no quadrant to be placed in — see `docs/drag-and-drop.md` §5.
 //! - Renders a `Raised` surface behind the content so the preview reads as a
 //!   picked-up row against the window background.
 //!

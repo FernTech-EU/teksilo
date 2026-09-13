@@ -20,6 +20,21 @@ Row heights come in three modes: uniform (`item_height`, default fast path),
 exact per-flat-index callback (`item_height_fn`), and auto-measured
 (`auto_item_height` — height-for-width per row, scroll-anchored).
 
+## Pan to scroll
+
+The view installs `common::scrollable::ScrollableBehavior`,
+which gives it the shared wheel arithmetic, a finger's pan and the
+`PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+release coasts, and a pan it cannot absorb hands the **whole** event to the
+container outside. Vertical only: this view owns no horizontal offset, so a
+horizontal pan is declined and chains outward. A pan that starts on a row
+scrolls rather than activating it, toggling its chevron, or collapsing a
+multi-selection onto it — the three things a *release* on that row commits.
+Activation is a gesture, so the arbitration cancels it; the chevron and the
+deferred collapse are raw `PointerUp` arms the arbitration cannot reach, so
+each asks `data_views::release_completes_the_press` whether the release still
+belongs to the row.
+
 ## Keyboard
 
 Arrows move the cursor; `Home` / `End` reach the first and last **visible**
@@ -55,6 +70,14 @@ let _w = TreeView::new(tree_model, |item, entry, _selected| {
 })
 .item_height(28.0);
 ```
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TreeView at Touch density](img/tree_view-touch.png)
 
 ## Builder methods at a glance
 

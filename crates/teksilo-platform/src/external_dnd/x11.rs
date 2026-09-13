@@ -176,7 +176,22 @@ struct X11DndGuard {
 }
 
 impl ExternalDndGuard for X11DndGuard {
-    fn begin_drag(&self, data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
+    /// `pointer` is deliberately unused, and the reason is a protocol fact
+    /// rather than an omission: an XDND drag is driven by the **virtual core
+    /// pointer**, and X11 promotes a pointer-emulating touch onto it — position
+    /// and buttons both — which is precisely why the event translator carries a
+    /// suppressor for the emulated stream (see
+    /// `BackendCaps::synthesises_mouse_from_touch` for `WindowSystem::X11`). So
+    /// the `QueryPointer` poll in `DndThread::pump_outbound` already reports a
+    /// finger's position and its held button, and needs no per-device branch.
+    /// The premise is pinned by
+    /// `premise_tests::the_x11_outbound_poll_rests_on_touch_being_promoted_to_the_core_pointer`.
+    fn begin_drag(
+        &self,
+        data: &OutboundDragData,
+        _image: Option<&DragImageData>,
+        _pointer: teksilo_tokens::PointerKind,
+    ) -> bool {
         if data.is_empty() {
             return false;
         }
@@ -194,6 +209,11 @@ impl ExternalDndGuard for X11DndGuard {
 
     fn cancel_drag(&self) {
         let _ = self.commands.send(Command::Cancel);
+        self.waker.wake();
+    }
+
+    fn set_drop_accepted(&self, accepted: bool) {
+        let _ = self.commands.send(Command::SetDropAccepted(accepted));
         self.waker.wake();
     }
 
@@ -218,6 +238,32 @@ impl Drop for X11DndGuard {
             // gone before the window itself is destroyed.
             let _ = handle.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod premise_tests {
+    use crate::pointer_backend::{BackendCaps, PlatformKind};
+    use crate::window_system::WindowSystem;
+
+    /// The outbound drag's liveness test is `QueryPointer`'s BUTTON1 mask, and
+    /// that is the right question for a finger **only** because X11 promotes a
+    /// pointer-emulating touch onto the virtual core pointer, buttons included.
+    ///
+    /// Recorded as a test rather than a comment because it is the premise the
+    /// whole outbound path rests on for a touchscreen: if X11 ever stopped
+    /// promoting — or if the capability row were corrected to say it does not —
+    /// every finger export would end on its first poll tick and report a
+    /// cancellation with no diagnosis. This is what fails first instead.
+    #[test]
+    fn the_x11_outbound_poll_rests_on_touch_being_promoted_to_the_core_pointer() {
+        assert!(
+            BackendCaps::for_platform(PlatformKind::Unix, WindowSystem::X11)
+                .synthesises_mouse_from_touch,
+            "X11's outbound drag reads the core pointer's button mask; if touch \
+             is no longer promoted onto that pointer, `pump_outbound` needs a \
+             per-device liveness rule",
+        );
     }
 }
 
@@ -324,6 +370,8 @@ enum Command {
     Begin(OutboundDragData),
     /// The user pressed Escape — abandon the outbound drag.
     Cancel,
+    /// Re-answer the in-flight inbound drag with the widget tree's verdict.
+    SetDropAccepted(bool),
 }
 
 fn run_thread(
@@ -386,6 +434,7 @@ fn pump_until_shutdown(
             match command {
                 Command::Begin(data) => state.begin_outbound(data),
                 Command::Cancel => state.cancel_outbound(),
+                Command::SetDropAccepted(accepted) => state.revise_inbound_accept(accepted),
             }
         }
 
@@ -475,6 +524,15 @@ struct Inbound {
     /// Set once `XdndDrop` arrives, so a `SelectionNotify` can tell a
     /// drop-time transfer from a speculative one.
     dropping: bool,
+    /// The accept bit of the last `XdndStatus` we sent.
+    ///
+    /// The first status of a drag can only be about *format* compatibility (the
+    /// protocol wants an answer per position, on this thread, before the widget
+    /// tree has seen the sample). The widget's real verdict arrives later, and
+    /// the per-position statuses that follow must carry it rather than reverting
+    /// to the format answer — otherwise a rejecting target's cursor flickers
+    /// between refuse and accept for every motion sample.
+    accept: bool,
 }
 
 /// An outbound drag this window started.
@@ -642,6 +700,7 @@ impl DndThread {
             entered: false,
             incr: None,
             dropping: false,
+            accept: chosen.is_some(),
         });
     }
 
@@ -662,20 +721,17 @@ impl DndThread {
             let first = !inbound.entered;
             inbound.entered = true;
             let types = first.then(|| inbound.types.clone());
-            (inbound.chosen.is_some(), first, types)
+            (inbound.accept, first, types)
         };
         let formats = types.map(|types| self.type_names(&types));
 
-        // Answer immediately: XDND requires a status per position, and we
-        // cannot round-trip to the UI thread synchronously to ask the widget
-        // under the cursor. So this advertises *format* compatibility; the
-        // widget tree still decides whether it accepts, and a rejected drop
-        // simply produces no drop handler call.
-        let action = self.conn.atoms().xdnd_action_copy;
-        self.send_to_source(
-            self.conn.atoms().xdnd_status,
-            xdnd::encode_status(self.toplevel, accept, action),
-        );
+        // Answer at once: XDND requires a status per position, and we cannot
+        // round-trip to the UI thread synchronously to ask the widget under the
+        // cursor. The FIRST answer of a drag is therefore about *format*
+        // compatibility alone; every one after it carries whatever verdict the
+        // widget tree has since pushed through `set_drop_accepted`, which is
+        // what stops the OS showing "will accept" over a target that refuses.
+        self.send_status(accept);
 
         if first {
             // Bytes are not fetched during hover — a speculative
@@ -887,6 +943,45 @@ impl DndThread {
     /// reference `xdnd.c` both do this, and sources that route replies by
     /// `xclient.window` (GTK matches it against its drag context) discard a
     /// message addressed any other way.
+    /// Send an `XdndStatus` carrying `accept`.
+    ///
+    /// The action follows the bit — Copy when accepted, none when refused — and
+    /// XDND requires exactly that pairing: a status whose accept bit is clear
+    /// must not name an action, or a source may act on the action and ignore the
+    /// bit. Copy is the only operation Teksilo advertises in either direction.
+    fn send_status(&self, accept: bool) {
+        let action = if accept {
+            self.conn.atoms().xdnd_action_copy
+        } else {
+            x11rb::NONE
+        };
+        self.send_to_source(
+            self.conn.atoms().xdnd_status,
+            xdnd::encode_status(self.toplevel, accept, action),
+        );
+    }
+
+    /// Re-answer the in-flight inbound drag with the widget tree's verdict.
+    ///
+    /// A source is free to receive several statuses for one drag — GTK and Qt
+    /// both track the latest — so revising is the sanctioned way to correct the
+    /// format-only answer `on_position` had to give. Stored as well as sent, so
+    /// the statuses the following positions produce keep the verdict instead of
+    /// reverting.
+    fn revise_inbound_accept(&mut self, accepted: bool) {
+        let Some(inbound) = self.inbound.as_mut() else {
+            return;
+        };
+        // A refusal is honoured whatever the formats said; an acceptance cannot
+        // exceed them, because there is no readable type to hand over.
+        let accept = accepted && inbound.chosen.is_some();
+        if inbound.accept == accept {
+            return;
+        }
+        inbound.accept = accept;
+        self.send_status(accept);
+    }
+
     fn send_to_source(&self, type_: Atom, data: [u32; 5]) {
         let Some(source) = self.inbound.as_ref().map(|i| i.source) else {
             return;
@@ -1020,6 +1115,16 @@ impl DndThread {
         // Button 1 still down ⇒ the drag continues. `QueryPointer` reports the
         // live button state regardless of who holds the grab, which is exactly
         // why this backend needs no grab of its own.
+        //
+        // And it answers for a **finger** as well as a mouse, with no per-device
+        // branch: X11 promotes a pointer-emulating touch onto the virtual core
+        // pointer, position and buttons alike — winit filters the emulated
+        // *button events* client-side, but the master device's own state is what
+        // `QueryPointer` reports and the emulation drives it. That promotion is
+        // the same fact the event translator's phantom-motion suppressor exists
+        // for, and `the_x11_outbound_poll_rests_on_touch_being_promoted_to_the_core_pointer`
+        // pins it, so a backend that stopped promoting fails a test rather than
+        // silently stranding every touch export.
         let button_held = pointer.mask.contains(KeyButMask::BUTTON1);
         let (root_x, root_y) = (pointer.root_x, pointer.root_y);
 
@@ -1197,6 +1302,22 @@ impl DndThread {
             x11rb::CURRENT_TIME,
         ));
         let _ = self.conn.flush();
+        // Our own drag ending while it is over this very window is the one abort
+        // a *destination* can be told about: no `XdndLeave` is coming for a drag
+        // that simply stopped, so the window would otherwise keep a live session
+        // and a highlighted target for a drag that no longer exists.
+        // Recognised by the inbound session naming *our own* proxy as its
+        // source, which is what a self-drag looks like on this connection: a
+        // foreign drag's session names someone else's window and must not be
+        // torn down from here.
+        if self
+            .inbound
+            .as_ref()
+            .is_some_and(|inbound| inbound.source == self.proxy)
+        {
+            self.inbound = None;
+            self.post(ExternalDragEvent::Cancelled);
+        }
         self.post(ExternalDragEvent::DragEnded { outcome });
     }
 

@@ -21,7 +21,9 @@ use teksilo_canvas::Point;
 
 use crate::event::{ButtonMask, EventResponse, WidgetEvent};
 use crate::event_handlers::EventHandlers;
+use crate::gesture::MultiContact;
 use crate::gesture::{DragPhase, PinchPhase, SwipeDirection, TapEvent};
+use crate::pointer::touch_action::{PanAxes, PanClaim, TouchAction};
 use crate::signal::Prop;
 use crate::widget::{CursorIcon, EventContext, Widget};
 use crate::widget_id::WidgetId;
@@ -139,6 +141,67 @@ pub struct AccessibilityOverrides {
     pub customize: Option<Box<dyn Fn(&mut crate::accessibility::AccessNodeBuilder)>>,
 }
 
+impl AccessibilityOverrides {
+    /// Fold `other` into `self`: later scalars win, lists append.
+    ///
+    /// Needed because overrides reach a node from **two** directions — a builder
+    /// chain at construction (`WidgetWithHandlers::access_*`) and a later
+    /// [`BuildContext::apply_handlers`](crate::build_context::BuildContext::apply_handlers)
+    /// on the same id, which is how a widget gives a node it already built one
+    /// more action. Assigning the second block over the first silently dropped
+    /// everything in the first, and nothing else reads an override block, so the
+    /// loss was invisible: a `TreeTableView` row lost `ScrollIntoView` and its
+    /// `Expand` / `Collapse` pair the moment it also gained a move command.
+    ///
+    /// The merge rules are the ones
+    /// [the overrides page](https://github.com/ferntech-eu/teksilo/blob/main/docs/accessibility-overrides.md)
+    /// already documents for a single block: scalars replace when set, lists
+    /// append. `customize` is the exception — it is an escape hatch and both
+    /// halves may matter, so two are **chained** in application order rather
+    /// than one winning.
+    pub(crate) fn merge_from(&mut self, other: Self) {
+        macro_rules! scalar {
+            ($($field:ident),+ $(,)?) => {
+                $(if other.$field.is_some() { self.$field = other.$field; })+
+            };
+        }
+        scalar!(
+            label,
+            description,
+            value,
+            role,
+            hidden,
+            disabled,
+            identifier,
+            live,
+            aria_current,
+            shortcut,
+            shortcut_id,
+            has_popup,
+            orientation,
+            numeric_value,
+            min_numeric_value,
+            max_numeric_value,
+            numeric_step,
+        );
+        self.controls.extend(other.controls);
+        self.described_by.extend(other.described_by);
+        self.labelled_by.extend(other.labelled_by);
+        self.actions.extend(other.actions);
+        self.removed_actions.extend(other.removed_actions);
+        // Appended, so the ids already published for the existing entries keep
+        // pointing at the same handlers.
+        self.custom_actions.extend(other.custom_actions);
+        self.customize = match (self.customize.take(), other.customize) {
+            (Some(first), Some(second)) => Some(Box::new(move |builder| {
+                first(builder);
+                second(builder);
+            })),
+            (first, second) => second.or(first),
+        };
+    }
+}
+
 impl std::fmt::Debug for AccessibilityOverrides {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AccessibilityOverrides")
@@ -254,6 +317,12 @@ impl AccessibilityOverrides {
                 })
                 .collect();
             b.set_custom_actions(custom);
+            // A node's custom actions are only reachable when it also
+            // advertises `Action::CustomAction`: an adapter reports the list
+            // through the supported-action gate, not through the list's
+            // emptiness (`accesskit_ios-0.2.0/src/node.rs:109` is the one that
+            // says so in code). Without this the whole vector is decoration.
+            b.add_action(accesskit::Action::CustomAction);
         }
         if let Some(ref f) = self.customize {
             f(b);
@@ -310,6 +379,24 @@ pub struct HandlerSet {
     /// drag/swipe on any ancestor above it (a *gesture dead zone*). See
     /// [`super::arena::WidgetNode::gesture_dead_zone`].
     pub(crate) gesture_dead_zone: Option<bool>,
+    /// When `Some(..)`, selects what a **hold** on this node's subtree means for
+    /// the tree-owned long-press route. See
+    /// [`super::arena::WidgetNode::long_press_role`].
+    pub(crate) long_press_role: Option<crate::widget_tree::touch_route::LongPressRole>,
+    /// When `Some(..)`, overrides what a direct pointer may do to this
+    /// node's subtree. See [`super::arena::WidgetNode::touch_action`].
+    pub(crate) touch_action: Option<TouchAction>,
+    /// When `Some(..)`, declares this node a pan surface. See
+    /// [`super::arena::WidgetNode::pan_claim`].
+    pub(crate) pan_claim: Option<PanClaim>,
+    pub(crate) overscroll_behavior: Option<crate::OverscrollBehavior>,
+    /// When `Some(..)`, overrides when a drag on this node may begin. See
+    /// [`super::arena::WidgetNode::drag_activation`].
+    pub(crate) drag_activation: Option<teksilo_tokens::DragActivation>,
+
+    /// How many simultaneous contacts this node's recognizers serve. See
+    /// [`super::arena::WidgetNode::multi_contact`].
+    pub(crate) multi_contact: Option<MultiContact>,
     /// When `Some(true)` and this node holds keyboard focus, a `KeyDown`
     /// bypasses shortcut resolution and is delivered straight to it (a
     /// *keyboard capture* surface — terminals, game viewports). See
@@ -319,6 +406,13 @@ pub struct HandlerSet {
     /// to pointer hit-testing (decorative overlays — count badges,
     /// watermarks). See [`super::arena::WidgetNode::hit_transparent`].
     pub(crate) hit_transparent: Option<bool>,
+    /// Per-node override of the *miss-only* slop this node may earn. Second
+    /// link of the precedence chain. See [`HandlerSet::hit_slop`].
+    pub(crate) hit_slop: Option<crate::pointer::hit_slop::HitSlop>,
+    /// When `Some(true)`, this node is excluded from BOTH hit-widening
+    /// mechanisms. Head of the precedence chain. See
+    /// [`HandlerSet::no_hit_slop`].
+    pub(crate) no_hit_slop: Option<bool>,
     pub(crate) context_menu_factory: Option<ContextMenuFactory>,
     /// User-bound signal that the framework writes whenever the
     /// focused widget is a strict descendant of this node. See
@@ -358,8 +452,16 @@ impl HandlerSet {
             ime: None,
             event_pass_through: None,
             gesture_dead_zone: None,
+            long_press_role: None,
+            drag_activation: None,
+            touch_action: None,
+            pan_claim: None,
+            overscroll_behavior: None,
+            multi_contact: None,
             keyboard_capture: None,
             hit_transparent: None,
+            hit_slop: None,
+            no_hit_slop: None,
             context_menu_factory: None,
             focus_within: None,
             hover_within: None,
@@ -609,9 +711,88 @@ impl HandlerSet {
     /// draggable / swipeable container (a dock-panel header, a card, a list
     /// row) without a few px of click jitter starting the ancestor's drag.
     /// The container's own drag still works everywhere else. Honored by
-    /// `arm_drag_observers`; see the `DeadZone` wrapper widget.
+    /// `PointerSequence` member enrolment; see the `DeadZone` wrapper widget.
     pub fn gesture_dead_zone(mut self, dead_zone: bool) -> Self {
         self.gesture_dead_zone = Some(dead_zone);
+        self
+    }
+
+    /// Select what a **hold** on this widget's subtree means, for the
+    /// tree-owned long-press route.
+    ///
+    /// Only ever consulted for a pointer that cannot hover, and only where the
+    /// widget installs no `on_long_press` of its own — that always wins. See
+    /// [`crate::widget_tree::touch_route`] for the precedence and for what each
+    /// variant selects.
+    pub fn long_press_role(mut self, role: crate::widget_tree::touch_route::LongPressRole) -> Self {
+        self.long_press_role = Some(role);
+        self
+    }
+
+    /// Override what a direct pointer (touch, pen) is permitted to do to
+    /// this widget's subtree — the CSS `touch-action` model. Intersected
+    /// with every ancestor's declaration on the way down; a mouse never
+    /// consults this. See [`super::arena::WidgetNode::touch_action`].
+    pub fn touch_action(mut self, action: TouchAction) -> Self {
+        self.touch_action = Some(action);
+        self
+    }
+
+    /// Declare this widget a **pan surface** on `axes` for direct pointers,
+    /// with kinetic (fling/settle) hand-off on release. Sugar for
+    /// `.pan_claim(PanClaim { axes, devices: PointerKindMask::DIRECT, kinetic: true })`
+    /// — the shape every scrollable declares. See
+    /// [`super::arena::WidgetNode::pan_claim`].
+    pub fn scroll_container(mut self, axes: PanAxes) -> Self {
+        self.pan_claim = Some(PanClaim {
+            axes,
+            devices: teksilo_tokens::PointerKindMask::DIRECT,
+            kinetic: true,
+        });
+        self
+    }
+
+    /// Declare this widget a pan surface with an explicit [`PanClaim`] —
+    /// the escape hatch behind [`scroll_container`](Self::scroll_container)
+    /// for a claim that isn't kinetic, or that widens/narrows the device
+    /// mask. See [`super::arena::WidgetNode::pan_claim`].
+    pub fn pan_claim(mut self, claim: PanClaim) -> Self {
+        self.pan_claim = Some(claim);
+        self
+    }
+
+    /// Whether this widget absorbs a scroll it cannot use
+    /// ([`Contain`](crate::OverscrollBehavior::Contain)) or lets it chain
+    /// outward at its boundary ([`Chain`](crate::OverscrollBehavior::Chain),
+    /// the default). The CSS `overscroll-behavior` model, read by the pan
+    /// claimant chain. See [`super::arena::WidgetNode::overscroll_behavior`].
+    pub fn overscroll_behavior(mut self, behavior: crate::OverscrollBehavior) -> Self {
+        self.overscroll_behavior = Some(behavior);
+        self
+    }
+
+    /// When a drag on this widget may begin relative to the press that starts
+    /// it.
+    ///
+    /// [`DragActivation::Auto`](teksilo_tokens::DragActivation::Auto) — the
+    /// default — is `Immediate` for a precise pointer, which is exactly
+    /// today's behaviour, and `AfterLongPress` for a coarse pointer whose axis
+    /// a pan surface has already claimed. Declare
+    /// [`Immediate`](teksilo_tokens::DragActivation::Immediate) for a control
+    /// whose drag *is* the interaction (a slider thumb, a splitter handle) and
+    /// [`AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress) for
+    /// one that must not steal a scroll (a reorderable list row). See
+    /// [`super::arena::WidgetNode::drag_activation`].
+    pub fn drag_activation(mut self, activation: teksilo_tokens::DragActivation) -> Self {
+        self.drag_activation = Some(activation);
+        self
+    }
+
+    /// How many simultaneous contacts this node serves. Default
+    /// [`MultiContact::First`]. See
+    /// [`super::arena::WidgetNode::multi_contact`].
+    pub fn multi_contact(mut self, policy: MultiContact) -> Self {
+        self.multi_contact = Some(policy);
         self
     }
 
@@ -647,6 +828,38 @@ impl HandlerSet {
     /// the click meant for the control underneath.
     pub fn hit_transparent(mut self, transparent: bool) -> Self {
         self.hit_transparent = Some(transparent);
+        self
+    }
+
+    /// Override how far a *missed* press may be re-attributed to this node, and
+    /// up to what size it is topped up.
+    ///
+    /// Second link of the precedence chain: `no_hit_slop` beats this, this
+    /// beats the widget's own `Widget::hit_slop`, and that beats the density
+    /// default. Use it for a control the framework cannot recognise as small —
+    /// a hand-drawn handle, a custom mark in a chart — or to raise `up_to`
+    /// beyond the density's `target_size` for one especially fiddly target.
+    ///
+    /// Hit-only: no layout moves and nothing repaints differently.
+    pub fn hit_slop(mut self, slop: crate::pointer::hit_slop::HitSlop) -> Self {
+        self.hit_slop = Some(slop);
+        self
+    }
+
+    /// Take this node out of **both** hit-widening mechanisms: it earns no slop
+    /// outset, and its `Widget::hit_outset` is ignored.
+    ///
+    /// Head of the precedence chain, and the right switch for a node whose
+    /// exact rectangle is the contract — a surface hosting foreign content
+    /// (a `WebView`, an embedded engine) that must receive precisely the
+    /// presses that land on it and no others, or a modal scrim, which must
+    /// never re-attribute a press to something under it.
+    ///
+    /// Per-node, not per-subtree: descendants may still widen. To take a whole
+    /// subtree out of hit-testing use
+    /// [`hit_transparent`](Self::hit_transparent).
+    pub fn no_hit_slop(mut self) -> Self {
+        self.no_hit_slop = Some(true);
         self
     }
 
@@ -719,6 +932,22 @@ impl HandlerSet {
         self
     }
 
+    /// Set the pointer-cancel handler. Fires when a pointer interaction on
+    /// this widget is taken away — the window lost focus, a modal opened, the
+    /// subtree was parked, a peer won the arbitration.
+    ///
+    /// **Terminal**: no `PointerUp` follows. Release anything the press
+    /// latched; the framework releases its own state but never widget-owned
+    /// state.
+    pub fn on_pointer_cancel(
+        mut self,
+        f: impl FnMut(&crate::pointer::PointerInfo, crate::pointer::CancelReason, &mut EventContext)
+        + 'static,
+    ) -> Self {
+        self.handlers.on_pointer_cancel = Some(Box::new(f));
+        self
+    }
+
     /// Set the per-frame drag-tick handler. Fires once per frame while a
     /// drag is active and this widget is the current drop target. The
     /// closure receives the current pointer position in widget-local
@@ -758,6 +987,28 @@ impl HandlerSet {
         f: impl FnMut(crate::drag_payload::DropOutcome, &mut EventContext) + 'static,
     ) -> Self {
         self.handlers.on_drag_ended = Some(Box::new(f));
+        self
+    }
+
+    /// Advertise a named custom action on this node and register its callback.
+    ///
+    /// The [`WidgetWithHandlers`] twin
+    /// ([`access_custom_action`](WidgetWithHandlers::access_custom_action)) is
+    /// how an *application* adds one from outside. This is how a **widget**
+    /// adds one to a node it builds itself — a virtualized row, a rail item,
+    /// a header cell — where there is no builder chain to hang it on because
+    /// the node is reached through
+    /// [`BuildContext::apply_handlers`](crate::build_context::BuildContext::apply_handlers).
+    ///
+    /// Actions are dispatched by declaration order, so a node's callbacks and
+    /// its advertised list cannot drift apart.
+    pub fn access_custom_action<F>(mut self, label: impl Into<Prop<String>>, handler: F) -> Self
+    where
+        F: FnMut(&mut EventContext) + 'static,
+    {
+        self.access_mut()
+            .custom_actions
+            .push((label.into(), Box::new(handler)));
         self
     }
 }
@@ -988,6 +1239,58 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
+    /// Select what a hold on this widget's subtree means. See
+    /// [`HandlerSet::long_press_role`].
+    pub fn long_press_role(mut self, role: crate::widget_tree::touch_route::LongPressRole) -> Self {
+        self.handler_set.long_press_role = Some(role);
+        self
+    }
+
+    /// Override what a direct pointer may do to this widget's subtree. See
+    /// [`HandlerSet::touch_action`].
+    pub fn touch_action(mut self, action: TouchAction) -> Self {
+        self.handler_set.touch_action = Some(action);
+        self
+    }
+
+    /// Declare this widget a pan surface on `axes`, kinetic, direct pointers
+    /// only. See [`HandlerSet::scroll_container`].
+    pub fn scroll_container(mut self, axes: PanAxes) -> Self {
+        self.handler_set.pan_claim = Some(PanClaim {
+            axes,
+            devices: teksilo_tokens::PointerKindMask::DIRECT,
+            kinetic: true,
+        });
+        self
+    }
+
+    /// Declare this widget a pan surface with an explicit [`PanClaim`]. See
+    /// [`HandlerSet::pan_claim`].
+    pub fn pan_claim(mut self, claim: PanClaim) -> Self {
+        self.handler_set.pan_claim = Some(claim);
+        self
+    }
+
+    /// Whether this widget absorbs a boundary scroll or chains it outward. See
+    /// [`HandlerSet::overscroll_behavior`].
+    pub fn overscroll_behavior(mut self, behavior: crate::OverscrollBehavior) -> Self {
+        self.handler_set.overscroll_behavior = Some(behavior);
+        self
+    }
+
+    /// When a drag on this widget may begin. See
+    /// [`HandlerSet::drag_activation`].
+    pub fn drag_activation(mut self, activation: teksilo_tokens::DragActivation) -> Self {
+        self.handler_set.drag_activation = Some(activation);
+        self
+    }
+
+    /// [`HandlerSet::multi_contact`].
+    pub fn multi_contact(mut self, policy: MultiContact) -> Self {
+        self.handler_set.multi_contact = Some(policy);
+        self
+    }
+
     /// Mark this widget a keyboard capture surface: while focused, every
     /// `KeyDown` bypasses shortcut resolution and reaches its `on_key`
     /// handler (terminals, game viewports). See
@@ -1001,6 +1304,20 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// hit-testing. See [`HandlerSet::hit_transparent`].
     pub fn hit_transparent(mut self, transparent: bool) -> Self {
         self.handler_set.hit_transparent = Some(transparent);
+        self
+    }
+
+    /// Override the miss-only hit slop for this node. See
+    /// [`HandlerSet::hit_slop`].
+    pub fn hit_slop(mut self, slop: crate::pointer::hit_slop::HitSlop) -> Self {
+        self.handler_set.hit_slop = Some(slop);
+        self
+    }
+
+    /// Take this node out of both hit-widening mechanisms. See
+    /// [`HandlerSet::no_hit_slop`].
+    pub fn no_hit_slop(mut self) -> Self {
+        self.handler_set.no_hit_slop = Some(true);
         self
     }
 
@@ -1051,6 +1368,17 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Set the drag-leave handler. See [`HandlerSet::on_drag_leave`].
     pub fn on_drag_leave(mut self, f: impl FnMut(&mut EventContext) + 'static) -> Self {
         self.handler_set.handlers.on_drag_leave = Some(Box::new(f));
+        self
+    }
+
+    /// Set the pointer-cancel handler. See
+    /// [`HandlerSet::on_pointer_cancel`].
+    pub fn on_pointer_cancel(
+        mut self,
+        f: impl FnMut(&crate::pointer::PointerInfo, crate::pointer::CancelReason, &mut EventContext)
+        + 'static,
+    ) -> Self {
+        self.handler_set.handlers.on_pointer_cancel = Some(Box::new(f));
         self
     }
 
@@ -1382,7 +1710,31 @@ impl<W: Widget> std::fmt::Debug for WidgetWithHandlers<W> {
     }
 }
 
+/// Every method of [`Widget`], forwarded to the wrapped widget.
+///
+/// `WidgetWithHandlers<W>` **replaces** `W` at `W`'s own arena node — the tree
+/// never sees `W` again. So a hook this impl does not forward is not overridden,
+/// it is gone: the trait's default answers in its place, for every widget any
+/// builder method has ever touched. Nothing warns, nothing fails to compile, and
+/// the widget goes on building, painting and hit-testing; only the behaviour
+/// behind the dropped hook stops, at a call site nowhere near the `.on_tap(..)`
+/// that silenced it. A test that drives the hook on a bare widget cannot see
+/// this, which is why every hook is also driven through a builder method in the
+/// `wrapper_forwarding_tests` module below, and why `missing_trait_methods` is
+/// denied here: a method added to `Widget` must fail this impl's lint before it
+/// can quietly fail a user's app.
+///
+/// The methods appear in the order the trait declares them, so the two can be
+/// read side by side.
+#[deny(clippy::missing_trait_methods)]
 impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
+    /// Forwarded so the name is the widget's. The wrapper's own name identifies
+    /// the wrapper, which is never what a census bucket or an inspector row is
+    /// asking about.
+    fn type_name(&self) -> &'static str {
+        self.widget.type_name()
+    }
+
     fn build(
         &mut self,
         ctx: &mut crate::build_context::BuildContext,
@@ -1396,6 +1748,14 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         ctx: &crate::widget::LayoutContext,
     ) -> crate::widget::LayoutResponse {
         self.widget.layout_response(proposal, ctx)
+    }
+
+    /// Forwarded because the opt-out exists to protect a widget whose
+    /// `layout_response` is not idempotent. Answering the default here caches
+    /// such a widget anyway, and a memoized non-idempotent measure is wrong in a
+    /// way no layout assertion localizes.
+    fn cacheable_layout(&self) -> bool {
+        self.widget.cacheable_layout()
     }
 
     fn place_children(
@@ -1417,12 +1777,74 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.paint(bounds, canvas, ctx)
     }
 
+    /// The two paint hooks and their `wants_*` gates are forwarded as pairs: the
+    /// walker consults the gate and skips the hook when it answers `false`, so a
+    /// forwarded hook behind an unforwarded gate never runs, and the widget
+    /// reads as having no hook at all rather than as having lost one.
+    fn wants_after_paint(&self) -> bool {
+        self.widget.wants_after_paint()
+    }
+
+    fn after_paint(
+        &self,
+        view: &crate::widget::WidgetTreeView<'_>,
+        ctx: &crate::widget::PaintContext,
+    ) {
+        self.widget.after_paint(view, ctx)
+    }
+
+    fn wants_post_paint(&self) -> bool {
+        self.widget.wants_post_paint()
+    }
+
+    fn post_paint(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        canvas: &mut teksilo_canvas::Canvas,
+        ctx: &crate::widget::PaintContext,
+    ) {
+        self.widget.post_paint(bounds, canvas, ctx)
+    }
+
     fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
         self.widget.accessibility(builder)
     }
 
+    /// Gate and hook again — see [`Widget::wants_after_paint`].
+    fn wants_descendant_redirects(&self) -> bool {
+        self.widget.wants_descendant_redirects()
+    }
+
+    fn a11y_redirect_descendant(
+        &self,
+        self_id: crate::widget_id::WidgetId,
+        descendant: crate::widget_id::WidgetId,
+    ) -> Option<accesskit::NodeId> {
+        self.widget.a11y_redirect_descendant(self_id, descendant)
+    }
+
+    fn accessible_title_hint(&self) -> Option<String> {
+        self.widget.accessible_title_hint()
+    }
+
+    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.accessible_title_node()
+    }
+
+    fn initial_focus_hint(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.initial_focus_hint()
+    }
+
+    fn context_menu_key_target(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.context_menu_key_target()
+    }
+
     fn children(&self) -> Vec<crate::widget_id::WidgetId> {
         self.widget.children()
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<crate::widget_id::WidgetId>> {
+        self.widget.accessibility_children()
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {
@@ -1448,6 +1870,83 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
             .unwrap_or_else(|| self.widget.clips_children())
     }
 
+    fn focus_reveal_rect(&self, bounds: teksilo_canvas::Rect) -> Option<teksilo_canvas::Rect> {
+        self.widget.focus_reveal_rect(bounds)
+    }
+
+    /// The hit-shape family, forwarded for the same reason `as_any` is: a
+    /// widget must not stop being itself to the hit test because a builder
+    /// method wrapped it.
+    ///
+    /// A round control that answers `hit_shape` and `hit_distance` loses both
+    /// the moment someone writes `.on_tap(..)` on it if these are not
+    /// forwarded — and loses them silently, which is the worst way to lose a
+    /// hit test. The node-level `.hit_slop(..)` / `.no_hit_slop()` overrides
+    /// need no forwarding: they ride the `HandlerSet` onto the node.
+    fn hit_shape(&self, local_point: teksilo_canvas::Point, bounds: teksilo_canvas::Rect) -> bool {
+        self.widget.hit_shape(local_point, bounds)
+    }
+
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        self.widget.hit_outset(kind, tokens)
+    }
+
+    fn hit_slop(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> Option<crate::pointer::hit_slop::HitSlop> {
+        // Disambiguated: `WidgetBuilder::hit_slop(self, HitSlop)` — the
+        // consuming builder method — shares this name, exactly as
+        // `clips_children` does on both traits.
+        Widget::hit_slop(&self.widget, kind, tokens)
+    }
+
+    fn hit_distance(
+        &self,
+        local_point: teksilo_canvas::Point,
+        bounds: teksilo_canvas::Rect,
+    ) -> Option<f32> {
+        self.widget.hit_distance(local_point, bounds)
+    }
+
+    fn target_regions(&self, bounds: teksilo_canvas::Rect) -> Vec<crate::partition::TargetRegion> {
+        self.widget.target_regions(bounds)
+    }
+
+    /// Forwarded because the default is the destructive answer. A container that
+    /// keeps memoized panes across a rebuild loses them to a builder method
+    /// otherwise, and the loss reads as content that vanishes on an unrelated
+    /// state change rather than as a dropped forward.
+    fn preserves_children_on_rebuild(&self) -> bool {
+        self.widget.preserves_children_on_rebuild()
+    }
+
+    /// Forwarded so tooltip content that knows itself to be empty can still say
+    /// so. The default is `true`, which shows an empty bubble instead.
+    fn tooltip_has_content(&self) -> bool {
+        self.widget.tooltip_has_content()
+    }
+
+    /// Forwarded because a declaration is how the registry and the rebinding UI
+    /// learn a keystroke exists. Dropped, the shortcut is not overridden by
+    /// anything — it is simply never registered.
+    fn declare_shortcuts(&self) -> Vec<crate::shortcut::Shortcut> {
+        self.widget.declare_shortcuts()
+    }
+
+    /// The one method here that is **not** a forward, deliberately: it exists so
+    /// the arena can lift off the handlers the builder chain just attached, and
+    /// those live on the wrapper, not on the widget. Forwarding it would hand
+    /// the arena the wrapped widget's set instead and the attached handlers
+    /// would never reach the node — which is the whole point of the wrapper.
+    ///
+    /// The call is the inherent `WidgetWithHandlers::take_handler_set`, not this
+    /// one.
     fn take_handler_set(&mut self) -> Option<HandlerSet> {
         Some(self.take_handler_set())
     }
@@ -1638,6 +2137,55 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         WidgetWithHandlers::new(self).gesture_dead_zone(dead_zone)
     }
 
+    /// Select what a hold on this widget's subtree means. See
+    /// [`HandlerSet::long_press_role`].
+    fn long_press_role(
+        self,
+        role: crate::widget_tree::touch_route::LongPressRole,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).long_press_role(role)
+    }
+
+    /// Override what a direct pointer may do to this widget's subtree. See
+    /// [`HandlerSet::touch_action`].
+    fn touch_action(self, action: TouchAction) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).touch_action(action)
+    }
+
+    /// Declare this widget a pan surface on `axes`, kinetic, direct pointers
+    /// only. See [`HandlerSet::scroll_container`].
+    fn scroll_container(self, axes: PanAxes) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).scroll_container(axes)
+    }
+
+    /// Declare this widget a pan surface with an explicit [`PanClaim`]. See
+    /// [`HandlerSet::pan_claim`].
+    fn pan_claim(self, claim: PanClaim) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).pan_claim(claim)
+    }
+
+    /// Whether this widget absorbs a boundary scroll or chains it outward. See
+    /// [`HandlerSet::overscroll_behavior`].
+    fn overscroll_behavior(self, behavior: crate::OverscrollBehavior) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).overscroll_behavior(behavior)
+    }
+
+    /// Declare when a drag on this widget may begin relative to the press that
+    /// starts it. See [`HandlerSet::drag_activation`].
+    fn drag_activation(
+        self,
+        activation: teksilo_tokens::DragActivation,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).drag_activation(activation)
+    }
+
+    /// Declare how many simultaneous contacts this widget serves. Default
+    /// [`MultiContact::First`] — the second finger on a single-contact control
+    /// is terminated there rather than reaching an ancestor.
+    fn multi_contact(self, policy: MultiContact) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).multi_contact(policy)
+    }
+
     /// Mark this widget a keyboard capture surface (terminals, game
     /// viewports): while focused, `KeyDown`s bypass shortcut resolution.
     /// See [`HandlerSet::keyboard_capture`].
@@ -1650,6 +2198,18 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// [`HandlerSet::hit_transparent`].
     fn hit_transparent(self, transparent: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).hit_transparent(transparent)
+    }
+
+    /// Override the miss-only hit slop for this node. See
+    /// [`HandlerSet::hit_slop`].
+    fn hit_slop(self, slop: crate::pointer::hit_slop::HitSlop) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).hit_slop(slop)
+    }
+
+    /// Take this node out of both hit-widening mechanisms — no slop outset and
+    /// no `Widget::hit_outset`. See [`HandlerSet::no_hit_slop`].
+    fn no_hit_slop(self) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).no_hit_slop()
     }
 
     /// Set a context-menu factory. See
@@ -1701,6 +2261,16 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         f: impl FnMut(teksilo_canvas::Point, &mut EventContext) + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).on_drag_tick(f)
+    }
+
+    /// Attach a pointer-cancel handler. See
+    /// [`HandlerSet::on_pointer_cancel`].
+    fn on_pointer_cancel(
+        self,
+        f: impl FnMut(&crate::pointer::PointerInfo, crate::pointer::CancelReason, &mut EventContext)
+        + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).on_pointer_cancel(f)
     }
 
     fn on_drop(
@@ -1895,6 +2465,9 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
 impl<W: Widget + Sized + 'static> WidgetBuilder for W {}
 
 #[cfg(test)]
+mod wrapper_forwarding_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::widget::WidgetPlacement;
@@ -2038,6 +2611,70 @@ mod tests {
             seen_mut,
             Some(7),
             "as_any_mut must forward through the wrapper too"
+        );
+    }
+
+    // --- touch-action / pan-claim builder surfaces ---------------------
+
+    /// Surface 1: `HandlerSet`'s own builder methods set its fields
+    /// directly — no arena involved.
+    #[test]
+    fn handler_set_surface_sets_touch_action_and_pan_claim() {
+        let hs = HandlerSet::new()
+            .touch_action(TouchAction::PAN_Y)
+            .scroll_container(PanAxes::BOTH);
+        assert_eq!(hs.touch_action, Some(TouchAction::PAN_Y));
+        assert_eq!(
+            hs.pan_claim,
+            Some(PanClaim {
+                axes: PanAxes::BOTH,
+                devices: teksilo_tokens::PointerKindMask::DIRECT,
+                kinetic: true,
+            })
+        );
+    }
+
+    /// Surface 2: `WidgetWithHandlers<W>`'s inherent methods — reached by
+    /// chaining a second builder call onto an already-wrapped widget, which
+    /// resolves to the inherent impl rather than the blanket trait default.
+    #[test]
+    fn widget_with_handlers_surface_sets_touch_action_and_pan_claim() {
+        let wrapped = crate::test_widgets::FillWidget::new()
+            .gesture_dead_zone(false) // promotes to WidgetWithHandlers via the trait
+            .touch_action(TouchAction::NONE) // now resolves to the inherent method
+            .pan_claim(PanClaim::horizontal());
+        assert_eq!(wrapped.handler_set.touch_action, Some(TouchAction::NONE));
+        assert_eq!(wrapped.handler_set.pan_claim, Some(PanClaim::horizontal()));
+    }
+
+    /// Surface 3: the blanket `WidgetBuilder` trait default method, called
+    /// directly on a bare `Widget` and verified end-to-end through the tree
+    /// (the widget-authoring call shape apps actually use). Read back
+    /// through the two path folds themselves: for a root with no ancestors,
+    /// `effective_touch_action` / `pan_candidates` reduce to exactly the
+    /// node's own declaration, so this doubles as a sanity check on those
+    /// folds' base case.
+    #[test]
+    fn widget_builder_surface_sets_the_node_fields() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(
+            crate::test_widgets::FillWidget::new()
+                .touch_action(TouchAction::PAN_X)
+                .scroll_container(PanAxes::Y),
+        );
+        tree.layout(teksilo_canvas::SizeProposal::exact(100.0, 100.0));
+
+        assert_eq!(tree.effective_touch_action(id), TouchAction::PAN_X);
+        assert_eq!(
+            tree.pan_candidates(id, TouchAction::AUTO),
+            vec![(
+                id,
+                PanClaim {
+                    axes: PanAxes::Y,
+                    devices: teksilo_tokens::PointerKindMask::DIRECT,
+                    kinetic: true,
+                }
+            )]
         );
     }
 }

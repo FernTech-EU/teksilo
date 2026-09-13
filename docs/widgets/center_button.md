@@ -33,6 +33,14 @@ let bell = NotificationCenterButton::new(archive)
     });
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![NotificationCenterButton at Touch density](img/center_button-touch.png)
+
 ## Builder methods at a glance
 
 `for_window`, `for_audience`, `size`, `show_badge_when_zero`, `max_badge_count`, `placement`, `on_action_invoked`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

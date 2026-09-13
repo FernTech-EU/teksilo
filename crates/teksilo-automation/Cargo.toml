@@ -19,10 +19,15 @@ categories = ["development-tools::testing", "accessibility"]
 # Core-only peer (mirrors `teksilo-data`): depends on `teksilo-core` for the
 # `WidgetTree` / `WindowOps` / event surface and re-exports `accesskit` via
 # `teksilo_core::accesskit`. `teksilo-canvas` supplies the geometry types
-# (`Point`/`Rect`/`SizeProposal`) the executor drives the tree with. No GUI,
-# render, platform, or app crate — no async runtime.
+# (`Point`/`Rect`/`SizeProposal`) the executor drives the tree with, and
+# `teksilo-tokens` the input vocabulary the touch and pen ops name
+# (`PointerKind`, `PenKind`, `TargetDensity`) — `teksilo-core` takes those from
+# tokens and does not re-export them, and all three are pure data types from a
+# crate below core, so the core-only-peer shape is unchanged. No GUI, render,
+# platform, or app crate — no async runtime.
 teksilo-core = { workspace = true }
 teksilo-canvas = { workspace = true }
+teksilo-tokens = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

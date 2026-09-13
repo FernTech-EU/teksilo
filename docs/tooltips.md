@@ -3,8 +3,9 @@
 
 # Tooltip Reference
 
-Tooltips are hover-/focus-triggered overlays that surface ancillary information
-about a control. Teksilo ships **three tiers** that share one attachment pipeline:
+Tooltips are overlays that surface ancillary information about a control,
+summoned by a hover, by keyboard focus, or — for a pointer that cannot hover — by
+a **hold**. Teksilo ships **three tiers** that share one attachment pipeline:
 
 - **Plain tooltips** — a single localized string in a themed rounded-rect
   surface. Pure-text, ephemeral, no interaction.
@@ -371,7 +372,7 @@ Widgets that need a custom value pass an explicit `Duration` to
 
 | Method | Use |
 |--------|-----|
-| `attach_tooltip(anchor, content, delay)` | Plain hover-only tooltip |
+| `attach_tooltip(anchor, content, delay)` | Plain tooltip — hover, or a hold on a pointer that cannot hover |
 | `attach_tooltip_with_sticky(anchor, content, delay, sticky_after)` | Tooltip that auto-promotes after `sticky_after` of visible time |
 | `attach_tooltip_with_sticky_sink(anchor, content, delay, sticky_after, shown_at_sink)` | Same plus a shared `Rc<Cell<Option<Instant>>>` the tree updates on show/dismiss; the rich widget reads it from `paint()` to drive its dwell indicator without a paint-gap heuristic |
 | `promote_tooltip_to_sticky(content_id)` | Manual promotion — flag the entry sticky and swap the overlay to `EscapeOrClickOutside` |
@@ -413,9 +414,48 @@ event batch. The state-machine is:
    leave-grace (WCAG 1.4.13 Hoverable). Sticky tooltips (post-promotion)
    survive — the user dismisses them via `EscapeOrClickOutside`.
 
+Steps 1, 2 and 5 are the **hover owner's** alone. A contact writes no hover
+state, receives no `PointerEnter` and no `PointerLeave`, and so passes through
+none of them; a finger's route into the same entries is the hold, below.
+
+---
+
+## Under a finger: the hold
+
+A contact produces no hover, ever, so none of the machinery above runs for one,
+and no tooltip is reachable *through it*. The route that replaces it is a **long
+press**, and it is the *tree's* rather than any widget's — see
+[`teksilo_core::widget_tree::touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs).
+
+It has to be the tree's for one reason above all: the most load-bearing
+hover-only tooltip in the framework is the one on a **disabled** control — the
+"why is this greyed out?" answer, which hover reaches because
+`tooltip_pointer_enter` sits beside, not behind, the `is_enabled` gate that
+`dispatch_to_widget` applies. A disabled node's events stop at that gate, and a
+gesture arena is only ever installed past it — so a disabled node has none and
+can recognise nothing at all. The hold is therefore a deadline hung off the press
+record, resolved in the same pass as the press-feedback delay and a standing
+hold's expiry.
+
+Three things follow, and they are what a caller sees:
+
+- **It picks the same entry a hover would** — the innermost whose anchor contains
+  the pressed node — and it shows it through the same pass, so the content and
+  blank-body checks are not duplicated and cannot drift.
+- **It is touch only.** A pen hovers and has a barrel button, so its hold stays
+  its own; a mouse keeps its dwell.
+- **It retires itself.** Nothing leaves it and nothing moves focus off it, so the
+  surface carries an expiry of its own (`TOUCH_TOOLTIP_DISMISS`) alongside
+  `Escape` and a press outside.
+
+A widget's own `on_long_press` always wins over the route, and a hold that is
+already arming a grab — a reorderable row under a finger — is spent, so no tip
+appears there either. `LongPressRole` on the node selects or suppresses the route
+for cases the framework cannot infer.
+
 ### Suppression and dismissal
 
-Beyond hover-leave, four things retire a tooltip:
+Beyond hover-leave, five things retire a tooltip:
 
 | Trigger | Pending dwell | Shown non-sticky | Sticky |
 |---|---|---|---|
@@ -423,6 +463,7 @@ Beyond hover-leave, four things retire a tooltip:
 | Drag session active (`tooltip_cancel_pending_dwell`) | cancelled | — | kept |
 | Window deactivated (`tooltip_window_deactivated`) | cancelled | dismissed | kept |
 | <kbd>Escape</kbd> (`try_dismiss_top_on_escape`) | — | dismissed | dismissed |
+| Its own expiry, for a tip a **hold** summoned (`TOUCH_TOOLTIP_DISMISS`) | — | dismissed | n/a — a hold-shown tip is not promoted |
 
 A press means the user already knows what the control does, so a tip must not
 pop *after* the click that answered it, nor sit over what was just clicked —

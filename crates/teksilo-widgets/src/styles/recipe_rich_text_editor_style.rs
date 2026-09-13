@@ -14,10 +14,10 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::styles::{RichTextEditorStyle, RichTextEditorStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
+use teksilo_tokens::{BorderRole, CornerRadius, InputTokens, SurfaceRole};
 
 use crate::primitives::{Padding, RectWidget, ZStack};
-use crate::styles::recipe_text_input_style as field_dims;
+use crate::styles::TextInputRecipe;
 
 /// Default `RichTextEditorStyle` shipped with Teksilo. Wraps the
 /// viewport in a TextInput-like border + padding + corner-radius
@@ -25,6 +25,20 @@ use crate::styles::recipe_text_input_style as field_dims;
 /// when read-only — viewers shouldn't carry an editable-field frame.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeRichTextEditorStyle;
+
+impl RecipeRichTextEditorStyle {
+    /// This style resolved against a density's [`InputTokens`], as
+    /// `RecipeRichTextEditorStyle::for_tokens(&ctx.theme().input)` at the widget's own
+    /// build site.
+    ///
+    /// The style is a unit struct: it borrows the text-field dimensions
+    /// wholesale, and resolves them per density inside
+    /// [`make_body`](RichTextEditorStyle::make_body) from
+    /// `ctx.theme().input`, so there is nothing to bake here.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
+        Self
+    }
+}
 
 impl RichTextEditorStyle for RecipeRichTextEditorStyle {
     fn make_body(&self, cfg: &RichTextEditorStyleConfig, ctx: &mut BuildContext) -> WidgetId {
@@ -51,8 +65,11 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
         // Editable: TextInput-style focus-aware frame. The widget-level
         // `content_padding` replaces the default field insets when set.
         let theme = ctx.theme_signal().get();
+        // The field metrics come from the same recipe `TextInput` uses, resolved
+        // against the active density so the two stay on one baseline.
+        let field = TextInputRecipe::for_tokens(&theme.input);
         let focus_ring_width = theme.shape.focus_ring_width;
-        let field_border_width = field_dims::TEXT_FIELD_BORDER_WIDTH;
+        let field_border_width = field.border_width;
         let border_role = cfg.is_focused.map(|f| {
             if *f {
                 BorderRole::Focused
@@ -75,13 +92,13 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
             )
             .border_color(ColorProp::DynamicBorderRole(border_role))
             .border_width(border_width_signal)
-            .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
+            .corner_radius(CornerRadius::uniform(field.corner_radius));
         let bg_id = ctx.add(bg);
         let (pt, pr, pb, pl) = cfg.content_padding.unwrap_or((
-            field_dims::TEXT_FIELD_PADDING_VERTICAL,
-            field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
-            field_dims::TEXT_FIELD_PADDING_VERTICAL,
-            field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
+            field.padding_vertical,
+            field.padding_horizontal,
+            field.padding_vertical,
+            field.padding_horizontal,
         ));
         let padded = ctx.add(Padding::new(pt, pr, pb, pl).child_id(cfg.viewport));
         ctx.add(ZStack::new().add_child(bg_id).add_child(padded))

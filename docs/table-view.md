@@ -482,6 +482,12 @@ trait — `FlatNavigator` for `TableView`, `TreeNavigator` for
 
 ## Drag & drop
 
+Under a finger the rules differ, and they are shared with the other four data
+views: [Data views under a finger](data-view-touch.md) covers when a press
+commits the selection, why both reorders — rows and columns — wait for a hold,
+why the column-header strip is a pan surface, and how the tree-table's drop
+bands widen.
+
 ### Column resize
 
 The grip is **centred on the divider**: it reaches `RESIZE_HANDLE_WIDTH`
@@ -562,7 +568,9 @@ to serve a rare one.
 
 ### Column reorder
 
-Drag a header cell from outside the resize zone. The column-reorder
+Drag a header cell from outside the resize zone — after a long press if the
+pointer is coarse, so a finger's swipe along the strip stays a horizontal pan
+([data-view-touch.md §3](data-view-touch.md)). The column-reorder
 drag emits `ColumnReorderDragData { col_id, source_table_id }`. The
 header strip is the drop target; dropping inside the leading-pinned
 pane re-pins the column to `Leading`, dropping inside the

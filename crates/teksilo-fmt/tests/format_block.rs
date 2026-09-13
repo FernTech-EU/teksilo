@@ -103,6 +103,36 @@ fn argument_free_property() {
     assert_eq!(out, "Expand {\n    fills_stack\n}");
 }
 
+/// The formatter never reorders body items, including the properties the
+/// `teksu!` lowering pass does reorder.
+///
+/// The two tools must disagree here on purpose: the lowering moves wrapping
+/// `WidgetBuilder` properties to the end of the emitted chain, but the source
+/// is the user's and a formatter that moved them would rewrite what they wrote
+/// on every save. This pins the split, using a wrapping property
+/// (`touch_action`) placed before a child and beside a widget-specific one.
+#[test]
+fn wrapping_properties_keep_their_source_position() {
+    let input = "Probe { touch_action: TouchAction::NONE spacing: 4.0 Leaf on_tap: |_, _| {} }";
+    let expected = vec![
+        "Probe {",
+        "    touch_action: TouchAction::NONE",
+        "    spacing: 4.0",
+        "    Leaf",
+        "    on_tap: |_, _| {}",
+        "}",
+    ];
+    assert_eq!(fmt(input).lines().collect::<Vec<_>>(), expected);
+}
+
+/// An argument-free wrapping property survives the round trip in the
+/// bare-lowercase form, which is the only way to write one.
+#[test]
+fn argument_free_wrapping_property() {
+    let out = fmt("Probe { no_hit_slop Leaf }");
+    assert_eq!(out, "Probe {\n    no_hit_slop\n    Leaf\n}");
+}
+
 #[test]
 fn explicit_constructor() {
     let out = fmt(r#"VStack { Button::new("ok") }"#);

@@ -20,10 +20,11 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{RadioStyle, RadioStyleConfig, RadioVariant};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, InputTokens, TargetRole};
 
 // IntUI design tokens for RadioButton. The recipe owns its own dimensions.
 pub const RADIO_VISUAL_SIZE: f32 = 19.0;
@@ -42,14 +43,25 @@ pub struct RadioRecipe {
     pub inner_dot_size: f32,
 }
 
-impl Default for RadioRecipe {
-    fn default() -> Self {
+impl RadioRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
             visual_size: RADIO_VISUAL_SIZE,
-            hit_area: RADIO_HIT_AREA,
-            label_gap: RADIO_LABEL_GAP,
+            hit_area: dp(RADIO_HIT_AREA, TargetRole::Target, tokens),
+            label_gap: spacing(RADIO_LABEL_GAP, tokens),
             inner_dot_size: RADIO_INNER_DOT_SIZE,
         }
+    }
+}
+
+impl Default for RadioRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -65,6 +77,18 @@ impl RecipeRadioStyle {
     pub fn new(recipe: RadioRecipe) -> Self {
         Self { recipe }
     }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeRadioStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: RadioRecipe::for_tokens(tokens),
+        }
+    }
 }
 
 impl RadioStyle for RecipeRadioStyle {
@@ -75,7 +99,7 @@ impl RadioStyle for RecipeRadioStyle {
             .map(|(focused, hovered)| {
                 if *focused {
                     Some(if *hovered {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     } else {
                         FocusOrigin::Keyboard
                     })

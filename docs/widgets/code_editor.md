@@ -40,6 +40,14 @@ the editor knows how to toggle a line comment, not that Rust uses `//`.
 Guessing would be worse than not knowing — inserting `//` into a Python file
 corrupts it silently.
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![CodeEditorHandle at Touch density](img/code_editor-touch.png)
+
 ## Builder methods at a glance
 
 `cursor_position`, `cursor_position_signal`, `caret_count`, `bracket_match`, `has_selection`, `can_undo`, `undo`, `redo`, `copy`, `cut`, `paste`, `select_all`, `is_read_only`, `can_redo`, `document_version`, `scroll_y`

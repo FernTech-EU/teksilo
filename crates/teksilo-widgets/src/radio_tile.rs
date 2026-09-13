@@ -35,6 +35,18 @@
 //!     .tile(RadioTile::new().icon(icon).title(tr!(single_file())).description(tr!(single_file_desc())))
 //!     .tile(RadioTile::new().icon(icon2).title(tr!(bundle())).description(tr!(bundle_desc())))
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! A tile is a whole-card target, comfortably past the floor at every density, and
+//! it activates on the release. What the touch sweep changed is its **pressed**
+//! appearance: it was written by the `Space` path alone, so the recipe painted a
+//! state no pointer reached — on the one control where a press visual matters
+//! most, because there is no smaller affordance inside the card to look at.
+//!
+//! A tap by a contact also rests the tile idle rather than hovered, for the reason
+//! `ToolBox`'s header does: a finger sends no hover-leave, and the stale tint
+//! becomes visible as soon as the selection moves to another tile.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -53,17 +65,30 @@ use teksilo_core::styles::{
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{HAlignment, TextRole, TextStyleRole, VAlignment};
+use teksilo_tokens::{HAlignment, InputTokens, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::primitives::{HStack, Spacer, TextWidget, VStack};
 use crate::styles::{RecipeRadioStyle, RecipeRadioTileStyle};
+use teksilo_core::styles::density::spacing;
 use teksilo_i18n::LocalizedString;
 
 /// Horizontal gap between the icon / title / indicator on a tile's top row.
 const TILE_ROW_GAP: f32 = 10.0;
+
+/// [`TILE_ROW_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn tile_row_gap(tokens: &InputTokens) -> f32 {
+    spacing(TILE_ROW_GAP, tokens)
+}
 /// Vertical gap between the tile's title row and its description.
 const TILE_TITLE_DESC_GAP: f32 = 6.0;
+
+/// [`TILE_TITLE_DESC_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn tile_title_desc_gap(tokens: &InputTokens) -> f32 {
+    spacing(TILE_TITLE_DESC_GAP, tokens)
+}
 
 /// Which side of the top row the radio indicator sits on. Defaults to
 /// `Trailing` (top-right in LTR), matching the reference design.
@@ -430,30 +455,29 @@ impl Widget for RadioTile {
         // --- Radio indicator: reuse the theme's RadioStyle so the glyph
         // matches a standalone RadioButton. The glyph never draws its own
         // focus ring (the tile owns the ring), so pass a constant `false`.
-        let indicator_id = if self.show_indicator {
-            let radio_style: SharedRadioStyle = ctx
-                .theme()
-                .style_slots
-                .radio
-                .clone()
-                .unwrap_or_else(|| Rc::new(RecipeRadioStyle::default()));
-            let radio_cfg = RadioStyleConfig {
-                is_selected: is_selected.clone(),
-                is_hovered: is_hovered.clone(),
-                is_pressed: is_pressed.clone(),
-                is_focused: Signal::new(false),
-                is_disabled: is_disabled.clone(),
-                variant: RadioVariant::Circle,
+        let indicator_id =
+            if self.show_indicator {
+                let radio_style: SharedRadioStyle =
+                    ctx.theme().style_slots.radio.clone().unwrap_or_else(|| {
+                        Rc::new(RecipeRadioStyle::for_tokens(&ctx.theme().input))
+                    });
+                let radio_cfg = RadioStyleConfig {
+                    is_selected: is_selected.clone(),
+                    is_hovered: is_hovered.clone(),
+                    is_pressed: is_pressed.clone(),
+                    is_focused: Signal::new(false),
+                    is_disabled: is_disabled.clone(),
+                    variant: RadioVariant::Circle,
+                };
+                Some(radio_style.make_body(&radio_cfg, ctx))
+            } else {
+                None
             };
-            Some(radio_style.make_body(&radio_cfg, ctx))
-        } else {
-            None
-        };
 
         // --- Top row: [icon?] [title] [Spacer] [indicator?] (indicator side
         // configurable; RTL handled by HStack + Spacer).
         let mut top_row = HStack::new()
-            .spacing(TILE_ROW_GAP)
+            .spacing(tile_row_gap(&ctx.theme().input))
             .alignment(VAlignment::Center);
 
         if self.indicator_side == RadioTileIndicatorSide::Leading
@@ -511,7 +535,7 @@ impl Widget for RadioTile {
 
         // --- Content column: top row + (description|body, unless compact).
         let mut content_col = VStack::new()
-            .spacing(TILE_TITLE_DESC_GAP)
+            .spacing(tile_title_desc_gap(&ctx.theme().input))
             .alignment(HAlignment::Leading)
             .add_child(top_row_id);
 
@@ -543,7 +567,7 @@ impl Widget for RadioTile {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.radio_tile.clone())
-            .unwrap_or_else(|| Rc::new(RecipeRadioTileStyle::default()));
+            .unwrap_or_else(|| Rc::new(RecipeRadioTileStyle::for_tokens(&ctx.theme().input)));
         let cfg = RadioTileStyleConfig {
             content: content_id,
             is_selected: is_selected.clone(),
@@ -599,13 +623,49 @@ impl Widget for RadioTile {
         let sel_access = self.selected.clone();
         let int_tap = interaction.clone();
         let int_hover = interaction.clone();
+        // The tile's pressed chrome, driven by the router's press record. It was
+        // previously written by the `Space` path alone, so the recipe's pressed
+        // appearance was unreachable for a mouse and for a finger alike — and a
+        // whole-card control is the one a press visual matters most on, because
+        // there is no smaller affordance inside it to look at. The framework
+        // press also survives a press sliding off the card and back on, and is
+        // withdrawn without a release when a surrounding scroller claims the
+        // pan, which is exactly what a tile in a scrolling settings pane needs.
+        let hovered_cell = Rc::new(std::cell::Cell::new(false));
+        {
+            let hovered = hovered_cell.clone();
+            crate::common::interaction::bind_press_state(
+                ctx,
+                interaction.clone(),
+                InteractionState::Pressed,
+                move || {
+                    if hovered.get() {
+                        InteractionState::Hovered
+                    } else {
+                        InteractionState::Idle
+                    }
+                },
+            );
+        }
+        let hovered_for_hover = hovered_cell.clone();
 
         let mut handler_set = HandlerSet::new()
-            .on_tap(move |_pos, _ctx: &mut EventContext| {
+            .on_tap(move |_pos, ctx: &mut EventContext| {
                 sel_tap.set(value);
-                int_tap.set(InteractionState::Hovered);
+                // A mouse or a pen is still over the tile after the release; a
+                // finger is gone and sends no hover-leave to correct a
+                // `Hovered` state with.
+                int_tap.set(if ctx.pointer_kind().hovers() {
+                    InteractionState::Hovered
+                } else {
+                    InteractionState::Idle
+                });
             })
             .on_hover(move |entered: bool, _ctx: &mut EventContext| {
+                // Recorded beside the signal as well: while the tile is
+                // `Pressed` the hover truth has nowhere to live in the enum,
+                // and the press binding needs it to pick the resting state.
+                hovered_for_hover.set(entered);
                 if entered {
                     int_hover.set(InteractionState::Hovered);
                 } else {

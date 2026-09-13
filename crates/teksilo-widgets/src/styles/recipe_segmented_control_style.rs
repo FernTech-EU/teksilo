@@ -18,10 +18,11 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::Signal;
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_core::styles::{SegmentSlots, SegmentedControlStyle, SegmentedControlStyleConfig};
 use teksilo_core::widget::{LayoutContext, LayoutResponse, PaintContext, Widget};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::CornerRadius;
+use teksilo_tokens::{CornerRadius, InputTokens, TargetRole};
 
 // IntUI design tokens for SegmentedControl. The recipe owns its own
 // dimensions.
@@ -46,15 +47,26 @@ pub struct SegmentedControlRecipe {
     pub border_width: f32,
 }
 
-impl Default for SegmentedControlRecipe {
-    fn default() -> Self {
+impl SegmentedControlRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            height: SEGMENTED_CONTROL_HEIGHT,
-            padding_horizontal: SEGMENTED_CONTROL_PADDING_HORIZONTAL,
-            padding_vertical: SEGMENTED_CONTROL_PADDING_VERTICAL,
+            height: dp(SEGMENTED_CONTROL_HEIGHT, TargetRole::Target, tokens),
+            padding_horizontal: spacing(SEGMENTED_CONTROL_PADDING_HORIZONTAL, tokens),
+            padding_vertical: spacing(SEGMENTED_CONTROL_PADDING_VERTICAL, tokens),
             corner_radius: SEGMENTED_CONTROL_CORNER_RADIUS,
             border_width: SEGMENTED_CONTROL_BORDER_WIDTH,
         }
+    }
+}
+
+impl Default for SegmentedControlRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -67,6 +79,18 @@ pub struct RecipeSegmentedControlStyle {
 impl RecipeSegmentedControlStyle {
     pub fn new(recipe: SegmentedControlRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeSegmentedControlStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: SegmentedControlRecipe::for_tokens(tokens),
+        }
     }
 }
 

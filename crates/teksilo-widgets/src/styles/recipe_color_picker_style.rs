@@ -16,10 +16,11 @@
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::styles::{ColorPickerLayout, ColorPickerStyle, ColorPickerStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::Color;
+use teksilo_tokens::{Color, InputTokens, TargetRole};
 
 use crate::panel::Panel;
 use crate::primitives::{HStack, VStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // ─── IntUI design tokens for ColorPicker ───────────────────────────
 
@@ -118,14 +119,19 @@ pub struct ColorPickerRecipe {
     pub hex_field_width: f32,
 }
 
-impl Default for ColorPickerRecipe {
-    fn default() -> Self {
+impl ColorPickerRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            canvas_width: CANVAS_WIDTH,
-            canvas_height: CANVAS_HEIGHT,
+            canvas_width: dp(CANVAS_WIDTH, TargetRole::Target, tokens),
+            canvas_height: dp(CANVAS_HEIGHT, TargetRole::Target, tokens),
             canvas_corner_radius: CANVAS_CORNER_RADIUS,
             strip_thickness: STRIP_THICKNESS,
-            strip_length: STRIP_LENGTH,
+            strip_length: dp(STRIP_LENGTH, TargetRole::Target, tokens),
             strip_corner_radius: STRIP_CORNER_RADIUS,
             indicator_radius: INDICATOR_RADIUS,
             indicator_outer_stroke_width: INDICATOR_OUTER_STROKE_WIDTH,
@@ -135,21 +141,27 @@ impl Default for ColorPickerRecipe {
             strip_thumb_width: STRIP_THUMB_WIDTH,
             strip_thumb_height: STRIP_THUMB_HEIGHT,
             strip_thumb_corner_radius: STRIP_THUMB_CORNER_RADIUS,
-            padding: PADDING,
-            gap: GAP,
+            padding: spacing(PADDING, tokens),
+            gap: spacing(GAP, tokens),
             swatch_size: SWATCH_SIZE,
-            swatch_spacing: SWATCH_SPACING,
+            swatch_spacing: spacing(SWATCH_SPACING, tokens),
             swatch_corner_radius: SWATCH_CORNER_RADIUS,
             swatch_selected_stroke_width: SWATCH_SELECTED_STROKE_WIDTH,
             checker_cell: CHECKER_CELL,
             checker_color_a: CHECKER_COLOR_A,
             checker_color_b: CHECKER_COLOR_B,
-            preview_width: PREVIEW_WIDTH,
-            preview_height: PREVIEW_HEIGHT,
+            preview_width: dp(PREVIEW_WIDTH, TargetRole::Target, tokens),
+            preview_height: dp(PREVIEW_HEIGHT, TargetRole::Target, tokens),
             preview_corner_radius: PREVIEW_CORNER_RADIUS,
-            spinner_field_width: SPINNER_FIELD_WIDTH,
-            hex_field_width: HEX_FIELD_WIDTH,
+            spinner_field_width: dp(SPINNER_FIELD_WIDTH, TargetRole::Target, tokens),
+            hex_field_width: dp(HEX_FIELD_WIDTH, TargetRole::Target, tokens),
         }
+    }
+}
+
+impl Default for ColorPickerRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -162,6 +174,18 @@ pub struct RecipeColorPickerStyle {
 impl RecipeColorPickerStyle {
     pub fn new(recipe: ColorPickerRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeColorPickerStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: ColorPickerRecipe::for_tokens(tokens),
+        }
     }
 }
 

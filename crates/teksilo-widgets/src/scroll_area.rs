@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! ScrollArea — a clipping viewport that scrolls its content on wheel, touch,
-//! and assistive-technology actions.
+//! ScrollArea — a clipping viewport that scrolls its content on wheel, on a
+//! finger's pan, and on assistive-technology actions.
 //!
 //! Wrap any widget in `ScrollArea` to make it scrollable. The scroll position
 //! is stored in reactive `Signal<f32>` signals (one per axis), shared with the
@@ -10,6 +10,21 @@
 //! modes cover most use cases: `Overlay` (the default, macOS-style thin-at-rest
 //! indicator that expands on hover) and `Permanent` (a layout-consuming gutter
 //! always on screen). Use [`ScrollBarPolicy`] to control when each axis shows.
+//!
+//! ## Pan to scroll
+//!
+//! `ScrollArea` is the reference adopter of [`ScrollableBehavior`]: it
+//! declares a both-axis pan claim, so a direct pointer dragging its content is
+//! synthesised by the router into a positioned `Scroll` and delivered along the
+//! claimant chain. A release hands its velocity to the tree's fling driver,
+//! whose coast arrives back here as ordinary scroll deltas and stops — and
+//! chains outward — at the boundary, exactly as a wheel notch does. A mouse
+//! never pans: the wheel is its scroll device, and its behaviour here is
+//! unchanged in every particular.
+//!
+//! Following the finger *past* the end is off by default
+//! ([`ScrollArea::rubber_band`]); a nested area that banded at its own end could
+//! never hand the gesture to the container around it.
 //!
 //! ## Accessibility
 //!
@@ -27,23 +42,27 @@
 //!     .smooth_scrolling(true);
 //! ```
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-use teksilo_canvas::{Point, Rect, Size, SizeProposal};
+use teksilo_canvas::{Point, Rect, Size, SizeProposal, Vec2};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
-use teksilo_core::event::{EventResponse, ScrollDelta, WidgetEvent};
+use teksilo_core::event::{EventResponse, WidgetEvent};
+use teksilo_core::kinetic::KineticScroller;
+use teksilo_core::pointer::touch_action::PanAxes;
+use teksilo_core::pointer::{ScrollPhase, ScrollSource};
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::Easing;
+use teksilo_tokens::{Easing, OverscrollStyle, RevealPolicy};
 
 use crate::common::scroll::OverscrollBehavior;
+use crate::common::scrollable::{ScrollableAxes, ScrollableBehavior};
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 
 /// How the scroll bar is presented relative to the viewport content.
@@ -60,8 +79,13 @@ pub enum ScrollBarMode {
     Permanent,
     /// Floats over the content like `Overlay` but only ever shows the thin resting
     /// indicator, never the full track. A passive scroll-position display for
-    /// minimal UIs; drag, track-click, and keyboard still work against the full
-    /// slot bounds.
+    /// minimal UIs; drag and track-click still work against the full slot bounds.
+    ///
+    /// **Not the keyboard.** The bar's arrow / `Home` / `End` / `Page` arms sit on
+    /// a node built `focusable(false)`, so no keyboard user reaches them under any
+    /// of the three modes — see [`ScrollBarPolicy::AlwaysOff`], which states the
+    /// same limit from the other side, and `docs/touch-and-pen.md` §10.2, which
+    /// carries it as an open finding.
     Thin,
 }
 
@@ -73,7 +97,15 @@ pub enum ScrollBarPolicy {
     AsNeeded,
     /// Always show the scroll bar, even when content fits without scrolling.
     AlwaysOn,
-    /// Never show the scroll bar; content is still scrollable via wheel and touch.
+    /// Never show the scroll bar; the content still scrolls on a wheel, on a
+    /// finger's pan, and from the assistive-technology scroll actions the
+    /// viewport advertises.
+    ///
+    /// Not from the keyboard: `ScrollArea` installs no key handler, and the
+    /// arrow / Home / End / Page arms on [`ScrollBar`] belong to a node built
+    /// `focusable(false)`, so no keyboard user reaches them. A focused
+    /// descendant is still revealed — that is `ScrollIntoView`, not a key the
+    /// viewport handles.
     AlwaysOff,
 }
 
@@ -168,6 +200,22 @@ pub struct ScrollArea {
     /// Shared via `Rc` for the same reason as `pending_restore_y`: it is cleared
     /// beside it, from a closure that cannot borrow `self`.
     restore_wrote_y: Rc<Cell<Option<f32>>>,
+
+    // --- pan / kinetic ---
+    /// This surface's physics: the range, the rubber band, and the offset a
+    /// pan is currently holding. Owned here rather than by the behaviour so it
+    /// survives a rebuild and so `place_children` — the only place the viewport
+    /// extent is known — can publish into it.
+    scroller: Rc<RefCell<KineticScroller>>,
+    /// How far past its range the content is being held, per axis. Zero unless
+    /// [`Self::rubber_band`] is on and a finger is past the end.
+    overscroll: Signal<Vec2>,
+    /// Whether a finger may drag the content past the end. Off by default —
+    /// see [`Self::rubber_band`].
+    rubber_band: bool,
+    /// Raised while a finger's pan is in flight, so an overlay bar shows what
+    /// is moving. Read by both `ScrollBar` children.
+    scrollbar_reveal: Signal<bool>,
 }
 
 impl Default for ScrollArea {
@@ -222,7 +270,34 @@ impl ScrollArea {
             viewport_origin: Rc::new(Cell::new(Point::ZERO)),
             pending_restore_y: Rc::new(Cell::new(None)),
             restore_wrote_y: Rc::new(Cell::new(None)),
+            scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
+            overscroll: Signal::new(Vec2::ZERO),
+            rubber_band: false,
+            scrollbar_reveal: Signal::new(false),
         }
+    }
+
+    /// Let a finger drag the content past its end, with decreasing gain, and
+    /// release it on the lift — the iOS / Flutter `BouncingScrollPhysics` feel.
+    ///
+    /// **Off by default, and the default is load-bearing.** A surface that
+    /// follows the finger past its end has absorbed the movement, so a nested
+    /// area that banded could never hand the gesture to the container around
+    /// it. The band belongs to the outermost area of a scroll chain.
+    ///
+    /// `prefers-reduced-motion` hard-clamps it whatever this says.
+    pub fn rubber_band(mut self, enabled: bool) -> Self {
+        self.rubber_band = enabled;
+        self
+    }
+
+    /// How far past its range the content is currently being held, per axis,
+    /// after the band. Always `ZERO` with [`Self::rubber_band`] off.
+    ///
+    /// The scroll offset itself never leaves the range, so this is the signal
+    /// a surface binds to draw a stretch or a glow; ignoring it is correct.
+    pub fn overscroll_signal(&self) -> Signal<Vec2> {
+        self.overscroll.clone()
     }
 
     /// Set the scrollable content widget.
@@ -545,7 +620,11 @@ impl Widget for ScrollArea {
             self.viewport_ratio_y.clone(),
         )
         .thickness(thickness)
-        .visual(visual);
+        .visual(visual)
+        // A contact writes no hover, so an overlay bar would stay hidden under
+        // the very gesture that is moving it. Both bars watch the one signal
+        // the scroll handler raises while a pan is in flight.
+        .reveal(self.scrollbar_reveal.clone());
         if let Some(tint) = &self.scroll_bar_thumb_color {
             v_scrollbar = v_scrollbar.thumb_color(tint.clone());
         }
@@ -560,7 +639,8 @@ impl Widget for ScrollArea {
             self.viewport_ratio_x.clone(),
         )
         .thickness(thickness)
-        .visual(visual);
+        .visual(visual)
+        .reveal(self.scrollbar_reveal.clone());
         if let Some(tint) = &self.scroll_bar_thumb_color {
             h_scrollbar = h_scrollbar.thumb_color(tint.clone());
         }
@@ -621,16 +701,23 @@ impl Widget for ScrollArea {
 
         let mut handlers = HandlerSet::new().clips_children(true);
 
-        // ScrollArea stays on `on_scroll` — both mouse-wheel clicks
-        // (`ScrollDelta::Lines`) and trackpad two-finger pans
-        // (`ScrollDelta::Pixels`) already arrive as `WidgetEvent::Scroll`
-        // from the platform, and momentum is handled by animating
-        // `scroll_y`/`scroll_x` with `Easing::EaseOut` below. A future
-        // touch backend would add `on_swipe` here for flick-to-scroll;
-        // there is nothing to migrate today.
-        //
-        // Scroll handler (handles both Scroll and ScrollIntoView)
+        // Everything that scrolls this area arrives as `WidgetEvent::Scroll`,
+        // so there is one handler and no `on_pan`: a wheel notch
+        // (`ScrollDelta::Lines`), a trackpad stream (`ScrollDelta::Pixels`), a
+        // finger's pan synthesised by the router, and the coast that follows a
+        // release all come through the same door.
+        // `ScrollableBehavior::install` attaches both halves of that — the
+        // shared handler and the pan claim that puts this node on the claimant
+        // chain — and the arm below is what `ScrollArea` adds on top: its
+        // `ScrollIntoView` reveal, and the two pieces of per-scroll bookkeeping
+        // that must run before any delta lands.
         {
+            // The `ScrollIntoView` reveal and the two pieces of per-scroll
+            // bookkeeping this area owns. Installed as the behaviour's `before`
+            // arm, so it sees every event first: it claims a reveal outright,
+            // and it *observes* a scroll and then declines, which is what lets
+            // the shared handler own the delta while this arm still gets to run
+            // ahead of it.
             let scroll_y = scroll_y.clone();
             let scroll_x = scroll_x.clone();
             let max_scroll_y = max_scroll_y.clone();
@@ -644,143 +731,163 @@ impl Widget for ScrollArea {
             // on every layout pass and fight them for it.
             let pending_restore_y = self.pending_restore_y.clone();
             let restore_wrote_y = self.restore_wrote_y.clone();
-            handlers = handlers.on_scroll(move |event, _ctx| match event {
-                WidgetEvent::Scroll { delta, .. } => {
-                    pending_restore_y.set(None);
-                    restore_wrote_y.set(None);
-                    let max_y = max_scroll_y.get();
-                    let max_x = max_scroll_x.get();
-                    let cur_y = scroll_y.get();
-                    let cur_x = scroll_x.get();
-                    // Base off the animation target (not the rendered offset)
-                    // so a mid-fling boundary correctly chains.
-                    let base_y = scroll_y.animation_target().unwrap_or(cur_y);
-                    let base_x = scroll_x.animation_target().unwrap_or(cur_x);
+            // An overlay bar is revealed for as long as a finger's pan is in
+            // flight, and returns to its resting state on the lift. At a
+            // density whose `RevealPolicy` is `Always` the resting state is
+            // "shown", so this only ever adds a reveal, never takes one away.
+            let reveal = self.scrollbar_reveal.clone();
+            let reveal_at_rest = ctx.theme().input.reveal == RevealPolicy::Always;
 
-                    let (dx, dy) = match delta {
-                        ScrollDelta::Lines { x, y } => (x * line_height, y * line_height),
-                        ScrollDelta::Pixels { x, y } => (*x, *y),
-                    };
-                    let (target_x, moved_x) =
-                        crate::common::scroll::scroll_clamp_axis(base_x, dx, max_x);
-                    let (target_y, moved_y) =
-                        crate::common::scroll::scroll_clamp_axis(base_y, dy, max_y);
-
-                    if moved_x || moved_y {
-                        if smooth_scrolling {
-                            scroll_y.animate_to(target_y, smooth_scroll_duration, Easing::EaseOut);
-                            scroll_x.animate_to(target_x, smooth_scroll_duration, Easing::EaseOut);
-                        } else {
-                            scroll_y.set(target_y);
-                            scroll_x.set(target_x);
+            let own_arm = move |event: &WidgetEvent,
+                                ctx: &mut teksilo_core::widget::EventContext|
+                  -> Option<EventResponse> {
+                match event {
+                    WidgetEvent::Scroll { phase, .. } => {
+                        pending_restore_y.set(None);
+                        restore_wrote_y.set(None);
+                        if ctx.scroll_source() == ScrollSource::TouchPan {
+                            let in_flight = !matches!(
+                                phase,
+                                ScrollPhase::Ended
+                                    | ScrollPhase::MomentumEnded
+                                    | ScrollPhase::Cancelled
+                            );
+                            let want = in_flight || reveal_at_rest;
+                            if reveal.get() != want {
+                                reveal.set(want);
+                            }
                         }
+                        // Declined on purpose: the delta belongs to the shared
+                        // handler, which is the whole point of installing one.
+                        // `None`, not `Some(Ignored)`: this arm observed the
+                        // event, it did not consume it.
+                        None
                     }
-                    // Decline (Ignored) when fully clamped so the event chains
-                    // to an ancestor scrollable, unless Contain is set.
-                    crate::common::scroll::scroll_response(
-                        moved_x || moved_y,
-                        overscroll_behavior == OverscrollBehavior::Contain,
-                    )
-                }
-                WidgetEvent::ScrollIntoView {
-                    target_bounds,
-                    margin,
-                    align,
-                    motion,
-                    applied_scroll,
-                } => {
-                    pending_restore_y.set(None);
-                    restore_wrote_y.set(None);
-                    // `target_bounds` is in absolute tree coordinates (the
-                    // arena stores screen-space rects). Convert to the
-                    // content's local frame by subtracting the viewport's
-                    // absolute origin and adding the current scroll offset:
-                    // a child whose absolute top equals the viewport's
-                    // absolute top is at content-space y = scroll_y.
-                    let vp = viewport_size.get();
-                    let vo = viewport_origin.get();
-                    let sy = scroll_y.get();
-                    let sx = scroll_x.get();
+                    WidgetEvent::ScrollIntoView {
+                        target_bounds,
+                        margin,
+                        align,
+                        motion,
+                        applied_scroll,
+                    } => {
+                        pending_restore_y.set(None);
+                        restore_wrote_y.set(None);
+                        // `target_bounds` is in absolute tree coordinates (the
+                        // arena stores screen-space rects). Convert to the
+                        // content's local frame by subtracting the viewport's
+                        // absolute origin and adding the current scroll offset:
+                        // a child whose absolute top equals the viewport's
+                        // absolute top is at content-space y = scroll_y.
+                        let vp = viewport_size.get();
+                        let vo = viewport_origin.get();
+                        let sy = scroll_y.get();
+                        let sx = scroll_x.get();
 
-                    // Reveal on each axis independently, but leave an axis
-                    // untouched when the (margin-expanded) target already spans
-                    // the viewport on it: a target larger than the viewport is
-                    // "as visible as it can be", and aligning one of its edges
-                    // would spuriously move that axis — e.g. a full-width row
-                    // (or any target as wide as the content) resetting a
-                    // horizontally-scrolled ancestor on a vertical-only nav.
-                    let viewport_top = sy;
-                    let viewport_bottom = viewport_top + vp.height;
-                    let target_top = target_bounds.y - vo.y + sy - margin;
-                    let target_bottom = target_top + target_bounds.height + margin * 2.0;
+                        // Reveal on each axis independently, but leave an axis
+                        // untouched when the (margin-expanded) target already spans
+                        // the viewport on it: a target larger than the viewport is
+                        // "as visible as it can be", and aligning one of its edges
+                        // would spuriously move that axis — e.g. a full-width row
+                        // (or any target as wide as the content) resetting a
+                        // horizontally-scrolled ancestor on a vertical-only nav.
+                        let viewport_top = sy;
+                        let viewport_bottom = viewport_top + vp.height;
+                        let target_top = target_bounds.y - vo.y + sy - margin;
+                        let target_bottom = target_top + target_bounds.height + margin * 2.0;
 
-                    let mut new_y = sy;
-                    match align {
-                        // Pin: put the target at `f` of the way down the
-                        // viewport regardless of where it currently sits. The
-                        // margin is deliberately not applied — a pin already
-                        // names an exact position, and padding it would only
-                        // shift the pin by an amount the caller did not ask for.
-                        teksilo_core::event::ScrollAlign::Fraction(f) => {
-                            let target_top = target_bounds.y - vo.y + sy;
-                            new_y = target_top - (vp.height - target_bounds.height) * f;
-                        }
-                        teksilo_core::event::ScrollAlign::Minimal => {
-                            if !(target_top <= viewport_top && target_bottom >= viewport_bottom) {
-                                if target_top < viewport_top {
-                                    new_y = target_top;
-                                } else if target_bottom > viewport_bottom {
-                                    new_y = target_bottom - vp.height;
+                        let mut new_y = sy;
+                        match align {
+                            // Pin: put the target at `f` of the way down the
+                            // viewport regardless of where it currently sits. The
+                            // margin is deliberately not applied — a pin already
+                            // names an exact position, and padding it would only
+                            // shift the pin by an amount the caller did not ask for.
+                            teksilo_core::event::ScrollAlign::Fraction(f) => {
+                                let target_top = target_bounds.y - vo.y + sy;
+                                new_y = target_top - (vp.height - target_bounds.height) * f;
+                            }
+                            teksilo_core::event::ScrollAlign::Minimal => {
+                                if !(target_top <= viewport_top && target_bottom >= viewport_bottom)
+                                {
+                                    if target_top < viewport_top {
+                                        new_y = target_top;
+                                    } else if target_bottom > viewport_bottom {
+                                        new_y = target_bottom - vp.height;
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    let viewport_left = sx;
-                    let viewport_right = viewport_left + vp.width;
-                    let target_left = target_bounds.x - vo.x + sx - margin;
-                    let target_right = target_left + target_bounds.width + margin * 2.0;
+                        let viewport_left = sx;
+                        let viewport_right = viewport_left + vp.width;
+                        let target_left = target_bounds.x - vo.x + sx - margin;
+                        let target_right = target_left + target_bounds.width + margin * 2.0;
 
-                    let mut new_x = sx;
-                    if !(target_left <= viewport_left && target_right >= viewport_right) {
-                        if target_left < viewport_left {
-                            new_x = target_left;
-                        } else if target_right > viewport_right {
-                            new_x = target_right - vp.width;
+                        let mut new_x = sx;
+                        if !(target_left <= viewport_left && target_right >= viewport_right) {
+                            if target_left < viewport_left {
+                                new_x = target_left;
+                            } else if target_right > viewport_right {
+                                new_x = target_right - vp.width;
+                            }
                         }
-                    }
 
-                    // Clamp up front rather than setting then calling
-                    // `clamp_and_set`: an animated scroll must be aimed at a
-                    // reachable offset, or the tween would start toward a
-                    // target the clamp immediately retracts.
-                    let new_y = new_y.clamp(0.0, max_scroll_y.get());
-                    let new_x = new_x.clamp(0.0, max_scroll_x.get());
+                        // Clamp up front rather than setting then calling
+                        // `clamp_and_set`: an animated scroll must be aimed at a
+                        // reachable offset, or the tween would start toward a
+                        // target the clamp immediately retracts.
+                        let new_y = new_y.clamp(0.0, max_scroll_y.get());
+                        let new_x = new_x.clamp(0.0, max_scroll_x.get());
 
-                    match motion {
-                        teksilo_core::event::ScrollMotion::Smooth if smooth_scrolling => {
-                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
-                            scroll_x.animate_to(new_x, smooth_scroll_duration, Easing::EaseOut);
+                        match motion {
+                            teksilo_core::event::ScrollMotion::Smooth if smooth_scrolling => {
+                                scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
+                                scroll_x.animate_to(new_x, smooth_scroll_duration, Easing::EaseOut);
+                            }
+                            _ => {
+                                scroll_y.set(new_y);
+                                scroll_x.set(new_x);
+                            }
                         }
-                        _ => {
-                            scroll_y.set(new_y);
-                            scroll_x.set(new_x);
+                        // Report the applied scroll delta so a nested outer
+                        // container can re-target the same rect. Computed from the
+                        // clamped *targets*, not the live signal, so an animated
+                        // scroll reports where it is heading rather than the single
+                        // frame it has travelled so far.
+                        if let Some(cell) = applied_scroll
+                            && let Ok(mut d) = cell.lock()
+                        {
+                            *d = teksilo_canvas::Point::new(new_x - sx, new_y - sy);
                         }
+                        Some(EventResponse::Handled)
                     }
-                    // Report the applied scroll delta so a nested outer
-                    // container can re-target the same rect. Computed from the
-                    // clamped *targets*, not the live signal, so an animated
-                    // scroll reports where it is heading rather than the single
-                    // frame it has travelled so far.
-                    if let Some(cell) = applied_scroll
-                        && let Ok(mut d) = cell.lock()
-                    {
-                        *d = teksilo_canvas::Point::new(new_x - sx, new_y - sy);
-                    }
-                    EventResponse::Handled
+                    _ => None,
                 }
-                _ => EventResponse::Ignored,
-            });
+            };
+
+            let axes = ScrollableAxes {
+                x: self.scroll_x.clone(),
+                y: self.scroll_y.clone(),
+                max_x: self.max_scroll_x.clone(),
+                max_y: self.max_scroll_y.clone(),
+                overscroll: self.overscroll.clone(),
+            };
+            let behavior = ScrollableBehavior::new(axes)
+                .with_scroller(self.scroller.clone())
+                // Both axes: a claim on an axis this area cannot currently
+                // scroll costs nothing, because the chain re-offers the whole
+                // event outward the moment the axis declines it.
+                .axes(PanAxes::BOTH)
+                .overscroll(overscroll_behavior)
+                .rubber_band(self.rubber_band)
+                .overscroll_style(OverscrollStyle::RubberBand)
+                .smooth(smooth_scrolling)
+                .smooth_duration(smooth_scroll_duration)
+                .line_height(line_height)
+                .reduced_motion(ctx.prefers_reduced_motion())
+                .physics(ctx.theme().input.scroll_physics)
+                .before(own_arm);
+            handlers = behavior.install(handlers);
         }
 
         // Access action handler
@@ -993,6 +1100,13 @@ impl Widget for ScrollArea {
         self.viewport_size
             .set(Size::new(viewport_width, viewport_height));
         self.viewport_origin.set(bounds.origin());
+        // The rubber band's resistance is a fraction of the viewport, so a tall
+        // area resists over a longer travel than a short one. This is the only
+        // pass that knows the number, and the scroller is a `RefCell` precisely
+        // so `&self` can hand it over.
+        self.scroller
+            .borrow_mut()
+            .set_viewport(Vec2::new(viewport_width, viewport_height));
 
         // The scrollbar children bind these `Signal<f32>` metrics for thumb
         // size/position. `Signal::set` always notifies regardless of whether
@@ -1206,6 +1320,7 @@ impl Widget for ScrollArea {
 mod tests {
     use super::*;
     use teksilo_canvas::SizeProposal;
+    use teksilo_core::event::ScrollDelta;
     use teksilo_core::widget::LayoutContext;
     use teksilo_core::widget_tree::WidgetTree;
 
@@ -1317,10 +1432,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 40.0));
 
         // Scroll down 100px
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 80.0));
 
         // After scrolling, item a should be above viewport (negative y)
@@ -1353,10 +1468,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
 
         // Scroll way past the end
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Content should not be scrolled past max (200 - 100 = 100)
@@ -1400,10 +1515,10 @@ mod tests {
 
         // Scroll via mouse wheel
         tree.pointer_move(Point::new(50.0, 50.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 50.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 50.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // The content child should have moved up
@@ -1609,10 +1724,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
 
         // Scroll right via horizontal wheel
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 80.0, y: 0.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 80.0, y: 0.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // Content should have shifted left
@@ -1789,10 +1904,10 @@ mod tests {
         tree.pointer_move(Point::new(50.0, 50.0));
 
         // Scroll via line-based wheel (should animate)
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Lines { x: 0.0, y: 5.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Lines { x: 0.0, y: 5.0 },
+            Default::default(),
+        ));
 
         // The animation target was set but not yet ticked — the state
         // should have a pending animation (animate_to marks dirty).
@@ -1831,10 +1946,10 @@ mod tests {
 
         tree.pointer_move(Point::new(50.0, 50.0));
 
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Lines { x: 0.0, y: 5.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Lines { x: 0.0, y: 5.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let children = tree.children(scroll);
@@ -1904,10 +2019,10 @@ mod tests {
 
         // Scroll partway down
         tree.pointer_move(Point::new(50.0, 50.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let content = tree.children(scroll)[0];
@@ -1985,10 +2100,10 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.pointer_move(Point::new(50.0, 50.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let scroll_before = tree.children(parent)[0];
@@ -2052,10 +2167,10 @@ mod tests {
 
         // Scroll down so the target is well above the viewport top.
         tree.pointer_move(Point::new(100.0, 100.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 150.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 150.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 250.0));
 
         let target_before = tree.bounds(target);
@@ -2412,10 +2527,10 @@ mod tests {
 
         // Pointer over the inner viewport, then scroll the inner to its bottom.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         let inner_bottom = inner_y.get();
@@ -2427,10 +2542,10 @@ mod tests {
 
         // Another downward scroll: inner is clamped → the event chains to outer.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         assert!(
@@ -2448,18 +2563,18 @@ mod tests {
         let (mut tree, _inner_y, outer_y) = nested_scroll_fixture(OverscrollBehavior::Contain);
 
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         // Inner at bottom + Contain → a further scroll is absorbed, not chained.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(200.0, 150.0));
 
         assert!(
@@ -2619,10 +2734,10 @@ mod tests {
 
         // Scroll right far enough to bring the last cell fully into view.
         tree.pointer_move(Point::new(300.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 300.0, y: 0.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 300.0, y: 0.0 },
+            Default::default(),
+        ));
         tree.layout(SizeProposal::exact(600.0, 400.0));
 
         let b = tree.bounds(last);
@@ -2872,10 +2987,10 @@ mod tests {
         assert_eq!(scroll_y.get(), 400.0, "precondition: still pending");
 
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 100.0 },
-            modifiers: Default::default(),
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 100.0 },
+            Default::default(),
+        ));
         let after_reader = scroll_y.get();
 
         height.set(12000.0);
@@ -2955,5 +3070,274 @@ mod tests {
             120.0,
             "a later restore_scroll_y(0.0) must disarm the earlier pending offset"
         );
+    }
+}
+
+/// A finger on the content, and the coast that follows it.
+///
+/// The wheel path is covered above and deliberately not restated here: the
+/// point of these is that adopting `ScrollableBehavior` added a second input
+/// route without moving the first one.
+#[cfg(test)]
+mod pan_tests {
+    use super::*;
+    use crate::primitives::VStack;
+    use std::time::Duration;
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::event::{Modifiers, PointerButton};
+    use teksilo_core::pointer::clock::ManualClock;
+    use teksilo_core::pointer::{
+        BackendDeviceKey, EventTime, PointerId, PointerIdAllocator, PointerInfo, PointerPhase,
+        PointerSample,
+    };
+    use teksilo_core::widget::{LayoutContext, LayoutResponse};
+    use teksilo_core::widget_tree::WidgetTree;
+
+    /// A leaf of a fixed intrinsic size — content for the area to scroll.
+    #[derive(Debug)]
+    struct TallLeaf {
+        width: f32,
+        height: f32,
+    }
+
+    impl TallLeaf {
+        fn new(width: f32, height: f32) -> Self {
+            Self { width, height }
+        }
+    }
+
+    impl Widget for TallLeaf {
+        fn layout_response(&self, _p: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            Size::new(self.width, self.height).into()
+        }
+    }
+
+    fn contact_id(raw: u64) -> PointerId {
+        let alloc = PointerIdAllocator::global();
+        let device = BackendDeviceKey::new(0x5A7E);
+        let id = alloc.begin(device, raw);
+        alloc.end(device, raw);
+        id
+    }
+
+    fn contact(id: PointerId, phase: PointerPhase, at: Point) -> PointerSample {
+        PointerSample {
+            pointer: PointerInfo::touch(id, EventTime::ZERO),
+            phase,
+            position: at,
+            button: None,
+            modifiers: Modifiers::NONE,
+            coalesced: Vec::new(),
+        }
+    }
+
+    fn pan_slop() -> f32 {
+        teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch)
+            .pan_slop
+            .expect("a touch profile pans")
+    }
+
+    /// Press at `from`, cross the pan slop, then travel `dy`.
+    fn drag(tree: &mut WidgetTree, id: PointerId, from: Point, dy: f32) -> Point {
+        tree.dispatch_pointer(contact(id, PointerPhase::Down, from));
+        let arm = Point::new(from.x, from.y + pan_slop().copysign(dy) + dy.signum());
+        tree.dispatch_pointer(contact(id, PointerPhase::Move, arm));
+        let at = Point::new(from.x, arm.y + (dy - (arm.y - from.y)));
+        tree.dispatch_pointer(contact(id, PointerPhase::Move, at));
+        at
+    }
+
+    /// A 200 × 100 area over 200 × 600 of content, with the bars off so a press
+    /// in the middle of the viewport can only reach the content.
+    fn area(
+        build: impl FnOnce(ScrollArea) -> ScrollArea,
+    ) -> (WidgetTree, Signal<f32>, Signal<Vec2>) {
+        let mut tree = WidgetTree::new();
+        let content = tree.add(TallLeaf::new(200.0, 600.0));
+        let sa = build(
+            ScrollArea::from_id(content)
+                .smooth_scrolling(false)
+                .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
+                .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff),
+        );
+        let y = sa.scroll_y_signal().clone();
+        let overscroll = sa.overscroll_signal();
+        tree.add(sa);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        (tree, y, overscroll)
+    }
+
+    /// Dragging a finger up scrolls the content down — the pan claim is
+    /// declared, the router synthesises a positioned `Scroll`, and this area
+    /// takes it.
+    #[test]
+    fn a_finger_pans_the_content() {
+        let (mut tree, y, _overscroll) = area(|sa| sa);
+        drag(&mut tree, contact_id(1), Point::new(100.0, 80.0), -60.0);
+        assert!(y.get() > 0.0, "the finger scrolled the area: {}", y.get());
+    }
+
+    /// A pan does not tween: `smooth_scrolling` governs the wheel and nothing
+    /// else, because the content is under the finger.
+    #[test]
+    fn a_pan_is_not_smoothed() {
+        let (mut tree, y, _overscroll) = area(|sa| sa.smooth_scrolling(true));
+        drag(&mut tree, contact_id(2), Point::new(100.0, 80.0), -60.0);
+        assert!(y.get() > 0.0);
+        assert_eq!(y.animation_target(), None);
+    }
+
+    /// A fast release hands its velocity to the tree's coast, which keeps the
+    /// area moving after the finger has gone.
+    #[test]
+    fn a_fast_release_flings() {
+        let (mut tree, y, _overscroll) = area(|sa| sa);
+        let clock = Rc::new(ManualClock::new(EventTime::ZERO));
+        tree.set_input_clock(clock.clone());
+
+        let finger = contact_id(3);
+        let from = Point::new(100.0, 95.0);
+        tree.dispatch_pointer(contact(finger, PointerPhase::Down, from));
+        let mut at = from.y;
+        for step in 1..=5 {
+            clock.set(EventTime::from_millis(step * 4));
+            at -= 15.0;
+            tree.dispatch_pointer(contact(finger, PointerPhase::Move, Point::new(from.x, at)));
+        }
+        clock.set(EventTime::from_millis(24));
+        tree.dispatch_pointer(contact(finger, PointerPhase::Up, Point::new(from.x, at)));
+
+        let at_release = y.get();
+        assert!(at_release > 0.0);
+        tree.advance_time(Duration::from_millis(100));
+        assert!(
+            y.get() > at_release,
+            "the coast kept it moving: {at_release} -> {}",
+            y.get()
+        );
+    }
+
+    /// `prefers-reduced-motion` turns the coast off: the content stops where
+    /// the finger left it, and nothing moves it afterwards.
+    #[test]
+    fn reduced_motion_collapses_the_fling_to_a_settle() {
+        let mut tree = WidgetTree::new();
+        tree.set_accessibility_preferences(false, true, 1.0);
+        let content = tree.add(TallLeaf::new(200.0, 600.0));
+        let sa = ScrollArea::from_id(content)
+            .smooth_scrolling(false)
+            .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
+            .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff);
+        let y = sa.scroll_y_signal().clone();
+        tree.add(sa);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let clock = Rc::new(ManualClock::new(EventTime::ZERO));
+        tree.set_input_clock(clock.clone());
+        let finger = contact_id(4);
+        let from = Point::new(100.0, 95.0);
+        tree.dispatch_pointer(contact(finger, PointerPhase::Down, from));
+        let mut at = from.y;
+        for step in 1..=5 {
+            clock.set(EventTime::from_millis(step * 4));
+            at -= 15.0;
+            tree.dispatch_pointer(contact(finger, PointerPhase::Move, Point::new(from.x, at)));
+        }
+        clock.set(EventTime::from_millis(24));
+        tree.dispatch_pointer(contact(finger, PointerPhase::Up, Point::new(from.x, at)));
+
+        let at_release = y.get();
+        assert!(at_release > 0.0, "the pan itself still scrolls");
+        tree.advance_time(Duration::from_millis(200));
+        assert_eq!(y.get(), at_release, "and nothing coasts afterwards");
+    }
+
+    /// With the band on, a finger past the end holds the content there with
+    /// decreasing gain, and the lift releases it. The offset never leaves the
+    /// range, so a surface that ignores `overscroll_signal` is unaffected.
+    #[test]
+    fn the_rubber_band_holds_and_releases() {
+        let (mut tree, y, overscroll) = area(|sa| sa.rubber_band(true));
+        y.set(500.0);
+
+        let finger = contact_id(5);
+        let at = drag(&mut tree, finger, Point::new(100.0, 95.0), -70.0);
+        assert_eq!(y.get(), 500.0, "the offset stays inside the range");
+        let held = overscroll.get().y;
+        assert!(held > 0.0, "the band is holding it past the end");
+        assert!(held < 70.0, "with decreasing gain: {held}");
+
+        tree.dispatch_pointer(contact(finger, PointerPhase::Up, at));
+        assert_eq!(overscroll.get(), Vec2::ZERO, "the lift released it");
+    }
+
+    /// Off by default, so a nested area can still hand its boundary pan to the
+    /// container around it rather than absorbing it into a band.
+    #[test]
+    fn the_band_is_off_by_default() {
+        let (mut tree, y, overscroll) = area(|sa| sa);
+        y.set(500.0);
+        drag(&mut tree, contact_id(6), Point::new(100.0, 95.0), -70.0);
+        assert_eq!(overscroll.get(), Vec2::ZERO);
+        assert_eq!(y.get(), 500.0);
+    }
+
+    /// A boundary pan hands the **whole** event to the container outward — the
+    /// same rule the wheel has always followed, with no residual split between
+    /// the two.
+    #[test]
+    fn a_boundary_pan_chains_the_whole_event_outward() {
+        let mut tree = WidgetTree::new();
+        let inner_content = tree.add(TallLeaf::new(200.0, 120.0));
+        let inner_sa = ScrollArea::from_id(inner_content)
+            .smooth_scrolling(false)
+            .preferred_size(200.0, 100.0)
+            .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
+            .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff);
+        let inner_y = inner_sa.scroll_y_signal().clone();
+        let inner = tree.add(inner_sa);
+
+        let filler = tree.add(TallLeaf::new(200.0, 400.0));
+        let outer_content = tree.add(VStack::new().add_child(inner).add_child(filler));
+        let outer_sa = ScrollArea::from_id(outer_content)
+            .smooth_scrolling(false)
+            .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)
+            .horizontal_scroll_bar_policy(ScrollBarPolicy::AlwaysOff);
+        let outer_y = outer_sa.scroll_y_signal().clone();
+        tree.add(outer_sa);
+        tree.layout(SizeProposal::exact(200.0, 150.0));
+
+        // Park the inner area at its end, then keep panning in the same
+        // direction on the same finger.
+        inner_y.set(20.0);
+        let finger = contact_id(7);
+        drag(&mut tree, finger, Point::new(100.0, 80.0), -60.0);
+
+        assert_eq!(inner_y.get(), 20.0, "the inner area is pinned at its end");
+        assert!(
+            outer_y.get() > 0.0,
+            "so the container took the pan: {}",
+            outer_y.get()
+        );
+    }
+
+    /// A mouse is not a panning pointer: pressing and dragging with the primary
+    /// button scrolls nothing, and the wheel is untouched.
+    #[test]
+    fn a_mouse_press_and_drag_does_not_pan() {
+        let (mut tree, y, _overscroll) = area(|sa| sa);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(100.0, 80.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.pointer_move(Point::new(100.0, 20.0));
+        assert_eq!(y.get(), 0.0, "a mouse drag is not a pan");
+
+        tree.dispatch_event(WidgetEvent::scroll(
+            teksilo_core::event::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+            Modifiers::NONE,
+        ));
+        assert_eq!(y.get(), 40.0, "…and its wheel still scrolls");
     }
 }

@@ -54,6 +54,20 @@
 //!         .label("Birth date"),
 //! );
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! Nothing to declare here, and the reason applies to the whole date/time
+//! family ([`TimeEdit`](crate::time_edit::TimeEdit),
+//! [`DateTimeEdit`](crate::date_time_edit::DateTimeEdit),
+//! [`DateRangeEdit`](crate::date_range_edit::DateRangeEdit)): the composite's
+//! own handler set carries `focus_within` and `on_key_preview` only — no tap,
+//! no drag, no scroll — so its pointer surface is entirely the embedded text
+//! field, the trigger `IconButton` and the popover `Calendar`, each of which
+//! answers for itself. In particular the family does **not** declare
+//! `touch_action(NONE)`: it produces no value from a press position, and
+//! declaring it would stop a finger scrolling a form that contains a date
+//! field.
 
 #[cfg(test)]
 mod tests;

@@ -17,6 +17,16 @@
 //! let arrow = TwistArrow::new(16.0, true, false)
 //!     .on_click(|ctx| ctx.send_intent(teksilo_core::Intent::new("tree.toggle")));
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! A 12 dp chevron is half the 24 dp target floor and cannot grow — the indent
+//! column is the tree's own geometry. It declares a `Widget::hit_outset`
+//! instead, which is the one mechanism that can win here: the chevron's
+//! neighbour is the row, the row takes presses, and a point inside the row is
+//! at distance zero from it, so the miss-only slop pass could never reach the
+//! chevron. Zero for a leaf chevron and for a decorative one, which take no
+//! press.
 
 use std::rc::Rc;
 
@@ -174,7 +184,163 @@ impl Widget for TwistArrow {
         canvas.fill_path(&path, color);
     }
 
+    /// A 12 dp chevron is half the 24 dp conformance floor, and it cannot grow:
+    /// the indent column it sits in is the tree's own geometry, and widening it
+    /// at Compact would move every row's label.
+    ///
+    /// So the shortfall is made up between the pointer and the arena. This is
+    /// the one place it *has* to be an outset rather than the miss-only slop
+    /// pass: the chevron's neighbour is the row, the row takes presses, and a
+    /// point inside the row is at distance zero from it — so the slop pass, which
+    /// only re-attributes to a candidate strictly closer than the bubble owner,
+    /// can never reach the chevron. An outset is tested inside the exact pass
+    /// and wins.
+    ///
+    /// Zero for a chevron that would refuse the press anyway — no children, or
+    /// no `on_click` — because a widened node that then ignores the press is a
+    /// hole punched in the row behind it.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        if !self.has_children || self.on_click.is_none() {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        }
+        crate::button::target_outset(Size::new(self.size, self.size), kind, tokens)
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_hidden();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use teksilo_core::pointer::PointerPhase;
+    use teksilo_core::widget_tree::WidgetTree;
+    use teksilo_tokens::{InputTokens, PointerKind};
+
+    use crate::button::press_test_support::{finger, touch};
+    use crate::primitives::{HStack, TextWidget};
+
+    /// A 12 dp chevron beside a 200 dp row label, both inside a row that takes
+    /// taps of its own: the row is the shape the census names as the reason the
+    /// slop pass cannot serve the chevron.
+    fn row_with_chevron(
+        toggles: std::rc::Rc<Cell<u32>>,
+        row_taps: std::rc::Rc<Cell<u32>>,
+    ) -> (WidgetTree, WidgetId) {
+        use teksilo_core::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let arrow = tree.add(
+            TwistArrow::new(12.0, true, false).on_click(move |_| toggles.set(toggles.get() + 1)),
+        );
+        let label = tree.add(TextWidget::new(teksilo_i18n::lit!("Documents")));
+        let _row = tree.add(
+            HStack::new()
+                .add_child(arrow)
+                .add_child(label)
+                .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(240.0, 28.0));
+        (tree, arrow)
+    }
+
+    /// The outset takes a finger that landed beside the glyph, inside the row.
+    #[test]
+    fn a_finger_just_outside_the_chevron_still_toggles() {
+        let toggles = std::rc::Rc::new(Cell::new(0));
+        let row_taps = std::rc::Rc::new(Cell::new(0));
+        let (mut tree, arrow) = row_with_chevron(toggles.clone(), row_taps.clone());
+        let b = tree.bounds(arrow);
+        // 4 dp past the glyph's trailing edge — outside the 12 dp box, inside
+        // the 24 dp target the outset earns it.
+        let at = teksilo_canvas::Point::new(b.x + b.width + 4.0, b.center().y);
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+        assert_eq!(
+            toggles.get(),
+            1,
+            "the chevron's outset did not take the press"
+        );
+        assert_eq!(row_taps.get(), 0, "and the row must not have taken it too");
+    }
+
+    /// A mouse is exact: the same press lands on the row, exactly as it did
+    /// before the touch programme.
+    #[test]
+    fn a_mouse_just_outside_the_chevron_lands_on_the_row() {
+        let toggles = std::rc::Rc::new(Cell::new(0));
+        let row_taps = std::rc::Rc::new(Cell::new(0));
+        let (mut tree, arrow) = row_with_chevron(toggles.clone(), row_taps.clone());
+        let b = tree.bounds(arrow);
+        let at = teksilo_canvas::Point::new(b.x + b.width + 4.0, b.center().y);
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+            at,
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_up(
+            at,
+            teksilo_core::event::PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
+        assert_eq!(
+            toggles.get(),
+            0,
+            "a mouse must not be given the chevron's outset"
+        );
+        assert_eq!(row_taps.get(), 1);
+    }
+
+    /// A chevron that paints nothing and does nothing claims no space: a leaf
+    /// row's indent slot must stay transparent to the row behind it.
+    #[test]
+    fn an_inert_chevron_declares_no_outset() {
+        let tokens = InputTokens::default();
+        let leaf = TwistArrow::new(12.0, false, false).on_click(|_| {});
+        assert_eq!(
+            leaf.hit_outset(PointerKind::Touch, &tokens),
+            teksilo_canvas::EdgeInsets::ZERO,
+        );
+        let decorative = TwistArrow::new(12.0, true, false);
+        assert_eq!(
+            decorative.hit_outset(PointerKind::Touch, &tokens),
+            teksilo_canvas::EdgeInsets::ZERO,
+        );
+    }
+
+    /// The outset reaches exactly the conformance floor at Compact and the
+    /// density's own target above it — and never applies to a mouse.
+    #[test]
+    fn the_outset_lifts_the_chevron_to_the_density_target() {
+        let arrow = TwistArrow::new(12.0, true, false).on_click(|_| {});
+        for density in [
+            teksilo_tokens::TargetDensity::Compact,
+            teksilo_tokens::TargetDensity::Comfortable,
+            teksilo_tokens::TargetDensity::Touch,
+        ] {
+            let tokens = InputTokens::for_density(density);
+            let out = arrow.hit_outset(PointerKind::Touch, &tokens);
+            assert_eq!(
+                12.0 + out.horizontal(),
+                tokens.target_size,
+                "{density:?} horizontal",
+            );
+            assert_eq!(
+                12.0 + out.vertical(),
+                tokens.target_size,
+                "{density:?} vertical"
+            );
+            assert_eq!(
+                arrow.hit_outset(PointerKind::Mouse, &tokens),
+                teksilo_canvas::EdgeInsets::ZERO,
+                "{density:?} mouse",
+            );
+        }
     }
 }

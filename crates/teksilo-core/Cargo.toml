@@ -14,6 +14,9 @@ description = "Core of the Teksilo GUI framework — widget trait, arena, layout
 documentation = "https://docs.rs/teksilo-core"
 keywords = ["gui", "widgets", "layout", "reactive", "theming"]
 categories = ["gui", "data-structures"]
+# Bench targets are declared explicitly below: `benches/budget.rs` is a shared
+# module of the two of them, not a third benchmark.
+autobenches = false
 
 [dependencies]
 teksilo-tokens = { workspace = true }
@@ -34,6 +37,24 @@ raw-window-handle = "0.6"
 # Test-only: property-based testing (see the `proptest` entry in the
 # workspace manifest for why proptest rather than cargo-fuzz).
 proptest = { workspace = true }
+# Test-only: `Theme` derives Serialize/Deserialize and the density work asserts
+# that a theme serialized before `input` existed still loads.
+serde_json = { workspace = true }
+# Test-only: the pointer-dispatch performance budget.
+criterion = { workspace = true }
+
+# The measurement. `harness = false` because criterion brings its own; the
+# binary's exit status is the hard budget gate, so a CI job asserts on it by
+# running the command.
+[[bench]]
+name = "pointer_dispatch"
+harness = false
+
+# The gate's own arithmetic, under the ordinary libtest harness so
+# `cargo test --benches` runs it. Separate target because a `harness = false`
+# binary never runs a `#[test]`.
+[[bench]]
+name = "budget_gate"
 
 [package.metadata.docs.rs]
 all-features = true

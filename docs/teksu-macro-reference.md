@@ -152,16 +152,20 @@ VStack {
 //      .child(Button::new("OK").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Submit)))
 ```
 
-Body items are emitted in source order — you can interleave properties
-and children freely.
+Body items are emitted in source order, with one exception: a property
+naming a `WidgetBuilder` method is moved to the end of the chain (see
+[Handlers](#handlers)). You can interleave properties and children
+freely either way.
 
 ---
 
 ## Category B slots
 
-Widgets with named slots (Card, TitleBar, DialogContent, Breadcrumb,
-TabWidget, Popover, Snackbar, Dialog, Wizard, Accordion, SplitView)
-address content by slot name, not by bare child:
+Widgets with named slots (Card, TabWidget, Dialog, Accordion and others)
+address content by slot name, not by bare child. The set the macro
+recognises well enough to emit a targeted hint for is
+`teksilo_parse::diag::is_category_b_widget`; a widget outside it fails
+with the compiler's own "no method named `child`" instead:
 
 ```rust
 Card {
@@ -420,14 +424,7 @@ Side-effect form forces statement-sequence lowering.
 
 Handlers are properties whose value is a closure. The macro preserves
 closure syntax verbatim — `move`, capture, and arity stay as you wrote
-them. Handler-attachment properties (`on_tap`, `on_hover`, `on_key`,
-`focusable`, `cursor`, `context_menu`, and every other method on the
-`WidgetBuilder` trait) are **automatically moved to the end** of the
-emitted builder chain, so you can interleave them with children and
-widget-specific properties in any order. Without the reorder, a call
-like `.context_menu(...).child(...)` would fail to resolve because the
-`WidgetBuilder` methods wrap the widget in `WidgetWithHandlers<T>`
-which doesn't expose per-widget setters.
+them.
 
 ```rust
 Button("Click") {
@@ -449,6 +446,43 @@ Button("Click") {
 
 Whether a handler attaches to the element itself or to an inner widget
 is the builder's concern; the DSL does not distinguish.
+
+### Reorder rule
+
+A property is **moved to the end** of the emitted builder chain when its
+name is a method on the `WidgetBuilder` trait that returns
+`WidgetWithHandlers<T>`. Every other body item keeps its source
+position, and relative order within each of the two groups is preserved.
+
+The return type is the criterion, not the `on_` prefix: a wrapping method
+replaces the widget with `WidgetWithHandlers<T>`, which exposes none of
+the widget's own setters, so anything written after it — a child, a
+`spacing`, a named slot — would resolve against the wrapper and fail. The
+reorder is what lets you write handlers and children in any order.
+
+Every family of `WidgetBuilder` method is covered: gestures, focus and
+keyboard, pointer events and cancellation, touch and pointer arbitration
+(`touch_action` and the pan/hit-slop declarations), drag and drop,
+accessibility overrides, and the framework-level node properties. The
+authoritative list is `teksilo_parse::diag::is_widget_builder_method`;
+the `teksilo-teksu-guard` crate fails the build if it falls behind the
+trait, so a method added to the trait cannot silently stop being
+reordered.
+
+A `WidgetBuilder` method that takes no argument is written in the
+argument-free bare-lowercase form and is reordered the same way:
+
+```rust
+Panel {
+    no_hit_slop
+    padding: 8.0
+    TextWidget("Body")
+}
+// ↓ Panel::new()
+//      .padding(8.0)
+//      .child(TextWidget::new("Body"))
+//      .no_hit_slop()
+```
 
 ---
 
@@ -534,7 +568,7 @@ diagnostic under the user's token, thanks to span-preserving emission.
 - [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — complete
   grammar, design principles, and worked translations of the reference
   examples.
-- [crates/teksilo/tests/teksu/pass/](../crates/teksilo/tests/teksu/pass/)
+- [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
   — trybuild fixtures exercising every supported form.
 - [crates/teksilo-macros/src/](../crates/teksilo-macros/src/) — the
   implementation (parse → IR → lower).

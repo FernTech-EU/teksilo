@@ -11,6 +11,7 @@ use crate::build_context::BuildContext;
 use crate::focus::FocusOrigin;
 use crate::signal::Signal;
 use crate::widget_id::WidgetId;
+use teksilo_tokens::InputTokens;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum SliderVariant {
@@ -26,9 +27,14 @@ pub enum SliderVariant {
     Range,
 }
 
-/// Slider orientation. Horizontal is the default; the value
-/// progresses left → right (or right → left in RTL — slider doesn't
-/// flip today, that's a known follow-up).
+/// Slider orientation. Horizontal is the default.
+///
+/// A horizontal slider's value progresses along the **reading direction**: left
+/// → right in LTR, right → left in RTL. The minimum therefore sits at the
+/// leading edge on both, and the pointer axis, the painted fill and the
+/// horizontal arrow keys all mirror together. A style that paints its own track
+/// must mirror with them — `cfg.value_normalized` is the value, not a screen
+/// position.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum SliderOrientation {
     #[default]
@@ -79,6 +85,26 @@ pub trait SliderStyle: 'static {
     /// this too, or dragging will map to the wrong pixel boundary.
     fn thumb_diameter(&self, _cfg: &SliderStyleConfig) -> f32 {
         14.0
+    }
+
+    /// The same diameter, told which density is active.
+    ///
+    /// The thumb is *paint geometry inside one leaf node* — the track, the
+    /// fill and the knob are one canvas — so the host `Slider` reads this at
+    /// event time to size the grab region, and it is the only place a density
+    /// can reach it. Additive and defaulted to
+    /// [`thumb_diameter`](Self::thumb_diameter), so a style written before the
+    /// density layer existed keeps working and keeps its own number; a style
+    /// that wants a bigger knob under a coarse pointer overrides this one
+    /// instead.
+    ///
+    /// The **painted** knob is deliberately not grown here: A10 gives the
+    /// slider its coarse target through `target_regions` and `hit_outset` over
+    /// an unchanged 14 dp visual (the design's Constants table: "14 dp visual →
+    /// 24 dp hit, 44 at Touch"). This exists so a style *may* disagree, not so
+    /// the framework does.
+    fn thumb_diameter_for(&self, cfg: &SliderStyleConfig, _tokens: &InputTokens) -> f32 {
+        self.thumb_diameter(cfg)
     }
 }
 

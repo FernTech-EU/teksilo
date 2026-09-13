@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 68a070a4d344e4abc7b71f61aa93f9e89f60227bcddefcf2666a99ec55719d06 # shrinks to (stack, script) = ([NodeSpec { tap: false, drag: false, captures: false, previews: false, claims_pan: false, action: TouchAction(255), activation: Auto, dead_zone: false }], Script { kind: Pen(Pen), steps: [], cancelled: true })

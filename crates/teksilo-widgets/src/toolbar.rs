@@ -61,6 +61,17 @@
 //!     .action(ToolbarAction::new(lit!("Undo"), undo_icon).priority(-1))
 //!     .item(ToolbarItem::flexible_space());
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! Nothing to do here, and it is worth recording why: every command on the bar
+//! is an [`IconButton`] or a [`PopoverIconButton`], so each one inherits the
+//! framework press, release activation and slide-off abort from the button
+//! family, and each is already 24 dp at Compact
+//! (`IconButtonSize::Compact`/`Default`). The bar itself carries only roving
+//! keyboard navigation and takes no press of its own. The overflow chevron is
+//! gated on the layout-derived `is_overflowing` signal, not on hover, so it is
+//! reachable by a finger without any reveal policy.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -87,12 +98,32 @@ use crate::menu_list::MenuList;
 use crate::popover_widget::PopoverIconButton;
 use crate::primitives::icon_widget::IconWidget;
 use crate::primitives::{Divider, HStack, Spacer, VStack};
+use teksilo_core::styles::density::{dp, spacing};
+use teksilo_tokens::{InputTokens, TargetRole};
 
 /// Toolbar design tokens.
 pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
+
+/// [`TOOLBAR_HEIGHT_DEFAULT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn toolbar_height_default(tokens: &InputTokens) -> f32 {
+    dp(TOOLBAR_HEIGHT_DEFAULT, TargetRole::Target, tokens)
+}
 pub const TOOLBAR_SPACING: f32 = 4.0;
+
+/// [`TOOLBAR_SPACING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn toolbar_spacing(tokens: &InputTokens) -> f32 {
+    spacing(TOOLBAR_SPACING, tokens)
+}
 /// Width/height reserved for the overflow chevron when it is shown.
 const CHEVRON_EXTENT: f32 = 30.0;
+
+/// [`CHEVRON_EXTENT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn chevron_extent(tokens: &InputTokens) -> f32 {
+    dp(CHEVRON_EXTENT, TargetRole::Target, tokens)
+}
 const ICON_SIZE: f32 = 16.0;
 
 /// Layout axis of the toolbar.
@@ -501,7 +532,10 @@ impl ToolbarItem {
 pub struct Toolbar {
     items: Vec<ToolbarItem>,
     orientation: ToolbarOrientation,
-    spacing: f32,
+    /// Gap between items. `None` follows the active density
+    /// ([`toolbar_spacing`]); `Some` is an explicit app override that density
+    /// leaves alone.
+    spacing: Option<f32>,
     label: Option<LocalizedString>,
     /// Size variant applied to every action's inline [`IconButton`] (and the
     /// overflow chevron). Default [`IconButtonSize::Compact`].
@@ -552,7 +586,7 @@ impl Toolbar {
             orientation: ToolbarOrientation::Horizontal,
             button_size: IconButtonSize::Compact,
             button_style: None,
-            spacing: TOOLBAR_SPACING,
+            spacing: None,
             label: None,
             compact: false,
             overflowed: Signal::new(Vec::new()),
@@ -616,8 +650,14 @@ impl Toolbar {
 
     /// Gap between consecutive toolbar items in logical pixels (default
     /// [`TOOLBAR_SPACING`]).
+    /// The gap actually used: the app's override if it set one, else the
+    /// density's [`toolbar_spacing`].
+    fn resolved_spacing(&self, tokens: &InputTokens) -> f32 {
+        self.spacing.unwrap_or_else(|| toolbar_spacing(tokens))
+    }
+
     pub fn spacing(mut self, spacing: f32) -> Self {
-        self.spacing = spacing;
+        self.spacing = Some(spacing);
         self
     }
 
@@ -875,13 +915,13 @@ impl Widget for Toolbar {
         }
 
         let row: WidgetId = if horizontal {
-            let mut r = HStack::new().spacing(self.spacing);
+            let mut r = HStack::new().spacing(self.resolved_spacing(&ctx.theme().input));
             for id in &child_ids {
                 r = r.add_child(*id);
             }
             ctx.add(r)
         } else {
-            let mut r = VStack::new().spacing(self.spacing);
+            let mut r = VStack::new().spacing(self.resolved_spacing(&ctx.theme().input));
             for id in &child_ids {
                 r = r.add_child(*id);
             }
@@ -944,7 +984,8 @@ impl Widget for Toolbar {
                     count += 1;
                 }
             }
-            content_main += self.spacing * count.saturating_sub(1) as f32;
+            content_main +=
+                self.resolved_spacing(&ctx.theme.input) * count.saturating_sub(1) as f32;
             // Cross axis: clamp to the offered size when the parent bounds it (a
             // tight slot can't be exceeded), else use the measured content cross.
             let offered_cross = if horizontal {
@@ -969,7 +1010,8 @@ impl Widget for Toolbar {
                 min_main += main(s);
                 min_count += 1;
             }
-            min_main += self.spacing * min_count.saturating_sub(1) as f32;
+            min_main +=
+                self.resolved_spacing(&ctx.theme.input) * min_count.saturating_sub(1) as f32;
             let min_main = min_main.min(content_main);
 
             let (size, min) = if horizontal {
@@ -1048,7 +1090,8 @@ impl Widget for Toolbar {
             &action_w,
             &priorities,
             &always,
-            self.spacing,
+            self.resolved_spacing(&ctx.theme.input),
+            chevron_extent(&ctx.theme.input),
             total_slots,
         );
 
@@ -1138,6 +1181,7 @@ fn compute_overflow(
     priority: &[i32],
     always: &[bool],
     spacing: f32,
+    chevron_extent: f32,
     total_slots: usize,
 ) -> Vec<bool> {
     let n = action_w.len();
@@ -1156,7 +1200,7 @@ fn compute_overflow(
             }
         }
         if with_chevron {
-            w += CHEVRON_EXTENT;
+            w += chevron_extent;
             visible_slots += 1;
         }
         w + spacing * (visible_slots.saturating_sub(1)) as f32

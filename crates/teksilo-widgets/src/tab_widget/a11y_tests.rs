@@ -237,8 +237,14 @@ fn roving_tab_stop_only_on_selected() {
 
     // Only the selected (index 0 by default) tab should be in the
     // Tab-key traversal order; the others must report `tab_stop == false`.
+    //
+    // The positive half reads the traversal graph, not the `tab_stop` flag
+    // alone: a stop is focusable *and* unsuppressed, so the flag by itself is
+    // satisfied by a header no keyboard user can reach. Deleting the header's
+    // `focusable(true)` left this assertion green.
     assert!(
-        tree.tab_stop(header_widget_ids[0]),
+        tree.tab_stops_within(tree.roots()[0])
+            .contains(&header_widget_ids[0]),
         "selected tab must be a Tab stop"
     );
     for (i, id) in header_widget_ids.iter().enumerate().skip(1) {

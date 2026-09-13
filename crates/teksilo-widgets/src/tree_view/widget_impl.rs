@@ -247,45 +247,135 @@ impl<T: 'static> Widget for TreeView<T> {
         // scrollbar thumb drag is exactly the one the framework defers.
 
         // --- Scroll event handler + DnD ---
-        let scroll_y = self.scroll_y.clone();
-        let max_scroll = self.max_scroll_y.clone();
-        let line_height = self.item_height;
-        let overscroll_behavior = self.overscroll_behavior;
-        let smooth_scrolling = self.smooth_scrolling;
-        let smooth_scroll_duration = self.smooth_scroll_duration;
-        let mut handlers = HandlerSet::new()
-            .on_scroll(move |event, _ctx| match event {
-                teksilo_core::event::WidgetEvent::Scroll { delta, .. } => {
-                    let dy = match delta {
-                        teksilo_core::event::ScrollDelta::Lines { y, .. } => y * line_height,
-                        teksilo_core::event::ScrollDelta::Pixels { y, .. } => *y,
-                    };
-                    let current = scroll_y.get();
-                    let max = max_scroll.get();
-                    // Base off the animation target (not the rendered offset)
-                    // so a mid-fling boundary correctly chains and successive
-                    // notches accumulate instead of restarting from the
-                    // partway-animated position.
-                    let base = scroll_y.animation_target().unwrap_or(current);
-                    let (new_y, moved) = crate::common::scroll::scroll_clamp_axis(base, dy, max);
-                    if moved {
-                        if smooth_scrolling {
-                            scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
-                        } else {
-                            scroll_y.set(new_y);
+        // The wheel arithmetic, the pan and the claim that puts this node on a
+        // finger's claimant chain all come from `common::scrollable`. A wheel
+        // still takes the path it always did — `handle_scroll_event` branches
+        // on the scroll *source*, not the phase.
+        let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
+        {
+            let behavior = crate::common::scrollable::ScrollableBehavior::new(
+                crate::common::scrollable::ScrollableAxes::vertical(
+                    self.scroll_y.clone(),
+                    self.max_scroll_y.clone(),
+                ),
+            )
+            .with_scroller(self.scroller.clone())
+            // Vertical only: this view owns no horizontal offset, so a
+            // horizontal pan is declined and chains outward.
+            .axes(PanAxes::Y)
+            .overscroll(self.overscroll_behavior)
+            .smooth(self.smooth_scrolling)
+            .smooth_duration(self.smooth_scroll_duration)
+            .line_height(self.item_height)
+            .reduced_motion(ctx.prefers_reduced_motion())
+            .physics(ctx.theme().input.scroll_physics);
+            handlers = behavior.install(handlers);
+        }
+
+        // --- The non-drag reorder, all four routes at once ---
+        //
+        // The row drag can do two things here: move a row among its siblings
+        // (`OrderedMove`) and reparent it (`TreeMove`, the drag's
+        // `DropPosition::Into`). Both are committed through the source's own
+        // `accept_drop`, and both closures are shared by the chord below, the
+        // row's context menu and the row's AccessKit custom actions — see
+        // `common::ordered_move`.
+        let (reorder_perform, reparent_perform) = if self.reorderable {
+            let follow = {
+                let sel = self.row_selection.clone();
+                let fi = self.focused_index.clone();
+                let fi_anchor = self.focused_anchor.clone();
+                let source = self.source.clone();
+                let metrics = self.metrics.clone();
+                let scroll = self.scroll_y.clone();
+                let vh = self.viewport_height.clone();
+                let vb = self.viewport_bounds.clone();
+                let max = self.max_scroll_y.clone();
+                Rc::new(
+                    move |new_flat: usize, ctx: &mut teksilo_core::widget::EventContext| {
+                        fi.set(Some(new_flat));
+                        *fi_anchor.borrow_mut() = Some(source.anchor(new_flat));
+                        if let Some(ref sel) = sel {
+                            sel.select(new_flat);
                         }
-                    }
-                    // Chain to an ancestor scrollable when fully clamped
-                    // (unless Contain), otherwise consume.
-                    crate::common::scroll::scroll_response(
-                        moved,
-                        overscroll_behavior == OverscrollBehavior::Contain,
-                    )
-                }
-                _ => teksilo_core::event::EventResponse::Ignored,
-            })
-            .clips_children(true)
-            .focusable(true);
+                        let current = scroll.get();
+                        let new_scroll = metrics.borrow_mut().scroll_for_ensure_visible(
+                            new_flat,
+                            current,
+                            vh.get(),
+                            max.get(),
+                        );
+                        if (new_scroll - current).abs() > f32::EPSILON {
+                            scroll.set(new_scroll);
+                        }
+                        crate::common::row_metrics::chase_row_into_outer_view(
+                            ctx,
+                            &metrics,
+                            vb.get(),
+                            new_flat,
+                            new_scroll,
+                        );
+                    },
+                )
+            };
+            // The row's name for the utterance, from the same resolver
+            // find-as-you-type uses. `None` where the application gave none.
+            let name_of: Rc<dyn Fn(usize) -> Option<String>> = {
+                let source = self.source.clone();
+                let label = self.type_ahead_label.clone();
+                Rc::new(move |index: usize| {
+                    let label = label.as_ref()?;
+                    source.with_row_str(index, &|item| label(item))
+                })
+            };
+            let sibling = {
+                let source = self.source.clone();
+                let follow = follow.clone();
+                let name_of = name_of.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::OrderedMove,
+                          flat: usize,
+                          ctx: &mut teksilo_core::widget::EventContext| {
+                        let name = (name_of)(flat);
+                        let Some(new_flat) = source.sibling_move(flat, mv) else {
+                            return;
+                        };
+                        follow(new_flat, ctx);
+                        let (pos, size) = source.sibling_position(new_flat);
+                        ctx.announce(crate::common::ordered_move::move_announcement(
+                            name.as_deref(),
+                            pos.saturating_sub(1),
+                            size,
+                        ));
+                    },
+                ) as crate::common::ordered_move::MoveRow
+            };
+            let reparent = {
+                let source = self.source.clone();
+                let follow = follow.clone();
+                Rc::new(
+                    move |mv: crate::common::ordered_move::TreeMove,
+                          flat: usize,
+                          ctx: &mut teksilo_core::widget::EventContext| {
+                        let name = (name_of)(flat);
+                        let Some(new_flat) = source.reparent(flat, mv) else {
+                            return;
+                        };
+                        follow(new_flat, ctx);
+                        // `set_level` is 1-based, and so is what an adapter
+                        // announces, so the depth becomes a level here.
+                        let level = source.meta(new_flat).map_or(1, |m| m.depth + 1);
+                        ctx.announce(crate::common::ordered_move::reparent_announcement(
+                            name.as_deref(),
+                            level,
+                        ));
+                    },
+                ) as crate::common::ordered_move::TreeReparentRow
+            };
+            (Some(sibling), Some(reparent))
+        } else {
+            (None, None)
+        };
 
         // --- Keyboard navigation + expand/collapse + Alt+Arrow reorder ---
         {
@@ -294,7 +384,8 @@ impl<T: 'static> Widget for TreeView<T> {
             let activate_key = self.on_activate.clone();
             let fi = self.focused_index.clone();
             let fi_anchor = self.focused_anchor.clone();
-            let reorderable = self.reorderable;
+            let reorder_key = reorder_perform.clone();
+            let reparent_key = reparent_perform.clone();
             let scroll_for_nav = self.scroll_y.clone();
             let metrics_for_nav = self.metrics.clone();
             let max_for_nav = self.max_scroll_y.clone();
@@ -444,28 +535,44 @@ impl<T: 'static> Widget for TreeView<T> {
                         return teksilo_core::event::EventResponse::Ignored;
                     }
 
-                    // Alt+Arrow: sibling reorder (when reorderable). Routed
-                    // through the source's own `accept_drop` (cycle-guarded),
-                    // which returns the moved row's new flat index.
-                    if modifiers.alt() && reorderable {
+                    // The keyboard route to the row drag. `Alt` plus the
+                    // vertical arrows and the ends move the row among its
+                    // siblings; the accelerator plus `]` / `[` — and, off macOS,
+                    // `Alt` plus the horizontal arrows — indent and outdent,
+                    // which is the same drag's reparenting drop. Decoding and
+                    // commit are both `common::ordered_move`, shared with the
+                    // row's context menu and its AccessKit custom actions.
+                    if (modifiers.alt() || modifiers.command())
+                        && let Some(ref sibling) = reorder_key
+                        && let Some(ref reparent) = reparent_key
+                    {
                         let flat_idx = sel_for_key
                             .as_ref()
                             .and_then(|s| s.selected_indices().first().copied())
                             .or(fi.get())
                             .unwrap_or(current);
-                        let down = match key {
-                            teksilo_core::event::Key::ArrowUp => false,
-                            teksilo_core::event::Key::ArrowDown => true,
-                            _ => return teksilo_core::event::EventResponse::Ignored,
-                        };
-                        if let Some(new_flat) = source.keyboard_reorder(flat_idx, down) {
-                            set_focus(new_flat);
-                            if let Some(ref sel) = sel_for_key {
-                                sel.select(new_flat);
-                            }
+                        if let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
+                            *key,
+                            *modifiers,
+                            crate::common::ordered_move::MoveAxis::Vertical,
+                            ctx.is_rtl(),
+                        ) {
+                            sibling(mv, flat_idx, ctx);
                             return teksilo_core::event::EventResponse::Handled;
                         }
-                        return teksilo_core::event::EventResponse::Ignored;
+                        if let Some(mv) = crate::common::ordered_move::TreeMove::from_key(
+                            *key,
+                            *modifiers,
+                            ctx.is_rtl(),
+                        ) {
+                            reparent(mv, flat_idx, ctx);
+                            return teksilo_core::event::EventResponse::Handled;
+                        }
+                        // Falls THROUGH rather than swallowing: on macOS `⌥→` /
+                        // `⌥←` are the subtree expand pair
+                        // (`list_nav::mac_alias`), and the reorder decoders
+                        // deliberately decline them there. Returning `Ignored`
+                        // here made those two dead in any reorderable tree.
                     }
 
                     // Move the cursor to `to`, selecting and revealing it the
@@ -781,7 +888,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let width_for_hover = self.placed_content_width.clone();
             let hr_for_hover = hovered_row.clone();
             let export_for_hover = self.export.clone();
-            handlers = handlers.on_drag_hover(move |payload, position, _ctx| {
+            handlers = handlers.on_drag_hover(move |payload, position, ctx| {
                 let line_width = width_for_hover.get();
                 let vc = source_for_hover.visible_count();
                 if vc == 0 {
@@ -809,15 +916,17 @@ impl<T: 'static> Widget for TreeView<T> {
                 // Drop position from Y within the row (top third Before / middle
                 // Into / bottom After). The source's `can_accept` is the verdict
                 // — a Reject shows NO line (the pre-commit forbidden affordance).
+                // Before / Into / After from the y within the row. The bands
+                // are plain thirds for a cursor and widen at the edges for a
+                // finger — `common::drop_bands` owns the rule, and the hover
+                // affordance and the drop itself both read it, so the line the
+                // user sees cannot promise a position the drop does not take.
                 let y_in_row = content_y - row_top;
-                let third = (row_h / 3.0).max(f32::EPSILON);
-                let drop_pos = if y_in_row < third {
-                    DropPosition::Before
-                } else if y_in_row > 2.0 * third {
-                    DropPosition::After
-                } else {
-                    DropPosition::Into
-                };
+                let drop_pos = crate::common::drop_bands::drop_position_in_row(
+                    y_in_row,
+                    row_h,
+                    ctx.pointer_kind(),
+                );
                 // The source's verdict decides the *effective* position: a
                 // `Redirect` (e.g. Into-a-leaf → After) overrides the raw zone.
                 // `depth` rides along so `paint` can indent the affordance to
@@ -895,15 +1004,17 @@ impl<T: 'static> Widget for TreeView<T> {
                     let ins = m.insertion_index(content_y);
                     (r, m.row_top(r), m.row_height(r), ins)
                 };
+                // Before / Into / After from the y within the row. The bands
+                // are plain thirds for a cursor and widen at the edges for a
+                // finger — `common::drop_bands` owns the rule, and the hover
+                // affordance and the drop itself both read it, so the line the
+                // user sees cannot promise a position the drop does not take.
                 let y_in_row = content_y - row_top;
-                let third = (row_h / 3.0).max(f32::EPSILON);
-                let drop_pos = if y_in_row < third {
-                    DropPosition::Before
-                } else if y_in_row > 2.0 * third {
-                    DropPosition::After
-                } else {
-                    DropPosition::Into
-                };
+                let drop_pos = crate::common::drop_bands::drop_position_in_row(
+                    y_in_row,
+                    row_h,
+                    ctx.pointer_kind(),
+                );
                 let is_same_view = payload
                     .get_typed::<RowDragData<T>>()
                     .is_some_and(|rd| rd.source == my_view_id);
@@ -944,20 +1055,11 @@ impl<T: 'static> Widget for TreeView<T> {
             let hr_for_tick = hovered_row.clone();
             let source_for_tick = self.source.clone();
             const SPRING_DELAY_MS: u64 = 700;
-            handlers = handlers.on_drag_tick(move |pos, _ctx| {
+            handlers = handlers.on_drag_tick(move |pos, ctx| {
                 // --- 1. Edge auto-scroll ---
-                const EDGE: f32 = 32.0;
-                const MAX_VELOCITY: f32 = 12.0;
                 let h = viewport_for_tick.get();
-                let above = (EDGE - pos.y).max(0.0);
-                let below = (pos.y - (h - EDGE)).max(0.0);
-                let delta = if above > 0.0 {
-                    -(above / EDGE) * MAX_VELOCITY
-                } else if below > 0.0 {
-                    (below / EDGE) * MAX_VELOCITY
-                } else {
-                    0.0
-                };
+                let band = crate::common::drag_autoscroll::band_for(ctx.pointer_kind());
+                let delta = crate::common::drag_autoscroll::step(pos.y, h, band);
                 if delta.abs() > 0.01 {
                     let max = max_scroll_for_tick.get();
                     let new_y = (scroll_for_tick.get() + delta).clamp(0.0, max);
@@ -1014,6 +1116,8 @@ impl<T: 'static> Widget for TreeView<T> {
             focused_index: self.focused_index.clone(),
             focused_anchor: self.focused_anchor.clone(),
             reorderable: self.reorderable,
+            reorder_perform: reorder_perform.clone(),
+            reparent_perform: reparent_perform.clone(),
             row_click_expands: self.row_click_expands,
             export: self.export.clone(),
             on_activate: self.on_activate.clone(),
@@ -1027,6 +1131,7 @@ impl<T: 'static> Widget for TreeView<T> {
             prev_built_start: self.pane_built_start.clone(),
             prev_built_end: self.pane_built_end.clone(),
             item_entries: Vec::new(),
+            row_roots: Vec::new(),
             row_map: self.row_map.clone(),
         };
         self.body_pane_id = Some(ctx.add(pane));
@@ -1078,6 +1183,12 @@ impl<T: 'static> Widget for TreeView<T> {
         // realization window from this, and a stale value there costs a
         // permanent rebuild loop (`common::viewport`).
         crate::common::viewport::record_viewport_height(&self.viewport_height, bounds.height);
+        // The rubber band's resistance is a fraction of the viewport. This
+        // view does not band, but the scroller reads the extent either way and
+        // this is the only pass that knows it.
+        self.scroller
+            .borrow_mut()
+            .set_viewport(teksilo_canvas::Vec2::new(bounds.width, bounds.height));
 
         if children.is_empty() {
             return;

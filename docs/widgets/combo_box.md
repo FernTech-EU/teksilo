@@ -46,6 +46,25 @@ The widget is split across four internal modules:
   `FilteredItemList` inner widget.
 - `tests` holds the headless unit tests.
 
+## Touch and pen
+
+The closed box is one target — the arrow column is paint inside it, not a
+second target — and it opens the dropdown from its tap, so already on the
+release. The field's hover tint is decoration with nothing behind it.
+
+The dropdown's rows are menu rows and take the menu row's target floor at every
+density; before this they measured against the raw Compact constant while a
+`MenuList`'s rows grew, and the panel that shows `max_visible_items` of them now
+resolves the same number they do.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ComboBox at Touch density](img/combo_box-touch.png)
+
 ## Builder methods at a glance
 
 `from_items`, `from_model`, `from_source`, `item_label`, `render_item`, `render_selected`, `on_select`, `max_visible_items`, `type_ahead_timeout`, `placeholder`, `label`, `enabled`, `variant`, `style`, `text_style`, `text_role`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `searchable`, `search_query`, `filter`

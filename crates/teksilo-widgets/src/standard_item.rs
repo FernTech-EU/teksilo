@@ -65,6 +65,29 @@
 //! a nameless `Role::CheckBox`. The chevron's `TwistArrow` is
 //! decorative (`set_hidden`); the row's expanded state is owned by
 //! the wrapper.
+//!
+//! ## Touch and pen
+//!
+//! A row's **height** is a target floor and follows the density ladder: the row
+//! projects the raw module constants through `density::dp` at layout time. It does
+//! **not** read `StandardItemRecipe::min_height_single_line` /
+//! `min_height_two_line`, which have carried the same projected values since the
+//! density sweep and have no reader — so retuning either of those two recipe
+//! fields in a preset moves nothing. `layout_response` says the same thing at the
+//! site; `docs/touch-and-pen.md` §10.1 carries it as an open finding.
+//!
+//! A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
+//! body pane owns the tap, the double tap and the reorder drag, and resolves which
+//! row they mean by coordinate; the framework press belongs to the node whose
+//! gesture arena took it, so a row's own `pressed_signal` is structurally always
+//! false. The `Pressed` chrome the recipe paints is therefore reachable only
+//! through a caller-supplied `interaction_signal`. Changing that means ruling on
+//! which node owns a press when a data view is wrapped in something tappable,
+//! which is an open design question rather than a widget change.
+//!
+//! Hover is decoration plus the reveal policy: at a density that reveals every
+//! affordance the row pins its `reveal` signal on, so trailing actions do not
+//! depend on a hover a contact never produces.
 
 use std::rc::Rc;
 
@@ -79,7 +102,7 @@ use teksilo_data::{CheckState, FlatEntry};
 use teksilo_canvas::TextOverflow;
 use teksilo_core::styles::{SharedStandardItemStyle, StandardItemStyleConfig};
 use teksilo_i18n::LocalizedString;
-use teksilo_tokens::{HAlignment, TextRole, TextStyleRole, VAlignment};
+use teksilo_tokens::{HAlignment, RevealPolicy, TextRole, TextStyleRole, VAlignment};
 
 use crate::button::InteractionState;
 use crate::checkbox::Checkbox;
@@ -130,6 +153,9 @@ pub struct StandardListItem {
     /// (`TextOverflow::Wrap`).
     subtitle_overflow: Option<TextOverflow>,
     interaction: Signal<InteractionState>,
+    /// Optional sink for [`Self::reveal_signal`] — "should this row's
+    /// hover-revealed controls be reachable right now".
+    reveal: Option<Signal<bool>>,
     style_override: Option<SharedStandardItemStyle>,
     root_child_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
@@ -165,6 +191,7 @@ impl StandardListItem {
             label_slot: None,
             subtitle_overflow: None,
             interaction: Signal::new(InteractionState::Idle),
+            reveal: None,
             style_override: None,
             root_child_id: None,
             tooltip_text: None,
@@ -324,19 +351,39 @@ impl StandardListItem {
     /// [`trailing_slot`](Self::trailing_slot) is pushed past the row's edge.
     /// Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
     /// stay reachable: the label then shrinks and truncates within the row.
-    /// **Share the row's interaction state**, so a caller can reveal controls on
-    /// hover.
+    /// **Share the row's interaction state** — idle, hovered, pressed.
     ///
     /// A row that shows its actions only while the pointer is over it is a standard
     /// pattern — a search result offering *replace* and *dismiss*, a list offering
     /// *remove* — and it cannot be built from outside without knowing when the row
     /// is hovered. The row already tracks that; this is the handle on it.
     ///
-    /// The signal is written by the row, not read: pass one in, watch it, and gate
-    /// a trailing slot on it. Reserve the space the controls will take, or the row
-    /// reflows under the pointer that is trying to hit them.
+    /// The signal is written by the row, not read: pass one in and watch it.
+    ///
+    /// **To gate revealed controls, use [`reveal_signal`](Self::reveal_signal)
+    /// instead.** This one reports hover, and hover is a mouse's alone — a
+    /// trailing slot gated on `Hovered` is a slot a finger can never reach.
     pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self {
         self.interaction = signal;
+        self
+    }
+
+    /// **Whether this row's revealed controls should be reachable**, which is
+    /// not the same question as whether the row is hovered.
+    ///
+    /// [`interaction_signal`](Self::interaction_signal) reports the row's
+    /// interaction state, and a caller gating a trailing slot on `Hovered` has
+    /// built something a finger can never reach: a contact produces no hover,
+    /// ever, so the controls never appear. This signal is the same intent
+    /// stated as intent, and the row answers it per density — hover while the
+    /// density reveals on hover, and **permanently `true`** at a density whose
+    /// [`RevealPolicy`] is `Always`, where nothing is going to hover.
+    ///
+    /// Gate the slot on this, not on the interaction state, and reserve the
+    /// space the controls take — the row reflows otherwise, under the pointer
+    /// trying to hit them.
+    pub fn reveal_signal(mut self, signal: Signal<bool>) -> Self {
+        self.reveal = Some(signal);
         self
     }
 
@@ -477,7 +524,11 @@ impl StandardListItem {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.standard_item.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeStandardItemStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeStandardItemStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let on_selected = style.selected_label_role();
         let emphasised =
             on_selected.map(|_| ctx.view_focus_active().and(&ctx.window_active_signal()));
@@ -718,13 +769,27 @@ impl StandardListItem {
         // track hover but the recipe's bg cascade short-circuits to
         // Transparent.
         use teksilo_core::widget_builder::HandlerSet;
+        // A density that reveals every affordance pins the reveal signal on and
+        // never writes it again: there is no hover to follow, and a row whose
+        // actions blink out when the finger lifts is a row whose actions cannot
+        // be used. The *interaction* signal is untouched by this — it still
+        // reports hover, so the row's tint is not permanently lit.
+        let reveal_always = ctx.theme().input.reveal == RevealPolicy::Always;
+        if let Some(reveal) = self.reveal.as_ref() {
+            reveal
+                .set(reveal_always || matches!(self.interaction.get(), InteractionState::Hovered));
+        }
         let interaction_for_hover = self.interaction.clone();
+        let reveal_for_hover = (!reveal_always).then(|| self.reveal.clone()).flatten();
         let handlers = HandlerSet::new().on_hover(move |entered: bool, _ctx: &mut EventContext| {
             interaction_for_hover.set(if entered {
                 InteractionState::Hovered
             } else {
                 InteractionState::Idle
             });
+            if let Some(reveal) = reveal_for_hover.as_ref() {
+                reveal.set(entered);
+            }
         });
         ctx.apply_self_handlers(handlers);
 
@@ -789,11 +854,21 @@ impl Widget for StandardListItem {
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         use crate::styles::recipe_standard_item_style as si;
-        let min_height = if self.subtitle.is_some() {
-            si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE
-        } else {
-            si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE
-        };
+        // A row is a target, so its floor follows the density ladder — 28 dp at
+        // Compact (unchanged: the floor only ever raises), 32 at Comfortable, 44
+        // at Touch. `StandardItemRecipe` has carried both projected heights
+        // since the density sweep and nothing read them: the row measured
+        // itself against the raw Compact constants, so a Touch build laid out
+        // 28 dp list rows under a theme that had already decided on 44.
+        let min_height = teksilo_core::styles::density::dp(
+            if self.subtitle.is_some() {
+                si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE
+            } else {
+                si::STANDARD_ITEM_MIN_HEIGHT_SINGLE_LINE
+            },
+            teksilo_tokens::TargetRole::Target,
+            &ctx.theme.input,
+        );
         let raw = self
             .root_child_id
             .and_then(|id| ctx.child_size(id, proposal))
@@ -882,9 +957,17 @@ impl StandardTreeItem {
     /// Forwarded to the inner [`StandardListItem`] — see its
     /// [`subtitle`](StandardListItem::subtitle).
     /// See [`StandardListItem::interaction_signal`]: the row's own hover/press
-    /// state, for a caller revealing controls on hover.
+    /// state. To gate revealed controls use
+    /// [`reveal_signal`](Self::reveal_signal).
     pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self {
         self.inner = self.inner.interaction_signal(signal);
+        self
+    }
+
+    /// See [`StandardListItem::reveal_signal`]: whether this row's revealed
+    /// controls should be reachable, answered per density.
+    pub fn reveal_signal(mut self, signal: Signal<bool>) -> Self {
+        self.inner = self.inner.reveal_signal(signal);
         self
     }
 
@@ -1336,7 +1419,8 @@ mod tests {
             cfg: &StandardItemStyleConfig,
             ctx: &mut teksilo_core::build_context::BuildContext,
         ) -> WidgetId {
-            crate::styles::RecipeStandardItemStyle::default().make_body(cfg, ctx)
+            crate::styles::RecipeStandardItemStyle::for_tokens(&ctx.theme().input)
+                .make_body(cfg, ctx)
         }
 
         fn selected_label_role(&self) -> Option<TextRole> {
@@ -1693,9 +1777,9 @@ mod tests {
         assert_eq!(state.get(), InteractionState::Idle);
 
         let b = tree.bounds(id);
-        tree.dispatch_event(teksilo_core::WidgetEvent::PointerMove {
-            position: teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
-        });
+        tree.dispatch_event(teksilo_core::WidgetEvent::pointer_move(
+            teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
+        ));
         tree.layout(SizeProposal::exact(300.0, 40.0));
         let _ = tree.render();
         assert_eq!(
@@ -1859,16 +1943,16 @@ mod tests {
 
     fn dispatch_tap(tree: &mut WidgetTree, position: teksilo_canvas::Point) {
         use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-        tree.dispatch_event(WidgetEvent::PointerDown {
+        tree.dispatch_event(WidgetEvent::pointer_down(
             position,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
             position,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
     }
 
     #[test]

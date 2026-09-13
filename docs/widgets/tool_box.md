@@ -34,6 +34,31 @@ ToolBox::new(selected.clone())
     .add(ToolBoxItem::new("Build", build_widget).enabled(false))
 ```
 
+## Touch and pen
+
+A section header activates from its tap, so it already actuates on the
+release. Two things did change:
+
+* its **pressed** appearance is the framework's press now, not the keyboard
+  path's — before, the recipe painted a state no pointer of either kind ever
+  wrote;
+* a tap by a contact rests the header **idle** rather than hovered. A finger
+  sends no hover-leave to correct a resting `Hovered` with, so a tapped header
+  stayed lit with nothing on it — visible once the selection moved elsewhere,
+  because a selected header's own chrome hides the tint until then.
+
+The optional header drag (`on_header_drag`, the dock panel's handle) needs no
+declaration for a contact: `DragActivation::Auto` resolves to `Immediate`
+where nothing competes for the axis, and to the hold where a scroller does.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ToolBox at Touch density](img/tool_box-touch.png)
+
 ## Builder methods at a glance
 
 `orientation`, `fill`, `collapsible`, `horizontal`, `on_header_drag`, `item`, `item_id`, `add`, `items`, `show_dividers`
@@ -163,16 +188,43 @@ ToolBox design tokens.
 pub const TOOL_BOX_HEADER_MIN_HEIGHT: f32 = 28.0;
 ```
 
+## `pub fn tool_box_header_min_height(...)`
+
+`TOOL_BOX_HEADER_MIN_HEIGHT` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn tool_box_header_min_height(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL`
 
 ```rust
 pub const TOOL_BOX_HEADER_PADDING_HORIZONTAL: f32 = 12.0;
 ```
 
+## `pub fn tool_box_header_padding_horizontal(...)`
+
+`TOOL_BOX_HEADER_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn tool_box_header_padding_horizontal(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const TOOL_BOX_ICON_TEXT_SPACING`
 
 ```rust
 pub const TOOL_BOX_ICON_TEXT_SPACING: f32 = 8.0;
+```
+
+## `pub fn tool_box_icon_text_spacing(...)`
+
+`TOOL_BOX_ICON_TEXT_SPACING` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn tool_box_icon_text_spacing(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const TOOL_BOX_CHEVRON_SIZE`

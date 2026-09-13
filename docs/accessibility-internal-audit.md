@@ -32,6 +32,30 @@
 > remediation is covered by headless regression tests, **not** by a live
 > assistive-technology session, which is the same omission §7 is about.
 
+> **Target-size amendment, 2026-09-10.** The three rows in this file that discuss
+> **2.5.8 Target Size (Minimum)** — the unnumbered 2.5.8 row in §2, the 2.5.8 row in
+> §3.2, and the bullet in §5.13 — predate the density and hit-targeting work, and
+> stated the framework's position on 24 dp without a density story to hang it on.
+> They are rewritten below against the settled position, which lives in
+> [`docs/density-and-targets.md`](density-and-targets.md) and which the token field
+> names encode:
+>
+> - **24 dp is SC 2.5.8 *Target Size (Minimum)*, level AA.** It is what
+>   `InputTokens::min_target_conformance` holds, it is **24 dp at every density and is
+>   never scaled**, and no `TargetRole::Target` dimension may come out below it.
+> - **44 dp is Apple's HIG minimum and SC 2.5.5 *Target Size (Enhanced)*, level AAA.**
+>   It is the `Touch` ladder's `target_size`. **44 dp must never be called AA** in this
+>   file or anywhere else: naming the enhanced criterion after the minimum one inflates
+>   what the toolkit is claiming.
+> - **48 dp is Material 3's touch-target rule**, a design-language figure and not a
+>   WCAG level. The `teksilo-theme-material3` preset applies it on top of the Touch
+>   ladder; every other preset stays at 44.
+>
+> Nothing else in this file has been re-assessed at the touch programme's HEAD, so the
+> rest still reads against commit `7b15f57d`. Two consequences for how the amended rows
+> should be read: a *conformance gate* now exists and is not the same thing as
+> conformance, and the gate measures the **IntUI** preset only.
+
 ---
 
 ## 1. Executive summary
@@ -125,7 +149,7 @@ The rightmost column records what the previous revision got wrong about each.
 
 | G-id | Criterion | Current location | Correction |
 |---|---|---|---|
-| G1 | 4.1.2 AT reactivity — rebuild dirties the AT snapshot | `a11y_dirty = true` at [layout_impl.rs:256](../crates/teksilo-core/src/widget_tree/layout_impl.rs), in `process_pending_rebuilds`. Test `rebuild_dirties_accessibility_tree` at [event_dispatch_impl.rs:2237](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs) | Was cited at `layout_impl.rs:203` (now unrelated code). Two sibling dirty-sites now exist — `:61` (AccessibilityOnly bindings) and `:100` (dormancy transitions) — and a plain relayout deliberately no longer re-walks AT |
+| G1 | 4.1.2 AT reactivity — rebuild dirties the AT snapshot | `a11y_dirty = true` at [layout_impl.rs:256](../crates/teksilo-core/src/widget_tree/layout_impl.rs), in `process_pending_rebuilds`. Test `rebuild_dirties_accessibility_tree` in [pointer_router.rs](../crates/teksilo-core/src/widget_tree/pointer_router.rs) | Was cited at `layout_impl.rs:203` (now unrelated code). Two sibling dirty-sites now exist — `:61` (AccessibilityOnly bindings) and `:100` (dormancy transitions) — and a plain relayout deliberately no longer re-walks AT |
 | G2 | 1.4.3 Contrast — WCAG luminance formula, CI-gated themes | `relative_luminance` [color.rs:261-270](../crates/teksilo-tokens/src/color.rs), `contrast_ratio` `:278-283`. Test `default_themes_meet_wcag_contrast_minimums` at [theme.rs:844-887](../crates/teksilo-tokens/src/theme.rs) | Was cited at `color.rs:266-277` / `theme.rs:784-826`. **Scope was overstated:** the gate iterates only `light_default()`/`dark_default()` — the IntUI preset — and never asserts `text_primary`. See §5.4 |
 | G3 | 1.4.11 Non-text contrast — focus indicators retuned | IntUI light `border_focused`/`focus_ring` = `#0C8294` at [theme.rs:319, :378](../crates/teksilo-tokens/src/theme.rs) (4.53:1 on `surface_content`, 4.26:1 on `surface_main`); IntUI dark = `#19BDD4` at `:456, :520` (7.28:1 / 6.10:1) | Was cited at `theme.rs:286-289,342-345`. The claim is IntUI-specific and does not generalise: Fluent binds focus to `focus_stroke_outer` (deliberately never the accent), macOS to the raw accent, Material 3 to `m.primary` |
 | G4 | 4.1.3 Status messages — ProgressBar value + `Live::Polite` | [progress_bar.rs:250-254, :292-301](../crates/teksilo-widgets/src/progress_bar.rs); test `accessibility_values` at `:480` | **Accurate as written** — the only G-row whose citation survived intact |
@@ -138,10 +162,10 @@ The rightmost column records what the previous revision got wrong about each.
 | G12 | 1.4.13 Content on hover or focus | No-dismiss-on-anchor-leave at [overlay_impl.rs:1615-1645](../crates/teksilo-core/src/widget_tree/overlay_impl.rs); 100 ms grace at `:486-494`; bounds check at [widget_tree.rs:1029-1055](../crates/teksilo-core/src/widget_tree.rs) | **The verdict was wrong when written.** G12 closed *hoverable*; *dismissible* and *persistent* were both still broken and were fixed a month later by `55eb6de4` — see §7 |
 | G13 | 1.4.1 / 1.4.11 + high contrast | `for_high_contrast()` at [theme.rs:230-259](../crates/teksilo-tokens/src/theme.rs); OS re-query in [window_manager.rs](../crates/teksilo-app/src/window_manager.rs); list/tree selection boundary at [recipe_standard_item_style.rs:133-166](../crates/teksilo-widgets/src/styles/recipe_standard_item_style.rs) | Line drift. **New problem:** `for_high_contrast()` hardcodes IntUI hexes and is applied to whatever preset is active — see §5.6 |
 | G14 | 3.2.1 On focus — debug warning for context change | [focus_impl.rs](../crates/teksilo-core/src/widget_tree/focus_impl.rs), [event_context.rs](../crates/teksilo-core/src/widget/event_context.rs) | Line drift only |
-| G15 | 4.1.2 — bound `access_*` props at `AccessibilityOnly` | `register_access_prop_bindings` at [widget_tree.rs:2298-2314](../crates/teksilo-core/src/widget_tree.rs); test `bound_access_label_change_dirties_accessibility_tree` at [event_dispatch_impl.rs:2264](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs) | Line drift. G15 covered *override* props only — the editors' own caret signals had the identical defect and were fixed later (`2f305370`) |
+| G15 | 4.1.2 — bound `access_*` props at `AccessibilityOnly` | `register_access_prop_bindings` at [widget_tree.rs:2298-2314](../crates/teksilo-core/src/widget_tree.rs); test `bound_access_label_change_dirties_accessibility_tree` in [pointer_router.rs](../crates/teksilo-core/src/widget_tree/pointer_router.rs) | Line drift. G15 covered *override* props only — the editors' own caret signals had the identical defect and were fixed later (`2f305370`) |
 | G16 | 2.3.3 — overlay fades snap under reduced motion | [overlay_impl.rs](../crates/teksilo-core/src/widget_tree/overlay_impl.rs) (`attach_overlay_fade`, `process_tooltips_impl`) | Previous revision cited a file `process_tooltips_impl.rs` that does not exist — it is a function inside `overlay_impl.rs` |
 | G17 | 1.3.2 Meaningful sequence — `accessibility_children()` | Trait method at [widget.rs:439](../crates/teksilo-core/src/widget.rs), honoured at [accessibility_impl.rs:499](../crates/teksilo-core/src/widget_tree/accessibility_impl.rs), overridden at [table_view.rs:2713](../crates/teksilo-widgets/src/table_view.rs) and [tree_table_view.rs:2673](../crates/teksilo-widgets/src/tree_table_view.rs) | Line drift only. The "exactly one walker call site" claim re-verified and holds |
-| — | 2.5.8 Target size — Compact icon button 22→24 dp | `ICON_BUTTON_SIZE_COMPACT = 24.0` at [recipe_icon_button_style.rs:32](../crates/teksilo-widgets/src/styles/recipe_icon_button_style.rs) | **The macOS preset overrides it to 18 dp** ([metrics.rs:170-172](../crates/teksilo-theme-macos/src/styles/metrics.rs)), reopening 2.5.8 for macOS-themed apps |
+| — | 2.5.8 Target size — Compact icon button 22→24 dp | `ICON_BUTTON_SIZE_COMPACT = 24.0` in [recipe_icon_button_style.rs](../crates/teksilo-widgets/src/styles/recipe_icon_button_style.rs), projected per density by `IconButtonRecipe::for_tokens` | Holds for the default recipe, and 24 dp is the AA floor — not a compromise. **A shipped preset can still undercut it:** `macos_icon_button_style_for` paints 18 dp at `IconButtonSize::Compact` ([metrics.rs](../crates/teksilo-theme-macos/src/styles/metrics.rs)) deliberately, to reproduce AppKit's own metric. `IconButton` implements neither `hit_outset` nor `HitTarget`, so nothing widens it for a mouse — the miss-only slop pass is 0 dp for a precise pointer at every density by design. See §3.2 |
 
 There is no G11 row and never was one in this revision: G11 was the label for the
 1.4.12 Text Spacing N/A reclassification, which the 2026-07-02 rewrite carried as
@@ -168,7 +192,7 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 | 1.4.1 Use of Color | A | framework | 🟡 | **Was three colour-only sites; one remains.** (a) *Fixed* — chart series carry a non-colour channel (`SeriesPattern`: dash / marker / hatch, rendered in the plot **and** the legend swatch), which also breaks the palette's modulo wrap (§5.2). (b) *Fixed* — `CommandPalette`'s highlight gained a leading marker bar beside the tint (§5.4). (c) **Still open:** TableView/TreeTableView selection band remains a flat fill (§5.3). List/tree rows *were* fixed (G13) |
 | 1.4.2 Audio Control | A | — | ➖ | No auto-playing audio. The terminal bell is visual-only (`BellStyle::{Visual,None}`) — but see 2.3.1 |
 | 1.4.3 Contrast (Minimum) | AA | framework | 🟡 | Formula at [color.rs:261-283](../crates/teksilo-tokens/src/color.rs). CI-gated for IntUI ([theme.rs:844-887](../crates/teksilo-tokens/src/theme.rs)); Fluent self-gates with 14 assertions using an alpha-compositing-aware helper ([color.rs:259-264, :334-402](../crates/teksilo-theme-fluent/src/color.rs)); macOS self-gates with ~43. **Material 3 has zero contrast assertions** — its tokens measure fine today but nothing holds them there |
-| 1.4.4 Resize Text | AA | framework | ✅ | Global text scale 80–200 % applied through `effective_theme` at relayout. The editor family moved from post-layout page zoom to a true `font_size_scale` since (`dfe23340`), so enlarged text now shapes at a larger ppem rather than stretching a raster. `SegmentedControl`'s 24 dp height was a *ceiling* that clipped labels at raised scale until `7f212749` made it a floor |
+| 1.4.4 Resize Text | AA | framework | ✅ | Global text scale 80–200 % applied through `effective_theme` at relayout. The editor family moved from post-layout page zoom to a true `font_size_scale` since (`dfe23340`), so enlarged text now shapes at a larger ppem rather than stretching a raster. `SegmentedControl`'s own 24 dp height — its Compact recipe dimension, which happens to equal the AA floor without being it — was a *ceiling* that clipped labels at raised scale until `7f212749` made it a floor |
 | 1.4.5 Images of Text | AA | framework | ✅ | All chrome renders through the glyph-atlas pipeline; no stock widget bakes label text into a raster |
 | 1.4.10 Reflow | AA | — | ➖ | Viewport-specific criterion; desktop constraint-negotiation layout is the analogue, not a literal evaluation |
 | 1.4.11 Non-text Contrast | AA | framework | 🟡 | Focus indicators fixed for IntUI (G3) and independently gated in Fluent and macOS. Same three colour-only sites as 1.4.1 lack a ≥3:1 boundary. macOS deliberately overrides Apple's own 1.25:1 `separatorColor` hairline for this reason |
@@ -180,10 +204,10 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 | Criterion | Lvl | Resp. | Status | Evidence / note |
 |---|---|---|---|---|
 | 2.1.1 Keyboard | A | framework | 🟡 | Real DFS Tab order + roving tabindex. Strong coverage: Splitter (arrows/Home/End/Enter, [handle.rs:489, :519-528](../crates/teksilo-widgets/src/splitter/handle.rs)), GridView (full 2D nav + Alt+Arrow reorder), SegmentedControl, CommandPalette, table cell navigation (added `15837b69`/`79b916f3`), scene magnetism connect flow. `WebView` **was** never `.focusable()`; it is now in the Tab cycle, with Enter entering the page (§5.10 — leaving an entered page stays outside the toolkit's control). The context-menu gap **is closed**: `Key::ContextMenu`, Shift+F10, and Ctrl+Shift+M on macOS all open the nearest `.context_menu(..)` from the keyboard (§5.8). **One gap remains:** docking's `split_into_tab`/`stack_into_tab` drop zones have no menu equivalent. Charts are also unreachable — no `focusable`/`on_key` outside the legend |
-| 2.1.2 No Keyboard Trap | A | framework | 🟡 | Modal and overlay scopes default to `EscapeOrClickOutside`. `Terminal`'s trap is **fixed at the primitive**: the dispatcher now reserves `Ctrl+Tab` / `Ctrl+Shift+Tab` for *every* `keyboard_capture` node before the widget is consulted, so no capture surface can swallow the one chord that gets focus out ([event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs)); Terminal also declines it itself, no longer consumes keys on the read-only path, and announces the chord to AT (§5.1). **One milder case remains:** the editable `CodeEditor`'s Tab-indent arm lacks the `tab_escape = ctrl` guard `RichTextEditor` has, and is not a capture surface so the dispatcher reservation does not cover it |
+| 2.1.2 No Keyboard Trap | A | framework | 🟡 | Modal and overlay scopes default to `EscapeOrClickOutside`. `Terminal`'s trap is **fixed at the primitive**: the dispatcher now reserves `Ctrl+Tab` / `Ctrl+Shift+Tab` for *every* `keyboard_capture` node before the widget is consulted, so no capture surface can swallow the one chord that gets focus out ([pointer_router.rs](../crates/teksilo-core/src/widget_tree/pointer_router.rs)); Terminal also declines it itself, no longer consumes keys on the read-only path, and announces the chord to AT (§5.1). **One milder case remains:** the editable `CodeEditor`'s Tab-indent arm lacks the `tab_escape = ctrl` guard `RichTextEditor` has, and is not a capture surface so the dispatcher reservation does not cover it |
 | 2.1.4 Character Key Shortcuts | A | framework | ✅ | Type-ahead and mnemonics are active only while the owning component holds focus. Scene magnetism's single-character `m` trigger meets the criterion by both available exceptions — remappable via `connect_key(..)` and active-on-focus-only. `4402128c` fixed hidden menu rows claiming a mnemonic and being activatable through it |
 | 2.2.1 Timing Adjustable | A | framework | 🟡 | **Previously scored ➖ n/a on the grounds that "no time-limited interactions exist" — that is false.** `Toast` auto-dismisses after a default 10 s ([toast.rs:65, :443](../crates/teksilo-widgets/src/toast.rs)) and can carry Link/Button actions. Adjustable only by the app author (`auto_dismiss_after`/`persistent`), never by the end user. Partially mitigated: dismissed toasts persist in the notification archive |
-| 2.2.2 Pause, Stop, Hide | A | framework | 🟡 | No auto-updating surface ships a pause affordance. `Cycle` (3 s default) has zero `pause`/`paused` occurrences. Joined since by `LogView` tail-following, `Terminal` scroll-on-output, and streaming charts — the chart demo hand-rolls its own pause signal, i.e. the framework supplies none. `Toast` pauses on pointer hover only, never on keyboard focus |
+| 2.2.2 Pause, Stop, Hide | A | framework | 🟡 | No auto-updating surface ships a pause affordance. `Cycle` (3 s default) has zero `pause`/`paused` occurrences. Joined since by `LogView` tail-following, `Terminal` scroll-on-output, and streaming charts — the chart demo hand-rolls its own pause signal, i.e. the framework supplies none. `Toast` pauses on a pointer hovering it or holding it down, never on keyboard focus |
 | 2.3.1 Three Flashes | A | framework | 🟡 | The animation wrappers are safe (`Shake` is spatial; `Pulse` is ~1.1 Hz opacity). **The terminal visual bell is not assessed as safe:** `BellStyle::Visual` is the default and every BEL restamps a full-bounds 0.25-alpha flash over 150 ms with no rate limit, no minimum interval and no reduced-motion gate ([terminal.rs:505-516, :816-826](../crates/teksilo-terminal/src/terminal.rs)). A process emitting BEL faster than ~3/s produces a full-viewport sawtooth. Whether the luminance delta crosses the general-flash threshold was not measured; the rate and area clearly qualify for assessment |
 | 2.4.1 Bypass Blocks | A | framework-enabled | ✅ | Previously ➖ n/a. Docking sides now emit `Role::Complementary` landmarks ([panel.rs:682](../crates/teksilo-widgets/src/docking/panel.rs)), which a screen reader's landmark rotor consumes — the desktop bypass mechanism. Roving tabindex additionally collapses composite groups to one Tab stop |
 | 2.4.2 Page Titled | A | framework | ➖ | Every window is titled — but `WindowConfig::title` is an *optional* builder field defaulting to the literal `"Teksilo"` ([config.rs:134, :276](../crates/teksilo-core/src/window/config.rs)), not "a required, always-supplied parameter" as previously stated. A non-descriptive default is reachable |
@@ -227,7 +251,7 @@ mislabelled 2.4.13 as Level AA when it is AAA. They are separated here.
 | 2.4.12 Focus Not Obscured (Enhanced) | AAA | ❌ | Follows from the above |
 | 2.4.13 Focus Appearance | AAA | ✅ | 2.0 dp stroke at ≥3:1 (G3). **Level corrected from AA** |
 | 2.5.7 Dragging Movements | AA | 🟡 | G6 (scene Alt+Arrow nudge), plus two further alternatives since: Splitter keyboard resize, and the scene magnetism keyboard connect flow ([magnetism.rs:172-240](../crates/teksilo-scene/src/view/magnetism.rs)). GridView's Alt+Arrow reorder is a validated same-view drop. **Docking drag-to-dock is the gap:** its only non-drag route is a context menu. That menu is now keyboard-reachable on a focused rail item (§5.8), but the `split_into_tab`/`stack_into_tab` drop zones still have no menu equivalent |
-| 2.5.8 Target Size (Minimum) | AA | 🟡 | 24 dp in the default recipe and under Fluent/Material 3; **18 dp under the macOS preset** ([metrics.rs:170-172](../crates/teksilo-theme-macos/src/styles/metrics.rs)). No test asserts a ≥24 floor — the only guard is `size_compact < size_default`. One stale "Compact 22 dp" doc comment remains at [icon_button.rs:98](../crates/teksilo-widgets/src/icon_button.rs) |
+| 2.5.8 Target Size (Minimum) | AA | 🟡 | The floor is **24 dp at every density and never scaled** (`InputTokens::min_target_conformance`), and it is now enforced two ways rather than asserted nowhere: `dp(.., TargetRole::Target, ..)` clamps upward to it, asserted by `a_target_never_lands_below_the_conformance_floor` in [density.rs](../crates/teksilo-core/src/styles/density.rs) at all three densities; and [target_audit.rs](../crates/teksilo-core/src/accessibility/target_audit.rs) measures each target's *reachable* extent — painted size plus whatever `hit_outset`, `target_regions`, `partition_targets` and the miss-only slop pass actually deliver — with named-fixture gates at all three densities, the stock catalog's in [teksilo-target-conformance/tests/conformance.rs](../crates/teksilo-target-conformance/tests/conformance.rs) and two more in `teksilo-charts` and `teksilo-scene`. **The preset limit this row used to carry is closed:** the widget gate sweeps **all four shipped presets** (Int UI, macOS, Fluent, Material 3), one family representative each. That sweep found 64 failures no Int UI gate could see, of which three were preset defects and are **fixed** — Fluent's list selection pill owned every press in a row, so a checkbox in a Fluent list could not be ticked by a mouse; the macOS icon button and switch sat under the floor at every density and now carry a conformance box around unchanged Apple chrome. **Three limits keep this 🟡 and not ✅.** (i) Coverage is whatever the three fixture lists name, and **four crates that own pointer targets have no list at all** (`teksilo-inspector`, `teksilo-terminal`, `teksilo-preview-ui`, `teksilo-webview`); §3.7 gives each one's feasibility. Charts and scene sweep Int UI alone, each for a written reason. (ii) **Fourteen** allow-listed findings remain, each carrying a written justification, a **pinned** measurement (the geometry *is* the matcher, so a figure cannot drift from what the gate excuses), an explicit theme axis, and an owner wherever there is a decision left to take — thirteen of the fourteen name one. **Five** rest on a 2.5.8 exception rather than on geometry: the `SpinBox` step buttons (18 × 13 dp), the `ColorPicker` swatch (22 × 22 dp), the `TreeTableView` chevron (12 × 12 dp, whose row expands and collapses on ArrowLeft / ArrowRight) and the window frame's diagonal corner grips (6 × 6 dp) under *Equivalent*, and `Link` (text-height, 17 dp) under *Inline* — four of those five still name an owner for the geometry, because an exception discharges the criterion without making the shape good. **Nine** are real shortfalls escalated rather than excused: a `SpinBox`'s editable field is 20 dp tall at Compact; a `SearchField`'s clear slot keeps its press and its pointer cursor while the query is empty and reaches 22 × 24 there; the tree chevron's `hit_outset` is inert because `StandardTreeItem` wraps it in a `FixedSize` its own size, so it reaches 16 dp in a `TreeView` at every density where the same chevron unwrapped reaches 24; at Touch a dock's tab strip is unreachable at its centre line because `DockResizeHandle`'s hit outset covers it — the outset inflates the 6 dp divider across its thickness to the density's **`target_size`** (24 dp at Compact, 44 at Touch: the AAA/HIG figure, *not* `grab_size`, which is 16 dp at Touch), which `grab_outset` in [docking/resize_handle.rs](../crates/teksilo-widgets/src/docking/resize_handle.rs) computes; a window's top resize ring swallows the top band of its own content at Touch, reported under Material 3 and present under all four; a Material 3 calendar's header title is 11.2 dp wide between four 48 dp nav arrows; a menu row comes out under the `item_height` its own recipe asked for; and the table header's resize grip and filter glyph reach exactly their own paint. The split is a field on each entry rather than a sentence here, and `the_allow_lists_roster_is_what_it_says_it_is` asserts both counts — the paragraph they replaced carried four numbers and every one was wrong. The header grip and the filter glyph were invisible until P40's mutation round, because the `table_view` fixture built its columns from the defaults and a `HeaderCell` reports **no** regions unless a column is filterable: a column's resize grip is a reported `Grab` reaching exactly its own paint, and the paint is itself only half the divider band, which straddles the boundary with `resize_grip` inside each of the two cells; and a filterable column's filter glyph reaches exactly its paint, the header cell around it owning every near miss at distance zero. Neither is excused by an exception: [drag-operation-census.md](drag-operation-census.md) row 7 rates column resize *Partial* — `Increment`/`Decrement` assistive actions and **no keyboard route at all**, the header cell being `.focusable(false)` — and there is no larger equivalent control for opening a filter. Both wait on that row's own remediation, a focusable header row with a roving tab index. The dock one is still the first to read: it is not a size failure at all but a gap in A10's outset-versus-target precedence, and it costs half a 38 dp tab strip at every dock side. (iii) Reaching the floor for a mouse is a *paint* question, and every hit-widening mechanism is 0 dp for a precise pointer on purpose, so a preset that paints under 24 dp fails for a mouse user unless 2.5.8's *Spacing* exception carries it |
 | 3.2.6 Consistent Help | A | ➖ | Author-scope |
 | 3.3.7 Redundant Entry | A | author | ➖ | Framework hooks exist (`Wizard`/`Stepper` for multi-step processes; `MruList`/`SettingsStore` for re-entry avoidance) but the criterion is satisfied at application level |
 | 3.3.8 Accessible Authentication (Min) | AA | ✅ | **`PasswordField` gets the asymmetry right, which is worth stating explicitly.** `copy_allowed()` is consulted at exactly two sites — `clipboard_copy` and `clipboard_cut` ([keyboard.rs:445, :460](../crates/teksilo-widgets/src/primitives/text_input_field/keyboard.rs)). `clipboard_paste` has no such guard, and the context-menu Paste row is the only one of the four built without an `.enabled(..)` clause. So a password manager's paste into a masked field works, while plaintext cannot be copied out. The reveal toggle is an additional transcription aid |
@@ -266,6 +290,99 @@ Chapter 5 applies to all ICT including software and is not subsumed by either.
 | 11.7(b) | Reduced motion preference | 🟡 | G16, and the unified `AccessibilityPreferences` pipeline. **The terminal visual bell is a motion path this pipeline does not reach** (2.3.1) |
 | 11.7(c) | Text scaling preference | ✅ | Applied at launch and on every focus-triggered refresh |
 | 11.7 | Re-query granularity | 🟡 | Focus-transition-triggered, not an OS push subscription — a deliberate zero-idle-cost choice. A user toggling "increase contrast" while the app holds focus continuously sees no change until a focus transition |
+
+---
+
+### 3.7 What the target-conformance gate covers — and what a green gate does not say
+
+The SC 2.5.8 row above rests on three fixture-driven gates — the stock widget
+catalog's, in `crates/teksilo-target-conformance/tests/conformance.rs`, plus
+`tests/target_conformance.rs` in `teksilo-charts` and in `teksilo-scene` — and a
+reader is entitled to know the shape of their coverage rather than infer it from
+the word "gate". **Three fixture lists exist**, one per gate. A green gate says
+*those three lists' fixtures conform at all three densities, except the written
+allow-list entries*. It does not say "the framework conforms".
+
+**Where the widget list lives, and what that costs.** It names only
+teksilo-widgets' public API and was an integration test of that crate until the
+gate needed it under more than one theme — a preset crate sits *above*
+teksilo-widgets in the crate graph, so no test binary inside teksilo-widgets can
+install one. The list, the allow-list and all four preset gates therefore live in
+`crates/teksilo-target-conformance`, which is `publish = false` and dev-depends
+on the three presets; **no published manifest changed.** The cost is that `cargo
+test -p teksilo-widgets` no longer catches an undersized control — `cargo test
+--workspace` does, and there is deliberately **no stub** left in
+`teksilo-widgets/tests/` to stand in for the gate, because a test that passes by
+containing nothing is worse than an absent one.
+
+**Four crates the touch programme changed own pointer targets and have no fixture
+list at all.** Each is feasible or not for a stated reason, so this is a backlog
+rather than an omission:
+
+| Crate | What it owns | A fixture list is… |
+| --- | --- | --- |
+| `teksilo-inspector` | The F12 debug panel: tab strip, tree rows, a picker, a resize strip. Its tabs route through `dp(.., Target, ..)` and its shell already uses a `TouchTarget`, so it has density-routed targets today. P35 also *deleted* a `hit_outset` here after measuring that the slop pass was what delivered the press. | **Feasible, and the largest gap.** The crate is an ordinary lib that depends on teksilo-widgets and builds a real tree; nothing structural is in the way. It is debug-only (`cfg(debug_assertions)`), which is an argument about priority, not about measurability. |
+| `teksilo-terminal` | A context menu whose rows are floored with `dp(ROW_MIN_HEIGHT, Target, ..)`, and touch selection handles with a `hit_size: dp(HANDLE_HIT_SIZE, Target, ..)` distinct from their painted diameter. | **Feasible.** `MemoryEngine` already exists for headless tests and the crate has a `tests/touch.rs`. The handles are the interesting subject: a painted-versus-hit split is exactly what the walker was built to catch. |
+| `teksilo-preview-ui` | The previewer's navigator, whose row is **§0 row 1** of `docs/density-inventory.md` — one of the three Compact-visible exceptions the whole density treatment defers to. | **Feasible** (one fixture over the navigator), and the only place that particular exception could ever be measured. |
+| `teksilo-webview` | One `WebView` node. It declares neither hit hook and routes no dimension through `dp`; the page's own targets are the page's, and the widget is a native subview the walker cannot see into. | **Not worth a list**, and this is the reason rather than an excuse: a fixture would measure one large rectangle and assert that it clears the floor. Stated here so the crate's absence is a decision. |
+
+**The preset axis, which used to be a boundary and is now covered.** The widget
+list sweeps **all four shipped presets** — Int UI, macOS, Fluent and Material 3 —
+at all three densities, one family representative each (light and dark are
+geometrically identical in every one of them, which the gate asserts rather than
+assumes). Charts and scene sweep Int UI alone, and that is a decision with a
+reason at each: a chart carries no preset chrome at all, and a scene's
+heavyweight tier is whatever widget the app puts in it, measured by the widget
+list under all four.
+
+**What the preset sweep cost when it was first run: 64 failures no Int UI gate
+could see.** Three were preset defects and are fixed — the Fluent selection pill
+owned every press in a list row, so a checkbox in a Fluent list could not be
+ticked *by a mouse*; the macOS icon button and switch sat 2 dp under the floor at
+every density with no mechanism to make it up. Two more are new written entries
+with owners: a window's top resize ring swallows the top band of its own content
+at Touch, and a Material 3 calendar's header title is 11.2 dp wide between four
+48 dp nav arrows. A green four-preset gate is a much stronger statement than a
+green Int UI one, and the difference is exactly those five findings.
+
+One further boundary, already named above and repeated here so it sits with the
+others: every hit-widening mechanism is 0 dp for a **precise** pointer by design
+(limit (iii)), so a sub-24 dp paint fails for a mouse user unless 2.5.8's
+*Spacing* exception carries it.
+
+**The Int UI Compact census moved, and it is not the invariant breaking.** The
+programme's invariant is that *Compact layout* does not move: no shipped control
+changes size at the densest rung without a `docs/density-inventory.md` §0 entry.
+Nothing in this package moved one. What moved is the **audit's own measurement**
+of Int UI at Compact, by three rows, and the honest statement is that the
+invariant is re-scoped rather than broken — it was always about geometry and
+never about the census, and this is the first package where the two came apart.
+The cause is `PROBE_EPSILON`, the slack the walker allows for its own bisection
+error, widened from 0.05 dp to three refinement quanta (0.094). The old figure
+was 1.6 quanta, under the two-quanta worst case an *extent* carries, so the
+shadow test — which reads "the reach is materially under the paint" as "another
+target is on top of this one" — mis-filed rows that were short only by the probe.
+A row filed that way carries **no verdict at all**, so the old figure was
+silencing findings rather than forgiving them. Seven rows across the widget list
+come back: four Fluent Touch tree chevrons (reach 15.9375 against 16 dp of
+paint), and three **Int UI Compact** menu rows (21.75 against 21.8), the ones a
+reader of this section would otherwise not expect to see move. Each is covered by
+the allow-list entry that already named that geometry, with the epsilon recorded
+at the pin. Measured both ways: 474 rows at 0.05, 481 at the current value, and
+identical at two quanta and three.
+
+**The sharpest consequence, measured.** Of the **three** Compact-visible `MinSize`
+exceptions `docs/density-inventory.md` §0 now enumerates, the gate can reach
+**none**: the previewer's navigator row is in a crate with no list; the macOS
+control height is now behind a preset the list *does* install, but the row §0
+names is the one `mount.rs` holds to `bezel.max(24.0)` rather than a fixture
+subject; and the code editor's
+completion row only exists while the popup is open, which the `code_editor`
+fixture does not do (it builds `CodeEditor::new(document).gutter(true)` and
+nothing else). The exceptions are each asserted somewhere — `mount.rs` holds the
+macOS one to `bezel.max(24.0)` — but not by the gate that reads §0 as its
+enumeration. A fourth §0 row was removed by P40 after measurement: see
+`docs/density-inventory.md`'s "Corrections P40" table.
 
 ---
 
@@ -312,7 +429,7 @@ property of the primitive, not a promise each capture-surface author has to reme
 to keep:
 
 - **The dispatcher reserves `Ctrl+Tab` / `Ctrl+Shift+Tab`.** In
-  [`dispatch_event_impl`](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs),
+  [`dispatch_event_impl`](../crates/teksilo-core/src/widget_tree/pointer_router.rs),
   the `Key::Tab` branch cycles focus *before* dispatching to a focused
   `keyboard_capture` node, so the chord never reaches the widget and no capture
   surface — present or future — can swallow it however greedily its `on_key`
@@ -531,7 +648,7 @@ already owns a `.context_menu(..)` gained one without opting in:
   `keysyms::Menu` on X11 and Wayland. macOS never produces it: its keyboards have no
   such key, and `winit-0.30.13`'s AppKit backend references the variant zero times.
 - **Three chords, because no single one exists everywhere.** `is_context_menu_chord`
-  ([event_dispatch_impl.rs](../crates/teksilo-core/src/widget_tree/event_dispatch_impl.rs))
+  ([pointer_router.rs](../crates/teksilo-core/src/widget_tree/pointer_router.rs))
   accepts the dedicated key with no modifiers, Shift+F10 (the convention Windows, GTK
   and Qt all honour, and the one a PC keyboard without a Menu key can still reach), and
   Ctrl+Shift+M on macOS only, where F10 is a media key under the default function-key
@@ -677,8 +794,10 @@ scope the embedded content separately. Both limits are now stated in
 
 ### 5.11 Toast timing, and pause affordances generally — 2.2.1 / 2.2.2 (A) · framework
 
-`Toast` auto-dismisses after 10 s by default and can carry actionable controls; the only
-pause input is a pointer hover count. Keyboard focus does not pause it — `focusable(true)`
+`Toast` auto-dismisses after 10 s by default and can carry actionable controls. Two
+pointer inputs pause it: a hover count, and — added for touch, where there is no hover to
+count — a **hold** on the surface, driven from the framework press so a revoked contact
+cannot leave the pause stuck on. Keyboard focus still does not pause it: `focusable(true)`
 is attached only when `closable_on_escape`, and only to bind Escape. A keyboard or
 screen-reader user has a hard 10 s window to reach and operate a toast action.
 
@@ -709,9 +828,12 @@ before claiming it is under threshold.
   [docs/accessibility-overrides.md:276](accessibility-overrides.md), where it is documented
   without that caveat (and where `access_hidden` is documented as `bool` when it is
   actually `impl Into<Prop<bool>>`).
-- **2.5.8 under the macOS preset** — `size_compact: 18.0` and no test asserting a ≥24 floor.
-- **One stale doc comment** — `icon_button.rs:98` still says "Compact 22 dp". The second
-  occurrence the previous revision cited at `:582` is gone.
+- **2.5.8 under the macOS preset** — `macos_icon_button_style_for` paints `size_compact:
+  18.0`, and `size_compact < size_default` is still the only assertion over that rung: the
+  conformance gate measures IntUI. The preset says at the constant that it is below the
+  floor and staying there, so this is a recorded trade (Apple's metrics reproduced
+  faithfully) and not an oversight — but an app shipping the macOS preset inherits the
+  failure, and nothing tells it so at build time.
 - **`StepButton` repeat timing** — hardcoded, non-adjustable, not preference-aware (§3.5, 5.7).
 - **`NotificationCenterButton`** — the unread count reaches AT only as a bare badge text
   node, not folded into the bell's accessible name.

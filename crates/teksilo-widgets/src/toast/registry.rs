@@ -113,6 +113,17 @@ pub(crate) struct LiveEntry {
     /// `None` for persistent toasts. Decremented each frame by the
     /// host's frame-tick effect when the hover-pause refcount is zero.
     pub(crate) time_left: Option<Duration>,
+    /// Whether a pointer is **holding** this toast down. The touch twin of the
+    /// hover refcount: a finger produces no hover, so pressing and holding the
+    /// surface is how a touch user says "wait, I am reading this".
+    ///
+    /// A flag on the entry rather than a second refcount, and deliberately: a
+    /// count leaks if its decrement is missed — a contact revoked mid-hold
+    /// would pin every toast in the application open for the rest of its run —
+    /// whereas a flag on the entry dies with the entry. It is written from the
+    /// framework's own press signal, which the framework clears on release and
+    /// on cancel alike.
+    pub(crate) held: bool,
     /// Boxed custom leading widget — `take()`-able exactly once when
     /// the surface is built. After the first build, subsequent
     /// rebuilds fall back to the default severity glyph.
@@ -471,6 +482,7 @@ impl ToastRegistry {
             on_dismiss: toast.on_dismiss,
             style_override: toast.style_override,
             time_left: auto_dismiss,
+            held: false,
             leading: toast.leading,
             id: toast.id,
             archive: toast.archive,
@@ -664,13 +676,39 @@ impl ToastRegistry {
         }
     }
 
+    /// Mark whether a pointer is holding the toast with `entry_id` down.
+    ///
+    /// Called from the surface's binding on the framework press signal, so the
+    /// release **and** a cancelled contact both clear it without the surface
+    /// having to notice either. Silently ignores an entry that has already gone.
+    pub(crate) fn set_entry_held(&self, entry_id: u64, held: bool) {
+        let mut inner = self.inner.borrow_mut();
+        if let Some(entry) = inner
+            .live_entries
+            .iter_mut()
+            .find(|e| e.entry_id == entry_id)
+        {
+            entry.held = held;
+        }
+    }
+
+    /// Whether any live toast is being held down.
+    ///
+    /// Group-wide, matching the hover refcount: holding one toast of a stack
+    /// holds the stack, because dismissing the ones above or below it would
+    /// move the thing being read.
+    pub(crate) fn any_held(&self) -> bool {
+        self.inner.borrow().live_entries.iter().any(|e| e.held)
+    }
+
     /// Tick the per-entry timers by `dt`. When `paused` is true (any
-    /// surface is hovered or focused), this is a no-op. Returns `true`
+    /// surface is hovered or focused), or any surface is being held down,
+    /// this is a no-op. Returns `true`
     /// if at least one entry expired (host then bumps the version
     /// signal and rebuilds, dropping the surfaces). Called from the
     /// host's frame-tick effect.
     pub(crate) fn tick_timers(&self, dt: Duration, paused: bool) -> bool {
-        if paused {
+        if paused || self.any_held() {
             return false;
         }
         let mut expired = Vec::new();

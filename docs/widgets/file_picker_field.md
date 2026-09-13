@@ -23,6 +23,14 @@ let _f = FilePickerField::new(path.clone())
     .placeholder(lit!("Choose a file…"));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![FilePickerField at Touch density](img/file_picker_field-touch.png)
+
 ## Builder methods at a glance
 
 `kind`, `dialog_title`, `starting_dir`, `default_file_name`, `add_filter`, `on_pick`, `placeholder`, `label`, `validation`, `enabled`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

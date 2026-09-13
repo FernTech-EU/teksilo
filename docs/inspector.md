@@ -13,11 +13,11 @@ Mental model in one line:
 TeksiloAppBuilder.install_inspector_in_debug() → F12 toggles a bottom panel inside every window
 ```
 
-The panel hosts nine tabs: live widget tree + properties + accessibility,
+The panel hosts ten tabs: live widget tree + properties + accessibility,
 theme + locale switchers, focus chain, registered shortcuts, active
-overlays, and registered data models. Plus a toolbar with a picker
-tool, a bounds-overlay mode selector, and an opacity slider for the
-overlay strokes.
+overlays, registered data models, and the pointer/density readout. Plus a
+toolbar with a picker tool, a bounds-overlay mode selector, an opacity slider
+for the overlay strokes, and a pointer watch.
 
 End-to-end smoke example: `cargo run -p simple-button` then press F12.
 
@@ -72,7 +72,30 @@ lines. In debug builds it:
 | **`--teksilo-inspector` CLI arg** | Open the inspector at startup. |
 | **`TEKSILO_INSPECTOR=1` env** | Same as the CLI arg. |
 | **`×` toolbar button** | Closes the panel (F12 reopens). |
+| **`InspectorState::toggle()`** | The public door. Reach the state through `ctx.app_state::<InspectorState>()` and put the inspector behind whatever the application already has — a debug menu item, a hidden button, a gesture of its own. |
+| **A hold in the bottom-trailing corner** | The framework's own coarse-pointer door — see below. |
 | **Persisted state** | If the app uses `SettingsStore`, the toggle remembers its last state across launches. |
+
+```rust
+if let Some(inspector) = ctx.app_state::<teksilo_inspector::InspectorState>() {
+    inspector.toggle();
+}
+```
+
+### The corner grip
+
+F12 is a keyboard chord, so on a machine with no keyboard the inspector needs
+another way in. Once a session has produced a **coarse** pointer sample — a
+finger — a grip appears in the window's bottom-trailing corner while the panel
+is closed, and a **hold** on it opens the panel. It advertises `Role::Button`
+with the same action, so an assistive-technology user reaches it too.
+
+What it costs is exactly one corner: the grip's node fills the window but is
+hittable only inside its own square (`Widget::hit_shape`), which is the density's
+target size, so a press anywhere else reaches the application unchanged. Inside
+the square the press belongs to the grip. It paints a visible mark for that
+reason — the cost is never silent — and it is not mounted at all until a finger
+has been seen, so a mouse-driven session never grows one.
 
 The shortcut id is `__teksilo_inspector.toggle`. The double-underscore
 prefix marks it as framework-reserved — do not bind it from app code.
@@ -101,7 +124,7 @@ appear dimmed in the Shortcuts tab.
 ## Toolbar
 
 ```
-[ Pick ] [ Off | Sel | All ] [ ── opacity ── ]                      [ × ]
+[ Pick ] [ Off | Sel | All ] [ ── opacity ── ] [ Overflow ] [ Watch ]   [ × ]
 ```
 
 - **Pick** — toggles the picker tool. While picking, a transparent
@@ -121,6 +144,10 @@ appear dimmed in the Shortcuts tab.
   Range 0.1 .. 1.0.
 - **Overflow toggle** — turns the overflow overlay on/off (see below).
   A check mark in the label reflects the state.
+- **Watch** — arms the Pointers tab's live contact readout. While it is armed
+  a full-window surface takes every pointer event, so the application receives
+  none: the label says which state it is in, and the surface paints a tint and
+  a mark under each contact. Off by default.
 - **×** — closes the panel.
 
 ## Overflow overlay
@@ -159,6 +186,7 @@ already at its `min`). Toggle from the toolbar; the choice persists via
 | **Focus** | Current focused widget plus its ancestor chain (root → leaf). Leaf shown in primary color, ancestors dimmed. |
 | **Shortcuts** | Every shortcut in the tree's `ShortcutRegistry` with its effective primary keystroke. Framework-reserved ids (`__`-prefixed) are dimmed. |
 | **Overlays** | Active overlays from `OverlayManager`, with their content + anchor labels. |
+| **Pointers** | Two halves. Always live: the input tokens in force (density, target and grab sizes, slop budget, the touch profile's thresholds) and every node in the user tree that declares a **pointer policy** — a pan claim, a `touch_action`, a gesture dead zone, a hit-slop policy, a multi-contact policy, a drag activation — each with the *effective* touch action folded down its ancestor chain beside its own. That is the half that answers "why does this not pan under a finger": the answer is usually a declaration several nodes above the one that should have panned. Behind **Watch**: the live contacts, with kind, position, frozen touch action and press state. |
 | **Models** | Data models registered via `.debug_named(...)` (see *Data models*). For each: name, kind (`ListModel`, `TreeModel`, `SelectionModel`), and len. Click a row to select it — its `debug_dump` output is shown below. With nothing selected, the most recently registered model is dumped (dimmed row highlight). Click the same row again to clear the selection. |
 
 ## Data models
@@ -277,6 +305,27 @@ through. Use the opacity slider to dim them for dense UIs.
   id in `state.shell_root_ids: Signal<Vec<WidgetId>>`. The picker
   walks every shell id when hit-testing, so opening a second window
   no longer shadows widgets in older windows.
+- **A 6 dp strip cannot be widened at Compact.** The strip abuts the
+  application's own content, so any reach it took there would be taken from a
+  press the application may want; at Compact it stays a 6 dp mouse target, and a
+  finger gets it through the framework's miss-only slop pass wherever nothing
+  competes for the press. At Touch the slot around it is target-sized, which is
+  the one density where changing the layout is allowed.
+- **Row heights follow the density only where rows are pressed.** The Tree,
+  Properties, Models and Locale tabs — whose rows *are* targets, picked by
+  dividing a press's y by the row height — take the density's `target_size` at
+  any density that admits a finger, and keep the dense 18 dp at Compact. The
+  read-only listings (Overlays, Shortcuts, Focus, Accessibility, Theme, Pointers)
+  keep 18 dp at every density: a row nothing can press is not a target, and
+  growing it would trade the whole listing's legibility for a hit box no pointer
+  wants.
+- **A density switch does not re-bake the application's own widgets while the
+  inspector is installed.** `WidgetTree::set_input_density` marks every *root*
+  for rebuild, and after wrapping, the shell is the only root; the shell
+  re-attaches the application's root rather than rebuilding it (it has to — it
+  did not build it and cannot), so the application keeps the dimensions its last
+  build chose until something else rebuilds it. Before the shell re-attached it,
+  the same switch **destroyed** it.
 
 ## Where the code lives
 
@@ -287,6 +336,12 @@ through. Use the opacity slider to dim them for dense UIs.
 - Highlight overlay: [crates/teksilo-inspector/src/highlight.rs](../crates/teksilo-inspector/src/highlight.rs)
 - Picker tool: [crates/teksilo-inspector/src/picker.rs](../crates/teksilo-inspector/src/picker.rs)
 - Resize handle: [crates/teksilo-inspector/src/resize_handle.rs](../crates/teksilo-inspector/src/resize_handle.rs)
+  — 6 dp of paint at every density, given a target-sized **slot** at Touch by a
+  `TouchTarget` in the shell (the framework's miss-only slop pass tops it up
+  inside that slot), and answering the `Increment` / `Decrement` actions it
+  advertises so an assistive-technology user can resize the panel without a drag
+- Corner grip (the coarse-pointer door): [crates/teksilo-inspector/src/grip.rs](../crates/teksilo-inspector/src/grip.rs)
+- Pointers tab + its watch surface: [crates/teksilo-inspector/src/tabs/pointers.rs](../crates/teksilo-inspector/src/tabs/pointers.rs)
 - Panel keyboard shortcuts: [crates/teksilo-inspector/src/keyboard.rs](../crates/teksilo-inspector/src/keyboard.rs)
 - Persistence: [crates/teksilo-inspector/src/persistence.rs](../crates/teksilo-inspector/src/persistence.rs)
 - Tabs: [crates/teksilo-inspector/src/tabs/](../crates/teksilo-inspector/src/tabs/)

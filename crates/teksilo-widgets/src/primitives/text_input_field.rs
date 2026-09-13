@@ -56,7 +56,9 @@ mod keyboard;
 pub mod mask;
 mod mouse;
 pub(crate) mod state;
+pub(crate) mod touch;
 pub mod validator;
+mod widget_impl;
 
 use std::rc::Rc;
 use teksilo_i18n::tr_widget;
@@ -75,7 +77,7 @@ use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::{SelectionType, TextDocument};
 use teksilo_text::{CursorAffinity, CursorDisplay, RichTextEngine, SharedTypesetter};
-use teksilo_tokens::TextStyle;
+use teksilo_tokens::{InputTokens, TextStyle};
 
 use crate::button::InteractionState;
 use crate::keystroke_format::format_keystroke;
@@ -95,10 +97,17 @@ pub use self::validator::{ValidationFeedback, ValidationOutcome, ValidatorFn};
 // which is exactly the kind of duplication that drifts silently: two carets
 // blinking at different rates is invisible to tests and obvious to users.
 use crate::common::editor_runtime::CaretPolicy;
+use teksilo_core::styles::density::spacing;
 
 /// Horizontal scroll margin in pixels. The caret stays at least this
 /// far from the left/right edge of the viewport.
 const SCROLL_MARGIN: f32 = 4.0;
+
+/// [`SCROLL_MARGIN`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn scroll_margin(tokens: &InputTokens) -> f32 {
+    spacing(SCROLL_MARGIN, tokens)
+}
 
 /// Default text-area height when the caller does not override it
 /// via [`TextInputField::text_height`]. Picked to match the Int UI
@@ -268,6 +277,11 @@ pub struct TextInputField {
     /// Minted with the widget, not with its state, so a [`TextFieldHandle`]
     /// taken before `build` observes the signal the built widget writes.
     focus_signal: Signal<bool>,
+    /// Touch selection: the controller, and the ids of the two overlays it
+    /// raises. Minted with the widget rather than in `build` so the handle
+    /// survives a rebuild even though the controller inside it is replaced.
+    /// See [`touch`].
+    pub(crate) touch: Rc<touch::FieldTouch>,
     /// Natural intrinsic width in logical pixels, cached at the end
     /// of `build()`. When an [`InputMask`] is set, this measures the
     /// mask's empty template (e.g. `__/__/____`) in the theme body
@@ -302,6 +316,8 @@ impl std::fmt::Debug for TextInputField {
 impl TextInputField {
     /// Construct a new field bound to `text`.
     pub fn new(text: Signal<String>) -> Self {
+        let state_slot: std::rc::Rc<std::cell::RefCell<Option<SharedState>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
         Self {
             text,
             enabled: Prop::Static(true),
@@ -331,8 +347,9 @@ impl TextInputField {
             state: None,
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
-            state_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
+            state_slot: state_slot.clone(),
             focus_signal: Signal::new(false),
+            touch: touch::FieldTouch::new(state_slot),
             natural_width: 200.0,
             retained: Rc::new(std::cell::RefCell::new(None)),
         }
@@ -680,1139 +697,6 @@ impl TextInputField {
     }
 }
 
-impl Widget for TextInputField {
-    fn as_any(&self) -> Option<&dyn std::any::Any> {
-        Some(self)
-    }
-
-    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Tell the framework this widget edits text.
-        //
-        // What it buys: an application may take `Ctrl+Z`, `Ctrl+C` and friends
-        // for itself — a single Undo command over the whole app has to — and
-        // registered shortcuts resolve before any widget sees the raw key. This
-        // is how the host can tell that the caret is *here*, and either drive
-        // this surface or step aside so it keeps its own keys. Without it, an
-        // application that routes those chords silently breaks every text
-        // widget it does not personally know about. See
-        // `teksilo_core::text_surface`.
-        ctx.register_text_surface(std::rc::Rc::new(self.handle()));
-        // Resolve the interaction signal (external override wins).
-        if let Some(signal) = self.external_interaction.take() {
-            self.interaction = signal;
-        }
-
-        // Resolve the mask placeholder character. Caller override wins;
-        // otherwise pull from the recipe constant. The theme snapshot
-        // is still captured for downstream typography reads below.
-        let theme_snapshot = ctx.theme_signal().get();
-        let mask_placeholder_char = self
-            .mask_placeholder_override
-            .unwrap_or(crate::styles::recipe_text_input_style::TEXT_FIELD_MASK_PLACEHOLDER_CHAR);
-
-        // Auto-derive placeholder from mask when none was explicitly
-        // set: an empty masked field paints `__/__/____` rather than
-        // a blank surface, giving the user a self-documenting template.
-        if self.placeholder.is_empty()
-            && let Some(ref m) = self.mask
-        {
-            self.placeholder = m.empty_template(mask_placeholder_char);
-        }
-
-        // Cache mask-aware natural width. When a mask is set, the
-        // visual content envelope is the FILLED template — every
-        // editable position holding its widest plausible glyph
-        // (`0` for digits, `M` for letters, etc.) and every fixed
-        // position holding its literal. Measuring the empty
-        // (`__/__/____`) template instead would shortchange the
-        // field by the difference between an underscore and a real
-        // glyph: ~2 dp per digit slot for `0`, ~5 dp per letter
-        // slot for `M`, which adds up to a multi-character shortfall
-        // for date / 12h time fields. We want the natural width to
-        // hold the fully-typed value without overflow.
-        //
-        // Without a mask the 200 dp fallback (set in `new()`) stays.
-        if let Some(ref m) = self.mask {
-            // Measure the worst-case glyph row PLUS one extra `M` of
-            // safety: one for caret breathing room past the last
-            // position, plus a defensive cushion for any per-glyph
-            // measurement variance between our heuristic fallback
-            // and the real glyph shaper. Without this safety char,
-            // dates were observed to clip the trailing 2 characters
-            // and 12h time fields clipped the AM/PM letters.
-            let mut widest = worst_case_template(m);
-            widest.push('M');
-            let style = &theme_snapshot.typography.body;
-            let measured = measure_width_px(ctx, &widest, style);
-            let slack = style.size;
-            self.natural_width = measured + slack;
-        }
-
-        // Compose the user's char_filter with the mask's class filter.
-        // The mask doesn't know the cursor position here (this is a
-        // pre-position filter), so it accepts any char that fits *any*
-        // editable position class — a permissive gate that catches
-        // gross mismatches (typing "a" into a digits-only mask) without
-        // requiring per-keystroke position tracking. Per-position
-        // gating happens at commit time via the validator.
-        if let Some(ref mask) = self.mask {
-            let mask_for_filter = mask.clone();
-            let user_filter = self.char_filter.take();
-            let combined: CharFilter = Rc::new(move |c: char| {
-                // Always allow fixed-separator characters (they're
-                // legitimate input even if user types them — the
-                // formatter consumes them).
-                let in_mask_class = mask_for_filter.positions().any(|p| match p {
-                    MaskPosition::Editable { class, .. } => class.accepts(c),
-                    MaskPosition::Fixed(sep) => *sep == c,
-                });
-                if !in_mask_class {
-                    return false;
-                }
-                match user_filter.as_ref() {
-                    Some(f) => f(c),
-                    None => true,
-                }
-            });
-            self.char_filter = Some(combined);
-        }
-
-        // Build the shared state from the configured builder values.
-        let mut on_submit = self.on_submit.take().map(Rc::new);
-        let mut on_blur = self.on_blur.take().map(Rc::new);
-
-        // Wrap commit callbacks with the validator pipeline. The
-        // wrapping closure: snapshots the bound text, runs the
-        // validator, applies the outcome (writes feedback, mutates
-        // text on `Corrected`), then chains the user's callback so
-        // composites can react to the now-updated state.
-        if let Some(validator) = self.validator.clone() {
-            let bound_text = self.text.clone();
-            let feedback = self.feedback.clone();
-            let prev_on_blur = on_blur.take();
-            on_blur = Some(Rc::new(Box::new({
-                let validator = validator.clone();
-                let feedback = feedback.clone();
-                let bound_text = bound_text.clone();
-                move |evt_ctx: &mut EventContext| {
-                    run_validator_and_apply(&validator, &bound_text, &feedback);
-                    if let Some(cb) = prev_on_blur.as_ref() {
-                        cb(evt_ctx);
-                    }
-                }
-            }) as CommandFactory));
-            let prev_on_submit = on_submit.take();
-            on_submit = Some(Rc::new(Box::new({
-                let validator = validator.clone();
-                let feedback = feedback.clone();
-                let bound_text = bound_text.clone();
-                move |evt_ctx: &mut EventContext| {
-                    run_validator_and_apply(&validator, &bound_text, &feedback);
-                    if let Some(cb) = prev_on_submit.as_ref() {
-                        cb(evt_ctx);
-                    }
-                }
-            }) as CommandFactory));
-        }
-
-        let initial_text = self.text.get();
-        // `read_only_effective` snapshots the build-time state so the
-        // shared TextInputState's read-only mode is set once. Disabled
-        // is now arena-driven and propagates per-paint via
-        // `effective_enabled`; the field's interaction handlers also
-        // check `ctx.is_enabled(self_id)` for keystroke gating. The
-        // shared state's read_only stays a separate, document-level
-        // concept (allows selection / no edits).
-        let read_only_effective = self.read_only || !self.enabled.get();
-
-        let initial_suffix = self.suffix.get();
-        let shared_state = TextInputState::new(TextInputConfig {
-            initial_text,
-            max_length: self.max_length,
-            read_only: read_only_effective,
-            on_submit,
-            on_access_set_value: self.on_access_set_value.clone(),
-            on_blur,
-            char_filter: self.char_filter.take(),
-            placeholder: self.placeholder.clone(),
-            suffix: initial_suffix,
-            secure: self.secure,
-            echo_mode: self.echo_mode,
-            echo_char: self.echo_char,
-            revealed: self.revealed.clone(),
-            at_reveal_policy: self.at_reveal_policy,
-            allow_copy: self.allow_copy,
-            focus_signal: self.focus_signal.clone(),
-        });
-        self.state = Some(shared_state.clone());
-        // Late-populate the slot so `caret_setter()` closures captured
-        // before build can now reach the inner state. Idempotent on
-        // rebuild — overwrites the slot with the freshly created
-        // SharedState.
-        *self.state_slot.borrow_mut() = Some(shared_state.clone());
-
-        // Reset feedback to Pristine whenever the user types — prior
-        // Invalid / Corrected announcements should clear as soon as
-        // the user starts editing again so they don't shout stale
-        // errors at someone trying to fix them.
-        {
-            let feedback = self.feedback.clone();
-            ctx.effect(&self.text, move |_| {
-                if !matches!(feedback.get(), ValidationFeedback::Pristine) {
-                    feedback.set(ValidationFeedback::Pristine);
-                }
-            });
-        }
-
-        // Mirror the inner state's `cursor_position` onto the field's
-        // public `caret_position` so callers of `caret_position()` see
-        // live caret updates. The state's signal is keyed by the
-        // shared state's identity (created in `TextInputState::new`),
-        // not by the field's; this effect bridges the two.
-        {
-            let inner = shared_state.borrow().cursor_position.clone();
-            let outer = self.caret_position.clone();
-            outer.set(inner.get());
-            ctx.effect(&inner, move |pos| {
-                if outer.get() != *pos {
-                    outer.set(*pos);
-                }
-            });
-        }
-
-        // Bind feedback at AccessibilityOnly so the field's AT node
-        // refreshes its `set_invalid` state when feedback changes.
-        {
-            let self_id = ctx.self_id();
-            self.feedback.bind_to(
-                self_id,
-                ctx.binding_registry(),
-                teksilo_core::binding::BindingLevel::AccessibilityOnly,
-            );
-        }
-
-        // Combobox wiring: a moved highlight in the list this field drives must
-        // re-walk the AT tree so the new `active_descendant` is announced.
-        // AccessibilityOnly — nothing about this field's own pixels changed.
-        for sig in [self.active_descendant.as_ref(), self.controls.as_ref()]
-            .into_iter()
-            .flatten()
-        {
-            sig.bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                teksilo_core::binding::BindingLevel::AccessibilityOnly,
-            );
-        }
-
-        // Secure fields: flipping the reveal toggle must repaint AND
-        // refresh AT. `RepaintOnly` dirties this node for the render
-        // walker so `paint()` runs and re-lays-out the masked/unmasked
-        // glyphs via the `needs_full_layout` flag the effect below sets
-        // — without it the flag is set but nothing calls `paint()`, so
-        // the visual only updates on the next unrelated repaint
-        // (hover / focus). This mirrors how `text_signal` is bound for
-        // edits. The parallel `AccessibilityOnly` bind swaps the AT
-        // role/value (PasswordInput ↔ TextInput under SwapRole); it lives
-        // in its own bucket and does not imply repaint, so both are
-        // required.
-        if self.secure
-            && let Some(revealed) = self.revealed.clone()
-        {
-            let id = ctx.self_id();
-            let reg = ctx.binding_registry();
-            revealed.bind_to(id, reg, teksilo_core::binding::BindingLevel::RepaintOnly);
-            revealed.bind_to(
-                id,
-                reg,
-                teksilo_core::binding::BindingLevel::AccessibilityOnly,
-            );
-        }
-
-        let text_signal = shared_state.borrow().text_signal.clone();
-
-        // Sync external text signal → internal state. A programmatic
-        // update on the bound signal rewrites the document; the
-        // caret ends up at the end of the inserted text (cursor
-        // behavior is documented in
-        // `text_document::TextCursor::insert_text`).
-        //
-        // `insert_text` only enqueues a `ContentsChanged` document
-        // event — `tick()` drains it on the next frame and propagates
-        // the new text to `text_signal`. Frames are demand-driven, so
-        // we ping `frame_request` here to guarantee a tick runs even
-        // when the external writer (e.g. an HSV-canvas drag feeding a
-        // spinner / hex bridge) is the only thing changing on screen.
-        // Without it, the document stays in sync with the bound signal
-        // but the visible glyphs lag until something else (focus, a
-        // keystroke, an animation frame) wakes the loop.
-        {
-            let ext = self.text.clone();
-            let state_for_sync = shared_state.clone();
-            ctx.effect(&ext, move |new_text| {
-                let st = state_for_sync.borrow();
-                let current = st.document.to_plain_text().unwrap_or_default();
-                if current != *new_text {
-                    st.cursor.select(SelectionType::Document);
-                    let _ = st.cursor.insert_text(new_text);
-                    if let Some(handle) = &st.frame_request {
-                        handle.set(true);
-                    }
-                }
-            });
-        }
-
-        // Sync internal text signal → external. Every edit that
-        // reaches `text_signal` also updates the caller-owned
-        // signal, so observers bound to it see every keystroke
-        // (after the debounce in `tick`).
-        {
-            let ext = self.text.clone();
-            ctx.effect(&text_signal, move |new_text| {
-                if ext.get() != *new_text {
-                    ext.set(new_text.clone());
-                }
-            });
-        }
-
-        // Secure reveal toggle: flipping the bound `revealed` signal
-        // swaps the laid-out glyphs wholesale (bullets ↔ plaintext), so
-        // mark the layout dirty and ping the frame loop to re-lay-out.
-        if self.secure
-            && let Some(revealed) = self.revealed.clone()
-        {
-            let state_for_reveal = shared_state.clone();
-            ctx.effect(&revealed, move |_| {
-                let mut st = state_for_reveal.borrow_mut();
-                st.needs_full_layout = true;
-                if let Some(handle) = &st.frame_request {
-                    handle.set(true);
-                }
-            });
-        }
-
-        // Swap the private engine for one sharing the app's
-        // `SharedTypesetter` so glyphs land in the atlas
-        // teksilo-render uploads to the GPU. When no typesetter is
-        // installed (headless tests), the pre-built private
-        // engine stays in place.
-        if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
-            let mut st = self.state().borrow_mut();
-            let mut engine = RichTextEngine::from_shared(shared.clone());
-            engine.set_wrap_mode(teksilo_text::WrapMode::None);
-            st.engine = engine;
-            st.needs_full_layout = true;
-        }
-
-        // Apply theme colors to the (possibly freshly swapped-in) engine.
-        // Setting them before the swap would be lost. The rich-text
-        // engine stores colors in GPU-ready form, so we register an
-        // effect on the theme signal that re-applies the palette on
-        // every theme switch instead of capturing a single snapshot.
-        //
-        // The text / caret / suffix *foreground* colours are deliberately
-        // NOT set here — `paint` owns them, because they depend on the
-        // effective enabled state as well as the theme (see the resolve
-        // block there). Selection is theme + window-active only, so it
-        // stays on this effect path.
-        let theme_signal = ctx.theme_signal();
-        // The selection colour is also window-active-aware. `ctx.effect` can
-        // only observe *mutable* signals (a derived `theme.zip(window_active)`
-        // would panic), so the theme effect reads the live window-active value
-        // via `.get()`, and the separate window-active effect (below, near the
-        // frame handles) re-applies the selection colour reading the live
-        // theme. Between them, a change to either axis re-applies correctly.
-        {
-            let theme = theme_signal.get();
-            let colors = &theme.colors;
-            let mut st = self.state().borrow_mut();
-            let tint = field_selection_color(colors, ctx.window_active(), st.has_focus);
-            st.selection_tint = tint;
-            st.engine.set_selection_color(tint);
-        }
-        {
-            let state = self.state().clone();
-            let wa_signal = ctx.window_active_signal();
-            ctx.effect(&theme_signal, move |theme| {
-                let colors = &theme.colors;
-                let mut st = state.borrow_mut();
-                let tint = field_selection_color(colors, wa_signal.get(), st.has_focus);
-                st.selection_tint = tint;
-                st.engine.set_selection_color(tint);
-            });
-        }
-
-        // Suffix engine: second independent `RichTextEngine` used
-        // to paint the non-editable trailing string (Qt's
-        // `QSpinBox` `suffix`). Shares the app's typesetter when
-        // available so glyphs land in the same atlas as the main
-        // document; falls back to a private engine under headless
-        // tests.
-        //
-        // `suffix_width` is cached on `TextInputState` and drives
-        // both the effective text viewport (so the scroll logic
-        // keeps the caret visible without sliding text behind the
-        // suffix) and the suffix paint origin at the right edge
-        // of the field. When the suffix is bound to a signal, a
-        // reactive effect below re-lays the engine out each time
-        // the signal fires.
-        let text_area_height = self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT).max(1.0);
-        let needs_suffix_engine = matches!(self.suffix, Prop::Bound(_)) || {
-            let st = self.state().borrow();
-            !st.suffix.is_empty()
-        };
-        if needs_suffix_engine {
-            let mut suffix_engine = if let Some(shared) = ctx.app_state::<SharedTypesetter>() {
-                RichTextEngine::from_shared(shared.clone())
-            } else {
-                RichTextEngine::private_default()
-            };
-            suffix_engine.set_wrap_mode(teksilo_text::WrapMode::None);
-            {
-                let theme = theme_signal.get();
-                let secondary = theme.colors.text_secondary.to_array();
-                suffix_engine.set_text_color(secondary);
-                suffix_engine.set_cursor_color(secondary);
-                suffix_engine.set_selection_color([0.0, 0.0, 0.0, 0.0]);
-            }
-            suffix_engine.set_viewport(10_000.0, text_area_height);
-
-            {
-                let mut st = self.state().borrow_mut();
-                st.suffix_engine = Some(suffix_engine);
-            }
-            // Initial layout from the current suffix value.
-            let initial = self.state().borrow().suffix.clone();
-            relayout_suffix(self.state(), &initial);
-        }
-
-        // Reactive suffix: observe the signal and re-lay out on
-        // every change. `Relayout` dirty-tracking ensures the
-        // surrounding layout sees the new `suffix_width` and the
-        // text viewport narrows/widens accordingly.
-        if let Prop::Bound(signal) = &self.suffix {
-            let self_id = ctx.self_id();
-            signal.bind_to(
-                self_id,
-                ctx.binding_registry(),
-                teksilo_core::binding::BindingLevel::Relayout,
-            );
-            let state_for_effect = self.state().clone();
-            ctx.effect(signal, move |new_text| {
-                relayout_suffix(&state_for_effect, new_text);
-            });
-        }
-
-        // Bind caret_visible for repaint.
-        {
-            let st = self.state().borrow();
-            let caret_visible = st.caret_visible.clone();
-            drop(st);
-            let self_id = ctx.self_id();
-            caret_visible.bind_to(
-                self_id,
-                ctx.binding_registry(),
-                teksilo_core::binding::BindingLevel::RepaintOnly,
-            );
-        }
-
-        // Bind text_signal at RepaintOnly AND AccessibilityOnly.
-        //
-        // RepaintOnly: when the text changes by any route — local
-        // typing, IME, clipboard paste, the ext→internal sync
-        // effect firing because a composite parent (SpinBox etc.)
-        // drove the bound signal — the field must redraw. During
-        // typing the caret-blink signal already keeps the widget
-        // repainting, which used to mask a missing repaint trigger
-        // on programmatic text changes to an unfocused field. With
-        // the explicit bind, no path depends on blink.
-        //
-        // AccessibilityOnly: screen readers see edits as soon as
-        // the text signal updates, independent of whether a paint
-        // happens this frame.
-        {
-            let st = self.state().borrow();
-            let text_signal = st.text_signal.clone();
-            drop(st);
-            let self_id = ctx.self_id();
-            let registry = ctx.binding_registry();
-            text_signal.bind_to(
-                self_id,
-                registry,
-                teksilo_core::binding::BindingLevel::RepaintOnly,
-            );
-            text_signal.bind_to(
-                self_id,
-                registry,
-                teksilo_core::binding::BindingLevel::AccessibilityOnly,
-            );
-        }
-
-        // Stash frame infrastructure handles and self_id.
-        {
-            let mut st = self.state().borrow_mut();
-            st.frame_request = Some(ctx.frame_request_handle());
-            st.frame_wake_at = Some(ctx.wake_at_handle());
-            st.field_widget_id = Some(ctx.self_id());
-        }
-
-        // Same dormancy discipline as `RichTextEditor`: a field parked in a
-        // non-selected `Switcher` / `visible_when(false)` branch must not
-        // keep the event loop awake (caret `wake_at`, frame-tick work,
-        // window-active re-arm). See that widget's build for the full story.
-        let activation = ctx.activation_signal(ctx.self_id());
-        if activation.get() {
-            ctx.request_frame();
-        }
-
-        {
-            let state = self.state().clone();
-            let interaction = self.interaction.clone();
-            ctx.effect(&activation, move |&active| {
-                if active {
-                    // **Re-activated** — re-arm the frame loop. The dormant branch
-                    // below does not re-arm `frame_request` (a parked surface has
-                    // nothing to paint) and the frame-tick effect is skipped
-                    // entirely while dormant, so nothing restarts the tick on the
-                    // way back. Same defect and same fix as `RichTextEditor` /
-                    // `CodeEditor`: the in-tree modal path builds content, parks it
-                    // dormant, mounts it, activates it and *then* moves focus in
-                    // (`present_in_tree_modal_request`), so without this a field in
-                    // a dialog draws no caret at all.
-                    let st = state.borrow();
-                    if let Some(handle) = &st.frame_request {
-                        handle.set(true);
-                    }
-                    return;
-                }
-                let mut st = state.borrow_mut();
-                if st.has_focus {
-                    st.has_focus = false;
-                    st.focus_signal.set(false);
-                    // Mirror the on_focus(false) interaction write so a
-                    // Focused chrome style doesn't stick on a parked field.
-                    interaction.set(InteractionState::Idle);
-                }
-                if st.caret_visible.get() {
-                    st.caret_visible.set(false);
-                }
-                st.blink.reset();
-            });
-        }
-
-        // Frame-tick effect: flushes pending chars, drains document
-        // events, drives the caret blink, and debounces undo/redo
-        // state changes.
-        //
-        // IMPORTANT: the mutable borrow must be dropped BEFORE
-        // setting `text_signal`. Setting it fires observers
-        // synchronously, which chain into the ext→internal sync
-        // effect that borrows the same state. Holding `borrow_mut`
-        // across `signal.set()` would panic.
-        {
-            let state = self.state().clone();
-            let active = activation.clone();
-            let tick_signal = ctx.frame_tick();
-            ctx.effect(&tick_signal, move |delta| {
-                if !active.get() {
-                    return;
-                }
-                let (more, pending_text) = {
-                    let mut st = state.borrow_mut();
-                    let more = tick(&mut st, *delta);
-                    st.has_selection.set(st.cursor.has_selection());
-                    let pending = st.deferred_text_update.take();
-                    (more, pending)
-                };
-                if let Some(text) = pending_text {
-                    let st = state.borrow();
-                    if st.text_signal.get() != text {
-                        st.text_signal.set(text);
-                    }
-                }
-                if more {
-                    let st = state.borrow();
-                    if let Some(handle) = &st.frame_request {
-                        handle.set(true);
-                    }
-                }
-            });
-        }
-
-        // Window-active effect — mirror the tree's window-active state onto the
-        // field state so the frame loop (no context) can gate the caret, and
-        // re-apply the window-aware selection colour (reading the live theme,
-        // since `ctx.effect` can't observe a derived theme×active signal). The
-        // loop may not tick while the window is inactive (animation scheduler
-        // parked), so on deactivation hide the caret synchronously here and
-        // request a frame so it reaches a paint pass — only while this field
-        // is itself active (a dormant field must not re-arm the loop).
-        {
-            let state = self.state().clone();
-            let active = activation.clone();
-            let wa_signal = ctx.window_active_signal();
-            let theme_for_sel = theme_signal.clone();
-            ctx.effect(&wa_signal, move |&window_active| {
-                let mut st = state.borrow_mut();
-                st.window_active = window_active;
-                let theme = theme_for_sel.get();
-                let tint = field_selection_color(&theme.colors, window_active, st.has_focus);
-                st.selection_tint = tint;
-                st.engine.set_selection_color(tint);
-                if window_active {
-                    // Reactivated: show the caret immediately if still focused
-                    // (restart the blink phase), rather than waiting one interval.
-                    if st.has_focus && !st.caret_visible.get() {
-                        st.caret_visible.set(true);
-                    }
-                    st.blink.reset();
-                } else {
-                    // Deactivated: hide the caret synchronously (the frame loop
-                    // may not tick while the window is inactive).
-                    if st.caret_visible.get() {
-                        st.caret_visible.set(false);
-                    }
-                    st.blink.reset();
-                }
-                if active.get()
-                    && let Some(handle) = &st.frame_request
-                {
-                    handle.set(true);
-                }
-            });
-        }
-
-        // Forward the enabled state into the arena. Disabled state no
-        // longer seeded into the interaction signal — the framework's
-        // arena enabled-state is the single source of truth (events
-        // gated, leaves resolve Disabled role).
-        let self_id = ctx.self_id();
-        ctx.enabled_when(self_id, self.enabled.clone());
-
-        // Attach handlers. Focus-origin inference mirrors the
-        // `Slider` pattern: hover cached, focus event checks hover
-        // to distinguish keyboard vs pointer origin for the
-        // select-all-on-keyboard-focus rule.
-        let hovered = std::rc::Rc::new(std::cell::Cell::new(false));
-        let hovered_for_focus = hovered.clone();
-        let hovered_for_hover = hovered.clone();
-
-        let state_for_focus = self.state().clone();
-        let interaction_for_focus = self.interaction.clone();
-        // The selection band's tint depends on focus, so the focus handler has
-        // to re-apply it — and needs the live theme to do so.
-        let theme_for_focus = theme_signal.clone();
-        let state_for_pointer = self.state().clone();
-        let state_for_key = self.state().clone();
-        let state_for_double = self.state().clone();
-        let state_for_triple = self.state().clone();
-        let state_for_access = self.state().clone();
-        let state_for_menu = self.state().clone();
-
-        let handlers = HandlerSet::new()
-            .focusable(true)
-            .cursor(CursorIcon::Text)
-            // Secure fields opt the focused node out of OS IME
-            // composition so the preedit / candidate window can't
-            // surface plaintext. Read by the platform IME layer at
-            // focus-change time (default `true` for plain fields).
-            .ime_input(if self.secure {
-                teksilo_core::ime::ImeContext::password()
-            } else {
-                teksilo_core::ime::ImeContext::text()
-            })
-            .on_hover(move |entered, _ctx| {
-                hovered_for_hover.set(entered);
-            })
-            .on_focus(move |gained, ctx| {
-                interaction_for_focus.set(if gained {
-                    InteractionState::Focused
-                } else {
-                    InteractionState::Idle
-                });
-
-                let mut st = state_for_focus.borrow_mut();
-                st.has_focus = gained;
-                st.focus_signal.set(gained);
-                // Re-tint the selection band: `has_focus` is half of what
-                // decides it, so losing focus inside an active window has to
-                // re-apply just as losing the window does.
-                let sel_theme = theme_for_focus.get();
-                let tint = field_selection_color(&sel_theme.colors, st.window_active, gained);
-                st.selection_tint = tint;
-                st.engine.set_selection_color(tint);
-                // RevealWhileTyping shows plaintext while focused and
-                // re-masks on blur — both transitions need a relayout.
-                if st.secure && st.echo_mode == EchoMode::RevealWhileTyping {
-                    st.needs_full_layout = true;
-                }
-                let mut blur_callback: Option<Rc<CommandFactory>> = None;
-                if gained {
-                    st.blink.restart();
-                    st.caret_visible.set(true);
-                    let is_keyboard = !hovered_for_focus.get();
-                    drop(st);
-                    if is_keyboard {
-                        let st = state_for_focus.borrow();
-                        st.cursor.select(SelectionType::Document);
-                        drop(st);
-                        sync_cursor_signals(&state_for_focus);
-                    }
-                    // Seed the OS IME candidate area at the caret so the
-                    // first composition appears in the right place.
-                    keyboard::report_ime_cursor_area(&state_for_focus, ctx);
-                } else {
-                    // Preserve `cursor`'s selection across focus loss
-                    // — clearing it here breaks the right-click
-                    // context menu path (the framework focuses the
-                    // newly-mounted menu, which dispatches `FocusLost`
-                    // here, and `Cut` / `Copy` invoked from the menu
-                    // afterwards find an empty selection). A Win32
-                    // edit control does the same: the default (no
-                    // `ES_NOHIDESEL`) hides the highlight on blur but
-                    // `EM_GETSEL` still returns the range, so the
-                    // menu invoked afterwards still has something to
-                    // act on. The *painting* is the part that stops —
-                    // see `field_selection_color`, which returns a
-                    // transparent band for an unfocused field.
-                    st.scroll_x = 0.0;
-                    st.caret_visible.set(false);
-                    st.drag_state = state::DragState::Idle;
-                    // Drop the IME-area dedup cache. The OS candidate area is a
-                    // single per-window resource a sibling field may re-point
-                    // while we are unfocused; clearing this forces the next
-                    // focus-gain report to re-seed it instead of being deduped.
-                    st.last_ime_area = None;
-                    blur_callback = st.on_blur.clone();
-                    drop(st);
-                    // Abandon any in-progress composition on blur — remove
-                    // the tentative preedit text from the document.
-                    keyboard::clear_ime_preedit(&state_for_focus);
-                    sync_cursor_signals(&state_for_focus);
-                }
-                if let Some(cb) = blur_callback {
-                    cb(ctx);
-                }
-                ctx.request_frame();
-            })
-            .on_pointer_event(move |event, ctx| {
-                mouse::handle_pointer_event(&state_for_pointer, event, ctx)
-            })
-            .on_key(move |event, ctx| keyboard::handle_key(&state_for_key, event, ctx))
-            .on_double_tap(move |event, ctx| {
-                mouse::handle_double_tap(&state_for_double, event.position, ctx)
-            })
-            .on_triple_tap(move |event, ctx| {
-                mouse::handle_triple_tap(&state_for_triple, event.position, ctx)
-            })
-            .on_access_action_request(move |action, _target_node, data, ctx| {
-                handle_access_action(&state_for_access, action, data, ctx)
-            })
-            // Right-click context menu — built fresh per click so the
-            // enabled state of each item reflects the live selection /
-            // clipboard state at the moment the menu opens. The framework
-            // handles overlay placement, focus restoration, and dismissal.
-            .context_menu(move |position, ctx| {
-                let _ = ctx;
-                // Framework gates pointer events on `arena.is_enabled`
-                // before reaching this closure — a disabled field
-                // never receives the right-click that would open the
-                // context menu.
-                // Reposition the caret to the click position when the
-                // click lands outside the existing selection — the
-                // platform convention for "right-click then Cut /
-                // Copy / Paste at the new caret".
-                mouse::reposition_caret_for_context_menu(&state_for_menu, position);
-                Some(build_context_menu_widget(&state_for_menu))
-            });
-
-        ctx.apply_self_handlers(handlers);
-        Vec::new()
-    }
-
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> teksilo_core::widget::LayoutResponse {
-        // Default unwrap is the cached natural width (mask-aware when
-        // a mask is set; 200 dp fallback otherwise). Composing widgets
-        // that wrap us in a constraint pass `Some(width)` and we use
-        // that; the natural width is what surfaces in unconstrained
-        // intrinsic queries (ZStack measurement with `unspecified()`,
-        // etc.) so the chain reports a sensible content size.
-        //
-        // The cached `natural_width` / `text_height` are 1.0-scale baselines;
-        // multiply by `ctx.text_scale` so the field box grows with the global
-        // accessibility text scale (the engine grows the glyphs to match — see
-        // `paint`). A caller-supplied width constraint is honored as-is.
-        let scale = ctx.text_scale;
-        let w = proposal
-            .width
-            .unwrap_or(self.natural_width * scale)
-            .max(0.0);
-        let h = (self.text_height.unwrap_or(DEFAULT_TEXT_HEIGHT) * scale).max(0.0);
-        Size::new(w, h).into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        _children: &mut [WidgetPlacement],
-        ctx: &LayoutContext,
-    ) {
-        // Layout runs before paint, so this is the authoritative point to adopt
-        // the field's viewport. `sync_viewport` welds the width write to the
-        // `needs_full_layout` flag it also serves as the detector for (see its
-        // docs); paint calls it again as an idempotent echo.
-        if let Some(state) = self.state.as_ref() {
-            state.borrow_mut().sync_viewport(bounds);
-        }
-
-        if let Some(backend) = ctx.text_backend {
-            self.retain_text_geometry(
-                bounds,
-                &ctx.theme.typography.body,
-                backend,
-                base_text_direction(ctx.layout_direction),
-            );
-        }
-    }
-
-    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-        let Some(state) = self.state.as_ref() else {
-            return;
-        };
-        let mut st = state.borrow_mut();
-
-        // Grow the shaped text with the global accessibility scale. Must run
-        // before the relayout block below so the larger glyphs are shaped this
-        // frame; no-op when the scale is unchanged.
-        st.apply_font_scale(ctx.text_scale);
-        // Idempotent echo — `place_children` already adopted these exact bounds
-        // during layout, so this is normally a no-op.
-        st.sync_viewport(bounds);
-
-        // Resolve the glyph / caret / suffix colours against the *effective*
-        // enabled state, exactly as `TextWidget` and `RectWidget` resolve a
-        // `ColorProp` at paint time. `paint` is the single writer of these:
-        // the field shapes through a `RichTextEngine`, which takes raw GPU
-        // colours and so never passes through `ColorProp::resolve` — the
-        // disabled substitution that greys every role-driven leaf for free
-        // cannot reach it. Doing it here (rather than as a build-time effect
-        // on `effective_enabled_signal`) is also the only correct option:
-        // that signal is *derived* whenever an ancestor binds `enabled`, and
-        // `Signal::observe` panics on derived signals. Cheap — the engine
-        // stores the colour and the render-frame builder reads it, so there
-        // is no relayout and no reshaping.
-        let text_color = if ctx.effective_enabled {
-            ctx.theme.colors.text_primary
-        } else {
-            ctx.theme.colors.text_disabled
-        };
-        st.engine.set_text_color(text_color.to_array());
-        st.engine.set_cursor_color(text_color.to_array());
-
-        let suffix_width = st.suffix_width;
-        let text_viewport_width = (bounds.width - suffix_width).max(0.0);
-
-        st.engine.set_viewport(10_000.0, bounds.height);
-
-        if st.needs_full_layout || !st.engine.has_full_layout() {
-            st.layout_full_masked();
-            st.needs_full_layout = false;
-            st.content_dirty = true;
-        }
-
-        // Suppress the caret in an inactive window for every paint — the
-        // authoritative gate, covering the frame between a window-active flip
-        // and the build-time effect running.
-        let caret_on = st.caret_visible.get() && st.has_focus && st.window_active;
-        // `NoEcho` while masked lays out an *empty* source, so the real
-        // document cursor (which may sit past 0) must not be handed to
-        // the engine — pin the displayed caret/selection to the start.
-        // The real `cursor` still tracks the true position for editing.
-        let hide_all = st.echo_mode == EchoMode::NoEcho && st.should_mask();
-        let (disp_pos, disp_anchor) = if hide_all {
-            (0, 0)
-        } else {
-            (st.cursor.position(), st.cursor.anchor())
-        };
-        // Single-line input has no wrap → affinity is moot; the
-        // default Downstream matches pre-affinity behavior.
-        let cursor_display = CursorDisplay {
-            position: disp_pos,
-            anchor: disp_anchor,
-            affinity: CursorAffinity::Downstream,
-            visible: caret_on,
-            selected_cells: Vec::new(),
-        };
-        st.engine.set_cursor(&cursor_display);
-
-        ensure_caret_visible_h(&mut st, text_viewport_width);
-
-        let scroll_x = st.scroll_x;
-
-        let text_clip = Rect::new(bounds.x, bounds.y, text_viewport_width, bounds.height);
-        canvas.set_clip(text_clip);
-
-        {
-            let state_ref: &mut TextInputState = &mut st;
-            let TextInputState {
-                ref mut engine,
-                ref document,
-                ref mut image_cache,
-                ..
-            } = *state_ref;
-
-            engine.with_render_frame(|frame| {
-                paint_frame(
-                    canvas,
-                    PaintParams {
-                        frame,
-                        origin: Point::new(bounds.x - scroll_x, bounds.y),
-                        document,
-                        image_cache,
-                        // No inline images on this surface, so none can be missing.
-                        image_resolver: None,
-                        selection: None,
-                        selection_color: [0.0; 4],
-                        selected_image_out: None,
-                        resize_preview: None,
-                        draw_caret: caret_on,
-                    },
-                );
-            });
-        }
-
-        // IME preedit underline: a thin line under the composing range so
-        // the user sees the text is tentative. Single line → one segment;
-        // on a secure field it sits under the masked bullets. Drawn inside
-        // the text clip so it never spills past the viewport.
-        if let Some(range) = st.ime_preedit_range.clone()
-            && st.engine.has_full_layout()
-            && range.start < range.end
-        {
-            let start_c = st
-                .engine
-                .caret_rect(range.start, CursorAffinity::Downstream);
-            let end_c = st.engine.caret_rect(range.end, CursorAffinity::Downstream);
-            let x0 = bounds.x - scroll_x + start_c[0];
-            let x1 = bounds.x - scroll_x + end_c[0];
-            let y = bounds.y + start_c[1] + start_c[3] - 1.0;
-            canvas.draw_line(
-                Point::new(x0, y),
-                Point::new(x1, y),
-                ctx.theme.colors.text_primary,
-                teksilo_canvas::StrokeStyle::solid(1.0),
-            );
-        }
-
-        canvas.clear_clip();
-
-        if suffix_width > 0.0
-            && let Some(suffix_engine) = st.suffix_engine.as_mut()
-        {
-            // The suffix dims with the value it annotates — a crisp " %"
-            // beside greyed-out digits reads as a rendering bug.
-            let suffix_color = if ctx.effective_enabled {
-                ctx.theme.colors.text_secondary
-            } else {
-                ctx.theme.colors.text_disabled
-            };
-            suffix_engine.set_text_color(suffix_color.to_array());
-            let suffix_clip = Rect::new(
-                bounds.x + text_viewport_width,
-                bounds.y,
-                suffix_width,
-                bounds.height,
-            );
-            canvas.set_clip(suffix_clip);
-            let suffix_origin = Point::new(bounds.x + text_viewport_width, bounds.y);
-            suffix_engine.with_render_frame(|frame| {
-                paint_suffix_glyphs(canvas, frame, suffix_origin);
-            });
-            canvas.clear_clip();
-        }
-
-        // Re-measure for the accessibility pass. `place_children` is the
-        // authority on the width, but an edit dirties the field at
-        // `RepaintOnly` / `AccessibilityOnly` and never relayouts — so
-        // without this echo every keystroke would leave the runs describing
-        // the text as it was before it. Same shape as the `sync_viewport`
-        // echo above; the backend caches by (text, style), so a frame that
-        // only blinks the caret pays a lookup.
-        drop(st);
-        if let Some(backend) = canvas.text_backend() {
-            self.retain_text_geometry(
-                bounds,
-                &ctx.theme.typography.body,
-                backend,
-                base_text_direction(ctx.layout_direction),
-            );
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        use teksilo_core::accesskit::{Action, Role};
-
-        let Some(state) = self.state.as_ref() else {
-            return;
-        };
-        let st = state.borrow();
-
-        let text = st.document.to_plain_text().unwrap_or_default();
-
-        // AT-protection tracks the *explicit* reveal toggle only — not
-        // the visual `RevealWhileTyping` focus-reveal (a sighted-only
-        // convenience that a screen reader shouldn't surface as
-        // plaintext, and that has no AT-dirty trigger on focus). The
-        // reveal signal is bound at AccessibilityOnly in `build`, so the
-        // role/value swap reaches AT when it flips. `Role::PasswordInput`
-        // is the sole mechanism telling AT not to speak the value —
-        // accesskit has no separate `protected` flag.
-        let explicitly_revealed = st.revealed.as_ref().is_some_and(|s| s.get());
-        let protected = st.secure
-            && match st.at_reveal_policy {
-                AtRevealPolicy::AlwaysProtected => true,
-                AtRevealPolicy::SwapRole => !explicitly_revealed,
-            };
-
-        if protected {
-            builder.set_role(Role::PasswordInput);
-            // Expose a bullet string of the right length (NoEcho hides
-            // even that) so AT can announce the character count, never
-            // the secret. Deliberately omit character lengths, word
-            // starts, and the text selection: the caret model stays
-            // opaque so no structure about the secret leaks.
-            if st.echo_mode != EchoMode::NoEcho {
-                let count = text.chars().count();
-                if count > 0 {
-                    builder.set_value(st.echo_char.to_string().repeat(count));
-                }
-            }
-        } else {
-            // Plain field, or a revealed field under `SwapRole`: report
-            // as a text input exposing the real value, mirroring the web
-            // `type=password ↔ type=text` swap. The specialised role from
-            // `input_purpose` (WCAG 1.3.5) applies here; `Role::TextInput` is
-            // the `Normal` default.
-            builder.set_role(self.input_purpose.to_role());
-            // Keep the value on the input node so the focus announcement is
-            // unchanged: accesskit resolves `value()` from `data().value()`
-            // first, falling back to the TextRun text only when unset.
-            if !text.is_empty() {
-                builder.set_value(&text);
-            }
-
-            // Expose the editable content as child `Role::TextRun`s, NOT as
-            // `character_lengths` on the input node itself. accesskit_consumer's
-            // `supports_text_ranges()` is false for a childless input that only
-            // hosts character data on its own node, so the macOS adapter never
-            // fires `AXSelectedTextChanged` — VoiceOver reads the value once on
-            // focus but never echoes characters/words while typing. Runs are
-            // emitted even for an empty field so `supports_text_ranges()` is
-            // already true before the first keystroke (the change-diff's *old*
-            // node must support ranges too for the notification to fire).
-            let retained = self.retained.borrow();
-            let source = match retained.as_ref() {
-                // A retained measurement describes the text it was taken of.
-                // The document can move on between two layouts, so compare
-                // rather than trust — a run whose ranges index a text that no
-                // longer exists is worse than one with no extents.
-                Some(placed) if placed.text == text => match placed.geometry.as_deref() {
-                    // The measurement covers the whole line; the field shows a
-                    // window onto it, so slide the rects back by the scroll
-                    // offset to land in the field's own space. `build`
-                    // translates them into window space from there.
-                    Some(geometry) => TextRunSource::from_geometry(
-                        &placed.text,
-                        geometry,
-                        Point::new(-st.scroll_x, 0.0),
-                        0,
-                    )
-                    .with_base_direction(placed.base_direction),
-                    None => TextRunSource::flat(&placed.text, 0)
-                        .with_fallback_rect(Rect::new(
-                            0.0,
-                            0.0,
-                            placed.bounds.width,
-                            placed.bounds.height,
-                        ))
-                        .with_base_direction(placed.base_direction),
-                },
-                // Never placed, painted without a measuring backend, or one
-                // edit ahead of the last measurement.
-                _ => TextRunSource::flat(&text, 0),
-            };
-            let emission = push_text_runs(builder, None, &source);
-
-            // While composing (IME preedit active), expose the composition
-            // as a selection so screen readers / braille track the tentative
-            // text — the composing characters are already in `value`. Falls
-            // back to the live cursor/selection when not composing. (The
-            // secure branch above never reaches here, so a password preedit
-            // is never exposed.) `position()` / `anchor()` are character
-            // indices (text-document is char-space), which the emission maps
-            // onto the run that holds them — a caret past 255 characters is
-            // in the second run, at its own offset.
-            let (anchor, pos) = match st.ime_preedit_range.clone() {
-                Some(range) => (range.start, range.end),
-                None => (st.cursor.anchor(), st.cursor.position()),
-            };
-            if let (Some(anchor), Some(focus)) =
-                (emission.position_of(anchor), emission.position_of(pos))
-            {
-                builder.set_text_selection_to(anchor, focus);
-            }
-        }
-
-        if !st.placeholder.is_empty() {
-            builder.set_placeholder(st.placeholder.clone());
-        }
-
-        if st.read_only {
-            builder.set_read_only();
-        }
-
-        builder.add_action(Action::Focus);
-        if !st.read_only {
-            builder.add_action(Action::SetValue);
-            builder.add_action(Action::ReplaceSelectedText);
-        }
-        // Only meaningful when the caret model is exposed to AT.
-        if !protected {
-            builder.add_action(Action::SetTextSelection);
-        }
-
-        // Validation feedback → accesskit `aria-invalid`. Surface
-        // `Invalid` as `Invalid::True`; `Corrected` doesn't carry an
-        // invalid marker (the data is now valid) but the composite's
-        // Live region announces the correction. The framework's
-        // AccessNodeBuilder doesn't yet wrap `set_invalid`, so reach
-        // through `inner_mut()` which is the documented escape hatch.
-        if self.feedback.get().is_invalid() {
-            builder
-                .inner_mut()
-                .set_invalid(teksilo_core::accesskit::Invalid::True);
-        }
-
-        // ARIA combobox wiring. This node is the one that actually holds
-        // keyboard focus, which is why the relation is published here and not
-        // on whichever composite owns the list — AT follows the *focused*
-        // node's active descendant.
-        if let Some(listbox) = self.controls.as_ref().and_then(|s| s.get()) {
-            builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(listbox));
-        }
-        if let Some(active) = self.active_descendant.as_ref().and_then(|s| s.get()) {
-            builder
-                .inner_mut()
-                .set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(active));
-        }
-    }
-}
-
 impl TextInputField {
     /// Shape the field's text once more and keep the geometry.
     ///
@@ -1888,7 +772,7 @@ fn base_text_direction(
 /// editable text, i.e. `viewport_width - suffix_width`. Callers pass
 /// the reduced width explicitly so the scroll never slides text
 /// behind the non-editable suffix.
-fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32) {
+fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32, tokens: &InputTokens) {
     if !st.engine.has_full_layout() || text_viewport_width <= 0.0 {
         return;
     }
@@ -1899,10 +783,11 @@ fn ensure_caret_visible_h(st: &mut TextInputState, text_viewport_width: f32) {
     let caret_w = caret[2].max(1.0);
     let vw = text_viewport_width;
 
-    if caret_x - st.scroll_x < SCROLL_MARGIN {
-        st.scroll_x = (caret_x - SCROLL_MARGIN).max(0.0);
-    } else if caret_x + caret_w - st.scroll_x > vw - SCROLL_MARGIN {
-        st.scroll_x = caret_x + caret_w - vw + SCROLL_MARGIN;
+    let margin = scroll_margin(tokens);
+    if caret_x - st.scroll_x < margin {
+        st.scroll_x = (caret_x - margin).max(0.0);
+    } else if caret_x + caret_w - st.scroll_x > vw - margin {
+        st.scroll_x = caret_x + caret_w - vw + margin;
     }
 }
 
@@ -2180,62 +1065,72 @@ fn build_context_menu_widget(state: &SharedState) -> Box<dyn Widget> {
     let copy_allowed = st.copy_allowed();
     drop(st);
 
-    let state_cut = state.clone();
-    let state_copy = state.clone();
-    let state_paste = state.clone();
-    let state_select_all = state.clone();
-
     Box::new(
         MenuList::new()
-            .item(
-                MenuItem::new(tr_widget!(menu_cut()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
-                    .enabled(has_selection && copy_allowed)
-                    .on_activate_fn(move |ctx| {
-                        {
-                            let mut st = state_cut.borrow_mut();
-                            keyboard::clipboard_cut(&mut st, ctx);
-                        }
-                        sync_cursor_signals(&state_cut);
-                        ctx.request_frame();
-                    }),
-            )
-            .item(
-                MenuItem::new(tr_widget!(menu_copy()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
-                    .enabled(has_selection && copy_allowed)
-                    .on_activate_fn(move |ctx| {
-                        let mut st = state_copy.borrow_mut();
-                        keyboard::clipboard_copy(&mut st, ctx);
-                    }),
-            )
-            .item(
-                MenuItem::new(tr_widget!(menu_paste()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
-                    .on_activate_fn(move |ctx| {
-                        {
-                            let mut st = state_paste.borrow_mut();
-                            keyboard::clipboard_paste(&mut st, ctx);
-                        }
-                        sync_cursor_signals(&state_paste);
-                        ctx.request_frame();
-                    }),
-            )
+            .item(menu_row_cut(state).enabled(has_selection && copy_allowed))
+            .item(menu_row_copy(state).enabled(has_selection && copy_allowed))
+            .item(menu_row_paste(state))
             .item(MenuSeparator)
-            .item(
-                MenuItem::new(tr_widget!(menu_select_all()))
-                    .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
-                    .enabled(doc_non_empty)
-                    .on_activate_fn(move |ctx| {
-                        {
-                            let st = state_select_all.borrow();
-                            st.cursor.select(SelectionType::Document);
-                        }
-                        sync_cursor_signals(&state_select_all);
-                        ctx.request_frame();
-                    }),
-            ),
+            .item(menu_row_select_all(state).enabled(doc_non_empty)),
     )
+}
+
+// The four command rows, shared by the right-click menu above and the touch
+// selection toolbar in `touch.rs`. One implementation of each command, reached
+// two ways — the menu decides enablement from a snapshot taken as it opens, the
+// toolbar decides *visibility* from the controller's derived
+// `ClipboardActions`, and neither owns the command itself.
+
+pub(crate) fn menu_row_cut(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_cut()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::X)))
+        .on_activate_fn(move |ctx| {
+            {
+                let mut st = state.borrow_mut();
+                keyboard::clipboard_cut(&mut st, ctx);
+            }
+            sync_cursor_signals(&state);
+            ctx.request_frame();
+        })
+}
+
+pub(crate) fn menu_row_copy(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_copy()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::C)))
+        .on_activate_fn(move |ctx| {
+            let mut st = state.borrow_mut();
+            keyboard::clipboard_copy(&mut st, ctx);
+        })
+}
+
+pub(crate) fn menu_row_paste(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_paste()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::V)))
+        .on_activate_fn(move |ctx| {
+            {
+                let mut st = state.borrow_mut();
+                keyboard::clipboard_paste(&mut st, ctx);
+            }
+            sync_cursor_signals(&state);
+            ctx.request_frame();
+        })
+}
+
+pub(crate) fn menu_row_select_all(state: &SharedState) -> MenuItem {
+    let state = state.clone();
+    MenuItem::new(tr_widget!(menu_select_all()))
+        .shortcut_label(format_keystroke(KeyStroke::command(Key::A)))
+        .on_activate_fn(move |ctx| {
+            {
+                let st = state.borrow();
+                st.cursor.select(SelectionType::Document);
+            }
+            sync_cursor_signals(&state);
+            ctx.request_frame();
+        })
 }
 
 /// Run the validator on the bound text and update the feedback signal.
@@ -2433,140 +1328,14 @@ mod text_run_tests {
 }
 
 #[cfg(test)]
-mod window_active_tests {
-    use super::*;
-    use teksilo_canvas::{Point, SizeProposal};
-    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    use teksilo_core::signal::Signal;
-    use teksilo_core::widget_tree::WidgetTree;
+mod window_active_tests;
 
-    #[test]
-    fn field_selection_color_swaps_on_window_active() {
-        let colors = teksilo_core::presets::intui::light().colors;
-        assert_eq!(
-            field_selection_color(&colors, true, true),
-            colors.selection_bg_active.to_array(),
-            "active window uses the vivid selection colour"
-        );
-        assert_eq!(
-            field_selection_color(&colors, false, true),
-            colors.selection_bg_inactive.to_array(),
-            "inactive window uses the muted selection colour"
-        );
-        assert_ne!(
-            field_selection_color(&colors, true, true),
-            field_selection_color(&colors, false, true)
-        );
-    }
-
-    /// **A field that is not focused paints no selection at all**, in an
-    /// active window or a background one.
-    ///
-    /// Dimming it was not enough: tab across a form of `SpinBox`es — each of
-    /// which selects all on keyboard focus — and every field left behind kept
-    /// a grey band, so the form read as a column of half-lit selections with
-    /// no way to tell which one the keystrokes went to. Native single-line
-    /// fields hide it outright (Win32 without `ES_NOHIDESEL`,
-    /// `TextBoxBase.HideSelection = true`, `QLineEdit`'s `deselect()` on
-    /// focus-out, AppKit detaching the field editor).
-    #[test]
-    fn field_selection_color_vanishes_when_the_field_is_not_focused() {
-        let colors = teksilo_core::presets::intui::light().colors;
-        assert_eq!(
-            field_selection_color(&colors, true, false),
-            [0.0; 4],
-            "an unfocused field must paint no selection, even in an active window"
-        );
-        assert_eq!(field_selection_color(&colors, false, false), [0.0; 4]);
-    }
-
-    /// ...and the live field re-tints as focus comes and goes, rather than
-    /// keeping whatever colour it was built with.
-    #[test]
-    fn a_field_re_tints_its_selection_when_focus_leaves_it() {
-        let colors = teksilo_core::presets::intui::light().colors;
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let a = tree.add(TextInputField::new(Signal::new("hello".to_string())));
-        let b = tree.add(TextInputField::new(Signal::new("world".to_string())));
-        tree.layout(SizeProposal::exact(200.0, 40.0));
-
-        let tint = |tree: &WidgetTree, id| {
-            tree.widget_as_any(id)
-                .and_then(|w| w.downcast_ref::<TextInputField>())
-                .and_then(|f| f.state.as_ref())
-                .map(|st| st.borrow().selection_tint)
-                .expect("a built field")
-        };
-
-        tree.focus(a);
-        assert_eq!(
-            tint(&tree, a),
-            colors.selection_bg_active.to_array(),
-            "the focused field paints its selection live"
-        );
-
-        tree.focus(b);
-        assert_eq!(
-            tint(&tree, a),
-            [0.0; 4],
-            "focus moved to another field and the first kept a visible selection"
-        );
-        assert_eq!(tint(&tree, b), colors.selection_bg_active.to_array());
-    }
-
-    #[test]
-    fn caret_hidden_when_window_inactive() {
-        let text = Signal::new("hello".to_string());
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let id = tree.add(TextInputField::new(text));
-        tree.layout(SizeProposal::exact(200.0, 40.0));
-        let _ = tree.render();
-
-        // Reach the built field's shared state (created lazily in build()) to
-        // observe the caret-gate inputs directly — the caret paints as an
-        // engine-internal fill, not a top-level decoration.
-        let state = tree
-            .widget_as_any(id)
-            .and_then(|a| a.downcast_ref::<TextInputField>())
-            .map(|f| f.state().clone())
-            .expect("built TextInputField is reachable via as_any");
-
-        // Focus the field by clicking its centre.
-        let b = tree.bounds(id);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0),
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        // One frame so the blink turns the caret on (on_focus sets it on; the
-        // 500 ms interval hasn't elapsed after a single 16 ms tick).
-        tree.request_frame();
-        tree.tick_animations(std::time::Duration::from_millis(16));
-        tree.layout(SizeProposal::exact(200.0, 40.0));
-
-        assert!(state.borrow().has_focus, "field took focus");
-        assert!(state.borrow().window_active);
-        assert!(
-            state.borrow().caret_visible.get(),
-            "caret visible when focused in an active window"
-        );
-
-        // Window blur: caret hidden (effect clears it synchronously).
-        tree.set_window_active(false);
-        assert!(!state.borrow().window_active);
-        assert!(
-            !state.borrow().caret_visible.get(),
-            "caret hidden while the window is inactive"
-        );
-
-        // Reactivate: caret returns immediately (field still holds focus).
-        tree.set_window_active(true);
-        assert!(
-            state.borrow().caret_visible.get(),
-            "caret restored on window reactivate"
-        );
-    }
-}
+/// **Pointer editing, both devices.** The mouse half is a baseline the touch
+/// work needed before it could change `mouse.rs`: nothing in this stack
+/// dispatched a press-move-release pair or a multi-click at a field, so
+/// "the suite still passes" was satisfiable with drag-select broken.
+#[cfg(test)]
+mod pointer_tests;
 
 /// **A key the platform decorates with control text must still bubble.**
 ///
@@ -2574,105 +1343,7 @@ mod window_active_tests {
 /// synthetic helper in the workspace sends `text: None`, which skips the branch
 /// under test entirely — so a test written with `press_key` passes on the bug.
 #[cfg(test)]
-mod key_text_bubbling_tests {
-    use super::*;
-    use std::cell::Cell;
-    use teksilo_canvas::{Point, SizeProposal};
-    use teksilo_core::WidgetBuilder;
-    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    use teksilo_core::signal::Signal;
-    use teksilo_core::widget_tree::WidgetTree;
-
-    /// Dispatch one `KeyDown` to a focused field that sits *inside* a widget
-    /// carrying an `on_key`, and report whether that outer handler saw it.
-    ///
-    /// The nesting is the point. Hanging the handler on the field itself puts
-    /// it on the same node the click focuses, above the field's own handler
-    /// rather than behind it, and the bubble under test never happens — which
-    /// is exactly how an earlier version of this test passed on the bug.
-    fn outer_handler_sees(key: Key, text: Option<&str>, field: TextInputField) -> bool {
-        let seen = Rc::new(Cell::new(false));
-        let seen_for_handler = seen.clone();
-        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        let outer = tree.add(crate::primitives::VStack::new().child(field).on_key(
-            move |_ev, _ctx| {
-                seen_for_handler.set(true);
-                EventResponse::Handled
-            },
-        ));
-        tree.layout(SizeProposal::exact(200.0, 40.0));
-
-        let b = tree.bounds(outer);
-        let centre = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: centre,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: centre,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        let focused = tree.focused().expect("the click focused something");
-        assert_ne!(
-            focused, outer,
-            "focus must land on the field, or nothing below the outer handler is being tested"
-        );
-
-        tree.dispatch_event(WidgetEvent::KeyDown {
-            key,
-            modifiers: Modifiers::NONE,
-            text: text.map(str::to_string),
-        });
-        seen.get()
-    }
-
-    /// The bug: winit gives Escape `text: Some("\u{1b}")`, the field had no
-    /// `Escape` arm so it fell into the printable-character branch, the control
-    /// character was filtered out, and the empty result was read as "input
-    /// rejected" — which swallows the key. Escape therefore never left a
-    /// focused field, and anything above it that closes on Escape stayed open.
-    #[test]
-    fn escape_bubbles_out_of_a_field_even_carrying_its_control_text() {
-        assert!(
-            outer_handler_sees(
-                Key::Escape,
-                Some("\u{1b}"),
-                TextInputField::new(Signal::new("hello".to_string()))
-            ),
-            "Escape must reach the widget above the field"
-        );
-    }
-
-    /// ...and it made no difference with `text: None`, which is why the whole
-    /// suite went green on the bug. Kept so the two cases stay visibly paired.
-    #[test]
-    fn escape_bubbles_out_of_a_field_without_text() {
-        assert!(outer_handler_sees(
-            Key::Escape,
-            None,
-            TextInputField::new(Signal::new("hello".to_string()))
-        ));
-    }
-
-    /// The other half of the guard, and the reason it is written against the
-    /// *text* rather than the `Key` variant: a character the field's filter
-    /// rejects is still swallowed, so a digits-only field does not let a
-    /// rejected letter fall through and match a shortcut.
-    ///
-    /// A typed letter arrives as `Key::A`, not `Key::Character('a')`, so a
-    /// variant test here would have silently stopped swallowing letters.
-    #[test]
-    fn a_filter_rejected_character_is_still_swallowed() {
-        let digits_only = TextInputField::new(Signal::new(String::new()))
-            .char_filter(|c: char| c.is_ascii_digit());
-        assert!(
-            !outer_handler_sees(Key::A, Some("a"), digits_only),
-            "a rejected letter must not bubble into a shortcut match"
-        );
-    }
-}
+mod key_text_bubbling_tests;
 
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.

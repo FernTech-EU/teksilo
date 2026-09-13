@@ -9,7 +9,7 @@
 //! configured `I18nManager` the tab shows a hint message and does
 //! nothing.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Canvas, Rect, SizeProposal};
@@ -21,7 +21,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Color, CornerRadius, TextRole};
 
 use crate::state::InspectorState;
-use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X};
+use crate::tabs::{ROW_HEIGHT, ROW_PADDING_X, row_height};
 
 pub(crate) struct LocaleTab {
     #[allow(dead_code)]
@@ -33,6 +33,10 @@ pub(crate) struct LocaleTab {
     /// Active locale tag (string form). Used by `paint` to highlight
     /// the active row.
     active: RefCell<Option<String>>,
+    /// The row height the last layout pass painted at, published for the tap
+    /// handler: rows are pressed here, so their height follows the density —
+    /// and an `EventContext` has no theme to read it from.
+    row_height: Rc<Cell<f32>>,
 }
 
 impl LocaleTab {
@@ -41,6 +45,7 @@ impl LocaleTab {
             state,
             locales: Rc::new(RefCell::new(Vec::new())),
             active: RefCell::new(None),
+            row_height: Rc::new(Cell::new(ROW_HEIGHT)),
         }
     }
 }
@@ -54,10 +59,11 @@ impl std::fmt::Debug for LocaleTab {
 impl Widget for LocaleTab {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let snapshot_handle = self.locales.clone();
+        let rh_handle = self.row_height.clone();
         let handlers = HandlerSet::new()
             .focusable(true)
             .on_tap(move |event, event_ctx| {
-                let idx = (event.position.y / ROW_HEIGHT).floor() as usize;
+                let idx = (event.position.y / rh_handle.get()).floor() as usize;
                 let tag = snapshot_handle.borrow().get(idx).cloned();
                 if let Some(tag) = tag {
                     event_ctx.set_locale(tag);
@@ -67,14 +73,16 @@ impl Widget for LocaleTab {
         Vec::new()
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        let rh = row_height(&ctx.theme.input);
+        self.row_height.set(rh);
         let supported = teksilo_i18n::current_supported_locales().unwrap_or_default();
         let active = teksilo_i18n::current_locale().map(|s| s.get().to_string());
         let tags: Vec<String> = supported.iter().map(|l| l.to_string()).collect();
         let height = if tags.is_empty() {
-            ROW_HEIGHT
+            rh
         } else {
-            tags.len() as f32 * ROW_HEIGHT
+            tags.len() as f32 * rh
         };
         *self.locales.borrow_mut() = tags;
         *self.active.borrow_mut() = active;
@@ -82,6 +90,7 @@ impl Widget for LocaleTab {
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        let rh = row_height(&ctx.theme.input);
         let theme = ctx.theme;
         let style = &theme.typography.body;
         let primary = TextRole::Primary.resolve(&theme.colors);
@@ -91,25 +100,20 @@ impl Widget for LocaleTab {
         let active = self.active.borrow();
 
         if tags.is_empty() {
-            let r = Rect::new(
-                bounds.x + ROW_PADDING_X,
-                bounds.y + 2.0,
-                bounds.width,
-                ROW_HEIGHT,
-            );
+            let r = Rect::new(bounds.x + ROW_PADDING_X, bounds.y + 2.0, bounds.width, rh);
             canvas.draw_text("(no I18nManager configured)", r, style, secondary);
             return;
         }
 
         for (i, tag) in tags.iter().enumerate() {
-            let y = bounds.y + (i as f32) * ROW_HEIGHT;
-            let row_rect = Rect::new(bounds.x, y, bounds.width, ROW_HEIGHT);
+            let y = bounds.y + (i as f32) * rh;
+            let row_rect = Rect::new(bounds.x, y, bounds.width, rh);
             let is_active = active.as_deref() == Some(tag.as_str());
             if is_active {
                 let bg = Color::from_rgba(0.13, 0.55, 1.0, 0.15);
                 canvas.fill_rounded_rect(row_rect, CornerRadius::ZERO, bg);
             }
-            let text_rect = Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, bounds.width, ROW_HEIGHT);
+            let text_rect = Rect::new(bounds.x + ROW_PADDING_X, y + 2.0, bounds.width, rh);
             let color = if is_active { primary } else { secondary };
             let label = if is_active {
                 format!("{}  (active)", tag)
@@ -120,5 +124,12 @@ impl Widget for LocaleTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The supported locale tags, one per row.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(self.locales.borrow().join("\n"));
+    }
 }

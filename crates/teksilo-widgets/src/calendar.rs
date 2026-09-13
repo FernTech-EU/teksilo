@@ -70,6 +70,17 @@
 //!         .on_selection_changed(|d, ctx| ctx.send_intent(MyIntent::DateChanged(d))),
 //! );
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! A day cell is a **tap target**, not a manipulator, and the distinction
+//! decides what it declares. Its activation is `on_tap`, so it already lands on
+//! the release; its 32 dp box already clears the WCAG 2.2 SC 2.5.8 floor at
+//! Compact and follows the density ladder above it; and it produces no value
+//! from the press position and owns no drag. It therefore does **not** declare
+//! `touch_action(NONE)`: a finger that comes to rest on a day and then drags is
+//! scrolling the dialog or form the calendar sits in, which is what a user
+//! expects and what declaring NONE would forbid for nothing gained.
 
 mod cell;
 mod header;

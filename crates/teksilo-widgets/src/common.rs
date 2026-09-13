@@ -11,16 +11,23 @@
 //! surface.
 
 pub(crate) mod column_geometry;
+pub(crate) mod conformance_box;
 pub mod datetime;
+pub mod drag_autoscroll;
+pub(crate) mod drop_bands;
 pub(crate) mod editor_runtime;
+pub(crate) mod interaction;
 pub(crate) mod list_nav;
 #[cfg(test)]
 pub(crate) mod locale_switch_test;
+pub mod ordered_move;
 pub(crate) mod range_nav;
 pub(crate) mod row_metrics;
 pub(crate) mod row_offsets;
 pub(crate) mod scroll;
+pub mod scrollable;
 pub(crate) mod text_nav;
+pub(crate) mod text_scroll;
 #[cfg(test)]
 pub(crate) mod thumb_drag_test;
 pub(crate) mod tree_expand;

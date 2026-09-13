@@ -31,6 +31,8 @@ mod combo_box_style;
 mod component_style_slots;
 #[path = "styles/date_edit_style.rs"]
 mod date_edit_style;
+#[path = "styles/density.rs"]
+pub mod density;
 #[path = "styles/dialog_style.rs"]
 mod dialog_style;
 #[path = "styles/drop_target_style.rs"]
@@ -85,6 +87,8 @@ mod tab_style;
 mod table_style;
 #[path = "styles/text_input_style.rs"]
 mod text_input_style;
+#[path = "styles/text_selection_style.rs"]
+mod text_selection_style;
 #[path = "styles/theme.rs"]
 mod theme;
 #[path = "styles/theme_appearance.rs"]
@@ -126,6 +130,7 @@ pub use combo_box_style::{
 };
 pub use component_style_slots::ComponentStyleSlots;
 pub use date_edit_style::{DateEditStyle, DateEditStyleConfig, SharedDateEditStyle};
+pub use density::{density_min_size, dp, spacing};
 pub use dialog_style::{DialogStyle, DialogStyleConfig, SharedDialogStyle};
 pub use drop_target_style::{
     DropRegion, DropRegionSet, DropTargetDragState, DropTargetStyle, DropTargetStyleConfig,
@@ -195,7 +200,10 @@ pub use text_input_style::{
     SharedTextInputStyle, TextInputStyle, TextInputStyleConfig, TextInputValidationLevel,
     TextInputVariant,
 };
-pub use theme::{Theme, ThemeId};
+pub use text_selection_style::{
+    SharedTextSelectionStyle, TextMagnifierRecipe, TextSelectionHandleRecipe, TextSelectionStyle,
+};
+pub use theme::{DensityProjection, Theme, ThemeId};
 pub use theme_appearance::ThemeAppearance;
 pub use theme_extension::ThemeExtensions;
 pub use toast_style::{SharedToastStyle, ToastPriority, ToastStyle, ToastStyleConfig};

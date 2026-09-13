@@ -21,6 +21,7 @@ fn nothing_overflows_when_it_all_fits() {
         &[0, 0, 0],
         &[false; 3],
         0.0,
+        super::CHEVRON_EXTENT,
         3,
     );
     assert_eq!(flags, vec![false, false, false]);
@@ -30,7 +31,16 @@ fn nothing_overflows_when_it_all_fits() {
 fn lowest_priority_overflows_first() {
     // avail 70, two 40px actions, priorities [10, 0]. Doesn't all fit (80>70),
     // so reserve the chevron and drop the lowest-priority action (#1).
-    let flags = compute_overflow(70.0, 0.0, &[40.0, 40.0], &[10, 0], &[false; 2], 0.0, 2);
+    let flags = compute_overflow(
+        70.0,
+        0.0,
+        &[40.0, 40.0],
+        &[10, 0],
+        &[false; 2],
+        0.0,
+        super::CHEVRON_EXTENT,
+        2,
+    );
     assert_eq!(
         flags,
         vec![false, true],
@@ -48,6 +58,7 @@ fn ties_break_toward_the_last_declared() {
         &[0, 0, 0],
         &[false; 3],
         0.0,
+        super::CHEVRON_EXTENT,
         3,
     );
     // avail 70: chevron(30) + one 40 = 70 fits; drop #2 then #1.
@@ -56,7 +67,16 @@ fn ties_break_toward_the_last_declared() {
 
 #[test]
 fn always_overflow_actions_start_collapsed_even_with_room() {
-    let flags = compute_overflow(1000.0, 0.0, &[40.0, 40.0], &[0, 0], &[false, true], 0.0, 2);
+    let flags = compute_overflow(
+        1000.0,
+        0.0,
+        &[40.0, 40.0],
+        &[0, 0],
+        &[false, true],
+        0.0,
+        super::CHEVRON_EXTENT,
+        2,
+    );
     assert_eq!(
         flags,
         vec![false, true],
@@ -74,14 +94,32 @@ fn always_overflow_does_not_distort_spacing_estimate() {
     //
     // Two 40px actions, action #1 is always_overflow, spacing 10.
     //   inline = action0(40) + gap(10) + chevron(30) = 80
-    let just_fits = compute_overflow(80.0, 0.0, &[40.0, 40.0], &[0, 0], &[false, true], 10.0, 2);
+    let just_fits = compute_overflow(
+        80.0,
+        0.0,
+        &[40.0, 40.0],
+        &[0, 0],
+        &[false, true],
+        10.0,
+        super::CHEVRON_EXTENT,
+        2,
+    );
     assert_eq!(
         just_fits,
         vec![false, true],
         "action0 stays inline when the bar is exactly wide enough (80px)"
     );
     // One pixel narrower → action0 must also collapse (chevron-only, 30px).
-    let too_tight = compute_overflow(79.0, 0.0, &[40.0, 40.0], &[0, 0], &[false, true], 10.0, 2);
+    let too_tight = compute_overflow(
+        79.0,
+        0.0,
+        &[40.0, 40.0],
+        &[0, 0],
+        &[false, true],
+        10.0,
+        super::CHEVRON_EXTENT,
+        2,
+    );
     assert_eq!(
         too_tight,
         vec![true, true],
@@ -92,7 +130,16 @@ fn always_overflow_does_not_distort_spacing_estimate() {
 #[test]
 fn pinned_width_reduces_room_for_actions() {
     // 160px of pinned content leaves little room → actions overflow.
-    let flags = compute_overflow(200.0, 160.0, &[40.0, 40.0], &[0, 0], &[false; 2], 0.0, 4);
+    let flags = compute_overflow(
+        200.0,
+        160.0,
+        &[40.0, 40.0],
+        &[0, 0],
+        &[false; 2],
+        0.0,
+        super::CHEVRON_EXTENT,
+        4,
+    );
     // 160 + chevron(30) = 190; one 40 → 230 > 200 → both overflow.
     assert_eq!(flags, vec![true, true]);
 }

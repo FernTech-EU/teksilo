@@ -14,15 +14,18 @@
 //! (`IconButton::style(...)`) or theme-wide
 //! (`theme.style_slots.icon_button = Some(Rc::new(MyIconButton))`).
 
+use teksilo_canvas::Size;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{IconButtonSize, IconButtonStyle, IconButtonStyleConfig};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::CornerRadius;
-use teksilo_tokens::{BorderRole, SurfaceRole};
+use teksilo_tokens::{BorderRole, InputTokens, SurfaceRole, TargetRole};
 
+use crate::common::conformance_box::conformance_box;
 use crate::primitives::{Center, FixedSize, RectWidget, ZStack};
+use teksilo_core::styles::density::dp;
 
 // IntUI design tokens for IconButton. The recipe owns its own dimensions.
 // Sizes follow the IntelliJ IntUI scale (Compact < Default < Toolbar
@@ -57,20 +60,31 @@ pub struct IconButtonRecipe {
     pub corner_radius: f32,
 }
 
-impl Default for IconButtonRecipe {
-    fn default() -> Self {
+impl IconButtonRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            size_compact: ICON_BUTTON_SIZE_COMPACT,
-            size_default: ICON_BUTTON_SIZE_DEFAULT,
-            size_toolbar: ICON_BUTTON_SIZE_TOOLBAR,
-            size_large: ICON_BUTTON_SIZE_LARGE,
-            size_hero: ICON_BUTTON_SIZE_HERO,
+            size_compact: dp(ICON_BUTTON_SIZE_COMPACT, TargetRole::Target, tokens),
+            size_default: dp(ICON_BUTTON_SIZE_DEFAULT, TargetRole::Target, tokens),
+            size_toolbar: dp(ICON_BUTTON_SIZE_TOOLBAR, TargetRole::Target, tokens),
+            size_large: dp(ICON_BUTTON_SIZE_LARGE, TargetRole::Target, tokens),
+            size_hero: dp(ICON_BUTTON_SIZE_HERO, TargetRole::Target, tokens),
             icon_size: ICON_BUTTON_ICON_SIZE,
             icon_size_toolbar: ICON_BUTTON_ICON_SIZE_TOOLBAR,
             icon_size_large: ICON_BUTTON_ICON_SIZE_LARGE,
             icon_size_hero: ICON_BUTTON_ICON_SIZE_HERO,
             corner_radius: ICON_BUTTON_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for IconButtonRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -85,6 +99,18 @@ pub struct RecipeIconButtonStyle {
 impl RecipeIconButtonStyle {
     pub fn new(recipe: IconButtonRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeIconButtonStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: IconButtonRecipe::for_tokens(tokens),
+        }
     }
 }
 
@@ -131,12 +157,20 @@ impl IconButtonStyle for RecipeIconButtonStyle {
 
         let centered_id = ctx.add(Center::new().child_id(cfg.icon));
         let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(centered_id));
-        ctx.add(
+        let painted = ctx.add(
             FixedSize::new()
                 .width(button_dim)
                 .height(button_dim)
                 .child_id(zstack_id),
-        )
+        );
+        // The conformance box (see `common::conformance_box` for the bargain).
+        // The shipped recipe routes every rung through `dp(.., Target, ..)`
+        // and is the identity — no box is built. What earns one is a preset
+        // pinning a rung below the floor, as macOS does at 22 dp (18 at
+        // `Compact`), and a row of icon buttons is exactly the flush-neighbour
+        // geometry where no hit mechanism could stand in for it.
+        let (root, _) = conformance_box(ctx, painted, Size::new(button_dim, button_dim));
+        root
     }
 }
 
@@ -199,5 +233,82 @@ fn resolve_size(size: IconButtonSize, recipe: &IconButtonRecipe) -> f32 {
         IconButtonSize::Toolbar => recipe.size_toolbar,
         IconButtonSize::Large => recipe.size_large,
         IconButtonSize::Hero => recipe.size_hero,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use teksilo_canvas::SizeProposal;
+    use teksilo_core::widget_id::WidgetId;
+    use teksilo_core::widget_tree::WidgetTree;
+
+    use super::*;
+    use crate::icon_button::IconButton;
+    use crate::primitives::IconWidget;
+
+    /// Every `FixedSize` under `root`, as `(width, height)` sorted by width.
+    fn fixed_size_squares(tree: &WidgetTree, root: WidgetId) -> Vec<(f32, f32)> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|t| t.rsplit("::").next() == Some("FixedSize"))
+            {
+                let b = tree.bounds(id);
+                out.push((b.width, b.height));
+            }
+            for c in tree.children(id) {
+                stack.push(c);
+            }
+        }
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out
+    }
+
+    fn mounted(button: IconButton) -> (WidgetTree, WidgetId) {
+        // Inside a stack, not bare at the root: a root child is stretched to
+        // the window proposal, which would hide the squares under measurement.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(crate::primitives::HStack::new().child(button));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        (tree, id)
+    }
+
+    /// The identity contract at this call site: the shipped recipe routes
+    /// every rung through `dp(.., Target, ..)`, so the conformance box is not
+    /// built at all — the painted square is the only `FixedSize` in the
+    /// button's chrome. Reddens if `make_body` goes back to wrapping
+    /// unconditionally (a second `FixedSize` appears).
+    #[test]
+    fn an_int_ui_icon_button_gains_no_conformance_wrapper() {
+        let (tree, id) = mounted(IconButton::new(IconWidget::checkmark(12.0)));
+        assert_eq!(
+            fixed_size_squares(&tree, id),
+            vec![(ICON_BUTTON_SIZE_DEFAULT, ICON_BUTTON_SIZE_DEFAULT)],
+            "one FixedSize — the painted square — and no box above it",
+        );
+    }
+
+    /// And the box contract at this call site: a recipe pinning a rung under
+    /// the floor (the macOS shape, reproduced here without the preset crate)
+    /// gets exactly one extra `FixedSize` at the floor around the untouched
+    /// painted square. Reddens if the `conformance_box` call is dropped from
+    /// `make_body` or its floor read is neutered.
+    #[test]
+    fn a_sub_floor_recipe_earns_exactly_the_conformance_box() {
+        let sub_floor = RecipeIconButtonStyle::new(IconButtonRecipe {
+            size_default: 18.0,
+            ..IconButtonRecipe::default()
+        });
+        let (tree, id) = mounted(IconButton::new(IconWidget::checkmark(12.0)).style(sub_floor));
+        let floor = teksilo_core::presets::intui::light()
+            .input
+            .min_target_conformance;
+        assert_eq!(
+            fixed_size_squares(&tree, id),
+            vec![(18.0, 18.0), (floor, floor)],
+            "the painted square keeps the recipe's number inside a box at the floor",
+        );
     }
 }

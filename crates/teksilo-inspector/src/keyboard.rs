@@ -188,5 +188,10 @@ impl Widget for PanelShortcutHost {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
+        // Deliberately empty: this is a shortcut *scope*, layout- and
+        // AT-transparent by design. Emitting no property keeps the default
+        // `GenericContainer`, which the walker prunes while promoting the panel
+        // inside it — the same rule every layout primitive follows.
+    }
 }

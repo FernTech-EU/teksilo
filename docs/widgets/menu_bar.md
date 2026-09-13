@@ -50,6 +50,14 @@ let _w = MenuBar::new()
     ));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![MenuBar at Touch density](img/menu_bar-touch.png)
+
 ## Builder methods at a glance
 
 `from_model`, `native_on_macos`, `collapsible`, `collapsed_signal`, `collapse_policy`, `hamburger_size`, `is_collapsed`, `no_dispatcher_install`, `menu`, `leading_slot`, `trailing_slot`

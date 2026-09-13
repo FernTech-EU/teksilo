@@ -85,9 +85,11 @@ struct ActiveAnimation {
     looping: bool,
     epsilon: f32,
     last_set_value: f32,
-    /// Wall-clock when the animation entered the scheduler; used with
-    /// `max_duration` to enforce the opt-in cap. Note this is distinct
-    /// from `start_time`, which gets rebased on pause/resume.
+    /// When the animation entered the scheduler, on whichever clock the tree
+    /// measures animations against; used with `max_duration` to enforce the
+    /// opt-in cap. Distinct from `start_time` in that a pause/resume rebases
+    /// that and not this — but `rebase` moves both, or a cap would measure the
+    /// tree's whole age rather than the animation's own.
     started_at: Instant,
     max_duration: Option<Duration>,
 }
@@ -111,9 +113,13 @@ pub struct AnimationScheduler {
     /// `ControlFlow::WaitUntil`. Used to suspend animations while the
     /// owning window is unfocused or occluded.
     window_active: bool,
-    /// Wall-clock when the scheduler last went inactive. Used on resume
-    /// to rebase each animation's `start_time` so `t` is phase-continuous
-    /// across the pause (no snap, no skipped frames).
+    /// When the scheduler last went inactive, on whichever clock the tree
+    /// measures animations against. Used on resume to rebase each animation's
+    /// `start_time` so `t` is phase-continuous across the pause (no snap, no
+    /// skipped frames). `rebase` moves this mark too: a pause that spans a
+    /// hand-back would otherwise resume the animation *backwards*, the resume
+    /// offset being the whole gap between the two axes rather than the time
+    /// spent paused.
     paused_at: Option<Instant>,
 }
 
@@ -297,6 +303,45 @@ impl AnimationScheduler {
 
     pub fn is_window_active(&self) -> bool {
         self.window_active
+    }
+
+    /// Move every stored instant from one time axis onto another, preserving
+    /// each animation's elapsed time across the move.
+    ///
+    /// Called when the tree switches the clock it measures animations against
+    /// — between the wall clock and its simulated one, in either direction.
+    /// Every instant this scheduler holds (`start_time`, `next_tick`,
+    /// `started_at`, and the pause mark) was taken on the axis that reads
+    /// `from` at this moment and has to be re-expressed on the one that reads
+    /// `to`, or the very next tick measures an elapsed time that includes the
+    /// whole gap between the two axes: forwards it completes every animation
+    /// at once, backwards it clamps every elapsed time to zero and nothing
+    /// moves again.
+    ///
+    /// Shifting backwards past the underlying clock's own origin is not
+    /// representable; such an instant is clamped to `to`, which costs that
+    /// animation its accumulated phase and nothing else. Reaching that clamp
+    /// takes a stored instant older than the platform's monotonic origin, so it
+    /// is unreachable in practice and deliberately left untested.
+    pub fn rebase(&mut self, from: Instant, to: Instant) {
+        if to == from {
+            return;
+        }
+        let shift = |instant: Instant| -> Instant {
+            if to >= from {
+                instant + (to - from)
+            } else {
+                instant.checked_sub(from - to).unwrap_or(to)
+            }
+        };
+        for anim in &mut self.animations {
+            anim.start_time = shift(anim.start_time);
+            anim.next_tick = shift(anim.next_tick);
+            anim.started_at = shift(anim.started_at);
+        }
+        if let Some(paused_at) = self.paused_at {
+            self.paused_at = Some(shift(paused_at));
+        }
     }
 
     /// Advance all active animations to the given time.

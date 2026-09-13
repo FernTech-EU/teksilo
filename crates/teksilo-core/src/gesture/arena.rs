@@ -1,16 +1,34 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-use std::time::Instant;
+use teksilo_canvas::Point;
+use teksilo_tokens::GestureProfile;
 
-use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent};
+use crate::event::PointerButton;
+use crate::pointer::EventTime;
+
+use super::config::{TapContact, TapStreak};
+use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, RecognizerContext};
 
 /// Arbitrates among multiple gesture recognizers competing on the same event
 /// stream. All recognizers are fed each event in parallel. When one recognizes,
 /// the others are reset. Failed recognizers are excluded from future events
 /// until the next sequence (pointer up resets all).
+///
+/// One arena serves **one contact**. A node that can be touched by two fingers
+/// at once owns one arena per live [`PointerId`](crate::pointer::PointerId),
+/// held by its [`GestureArenaSet`](super::GestureArenaSet) — which is also
+/// where the cross-contact [`TapStreak`] lives, because a tap streak has to
+/// outlive the contact that produced each of its taps.
 pub struct GestureArena {
     entries: Vec<ArenaEntry>,
+    /// Press bookkeeping for the contact this arena serves: what the streak
+    /// owner asks before deciding a release counted as a tap.
+    contact: TapContact,
+    /// The streak [`process`](Self::process) advances, for a caller that drives
+    /// an arena directly rather than through a set. The dispatch path never
+    /// touches it — it passes the node's streak in the context instead.
+    fallback_streak: TapStreak,
 }
 
 struct ArenaEntry {
@@ -22,43 +40,111 @@ impl GestureArena {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+            contact: TapContact::default(),
+            fallback_streak: TapStreak::EMPTY,
         }
     }
 
     /// Add a recognizer to the arena.
     pub fn add(&mut self, recognizer: impl GestureRecognizer + 'static) {
+        self.add_boxed(Box::new(recognizer));
+    }
+
+    /// Add an already-boxed recognizer — what a
+    /// [`GestureProto`](super::GestureProto) hands over when a set
+    /// instantiates an arena for a new contact.
+    pub fn add_boxed(&mut self, recognizer: Box<dyn GestureRecognizer>) {
         self.entries.push(ArenaEntry {
-            recognizer: Box::new(recognizer),
+            recognizer,
             failed: false,
         });
+    }
+
+    /// Feed the contact's press bookkeeping and report the press point and
+    /// button when `event` is a release that counted as a tap.
+    ///
+    /// Called by [`GestureArenaSet`](super::GestureArenaSet) just before it
+    /// feeds the recognizers, so the node streak is already advanced by the
+    /// time they read it.
+    pub(crate) fn observe_tap(
+        &mut self,
+        event: &RawPointerEvent,
+        profile: &GestureProfile,
+    ) -> Option<(Point, PointerButton)> {
+        self.contact.observe(event, profile)
     }
 
     /// Feed a raw pointer event to all active recognizers.
     ///
     /// Returns the recognized gesture from the highest-priority recognizer,
     /// or `None` if no gesture was recognized yet.
-    pub fn process(&mut self, event: &RawPointerEvent) -> Option<GestureEvent> {
+    pub fn process_with(
+        &mut self,
+        event: &RawPointerEvent,
+        cx: &RecognizerContext,
+    ) -> Option<GestureEvent> {
         // On pointer down, give every recognizer a fresh chance — clear
         // the per-arena `failed` flag so a recognizer that failed on the
         // previous sequence can compete again. We deliberately do NOT call
         // `recognizer.reset()` here: the recognizers all overwrite their
-        // per-sequence state on `RawPointerEvent::Down` themselves, and
-        // calling `reset()` would wipe legitimate cross-sequence state
-        // (notably `DoubleTapRecognizer::first_tap_time`, which must
-        // survive the second `Down` for the double-tap to be recognized).
+        // per-sequence state on `RawPointerEvent::Down` themselves. (Before
+        // P06 this comment also warned about wiping `DoubleTapRecognizer`'s
+        // cross-sequence state; that state now lives on the node, in the
+        // `TapStreak`, precisely so no arena lifetime can destroy it.)
         if matches!(event, RawPointerEvent::Down { .. }) {
             for entry in &mut self.entries {
                 entry.failed = false;
             }
         }
 
+        self.arbitrate(|recognizer| recognizer.process(event, cx))
+    }
+
+    /// Feed an event with no node behind it: the arena's own streak, the
+    /// shipped profile for the event's pointer kind, and no bounds.
+    ///
+    /// What a hand-rolled arena uses. The dispatch path calls
+    /// [`process_with`](Self::process_with) instead, so the thresholds follow
+    /// the live theme and the streak is the node's.
+    pub fn process(&mut self, event: &RawPointerEvent) -> Option<GestureEvent> {
+        let base = RecognizerContext::for_event(event);
+        if let Some((press, button)) = self.contact.observe(event, &base.profile) {
+            self.fallback_streak
+                .advance(base.now, &base.profile, press, button);
+        }
+        let streak = std::mem::take(&mut self.fallback_streak);
+        let cx = base.with_streak(&streak);
+        let recognized = self.process_with(event, &cx);
+        self.fallback_streak = streak;
+        if recognized.is_some_and(|g| !super::arena_set::preserves_streak(&g)) {
+            self.fallback_streak.reset();
+        }
+        recognized
+    }
+
+    /// Advance time-driven recognizers (notably `LongPressRecognizer`) and
+    /// return the highest-priority gesture that just transitioned to
+    /// `Recognized`, if any. Must be called by the event loop on each wake
+    /// so long-press fires without requiring further pointer traffic.
+    pub fn tick_with(&mut self, cx: &RecognizerContext) -> Option<GestureEvent> {
+        self.arbitrate(|recognizer| recognizer.tick(cx))
+    }
+
+    /// Run one round of `step` across every non-failed recognizer and resolve
+    /// the winner. Shared by [`process_with`](Self::process_with) and
+    /// [`tick_with`](Self::tick_with), which differ only in what they ask each
+    /// recognizer to do.
+    fn arbitrate(
+        &mut self,
+        mut step: impl FnMut(&mut dyn GestureRecognizer) -> GestureResult,
+    ) -> Option<GestureEvent> {
         let mut best: Option<(usize, u32, GestureEvent)> = None;
 
         for (i, entry) in self.entries.iter_mut().enumerate() {
             if entry.failed {
                 continue;
             }
-            match entry.recognizer.process(event) {
+            match step(entry.recognizer.as_mut()) {
                 GestureResult::Recognized(gesture) => {
                     let prio = entry.recognizer.priority();
                     if best.as_ref().is_none_or(|(_, bp, _)| prio > *bp) {
@@ -94,51 +180,10 @@ impl GestureArena {
         best.map(|(_, _, gesture)| gesture)
     }
 
-    /// Advance time-driven recognizers (notably `LongPressRecognizer`) and
-    /// return the highest-priority gesture that just transitioned to
-    /// `Recognized`, if any. Must be called by the event loop on each wake
-    /// so long-press fires without requiring further pointer traffic.
-    pub fn tick(&mut self, now: Instant) -> Option<GestureEvent> {
-        let mut best: Option<(usize, u32, GestureEvent)> = None;
-
-        for (i, entry) in self.entries.iter_mut().enumerate() {
-            if entry.failed {
-                continue;
-            }
-            match entry.recognizer.tick(now) {
-                GestureResult::Recognized(gesture) => {
-                    let prio = entry.recognizer.priority();
-                    if best.as_ref().is_none_or(|(_, bp, _)| prio > *bp) {
-                        best = Some((i, prio, gesture));
-                    }
-                }
-                GestureResult::Failed => {
-                    entry.failed = true;
-                }
-                GestureResult::Pending => {}
-            }
-        }
-
-        if let Some((winner_idx, _, _)) = &best {
-            for (i, entry) in self.entries.iter_mut().enumerate() {
-                if i == *winner_idx || entry.failed {
-                    continue;
-                }
-                if !entry.recognizer.resets_on_peer_recognition() {
-                    continue;
-                }
-                entry.recognizer.reset();
-                entry.failed = false;
-            }
-        }
-
-        best.map(|(_, _, gesture)| gesture)
-    }
-
-    /// Earliest wall-clock instant at which any recognizer in this arena
-    /// would like `tick()` to be called. Returns `None` if no recognizer
-    /// has a pending time-driven transition.
-    pub fn next_deadline(&self) -> Option<Instant> {
+    /// Earliest instant at which any recognizer in this arena would like
+    /// `tick_with()` to be called. Returns `None` if no recognizer has a
+    /// pending time-driven transition.
+    pub fn next_deadline(&self) -> Option<EventTime> {
         self.entries
             .iter()
             .filter(|entry| !entry.failed)
@@ -152,6 +197,33 @@ impl GestureArena {
             entry.recognizer.reset();
             entry.failed = false;
         }
+        self.contact = TapContact::default();
+    }
+
+    /// Revoke every recognizer: the interaction was taken away rather than
+    /// completed.
+    pub fn cancel(&mut self) {
+        for entry in &mut self.entries {
+            entry.recognizer.cancel();
+            entry.failed = true;
+        }
+        self.contact = TapContact::default();
+    }
+
+    /// Revoke only the tap family — tap, double tap, triple tap, long press —
+    /// and leave everything else running.
+    ///
+    /// This is the asymmetry WCAG 2.2 SC 2.5.2 needs: sliding a finger off a
+    /// button must abort the *activation* without aborting the drag the same
+    /// press is driving.
+    pub fn cancel_taps(&mut self) {
+        for entry in &mut self.entries {
+            if entry.recognizer.tap_family() {
+                entry.recognizer.cancel();
+                entry.failed = true;
+            }
+        }
+        self.contact = TapContact::default();
     }
 
     /// Returns true if the arena has any recognizers.

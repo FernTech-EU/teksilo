@@ -11,10 +11,24 @@
 //! or theme-wide (`theme.style_slots.grid_view = Some(Rc::new(...))`).
 
 use teksilo_core::styles::GridViewStyle;
+use teksilo_tokens::InputTokens;
 
 /// The stock grid decoration style. Unit struct — all chrome comes from the
 /// trait defaults.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RecipeGridViewStyle;
+
+impl RecipeGridViewStyle {
+    /// This style resolved against a density's [`InputTokens`], as
+    /// `RecipeGridViewStyle::for_tokens(&ctx.theme().input)` at the widget's own
+    /// build site.
+    ///
+    /// The style is a unit struct: every dimension it draws on comes from
+    /// the [`GridViewStyle`] trait defaults, none of which is a target or a
+    /// gap, so the projection is the identity at every density.
+    pub fn for_tokens(_tokens: &InputTokens) -> Self {
+        Self
+    }
+}
 
 impl GridViewStyle for RecipeGridViewStyle {}

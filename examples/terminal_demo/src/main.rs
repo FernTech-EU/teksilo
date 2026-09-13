@@ -13,6 +13,18 @@
 //! Run: `cargo run -p terminal-demo`
 //!
 //! Click the terminal to give it keyboard focus.
+//!
+//! # Touch
+//!
+//! The terminal claims the pan itself, so a **one-finger drag scrolls the
+//! scrollback** and hands its velocity off to a kinetic coast; the offset is a
+//! ring position quantised to lines, so a sub-line sample is banked rather than
+//! dropped. Double- and triple-tap select the word and the line. A **hold** opens
+//! the terminal's own menu (Copy / Paste / Select all / Clear) — the terminal
+//! raises no separate selection toolbar, because its hold *is* the menu. Selection
+//! handles snap to cell boundaries. A finger is never reported to the child
+//! program as a mouse; that is a policy of its own, separate from the mouse
+//! reporting a program requests. See [docs/terminal.md](../../docs/terminal.md).
 
 use teksilo::prelude::*;
 use teksilo::terminal::{BellStyle, CursorStyle, Terminal};

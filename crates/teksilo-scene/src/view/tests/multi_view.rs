@@ -263,14 +263,12 @@ fn drag_on_delegated_heavyweight_tappable_card_starts_marquee() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     tree.pointer_move(Point::new(70.0, 70.0));
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(70.0, 70.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(120.0, 120.0),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(70.0, 70.0),
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(120.0, 120.0)));
 
     view_ref(&tree, view_id, |v| {
         assert!(

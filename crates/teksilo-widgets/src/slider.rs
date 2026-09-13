@@ -43,6 +43,31 @@
 //! let volume = Signal::new(0.5_f32);
 //! let _w = Slider::new(volume, 0.0, 1.0).step(0.05);
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! A slider is a **continuous manipulator**: the value it produces *is* the
+//! press position, so a finger that lands on it adjusts it — even inside a
+//! scrolling form, and from the first movement rather than after a long-press
+//! timer. Two separate things deliver that. The press *capture* the drag takes
+//! makes the slider the innermost member of the pointer's sequence, which is
+//! what stops an enclosing scroller winning the gesture. `touch_action(NONE)`
+//! is the declaration on top: it forbids every default touch behaviour on the
+//! hit path, which in practice means a **two-contact pinch** started on the
+//! slider never reaches the surface under it. `docs/touch-and-pen.md` §7.3.
+//!
+//! [`teksilo_core::widget::Widget::target_regions`]
+//! reports what the style painted inside the slider's one node: the whole node
+//! as the press surface, and the knob as the grab affordance, sized through the
+//! resolved style's density-aware `thumb_diameter_for`. Nothing else in the
+//! tree can see the knob — it is drawn on the same canvas as the track — so
+//! this is the only way a conformance audit or a coarse-press router learns it
+//! is there.
+//!
+//! **Right-to-left.** A horizontal slider's minimum sits at the *leading* edge,
+//! which is the right-hand one in an RTL UI, so both the painted fill and the
+//! position→value map mirror. They were previously mirrored in neither, so an
+//! RTL slider's knob moved away from the finger dragging it.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -52,6 +77,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::gesture::DragPhase;
+use teksilo_core::pointer::touch_action::TouchAction;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{
     SharedSliderStyle, SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
@@ -68,6 +94,12 @@ use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 // import path.
 pub use teksilo_core::styles::SliderVariant as SliderVariantExport;
 use teksilo_i18n::LocalizedString;
+
+/// [`Widget::target_regions`] part id for the whole press surface — the track
+/// plus everything either side of it, which is what a tap or a drag acts on.
+pub const SLIDER_PART_BODY: u16 = 0;
+/// [`Widget::target_regions`] part id for the knob.
+pub const SLIDER_PART_THUMB: u16 = 1;
 
 /// A draggable value selector bound to a `Signal<f32>` in a continuous
 /// or discrete range. Visual chrome is fully delegated to a
@@ -94,6 +126,14 @@ pub struct Slider {
     /// `build()` (`:focus-visible`).
     focused: Signal<bool>,
     cached_bounds: Rc<Cell<Rect>>,
+    /// Reading direction, captured in `place_children` (the one hook with a
+    /// `LayoutContext`) so both the position→value map, which only ever sees an
+    /// `EventContext`, and `target_regions`, which sees neither, agree with
+    /// what the style painted.
+    cached_rtl: Rc<Cell<bool>>,
+    /// The knob diameter the resolved style reported at build time, kept so
+    /// `target_regions` can place the thumb exactly where the body painted it.
+    thumb_diameter: Cell<f32>,
     body_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
@@ -125,6 +165,8 @@ impl Slider {
             dragging: Signal::new(false),
             focused: Signal::new(false),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
+            cached_rtl: Rc::new(Cell::new(false)),
+            thumb_diameter: Cell::new(0.0),
             body_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -285,7 +327,11 @@ impl Widget for Slider {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.slider.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeSliderStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeSliderStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
 
         // Derived `value_normalized` signal — re-renders the body
         // whenever the user-visible value changes.
@@ -320,7 +366,7 @@ impl Widget for Slider {
                 } else if *v {
                     Some(FocusOrigin::Keyboard)
                 } else {
-                    Some(FocusOrigin::Pointer)
+                    Some(FocusOrigin::POINTER)
                 }
             }),
             orientation,
@@ -335,8 +381,12 @@ impl Widget for Slider {
         // `EventContext` and can't reach the theme at event time.
         // Query the *resolved* style so a custom `SliderStyle` with a
         // different thumb size keeps drag hit-testing aligned, instead of
-        // baking in the recipe's design constant.
-        let thumb_radius = style.thumb_diameter(&cfg) * 0.5;
+        // baking in the recipe's design constant. Through the density-aware
+        // overload, so a style that does size its knob by density is asked the
+        // question that lets it answer; the default forwards to the plain
+        // `thumb_diameter` and the painted 14 dp knob is unchanged.
+        let thumb_radius = style.thumb_diameter_for(&cfg, &ctx.theme().input) * 0.5;
+        self.thumb_diameter.set(thumb_radius * 2.0);
 
         let value = self.value.clone();
         let single_step = self.effective_step();
@@ -429,7 +479,16 @@ impl Widget for Slider {
         // no per-handler enabled snapshot guards anymore.
         let mut handlers = HandlerSet::new()
             .focusable(true)
-            .cursor(CursorIcon::Pointer);
+            .cursor(CursorIcon::Pointer)
+            // A continuous manipulator: the value it produces IS the press
+            // position, so no default touch behaviour may be run on it. `NONE`
+            // freezes the whole hit path's touch action at the press
+            // (`docs/touch-and-pen.md` §7.3, A6). What that observably forbids
+            // — and what `two_contacts_on_a_slider_pinch_nothing_underneath`
+            // holds it to — is a **two-contact pinch** started on the slider
+            // reaching the surface underneath. Keeping an enclosing scroller
+            // off the press is the drag's capture, not this.
+            .touch_action(TouchAction::NONE);
 
         // Thumb drag — routed through the typed gesture API.
         {
@@ -439,6 +498,7 @@ impl Widget for Slider {
                 DragPhase::Started {
                     position,
                     button: PointerButton::Primary,
+                    ..
                 } => {
                     dragging.set(true);
                     set_value(position.x, position.y, ctx.is_rtl());
@@ -592,10 +652,11 @@ impl Widget for Slider {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         // Cache bounds for event handling (needed before paint).
         self.cached_bounds.set(bounds);
+        self.cached_rtl.set(ctx.is_rtl());
         if let Some(child) = children.first_mut() {
             child.origin = bounds.origin();
             child.size = bounds.size();
@@ -604,6 +665,58 @@ impl Widget for Slider {
 
     fn children(&self) -> Vec<WidgetId> {
         self.body_id.into_iter().collect()
+    }
+
+    /// What a slider paints inside its one node: a track and a knob.
+    ///
+    /// The node itself is the *target* — a press anywhere on it jumps the value
+    /// and a drag from anywhere moves it — so it is reported whole, and it is
+    /// what the conformance audit measures (the shipped body is at least 24 dp
+    /// across, `MIN_CROSS_SIZE` in `styles/recipe_slider_style.rs`). The knob is
+    /// reported as a **grab** because that is the affordance a user aims at,
+    /// and because nothing else in the tree can see that it exists: it is drawn
+    /// on the same canvas as the track, and its diameter comes from the
+    /// resolved [`SliderStyle`], not from any layout.
+    ///
+    /// The geometry is derived exactly as the body paints it, mirrored under
+    /// RTL, so the report and the picture cannot drift.
+    fn target_regions(&self, bounds: Rect) -> Vec<teksilo_core::partition::TargetRegion> {
+        use teksilo_core::partition::TargetRegion;
+
+        let mut regions = vec![TargetRegion::target(bounds, SLIDER_PART_BODY)];
+        let diameter = self.thumb_diameter.get();
+        if diameter <= 0.0 || !diameter.is_finite() {
+            return regions;
+        }
+        let radius = diameter * 0.5;
+        let range = self.max - self.min;
+        let t = if range.abs() < f32::EPSILON {
+            0.0
+        } else {
+            ((self.value.get() - self.min) / range).clamp(0.0, 1.0)
+        };
+        let (cx, cy) = match self.orientation {
+            Orientation::Horizontal => {
+                let usable = (bounds.width - diameter).max(0.0);
+                let t = if self.cached_rtl.get() { 1.0 - t } else { t };
+                (
+                    bounds.x + radius + usable * t,
+                    bounds.y + bounds.height * 0.5,
+                )
+            }
+            Orientation::Vertical => {
+                let usable = (bounds.height - diameter).max(0.0);
+                (
+                    bounds.x + bounds.width * 0.5,
+                    bounds.y + radius + usable * t,
+                )
+            }
+        };
+        regions.push(TargetRegion::grab(
+            Rect::new(cx - radius, cy - radius, diameter, diameter),
+            SLIDER_PART_THUMB,
+        ));
+        regions
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -990,16 +1103,16 @@ mod tests {
         // left-to-right.
         let p = Point::new(190.0, 30.0);
         tree.pointer_move(p);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(
             value.get() < 20.0,
             "a click near the right edge is near the minimum under RTL, got {}",
@@ -1057,16 +1170,8 @@ mod tests {
         let top = Point::new(30.0, 12.0);
         tree.pointer_move(top);
         for ev in [
-            WidgetEvent::PointerDown {
-                position: top,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
-            WidgetEvent::PointerUp {
-                position: top,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
+            WidgetEvent::pointer_down(top, PointerButton::Primary, Modifiers::NONE),
+            WidgetEvent::pointer_up(top, PointerButton::Primary, Modifiers::NONE),
         ] {
             tree.dispatch_event(ev);
         }
@@ -1174,16 +1279,16 @@ mod tests {
             b.x
         );
         for ev in [
-            WidgetEvent::PointerDown {
-                position: Point::new(140.0, 30.0),
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
-            WidgetEvent::PointerUp {
-                position: Point::new(140.0, 30.0),
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
+            WidgetEvent::pointer_down(
+                Point::new(140.0, 30.0),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
+            WidgetEvent::pointer_up(
+                Point::new(140.0, 30.0),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
         ] {
             tree.dispatch_event(ev);
         }
@@ -1270,5 +1375,581 @@ mod tests {
             info.actions()
                 .contains(&teksilo_core::accesskit::Action::Decrement)
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Touch: the manipulator contract
+    // -----------------------------------------------------------------
+
+    /// A finger drag that starts on a slider inside a scroller adjusts the
+    /// slider, from the **first move sample**, and scrolls nothing.
+    ///
+    /// The end-to-end behaviour the touch programme promises for a continuous
+    /// manipulator. What delivers it is the press capture the slider's drag
+    /// takes: it makes the slider the innermost member of the pointer's
+    /// sequence, which both stops the enclosing claimant winning the gesture
+    /// and means no long-press timer is ever interposed. The drag is deliberately
+    /// **vertical-dominant** — straight down the axis the scroller claims and
+    /// far past the 36 dp pan slop — because a drag along the slider's own axis
+    /// is not contested by a vertical claimant and would prove nothing.
+    #[test]
+    fn a_finger_drag_on_a_slider_inside_a_scroller_adjusts_the_slider() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::event::EventResponse;
+        use teksilo_core::pointer::PointerPhase;
+        use teksilo_core::pointer::touch_action::PanClaim;
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let scrolled = Rc::new(Cell::new(0_u32));
+        let count = scrolled.clone();
+        let value = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let slider = tree.add(Slider::new(value.clone(), 0.0, 100.0));
+        let _list = tree.add(
+            crate::primitives::VStack::new()
+                .add_child(slider)
+                .scroll_container(teksilo_core::pointer::touch_action::PanAxes::BOTH)
+                .pan_claim(PanClaim::vertical())
+                .on_scroll(move |_e, _c| {
+                    count.set(count.get() + 1);
+                    EventResponse::Handled
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        let b = tree.bounds(slider);
+        let start = Point::new(b.x + 20.0, b.center().y);
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, start, 0));
+
+        // One move, already past the coarse 18 dp drag slop. The value must
+        // have moved on *this* sample: a drag deferred to the 500 ms long-press
+        // timer would leave it at zero here.
+        tree.dispatch_pointer(touch(
+            id,
+            PointerPhase::Move,
+            Point::new(start.x + 30.0, start.y + 45.0),
+            20,
+        ));
+        assert!(
+            value.get() > 0.0,
+            "the drag must arm on the first move, not after a long press (value {})",
+            value.get(),
+        );
+
+        // …and keep going, vertically far past the 36 dp pan slop.
+        for (i, (dx, dy)) in [(60.0_f32, 90.0_f32), (90.0, 140.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let at = Point::new(start.x + dx, start.y + dy);
+            tree.dispatch_pointer(touch(id, PointerPhase::Move, at, 40 + i as u64 * 20));
+        }
+        tree.dispatch_pointer(touch(
+            id,
+            PointerPhase::Up,
+            Point::new(start.x + 90.0, start.y + 140.0),
+            100,
+        ));
+        assert!(
+            value.get() > 40.0,
+            "the finger drag did not reach the slider (value {})",
+            value.get(),
+        );
+        assert_eq!(scrolled.get(), 0, "and it must not have scrolled the list");
+    }
+
+    /// **`touch_action(NONE)`'s own test.** Two contacts landing on a
+    /// manipulator start no pinch on the surface under it.
+    ///
+    /// This is the one consumer of the declaration that the slider's press
+    /// capture does not already cover: `feed_pinch` asks
+    /// `effective_touch_action(hit target).allows_pinch()` on the contact
+    /// itself, before any capture or arbitration exists. Relax the slider to
+    /// `AUTO` and the pinch starts.
+    #[test]
+    fn two_contacts_on_a_slider_pinch_nothing_underneath() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::gesture::PinchPhase;
+        use teksilo_core::pointer::PointerPhase;
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let started = Rc::new(Cell::new(0_u32));
+        let n = started.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let slider = tree.add(Slider::new(Signal::new(0.0_f32), 0.0, 100.0));
+        let _surface = tree.add(crate::primitives::ZStack::new().add_child(slider).on_pinch(
+            move |phase, _c| {
+                if matches!(phase, PinchPhase::Started { .. }) {
+                    n.set(n.get() + 1);
+                }
+            },
+        ));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        let b = tree.bounds(slider);
+        let a = finger();
+        let c = finger();
+        tree.dispatch_pointer(touch(
+            a,
+            PointerPhase::Down,
+            Point::new(b.x + 40.0, b.center().y),
+            0,
+        ));
+        tree.dispatch_pointer(touch(
+            c,
+            PointerPhase::Down,
+            Point::new(b.x + 150.0, b.center().y),
+            5,
+        ));
+
+        assert_eq!(
+            started.get(),
+            0,
+            "a pinch started on a manipulator must not reach the surface under it",
+        );
+        assert!(
+            !tree.touch_pinch_active(),
+            "…and no pinch may be running at all",
+        );
+    }
+
+    /// The mirroring reaches the mounted widget, off the same layout direction
+    /// the pointer path reads at event time — which is what makes the keys and
+    /// the drag agree by construction rather than by coincidence. The chord
+    /// table itself is `common::range_nav`, shared with every other bounded
+    /// scalar and tested there.
+    #[test]
+    fn an_rtl_slider_raises_its_value_on_the_leftward_arrow() {
+        use teksilo_core::environment::LayoutDirection;
+
+        for (direction, raising, lowering) in [
+            (
+                LayoutDirection::LeftToRight,
+                Key::ArrowRight,
+                Key::ArrowLeft,
+            ),
+            (
+                LayoutDirection::RightToLeft,
+                Key::ArrowLeft,
+                Key::ArrowRight,
+            ),
+        ] {
+            let value = Signal::new(50.0_f32);
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            tree.set_layout_direction(direction);
+            let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+            tree.layout(SizeProposal::exact(200.0, 40.0));
+            tree.focus(s);
+            tree.press_key(raising, Modifiers::NONE);
+            assert_eq!(value.get(), 60.0, "{direction:?}: {raising:?} must raise");
+            tree.press_key(lowering, Modifiers::NONE);
+            tree.press_key(lowering, Modifiers::NONE);
+            assert_eq!(value.get(), 40.0, "{direction:?}: {lowering:?} must lower");
+        }
+    }
+
+    /// A horizontal slider's minimum sits at the **leading** edge, which is the
+    /// right-hand one under RTL. The painted knob and the value the press maps
+    /// to must agree; before this they ran opposite ways.
+    #[test]
+    fn the_value_axis_mirrors_under_rtl() {
+        use teksilo_core::environment::LayoutDirection;
+
+        let value = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_layout_direction(LayoutDirection::RightToLeft);
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        let b = tree.bounds(s);
+
+        // A tap near the RIGHT edge is the minimum under RTL.
+        tree.pointer_down_button(
+            Point::new(b.right() - 4.0, b.center().y),
+            PointerButton::Primary,
+        );
+        tree.pointer_up_button(
+            Point::new(b.right() - 4.0, b.center().y),
+            PointerButton::Primary,
+        );
+        assert!(
+            value.get() < 10.0,
+            "RTL minimum is the right edge, got {}",
+            value.get()
+        );
+
+        // …and the LEFT edge is the maximum.
+        tree.pointer_down_button(Point::new(b.x + 4.0, b.center().y), PointerButton::Primary);
+        tree.pointer_up_button(Point::new(b.x + 4.0, b.center().y), PointerButton::Primary);
+        assert!(
+            value.get() > 90.0,
+            "RTL maximum is the left edge, got {}",
+            value.get()
+        );
+    }
+
+    /// What the body actually painted, read out of the render frame.
+    ///
+    /// The default `SliderStyle` draws track, fill and knob as three rounded
+    /// rects on one canvas, so nothing in the widget tree can be measured to
+    /// find them; the frame is the only place the picture exists. They are told
+    /// apart by the two things the recipe fixes: the track carries
+    /// `surface_sunken`, and of the two accent-coloured rects the knob is the
+    /// square one (`thumb_diameter` on both axes) while the fill is
+    /// `track_height` tall.
+    struct PaintedSlider {
+        track: teksilo_canvas::Rect,
+        fill: Option<teksilo_canvas::Rect>,
+        thumb: teksilo_canvas::Rect,
+    }
+
+    fn painted_slider(
+        direction: teksilo_core::environment::LayoutDirection,
+        value: f32,
+    ) -> PaintedSlider {
+        use crate::styles::recipe_slider_style::{SLIDER_THUMB_DIAMETER, SLIDER_TRACK_HEIGHT};
+
+        let theme = teksilo_core::presets::intui::light();
+        let accent = theme.colors.accent.to_array();
+        let sunken = theme.colors.surface_sunken.to_array();
+        let mut tree = WidgetTree::new().with_theme(theme);
+        tree.set_layout_direction(direction);
+        let _s = tree.add(Slider::new(Signal::new(value), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        let frame = tree.render();
+        let rect = |q: &teksilo_canvas::ShapeQuad| {
+            teksilo_canvas::Rect::new(q.screen[0], q.screen[1], q.screen[2], q.screen[3])
+        };
+        let track = frame
+            .shapes
+            .iter()
+            .find(|q| q.color == sunken)
+            .map(rect)
+            .expect("the body paints a track");
+        let thumb = frame
+            .shapes
+            .iter()
+            .find(|q| {
+                q.color == accent
+                    && (q.screen[2] - SLIDER_THUMB_DIAMETER).abs() < 0.01
+                    && (q.screen[3] - SLIDER_THUMB_DIAMETER).abs() < 0.01
+            })
+            .map(rect)
+            .expect("the body paints a knob");
+        let fill = frame
+            .shapes
+            .iter()
+            .find(|q| {
+                q.color == accent
+                    && (q.screen[3] - SLIDER_TRACK_HEIGHT).abs() < 0.01
+                    && q.screen[2] > 0.0
+            })
+            .map(rect);
+        PaintedSlider { track, fill, thumb }
+    }
+
+    /// The reported knob is where the body painted it, in both directions.
+    ///
+    /// Two halves, and the second is what makes the first mean anything: the
+    /// report is derived in `Slider::target_regions` from a cached rtl flag and
+    /// the picture is derived in `SliderBody::paint` from the paint context's
+    /// own, so "the report and the picture cannot drift" is a claim about two
+    /// separate pieces of arithmetic. Reading only the report would leave the
+    /// paint free to run the other way.
+    #[test]
+    fn the_reported_thumb_mirrors_with_the_paint() {
+        use teksilo_core::environment::LayoutDirection;
+
+        fn thumb_centre(direction: LayoutDirection) -> f32 {
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            tree.set_layout_direction(direction);
+            let s = tree.add(Slider::new(Signal::new(0.0_f32), 0.0, 100.0));
+            tree.layout(SizeProposal::exact(200.0, 40.0));
+            let bounds = tree.bounds(s);
+            let regions = tree.widget_target_regions(s);
+            let thumb = regions
+                .iter()
+                .find(|r| r.part == SLIDER_PART_THUMB)
+                .expect("the slider reports its knob");
+            thumb.rect.center().x - bounds.x
+        }
+
+        let ltr = thumb_centre(LayoutDirection::LeftToRight);
+        let rtl = thumb_centre(LayoutDirection::RightToLeft);
+        assert!(
+            ltr < 20.0,
+            "at the minimum, LTR puts the knob at the left ({ltr})"
+        );
+        assert!(rtl > 180.0, "and RTL puts it at the right ({rtl})");
+
+        // …and the paint agrees, at a value where being off by the mirror is
+        // three quarters of the track rather than a rounding error.
+        for direction in [LayoutDirection::LeftToRight, LayoutDirection::RightToLeft] {
+            let painted = painted_slider(direction, 25.0);
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            tree.set_layout_direction(direction);
+            let s = tree.add(Slider::new(Signal::new(25.0_f32), 0.0, 100.0));
+            tree.layout(SizeProposal::exact(200.0, 40.0));
+            let reported = tree
+                .widget_target_regions(s)
+                .into_iter()
+                .find(|r| r.part == SLIDER_PART_THUMB)
+                .expect("the slider reports its knob");
+            assert!(
+                (reported.rect.center().x - painted.thumb.center().x).abs() < 0.51,
+                "{direction:?}: the slider reports its knob at {} and paints it at {}",
+                reported.rect.center().x,
+                painted.thumb.center().x,
+            );
+        }
+    }
+
+    /// Under RTL a horizontal slider's minimum is the **right** edge, so the
+    /// filled part of the track is the stretch between the knob and that edge.
+    ///
+    /// The knob and the fill are mirrored by two separate expressions in
+    /// `SliderBody::paint`, and reverting either one on its own leaves a
+    /// picture that is merely wrong rather than crashing: a knob a quarter of
+    /// the way along an RTL track, or a fill running from the wrong edge and
+    /// three times too long. Both are pinned here, against a value far from the
+    /// midpoint so neither can hide behind symmetry.
+    #[test]
+    fn the_rtl_fill_runs_from_the_knob_to_the_leading_edge() {
+        use teksilo_core::environment::LayoutDirection;
+
+        let ltr = painted_slider(LayoutDirection::LeftToRight, 25.0);
+        let ltr_fill = ltr.fill.expect("a quarter-full slider paints a fill");
+        assert!(
+            (ltr_fill.x - ltr.track.x).abs() < 0.51,
+            "LTR fills from the left edge of the track, not from {}",
+            ltr_fill.x,
+        );
+        assert!(
+            (ltr_fill.width - ltr.track.width * 0.25).abs() < 0.51,
+            "LTR fills a quarter of the track, not {} of {}",
+            ltr_fill.width,
+            ltr.track.width,
+        );
+        assert!(
+            (ltr_fill.right() - ltr.thumb.center().x).abs() < 0.51,
+            "LTR: the fill ends at the knob ({} vs {})",
+            ltr_fill.right(),
+            ltr.thumb.center().x,
+        );
+
+        let rtl = painted_slider(LayoutDirection::RightToLeft, 25.0);
+        let rtl_fill = rtl.fill.expect("a quarter-full slider paints a fill");
+        assert!(
+            (rtl.thumb.center().x - (rtl.track.x + rtl.track.width * 0.75)).abs() < 0.51,
+            "RTL puts a quarter-value knob three quarters along the track, not at {}",
+            rtl.thumb.center().x,
+        );
+        assert!(
+            (rtl_fill.right() - rtl.track.right()).abs() < 0.51,
+            "RTL fills to the right edge of the track, not to {}",
+            rtl_fill.right(),
+        );
+        assert!(
+            (rtl_fill.width - rtl.track.width * 0.25).abs() < 0.51,
+            "RTL fills a quarter of the track, not {} of {}",
+            rtl_fill.width,
+            rtl.track.width,
+        );
+        assert!(
+            (rtl_fill.x - rtl.thumb.center().x).abs() < 0.51,
+            "RTL: the fill starts at the knob ({} vs {})",
+            rtl_fill.x,
+            rtl.thumb.center().x,
+        );
+    }
+
+    /// The reported knob is the size the **style** says it painted.
+    ///
+    /// `Slider` cannot see the knob: it is three rounded rects on one canvas,
+    /// and the only place its diameter exists is the resolved `SliderStyle`.
+    /// So the widget asks — `thumb_diameter_for`, at build time, while the
+    /// theme is still in reach — and the source comment says why it asks
+    /// rather than baking in the recipe's design constant: "so a custom
+    /// `SliderStyle` with a different thumb size keeps drag hit-testing
+    /// aligned".
+    ///
+    /// The expectation therefore has to come from the style too. A test that
+    /// re-derives it from the widget's own cached field asserts only that the
+    /// field equals itself, and a knob frozen at any plausible-looking constant
+    /// — the 24 dp conformance floor, say, against the shipped 14 dp — passes
+    /// it while every custom style's drag lands on the wrong pixel.
+    #[test]
+    fn the_reported_knob_is_the_size_the_style_reports() {
+        use teksilo_core::styles::{
+            SliderOrientation, SliderStyle, SliderStyleConfig, SliderVariant,
+        };
+
+        fn config() -> SliderStyleConfig {
+            SliderStyleConfig {
+                value_normalized: Signal::new(0.5),
+                is_hovered: Signal::new(false),
+                is_dragging: Signal::new(false),
+                is_disabled: Signal::new(false),
+                focus_origin: Signal::new(None),
+                orientation: SliderOrientation::Horizontal,
+                tick_count: None,
+                variant: SliderVariant::Continuous,
+            }
+        }
+
+        /// The knob region a slider reports, built with the default style or
+        /// with one that declares `diameter`.
+        fn reported_knob(diameter: Option<f32>) -> Rect {
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            let mut slider = Slider::new(Signal::new(50.0_f32), 0.0, 100.0);
+            if let Some(diameter) = diameter {
+                slider = slider.style(FatKnob(diameter));
+            }
+            let s = tree.add(slider);
+            tree.layout(SizeProposal::exact(200.0, 60.0));
+            tree.widget_target_regions(s)
+                .into_iter()
+                .find(|r| r.part == SLIDER_PART_THUMB)
+                .expect("the slider reports its knob")
+                .rect
+        }
+
+        /// A style that paints the stock body but declares a knob of its own.
+        /// The whole point of the `thumb_diameter` hook.
+        struct FatKnob(f32);
+
+        impl SliderStyle for FatKnob {
+            fn make_body(
+                &self,
+                cfg: &SliderStyleConfig,
+                ctx: &mut teksilo_core::build_context::BuildContext,
+            ) -> WidgetId {
+                crate::styles::RecipeSliderStyle::default().make_body(cfg, ctx)
+            }
+
+            fn thumb_diameter(&self, _cfg: &SliderStyleConfig) -> f32 {
+                self.0
+            }
+        }
+
+        // The shipped default: the number in the report is the number the
+        // default style answers with, not a constant that happens to look
+        // right today.
+        let shipped = crate::styles::RecipeSliderStyle::default().thumb_diameter(&config());
+        let knob = reported_knob(None);
+        assert_eq!(
+            (knob.width, knob.height),
+            (shipped, shipped),
+            "the default style reports a {shipped} dp knob and the region is {}x{}",
+            knob.width,
+            knob.height,
+        );
+
+        // And a style that disagrees is obeyed. 30 dp is nothing the widget
+        // could arrive at on its own: not the recipe's 14, not the 24 dp
+        // conformance floor, not the 6 dp grab floor the audit checks against.
+        let fat = reported_knob(Some(30.0));
+        assert_eq!(
+            (fat.width, fat.height),
+            (30.0, 30.0),
+            "a custom style's 30 dp knob reported as {}x{}",
+            fat.width,
+            fat.height,
+        );
+        assert_ne!(
+            fat.width, shipped,
+            "the probe only discriminates while the two styles disagree",
+        );
+    }
+
+    /// The slider reports its **whole node** as the press surface, beside the
+    /// knob.
+    ///
+    /// It is the first of the two regions and it is claimed twice in prose —
+    /// the module header's "the whole node as the press surface" and
+    /// `target_regions`' "it is reported whole, and it is what the conformance
+    /// audit measures". Both are load-bearing: a press anywhere on the body
+    /// jumps the value, so the body is the target a coarse-press router aims
+    /// at, and it is the rect the audit measures the 24 dp floor against. A
+    /// slider that reported only its knob would advertise a 14 dp control.
+    ///
+    /// The tests either side of this one do not cover it: the floor sweep
+    /// iterates whatever comes back, so it passes vacuously on an empty-but-
+    /// for-the-knob report, and the other two search for the thumb part alone.
+    /// The colour-picker strips have exactly this test
+    /// (`the_hue_strip_reports_its_body_and_its_thumb`).
+    #[test]
+    fn the_reported_body_is_the_whole_node() {
+        use teksilo_core::partition::TargetRegion;
+
+        fn body_of(regions: &[TargetRegion]) -> &TargetRegion {
+            regions
+                .iter()
+                .find(|r| r.part == SLIDER_PART_BODY)
+                .expect("the slider reports its body as a press surface")
+        }
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let value = Signal::new(50.0_f32);
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+
+        let bounds = tree.bounds(s);
+        let regions = tree.widget_target_regions(s);
+        assert_eq!(regions.len(), 2, "body and knob, got {regions:?}");
+
+        let body = body_of(&regions);
+        assert_eq!(
+            body.rect, bounds,
+            "the body region is the node's own rect, not a slice of it",
+        );
+        assert_eq!(
+            body.role,
+            teksilo_tokens::TargetRole::Target,
+            "a press surface is a Target — a Grab would be audited against the \
+             6 dp floor instead of the 24 dp one",
+        );
+
+        // The body is the node, so it does not follow the value the way the
+        // knob does — a report that mixed the two up is caught here.
+        let knob = regions
+            .iter()
+            .find(|r| r.part == SLIDER_PART_THUMB)
+            .expect("the slider reports its knob")
+            .rect;
+        assert!(
+            body.rect.width > knob.width,
+            "the body ({:?}) should span the whole node the knob ({knob:?}) slides along",
+            body.rect,
+        );
+        value.set(90.0);
+        assert_eq!(
+            body_of(&tree.widget_target_regions(s)).rect,
+            bounds,
+            "the body stays the whole node as the value moves",
+        );
+    }
+
+    /// Every region the slider reports clears the floor its role is audited
+    /// against, at the density CI runs at.
+    #[test]
+    fn the_reported_regions_clear_their_floors_at_compact() {
+        let theme = teksilo_core::presets::intui::light();
+        let tokens = theme.input;
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let s = tree.add(Slider::new(Signal::new(50.0_f32), 0.0, 100.0));
+        tree.layout(SizeProposal::exact(200.0, 40.0));
+        for region in tree.widget_target_regions(s) {
+            let floor = match region.role {
+                teksilo_tokens::TargetRole::Target => tokens.min_target_conformance,
+                teksilo_tokens::TargetRole::Grab => tokens.grab_size,
+                teksilo_tokens::TargetRole::Decoration => continue,
+            };
+            let min = region.rect.width.min(region.rect.height);
+            assert!(
+                min >= floor,
+                "part {} ({:?}) measured {min}, under its {floor} dp floor",
+                region.part,
+                region.role,
+            );
+        }
     }
 }

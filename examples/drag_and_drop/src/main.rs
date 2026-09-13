@@ -21,6 +21,17 @@
 //! `.export_external` also advertises `text/plain`, so a song can be dropped on
 //! another application.
 //!
+//! # Touch
+//!
+//! Every "drag a row" above means **hold the row first, then drag**, on a
+//! touchscreen or a stylus. A direct pointer's press belongs to the scroller the
+//! rows sit in until the hold arms the row's own drag; a mouse still drags from
+//! the first few pixels. The threshold is the active input profile's, not a
+//! number this example picks. See
+//! [docs/data-view-touch.md](../../docs/data-view-touch.md) §2, which also
+//! records the one place this is unreliable: a row shorter than the drag slop can
+//! lose the armed drag on its first sample.
+//!
 //! Run with: `cargo run -p drag-and-drop`
 
 use teksilo::core::WidgetPlacement;
@@ -147,7 +158,7 @@ impl Root {
                         )
                         .child(
                             TextWidget::new(lit!(
-                                "Reorder within, or drag row(s) \u{2192} Playlist (copy). Multi-select with Ctrl/Shift."
+                                "Reorder within, or drag row(s) \u{2192} Playlist (copy). Multi-select with Ctrl/Shift. On a touchscreen, hold a row first."
                             ))
                             .style(small)
                             .color(text_muted),
@@ -206,7 +217,7 @@ impl Root {
                         )
                         .child(
                             TextWidget::new(lit!(
-                                "Drop songs here from the Library. Drag a row onto Trash to remove it."
+                                "Drop songs here from the Library. Drag a row onto Trash to remove it \u{2014} hold it first with a finger."
                             ))
                             .style(small.clone())
                             .color(text_muted),
@@ -374,7 +385,7 @@ impl Root {
                                 .color(text_primary),
                         )
                         .child(
-                            TextWidget::new(lit!("Drag a row onto another: top third = before, middle = into, bottom = after."),
+                            TextWidget::new(lit!("Drag a row onto another: top third = before, middle = into, bottom = after. Hold first with a finger."),
                             )
                             .style(small)
                             .color(text_muted),

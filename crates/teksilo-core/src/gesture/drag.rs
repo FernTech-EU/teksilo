@@ -5,12 +5,16 @@ use teksilo_canvas::{Point, Vec2};
 
 use crate::event::PointerButton;
 
-use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent};
+use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, RecognizerContext};
 
 /// Recognizes a drag gesture (pointer down + move beyond threshold).
+///
+/// The threshold comes from the active profile's `drag_slop` — 5 dp for a
+/// mouse (exactly the pre-P06 constant), 18 dp for a finger — unless
+/// [`threshold`](Self::threshold) pins it.
 #[derive(Debug)]
 pub struct DragRecognizer {
-    threshold: f32,
+    threshold: Option<f32>,
     down_position: Option<Point>,
     down_button: Option<PointerButton>,
     dragging: bool,
@@ -20,7 +24,7 @@ pub struct DragRecognizer {
 impl DragRecognizer {
     pub fn new() -> Self {
         Self {
-            threshold: 5.0,
+            threshold: None,
             down_position: None,
             down_button: None,
             dragging: false,
@@ -28,9 +32,15 @@ impl DragRecognizer {
         }
     }
 
+    /// Pin the travel that arms the drag, overriding the profile's
+    /// `drag_slop`.
     pub fn threshold(mut self, t: f32) -> Self {
-        self.threshold = t;
+        self.threshold = Some(t);
         self
+    }
+
+    fn slop(&self, cx: &RecognizerContext) -> f32 {
+        self.threshold.unwrap_or(cx.profile.drag_slop)
     }
 }
 
@@ -41,7 +51,8 @@ impl Default for DragRecognizer {
 }
 
 impl GestureRecognizer for DragRecognizer {
-    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
+    fn process(&mut self, event: &RawPointerEvent, cx: &RecognizerContext) -> GestureResult {
+        let threshold = self.slop(cx);
         match event {
             RawPointerEvent::Down {
                 position, button, ..
@@ -52,7 +63,9 @@ impl GestureRecognizer for DragRecognizer {
                 self.dragging = false;
                 GestureResult::Pending
             }
-            RawPointerEvent::Move { position } => {
+            RawPointerEvent::Move {
+                position, pointer, ..
+            } => {
                 let Some(down) = self.down_position else {
                     return GestureResult::Pending;
                 };
@@ -64,12 +77,13 @@ impl GestureRecognizer for DragRecognizer {
                     return GestureResult::Recognized(GestureEvent::DragMoved {
                         position: *position,
                         delta,
+                        pointer: *pointer,
                     });
                 }
 
                 let dx = position.x - down.x;
                 let dy = position.y - down.y;
-                if (dx * dx + dy * dy).sqrt() >= self.threshold {
+                if (dx * dx + dy * dy).sqrt() >= threshold {
                     self.dragging = true;
                     self.last_position = Some(*position);
                     // `DragStarted.position` reports the *initial press*
@@ -82,20 +96,43 @@ impl GestureRecognizer for DragRecognizer {
                     return GestureResult::Recognized(GestureEvent::DragStarted {
                         position: down,
                         button: self.down_button.unwrap_or(PointerButton::Primary),
+                        pointer: *pointer,
                     });
                 }
 
                 GestureResult::Pending
             }
-            RawPointerEvent::Up { position, .. } => {
+            RawPointerEvent::Up {
+                position, pointer, ..
+            } => {
                 if self.dragging {
                     self.dragging = false;
                     self.down_position = None;
                     return GestureResult::Recognized(GestureEvent::DragEnded {
                         position: *position,
+                        pointer: *pointer,
                     });
                 }
                 self.down_position = None;
+                GestureResult::Failed
+            }
+            RawPointerEvent::Cancel {
+                position,
+                pointer,
+                reason,
+                ..
+            } => {
+                // A drag that was already running owes its handler an unwind;
+                // one that never armed just clears.
+                let was_dragging = self.dragging;
+                self.reset();
+                if was_dragging {
+                    return GestureResult::Recognized(GestureEvent::DragCancelled {
+                        position: *position,
+                        pointer: *pointer,
+                        reason: *reason,
+                    });
+                }
                 GestureResult::Failed
             }
         }
@@ -110,6 +147,15 @@ impl GestureRecognizer for DragRecognizer {
 
     fn priority(&self) -> u32 {
         20
+    }
+}
+
+#[cfg(test)]
+impl DragRecognizer {
+    /// The pre-P06 call shape — see `TapRecognizer::process`.
+    fn process(&mut self, event: &RawPointerEvent) -> GestureResult {
+        let cx = super::config::RecognizerContext::for_event(event);
+        GestureRecognizer::process(self, event, &cx)
     }
 }
 

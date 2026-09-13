@@ -854,6 +854,16 @@ impl Widget for SuggestionPanel {
         let text = self.text.clone();
         let dismissed = self.dismissed.clone();
 
+        // Row gutters come from the active `SearchFieldStyle`, not from
+        // `sf::ROW_PADDING_*`: a preset writes its own on the recipe (macOS's
+        // `NSSearchField` results row is 8 x 3 dp) and reading the module
+        // constants here rendered 10 x 4 whatever the theme had decided.
+        let panel_style =
+            crate::styles::recipe_search_field_style::resolve_search_field_style(&None, ctx);
+        let panel_tokens = ctx.theme().input;
+        let row_padding_horizontal = panel_style.row_padding_horizontal(&panel_tokens);
+        let row_padding_vertical = panel_style.row_padding_vertical(&panel_tokens);
+
         let list = suggestions.get();
         let total = list.len();
         let mut row_ids: Vec<WidgetId> = Vec::with_capacity(total);
@@ -877,8 +887,7 @@ impl Widget for SuggestionPanel {
                     .a11y_hidden(),
             );
             let inner_padded = ctx.add(
-                Padding::symmetric(sf::ROW_PADDING_VERTICAL, sf::ROW_PADDING_HORIZONTAL)
-                    .child_id(label_id),
+                Padding::symmetric(row_padding_vertical, row_padding_horizontal).child_id(label_id),
             );
             let row_z = ctx.add(ZStack::new().add_child(bg).add_child(inner_padded));
 
@@ -930,12 +939,12 @@ impl Widget for SuggestionPanel {
         // so the placement suppresses the top-side shadow.
         let listbox_inner = ctx.add(column);
         let padded = ctx.add(Padding::uniform(sf::PANEL_PADDING).child_id(listbox_inner));
-        let popover_style: teksilo_core::styles::SharedPopoverStyle = ctx
-            .theme()
-            .style_slots
-            .popover
-            .clone()
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipePopoverStyle::default()));
+        let popover_style: teksilo_core::styles::SharedPopoverStyle =
+            ctx.theme().style_slots.popover.clone().unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipePopoverStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let surface = popover_style.make_body(
             &PopoverStyleConfig {
                 content: padded,

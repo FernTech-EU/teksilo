@@ -425,6 +425,11 @@ impl SceneView {
         // (longer) tooltip dwell to avoid flashing during that sweep.
         let tooltip_delay = ctx.theme().motion.tooltip_delay_heavy;
 
+        // Every grab tolerance in the view reads this snapshot. Safe to snapshot
+        // because a density change marks the tree for rebuild, so a stale copy
+        // cannot outlive the density it came from.
+        let input_tokens = ctx.theme().input;
+
         let mut handlers = HandlerSet::new();
         handlers = self.register_pointer_handlers(
             handlers,
@@ -436,6 +441,7 @@ impl SceneView {
                 fade: tooltip_fade,
                 delay: tooltip_delay,
             },
+            input_tokens,
         );
 
         if self.interactive {
@@ -446,6 +452,20 @@ impl SceneView {
                 overscroll,
                 prefers_reduced,
             );
+            // The claim is what puts this node on the chain a synthesised pan
+            // walks; without it the scroll handler above would answer a wheel
+            // and never see a finger. Both axes are claimed unconditionally
+            // even though the scene's `pan_axes` policy is a live signal — a
+            // claim on an axis the policy has closed costs nothing, because
+            // the handler zeroes that axis' delta and the resulting `Ignored`
+            // re-offers the whole event to the next container outward. A
+            // build-time snapshot of a signal that changes at runtime would
+            // instead leave the surface deaf on an axis it had just re-opened.
+            handlers = handlers.pan_claim(teksilo_core::pointer::touch_action::PanClaim {
+                axes: teksilo_core::pointer::touch_action::PanAxes::BOTH,
+                devices: teksilo_tokens::PointerKindMask::DIRECT,
+                kinetic: true,
+            });
         }
 
         // The on_drag handler drives both marquee / drag-to-move selection
@@ -456,7 +476,7 @@ impl SceneView {
             crate::selection::SceneSelectionMode::None
         ) || self.magnetism.is_some()
         {
-            handlers = self.register_drag_handlers(handlers);
+            handlers = self.register_drag_handlers(handlers, input_tokens);
         }
 
         ctx.apply_self_handlers(handlers);

@@ -44,10 +44,24 @@ use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement}
 use teksilo_core::widget_id::WidgetId;
 
 use super::state::SharedState;
+use teksilo_core::styles::density::spacing;
+use teksilo_tokens::InputTokens;
 
 /// Padding either side of the numbers, in logical pixels before text scale.
 const GUTTER_PAD_LEADING: f32 = 8.0;
+
+/// [`GUTTER_PAD_LEADING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn gutter_pad_leading(tokens: &InputTokens) -> f32 {
+    spacing(GUTTER_PAD_LEADING, tokens)
+}
 const GUTTER_PAD_TRAILING: f32 = 12.0;
+
+/// [`GUTTER_PAD_TRAILING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn gutter_pad_trailing(tokens: &InputTokens) -> f32 {
+    spacing(GUTTER_PAD_TRAILING, tokens)
+}
 
 /// Digits needed to write `n`. `0` and `1` both need one.
 fn digits(n: usize) -> usize {
@@ -126,7 +140,8 @@ impl Widget for CodeGutter {
             // Headless: keep layout sane. A windowed app always has a backend.
             None => label.len() as f32 * 8.0,
         };
-        let w = GUTTER_PAD_LEADING + text_w + GUTTER_PAD_TRAILING;
+        let w =
+            gutter_pad_leading(&ctx.theme.input) + text_w + gutter_pad_trailing(&ctx.theme.input);
         let h = proposal.height.unwrap_or(0.0).max(0.0);
         Size::new(w, h).into()
     }
@@ -176,21 +191,31 @@ impl Widget for CodeGutter {
         // Worth the measure: numbers read as a column against the code's left
         // edge, and left-aligning would leave 9 and 100 at different distances
         // from the line each labels.
-        let right_edge = bounds.x + bounds.width - GUTTER_PAD_TRAILING;
+        let right_edge = bounds.x + bounds.width - gutter_pad_trailing(&ctx.theme.input);
+
+        // The measuring backend, resolved **before** the clip is pushed.
+        //
+        // This used to be a per-line `match` with a bare `return` in its `None`
+        // arm — an early return from inside the clip scope, which left the frame
+        // carrying a `SetClip` with no `ClearClip` after it. Every draw the rest
+        // of the tree emitted afterwards was then clipped to the gutter, and
+        // `RenderFrame::debug_validate_stacks` panics on the imbalance. It went
+        // unnoticed because a windowed app always has a backend and the arm is
+        // unreachable there; a headless render has none, and the *first* frame
+        // with a visible line reached it.
+        let Some(backend) = canvas.text_backend().cloned() else {
+            return;
+        };
 
         canvas.set_clip(bounds);
         for line in first..last {
             let y = line as f32 * line_h - scroll_y + bounds.y;
             let label = (line + 1).to_string();
 
-            let text_w = match canvas.text_backend() {
-                Some(b) => {
-                    b.borrow_mut()
-                        .layout_single_line(&label, &style, None)
-                        .width
-                }
-                None => return,
-            };
+            let text_w = backend
+                .borrow_mut()
+                .layout_single_line(&label, &style, None)
+                .width;
             let slot = Rect::new(right_edge - text_w, y, text_w, line_h);
 
             canvas.draw_text(

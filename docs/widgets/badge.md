@@ -36,6 +36,23 @@ let _badge = Badge::new(lit!("NEW"))
     .background(Color::new(0.2, 0.6, 1.0, 1.0));
 ```
 
+## Touch and pen
+
+Nothing to do, and it is worth saying why: a `Badge` carries no pointer
+handler of any kind — no tap, no hover, no drag — so it is not a target,
+takes no press and needs no widened hit area. Its only pointer-adjacent
+feature is a tooltip, whose touch route is the long press the tooltip
+package owns. A badge that an app makes tappable does so by wrapping it,
+and the wrapper is the target.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Badge at Touch density](img/badge-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `background`, `text_role`, `text_style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

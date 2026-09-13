@@ -21,7 +21,8 @@ use teksilo_canvas::Point;
 use crate::drag_payload::{DragPayload, DropOutcome};
 use crate::drag_state::DropFeedback;
 use crate::event::{ButtonMask, EventResponse, WidgetEvent};
-use crate::gesture::{DragPhase, GestureArena, PinchPhase, SwipeDirection, TapEvent};
+use crate::gesture::{DragPhase, GestureArenaSet, PinchPhase, SwipeDirection, TapEvent};
+use crate::pointer::{CancelReason, PointerInfo};
 use crate::widget::EventContext;
 
 /// Type alias for the four tap-family handler closures
@@ -129,13 +130,26 @@ pub(crate) struct EventHandlers {
     /// Called when a payload is dropped on this widget.
     /// Returns `true` if the drop was accepted.
     pub on_drop: Option<Box<dyn FnMut(DragPayload, Point, &mut EventContext) -> bool>>,
+    /// Called when a pointer interaction on this widget is **taken away** —
+    /// the window lost focus, a modal opened over it, the subtree was parked,
+    /// a peer won the arbitration, the platform revoked the contact.
+    ///
+    /// Terminal: no `PointerUp` follows a cancel for that pointer. A widget
+    /// that latched anything on the press — a selection anchor, a grabbed
+    /// divider, a highlight, a preview overlay — MUST release it here; the
+    /// framework releases its own state (capture, arbitration, drag session)
+    /// but never touches widget-owned state.
+    ///
+    /// The [`CancelReason`] says who took it, so a widget that wants to
+    /// distinguish "the user's window went away" from "a peer beat me" can.
+    pub on_pointer_cancel: Option<Box<dyn FnMut(&PointerInfo, CancelReason, &mut EventContext)>>,
     /// Called on the **source** widget when a drag it started ends, with the
     /// outcome (dropped in-app, exported to the OS as copy/move, or
     /// cancelled). The single completion hook for the drag's originator —
     /// used e.g. to remove the dragged item on an `OsMove`.
     pub on_drag_ended: Option<Box<dyn FnMut(DropOutcome, &mut EventContext)>>,
 
-    pub gesture_arena: Option<GestureArena>,
+    pub gesture_arena: Option<GestureArenaSet>,
 }
 
 impl EventHandlers {
@@ -163,6 +177,7 @@ impl EventHandlers {
             on_drag_hover: None,
             on_drag_leave: None,
             on_drag_tick: None,
+            on_pointer_cancel: None,
             on_drop: None,
             on_drag_ended: None,
             gesture_arena: None,
@@ -195,6 +210,10 @@ impl EventHandlers {
             on_drag_hover: other.on_drag_hover.or(self.on_drag_hover),
             on_drag_leave: merge_ctx_handler(self.on_drag_leave, other.on_drag_leave),
             on_drag_tick: merge_point_handler(self.on_drag_tick, other.on_drag_tick),
+            on_pointer_cancel: merge_cancel_handler(
+                self.on_pointer_cancel,
+                other.on_pointer_cancel,
+            ),
             on_drop: other.on_drop.or(self.on_drop),
             on_drag_ended: merge_outcome_handler(self.on_drag_ended, other.on_drag_ended),
             gesture_arena: other.gesture_arena.or(self.gesture_arena),
@@ -210,6 +229,22 @@ fn merge_point_handler(
         (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |point, ctx| {
             existing(point, ctx);
             incoming(point, ctx);
+        })),
+        (Some(existing), None) => Some(existing),
+        (None, Some(incoming)) => Some(incoming),
+        (None, None) => None,
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn merge_cancel_handler(
+    existing: Option<Box<dyn FnMut(&PointerInfo, CancelReason, &mut EventContext)>>,
+    incoming: Option<Box<dyn FnMut(&PointerInfo, CancelReason, &mut EventContext)>>,
+) -> Option<Box<dyn FnMut(&PointerInfo, CancelReason, &mut EventContext)>> {
+    match (existing, incoming) {
+        (Some(mut existing), Some(mut incoming)) => Some(Box::new(move |pointer, reason, ctx| {
+            existing(pointer, reason, ctx);
+            incoming(pointer, reason, ctx);
         })),
         (Some(existing), None) => Some(existing),
         (None, Some(incoming)) => Some(incoming),
@@ -411,6 +446,7 @@ impl std::fmt::Debug for EventHandlers {
             .field("on_drag_hover", &self.on_drag_hover.is_some())
             .field("on_drag_leave", &self.on_drag_leave.is_some())
             .field("on_drag_tick", &self.on_drag_tick.is_some())
+            .field("on_pointer_cancel", &self.on_pointer_cancel.is_some())
             .field("on_drop", &self.on_drop.is_some())
             .finish()
     }

@@ -15,6 +15,13 @@
 //!
 //! Visual chrome (selected / pressed / hover background, label
 //! colour) is delegated to the active `CalendarStyle::make_zoom_cell`.
+//!
+//! ## Touch and pen
+//!
+//! A zoom cell is well past the target floor on both axes at every density, and it
+//! picks on the release. Its **pressed** appearance is the framework's press now:
+//! the cell used to write `false` into that signal and nothing else, so the state
+//! its `CalendarStyle` painted was unreachable for a mouse as well as for a finger.
 
 use std::rc::Rc;
 
@@ -35,10 +42,18 @@ use crate::primitives::{HStack, VStack};
 use crate::styles::recipe_calendar_style::RecipeCalendarStyle;
 
 use super::CalendarMode;
+use teksilo_core::styles::density::spacing;
+use teksilo_tokens::InputTokens;
 
 const COLUMNS: usize = 3;
 const ROWS: usize = 4;
 const CELL_SPACING: f32 = 4.0;
+
+/// [`CELL_SPACING`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+fn cell_spacing(tokens: &InputTokens) -> f32 {
+    spacing(CELL_SPACING, tokens)
+}
 
 // ── MonthsGrid ───────────────────────────────────────────────────────
 
@@ -80,7 +95,7 @@ impl Widget for MonthsGrid {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let mut rows: Vec<WidgetId> = Vec::with_capacity(ROWS);
         for r in 0..ROWS {
-            let mut row = HStack::new().spacing(CELL_SPACING);
+            let mut row = HStack::new().spacing(cell_spacing(&ctx.theme().input));
             for c in 0..COLUMNS {
                 let month = (r * COLUMNS + c + 1) as i8;
                 let visible_month_for_cell = self.visible_month.clone();
@@ -104,7 +119,7 @@ impl Widget for MonthsGrid {
             }
             rows.push(ctx.add(row));
         }
-        let mut col = VStack::new().spacing(CELL_SPACING);
+        let mut col = VStack::new().spacing(cell_spacing(&ctx.theme().input));
         for id in rows {
             col = col.add_child(id);
         }
@@ -203,7 +218,7 @@ impl Widget for YearsGrid {
         // 12 cells: decade_start - 1 .. decade_start + 11
         let mut rows: Vec<WidgetId> = Vec::with_capacity(ROWS);
         for r in 0..ROWS {
-            let mut row = HStack::new().spacing(CELL_SPACING);
+            let mut row = HStack::new().spacing(cell_spacing(&ctx.theme().input));
             for c in 0..COLUMNS {
                 let cell_year = decade_start - 1 + (r * COLUMNS + c) as i16;
                 let visible_for_cell = self.visible_month.clone();
@@ -227,7 +242,7 @@ impl Widget for YearsGrid {
             }
             rows.push(ctx.add(row));
         }
-        let mut col = VStack::new().spacing(CELL_SPACING);
+        let mut col = VStack::new().spacing(cell_spacing(&ctx.theme().input));
         for id in rows {
             col = col.add_child(id);
         }
@@ -318,6 +333,14 @@ impl Widget for ZoomCell {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let hover = ctx.signal(false);
         let pressed = ctx.signal(false);
+        // The pressed chrome the `CalendarStyle` paints, driven by the router's
+        // own press record — the cell has no press handler of its own to keep.
+        // Before this it only ever wrote `false`: the month and year cells had
+        // a pressed appearance no pointer of any kind could reach. The
+        // framework press is also the only source that survives a press
+        // sliding off the cell and back on, and that is withdrawn without a
+        // release when an enclosing scroller claims the pan.
+        crate::common::interaction::bind_pressed(ctx, pressed.clone());
         let selected = self.selected.clone();
 
         // Visual chrome via the active CalendarStyle.
@@ -335,23 +358,17 @@ impl Widget for ZoomCell {
         let on_pick = self.on_pick.clone();
         let on_pick_for_access = on_pick.clone();
         let hover_for_handler = hover.clone();
-        let pressed_for_handler = pressed.clone();
-        let pressed_for_release = pressed.clone();
         let enabled = self.enabled;
         let handlers = HandlerSet::new()
             .focusable(enabled)
             .cursor(CursorIcon::Pointer)
             .on_hover(move |entered, _| {
                 hover_for_handler.set(entered);
-                if !entered {
-                    pressed_for_release.set(false);
-                }
             })
             .on_tap(move |_pos, ctx_evt| {
                 if !enabled {
                     return;
                 }
-                pressed_for_handler.set(false);
                 (on_pick)(ctx_evt);
             })
             .on_access_action(move |action, ctx_evt| {
@@ -414,5 +431,7 @@ fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {
         .style_slots
         .calendar
         .clone()
-        .unwrap_or_else(|| Rc::new(RecipeCalendarStyle::default()) as SharedCalendarStyle)
+        .unwrap_or_else(|| {
+            Rc::new(RecipeCalendarStyle::for_tokens(&ctx.theme().input)) as SharedCalendarStyle
+        })
 }

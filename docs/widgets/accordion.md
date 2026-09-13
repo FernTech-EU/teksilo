@@ -33,6 +33,27 @@ let expanded = Signal::new(false);
 let _accordion = Accordion::new(lit!("Advanced settings"), expanded);
 ```
 
+## Touch and pen
+
+The header is one target on the density ladder and toggles from its tap, so on
+the release. Where a dock panel installs `on_header_drag`, the same header is
+also a drag source: `DragActivation::Auto` resolves that to `Immediate` when
+nothing competes for the axis and to the hold when a scroller does, so a contact
+needs no declaration to move a panel — and a press that lifts without
+travelling still toggles.
+
+The trailing slot is wrapped in a `DeadZone`, so
+its action buttons and `⋮` menu take a press — jitter and all — without arming
+the panel drag behind them.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Accordion at Touch density](img/accordion-touch.png)
+
 ## Builder methods at a glance
 
 `orientation`, `horizontal`, `fill`, `on_header_drag`, `trailing`, `trailing_id`, `title_color`, `title_style`, `content_id`, `content`
@@ -49,12 +70,30 @@ Height of the accordion header row in pixels (vertical mode).
 pub const ACCORDION_HEADER_HEIGHT: f32 = 28.0;
 ```
 
+## `pub fn accordion_header_height(...)`
+
+`ACCORDION_HEADER_HEIGHT` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn accordion_header_height(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const ACCORDION_HEADER_PADDING_HORIZONTAL`
 
 Horizontal padding inside the accordion header on the leading and trailing edges.
 
 ```rust
 pub const ACCORDION_HEADER_PADDING_HORIZONTAL: f32 = 8.0;
+```
+
+## `pub fn accordion_header_padding_horizontal(...)`
+
+`ACCORDION_HEADER_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn accordion_header_padding_horizontal(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const ACCORDION_INDICATOR_SIZE`
@@ -71,6 +110,15 @@ Gap between the disclosure indicator and the title label.
 
 ```rust
 pub const ACCORDION_INDICATOR_GAP: f32 = 6.0;
+```
+
+## `pub fn accordion_indicator_gap(...)`
+
+`ACCORDION_INDICATOR_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn accordion_indicator_gap(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const ACCORDION_CORNER_RADIUS`

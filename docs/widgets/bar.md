@@ -52,7 +52,7 @@ let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tab_widget/bar/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tab_widget/index.html)
 
 ## `pub const DEFAULT_MIN_TAB_WIDTH`
 
@@ -60,6 +60,15 @@ Default min width for an unpinned tab.
 
 ```rust
 pub const DEFAULT_MIN_TAB_WIDTH: f32 = 96.0;
+```
+
+## `pub fn default_min_tab_width(...)`
+
+`DEFAULT_MIN_TAB_WIDTH` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn default_min_tab_width(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const DEFAULT_MAX_TAB_WIDTH`
@@ -81,6 +90,15 @@ by an empty gap.
 pub const DEFAULT_TAB_SPACING: f32 = 0.0;
 ```
 
+## `pub fn default_tab_spacing(...)`
+
+`DEFAULT_TAB_SPACING` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn default_tab_spacing(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const DEFAULT_BAR_SLOT_SPACING`
 
 Default spacing between the bar's leading slot, scroll area, and
@@ -90,12 +108,30 @@ trailing slot.
 pub const DEFAULT_BAR_SLOT_SPACING: f32 = 8.0;
 ```
 
+## `pub fn default_bar_slot_spacing(...)`
+
+`DEFAULT_BAR_SLOT_SPACING` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn default_bar_slot_spacing(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const DEFAULT_PINNED_TAB_WIDTH`
 
 Default width (in dp) of a pinned tab — icon-only squares.
 
 ```rust
 pub const DEFAULT_PINNED_TAB_WIDTH: f32 = 32.0;
+```
+
+## `pub fn default_pinned_tab_width(...)`
+
+`DEFAULT_PINNED_TAB_WIDTH` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn default_pinned_tab_width(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub struct TabBarDragData`

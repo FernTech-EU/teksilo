@@ -29,6 +29,14 @@
 //! `AutoComplete::List`, announces `expanded`, and points `active_descendant` at
 //! the highlighted row; the popup is a `Role::ListBox` of `Role::ListBoxOption`
 //! rows. Focus never moves into the popup.
+//!
+//! ## Touch and pen
+//!
+//! A suggestion row takes the menu row's target floor at every density, which
+//! raises it by 2 dp at Compact — the documented `MinSize`-is-a-hit-box exception,
+//! because a stack of adjacent rows is the one shape the hit mechanisms cannot
+//! serve: an outset on each row only moves the boundaries between them, the
+//! neighbour it would borrow from being another row.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -732,7 +740,9 @@ impl CompletionPanel {
 
 impl Widget for CompletionPanel {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, VStack, ZStack};
+        use crate::primitives::{
+            HStack, MinSize, Padding, RectWidget, Spacer, TextWidget, VStack, ZStack,
+        };
         use teksilo_core::binding::BindingLevel;
         use teksilo_i18n::lit;
         use teksilo_tokens::CornerRadius;
@@ -771,6 +781,25 @@ impl Widget for CompletionPanel {
         let end = start + m;
         let items = self.state.borrow().completion.window_items(start, end);
 
+        // A suggestion row is a menu row, and takes the same target floor: 24 dp
+        // at Compact, 32 at Comfortable, 44 at Touch.
+        //
+        // **This can raise the row at Compact**, by the up-to-2 dp between the
+        // padded text line's own height (22 dp as measured headlessly under the
+        // shipped typography; a taller line may already clear the floor) and the
+        // conformance floor, and that is the
+        // documented exception to the density rule rather than a breach of it: a
+        // `MinSize` *is* a hit box, 24 dp is the floor that governs hit boxes,
+        // and a stack of adjacent rows is the one shape the hit mechanisms
+        // cannot serve — an outset on each row only moves the boundaries
+        // between them, because the neighbour it would borrow from is another
+        // row. See `docs/density-inventory.md` §0.
+        let row_height = teksilo_core::styles::density::density_min_size(
+            teksilo_canvas::Size::new(0.0, 0.0),
+            teksilo_tokens::TargetAxes::HEIGHT,
+            &ctx.theme().input,
+        )
+        .height;
         let mut rows = VStack::new().spacing(1.0);
         let mut active_row = None;
         for (local, item) in items.iter().enumerate() {
@@ -808,7 +837,9 @@ impl Widget for CompletionPanel {
                 );
             }
             let row = row
-                .child(Padding::symmetric(3.0, 8.0).child(line))
+                .child(
+                    MinSize::new(0.0, row_height).child(Padding::symmetric(3.0, 8.0).child(line)),
+                )
                 .on_tap(move |_event, ctx| {
                     commit(&row_state, ctx, filtered_index);
                 })

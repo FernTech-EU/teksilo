@@ -3,6 +3,19 @@
 
 # OverlayTrigger
 
+`OverlayTrigger` — the shared "this widget opens that overlay" wrapper.
+
+Used by `Dialog`, `Snackbar` and every other presenter that lets a caller
+replace its default `Button` trigger with a widget of their own.
+
+## Touch and pen
+
+The trigger has no geometry and no press visual of its own: it forwards the
+caller's child, whose target and appearance are the child's, and routes the
+opening handlers onto that child's external bucket so they fire beside the
+child's own. The activation is an `on_tap`, so it happens on the release for
+every pointer kind.
+
 ## Builder methods at a glance
 
 `around`, `around_id`, `named`, `has_on_activate`, `on_activate`

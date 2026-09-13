@@ -64,6 +64,15 @@ const TRACK_STROKE: f32 = 1.0;
 /// 32 dp control beside it.
 const ROW_H: f32 = 32.0;
 
+/// [`ROW_H`] raised to the density's `target_size`. The track itself keeps its
+/// `[WinUI]` 40 × 20 geometry at every density — the switch is one coupled
+/// shape, and a compile-time assertion below ties the knob to the track — so
+/// what the density grows is the *row* the switch sits in, which is what the
+/// finger actually aims at.
+fn row_h(tokens: &teksilo_tokens::InputTokens) -> f32 {
+    teksilo_core::styles::density::dp(ROW_H, teksilo_tokens::TargetRole::Target, tokens)
+}
+
 // Geometry invariants, checked at compile time rather than in a test: a
 // resting knob has to fill the track's height exactly once its insets are
 // counted, the hover knob has to be the larger one, the pressed knob has to
@@ -186,8 +195,8 @@ impl Widget for FluentSwitchBody {
         vec![]
     }
 
-    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
-        Size::new(TRACK_W, ROW_H).into()
+    fn layout_response(&self, _proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        Size::new(TRACK_W, row_h(&ctx.theme.input)).into()
     }
 
     fn place_children(

@@ -19,9 +19,10 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::styles::{BannerStyle, BannerStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, VAlignment};
+use teksilo_tokens::{CornerRadius, InputTokens, VAlignment};
 
 use crate::primitives::{Expand, HStack, Padding, RectWidget, ZStack};
+use teksilo_core::styles::density::spacing;
 
 // IntUI design tokens for Banner. The recipe owns its own dimensions.
 // `BANNER_GLYPH_SIZE` and `BANNER_TITLE_DESCRIPTION_GAP` are consumed
@@ -53,16 +54,27 @@ pub struct BannerRecipe {
     pub title_description_gap: f32,
 }
 
-impl Default for BannerRecipe {
-    fn default() -> Self {
+impl BannerRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            padding_horizontal: BANNER_PADDING_HORIZONTAL,
-            padding_vertical: BANNER_PADDING_VERTICAL,
+            padding_horizontal: spacing(BANNER_PADDING_HORIZONTAL, tokens),
+            padding_vertical: spacing(BANNER_PADDING_VERTICAL, tokens),
             corner_radius: BANNER_CORNER_RADIUS,
             glyph_size: BANNER_GLYPH_SIZE,
-            content_gap: BANNER_CONTENT_GAP,
-            title_description_gap: BANNER_TITLE_DESCRIPTION_GAP,
+            content_gap: spacing(BANNER_CONTENT_GAP, tokens),
+            title_description_gap: spacing(BANNER_TITLE_DESCRIPTION_GAP, tokens),
         }
+    }
+}
+
+impl Default for BannerRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -77,6 +89,18 @@ pub struct RecipeBannerStyle {
 impl RecipeBannerStyle {
     pub fn new(recipe: BannerRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeBannerStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: BannerRecipe::for_tokens(tokens),
+        }
     }
 }
 

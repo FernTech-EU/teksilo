@@ -48,21 +48,21 @@ fn recording_config(
 
 fn down(tree: &mut WidgetTree, p: Point) {
     tree.pointer_move(p);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: p,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        p,
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
 }
 fn moved(tree: &mut WidgetTree, p: Point) {
-    tree.dispatch_event(WidgetEvent::PointerMove { position: p });
+    tree.dispatch_event(WidgetEvent::pointer_move(p));
 }
 fn up(tree: &mut WidgetTree, p: Point) {
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: p,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::default(),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        p,
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
 }
 fn key(tree: &mut WidgetTree, k: Key) {
     tree.dispatch_event(WidgetEvent::KeyDown {

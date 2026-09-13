@@ -33,6 +33,30 @@ let _w = SplitButton::new()
     .variant(ButtonVariant::Plain);
 ```
 
+## Touch and pen
+
+The action half is a target in its own right and needs nothing. The chevron
+half is 22 dp wide at every density — a dimension below the conformance floor
+cannot be routed through `dp`, which is a floor and would widen the paint at
+Compact — so it declares a `Widget::hit_outset` instead, with the whole
+shortfall on its **leading** edge: the trailing edge is the control's own
+frame, and an outset never escapes its parent.
+
+That means a direct pointer aiming between the halves gets the chevron, and a
+precise pointer gets exactly what is painted (`hit_outset` is zero for one).
+Of the two halves the action half is the wider, so it is the one that lends
+the dp — and the press it loses at its trailing edge is a press aimed at the
+chevron.
+
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![SplitButton at Touch density](img/split_button-touch.png)
+
 ## Builder methods at a glance
 
 `new_static`, `item`, `separator`, `variant`, `icon`, `style`, `text_style`, `text_role`, `enabled`, `initial_selected`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `chevron_tooltip`, `chevron_rich_tooltip`, `chevron_rich_tooltip_content`, `chevron_composite_tooltip`
@@ -49,10 +73,28 @@ SplitButton design tokens.
 pub const SPLIT_BUTTON_HEIGHT: f32 = 24.0;
 ```
 
+## `pub fn split_button_height(...)`
+
+`SPLIT_BUTTON_HEIGHT` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn split_button_height(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const SPLIT_BUTTON_MIN_WIDTH`
 
 ```rust
 pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
+```
+
+## `pub fn split_button_min_width(...)`
+
+`SPLIT_BUTTON_MIN_WIDTH` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn split_button_min_width(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const SPLIT_BUTTON_PADDING_HORIZONTAL`
@@ -61,10 +103,28 @@ pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
 pub const SPLIT_BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
 ```
 
+## `pub fn split_button_padding_horizontal(...)`
+
+`SPLIT_BUTTON_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn split_button_padding_horizontal(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const SPLIT_BUTTON_PADDING_VERTICAL`
 
 ```rust
 pub const SPLIT_BUTTON_PADDING_VERTICAL: f32 = 0.0;
+```
+
+## `pub fn split_button_padding_vertical(...)`
+
+`SPLIT_BUTTON_PADDING_VERTICAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn split_button_padding_vertical(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const SPLIT_BUTTON_CORNER_RADIUS`
@@ -103,6 +163,15 @@ Gap between an optional main-region leading icon and the label.
 
 ```rust
 pub const SPLIT_BUTTON_ICON_LABEL_GAP: f32 = 6.0;
+```
+
+## `pub fn split_button_icon_label_gap(...)`
+
+`SPLIT_BUTTON_ICON_LABEL_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn split_button_icon_label_gap(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub struct SplitButton`

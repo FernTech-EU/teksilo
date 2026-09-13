@@ -59,6 +59,28 @@ ctx.add(
 );
 ```
 
+## Touch and pen
+
+Nothing to declare here, and the reason applies to the whole date/time
+family (`TimeEdit`,
+`DateTimeEdit`,
+`DateRangeEdit`): the composite's
+own handler set carries `focus_within` and `on_key_preview` only — no tap,
+no drag, no scroll — so its pointer surface is entirely the embedded text
+field, the trigger `IconButton` and the popover `Calendar`, each of which
+answers for itself. In particular the family does **not** declare
+`touch_action(NONE)`: it produces no value from a press position, and
+declaring it would stop a finger scrolling a form that contains a date
+field.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![DateEdit at Touch density](img/date_edit-touch.png)
+
 ## Builder methods at a glance
 
 `style`, `required`, `min_date`, `max_date`, `format_pattern`, `placeholder`, `first_day_of_week`, `show_calendar_button`, `calendar_popover_placement`, `enabled`, `read_only`, `validation_behavior`, `width_policy`, `validation_feedback_signal`, `label`, `on_value_changed`, `value`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

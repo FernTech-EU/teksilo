@@ -20,9 +20,10 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{MenuItemMetrics, MenuItemStyle, MenuItemStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, SurfaceRole};
+use teksilo_tokens::{CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
 use crate::primitives::{Expand, FixedSize, HStack, MinSize, Padding, RectWidget, Spacer, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // IntUI design tokens for MenuItem / MenuList rows. The recipe owns
 // its own dimensions. The MenuList / MenuBar / ComboBox panel widgets
@@ -31,6 +32,17 @@ use crate::primitives::{Expand, FixedSize, HStack, MinSize, Padding, RectWidget,
 // radius, border, shadow density) is owned by `PopoverStyle` (the
 // `Menu` variant).
 pub const MENU_ITEM_HEIGHT: f32 = 24.0;
+
+/// [`MENU_ITEM_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+///
+/// The same projection `MenuItemRecipe::for_tokens` applies to `item_height`,
+/// exposed on its own for the two menu-shaped surfaces that measure a row
+/// without going through the recipe: the ComboBox dropdown's rows and the
+/// viewport that shows `max_visible_items` of them.
+pub fn menu_item_height(tokens: &InputTokens) -> f32 {
+    dp(MENU_ITEM_HEIGHT, TargetRole::Target, tokens)
+}
 /// Right-side padding column (also used as chevron column width).
 pub const MENU_ITEM_PADDING_HORIZONTAL: f32 = 12.0;
 /// Leading-side padding before the icon/check column.
@@ -66,18 +78,29 @@ pub struct MenuItemRecipe {
     pub item_corner_radius: f32,
 }
 
-impl Default for MenuItemRecipe {
-    fn default() -> Self {
+impl MenuItemRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            item_height: MENU_ITEM_HEIGHT,
-            padding_horizontal: MENU_ITEM_PADDING_HORIZONTAL,
-            padding_leading: MENU_ITEM_PADDING_LEADING,
+            item_height: dp(MENU_ITEM_HEIGHT, TargetRole::Target, tokens),
+            padding_horizontal: spacing(MENU_ITEM_PADDING_HORIZONTAL, tokens),
+            padding_leading: spacing(MENU_ITEM_PADDING_LEADING, tokens),
             icon_column_width: MENU_ICON_COLUMN_WIDTH,
-            icon_label_gap: MENU_ICON_LABEL_GAP,
-            shortcut_left_gap: MENU_SHORTCUT_LEFT_GAP,
-            separator_height: MENU_SEPARATOR_HEIGHT,
+            icon_label_gap: spacing(MENU_ICON_LABEL_GAP, tokens),
+            shortcut_left_gap: spacing(MENU_SHORTCUT_LEFT_GAP, tokens),
+            separator_height: spacing(MENU_SEPARATOR_HEIGHT, tokens),
             item_corner_radius: MENU_ITEM_CORNER_RADIUS,
         }
+    }
+}
+
+impl Default for MenuItemRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -91,6 +114,18 @@ pub struct RecipeMenuItemStyle {
 impl RecipeMenuItemStyle {
     pub fn new(recipe: MenuItemRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeMenuItemStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: MenuItemRecipe::for_tokens(tokens),
+        }
     }
 }
 
@@ -231,7 +266,7 @@ mod tests {
     impl MenuItemStyle for LayeringStyle {
         fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
             let backdrop = ctx.add(RectWidget::new().background(SurfaceRole::Hover));
-            let row = RecipeMenuItemStyle::default().make_body(cfg, ctx);
+            let row = RecipeMenuItemStyle::for_tokens(&ctx.theme().input).make_body(cfg, ctx);
             ctx.add(ZStack::new().add_child(backdrop).add_child(row))
         }
     }

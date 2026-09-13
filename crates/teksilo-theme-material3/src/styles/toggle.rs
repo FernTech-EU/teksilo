@@ -56,7 +56,7 @@ impl ToggleStyle for M3ToggleStyle {
                     Some(if *visible {
                         FocusOrigin::Keyboard
                     } else {
-                        FocusOrigin::Pointer
+                        FocusOrigin::POINTER
                     })
                 } else {
                     None

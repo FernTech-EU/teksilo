@@ -4,10 +4,19 @@
 //! `scene-showcase` — comprehensive demo of every `teksilo-scene` capability.
 //!
 //! One pannable / zoomable scene divided into eight labelled sections.
-//! Pan with two-finger trackpad / mouse wheel; zoom with Ctrl+wheel or
-//! pinch (where the OS supports it). Click a heavyweight card to focus
-//! it; Ctrl-click to toggle. Drag in empty space to marquee. Drag a
-//! "drag me" rectangle to move it — the new position persists.
+//! Pan with two-finger trackpad / mouse wheel; zoom with Ctrl+wheel, with a
+//! trackpad pinch, or with two fingers on a touchscreen — the framework
+//! recognises the touchscreen pinch itself and both producers deliver the same
+//! payload, so only the *trackpad* depends on the OS reporting the gesture.
+//! Click a heavyweight card to focus it; Ctrl-click to toggle. Drag in empty
+//! space to marquee. Drag a "drag me" rectangle to move it — the new position
+//! persists.
+//!
+//! A one-finger drag here **marquees and does not pan**, and that is the
+//! measured behaviour rather than an oversight: this view's marquee and its pan
+//! claim are on one node, so the drag recognizer latches at the drag slop before
+//! the pan claim is eligible at the wider pan slop. The camera is reached by two
+//! fingers, by the wheel, or by `DragMode::ScrollHandDrag`.
 //!
 //! What this exercises:
 //!

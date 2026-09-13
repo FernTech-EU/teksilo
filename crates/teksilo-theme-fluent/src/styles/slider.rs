@@ -48,6 +48,12 @@ const INNER_HOVER: f32 = 14.0;
 const INNER_PRESSED: f32 = 8.5;
 /// `SliderHorizontalHeight` — the cross-axis extent the control claims.
 const CROSS: f32 = 32.0;
+
+/// [`CROSS`] raised to the density's `target_size`. `[WinUI]`'s 32 dp already
+/// clears the 24 dp AA floor, so this is the identity at Compact.
+fn cross(tokens: &teksilo_tokens::InputTokens) -> f32 {
+    teksilo_core::styles::density::dp(CROSS, teksilo_tokens::TargetRole::Target, tokens)
+}
 /// Tick mark length (dp) for the discrete variant.
 const TICK: f32 = 4.0;
 
@@ -244,13 +250,13 @@ impl Widget for FluentSliderBody {
         vec![]
     }
 
-    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
         match self.orientation {
             SliderOrientation::Horizontal => {
-                Size::new(proposal.width.unwrap_or(160.0), CROSS).into()
+                Size::new(proposal.width.unwrap_or(160.0), cross(&ctx.theme.input)).into()
             }
             SliderOrientation::Vertical => {
-                Size::new(CROSS, proposal.height.unwrap_or(160.0)).into()
+                Size::new(cross(&ctx.theme.input), proposal.height.unwrap_or(160.0)).into()
             }
         }
     }

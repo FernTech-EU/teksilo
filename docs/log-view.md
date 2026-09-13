@@ -7,12 +7,15 @@
 editor's core turned inside out: instead of a bounded document a person edits,
 it is an unbounded one the *program* appends to and the person only reads,
 scrolls, selects, and copies. It reuses
-[`CodeEditorState`](../crates/teksilo-widgets/src/code_editor/state.rs) — so
-selection, copy, theming, and accessibility come for free and cannot drift from
-the editors' — but owns its own frame step
+[`CodeEditorState`](../crates/teksilo-widgets/src/code_editor/state.rs), so
+selection, the clipboard, theming, accessibility, pointer dispatch, the
+right-click menu and the touch selection chrome are the editors' own code rather
+than a second copy of it — but it owns its own frame step
 ([`log_stream.rs`](../crates/teksilo-widgets/src/code_editor/log_stream.rs)) and
 paint body, because content arrives faster than a person types, forever, and
 neither the editor's full relayout nor its event handling can carry that load.
+What it does *not* share is anything the caret drives: the caret is hidden by
+policy, and the two places that matter are called out below.
 
 ```rust
 use teksilo::widgets::{LogView, LogViewHandle};
@@ -122,6 +125,38 @@ a live selection stays glued to surviving text. Unset (the default) keeps every
 line: memory stays flat in the line count (only the window is shaped), but the
 raw text accumulates in the rope and each append stays linear in the document
 size — so a genuinely unbounded, sustained high-rate producer should set a cap.
+
+## Reading it: pointer, menu, and a finger
+
+A log is read, selected and copied, and every route to that is the code editor's
+([Pointer input](code-editor.md#pointer-input-two-devices)) with the read-only
+policy applied. What that comes to here:
+
+* A **right-click** opens a menu of Copy and Select All. Cut and Paste are absent
+  because the surface's own `Ctrl+X` and `Ctrl+V` are refused by the same filter
+  the menu asks. Before this there was no menu at all, so `Ctrl+C` was the only
+  way to get a line out of a log — and on a touch device there is no `Ctrl`.
+* A **hold** selects the word under the finger, raises the two selection handles
+  that adjust the range, and puts up a toolbar of **Copy** — Select All is offered
+  only while nothing is selected, and a hold has just selected something.
+  Dragging a handle into the viewport's edge band auto-scrolls, so a selection can
+  grow past the visible rows — which, in a windowed log, means past the rows that
+  are currently *shaped*: freshly scrolled rows shape as they arrive and the
+  hit-test resolves them.
+* A **tap** places the caret. It is invisible — the caret policy is `Hidden` — but
+  it is not inert: with no selection this surface's Copy takes the caret's whole
+  line, so a tap is what aims it. A tap raises **no** handle: the caret handle is
+  the one that *moves* a caret, and the controller offers it only on a surface that
+  is editable, so a 44 dp target over the text would offer nothing here.
+* A **finger's drag** pans, in both axes: an unwrapped log line that runs off the
+  right cannot be read otherwise.
+
+Two of the editor's on-screen-keyboard behaviours are deliberately absent, each
+for its own reason. The IME candidate area is never reported, because the surface
+is read-only and so no input method is allowed on it. And a viewport that shrinks
+does **not** re-reveal the caret: pulling this view's scroll offset anywhere would
+fight its own follow-tail rule, which is *derived* from that offset, so a
+"correction" would silently switch following back on.
 
 ## Accessibility
 

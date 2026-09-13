@@ -16,6 +16,21 @@
 //! exact per-flat-index callback (`item_height_fn`), and auto-measured
 //! (`auto_item_height` — height-for-width per row, scroll-anchored).
 //!
+//! ## Pan to scroll
+//!
+//! The view installs [`common::scrollable::ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior),
+//! which gives it the shared wheel arithmetic, a finger's pan and the
+//! `PanClaim` that puts it on a pan's claimant chain. A pan scrolls it, the
+//! release coasts, and a pan it cannot absorb hands the **whole** event to the
+//! container outside. Vertical only: this view owns no horizontal offset, so a
+//! horizontal pan is declined and chains outward. A pan that starts on a row
+//! scrolls rather than activating it, toggling its chevron, or collapsing a
+//! multi-selection onto it — the three things a *release* on that row commits.
+//! Activation is a gesture, so the arbitration cancels it; the chevron and the
+//! deferred collapse are raw `PointerUp` arms the arbitration cannot reach, so
+//! each asks `data_views::release_completes_the_press` whether the release still
+//! belongs to the row.
+//!
 //! ## Keyboard
 //!
 //! Arrows move the cursor; `Home` / `End` reach the first and last **visible**
@@ -57,11 +72,13 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use teksilo_canvas::{Point, Rect, Size, SizeProposal};
-use teksilo_tokens::{BorderRole, Easing};
+use teksilo_tokens::{BorderRole, InputTokens, OverscrollStyle, TargetRole};
 
 use teksilo_core::DropFeedback;
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
+use teksilo_core::kinetic::KineticScroller;
+use teksilo_core::pointer::touch_action::PanAxes;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
@@ -83,6 +100,12 @@ use crate::tree_source::{TreeRow, TreeRowMeta, TreeSource};
 
 const BUFFER_ITEMS: usize = 5;
 const DEFAULT_ITEM_HEIGHT: f32 = 28.0;
+
+/// [`DEFAULT_ITEM_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+fn default_item_height(tokens: &InputTokens) -> f32 {
+    dp(DEFAULT_ITEM_HEIGHT, TargetRole::Target, tokens)
+}
 const SCROLLBAR_THICKNESS: f32 = 12.0;
 
 /// Per-row context passed to a 4-arg TreeView delegate. Carries a
@@ -152,6 +175,7 @@ type RowDelegate<T> = dyn Fn(usize, &T, &TreeRowMeta, bool) -> Box<dyn Widget>;
 /// .item_height(28.0);
 /// ```
 use crate::data_views::DropViz;
+use teksilo_core::styles::density::dp;
 
 pub struct TreeView<T: 'static> {
     /// Index-keyed erased backing — the built-in `TreeSlice` or an external
@@ -294,6 +318,12 @@ pub struct TreeView<T: 'static> {
     /// Rows are not distinct focusable nodes, so the focus-driven follow never
     /// reveals the selected row in an outer scroller — this closes that gap.
     viewport_bounds: Rc<Cell<Rect>>,
+    /// This surface's pan physics: the range a finger's pan is clamped to and
+    /// the offset it is currently holding. Owned by the view rather than by
+    /// the [`ScrollableBehavior`](crate::common::scrollable::ScrollableBehavior)
+    /// so it survives a rebuild, and so `place_children` — the only pass that
+    /// knows the viewport extent — can publish into it.
+    scroller: Rc<RefCell<KineticScroller>>,
     /// Content width (updated during `place_children`, used by drag
     /// feedback so the insertion line / into-folder highlight spans the
     /// row's actual width instead of a guess). Mirrors `ListView`.

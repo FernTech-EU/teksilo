@@ -148,10 +148,12 @@ fn build_kit(
         .child(caption(
             "OverlayRequest::with_fade(...) — framework attaches an animated opacity scope \
              on the content, runs the 0→1 fade-in tween at show and 1→0 on dismiss, and \
-             defers the actual stack removal until the tween completes. Hover the button.",
+             defers the actual stack removal until the tween completes. Hover the \
+             button, or hold it with a finger \u{2014} a contact never hovers, and the \
+             tree's own hold route backdates the dwell so the same fade still runs.",
         ))
         .child(
-            Button::new(lit!("Hover me"))
+            Button::new(lit!("Hover or hold me"))
                 .variant(ButtonVariant::Filled)
                 .tooltip(lit!(
                     "I fade in and out over `motion.duration_fast` (~120 ms)."

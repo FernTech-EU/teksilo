@@ -183,7 +183,11 @@ impl Widget for ProgressBar {
             .style_override
             .clone()
             .or_else(|| ctx.theme().style_slots.progress_bar.clone())
-            .unwrap_or_else(|| Rc::new(crate::styles::RecipeProgressBarStyle::default()));
+            .unwrap_or_else(|| {
+                Rc::new(crate::styles::RecipeProgressBarStyle::for_tokens(
+                    &ctx.theme().input,
+                ))
+            });
         let cfg = ProgressBarStyleConfig {
             orientation: self.orientation,
             progress: if self.indeterminate {

@@ -30,6 +30,15 @@
 //! The current crumb sets `aria-current="page"`. The decorative separator
 //! chevrons are hidden from the AT tree. The `…` overflow button declares
 //! `HasPopup::Menu`.
+//!
+//! ## Touch and pen
+//!
+//! A crumb navigates on the release. It is as wide as its label, so a short one
+//! ("A / B / C", a drive letter) can land under the 24 dp target floor; it
+//! declares a `Widget::hit_outset` that makes the shortfall up between the
+//! pointer and the arena, so the trail's own geometry never moves. The current
+//! crumb and a trail with no navigation action declare none — a widened node
+//! that then refuses the press is a hole in whatever is behind it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -48,13 +57,14 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius};
+use teksilo_tokens::{Color, CornerRadius, InputTokens};
 
 use crate::button::{Button, ButtonVariant};
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 use crate::popover_widget::PopoverButton;
 use crate::primitives::{HStack, IconWidget, Spacer};
+use teksilo_core::styles::density::spacing;
 use teksilo_i18n::LocalizedString;
 
 const FALLBACK_CHAR_WIDTH: f32 = 8.0;
@@ -86,8 +96,20 @@ impl std::fmt::Debug for BreadcrumbEntry {
 pub const BREADCRUMB_ITEM_HEIGHT: f32 = 20.0;
 /// Horizontal inner padding of each segment pill in logical pixels.
 pub const BREADCRUMB_ITEM_PADDING_HORIZONTAL: f32 = 6.0;
+
+/// [`BREADCRUMB_ITEM_PADDING_HORIZONTAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn breadcrumb_item_padding_horizontal(tokens: &InputTokens) -> f32 {
+    spacing(BREADCRUMB_ITEM_PADDING_HORIZONTAL, tokens)
+}
 /// Gap reserved for the chevron separator between adjacent segments.
 pub const BREADCRUMB_SEPARATOR_GAP: f32 = 4.0;
+
+/// [`BREADCRUMB_SEPARATOR_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn breadcrumb_separator_gap(tokens: &InputTokens) -> f32 {
+    spacing(BREADCRUMB_SEPARATOR_GAP, tokens)
+}
 /// Corner radius of the interactive segment hover/focus rectangle.
 pub const BREADCRUMB_CORNER_RADIUS: f32 = 4.0;
 
@@ -199,6 +221,18 @@ struct BreadcrumbSegment {
     action: Option<CommandFactory>,
     current: bool,
     interaction: Signal<SegmentInteraction>,
+    /// The crumb's laid-out size, recorded at paint so `hit_outset` can ask
+    /// whether *this* crumb fell short. A crumb is text-width: "A / B / C"
+    /// makes three of them narrower than a finger.
+    painted_size: std::cell::Cell<Size>,
+    /// Whether this crumb navigates, recorded so it survives mounting.
+    ///
+    /// [`is_interactive`](Self::is_interactive) asks whether `action` is still
+    /// present, and `build` **moves** it out into the tap / key / AT closures.
+    /// So that question answers `false` for every crumb that has been built,
+    /// and anything consulted after mount — the hit outset is, on every press —
+    /// has to ask this instead.
+    navigates: std::cell::Cell<bool>,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn Widget>>,
@@ -216,11 +250,14 @@ impl std::fmt::Debug for BreadcrumbSegment {
 
 impl BreadcrumbSegment {
     fn new(label: LocalizedString, action: Option<CommandFactory>, current: bool) -> Self {
+        let navigates = !current && action.is_some();
         Self {
             label,
             action,
             current,
+            navigates: std::cell::Cell::new(navigates),
             interaction: Signal::new(SegmentInteraction::Idle),
+            painted_size: std::cell::Cell::new(Size::ZERO),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -247,7 +284,7 @@ impl BreadcrumbSegment {
     }
 
     fn estimate_width(&self, ctx: &LayoutContext) -> f32 {
-        let pad_h = BREADCRUMB_ITEM_PADDING_HORIZONTAL;
+        let pad_h = breadcrumb_item_padding_horizontal(&ctx.theme.input);
         let envelope = ctx.theme.shape.focus_ring_offset + ctx.theme.shape.focus_ring_width;
         let resolved = self.label.resolve_now();
         let text_width = if let Some(backend) = ctx.text_backend {
@@ -401,7 +438,28 @@ impl Widget for BreadcrumbSegment {
         Size::new(width, visual_h + envelope * 2.0).into()
     }
 
+    /// A crumb is as wide as its label, so a short one ("A / B / C", a drive
+    /// letter, a one-word folder) can land under the 24 dp floor on the axis
+    /// that matters most — and it cannot grow, because the crumbs and their
+    /// chevrons are laid out edge to edge and widening the paint would move the
+    /// whole trail. The shortfall is made up between the pointer and the arena.
+    ///
+    /// Zero for the current crumb and for a trail with no navigation action:
+    /// neither takes a press, and widening a node that then ignores one is a
+    /// hole punched in whatever is behind it.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        if !self.navigates.get() {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        }
+        crate::button::target_outset(self.painted_size.get(), kind, tokens)
+    }
+
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        self.painted_size.set(bounds.size());
         let colors = &ctx.theme.colors;
         let shape = &ctx.theme.shape;
         let envelope = shape.focus_ring_offset + shape.focus_ring_width;
@@ -460,7 +518,7 @@ impl Widget for BreadcrumbSegment {
             colors.text_secondary
         };
 
-        let pad_h = BREADCRUMB_ITEM_PADDING_HORIZONTAL;
+        let pad_h = breadcrumb_item_padding_horizontal(&ctx.theme.input);
         let text_bounds = Rect::new(
             visual.x + pad_h,
             visual.y,
@@ -513,8 +571,11 @@ impl Widget for BreadcrumbSeparator {
         _proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let _ = ctx;
-        Size::new(BREADCRUMB_SEPARATOR_GAP * 3.0, BREADCRUMB_ITEM_HEIGHT).into()
+        Size::new(
+            breadcrumb_separator_gap(&ctx.theme.input) * 3.0,
+            BREADCRUMB_ITEM_HEIGHT,
+        )
+        .into()
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -1172,5 +1233,230 @@ mod tests {
         let id = tree.add(bc);
         tree.layout(SizeProposal::exact(200.0, 30.0));
         assert!(tree.bounds(id).width > 0.0);
+    }
+
+    /// A crumb clears the 24 dp floor at Compact whenever its label gives it
+    /// the width, which is the usual case — and where it does not, the
+    /// `hit_outset` on `BreadcrumbSegment` makes the shortfall up between the
+    /// pointer and the arena rather than moving the trail. This pins the first
+    /// half; the second is the shared `target_outset` contract, covered where
+    /// it can be measured (`primitives::twist_arrow`).
+    #[test]
+    fn a_crumb_clears_the_conformance_floor_at_compact() {
+        let theme = teksilo_core::presets::intui::light();
+        let floor = theme.input.min_target_conformance;
+        let mut tree = WidgetTree::new().with_theme(theme);
+        let bc = tree.add(
+            Breadcrumb::new()
+                .item(BreadcrumbItem::new(lit!("A")).on_activate_fn(|_| {}))
+                .item(BreadcrumbItem::new(lit!("Files"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let _ = tree.render();
+        let crumb = first_crumb(&tree, bc).expect("the trail has crumbs");
+        assert!(
+            crumb.height >= floor,
+            "a Compact crumb measured {crumb:?}, under the {floor} dp floor",
+        );
+    }
+
+    /// A crumb that measures under the 24 dp floor, in a real trail, inside a
+    /// path bar that takes taps of its own.
+    ///
+    /// The crumb is nameless — an icon-only root crumb, an unnamed drive —
+    /// because that is the only label `MockTextBackend` can measure under the
+    /// floor: it bills every character at a flat 8 dp and the segment adds 12
+    /// dp of padding and 8 dp of focus-ring envelope, so even a one-letter
+    /// label comes out at 28 dp. With a real proportional font at
+    /// `typography.small`, a drive letter or a one-word folder lands in the
+    /// same place, which is the case the module doc names.
+    ///
+    /// The bar is what makes this test discriminate. The miss-only slop pass
+    /// only wins when the exact hit's bubble path carries no eligible handler,
+    /// or when its candidate is strictly closer than that path's owner; the bar
+    /// owns the press at distance zero, and a near-miss does not beat zero. So
+    /// the only mechanism left that can carry a press beside the crumb onto it
+    /// is `BreadcrumbSegment`'s own `hit_outset`.
+    fn narrow_crumb_in_a_tappable_bar(
+        hits: Rc<std::cell::Cell<u32>>,
+        bar_taps: Rc<std::cell::Cell<u32>>,
+    ) -> (WidgetTree, WidgetId) {
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let mut tree = themed_tree();
+        let trail = tree.add(
+            Breadcrumb::new()
+                .item(
+                    BreadcrumbItem::new(lit!("")).on_activate_fn(move |_| hits.set(hits.get() + 1)),
+                )
+                .item(BreadcrumbItem::new(lit!("Users")))
+                .item(BreadcrumbItem::new(lit!("cyril"))),
+        );
+        let _bar = tree.add(
+            crate::primitives::HStack::new()
+                .add_child(trail)
+                .on_tap(move |_e, _c| bar_taps.set(bar_taps.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let _ = tree.render();
+        let crumb = first_segment_id(&tree, trail).expect("the trail has crumbs");
+        (tree, crumb)
+    }
+
+    /// The trail's segments, in reading order.
+    fn segment_ids(tree: &WidgetTree, trail: WidgetId) -> Vec<WidgetId> {
+        let mut found: Vec<(WidgetId, f32)> = Vec::new();
+        let mut stack = vec![trail];
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|n| n.contains("BreadcrumbSegment"))
+            {
+                found.push((id, tree.bounds(id).x));
+            }
+            stack.extend(tree.children(id).iter().copied());
+        }
+        found.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        found.into_iter().map(|(id, _)| id).collect()
+    }
+
+    /// The leading, narrowest segment of the trail.
+    fn first_segment_id(tree: &WidgetTree, trail: WidgetId) -> Option<WidgetId> {
+        segment_ids(tree, trail).into_iter().next()
+    }
+
+    /// A crumb that lands under the floor earns the shortfall between the
+    /// pointer and the arena, so the trail's own geometry never moves.
+    #[test]
+    fn a_finger_just_outside_a_narrow_crumb_still_navigates() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let hits = Rc::new(std::cell::Cell::new(0_u32));
+        let bar_taps = Rc::new(std::cell::Cell::new(0_u32));
+        let (mut tree, crumb) = narrow_crumb_in_a_tappable_bar(hits.clone(), bar_taps.clone());
+        let b = tree.bounds(crumb);
+        assert!(
+            b.width < 24.0,
+            "the crumb is meant to be under the floor, got {b:?}"
+        );
+        // 1.5 dp past the crumb, inside the 24 dp target the outset earns it.
+        let at = teksilo_canvas::Point::new(b.right() + 1.5, b.center().y);
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+        assert_eq!(hits.get(), 1, "the crumb's outset did not take the press");
+        assert_eq!(bar_taps.get(), 0, "and the bar must not have taken it too");
+    }
+
+    /// The current crumb navigates nowhere, so it claims no widened target: a
+    /// node that widens itself and then refuses the press is a hole punched in
+    /// the path bar behind it.
+    ///
+    /// Read off the **mounted** crumbs, because the outset is derived from what
+    /// each one painted — an unmounted segment has painted nothing and would
+    /// report `ZERO` whatever the gate said.
+    #[test]
+    fn only_the_navigating_crumb_declares_an_outset() {
+        use teksilo_tokens::PointerKind;
+
+        let mut tree = themed_tree();
+        // Two nameless crumbs, so both land on the same 20 dp geometry: the
+        // first navigates, the last is the current one.
+        let trail = tree.add(
+            Breadcrumb::new()
+                .item(BreadcrumbItem::new(lit!("")).on_activate_fn(|_| {}))
+                .item(BreadcrumbItem::new(lit!(""))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let _ = tree.render();
+
+        let crumbs = segment_ids(&tree, trail);
+        assert_eq!(crumbs.len(), 2, "two crumbs, got {crumbs:?}");
+        for id in &crumbs {
+            assert!(
+                tree.bounds(*id).width < 24.0,
+                "premise: both crumbs are under the floor",
+            );
+        }
+        assert_ne!(
+            tree.widget_hit_outset(crumbs[0], PointerKind::Touch),
+            teksilo_canvas::EdgeInsets::ZERO,
+            "the navigating crumb earns its shortfall",
+        );
+        assert_eq!(
+            tree.widget_hit_outset(crumbs[1], PointerKind::Touch),
+            teksilo_canvas::EdgeInsets::ZERO,
+            "the current crumb navigates nowhere and must claim nothing",
+        );
+    }
+
+    /// A mouse is exact: the same press lands on the path bar, exactly as it
+    /// did before the touch programme.
+    #[test]
+    fn a_mouse_just_outside_a_narrow_crumb_lands_on_the_bar() {
+        let hits = Rc::new(std::cell::Cell::new(0_u32));
+        let bar_taps = Rc::new(std::cell::Cell::new(0_u32));
+        let (mut tree, crumb) = narrow_crumb_in_a_tappable_bar(hits.clone(), bar_taps.clone());
+        let b = tree.bounds(crumb);
+        let at = teksilo_canvas::Point::new(b.right() + 1.5, b.center().y);
+        tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+        tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+        assert_eq!(
+            hits.get(),
+            0,
+            "a mouse must not be given the crumb's outset"
+        );
+        assert_eq!(bar_taps.get(), 1);
+    }
+
+    /// A finger tap navigates on the release, like every other tap target in
+    /// the sweep.
+    #[test]
+    fn a_touch_tap_on_a_crumb_navigates_on_release() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let hits = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let count = hits.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let bc = tree.add(
+            Breadcrumb::new()
+                .item(
+                    BreadcrumbItem::new(lit!("A"))
+                        .on_activate_fn(move |_| count.set(count.get() + 1)),
+                )
+                .item(BreadcrumbItem::new(lit!("Files"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let _ = tree.render();
+        let crumb = first_crumb(&tree, bc).expect("the trail has crumbs");
+        let at = crumb.center();
+        let id = finger();
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
+        assert_eq!(hits.get(), 0, "the press navigates nowhere");
+        tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+        assert_eq!(hits.get(), 1, "the release does");
+    }
+
+    fn first_crumb(
+        tree: &WidgetTree,
+        trail: teksilo_core::widget_id::WidgetId,
+    ) -> Option<teksilo_canvas::Rect> {
+        let mut best: Option<teksilo_canvas::Rect> = None;
+        let mut stack = vec![trail];
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|t| t.contains("BreadcrumbSegment"))
+            {
+                let b = tree.bounds(id);
+                if best.is_none_or(|c| b.x < c.x) {
+                    best = Some(b);
+                }
+            }
+            stack.extend(tree.children(id).iter().copied());
+        }
+        best
     }
 }

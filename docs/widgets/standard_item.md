@@ -70,9 +70,36 @@ a nameless `Role::CheckBox`. The chevron's `TwistArrow` is
 decorative (`set_hidden`); the row's expanded state is owned by
 the wrapper.
 
+## Touch and pen
+
+A row's **height** is a target floor and follows the density ladder — the
+recipe has carried both projected heights since the density sweep, and the row
+now reads them rather than the raw Compact constants.
+
+A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
+body pane owns the tap, the double tap and the reorder drag, and resolves which
+row they mean by coordinate; the framework press belongs to the node whose
+gesture arena took it, so a row's own `pressed_signal` is structurally always
+false. The `Pressed` chrome the recipe paints is therefore reachable only
+through a caller-supplied `interaction_signal`. Changing that means ruling on
+which node owns a press when a data view is wrapped in something tappable,
+which is an open design question rather than a widget change.
+
+Hover is decoration plus the reveal policy: at a density that reveals every
+affordance the row pins its `reveal` signal on, so trailing actions do not
+depend on a hover a contact never produces.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![StandardListItem at Touch density](img/standard_item-touch.png)
+
 ## Builder methods at a glance
 
-`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `interaction_signal`, `label_slot`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `interaction_signal`, `reveal_signal`, `label_slot`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -201,17 +228,35 @@ narrow to hold it the primary `HStack` is over-constrained and the
 `trailing_slot` is pushed past the row's edge.
 Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
 stay reachable: the label then shrinks and truncates within the row.
-**Share the row's interaction state**, so a caller can reveal controls on
-hover.
+**Share the row's interaction state** — idle, hovered, pressed.
 
 A row that shows its actions only while the pointer is over it is a standard
 pattern — a search result offering *replace* and *dismiss*, a list offering
 *remove* — and it cannot be built from outside without knowing when the row
 is hovered. The row already tracks that; this is the handle on it.
 
-The signal is written by the row, not read: pass one in, watch it, and gate
-a trailing slot on it. Reserve the space the controls will take, or the row
-reflows under the pointer that is trying to hit them.
+The signal is written by the row, not read: pass one in and watch it.
+
+**To gate revealed controls, use `reveal_signal`
+instead.** This one reports hover, and hover is a mouse's alone — a
+trailing slot gated on `Hovered` is a slot a finger can never reach.
+
+#### `pub fn reveal_signal(mut self, signal: Signal<bool>) -> Self`
+
+**Whether this row's revealed controls should be reachable**, which is
+not the same question as whether the row is hovered.
+
+`interaction_signal` reports the row's
+interaction state, and a caller gating a trailing slot on `Hovered` has
+built something a finger can never reach: a contact produces no hover,
+ever, so the controls never appear. This signal is the same intent
+stated as intent, and the row answers it per density — hover while the
+density reveals on hover, and **permanently `true`** at a density whose
+`RevealPolicy` is `Always`, where nothing is going to hover.
+
+Gate the slot on this, not on the interaction state, and reserve the
+space the controls take — the row reflows otherwise, under the pointer
+trying to hit them.
 
 #### `pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self`
 
@@ -302,7 +347,13 @@ Create a tree item with the given primary label.
 Forwarded to the inner `StandardListItem` — see its
 `subtitle`.
 See [`StandardListItem::interaction_signal`]: the row's own hover/press
-state, for a caller revealing controls on hover.
+state. To gate revealed controls use
+`reveal_signal`.
+
+#### `pub fn reveal_signal(mut self, signal: Signal<bool>) -> Self`
+
+See [`StandardListItem::reveal_signal`]: whether this row's revealed
+controls should be reachable, answered per density.
 
 #### `pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self`
 

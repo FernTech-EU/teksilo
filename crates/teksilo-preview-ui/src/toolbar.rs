@@ -16,11 +16,17 @@
 //! whole-app reskin is still useful (seeing a widget on dark mode
 //! also reskins the chrome).
 //!
-//! Zoom is intentionally absent: real visual zoom requires a
-//! transform-aware paint primitive (a `ScaleWidget` that pushes a
-//! scaling transform onto the canvas) which teksilo-canvas does not
-//! currently support. The zoom signal in `AppState` is preserved
-//! for the future ScaleWidget to consume.
+//! The **density** switcher is the one control here that cannot be a plain
+//! signal write. A density is carried by the theme *and* decided inside
+//! `build()`, so switching it takes both halves: the re-projected theme (via
+//! `ctx.set_theme`, which the app layer applies to the tree before the next
+//! layout pass) and a rebuild (via the `density` signal, which
+//! `PreviewerRoot` binds at `BindingLevel::Rebuild`). `WidgetTree::
+//! set_input_density` does exactly these two things in one call; nothing on
+//! `EventContext` reaches it, which is why this is spelled out here.
+//!
+//! Zoom lives on the canvas, not here: it is driven by a pinch and by
+//! Ctrl-wheel over the stage (see `crate::canvas`).
 
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::widget::EventContext;
@@ -39,10 +45,13 @@ pub fn build_toolbar(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
     let bg_widget = build_background_picker(ctx, state);
     let locale_widget = build_locale_picker(ctx, state);
 
+    let density_widget = build_density_picker(ctx, state);
+
     let row = HStack::new()
         .spacing(16.0)
         .child(labelled("Theme:", theme_widget))
         .child(labelled("Background:", bg_widget))
+        .child(labelled("Density:", density_widget))
         .child(labelled("Locale:", locale_widget));
 
     let inner = ctx.add(Padding::symmetric(8.0, 12.0).child(row));
@@ -82,9 +91,13 @@ fn build_theme_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
             }
         });
         let style = style_sig.get();
+        let density_for_theme = state.density.clone();
         let btn = Button::new(lit!(label)).variant(style).on_activate_fn(
             move |ctx: &mut EventContext| {
-                ctx.set_theme(theme_choice.theme());
+                // At the active density: a theme carries its own `input`
+                // tokens, so handing over a bare preset would silently reset
+                // the previewer to Compact.
+                ctx.set_theme(theme_choice.theme_at(density_for_theme.get()));
                 theme_sig.set(theme_choice);
             },
         );
@@ -164,5 +177,45 @@ fn build_locale_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
         Vec::<String>::new(),
         teksilo_core::signal::Signal::new(None),
     );
+    ctx.add(row)
+}
+
+/// Density switcher: `Compact | Comfortable | Touch`.
+///
+/// Both halves in one handler, in this order. The theme is handed over first
+/// (the app layer applies it to the tree before the next layout pass), and the
+/// rebuild is requested second, so the pass that re-runs every `build()` reads
+/// the new tokens. Reversed, the rebuild would bake the old density and the new
+/// theme would only relayout it.
+fn build_density_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
+    const ALL: [(teksilo_tokens::TargetDensity, &str); 3] = [
+        (teksilo_tokens::TargetDensity::Compact, "Compact"),
+        (teksilo_tokens::TargetDensity::Comfortable, "Comfortable"),
+        (teksilo_tokens::TargetDensity::Touch, "Touch"),
+    ];
+    let mut row = HStack::new().spacing(4.0);
+    for (density, label) in ALL {
+        let current = state.density.clone();
+        let style_sig = current.map(move |d| {
+            if *d == density {
+                ButtonVariant::Filled
+            } else {
+                ButtonVariant::Ghost
+            }
+        });
+        let style = style_sig.get();
+        let density_target = state.density.clone();
+        let theme_choice = state.canvas_theme.clone();
+        let btn = Button::new(lit!(label)).variant(style).on_activate_fn(
+            move |ctx: &mut EventContext| {
+                if density_target.get() == density {
+                    return;
+                }
+                ctx.set_theme(theme_choice.get().theme_at(density));
+                density_target.set(density);
+            },
+        );
+        row = row.child(btn);
+    }
     ctx.add(row)
 }

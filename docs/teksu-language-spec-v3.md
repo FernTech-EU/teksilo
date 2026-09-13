@@ -285,7 +285,7 @@ TabWidget::new(selected)
     .trailing_slot(trailing_widget)
 ```
 
-Property ordering is preserved. The macro emits method calls in source order.
+Property ordering is preserved, except for the reorder in §3.5: the macro emits method calls in source order for every property that is not a wrapping `WidgetBuilder` method.
 
 Properties are never reinterpreted. `color: c.text_primary` emits `.color(c.text_primary)` whether `c.text_primary` is a `Color`, a `Signal<Color>`, or a `Prop<Color>`. Conversion happens at the type level through `impl Into<Prop<T>>`, not in the macro.
 
@@ -313,6 +313,16 @@ Button("Click") {
 
 All three desugar to the method call named by the property. The macro does not modify closure syntax: `move` stays explicit where the user writes it, and is absent where the user omits it. This is rule 3 of the design principles.
 
+#### Reorder of wrapping properties
+
+A property whose name is a method on the `WidgetBuilder` trait returning `WidgetWithHandlers<T>` is moved to the **end** of the emitted chain. Every other body item keeps its source position, and relative order within each of the two groups is preserved.
+
+The criterion is the return type, not the `on_` prefix. A wrapping method replaces the widget with `WidgetWithHandlers<T>`, which exposes none of the widget's own setters; a child or a widget-specific property emitted after it would resolve against the wrapper and fail with a diagnostic naming a `.child` the user never wrote. The reorder is what lets §3.6's free interleaving hold in the presence of handlers.
+
+This is the only respect in which the emitted chain departs from source order, and the only thing the macro needs to know about the framework: which names wrap. That knowledge lives in `teksilo_parse::diag::is_widget_builder_method` and nowhere else. Because it is a hand-written list and the trait grows, the `teksilo-teksu-guard` crate parses the trait and fails the build when the list falls behind it. The drift is otherwise invisible until a user writes the property with a child after it.
+
+An argument-free wrapping method (§3.4's bare-lowercase form) is reordered on the same rule.
+
 ### 3.6 Child Elements
 
 A bare element at body position, with no `name:` prefix and no `name =` binding, is a child element. Children desugar to `.child(...)` calls on the parent, using the inline-child resolution path from architecture §6.1.
@@ -331,7 +341,7 @@ VStack::new()
     .child(TextWidget::new("Body").style(t.body.clone()))
 ```
 
-Body items interleave freely. Properties, bindings, and children appear in the output chain in source order:
+Body items interleave freely. Properties, bindings, and children appear in the output chain in source order, subject to the §3.5 reorder:
 
 ```rust
 VStack {

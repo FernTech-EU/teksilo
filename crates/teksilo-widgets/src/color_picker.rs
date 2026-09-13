@@ -30,6 +30,25 @@
 //! (no ARIA precedent for 2D pointer gestures); the hue strip, alpha
 //! strip, RGB / HSV spinners, hex input, current-color preview, and
 //! swatch grid each carry their own appropriate role and value.
+//!
+//! ## Touch and pen
+//!
+//! The hue strip, the alpha strip and the HSV canvas are **continuous
+//! manipulators** — the value each produces *is* the press position — so all
+//! three declare `touch_action(NONE)`: a finger that lands on one adjusts it
+//! rather than scrolling the surface the picker sits in.  What `NONE` forbids,
+//! with a test on it, is a two-contact pinch begun on one of them reaching the
+//! surface underneath; the press capture each takes on its own `PointerDown` is
+//! what separately keeps an enclosing scroller from taking the gesture away.
+//! `docs/touch-and-pen.md` §7.3.
+//!
+//! The strips are 14 dp across and cannot grow — the panel's column geometry is
+//! built around them — so they make the 24 dp shortfall up between the pointer
+//! and the arena, through `Widget::hit_outset`, on the short axis only. A
+//! 22 dp preset swatch earns the same widening, on both of its axes. The
+//! strips also report what they painted through `Widget::target_regions`, so
+//! the knob a user aims at is visible to a conformance audit even though no
+//! layout ever produced it.
 
 pub mod alpha_strip;
 pub mod hsv_canvas;
@@ -196,7 +215,11 @@ impl ColorPicker {
             show_hue_strip: true,
             show_alpha_strip: None, // defaults to alpha_enabled
             show_rgb_spinners: true,
-            show_hsv_spinners: false,
+            // On by default: the numeric entry is the canvas's single-pointer
+            // alternative (WCAG 2.2 SC 2.5.7), so an application does not have
+            // to ask for it. `show_hsv_spinners(false)` still turns it off, for
+            // a picker whose canvas is hidden too.
+            show_hsv_spinners: true,
             show_hex_input: true,
             show_preview: true,
             show_swatches: true,
@@ -490,10 +513,15 @@ impl Widget for ColorPicker {
                 components.dragging.clone(),
             )
             .enabled(enabled);
-            // The HSV canvas is a 2D pointer surface with no ARIA
-            // precedent — exclude its subtree from the AT tree.
+            // The canvas's own children are decoration (three stacked gradient
+            // layers), so its subtree stays out of the AT tree — but the canvas
+            // node itself does not: it carries the four
+            // saturation-and-brightness steps as custom actions, which is the
+            // route an assistive client has to a 2-D value.
             use teksilo_core::widget_builder::WidgetBuilder;
-            top_row = top_row.child(canvas.access_exclude_subtree());
+            top_row = top_row.child(
+                canvas.access_subtree(teksilo_core::widget_builder::AccessSubtreeMode::Exclude),
+            );
         }
         if self.show_hue_strip {
             let hue = HueStrip::new(
@@ -818,8 +846,11 @@ fn resolve_color_picker_style(
         .color_picker
         .clone()
         .unwrap_or_else(|| {
-            Rc::new(crate::styles::recipe_color_picker_style::RecipeColorPickerStyle::default())
-                as teksilo_core::styles::SharedColorPickerStyle
+            Rc::new(
+                crate::styles::recipe_color_picker_style::RecipeColorPickerStyle::for_tokens(
+                    &ctx.theme().input,
+                ),
+            ) as teksilo_core::styles::SharedColorPickerStyle
         })
 }
 

@@ -43,6 +43,14 @@ let _w = MenuList::new()
     .item(MenuItem::new(lit!("Paste")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.paste"))));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![MenuList at Touch density](img/menu_list-touch.png)
+
 ## Builder methods at a glance
 
 `type_ahead_timeout`, `attached_side`, `item`, `item_when`, `item_boxed_when`, `separator`, `header`, `max_visible_items`

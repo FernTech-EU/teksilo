@@ -244,7 +244,7 @@ Five primitives constrain what their child can be:
 | Wrapper | Rule | When to use |
 | --- | --- | --- |
 | `FixedSize` | Child reports `bound.width` / `bound.height` (or its natural size on unbound axes); parent proposal is ignored on bound axes. | Dialog widths from settings, animated panel widths. |
-| `MinSize` | Child's wanted size is clamped *upward* on each constrained axis. | Touch targets (`MinSize::new(48.0, 48.0)`), readable column widths. |
+| `MinSize` | Child's wanted size is clamped *upward* on each constrained axis. | Hit targets, readable column widths. For a target, take the floor from the theme rather than hardcoding a number — see 4.2. |
 | `MaxSize` | Child's wanted size is clamped *downward*. Sets `clips_children: true` so overflow is scissored. | Reading-width caps (`MaxSize::width(640.0)`), modal max-height. |
 | `AspectRatio` | Wanted size fits within proposal at a fixed `width / height`. | Image previews, video tiles, square avatars. |
 | `Padding` | Wraps a child with insets; child receives `proposal − insets`, parent reports `child + insets`. | Inner spacing inside cards, dialogs, list rows. |
@@ -276,8 +276,11 @@ Both `width` and `height` accept `impl Into<Prop<f32>>` — pass an `f32` for st
 [crates/teksilo-widgets/src/primitives/min_size.rs](../crates/teksilo-widgets/src/primitives/min_size.rs)
 
 ```rust
-// 48×48 minimum touch target — the Button composite uses this internally:
-MinSize::new(48.0, 48.0).child(content)
+// A minimum hit box. `RecipeButtonStyle::make_body` wraps a Button in one of
+// these, at `ButtonRecipe::min_size` — 72 x 24 dp at Compact for all three
+// variant recipes, raised per axis to the active density's `target_size` by
+// `density_min_size`:
+MinSize::new(recipe.min_size.width, recipe.min_size.height).child(content)
 
 // Single axis:
 MinSize::width(120.0).child(label)
@@ -606,7 +609,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Equal split (1:1, 1:2, …) | `Expand::flex(n)` pairs in a stack |
 | One panel takes the rest | `Expand::new().child(panel)` |
 | Center one child | `Center::new().child(w)` |
-| Force a minimum touch area | `MinSize::new(48.0, 48.0)` |
+| Force a minimum touch area | `MinSize::new(min.width, min.height)` with `min = density_min_size(base, TargetAxes::BOTH, tokens)` — the floor is the density's, not the call site's (§4.2) |
 | Cap reading width | `MaxSize::width(640.0)` |
 | Dialog with a fixed width | `FixedSize::new().width(w)` |
 | Animated panel width | `FixedSize::width(animated_signal)` |
@@ -619,7 +622,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Settings forms | `FormLayout` |
 | Tab pages / wizard steps | `Switcher` |
 
-When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(48, 48)` instead of `FixedSize::width(48.0).height(48.0)` when you mean "at least," not "exactly." (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
+When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(w, h)` instead of `FixedSize::width(w).height(h)` when you mean "at least," not "exactly" — and for a *target*, take `w` and `h` from `density_min_size` rather than writing a number (§4.2). (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
 
 ---
 

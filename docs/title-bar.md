@@ -267,6 +267,68 @@ Builder: `.new(host)` → `.thickness(f32)` → `.content(widget)` / `.content_b
 
 ---
 
+## Touch: grab sizes, the multi-contact guard, and the Wayland limitation
+
+### The 6 dp visual is preserved exactly
+
+Every grip in the window chrome — the `Splitter` gutter, the `DockResizeHandle`, the `WindowFrame`'s resize strips and corners — is painted **6 dp at every density**. None of them is routed through the density `dp` floor, because a strip is an overlay drawn over the window's own edge and a gutter is space taken from the panes either side: widening the paint would eat content rather than empty space. A Compact build renders byte for byte what it always did.
+
+What a finger gets instead is `Widget::hit_outset`, consulted inside the exact hit-test pass. The arena offers an outset-declaring child the press against its *inflated* bounds **before** the ordinary reverse-sibling walk, which is why a widened gutter beats the panes painted on top of it rather than losing to whichever is last. Nothing about it touches layout: no rectangle moves, nothing repaints differently, and `place_children` is not consulted.
+
+The band is `TargetRole::Target`'s floor. Two shapes, because the two situations differ:
+
+| Grip | Painted | Band (Compact) | Band (Comfortable) | Band (Touch) | Inflation |
+|---|---|---|---|---|---|
+| `Splitter` gutter | 6 dp | 24 dp | 32 dp | 44 dp | **9 / 13 / 19 dp each side** — the gutter lies *between* two panes, so both halves are reachable and the shortfall is split |
+| `DockResizeHandle` | 6 dp | 24 dp | 32 dp | 44 dp | as above — also an interior divider |
+| `WindowFrame` edge strip | 6 dp | 24 dp | 32 dp | 44 dp | **18 / 26 / 38 dp** on both sides of the thickness axis; the outward half falls off the window and is discarded by the parent's clip, so the *reachable* band is `thickness + inward` = the target size, all of it inward |
+| `WindowFrame` corner | 6 × 6 dp | 24 dp | 32 dp | 44 dp | as the edge, but on all four sides — both axes are the diagonal grab |
+
+Three rules the numbers obey:
+
+- **Zero for a precise pointer, at every density.** A mouse hot-spot is exact and occludes nothing; widening its targets would steal presses from the panes and the content. Every band above is `PointerKind::is_direct()`-only.
+- **`dp` is a floor, so an already-generous grip earns nothing.** A theme that paints a 32 dp gutter gets no outset at Compact at all.
+- **The outset is silenced wherever the grip would refuse the press** — a disabled splitter handle, a handle parked because a neighbouring pane is hidden. A widened node that then ignores the press is a hole punched in whatever is behind it.
+
+An edge strip never inflates along its own length: that would reach past the window corner into the adjacent edge, which the corner cells already serve. Where two bands overlap the arena settles them by distance to each grip's own uninflated rectangle, not by sibling order, so the midpoint between two adjacent grips belongs to the nearer one.
+
+### The multi-contact guard
+
+`PlatformTitleBarHost::begin_resize` hands the window to the compositor for the rest of the gesture, and a splitter or dock drag captures an anti-jump offset measured from the pressing pointer's position. Both must therefore serve exactly one contact.
+
+`MultiContact::First` governs the **gesture arena**, not raw pointer dispatch, so a second finger's `PointerDown` still reaches a widget's `on_pointer_event`. Each of the three grips gates that press on `ctx.pointer().primary`:
+
+- a **`ResizeStrip`** refuses to ask for a second interactive resize against a live one;
+- a **`SplitterHandle`** and a **`DockResizeHandle`** refuse to recapture the drag offset — without the gate the first finger's next move would be measured against the intruder's position and the divider would leap by the distance between them. (`owns_pointer` already stops the intruder's *moves*; it is the press that does the damage.)
+
+A mouse is always primary, so none of these gates ever fires for one. Per W3C Pointer Events, a lifted primary does not hand the role on mid-sequence, so after a two-finger touch the surviving contact cannot start a resize — release and press again.
+
+### Wayland: a finger cannot move the window, and that is not a to-do
+
+`BackendCaps::touch_window_drag` is **`false` on every platform**, Wayland included. `xdg_toplevel::move` needs a serial from an input event on a toplevel the compositor agrees the client owns, and winit 0.30's `drag_window` harvests a *pointer* serial internally — a finger cannot reach it however the app asks. The request would not fail loudly; the compositor drops a request whose serial does not match, so calling it anyway would be a silent no-op.
+
+`DragRegion` therefore does not call `begin_drag` for a direct pointer. The finger's route is a **long press**, which asks the platform for its system window menu (`xdg_toplevel.show_window_menu` on Wayland) — and that menu's **Move** entry is how a finger moves the window. It is also the WCAG 2.5.7 single-pointer alternative to the dragging operation. A mouse reaches the same menu with the secondary button, unchanged.
+
+Where the platform has no window menu of its own — X11, where winit's `show_window_menu` is an empty stub and `_GTK_SHOW_WINDOW_MENU` is unimplemented by KWin — the fallback menu is `DragRegion`'s own `.context_menu(..)` factory, opened through the framework's long-press context-menu route rather than through a second copy of the opening machinery. That fallback menu has no Move entry today; X11's window manager keyboard bindings (Alt+F7 / Alt+F8) remain available regardless of who draws the frame.
+
+**Be honest about what the tests prove.** A headless test drives a fake `PlatformTitleBarHost`, which will happily record a `begin_drag` a compositor would have ignored — so no test in the suite can detect the real Wayland failure. What the suite pins is the *policy*: that `DragRegion` does not ask, and that the long press asks for the menu instead. Confirming that a finger really can move a window through the menu on a live compositor is a hardware-checklist line.
+
+### Telling the OS the same number
+
+Where the window manager answers the resize hit test itself — Windows, through `WM_NCHITTEST` — the frame's strips never see the press, so the two layers must agree about the band or a finger lands in the gap between them.
+
+`WindowFrame` publishes its **coarse** band (the widened one, in logical pixels) as `HitRegions::resize_borders` from its own `after_paint`, every frame. `HitRegions` is a whole-snapshot channel with one aggregator per window — `TitleBar::after_paint` collects the drag region, the dead-zone holes and the three control buttons — so the two are told apart **by shape**: a payload carrying a non-zero `resize_borders` and nothing else is a *band update* and writes only that field; anything else replaces the snapshot whole. The aggregator never produces the first shape (it builds from `HitRegions::new()` and leaves the band zero), including for the deliberately empty snapshot it publishes to *clear* its regions when the control cluster is hidden. `after_paint` is post-order, so wrapping the title bar — the canonical `WindowFrame::content(VStack { TitleBar, body })` — puts the band update after the aggregate every frame.
+
+The Windows proc then resolves the band per edge with `title_bar_host::resize_band`:
+
+- **a precise pointer gets `SM_CXPADDEDBORDER + SM_CXFRAME` exactly**, so an 8 px border does not become 24 px for every window edge in the app;
+- **a coarse one** (`GetCurrentInputMessageSource` reporting `IMDT_TOUCH` / `IMDT_PEN`) takes the published band where it is wider;
+- **the band never shrinks** — a published value narrower than the OS metric is ignored, so a frame built with a 2 dp strip cannot take away resize area the window manager was already giving.
+
+When the source cannot be read — `WM_NCHITTEST` sent by `DefWindowProc`'s own mouse tracking rather than by a real input packet — the answer is "precise", so the fallback is the metric the window has always used.
+
+---
+
 ## Windows backend
 
 The Windows host extends the DWM-drawn frame into the client area with a 1-pixel top inset (the magic value that preserves Win11's rounded corners — `0` gives square corners), then installs a `SetWindowSubclass` proc on the HWND to intercept the non-client messages that would otherwise hand control back to the OS frame. winit's own wndproc was registered at class-registration time via raw `SetWindowLongPtrW` and runs first; the comctl32 subclass chain fires after and falls through to `DefSubclassProc` for messages we don't intercept. AccessKit's `WM_GETOBJECT` subclass is a separate slot and they coexist.
@@ -274,14 +336,14 @@ The Windows host extends the DWM-drawn frame into the client area with a 1-pixel
 **Messages the proc handles:**
 
 - `WM_NCCALCSIZE` — zero non-client insets so the client area covers the full window. When `IsZoomed` is true, restore the system `SM_CXFRAME + SM_CXPADDEDBORDER` insets and clamp to the monitor work area so the maximized window doesn't cover the taskbar.
-- `WM_NCHITTEST` — return `HTLEFT` / `HTTOP` / corner codes for the outer N pixels (so the OS handles the resize loop natively, with the right cursor and snap behavior), `HTCAPTION` for the widget's drag region, and `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` for the control-button rects. Returning `HTMAXBUTTON` is what makes Win11 show the snap-layout flyout on hover. `no_drag` holes are tested **before** the button and drag rects and return `HTCLIENT` — they carve out both the dead-zoned interactive controls the app placed inside the caption *and* any overlay floating over it (a revealed hamburger menu bar, a tall modal), which must win over every chrome rect beneath it.
+- `WM_NCHITTEST` — return `HTLEFT` / `HTTOP` / corner codes for the outer N pixels (so the OS handles the resize loop natively, with the right cursor and snap behavior) — N being `resize_band(os_metric, published, coarse)`, which is the OS metric exactly for a mouse and the widget layer's published coarse band for a finger or a pen; `HTCAPTION` for the widget's drag region, and `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` for the control-button rects. Returning `HTMAXBUTTON` is what makes Win11 show the snap-layout flyout on hover. `no_drag` holes are tested **before** the button and drag rects and return `HTCLIENT` — they carve out both the dead-zoned interactive controls the app placed inside the caption *and* any overlay floating over it (a revealed hamburger menu bar, a tall modal), which must win over every chrome rect beneath it.
 - `WM_NCLBUTTONDOWN` over a button hit code — return 0 to prevent `DefSubclassProc` from entering its built-in press-tracking modal loop, which would otherwise consume the matching `WM_NCLBUTTONUP` itself (user-visible symptom: the button appears to need a double-click).
 - `WM_NCLBUTTONUP` over a button hit code — post a [`TitleBarSyntheticEvent`](../crates/teksilo-core/src/window_chrome.rs) through `AppEventProxy::send_external_boxed`. The teksilo-app dispatcher resolves the matching `WidgetId` via `host.title_bar_widget_id(target)` and calls `WidgetTree::synthesise_tap` to run the button's `on_tap` handler. `close_action` overrides fire here.
 - `WM_NCMOUSEMOVE` / `WM_NCMOUSELEAVE` — post `TitleBarHoverEvent` for the same reason. The host writes the matching `Signal<bool>` (registered by `WindowControls` via `host.register_hover_signal(...)` at build time); an effect inside `ControlButton` maps the bool to its visual `bg_signal`, so OS-driven hover renders identically to widget-tree hover.
 - `WM_DPICHANGED` — re-call `DwmExtendFrameIntoClientArea` so rounded corners survive a DPI change (winit handles the resize but doesn't re-extend). Falls through to `DefSubclassProc` for the rest.
 - `WM_NCPAINT` / `WM_NCACTIVATE` — return early (`0` and `TRUE` respectively) so DWM doesn't paint legacy caption-button artwork over our pixels and the frame doesn't flicker on focus changes.
 
-**Hit-region snapshot.** `TitleBar::after_paint` publishes a single complete `HitRegions` per frame. Wayland and macOS backends ignore it; the Windows host converts the logical-pixel rects to physical pixels via `GetDpiForWindow(hwnd)` and stores under a `Mutex<HitRegions>` shared with the proc. The proc reads via `try_lock` — if it's contended (re-entry via `SendMessage`), it falls through to `HTCLIENT` rather than blocking the message pump.
+**Hit-region snapshot.** `TitleBar::after_paint` publishes a single complete `HitRegions` per frame. Wayland and macOS backends ignore it; the Windows host converts the logical-pixel rects **and the resize band** to physical pixels via `GetDpiForWindow(hwnd)` and merges into a `Mutex<HitRegions>` shared with the proc (`merge_hit_regions`: a band-only payload updates only `resize_borders`, anything else replaces the snapshot whole — see "Telling the OS the same number" above). The proc takes the lock **once** per message, so the band that decides the edges and the rects that decide everything after them cannot disagree; if it's contended (re-entry via `SendMessage`) there is no snapshot and no band, so the OS metric stands and the message falls through to `HTCLIENT` rather than blocking the message pump.
 
 ```rust
 pub struct HitRegions {
@@ -293,7 +355,7 @@ pub struct HitRegions {
     pub close_id: Option<WidgetId>,
     pub drag: Vec<Rect>,                    // multiple → non-rectangular drag
     pub no_drag: Vec<Rect>,                 // holes: HTCLIENT wins over everything
-    pub resize_borders: ResizeBorders,      // per-edge widths
+    pub resize_borders: ResizeBorders,      // per-edge widths — the coarse grab band
 }
 ```
 
@@ -307,7 +369,10 @@ Widget layer:
 - [crates/teksilo-widgets/src/title_bar.rs](../crates/teksilo-widgets/src/title_bar.rs) — `TitleBar` builder + layout
 - [crates/teksilo-widgets/src/title_bar/controls.rs](../crates/teksilo-widgets/src/title_bar/controls.rs) — `WindowControls`, `ControlButton`
 - [crates/teksilo-widgets/src/title_bar/drag_region.rs](../crates/teksilo-widgets/src/title_bar/drag_region.rs) — `DragRegion`
-- [crates/teksilo-widgets/src/title_bar/window_frame.rs](../crates/teksilo-widgets/src/title_bar/window_frame.rs) — `WindowFrame`, `ResizeStrip`
+- [crates/teksilo-widgets/src/title_bar/window_frame.rs](../crates/teksilo-widgets/src/title_bar/window_frame.rs) — `WindowFrame`
+- [crates/teksilo-widgets/src/title_bar/resize_strip.rs](../crates/teksilo-widgets/src/title_bar/resize_strip.rs) — `ResizeStrip` and its grab band
+- [crates/teksilo-widgets/src/splitter/handle.rs](../crates/teksilo-widgets/src/splitter/handle.rs) — the `Splitter` gutter's grab band
+- [crates/teksilo-widgets/src/docking/resize_handle.rs](../crates/teksilo-widgets/src/docking/resize_handle.rs) — the dock divider's grab band
 
 Core trait:
 - [crates/teksilo-core/src/window_chrome.rs](../crates/teksilo-core/src/window_chrome.rs)

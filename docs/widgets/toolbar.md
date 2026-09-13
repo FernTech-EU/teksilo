@@ -66,6 +66,25 @@ let _bar = Toolbar::new()
     .item(ToolbarItem::flexible_space());
 ```
 
+## Touch and pen
+
+Nothing to do here, and it is worth recording why: every command on the bar
+is an `IconButton` or a `PopoverIconButton`, so each one inherits the
+framework press, release activation and slide-off abort from the button
+family, and each is already 24 dp at Compact
+(`IconButtonSize::Compact`/`Default`). The bar itself carries only roving
+keyboard navigation and takes no press of its own. The overflow chevron is
+gated on the layout-derived `is_overflowing` signal, not on hover, so it is
+reachable by a finger without any reveal policy.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Toolbar at Touch density](img/toolbar-touch.png)
+
 ## Builder methods at a glance
 
 `item`, `action`, `child`, `add_child`, `orientation`, `button_size`, `button_style`, `spacing`, `label`, `compact`, `is_overflowing`
@@ -82,10 +101,28 @@ Toolbar design tokens.
 pub const TOOLBAR_HEIGHT_DEFAULT: f32 = 40.0;
 ```
 
+## `pub fn toolbar_height_default(...)`
+
+`TOOLBAR_HEIGHT_DEFAULT` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn toolbar_height_default(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const TOOLBAR_SPACING`
 
 ```rust
 pub const TOOLBAR_SPACING: f32 = 4.0;
+```
+
+## `pub fn toolbar_spacing(...)`
+
+`TOOLBAR_SPACING` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn toolbar_spacing(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub enum ToolbarOrientation`
@@ -297,9 +334,6 @@ analogue of `theme.style_slots`). Default: the theme's flat / ghost
 icon-button style.
 
 #### `pub fn spacing(mut self, spacing: f32) -> Self`
-
-Gap between consecutive toolbar items in logical pixels (default
-`TOOLBAR_SPACING`).
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 

@@ -294,6 +294,15 @@ impl WebViewHandle for ServoHandle {
     fn set_focus(&self) {
         self.webview.focus();
     }
+    fn set_input_passthrough(&self, passthrough: bool) {
+        // Inverted here, and honestly so: Servo takes input only through
+        // `notify_input_event`, which this backend never calls, so the surface
+        // passes every press through already and being asked for that is a
+        // no-op. The *other* direction — an engine that takes its own input —
+        // is what this backend cannot offer, and the widget never asks for it
+        // (it only ever requests pass-through).
+        let _ = passthrough;
+    }
 }
 
 /// A no-op [`EventLoopWaker`]. A real backend wakes teksilo-app's winit event

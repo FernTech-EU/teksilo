@@ -34,6 +34,14 @@ Splitter::new(model.clone())
     .pane_label(0, tr!(sidebar()));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![Splitter at Touch density](img/splitter-touch.png)
+
 ## Builder methods at a glance
 
 `pane`, `pane_id`, `child`, `pane_label`, `style`, `enabled`

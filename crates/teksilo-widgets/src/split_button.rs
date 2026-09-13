@@ -28,6 +28,23 @@
 //!     .item(MenuItem::new(lit!("Debug")).on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.debug"))))
 //!     .variant(ButtonVariant::Plain);
 //! ```
+//!
+//! ## Touch and pen
+//!
+//! The action half is a target in its own right and needs nothing. The chevron
+//! half is 22 dp wide at every density — a dimension below the conformance floor
+//! cannot be routed through `dp`, which is a floor and would widen the paint at
+//! Compact — so it declares a [`Widget::hit_outset`] instead, with the whole
+//! shortfall on its **leading** edge: the trailing edge is the control's own
+//! frame, and an outset never escapes its parent.
+//!
+//! That means a direct pointer aiming between the halves gets the chevron, and a
+//! precise pointer gets exactly what is painted (`hit_outset` is zero for one).
+//! Of the two halves the action half is the wider, so it is the one that lends
+//! the dp — and the press it loses at its trailing edge is a press aimed at the
+//! chevron.
+//!
+//! [`Widget::hit_outset`]: teksilo_core::widget::Widget::hit_outset
 
 use std::rc::Rc;
 use teksilo_i18n::lit;
@@ -43,7 +60,7 @@ use teksilo_core::styles::{SharedSplitButtonStyle, SplitButtonStyle, SplitButton
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::TextRole;
+use teksilo_tokens::{InputTokens, TargetRole, TextRole};
 
 use crate::button::{ButtonVariant, InteractionState};
 use crate::menu_item::MenuItem;
@@ -51,6 +68,7 @@ use crate::menu_list::MenuList;
 use crate::primitives::{
     Center, FixedSize, HStack, IconWidget, MinSize, Padding, RectWidget, TextWidget, ZStack,
 };
+use teksilo_core::styles::density::{dp, spacing};
 use teksilo_i18n::LocalizedString;
 
 /// One row of the SplitButton's dropdown: either a real MenuItem or a
@@ -64,9 +82,33 @@ enum Row {
 
 /// SplitButton design tokens.
 pub const SPLIT_BUTTON_HEIGHT: f32 = 24.0;
+
+/// [`SPLIT_BUTTON_HEIGHT`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn split_button_height(tokens: &InputTokens) -> f32 {
+    dp(SPLIT_BUTTON_HEIGHT, TargetRole::Target, tokens)
+}
 pub const SPLIT_BUTTON_MIN_WIDTH: f32 = 72.0;
+
+/// [`SPLIT_BUTTON_MIN_WIDTH`] raised to the density's `target_size`
+/// (24 / 32 / 44 dp). The identity at Compact.
+pub fn split_button_min_width(tokens: &InputTokens) -> f32 {
+    dp(SPLIT_BUTTON_MIN_WIDTH, TargetRole::Target, tokens)
+}
 pub const SPLIT_BUTTON_PADDING_HORIZONTAL: f32 = 14.0;
+
+/// [`SPLIT_BUTTON_PADDING_HORIZONTAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn split_button_padding_horizontal(tokens: &InputTokens) -> f32 {
+    spacing(SPLIT_BUTTON_PADDING_HORIZONTAL, tokens)
+}
 pub const SPLIT_BUTTON_PADDING_VERTICAL: f32 = 0.0;
+
+/// [`SPLIT_BUTTON_PADDING_VERTICAL`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn split_button_padding_vertical(tokens: &InputTokens) -> f32 {
+    spacing(SPLIT_BUTTON_PADDING_VERTICAL, tokens)
+}
 pub const SPLIT_BUTTON_CORNER_RADIUS: f32 = 4.0;
 pub const SPLIT_BUTTON_BORDER_WIDTH: f32 = 1.0;
 pub const SPLIT_BUTTON_CHEVRON_WIDTH: f32 = 22.0;
@@ -74,6 +116,86 @@ pub const SPLIT_BUTTON_DIVIDER_WIDTH: f32 = 1.0;
 pub const SPLIT_BUTTON_CHEVRON_ICON_SIZE: f32 = 12.0;
 /// Gap between an optional main-region leading icon and the label.
 pub const SPLIT_BUTTON_ICON_LABEL_GAP: f32 = 6.0;
+
+/// [`SPLIT_BUTTON_ICON_LABEL_GAP`] scaled by the density's `spacing_factor`
+/// (1.00 / 1.15 / 1.30).
+pub fn split_button_icon_label_gap(tokens: &InputTokens) -> f32 {
+    spacing(SPLIT_BUTTON_ICON_LABEL_GAP, tokens)
+}
+
+/// The trailing chevron half, as a node of its own so it can carry a hit
+/// outset.
+///
+/// The chevron is painted 22 dp wide at every density — a dimension below the
+/// 24 dp conformance floor cannot be routed through
+/// [`teksilo_core::styles::density::dp`], which is a floor and would
+/// therefore widen the paint *at Compact* — so the shortfall is made up between
+/// the pointer and the arena instead, which is what [`Widget::hit_outset`] is
+/// for.
+///
+/// It has to be its own widget because the outset is a `Widget` hook and the
+/// half used to be a bare `FixedSize`: a hit outset on that primitive would
+/// belong to every fixed-size box in the framework.
+///
+/// [`Widget::hit_outset`]: teksilo_core::widget::Widget::hit_outset
+#[derive(Debug)]
+struct ChevronRegion {
+    width: f32,
+    height: f32,
+    child: WidgetId,
+}
+
+impl Widget for ChevronRegion {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        teksilo_canvas::Size::new(self.width, self.height).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+
+    /// Top the chevron up to the density's target size, for a direct pointer.
+    ///
+    /// **The whole horizontal shortfall goes on the leading edge**, over the
+    /// action half. The trailing edge is the control's own frame: an outset
+    /// never escapes its parent, so a symmetric split would spend half of it
+    /// outside the row and leave the reachable width one dp short of the floor.
+    /// The direction is the one that can be honoured, and it is also the
+    /// harmless one — the action half is the wider target of the two, and a
+    /// press it loses at its trailing dp is a press aimed at the chevron.
+    ///
+    /// Zero for a precise pointer, so the boundary a mouse feels is the
+    /// boundary the control paints.
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        if !kind.is_direct() {
+            return teksilo_canvas::EdgeInsets::ZERO;
+        }
+        let leading = (dp(self.width, TargetRole::Target, tokens) - self.width).max(0.0);
+        let vertical = ((dp(self.height, TargetRole::Target, tokens) - self.height) * 0.5).max(0.0);
+        teksilo_canvas::EdgeInsets::new(vertical, 0.0, vertical, leading)
+    }
+}
 
 /// A button split into a default-action region and a chevron dropdown region.
 ///
@@ -590,7 +712,7 @@ impl Widget for SplitButton {
             let icon_id = ctx.add(icon.color(label_color.clone()));
             ctx.add(
                 HStack::new()
-                    .spacing(SPLIT_BUTTON_ICON_LABEL_GAP)
+                    .spacing(split_button_icon_label_gap(&ctx.theme().input))
                     .add_child(icon_id)
                     .add_child(label_id),
             )
@@ -598,10 +720,14 @@ impl Widget for SplitButton {
             label_id
         };
 
+        // One resolved control height for the main region, the divider and the
+        // chevron region: they sit on one row, so they must agree.
+        let region_height = split_button_height(&ctx.theme().input);
+
         let main_padding_id = ctx.add(
             Padding::symmetric(
-                SPLIT_BUTTON_PADDING_VERTICAL,
-                SPLIT_BUTTON_PADDING_HORIZONTAL,
+                split_button_padding_vertical(&ctx.theme().input),
+                split_button_padding_horizontal(&ctx.theme().input),
             )
             .child_id(main_inner_id),
         );
@@ -614,7 +740,7 @@ impl Widget for SplitButton {
         let main_region = {
             let actions_for_tap = actions_rc.clone();
             let selected_for_tap = selected.clone();
-            MinSize::new(SPLIT_BUTTON_MIN_WIDTH, SPLIT_BUTTON_HEIGHT)
+            MinSize::new(split_button_min_width(&ctx.theme().input), region_height)
                 .child_id(main_content_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
                     let idx = selected_for_tap.get();
@@ -645,7 +771,7 @@ impl Widget for SplitButton {
         let divider_id = ctx.add(
             FixedSize::new()
                 .width(SPLIT_BUTTON_DIVIDER_WIDTH)
-                .height(SPLIT_BUTTON_HEIGHT)
+                .height(region_height)
                 .child_id(divider_fill_id),
         );
 
@@ -663,39 +789,40 @@ impl Widget for SplitButton {
 
         let chevron_region = {
             let int_for_tap = interaction.clone();
-            FixedSize::new()
-                .width(SPLIT_BUTTON_CHEVRON_WIDTH)
-                .height(SPLIT_BUTTON_HEIGHT)
-                .child_id(chevron_centered_id)
-                .on_tap({
-                    let menu_open = self.menu_open.clone();
-                    move |_pos, ctx: &mut EventContext| {
-                        int_for_tap.set(InteractionState::Pressed);
-                        // Build the popup if this is its first open, before the overlay
-                        // below is measured against it and focus moves into it.
-                        ctx.materialize_now(menu_id);
-                        ctx.activate(menu_id);
-                        menu_open.set(true);
-                        let on_dismiss_open = menu_open.clone();
-                        ctx.show_overlay(OverlayRequest {
-                            content_id: menu_id,
-                            anchor: self_id,
-                            placement: OverlayPlacement::BelowPreferred,
-                            dismiss: DismissBehavior::EscapeOrClickOutside,
-                            layer: OverlayLayer::InTree,
-                            parent_overlay: None,
-                            on_dismiss: Some(Rc::new(move || on_dismiss_open.set(false))),
-                            fade_duration: None,
-                        });
-                        // The MenuList owns the keyboard-navigation handler
-                        // (ArrowUp/ArrowDown/Enter/Escape) and that handler
-                        // only fires when the MenuList is focused. Hand focus
-                        // over so the user can immediately keyboard-walk the
-                        // items they just opened.
-                        ctx.request_focus(menu_id);
-                    }
-                })
-                .cursor(CursorIcon::Pointer)
+            ChevronRegion {
+                width: SPLIT_BUTTON_CHEVRON_WIDTH,
+                height: region_height,
+                child: chevron_centered_id,
+            }
+            .on_tap({
+                let menu_open = self.menu_open.clone();
+                move |_pos, ctx: &mut EventContext| {
+                    int_for_tap.set(InteractionState::Pressed);
+                    // Build the popup if this is its first open, before the overlay
+                    // below is measured against it and focus moves into it.
+                    ctx.materialize_now(menu_id);
+                    ctx.activate(menu_id);
+                    menu_open.set(true);
+                    let on_dismiss_open = menu_open.clone();
+                    ctx.show_overlay(OverlayRequest {
+                        content_id: menu_id,
+                        anchor: self_id,
+                        placement: OverlayPlacement::BelowPreferred,
+                        dismiss: DismissBehavior::EscapeOrClickOutside,
+                        layer: OverlayLayer::InTree,
+                        parent_overlay: None,
+                        on_dismiss: Some(Rc::new(move || on_dismiss_open.set(false))),
+                        fade_duration: None,
+                    });
+                    // The MenuList owns the keyboard-navigation handler
+                    // (ArrowUp/ArrowDown/Enter/Escape) and that handler
+                    // only fires when the MenuList is focused. Hand focus
+                    // over so the user can immediately keyboard-walk the
+                    // items they just opened.
+                    ctx.request_focus(menu_id);
+                }
+            })
+            .cursor(CursorIcon::Pointer)
         };
         let chevron_region_id = ctx.add(chevron_region);
 

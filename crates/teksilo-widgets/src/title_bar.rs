@@ -53,7 +53,7 @@ mod window_menu;
 pub use controls::{ControlAction, ControlButton, WindowControls, WindowControlsLayout};
 pub use drag_region::DragRegion;
 pub use resize_strip::ResizeStrip;
-pub use window_frame::WindowFrame;
+pub use window_frame::{WINDOW_FRAME_RESIZE_THICKNESS, WindowFrame};
 
 /// Type alias for the user-supplied close action that overrides
 /// `host.close()` (which on Wayland is currently a no-op due to winit 0.30
@@ -1468,7 +1468,7 @@ mod tests {
     fn dead_zone_in_center_does_not_arm_the_window_drag() {
         // The widget-land half of the same bug, live on every platform: a
         // press on a control inside the drag region armed the DragRegion's
-        // `on_drag` via `arm_drag_observers`, so a few px of pointer jitter
+        // `on_drag` via `PointerSequence` enrolment, so a few px of pointer jitter
         // during an ordinary click started a window move and ate the tap.
         // The `DeadZone` boundary must stop that arming.
 

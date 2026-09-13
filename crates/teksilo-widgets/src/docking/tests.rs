@@ -176,16 +176,16 @@ fn collapsing_a_split_accordion_keeps_its_header() {
     // Tap in A's header (top of the accordion) → collapse it → the Splitter
     // folds A's pane to the header sliver.
     let p = Point::new(ab.x + 10.0, ab.y + 6.0);
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: p,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    t.dispatch_event(WidgetEvent::PointerUp {
-        position: p,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        p,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    t.dispatch_event(WidgetEvent::pointer_up(
+        p,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     t.tick_animations(Duration::from_millis(400));
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
@@ -915,11 +915,11 @@ fn right_clicking_a_rail_item_opens_a_context_menu() {
     let centre = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
 
     assert!(t.active_overlays().is_empty(), "no menu before the click");
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: centre,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        centre,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         t.active_overlays().len(),
         1,
@@ -951,11 +951,11 @@ fn context_menu_is_only_on_tabs_not_on_pane_content() {
     // Right-click the pane *content* (well below the tab strip): no menu — the
     // panes / accordions / dock content must NOT carry the context menu.
     let content = Point::new(tb.x + tb.width / 2.0, tb.y + tb.height + 60.0);
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: content,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        content,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     assert!(
         t.active_overlays().is_empty(),
         "right-clicking pane content must not open a context menu"
@@ -963,11 +963,11 @@ fn context_menu_is_only_on_tabs_not_on_pane_content() {
 
     // Right-click the tab header itself: the menu opens.
     let tab_centre = Point::new(tb.x + tb.width / 2.0, tb.y + tb.height / 2.0);
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: tab_centre,
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        tab_centre,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         t.active_overlays().len(),
         1,
@@ -1017,6 +1017,142 @@ fn dragging_a_rail_item_reorders_within_the_side() {
         model.side_tabs(DockSide::Leading)[0].panes[0],
         b,
         "dragging A's rail item past B reordered the side (B is now first)"
+    );
+}
+
+/// The dock pane's five split/stack zones are the reusable `DropTarget`'s, not a
+/// hand-computed set of fifths — which is what makes them inherit the per-axis
+/// floor the drop target applies to a small pane (`tests/composite_touch.rs`
+/// measures the floor itself).
+///
+/// The pin is structural on purpose: if the five-zone overlay were ever
+/// hand-rolled again, the floor would silently stop applying and every geometry
+/// test of it would stay green.
+#[test]
+fn a_dock_panes_drop_zones_come_from_the_shared_drop_target() {
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    // A second dock in the same tab makes each one a split pane, which is the
+    // shape that carries the zones.
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    fn has_drop_target(tree: &WidgetTree, id: WidgetId) -> bool {
+        if tree
+            .widget_type_name(id)
+            .is_some_and(|n| n.contains("DropTarget"))
+        {
+            return true;
+        }
+        tree.children(id).iter().any(|&c| has_drop_target(tree, c))
+    }
+    assert!(
+        has_drop_target(&t, root),
+        "a dock pane hosts the shared DropTarget",
+    );
+}
+
+/// A finger's tap on a rail item selects its activity and shows the side, on the
+/// release — the same single activation path the mouse, the keyboard and an AT
+/// `Click` share.
+#[test]
+fn a_finger_taps_a_rail_item_to_show_its_side() {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    // Tap the activity that is *not* current: tapping the current one is the
+    // collapse toggle, which is a different assertion.
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let ab = t.bounds(a_item);
+    let at = Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0);
+
+    let selected_before = model.side_selected_tab_signal(DockSide::Leading).get();
+    assert_ne!(selected_before, 0, "fixture: A is not the current activity");
+    let f = t.new_contact();
+    t.touch_down(f, at);
+    assert_eq!(
+        model.side_selected_tab_signal(DockSide::Leading).get(),
+        selected_before,
+        "the press alone selects nothing",
+    );
+    t.touch_up(f, at);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert_ne!(
+        model.side_selected_tab_signal(DockSide::Leading).get(),
+        selected_before,
+        "the release selects the activity the finger lifted on",
+    );
+    assert!(model.side_visible_signal(DockSide::Leading).get());
+}
+
+/// And a finger that travels instead of lifting reorders the rail: the drag is
+/// the rail item's, not the side's, so nothing had to be declared for a contact
+/// to reach it.
+#[test]
+fn a_finger_reorders_the_rail_by_dragging_an_item() {
+    let model = DockingModel::new();
+    model.set_side_rail(DockSide::Leading, 48.0);
+    let (a, dwa) = dock("Aaa");
+    let (b, dwb) = dock("Bbb");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).new_tab());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert_eq!(model.side_tabs(DockSide::Leading)[0].panes[0], a);
+
+    let a_item = find_role_name(&t, root, Role::Tab, "Aaa").expect("A rail item");
+    let b_item = find_role_name(&t, root, Role::Tab, "Bbb").expect("B rail item");
+    let ab = t.bounds(a_item);
+    let bb = t.bounds(b_item);
+    let from = Point::new(ab.x + ab.width / 2.0, ab.y + ab.height / 2.0);
+    let to = Point::new(from.x, bb.y + bb.height + 10.0);
+
+    let f = t.new_contact();
+    t.touch_down(f, from);
+    for step in 1..=8 {
+        let y = from.y + (to.y - from.y) * step as f32 / 8.0;
+        t.touch_move(f, Point::new(from.x, y));
+    }
+    t.touch_up(f, to);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+
+    assert_eq!(
+        model.side_tabs(DockSide::Leading)[0].panes[0],
+        b,
+        "a finger dragging A past B reordered the side",
     );
 }
 
@@ -1235,16 +1371,16 @@ fn hamburger_restores_activities_when_all_hidden_in_strip() {
     let b = t.bounds(hb);
     let c = Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
     assert!(t.active_overlays().is_empty());
-    t.dispatch_event(WidgetEvent::PointerDown {
-        position: c,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    t.dispatch_event(WidgetEvent::PointerUp {
-        position: c,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    t.dispatch_event(WidgetEvent::pointer_down(
+        c,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    t.dispatch_event(WidgetEvent::pointer_up(
+        c,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert_eq!(
         t.active_overlays().len(),
         1,
@@ -1923,9 +2059,21 @@ fn bare_dock_shows_options_header_only_when_opted_in() {
     let mut t = tree();
     let root = t.add(layout);
     t.layout(SizeProposal::exact(900.0, 600.0));
+    let options = find_named(&t, root, "More actions: Explorer")
+        .expect("show_header(true) ⇒ a bare dock has the ⋮ options button");
+
+    // The census counts this button as the keyboard route to the placements a
+    // drag offers, so its reachability is asserted rather than read off the
+    // fact that an `IconButton` is focusable by default: it sits inside an
+    // accordion header wrapped in a `DeadZone`, and a `tab_stop` suppression
+    // anywhere above it would leave the menu pointer-only.
+    //
+    // The stop is the inner `IconButton`, not this node: the name is carried by
+    // the enclosing `PopoverWidget`, which is correctly not a stop of its own.
     assert!(
-        has_named(&t, root, "More actions: Explorer"),
-        "show_header(true) ⇒ a bare dock has the ⋮ options button"
+        !t.tab_stops_within(options).is_empty(),
+        "the ⋮ options button offers no Tab stop, so its menu — the only \
+         non-drag route to those placements — is reachable by pointer alone"
     );
 }
 

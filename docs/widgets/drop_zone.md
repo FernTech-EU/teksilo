@@ -45,6 +45,22 @@ status line that announces hover ("Drop to add 3 files"), success
 ARIA's `aria-grabbed` / `aria-dropeffect` are deprecated, so live-region
 announcements plus the Browse fallback are the supported pattern.
 
+## Touch and pen
+
+The zone is one target and the whole surface of it, so nothing here needs a
+floor or an outset, and an external drop carries no press to move to a release.
+The keyboard Browse fallback is what makes the action reachable at all where
+there is no OS drag-and-drop backend; it is not a touch affordance and is
+documented at its own builder.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![DropZone at Touch density](img/drop_zone-touch.png)
+
 ## Builder methods at a glance
 
 `subtitle`, `accept_extensions`, `allow_multiple`, `show_browse_button`, `starting_dir`, `browse_label`, `icon`, `style`, `on_files_dropped`, `on_text_dropped`, `on_urls_dropped`
@@ -90,8 +106,13 @@ When `false`, a multi-file drop is rejected.
 #### `pub fn show_browse_button(mut self, show: bool) -> Self`
 
 Show or hide the keyboard-operable Browse button. Default `true`.
-Keeping it visible is strongly recommended — it is the only
-keyboard-accessible path to the zone's action.
+
+It is the zone's **only** route that is not a drag. Turning it off leaves
+the drop as the sole way in, which fails WCAG 2.2 SC 2.5.7 (Dragging
+Movements) as well as SC 2.1.1 — so an application that hides it owes the
+same action another affordance of its own, reachable by keyboard and by a
+single pointer. See
+[the non-drag alternatives page](https://github.com/ferntech-eu/teksilo/blob/main/docs/a11y/non-drag-alternatives.md).
 
 #### `pub fn starting_dir(mut self, path: impl Into<PathBuf>) -> Self`
 

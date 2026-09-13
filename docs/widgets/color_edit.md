@@ -43,6 +43,14 @@ let _edit = ColorEdit::new(color)
     .show_chevron(true);
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ColorEdit at Touch density](img/color_edit-touch.png)
+
 ## Builder methods at a glance
 
 `nullable`, `alpha_enabled`, `swatches`, `swatch_columns`, `picker_layout`, `show_rgb_spinners`, `show_hsv_spinners`, `show_hex_input`, `show_hex_in_trigger`, `show_chevron`, `trigger_swatch_size`, `placement`, `dismiss_behavior`, `label`, `enabled`, `on_open`, `on_close`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`

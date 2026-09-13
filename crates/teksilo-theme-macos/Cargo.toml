@@ -42,6 +42,15 @@ teksilo-widgets = { workspace = true }
 # `tests/mount.rs` builds a real `WidgetTree` per widget; `lit!` supplies
 # the untranslated labels those constructors take.
 teksilo-i18n = { workspace = true }
+# `tests/preset_metrics.rs` reuses the conformance harness's `in_tappable_row`
+# — the row geometry that denies the miss-only slop pass — instead of keeping
+# a copy that could drift from the gate's. Path-only (no version): the crate
+# is `publish = false`, and cargo strips versionless path dev-dependencies at
+# publish time, so this never reaches a published manifest.
+teksilo-target-conformance = { path = "../teksilo-target-conformance" }
+# `tests/preset_metrics.rs` mounts the data views this preset restyles, and
+# those take a `ListModel` rather than a plain slice.
+teksilo-data = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

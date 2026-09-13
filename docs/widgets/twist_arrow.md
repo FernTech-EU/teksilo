@@ -22,6 +22,24 @@ let arrow = TwistArrow::new(16.0, true, false)
     .on_click(|ctx| ctx.send_intent(teksilo_core::Intent::new("tree.toggle")));
 ```
 
+## Touch and pen
+
+A 12 dp chevron is half the 24 dp target floor and cannot grow — the indent
+column is the tree's own geometry. It declares a `Widget::hit_outset`
+instead, which is the one mechanism that can win here: the chevron's
+neighbour is the row, the row takes presses, and a point inside the row is
+at distance zero from it, so the miss-only slop pass could never reach the
+chevron. Zero for a leaf chevron and for a decorative one, which take no
+press.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TwistArrow at Touch density](img/twist_arrow-touch.png)
+
 ## Builder methods at a glance
 
 `color`, `on_click`

@@ -124,5 +124,19 @@ impl Widget for ShortcutsTab {
         }
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {}
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The registered shortcuts, one `id  chord` line each.
+        // The house convention for painted text (`TextWidget` does exactly
+        // this): one `Role::Label` whose name is what is on the screen.
+        // Without it the tab is a blank rectangle to a screen reader.
+        builder.set_role(teksilo_core::accesskit::Role::Label);
+        builder.set_name(
+            self.rows
+                .borrow()
+                .iter()
+                .map(|row| format!("{}  {}", row.id, row.keystroke))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
 }

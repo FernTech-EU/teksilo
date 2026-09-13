@@ -11,6 +11,7 @@
 //! my-previewer --widget=button --variant=disabled   # focus widget+variant
 //! my-previewer --file=path/to/button.rs             # focus file's widget
 //! my-previewer --window=1600x900 --title="Custom"   # window overrides
+//! my-previewer --density=touch                      # preview at Touch density
 //! ```
 //!
 //! Parsing is intentionally hand-rolled (no `clap`) — six flags, no
@@ -26,6 +27,10 @@ pub struct PreviewerOptions {
     pub window_size: (u32, u32),
     pub initial_widget: Option<String>,
     pub initial_variant: Option<String>,
+    /// Density the previewer starts at. Applied to the window's tree at
+    /// creation, which is the one place an app can set a density outright —
+    /// see `crate::app_state::PreviewerRoot` for the live switch.
+    pub density: teksilo_tokens::TargetDensity,
 }
 
 impl Default for PreviewerOptions {
@@ -35,6 +40,7 @@ impl Default for PreviewerOptions {
             window_size: (1400, 900),
             initial_widget: None,
             initial_variant: None,
+            density: teksilo_tokens::TargetDensity::Compact,
         }
     }
 }
@@ -61,6 +67,12 @@ impl PreviewerOptions {
 
     pub fn variant(mut self, name: impl Into<String>) -> Self {
         self.initial_variant = Some(name.into());
+        self
+    }
+
+    /// Start at `density` instead of `Compact`.
+    pub fn density(mut self, density: teksilo_tokens::TargetDensity) -> Self {
+        self.density = density;
         self
     }
 
@@ -112,6 +124,19 @@ impl PreviewerOptions {
                     eprintln!("teksilo-previewer: --window must be WIDTHxHEIGHT (e.g. 1600x900)");
                     std::process::exit(2);
                 }
+            } else if let Some(value) = arg.strip_prefix("--density=") {
+                opts.density = match value.to_ascii_lowercase().as_str() {
+                    "compact" => teksilo_tokens::TargetDensity::Compact,
+                    "comfortable" => teksilo_tokens::TargetDensity::Comfortable,
+                    "touch" => teksilo_tokens::TargetDensity::Touch,
+                    other => {
+                        eprintln!(
+                            "teksilo-previewer: unknown --density '{}'                              (compact | comfortable | touch)",
+                            other
+                        );
+                        std::process::exit(2);
+                    }
+                };
             } else if let Some(value) = arg.strip_prefix("--title=") {
                 opts.window_title = value.to_string();
             } else if arg == "--help" || arg == "-h" {
@@ -237,6 +262,7 @@ fn print_usage() {
                                 from the given source file (suffix match).\n    \
              --window=<WxH>         Override the initial window size (default 1400x900).\n    \
              --title=<TEXT>         Override the window title.\n    \
+             --density=<NAME>       Start at compact | comfortable | touch.\n    \
              -h, --help             Print this help text and exit.\n"
     );
 }
@@ -263,5 +289,17 @@ mod tests {
     fn parses_window_size_arg() {
         let opts = PreviewerOptions::from_iter(["--window=1024x768"]);
         assert_eq!(opts.window_size, (1024, 768));
+    }
+
+    #[test]
+    fn parses_density_arg_and_defaults_to_compact() {
+        assert_eq!(
+            PreviewerOptions::default().density,
+            teksilo_tokens::TargetDensity::Compact
+        );
+        let opts = PreviewerOptions::from_iter(["--density=touch"]);
+        assert_eq!(opts.density, teksilo_tokens::TargetDensity::Touch);
+        let opts = PreviewerOptions::from_iter(["--density=Comfortable"]);
+        assert_eq!(opts.density, teksilo_tokens::TargetDensity::Comfortable);
     }
 }

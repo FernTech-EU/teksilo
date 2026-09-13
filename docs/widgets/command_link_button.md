@@ -21,6 +21,20 @@ CommandLinkButton::new(tr!(create_new_project()))
     .on_activate_fn(|ctx| ctx.send_intent(AppIntent::NewProject))
 ```
 
+## Touch and pen
+
+Shares `build_interaction_handlers` with `Button`; see that
+module's "Touch and pen" section. A command link is a tall, wide target by
+construction, so no hit-widening mechanism is involved.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![CommandLinkButton at Touch density](img/command_link_button-touch.png)
+
 ## Builder methods at a glance
 
 `description`, `icon`, `enabled`, `on_activate_fn`, `title_style`, `description_style`, `title_color`, `description_color`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
@@ -44,10 +58,28 @@ pub const COMMAND_LINK_BUTTON_ICON_SIZE: f32 = 28.0;
 pub const COMMAND_LINK_BUTTON_ICON_TEXT_GAP: f32 = 14.0;
 ```
 
+## `pub fn command_link_button_icon_text_gap(...)`
+
+`COMMAND_LINK_BUTTON_ICON_TEXT_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn command_link_button_icon_text_gap(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP`
 
 ```rust
 pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP: f32 = 4.0;
+```
+
+## `pub fn command_link_button_title_description_gap(...)`
+
+`COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn command_link_button_title_description_gap(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub const COMMAND_LINK_BUTTON_PADDING_HORIZONTAL`
@@ -56,16 +88,43 @@ pub const COMMAND_LINK_BUTTON_TITLE_DESCRIPTION_GAP: f32 = 4.0;
 pub const COMMAND_LINK_BUTTON_PADDING_HORIZONTAL: f32 = 16.0;
 ```
 
+## `pub fn command_link_button_padding_horizontal(...)`
+
+`COMMAND_LINK_BUTTON_PADDING_HORIZONTAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn command_link_button_padding_horizontal(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const COMMAND_LINK_BUTTON_PADDING_VERTICAL`
 
 ```rust
 pub const COMMAND_LINK_BUTTON_PADDING_VERTICAL: f32 = 14.0;
 ```
 
+## `pub fn command_link_button_padding_vertical(...)`
+
+`COMMAND_LINK_BUTTON_PADDING_VERTICAL` scaled by the density's `spacing_factor`
+(1.00 / 1.15 / 1.30).
+
+```rust
+pub fn command_link_button_padding_vertical(tokens: &InputTokens) -> f32;
+```
+
 ## `pub const COMMAND_LINK_BUTTON_MIN_HEIGHT`
 
 ```rust
 pub const COMMAND_LINK_BUTTON_MIN_HEIGHT: f32 = 64.0;
+```
+
+## `pub fn command_link_button_min_height(...)`
+
+`COMMAND_LINK_BUTTON_MIN_HEIGHT` raised to the density's `target_size`
+(24 / 32 / 44 dp). The identity at Compact.
+
+```rust
+pub fn command_link_button_min_height(tokens: &InputTokens) -> f32;
 ```
 
 ## `pub struct CommandLinkButton`

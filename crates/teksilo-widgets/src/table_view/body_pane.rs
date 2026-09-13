@@ -33,13 +33,14 @@ use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{DragEligibility, RowState, SelectionMode};
+use teksilo_data::{DragEligibility, RowState};
 
 use super::a11y::CellA11y;
 use super::body::{BodyRow, SharedColumnWidths};
 use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
+use crate::data_views::deferred_select::PendingSelect;
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
 use crate::table_view::column::EditTriggers;
 
@@ -85,6 +86,10 @@ pub(crate) struct BodyPane<T: 'static> {
     pub(crate) focused_cell: Signal<Option<(usize, usize)>>,
 
     pub(crate) reorderable: bool,
+    /// The non-drag reorder, bound once by the root. `Some` exactly when the
+    /// view is reorderable; each realized row binds its own index into it and
+    /// gets the menu rows and custom actions SC 2.5.7 asks for.
+    pub(crate) reorder_perform: Option<crate::common::ordered_move::MoveRow>,
     /// Cross-widget export / foreign-receive machinery, cloned in from the
     /// owning `TableView` — builds the drag-start payload here; the
     /// self-reorder flag and removal-thunk stash are Rc-backed, so mutations
@@ -150,6 +155,15 @@ pub(crate) struct BodyPane<T: 'static> {
 
     // Build state
     pub(crate) row_entries: Vec<(usize, WidgetId)>,
+    /// The ids this pane hands the arena as its children, positionally aligned
+    /// with [`Self::row_entries`].
+    ///
+    /// A row that is a drag source is wrapped in a
+    /// [`DragSurface`](crate::data_views::DragSurface) — the drag has to
+    /// strictly enclose whatever captures the press — so its layout child is
+    /// the wrapper. `row_entries` (and so `row_map`) stays on the `Role::Row`
+    /// node.
+    pub(crate) row_roots: Vec<WidgetId>,
     /// The realized `(row index -> row wrapper id)` map, shared with the owning
     /// view so its `&self` methods can resolve a row index to a widget without
     /// reaching into this pane.
@@ -265,6 +279,7 @@ impl<T: 'static> Widget for BodyPane<T> {
 
         // Build the visible row range.
         self.row_entries.clear();
+        self.row_roots.clear();
         let mut cell_entries: Vec<((usize, usize), WidgetId)> = Vec::new();
         let (start, end) = self.visible_range();
         let columns = self.columns.clone();
@@ -387,8 +402,25 @@ impl<T: 'static> Widget for BodyPane<T> {
                     let row_for_cell = row_idx;
                     let col_for_cell = display_pos;
                     let mode_for_cell = selection_mode;
+                    // Cell selection is deferred to the release for a direct
+                    // pointer, for the same reason the row's is: a finger's
+                    // press is the opening sample of a scroll, and no
+                    // release-time predicate can unwrite a selection already
+                    // made on `PointerDown`. A mouse still commits on press.
+                    // The row body uses `data_views::deferred_select`; a cell
+                    // cannot (its coordinate is a pair and its model is
+                    // `CellSelectionModel`), so it reuses only the decision
+                    // enum.
+                    let pending_cell_select: Rc<Cell<Option<PendingSelect>>> =
+                        Rc::new(Cell::new(None));
+                    let apply_cell = move |cs: &CellSelectionModel, what: PendingSelect| match what
+                    {
+                        PendingSelect::Collapse => cs.select(row_for_cell, col_for_cell),
+                        PendingSelect::Toggle => cs.toggle(row_for_cell, col_for_cell),
+                        PendingSelect::Extend => cs.extend_to(row_for_cell, col_for_cell),
+                    };
                     let cell_handlers =
-                        HandlerSet::new().on_pointer_event(move |event, _ctx| match event {
+                        HandlerSet::new().on_pointer_event(move |event, ctx| match event {
                             teksilo_core::event::WidgetEvent::PointerDown {
                                 button: teksilo_core::event::PointerButton::Primary,
                                 modifiers,
@@ -397,22 +429,45 @@ impl<T: 'static> Widget for BodyPane<T> {
                                 if editing_for_cell.get().is_some() {
                                     return teksilo_core::event::EventResponse::Ignored;
                                 }
+                                let what = match mode_for_cell {
+                                    TableSelectionMode::SingleCell => Some(PendingSelect::Collapse),
+                                    TableSelectionMode::MultiCell => Some(if modifiers.shift() {
+                                        PendingSelect::Extend
+                                    } else if modifiers.command() {
+                                        PendingSelect::Toggle
+                                    } else {
+                                        PendingSelect::Collapse
+                                    }),
+                                    _ => None,
+                                };
+                                if ctx.pointer_kind().is_direct() {
+                                    // The focus ring travels with the applied
+                                    // selection, not with the press.
+                                    pending_cell_select.set(what);
+                                    return teksilo_core::event::EventResponse::Ignored;
+                                }
+                                pending_cell_select.set(None);
                                 focused_for_cell.set(Some((row_for_cell, col_for_cell)));
-                                if let Some(ref cs) = cell_sel_for_click {
-                                    match mode_for_cell {
-                                        TableSelectionMode::SingleCell => {
-                                            cs.select(row_for_cell, col_for_cell);
-                                        }
-                                        TableSelectionMode::MultiCell => {
-                                            if modifiers.shift() {
-                                                cs.extend_to(row_for_cell, col_for_cell);
-                                            } else if modifiers.command() {
-                                                cs.toggle(row_for_cell, col_for_cell);
-                                            } else {
-                                                cs.select(row_for_cell, col_for_cell);
-                                            }
-                                        }
-                                        _ => {}
+                                if let (Some(cs), Some(what)) = (cell_sel_for_click.as_ref(), what)
+                                {
+                                    apply_cell(cs, what);
+                                }
+                                teksilo_core::event::EventResponse::Ignored
+                            }
+                            teksilo_core::event::WidgetEvent::PointerUp {
+                                button: teksilo_core::event::PointerButton::Primary,
+                                ..
+                            } => {
+                                if !crate::data_views::release_completes_the_press(ctx) {
+                                    // Abandoned, not postponed — a pan that
+                                    // started on this cell selects nothing.
+                                    pending_cell_select.set(None);
+                                    return teksilo_core::event::EventResponse::Ignored;
+                                }
+                                if let Some(what) = pending_cell_select.replace(None) {
+                                    focused_for_cell.set(Some((row_for_cell, col_for_cell)));
+                                    if let Some(cs) = cell_sel_for_click.as_ref() {
+                                        apply_cell(cs, what);
                                     }
                                 }
                                 teksilo_core::event::EventResponse::Ignored
@@ -528,8 +583,9 @@ impl<T: 'static> Widget for BodyPane<T> {
                     // Deferred collapse: pressing an already-selected row
                     // keeps the whole (multi-)selection so it can be
                     // dragged; the collapse-to-single happens on release
-                    // WITHOUT a drag.
-                    let pending_collapse = Rc::new(Cell::new(false));
+                    // WITHOUT a drag, and only on a release the row still
+                    // owns (see `release_completes_the_press`).
+                    let pending_collapse = crate::data_views::deferred_select::pending_cell();
                     row_handlers = row_handlers.on_pointer_event(move |event, ctx| match event {
                         teksilo_core::event::WidgetEvent::PointerDown {
                             button: teksilo_core::event::PointerButton::Primary,
@@ -539,21 +595,14 @@ impl<T: 'static> Widget for BodyPane<T> {
                             if editing_for_click.get().is_some() {
                                 return teksilo_core::event::EventResponse::Ignored;
                             }
-                            // The press belongs to an interactive child (an
-                            // embedded checkbox, button, …) — let it handle the
-                            // tap; don't also select the row. Clear any stale
-                            // deferred-collapse (left by a prior drag whose
-                            // PointerUp the drag machinery consumed) so it can't
-                            // fire on this unrelated interaction.
-                            if ctx.press_claimed_by_interactive_child() {
-                                pending_collapse.set(false);
-                                return teksilo_core::event::EventResponse::Ignored;
-                            }
-                            // Resolve the row's CURRENT position only after the
-                            // guards above have run — the interactive-child
-                            // branch clears stale deferred-collapse state, and
-                            // returning before it would strand that flag.
+                            // Resolve the row's CURRENT position. The
+                            // interactive-child guard lives in the shared
+                            // helper, which also clears any stale deferred
+                            // decision — so a vanished row must still reach it
+                            // rather than returning early and stranding the
+                            // flag.
                             let Some(row_index_for_click) = click_anchor.index() else {
+                                pending_collapse.set(None);
                                 return teksilo_core::event::EventResponse::Ignored;
                             };
                             // Nav-cursor sync (`focused_cell`) is handled by the
@@ -561,22 +610,19 @@ impl<T: 'static> Widget for BodyPane<T> {
                             // cell click in every mode — so a row click here already
                             // moves the arrow-nav origin. (TreeTableView has no such
                             // per-cell handler, so it syncs in its row handler.)
-                            if modifiers.command() && sel_for_click.mode() == SelectionMode::Multi {
-                                sel_for_click.toggle(row_index_for_click);
-                                pending_collapse.set(false);
-                            } else if modifiers.shift()
-                                && sel_for_click.mode() == SelectionMode::Multi
-                            {
-                                sel_for_click.extend_to(row_index_for_click);
-                                pending_collapse.set(false);
-                            } else if sel_for_click.is_selected(row_index_for_click) {
-                                // Defer: a following drag preserves the whole
-                                // selection; a plain click collapses on release.
-                                pending_collapse.set(true);
-                            } else {
-                                sel_for_click.select(row_index_for_click);
-                                pending_collapse.set(false);
-                            }
+                            //
+                            // The shared helper owns the whole decision: the
+                            // interactive-child guard, the accelerator and
+                            // shift clicks, the deferred collapse, and — for a
+                            // direct pointer — deferring the lot to the
+                            // release.
+                            crate::data_views::deferred_select::on_down(
+                                &sel_for_click,
+                                row_index_for_click,
+                                *modifiers,
+                                &pending_collapse,
+                                ctx,
+                            );
                             // Ignored so the gesture arena on this widget
                             // still sees the PointerDown and can arm the
                             // DragRecognizer for drag-to-reorder/export
@@ -587,20 +633,26 @@ impl<T: 'static> Widget for BodyPane<T> {
                             button: teksilo_core::event::PointerButton::Primary,
                             ..
                         } => {
-                            // A release on an interactive child is that
-                            // child's tap — never collapse the row from it
-                            // (guards against a `pending_collapse` a prior
-                            // drag left stuck true).
-                            if ctx.press_claimed_by_interactive_child() {
-                                return teksilo_core::event::EventResponse::Ignored;
-                            }
-                            // Reached only on a click WITHOUT a drag (an
-                            // active drag consumes PointerUp). Collapse the
-                            // deferred multi-selection to the clicked row.
-                            if pending_collapse.replace(false)
-                                && let Some(row) = click_anchor.index()
-                            {
-                                sel_for_click.select(row);
+                            // Apply whatever the press deferred — the
+                            // collapse of a multi-selection a mouse kept alive
+                            // for a drag, or a direct pointer's whole
+                            // decision. The helper owns the
+                            // interactive-child guard and asks
+                            // `release_completes_the_press` for itself, which
+                            // is how a finger's pan claim (which wins the
+                            // arbitration without raising a drag, so the
+                            // `PointerUp` is not routed to `handle_drag_drop`
+                            // and does arrive here) commits nothing.
+                            match click_anchor.index() {
+                                Some(row) => {
+                                    crate::data_views::deferred_select::on_up(
+                                        &sel_for_click,
+                                        row,
+                                        &pending_collapse,
+                                        ctx,
+                                    );
+                                }
+                                None => pending_collapse.set(None),
                             }
                             teksilo_core::event::EventResponse::Ignored
                         }
@@ -608,6 +660,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                     });
                 }
             }
+            let mut row_drag: Option<HandlerSet> = None;
             if is_drag_source {
                 let drag_row = row_idx;
                 let view_id = self.view_id;
@@ -625,7 +678,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                 let export_for_drag = self.export.clone();
                 let with_item_for_drag = self.with_item_fn.clone();
                 let snapshot_for_drag = self.snapshot_out_fn.clone();
-                row_handlers = row_handlers.on_drag(move |phase, ctx| {
+                row_drag = Some(HandlerSet::new().on_drag(move |phase, ctx| {
                     if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
                         // The source's per-row transferable gate.
                         if (drag_gate)(drag_row) == DragEligibility::NoDrag {
@@ -695,7 +748,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                         )) as Box<dyn Widget>;
                         ctx.start_drag_with_preview(anchor, payload, preview);
                     }
-                });
+                }));
             }
             // Row activation (open/commit) — a gesture, so it arbitrates
             // against the reorder drag via the gesture arena (a click
@@ -736,7 +789,43 @@ impl<T: 'static> Widget for BodyPane<T> {
             }
             ctx.apply_handlers(row_id, row_handlers);
 
+            // The non-drag alternative to that drag: the four Move commands as
+            // AccessKit custom actions plus a context menu carrying the same
+            // rows, both calling the root's own commit closure. See
+            // `common::ordered_move`.
+            if let Some(ref perform) = self.reorder_perform {
+                let anchor = (self.anchor_fn)(row_idx);
+                crate::common::ordered_move::RowCommands {
+                    perform: crate::common::ordered_move::bind_row(
+                        perform,
+                        Rc::new(move || anchor.index()),
+                    ),
+                    from: row_idx,
+                    count: (self.len_fn)(),
+                    axis: crate::common::ordered_move::MoveAxis::Vertical,
+                    extra: Vec::new(),
+                }
+                .install(ctx, row_id);
+            }
+
+            // The reorder drag goes on a wrapper that STRICTLY encloses this
+            // row, never on the row itself: a drag on the node that captures
+            // the press is driven by the capture dispatch, which runs before
+            // the arbitration advances, so it latches at `drag_slop` and
+            // decides the sequence before the table's own `PanClaim` can win at
+            // `pan_slop`. Enclosing it is also the only shape the tree arms
+            // `DragActivation` for — `Immediate` for a mouse, `AfterLongPress`
+            // for a finger. The absorber guarantees the row a gesture arena so
+            // something *inside* the wrapper takes the press.
+            let mut row_root = row_id;
+            if let Some(drag) = row_drag {
+                ctx.apply_handlers(row_id, crate::data_views::press_absorber());
+                row_root = ctx.add(crate::data_views::DragSurface::new(row_id));
+                ctx.apply_handlers(row_root, drag);
+            }
+
             self.row_entries.push((row_idx, row_id));
+            self.row_roots.push(row_root);
         }
         ctx.end_view_focus();
 
@@ -745,7 +834,7 @@ impl<T: 'static> Widget for BodyPane<T> {
         // Publish the realized (index -> row wrapper id) map for the view.
         *self.row_map.borrow_mut() = self.row_entries.clone();
 
-        self.row_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn layout_response(
@@ -853,7 +942,7 @@ impl<T: 'static> Widget for BodyPane<T> {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        self.row_entries.iter().map(|(_, id)| *id).collect()
+        self.row_roots.clone()
     }
 
     fn clips_children(&self) -> bool {

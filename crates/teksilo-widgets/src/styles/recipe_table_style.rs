@@ -22,12 +22,14 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{
-    SortDirection, TableGridRecipe, TableHeaderCellConfig, TableRowConfig, TableStyle,
+    SharedTableStyle, SortDirection, TableGridRecipe, TableHeaderCellConfig, TableRowConfig,
+    TableStyle,
 };
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{CornerRadius, SurfaceRole};
+use teksilo_tokens::{CornerRadius, InputTokens, SurfaceRole, TargetRole};
 
 use crate::primitives::{RectWidget, ZStack};
+use teksilo_core::styles::density::{dp, spacing};
 
 // ─── IntUI design tokens for TableView / TreeTableView ─────────────────
 
@@ -111,25 +113,36 @@ pub struct TableRecipe {
     pub tree_twist_label_gap: f32,
 }
 
-impl Default for TableRecipe {
-    fn default() -> Self {
+impl TableRecipe {
+    /// This recipe's dimensions resolved against a density's [`InputTokens`].
+    ///
+    /// [`Default`] is `for_tokens(&InputTokens::default())` — the Compact
+    /// ladder — so the shipped values below are the Compact column by
+    /// construction and cannot drift from it.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
         Self {
-            row_height: ROW_HEIGHT,
-            header_height: HEADER_HEIGHT,
-            cell_padding_horizontal: CELL_PADDING_HORIZONTAL,
-            cell_padding_vertical: CELL_PADDING_VERTICAL,
+            row_height: dp(ROW_HEIGHT, TargetRole::Target, tokens),
+            header_height: dp(HEADER_HEIGHT, TargetRole::Target, tokens),
+            cell_padding_horizontal: spacing(CELL_PADDING_HORIZONTAL, tokens),
+            cell_padding_vertical: spacing(CELL_PADDING_VERTICAL, tokens),
             resize_handle_width: RESIZE_HANDLE_WIDTH,
             grid_line_thickness: GRID_LINE_THICKNESS,
             corner_radius: CORNER_RADIUS,
             sort_indicator_size: SORT_INDICATOR_SIZE,
             filter_indicator_size: FILTER_INDICATOR_SIZE,
-            header_inter_cell_spacing: HEADER_INTER_CELL_SPACING,
-            focus_ring_inset: FOCUS_RING_INSET,
-            min_column_width_default: MIN_COLUMN_WIDTH_DEFAULT,
-            tree_indent_per_level: TREE_INDENT_PER_LEVEL,
+            header_inter_cell_spacing: spacing(HEADER_INTER_CELL_SPACING, tokens),
+            focus_ring_inset: spacing(FOCUS_RING_INSET, tokens),
+            min_column_width_default: dp(MIN_COLUMN_WIDTH_DEFAULT, TargetRole::Target, tokens),
+            tree_indent_per_level: spacing(TREE_INDENT_PER_LEVEL, tokens),
             tree_twist_size: TREE_TWIST_SIZE,
-            tree_twist_label_gap: TREE_TWIST_LABEL_GAP,
+            tree_twist_label_gap: spacing(TREE_TWIST_LABEL_GAP, tokens),
         }
+    }
+}
+
+impl Default for TableRecipe {
+    fn default() -> Self {
+        Self::for_tokens(&InputTokens::default())
     }
 }
 
@@ -145,6 +158,18 @@ pub struct RecipeTableStyle {
 impl RecipeTableStyle {
     pub fn new(recipe: TableRecipe) -> Self {
         Self { recipe }
+    }
+
+    /// This style with every dimension resolved against a density's
+    /// [`InputTokens`], as `RecipeTableStyle::for_tokens(&ctx.theme().input)` at
+    /// the widget's own build site.
+    ///
+    /// [`Default`] is the `TargetDensity::Compact` projection, so a Compact
+    /// tree gets exactly the values this module documents.
+    pub fn for_tokens(tokens: &InputTokens) -> Self {
+        Self {
+            recipe: TableRecipe::for_tokens(tokens),
+        }
     }
 }
 
@@ -235,4 +260,31 @@ impl TableStyle for RecipeTableStyle {
     fn grid(&self) -> TableGridRecipe {
         TableGridRecipe::default()
     }
+
+    /// This style's own gutter, so a recipe built by a preset — Fluent's 12 dp
+    /// `ListViewItem` gutter, say — is the one the header cell pads by.
+    /// `tokens` is unused: the recipe was already resolved against a density
+    /// by [`TableRecipe::for_tokens`] at the widget's build site.
+    fn cell_padding_horizontal(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.cell_padding_horizontal
+    }
+
+    /// This style's own vertical gutter. See
+    /// [`cell_padding_horizontal`](Self::cell_padding_horizontal).
+    fn cell_padding_vertical(&self, _tokens: &InputTokens) -> f32 {
+        self.recipe.cell_padding_vertical
+    }
+}
+
+/// The `TableStyle` a `TableView` / `TreeTableView` builds against: the
+/// theme-wide `style_slots.table` if an app or a preset installed one, else
+/// this module's default resolved against the active density.
+///
+/// Shared by the three sites that need it — the header cell's chrome and its
+/// gutter, and the two views' filter-zone arithmetic — so the gutter the cell
+/// pads by and the gutter the hit zone is measured from cannot disagree.
+pub fn resolve_table_style(ctx: &BuildContext) -> SharedTableStyle {
+    ctx.theme().style_slots.table.clone().unwrap_or_else(|| {
+        std::rc::Rc::new(RecipeTableStyle::for_tokens(&ctx.theme().input)) as SharedTableStyle
+    })
 }

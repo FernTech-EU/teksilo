@@ -42,7 +42,7 @@ assert_eq!(sel.count(), 0);
 
 ## Builder methods at a glance
 
-`mode`, `selection_signal`, `is_selected`, `selected_indices`, `count`, `select`, `toggle`, `extend_to`, `select_indices`, `select_all`, `clear`, `adjust_for_insert`, `adjust_for_remove`, `adjust_for_move`, `debug_named`
+`mode`, `selection_signal`, `is_selected`, `selected_indices`, `count`, `select`, `toggle`, `extend_to`, `extend_to_additive`, `select_indices`, `select_all`, `clear`, `adjust_for_insert`, `adjust_for_remove`, `adjust_for_move`, `invalidate_anchor_from`, `debug_named`
 
 ## API reference
 
@@ -112,8 +112,27 @@ In Single mode, behaves like `select()`.
 
 #### `pub fn extend_to(&self, index: usize)`
 
-Extend the selection from the anchor to the given index (for Shift+click).
-In Single mode, behaves like `select()`.
+Extend the selection from the anchor to the given index (for Shift+click
+and Shift+navigation). In Single mode, behaves like `select()`.
+
+The result is `base ∪ anchor..=index`, where `base` is the selection as
+it stood at the last non-extending mutation — **not** the current
+selection. So the range tracks the anchor in both directions: reversing
+a Shift gesture shrinks it, and `Shift+End` followed by `Shift+Home`
+leaves one row selected rather than the whole collection. The anchor
+itself does not move.
+
+#### `pub fn extend_to_additive(&self, index: usize)`
+
+Extend from the anchor to `index`, keeping whatever was selected when
+this gesture began (Ctrl+Shift+navigation).
+
+The difference from `extend_to` is only which set the
+range is unioned with: a plain gesture starts from the base committed by
+the last click or toggle, while this one captures the live selection on
+its first keystroke, so a second disjoint range can be built without
+losing the first. Subsequent keystrokes in the same gesture reuse that
+capture, so the range still shrinks when reversed.
 
 #### `pub fn select_indices(&self, indices: impl IntoIterator<Item = usize>, additive: bool)`
 
@@ -156,6 +175,21 @@ Indices in `start..start+count` are deselected; indices above are shifted down.
 Adjust selection indices after a block of `count` items moved from
 `from` to `to` (a post-removal index, matching `ListModel::move_item`).
 Selected indices follow their items, so a dragged row stays selected.
+
+#### `pub fn invalidate_anchor_from(&self, first_changed: usize)`
+
+Drop the range anchor when a projection has renumbered the rows under
+it, so the next `Shift` gesture starts from the cursor rather than from
+a row that has since moved.
+
+A sort/filter proxy signals a blanket reset rather than a per-row
+delta, so `adjust_for_*` never runs and an index anchor silently comes
+to mean a different row. Views that read
+`first_changed_index()` from `SortFilterListModel` / `TreeSlice` /
+`TreeDataSlice` / `SortFilterTreeModel` call this with it: everything
+before that index still means what it meant, so an anchor there
+survives. Qt hit the same bug and fixed it by making the anchor a
+persistent index; `KeyedSelectionModel` avoids it by construction.
 
 #### `pub fn debug_named(self, _name: impl Into<String>) -> Self`
 

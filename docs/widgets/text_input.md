@@ -30,6 +30,27 @@ TextInput::new(search.clone())
     .on_submit_fn(|ctx| ctx.send_intent(AppIntent::Search))
 ```
 
+## Touch and pen
+
+The trailing clear affordance is 16 dp of paint and a 24 dp target: raising
+its box would widen every field in the workspace at Compact, so the
+shortfall is made up between the pointer and the arena through
+`Widget::hit_outset` — declared by the slot that takes the tap, because the
+ring around an outset resolves to the declaring node rather than to a
+descendant, and by a direct child of the row, because an outset never
+escapes its parent. The slot keeps its 16 dp while the affordance is hidden
+so the row does not jump, and withdraws its outset while there is nothing to
+clear. The caret and selection behaviour of the field itself belongs to the
+touch-text package.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![TextInput at Touch density](img/text_input-touch.png)
+
 ## Builder methods at a glance
 
 `variant`, `style`, `placeholder`, `label`, `enabled`, `read_only`, `max_length`, `show_clear_button`, `min_width`, `leading_slot`, `trailing_slot`, `on_submit_fn`, `on_access_set_value`, `on_blur_fn`, `char_filter`, `suffix`, `input_mask`, `input_purpose`, `active_descendant`, `controls`, `validator`, `caret_position`, `handle`, `field_id`, `caret_setter`, `validation_feedback_signal`, `validation`, `validation_feedback`, `tooltip`, `rich_tooltip_key`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `text`

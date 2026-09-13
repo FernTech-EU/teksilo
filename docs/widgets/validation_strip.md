@@ -26,6 +26,14 @@ let (field_id, fb_signal) = build_text_input_field(ctx, ...);
 let strip = ctx.add(ValidationStrip::new(fb_signal));
 ```
 
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![ValidationStrip at Touch density](img/validation_strip-touch.png)
+
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/validation_strip/index.html)

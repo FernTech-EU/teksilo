@@ -201,11 +201,11 @@ fn read_only_editor_arrow_keys_move_caret_and_preserve_selection() {
     // it explicitly.
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
@@ -286,11 +286,11 @@ fn read_only_editor_end_key_does_not_escalate_past_block() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     tree.dispatch_event(WidgetEvent::KeyDown {
         key: Key::End,
@@ -359,16 +359,26 @@ fn read_only_editor_is_focusable_and_dispatches_key_events() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Simulate a primary click on the middle of the widget to focus it.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(100.0, 20.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(100.0, 20.0),
+        teksilo_core::event::PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
         "clicking the editor must focus it (focus={:?})",
         focused,
+    );
+
+    // A click reaching it is not the same as a keyboard reaching it: the click
+    // walks to the nearest focusable ancestor, while Tab additionally honours
+    // `tab_stop` on that node and every ancestor. A read-only editor a pointer
+    // can focus and Tab cannot is a 2.1.1 failure, so the traversal graph is
+    // asserted rather than inferred from the click.
+    assert!(
+        !tree.tab_stops_within(id).is_empty(),
+        "a read-only editor must be reachable by Tab, not only by a click"
     );
 
     // Capture the cursor position before key dispatch.
@@ -516,11 +526,11 @@ fn focus_editor(tree: &mut WidgetTree, id: teksilo_core::widget_id::WidgetId) {
     // swallow the click. The body is the focusable inner leaf; the
     // wrapper composes chrome around it through
     // `RichTextEditorStyle::make_body`.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
@@ -1035,27 +1045,25 @@ fn ctx_with_memory_clipboard(
 
 fn synth_pointer_down(tree: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 fn synth_pointer_up(tree: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(x, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(x, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 fn synth_pointer_move(tree: &mut WidgetTree, x: f32, y: f32) {
     use teksilo_core::event::WidgetEvent;
-    tree.dispatch_event(WidgetEvent::PointerMove {
-        position: Point::new(x, y),
-    });
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(x, y)));
 }
 
 #[test]
@@ -2281,11 +2289,11 @@ fn editor_right_click_opens_default_context_menu() {
     let _ = tree.render();
 
     let before = tree.active_overlays().len();
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert!(
@@ -2316,11 +2324,11 @@ fn editor_right_click_suppressed_when_default_context_menu_disabled() {
     let _ = tree.render();
 
     let before = tree.active_overlays().len();
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(50.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(50.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     assert_eq!(
         tree.active_overlays().len(),
@@ -2360,11 +2368,11 @@ fn editor_context_menu_copy_item_copies_selection_to_clipboard() {
     // Open the context menu via right-click. Two layout passes so
     // the overlay's widgets get real bounds — `tree.click` reads
     // `arena.bounds` to compute click center.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -2432,11 +2440,11 @@ fn editor_context_menu_paste_unformatted_item_strips_formatting() {
         teksilo_core::event::Modifiers::CTRL,
     );
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -2493,11 +2501,11 @@ fn editor_context_menu_copy_item_disabled_without_selection() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let update = tree.sync_accessibility();
@@ -2531,11 +2539,11 @@ fn read_only_editor_context_menu_shape_hides_cut_and_paste() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let update = tree.sync_accessibility();
@@ -2599,11 +2607,11 @@ fn editor_context_menu_slot_replaces_default_entirely() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let update = tree.sync_accessibility();
@@ -2654,11 +2662,11 @@ fn editor_right_click_does_not_collapse_selection() {
     );
     assert!(has_sel.get(), "Ctrl+A must flip has_selection");
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(30.0, 10.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(30.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert!(
@@ -2696,11 +2704,11 @@ fn editor_right_click_outside_selection_repositions_caret() {
     assert!(has_sel.get(), "precondition: a selection exists");
 
     // Right-click at the far left — resolves to the very start, outside [6, 11].
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Secondary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     assert!(
@@ -2868,11 +2876,11 @@ fn read_only_editor_arrow_keys_survive_default_context_menu() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(1.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(1.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     let focused = tree.focused();
     assert!(
         focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)),
@@ -4300,11 +4308,11 @@ fn link_click_callback_installs_without_panicking() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
 
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: Point::new(5.0, 10.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        Point::new(5.0, 10.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
     // No assertion on `seen` — the callback firing depends on the
     // mock engine's layout producing a Link hit at (5, 10), which
     // isn't guaranteed. The test's job here is to guard the
@@ -5551,10 +5559,10 @@ mod affinity_tests {
         // Pointer over the editor (top of the outer content), scroll it to the
         // bottom of its own content.
         tree.pointer_move(Point::new(50.0, 12.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(220.0, 150.0));
 
         let editor_bottom = editor_y.get();
@@ -5569,10 +5577,10 @@ mod affinity_tests {
 
         // A second downward wheel at the editor's boundary chains to the outer.
         tree.pointer_move(Point::new(50.0, 12.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 120.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 120.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(220.0, 150.0));
 
         assert!(
@@ -5582,6 +5590,162 @@ mod affinity_tests {
         assert!(
             outer_y.get() > 0.01,
             "outer must scroll because the editor chained the boundary wheel"
+        );
+    }
+
+    /// The nested fixture again, but tall enough for a finger.
+    ///
+    /// A touch pan only arms past `pan_slop` — 36 dp at the coarse profile —
+    /// so the 48 dp editor the wheel tests use is shorter than the gesture
+    /// that has to start inside it. Same shape, room to move: a 160 dp editor
+    /// over a 600 dp filler in a 400 dp window.
+    fn tall_nested_rich_text_fixture(
+        inner: crate::OverscrollBehavior,
+    ) -> (
+        WidgetTree,
+        teksilo_core::signal::Signal<f32>,
+        teksilo_core::signal::Signal<f32>,
+    ) {
+        use crate::ScrollArea;
+        use crate::primitives::{FixedSize, TextWidget, VStack};
+
+        let doc = TextDocument::new();
+        let text: String = (0..60)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        doc.set_plain_text(&text).unwrap();
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let editor = RichTextEditor::editor(doc).overscroll_behavior(inner);
+        let editor_y = editor.scroll_y();
+        // Seed the engine viewport the way a real paint pass would — see the
+        // sibling fixture for why a headless editor needs this.
+        {
+            let handle = editor.state_handle();
+            let mut st = handle.borrow_mut();
+            st.viewport_width = 208.0;
+            st.viewport_height = 160.0;
+            st.engine.set_viewport(208.0, 160.0);
+            st.needs_full_layout = true;
+        }
+        let editor_id = tree.add(editor);
+        let editor_box = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(160.0)
+                .child_id(editor_id),
+        );
+        let filler = tree.add(
+            FixedSize::new()
+                .width(220.0)
+                .height(600.0)
+                .child(TextWidget::new(lit!(""))),
+        );
+        let outer_content = tree.add(VStack::new().add_child(editor_box).add_child(filler));
+        let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(220.0, 400.0));
+        pump(&mut tree, 220.0, 400.0);
+        (tree, editor_y, outer_y)
+    }
+
+    /// The editor's scroll offsets are read at paint and bound to nothing, so
+    /// moving one repaints only if the surface asks. It asks exactly when an
+    /// axis moved — which is what the shared behaviour's `after` arm is for,
+    /// and what a boundary notch must not trigger.
+    #[test]
+    fn a_wheel_that_moves_the_editor_asks_for_a_frame_and_one_that_does_not_does_not() {
+        use teksilo_core::event::{Modifiers, ScrollDelta, WidgetEvent};
+
+        let (mut tree, editor_y, _outer_y) =
+            tall_nested_rich_text_fixture(crate::OverscrollBehavior::Contain);
+
+        tree.pointer_move(Point::new(50.0, 20.0));
+        let _ = tree.frame_requested();
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+            Modifiers::NONE,
+        ));
+        assert!(editor_y.get() > 0.0, "the notch moved the editor");
+        assert!(
+            tree.frame_requested(),
+            "a moved offset must ask for the repaint nothing else will",
+        );
+
+        // Park it at the top, where an upward notch can absorb nothing.
+        editor_y.set(0.0);
+        tree.layout(SizeProposal::exact(220.0, 400.0));
+        let _ = tree.frame_requested();
+        tree.pointer_move(Point::new(50.0, 20.0));
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: -40.0 },
+            Modifiers::NONE,
+        ));
+        assert_eq!(editor_y.get(), 0.0, "and this one moved nothing");
+        assert!(
+            !tree.frame_requested(),
+            "a notch that moved nothing must not cost a frame",
+        );
+    }
+
+    /// A finger pans the editor itself.
+    ///
+    /// The editor installs the shared scroll behaviour, claim included — its
+    /// wheel path, its boundary chaining and its pan arithmetic are the ones
+    /// every other scrollable uses — and the claim serves it even though the
+    /// editor also owns the press arena, which its double- and triple-tap
+    /// recognizers give it. `advance_sequence` (`pointer_state.rs`, the
+    /// `Some(id) == owner` arm) stops its walk at the press owner only for a
+    /// `Gesture` member, whose recognizer the capture dispatch is already
+    /// driving; a `Pan` member is decided in that walk and nowhere else.
+    ///
+    /// **Triage note.** This test previously asserted the opposite — that the
+    /// claim is inert here and that the walk stops, so nothing scrolls at all
+    /// — and said in as many words that the day the rule changed was the day
+    /// its assertions had to be rewritten into "the finger scrolled it". That
+    /// day is this one.
+    #[test]
+    fn a_finger_pans_the_rich_text_editor() {
+        use crate::button::press_test_support::{finger, touch};
+        use teksilo_core::pointer::PointerPhase;
+
+        let (mut tree, editor_y, outer_y) =
+            tall_nested_rich_text_fixture(crate::OverscrollBehavior::Chain);
+        let slop = teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch)
+            .pan_slop
+            .expect("a touch profile pans");
+
+        let id = finger();
+        let from = Point::new(50.0, 140.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, from, 0));
+        for (i, dy) in [slop + 1.0, slop + 60.0].into_iter().enumerate() {
+            tree.dispatch_pointer(touch(
+                id,
+                PointerPhase::Move,
+                Point::new(from.x, from.y - dy),
+                16 + i as u64 * 16,
+            ));
+        }
+        tree.dispatch_pointer(touch(
+            id,
+            PointerPhase::Up,
+            Point::new(from.x, from.y - slop - 60.0),
+            48,
+        ));
+
+        assert!(
+            editor_y.get() > 0.0,
+            "the editor's own claim serves it while it owns the press arena; \
+             it is at {}",
+            editor_y.get(),
+        );
+        assert_eq!(
+            outer_y.get(),
+            0.0,
+            "and the claim stays with the editor for the whole gesture, so \
+             the page behind it is not offered what the editor absorbed",
         );
     }
 
@@ -5595,10 +5759,10 @@ mod affinity_tests {
         // the boundary wheel so the outer never moves.
         for _ in 0..2 {
             tree.pointer_move(Point::new(50.0, 12.0));
-            tree.dispatch_event(WidgetEvent::Scroll {
-                delta: ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
-                modifiers: Modifiers::NONE,
-            });
+            tree.dispatch_event(WidgetEvent::scroll(
+                ScrollDelta::Pixels { x: 0.0, y: 9999.0 },
+                Modifiers::NONE,
+            ));
             tree.layout(SizeProposal::exact(220.0, 150.0));
         }
         assert!(
@@ -5794,10 +5958,10 @@ mod affinity_tests {
 
         // Wheel down, away from the caret.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 200.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 200.0 },
+            Modifiers::NONE,
+        ));
         tree.layout(SizeProposal::exact(220.0, 100.0));
         let after_scroll = editor_y.get();
         assert!(
@@ -5865,10 +6029,10 @@ mod affinity_tests {
         // Wheel the page DOWN. Caret is at the top (position 0) and does NOT
         // move, so nothing should ever pull the page back up to it.
         tree.pointer_move(Point::new(50.0, 40.0));
-        tree.dispatch_event(WidgetEvent::Scroll {
-            delta: ScrollDelta::Pixels { x: 0.0, y: 300.0 },
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 300.0 },
+            Modifiers::NONE,
+        ));
         // Drive the smooth animation to completion.
         for _ in 0..40 {
             tree.request_frame();
@@ -6438,11 +6602,11 @@ fn rtl_editor(text: &str, at: usize) -> (WidgetTree, teksilo_core::signal::Signa
 
     // Click to focus — key events only reach a focused widget — then
     // park the caret exactly where the test wants it.
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: teksilo_canvas::Point::new(1.0, 8.0),
-        button: teksilo_core::event::PointerButton::Primary,
-        modifiers: teksilo_core::event::Modifiers::NONE,
-    });
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        teksilo_canvas::Point::new(1.0, 8.0),
+        teksilo_core::event::PointerButton::Primary,
+        teksilo_core::event::Modifiers::NONE,
+    ));
     handle.select_range(at, at);
     assert_eq!(caret.get(), at, "caret should start at {at}");
     (tree, caret)
@@ -6596,16 +6760,16 @@ fn typewriter_fixture(
 /// silently disable typewriter scrolling for the rest of the test.
 fn click_at(tree: &mut WidgetTree, y: f32) {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(20.0, y),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(20.0, y),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 }
 
 fn key(tree: &mut WidgetTree, key: teksilo_core::event::Key) {
@@ -6769,16 +6933,14 @@ fn a_drag_selection_is_never_interrupted_by_the_pin() {
     click_at(&mut tree, 8.0);
 
     // Press and drag downward without releasing — an in-progress selection.
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(20.0, 8.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 8.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     recorded.set(None);
     for y in [20.0, 40.0, 60.0, 90.0] {
-        tree.dispatch_event(WidgetEvent::PointerMove {
-            position: Point::new(20.0, y),
-        });
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(20.0, y)));
     }
 
     assert!(
@@ -6789,11 +6951,11 @@ fn a_drag_selection_is_never_interrupted_by_the_pin() {
 
     // Releasing leaves the pin stood down (the pointer placed the caret);
     // the keyboard takes it back.
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: Point::new(20.0, 90.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(20.0, 90.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     recorded.set(None);
     key(&mut tree, teksilo_core::event::Key::ArrowDown);
     assert_eq!(recorded.get(), Some(ScrollAlign::Fraction(0.5)));
@@ -8367,11 +8529,11 @@ fn a_plain_click_on_a_link_places_the_caret_and_does_not_follow_it() {
     let _ = tree.render();
     focus_editor(&mut tree, id);
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
 
     assert_eq!(followed.get(), 0, "a plain click must not follow the link");
     assert!(
@@ -8400,11 +8562,11 @@ fn ctrl_click_on_a_link_follows_it() {
     let _ = tree.render();
     focus_editor(&mut tree, id);
 
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: Point::new(60.0, 20.0),
-        button: PointerButton::Primary,
-        modifiers: Modifiers::COMMAND,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(60.0, 20.0),
+        PointerButton::Primary,
+        Modifiers::COMMAND,
+    ));
 
     assert_eq!(seen.borrow().as_str(), "https://example.com");
 }
@@ -8679,11 +8841,11 @@ fn hrefs_after_click(
     let _ = tree.add(editor);
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let _ = tree.render();
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::PointerDown {
-        position: Point::new(2.0, 2.0),
-        button: teksilo_core::event::PointerButton::Primary,
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::pointer_down(
+        Point::new(2.0, 2.0),
+        teksilo_core::event::PointerButton::Primary,
         modifiers,
-    });
+    ));
 
     seen.borrow().clone()
 }
@@ -8697,8 +8859,8 @@ fn read_only_follows_a_link_on_a_plain_click() {
     assert_eq!(
         hrefs,
         vec!["https://example.com/x".to_string()],
-        "a read-only viewer must follow a link on an ordinary click — there is no caret to place, \
-         so a link that ignores a plain click reads as broken"
+        "a read-only viewer must follow a link on an ordinary click — its text cannot be \
+         edited, so a link that ignores a plain click reads as broken"
     );
 }
 

@@ -278,9 +278,15 @@ pub(crate) struct TreeSource<T: 'static> {
     parent_index_fn: Rc<dyn Fn(usize) -> Option<usize>>,
     /// `(pos_in_set_1based, set_size)` among the row's siblings (a11y).
     sibling_pos_fn: Rc<dyn Fn(usize) -> (usize, usize)>,
-    /// Alt+Arrow sibling reorder: `(index, down) -> new flat index` (or `None`
-    /// if at an edge / rejected). The key-typed sibling logic stays internal.
-    keyboard_reorder_fn: Rc<dyn Fn(usize, bool) -> Option<usize>>,
+    /// Non-drag sibling reorder: `(index, move) -> new flat index` (or `None`
+    /// if the move is unavailable or the source rejected it). Commits through
+    /// the source's own `accept_drop`, so it is the row drag's own path; the
+    /// key-typed sibling logic stays internal.
+    sibling_move_fn: Rc<dyn Fn(usize, crate::common::ordered_move::OrderedMove) -> Option<usize>>,
+    /// Non-drag reparent: `(index, indent | outdent) -> new flat index`. The
+    /// same `DropPosition::Into` / sibling-of-parent drop a drag makes; `None`
+    /// when there is no previous sibling to enter or no parent to leave.
+    reparent_fn: Rc<dyn Fn(usize, crate::common::ordered_move::TreeMove) -> Option<usize>>,
     /// Resolve `index` to a [`RowAnchor`](crate::data_views::RowAnchor) that
     /// survives row movement. Captures the source's key at build time; the key
     /// stays inside the closure, so `TreeSource<T>` remains key-agnostic.
@@ -295,12 +301,14 @@ impl<T: 'static> TreeSource<T> {
     /// `Rc<TreeSlice<T>>`; an external source passes its own `Rc<S>`.
     pub(crate) fn from_data_source<S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
         let dnd = TreeDndLazy::from_source(s.clone());
-        // Shared by `sibling_pos_fn` and `keyboard_reorder_fn` below — both
+        // Shared by `sibling_pos_fn`, `sibling_move_fn` and `reparent_fn` below — all
         // need "all visible roots, in order" and a version bump invalidates
-        // both alike, so one scan per version serves either caller.
+        // them alike, so one scan per version serves every caller.
         let root_cache: Rc<RootIndexCache> = Rc::new(RefCell::new(None));
-        let (root_cache_sib, root_cache_kbd) = (root_cache.clone(), root_cache);
-        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13) = (
+        let (root_cache_sib, root_cache_kbd, root_cache_reparent) =
+            (root_cache.clone(), root_cache.clone(), root_cache);
+        let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14) = (
+            s.clone(),
             s.clone(),
             s.clone(),
             s.clone(),
@@ -386,7 +394,7 @@ impl<T: 'static> TreeSource<T> {
                     }
                 }
             }),
-            keyboard_reorder_fn: Rc::new(move |index, down| {
+            sibling_move_fn: Rc::new(move |index, mv| {
                 let k = s10.key_at(index)?;
                 // Ordered sibling keys at `k`'s level. Roots are always visible
                 // (depth 0 never collapses out), so the root list is the visible
@@ -399,23 +407,53 @@ impl<T: 'static> TreeSource<T> {
                         .collect(),
                 };
                 let pos = siblings.iter().position(|x| *x == k)?;
-                let (target, position) = if down {
-                    if pos + 1 >= siblings.len() {
-                        return None;
-                    }
-                    (siblings[pos + 1].clone(), DropPosition::After)
-                } else {
-                    if pos == 0 {
-                        return None;
-                    }
-                    (siblings[pos - 1].clone(), DropPosition::Before)
-                };
+                // The gap a drag would have released over, computed once for all
+                // four moves — see `common::ordered_move::OrderedMove::as_row_drop`,
+                // whose target is a *position among these siblings* here rather
+                // than a flat index.
+                let drop = mv.as_row_drop(pos, siblings.len())?;
+                let target = siblings[drop.target].clone();
                 let applied = s10.accept_drop(DropCommit {
+                    source: DragSource::SameView { key: k.clone() },
+                    target,
+                    position: drop.position,
+                });
+                if applied { s10.flat_index_of(&k) } else { None }
+            }),
+            reparent_fn: Rc::new(move |index, mv| {
+                use crate::common::ordered_move::TreeMove;
+                let k = s14.key_at(index)?;
+                let (target, position) = match mv {
+                    TreeMove::Indent => {
+                        // The previous sibling becomes the new parent. Roots are
+                        // the visible depth-0 scan, exactly as above.
+                        let siblings: Vec<S::Key> = match s14.parent(&k) {
+                            Some(p) => s14.child_keys(&p),
+                            None => root_indices(&*s14, &root_cache_reparent)
+                                .iter()
+                                .filter_map(|&j| s14.key_at(j))
+                                .collect(),
+                        };
+                        let pos = siblings.iter().position(|x| *x == k)?;
+                        let target = siblings[pos.checked_sub(1)?].clone();
+                        // Reveal the new parent, or the indented row lands
+                        // inside something collapsed and vanishes — the caller
+                        // could then neither follow it nor say where it went. A
+                        // drag reaches the same state by spring-loading the row
+                        // it hovers.
+                        s14.set_expanded(&target, true);
+                        (target, DropPosition::Into)
+                    }
+                    // Land after the parent, at the parent's own level — which is
+                    // what makes outdent the exact inverse of indent.
+                    TreeMove::Outdent => (s14.parent(&k)?, DropPosition::After),
+                };
+                let applied = s14.accept_drop(DropCommit {
                     source: DragSource::SameView { key: k.clone() },
                     target,
                     position,
                 });
-                if applied { s10.flat_index_of(&k) } else { None }
+                if applied { s14.flat_index_of(&k) } else { None }
             }),
             version_fn: Rc::new(move || s8.version_signal()),
             first_changed_fn: Rc::new(move || s9.first_changed_index()),
@@ -481,8 +519,28 @@ impl<T: 'static> TreeSource<T> {
     /// Move the row at `index` up (`down=false`) or down among its siblings,
     /// routed through the source's own `accept_drop`. Returns the moved row's
     /// new flat index, or `None` at an edge / if rejected.
-    pub(crate) fn keyboard_reorder(&self, index: usize, down: bool) -> Option<usize> {
-        (self.keyboard_reorder_fn)(index, down)
+    /// Move the row at `index` among its siblings, returning its new flat index.
+    pub(crate) fn sibling_move(
+        &self,
+        index: usize,
+        mv: crate::common::ordered_move::OrderedMove,
+    ) -> Option<usize> {
+        (self.sibling_move_fn)(index, mv)
+    }
+
+    /// Indent or outdent the row at `index`, returning its new flat index.
+    pub(crate) fn reparent(
+        &self,
+        index: usize,
+        mv: crate::common::ordered_move::TreeMove,
+    ) -> Option<usize> {
+        (self.reparent_fn)(index, mv)
+    }
+
+    /// `(pos_in_set_1based, set_size)` among the row's siblings — which moves
+    /// are available reads off this.
+    pub(crate) fn sibling_position(&self, index: usize) -> (usize, usize) {
+        (self.sibling_pos_fn)(index)
     }
 
     pub(crate) fn version_signal(&self) -> Signal<u64> {

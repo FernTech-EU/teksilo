@@ -47,6 +47,20 @@ let log = NotificationLog::new(archive)
     });
 ```
 
+## Touch and pen
+
+A log row is a `StandardListItem`, so its target floor follows the density
+ladder with every other list row, and its tap replays the entry on the release.
+The trailing action strip is made of `Link`s and `Button`s, each its own target.
+
+## Density
+
+The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
+
+**Touch**
+
+![NotificationLog at Touch density](img/log-touch.png)
+
 ## Builder methods at a glance
 
 `for_window`, `for_audience`, `show_toolbar`, `empty_state`, `preferred_width`, `preferred_height`, `on_entry_invoked`, `on_action_invoked`
