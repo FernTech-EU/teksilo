@@ -285,6 +285,21 @@ can override, and none of them changes what a mouse does.
   `TargetMeasurement`/`TargetViolation` carry the measured floor as
   `conformance_floor`, and every consumer reads it instead of re-deriving one.
 
+#### Platform
+
+- **Teksilo could not open a window at all on GLES-3.1 class hardware.** A
+  window asked its device for `wgpu::Limits::default()`, which demands eight
+  colour attachments. A Raspberry Pi 4's V3D driver allows four, so device
+  creation was refused and the application panicked before its first window
+  existed. Nothing in the renderer wanted that headroom: every render pass has
+  one colour attachment, it binds no storage buffers, its widest uniform
+  binding is 8 KiB and its widest shader carries ten inter-stage variables. A
+  window now asks for `downlevel_defaults` with the texture-dimension limits
+  lifted to the adapter's own, which is the set the offscreen test renderer
+  already opens with, so a frame that renders in a test renders in a window.
+  An adapter sitting below even that floor gets one retry with its own reported
+  limits, which cannot be refused on limit grounds.
+
 #### Widgets
 
 - **A Fluent list or tree row can be clicked again.** The preset's selection pill

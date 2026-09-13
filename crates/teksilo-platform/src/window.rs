@@ -172,6 +172,68 @@ fn shared_instance() -> &'static wgpu::Instance {
 /// If a later window's surface turns out to be incompatible with the adapter we
 /// cached — a genuinely multi-GPU machine, where the second window opens on the
 /// other GPU — that window quietly gets its own device rather than failing.
+/// The limits a live window asks its device for.
+///
+/// Deliberately **not** [`wgpu::Limits::default`]. That set demands eight
+/// colour attachments, 64 KiB uniform bindings and 8192-pixel textures. This
+/// renderer draws every pass into a *single* colour attachment, binds at most
+/// 8 KiB of uniforms (128 animation slots of 64 bytes) and caps its path atlas
+/// at 4096 pixels. The headroom was inherited from the default, never needed.
+///
+/// On GLES-3.1 class hardware that headroom is not merely unused, it is
+/// refused: a Raspberry Pi 4's V3D driver allows four colour attachments, so
+/// `default()` failed device creation outright and the app could not open a
+/// window at all.
+///
+/// `downlevel_defaults` is wgpu's GLES-3.1 floor, which is exactly that class
+/// of hardware, and it is already what [`teksilo_render::test_support`] opens
+/// its offscreen device with, so a frame that renders in a test now renders in
+/// a window too. `using_resolution` lifts the three texture-dimension limits
+/// back to whatever this adapter really supports, because the path atlas grows
+/// past the 2048-pixel downlevel cap.
+fn window_device_limits(adapter_limits: wgpu::Limits) -> wgpu::Limits {
+    wgpu::Limits::downlevel_defaults().using_resolution(adapter_limits)
+}
+
+/// Open a device on `adapter`, preferring [`window_device_limits`] and falling
+/// back to whatever the adapter itself reports.
+///
+/// The fallback is not redundant. `downlevel_defaults` is a floor for a *class*
+/// of hardware, not a promise about any given adapter. Anything below GLES 3.1
+/// (an old GL driver, a constrained software rasterizer) can sit under it on a
+/// field `using_resolution` does not lift, and then the principled ask fails
+/// for the same reason `default()` did on the Pi. `adapter.limits()` is by
+/// construction the most that adapter can give, so it cannot be refused on
+/// limit grounds; a request that still fails has a real problem rather than a
+/// mis-sized ask, and that is the error worth propagating.
+async fn open_device(
+    adapter: &wgpu::Adapter,
+) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
+    let descriptor = |limits| wgpu::DeviceDescriptor {
+        label: Some("teksilo_device"),
+        required_features: wgpu::Features::empty(),
+        required_limits: limits,
+        ..Default::default()
+    };
+
+    match adapter
+        .request_device(&descriptor(window_device_limits(adapter.limits())))
+        .await
+    {
+        Ok(pair) => Ok(pair),
+        Err(err) => {
+            // Say why we dropped to the adapter's own limits: a silent
+            // fallback turns "this GPU is below the GLES-3.1 floor" into an
+            // unexplained difference in behaviour between two machines.
+            eprintln!(
+                "teksilo-platform: downlevel device limits refused ({err}); \
+                 retrying with the adapter's own limits"
+            );
+            adapter.request_device(&descriptor(adapter.limits())).await
+        }
+    }
+}
+
 async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
     static SHARED: Mutex<Option<SharedGpu>> = Mutex::new(None);
 
@@ -195,13 +257,7 @@ async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
         .await
         .expect("no compatible wgpu adapter available");
 
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("teksilo_device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            ..Default::default()
-        })
+    let (device, queue) = open_device(&adapter)
         .await
         .expect("wgpu device request failed");
 
@@ -791,5 +847,116 @@ mod accessibility_bridge_tests {
         bridge.publish(&published_tree());
         assert_eq!(bridge.on_activate().nodes.len(), 2);
         assert!(bridge.is_active());
+    }
+}
+
+#[cfg(test)]
+mod device_limits_tests {
+    use super::*;
+
+    /// A Raspberry Pi 4's V3D driver in the fields that matter here: four
+    /// colour attachments and 4096-pixel textures. This is the adapter the
+    /// crash report came from.
+    fn pi4_class_limits() -> wgpu::Limits {
+        wgpu::Limits {
+            max_texture_dimension_1d: 4096,
+            max_texture_dimension_2d: 4096,
+            max_texture_dimension_3d: 256,
+            max_color_attachments: 4,
+            ..wgpu::Limits::downlevel_defaults()
+        }
+    }
+
+    #[test]
+    fn the_default_limits_are_refused_by_gles_class_hardware() {
+        // The bug, stated as a test: this is what the window used to ask for,
+        // and `check_limits` is the same comparison wgpu makes inside
+        // `request_device`. If this ever starts passing, wgpu changed its
+        // defaults and the fallback below is what keeps us honest.
+        assert!(
+            !wgpu::Limits::default().check_limits(&pi4_class_limits()),
+            "the wgpu default limits are supposed to over-ask for a Pi-4 class \
+             adapter; that refusal is the crash this module exists to prevent"
+        );
+    }
+
+    #[test]
+    fn the_window_ask_is_satisfiable_on_gles_class_hardware() {
+        let adapter = pi4_class_limits();
+        assert!(
+            window_device_limits(adapter.clone()).check_limits(&adapter),
+            "a Pi-4 class adapter must be able to grant what a window asks for"
+        );
+    }
+
+    #[test]
+    fn the_window_never_asks_past_the_downlevel_floor() {
+        // The regression pin: whatever the adapter offers, every limit that is
+        // not a texture dimension stays at the GLES-3.1 floor. Re-introducing
+        // `Limits::default()` fails here on a developer's desktop rather than
+        // only on a reviewer's Raspberry Pi.
+        let generous = wgpu::Limits::default();
+        let asked = window_device_limits(generous.clone());
+        let floor = wgpu::Limits::downlevel_defaults();
+
+        assert_eq!(asked.max_color_attachments, floor.max_color_attachments);
+        assert_eq!(
+            asked.max_uniform_buffer_binding_size,
+            floor.max_uniform_buffer_binding_size
+        );
+        assert_eq!(
+            asked.max_inter_stage_shader_variables,
+            floor.max_inter_stage_shader_variables
+        );
+        assert_eq!(
+            asked.max_storage_buffers_per_shader_stage,
+            floor.max_storage_buffers_per_shader_stage
+        );
+        assert_ne!(
+            asked, generous,
+            "asking for the full default set is exactly the regression"
+        );
+    }
+
+    #[test]
+    fn texture_dimensions_follow_the_adapter() {
+        // `downlevel_defaults` caps 2D textures at 2048 and the path atlas
+        // grows to 4096, so the resolution limits, and only those, are lifted
+        // to whatever the adapter really offers.
+        const PATH_ATLAS_MAX: u32 = 4096;
+
+        for adapter in [pi4_class_limits(), wgpu::Limits::default()] {
+            let asked = window_device_limits(adapter.clone());
+            assert_eq!(
+                asked.max_texture_dimension_1d,
+                adapter.max_texture_dimension_1d
+            );
+            assert_eq!(
+                asked.max_texture_dimension_2d,
+                adapter.max_texture_dimension_2d
+            );
+            assert_eq!(
+                asked.max_texture_dimension_3d,
+                adapter.max_texture_dimension_3d
+            );
+            assert!(
+                asked.max_texture_dimension_2d >= PATH_ATLAS_MAX,
+                "the path atlas grows to {PATH_ATLAS_MAX}; a device that cannot \
+                 hold it would fail on a path-heavy frame instead of at startup"
+            );
+        }
+    }
+
+    #[test]
+    fn the_floor_still_covers_what_the_renderer_binds() {
+        // What the renderer actually needs, so that lowering the ask further
+        // fails here rather than in a frame. 128 animation slots of 64 bytes
+        // is the largest uniform binding; every render pass has exactly one
+        // colour attachment.
+        const ANIM_UNIFORM_BYTES: u64 = 128 * 64;
+        let asked = window_device_limits(pi4_class_limits());
+
+        assert!(asked.max_color_attachments >= 1);
+        assert!(asked.max_uniform_buffer_binding_size >= ANIM_UNIFORM_BYTES);
     }
 }
