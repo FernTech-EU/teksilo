@@ -1251,16 +1251,16 @@ mod tests {
         // left — clicking there pages forward, the mirror of the LTR case.
         let p = Point::new(40.0, 6.0);
         tree.pointer_move(p);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
 
         assert!(
             position.get() > 0.0,

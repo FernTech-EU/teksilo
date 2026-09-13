@@ -7,8 +7,8 @@
 
 use super::*;
 
-use crate::accessibility::AccessNodeBuilder;
 use super::accessibility_impl::to_accesskit_rect;
+use crate::accessibility::AccessNodeBuilder;
 
 impl WidgetTree {
     #[allow(clippy::type_complexity)]
@@ -734,7 +734,6 @@ impl WidgetTree {
         }
         builder
     }
-
 }
 
 /// Whether an AT node is a purely-structural container that should be

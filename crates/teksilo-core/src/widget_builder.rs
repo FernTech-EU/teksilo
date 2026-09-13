@@ -1827,6 +1827,10 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.accessible_title_hint()
     }
 
+    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.accessible_title_node()
+    }
+
     fn initial_focus_hint(&self) -> Option<crate::widget_id::WidgetId> {
         self.widget.initial_focus_hint()
     }

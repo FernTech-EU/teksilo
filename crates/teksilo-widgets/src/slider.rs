@@ -1103,16 +1103,16 @@ mod tests {
         // left-to-right.
         let p = Point::new(190.0, 30.0);
         tree.pointer_move(p);
-        tree.dispatch_event(WidgetEvent::PointerDown {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
-        tree.dispatch_event(WidgetEvent::PointerUp {
-            position: p,
-            button: PointerButton::Primary,
-            modifiers: Modifiers::NONE,
-        });
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            p,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
         assert!(
             value.get() < 20.0,
             "a click near the right edge is near the minimum under RTL, got {}",
@@ -1170,16 +1170,8 @@ mod tests {
         let top = Point::new(30.0, 12.0);
         tree.pointer_move(top);
         for ev in [
-            WidgetEvent::PointerDown {
-                position: top,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
-            WidgetEvent::PointerUp {
-                position: top,
-                button: PointerButton::Primary,
-                modifiers: Modifiers::NONE,
-            },
+            WidgetEvent::pointer_down(top, PointerButton::Primary, Modifiers::NONE),
+            WidgetEvent::pointer_up(top, PointerButton::Primary, Modifiers::NONE),
         ] {
             tree.dispatch_event(ev);
         }

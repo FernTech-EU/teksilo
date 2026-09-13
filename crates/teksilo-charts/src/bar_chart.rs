@@ -2256,7 +2256,7 @@ mod tests {
 
         let mut builder = AccessNodeBuilder::for_widget(id);
         crate::hit::emit_mark_node(&mut builder, mark);
-        let (_self_id, _self_node, children) = builder.build(id);
+        let (_self_id, _self_node, children, _local_bounds) = builder.build(id);
         let (_child_id, node) = children
             .first()
             .expect("emit_mark_node pushes exactly one synthetic child");

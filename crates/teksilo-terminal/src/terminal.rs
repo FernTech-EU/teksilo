@@ -1006,10 +1006,7 @@ impl Widget for Terminal {
         // The grid's offset inside the widget: `AccessNodeBuilder::build`
         // translates the emitted rects into window space itself, once the walker
         // has written the terminal's own box.
-        let origin = Point::new(
-            st.origin.x - st.bounds.x,
-            st.origin.y - st.bounds.y,
-        );
+        let origin = Point::new(st.origin.x - st.bounds.x, st.origin.y - st.bounds.y);
         a11y::build_terminal_a11y(builder, &st.snapshot, st.metrics, origin, &self.label);
     }
 

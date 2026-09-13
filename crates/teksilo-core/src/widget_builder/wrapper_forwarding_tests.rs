@@ -129,6 +129,10 @@ impl Widget for QueryProbe {
         Some(TITLE_HINT.to_string())
     }
 
+    fn accessible_title_node(&self) -> Option<WidgetId> {
+        Some(WidgetId::default())
+    }
+
     fn initial_focus_hint(&self) -> Option<WidgetId> {
         Some(WidgetId::default())
     }
@@ -252,6 +256,9 @@ fn query_hooks_lost(widget: &mut dyn Widget) -> Vec<&'static str> {
     }
     if widget.accessible_title_hint().as_deref() != Some(TITLE_HINT) {
         lost.push("accessible_title_hint");
+    }
+    if widget.accessible_title_node().is_none() {
+        lost.push("accessible_title_node");
     }
     if widget.initial_focus_hint().is_none() {
         lost.push("initial_focus_hint");

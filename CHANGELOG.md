@@ -13,15 +13,6 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
-## [0.9.5] - 2026-09-11
-
-Three main strands: text ranges on every visible label, one chord table for
-the bounded-scalar controls, and a submenu that survives the diagonal to
-reach it. Plus `stretch_last_column` on the tables, an assistive-technology
-whole-value write that commits, and a `FormLayout` that keeps its rows
-across a rebuild. One breaking change: `TextInputField::on_access_set_value`
-now returns whether the host accepted the string.
-
 ### Added
 
 #### Touch, pen and density
@@ -88,104 +79,8 @@ it always has.
 - **[docs/touch-verification.md](docs/touch-verification.md)** — the hardware
   procedure, and [its sign-off sheet](docs/touch-verification-signoff.md).
 
-#### Bounded-scalar controls
-
-See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
-
-- `common::range_nav`: the arrow, page and edge chords of a control that holds
-  one bounded number, as pure functions over
-  `(key, modifiers, kind, axis, direction)`. `Slider`, `SpinBox`, `ScrollBar`,
-  the colour picker's hue and alpha strips, the `Splitter` handle and the dock
-  resize handle each hand-rolled the same eight-key match and gave four
-  different answers for it. Like `list_nav`, it takes no platform convention:
-  Qt, GTK4, the Win32 trackbar and `<input type=range>` bind these keys
-  identically on all three desktops.
-- `PageUp` / `PageDown` in `Slider`, with `Slider::page_step` to size the jump.
-  Unset it defaults to ten times the effective `step`, so with the default step
-  of 1 % of the range a page is 10 % of it — WebKit's and Blink's rule for
-  `<input type=range>`, `QAbstractSlider::pageStep`, `GtkScale`'s page
-  increment, and the same `10 x` rule `SpinBox::page_step` already used. The
-  slider was the only one of Teksilo's bounded-scalar widgets with no coarse
-  step at all.
-- `Slider` publishes `numeric_value_jump` and services `Action::SetValue`,
-  taking either an `ActionData::NumericValue` or a numeric string and snapping
-  to `step` exactly as a drag does. AT-SPI publishes the `Value` interface off
-  `numeric_value` alone, so Orca's `Value.SetCurrentValue` already reached the
-  widget and was dropped; macOS gates `setAccessibilityValue:` settability on
-  the advertisement, which the node now carries.
-
-#### Widgets
-
-- **`Alt+ArrowDown` opens the popup and `Alt+ArrowUp` closes it** on
-  `ComboBox`, `DateEdit` and every `PopoverButton` / `PopoverIconButton` — so
-  `ColorEdit`, whose documentation has promised the chord since it was written.
-  The Win32 / WinForms / WPF drop-down chord, the Win32 `DateTimePicker` chord,
-  and the W3C ARIA combobox pattern: "displays the popup without moving focus",
-  which is why the modified form exists beside a bare `ArrowDown` that both
-  opens and advances.
-- `TextInputField::on_access_set_value` (forwarded by `TextInput`): handle an
-  assistive technology's whole-value write, given the string it set. Unset for
-  a field whose bound `Signal<String>` **is** the value — the write has already
-  landed and there is nothing to derive. `SpinBox` and the four date and time
-  editors install one, because their text is only a projection of a typed
-  value. The string is handed over rather than read back from the signal
-  because the field defers its document→signal sync to the next frame tick, so
-  a host reading the signal there would parse the text from *before* the edit.
-- **`F4` toggles the popup** on the drop-down *fields* — `ComboBox` and
-  `DateEdit` — the Win32 / Qt / WPF chord. Deliberately not on `PopoverWidget`,
-  which also backs toolbar chevrons and menu buttons and carries no such
-  convention. An app that registers `F4` as a `Shortcut` keeps it: shortcuts
-  resolve before the focused widget sees the key, and `Alt+F4` is unaffected.
-
-#### Accessibility
-
-- **Every visible label that owns its own accessible name is reviewable by
-  character, word and line**, routable on a braille display and trackable by a
-  screen magnifier. `TextWidget` — the building block behind every label in the
-  framework — now carries AccessKit text runs with real per-character extents,
-  so a screen reader's review cursor can walk a paragraph, a braille cell can
-  be routed to the word under it, and `AXBoundsForRange` / UIA's `TextPattern`
-  / AT-SPI's `GetCharacterExtents` all answer. Before, a label was one
-  unreviewable chunk; only the editors and the terminal exposed ranges, and
-  even those exposed no geometry.
-- `TextWidget::geometry_handle`, for a control that owns its name but paints
-  its text through a hidden label. `Badge`, `GroupHeader` and the scene's
-  `TextItem` use it and are now reviewable too.
-- `teksilo_core::accessibility::text_runs`: the shared emitter every text
-  surface goes through, and `teksilo_core::accessibility::audit`, which reports
-  labels that repeat an ancestor's name, labels with no text ranges, and runs
-  that disagree with the node they hang off.
-- `DocumentFlow::block_line_geometry` and the `*_with_geometry` layout methods
-  in text-typeset 1.11, which is where the per-character extents come from.
-
-#### Data views
-
-- `TableView::stretch_last_column` / `TreeTableView::stretch_last_column`:
-  the last column in display order takes the width the other columns leave
-  (Qt's `stretchLastSection`). Positional — it follows a reorder — and the
-  stretched column has no grip of its own.
-
-#### Core
-
-- `EventContext::arm_overlay_safe_region` / `overlay_safe_region_armed`: an
-  open overlay can claim a "safe triangle" from the point the pointer left its
-  anchor to its own near edge. While the pointer is inside it, the overlay's
-  pointer-leave grace is held off; leaving it starts that grace and coming back
-  cancels it. Any widget whose hover would tear the overlay down asks whether a
-  traversal is under way at all and stands aside for as long as one is, leaving
-  the dismissal to that one re-evaluated grace. Bounded to 600 ms so it stays a
-  travel allowance. Used by cascading submenus.
-- `EventContext::show_overlay_after_replacing_siblings`: like
-  `show_overlay_after_with_focus`, but the anchor's sibling overlays are
-  dismissed when the overlay actually shows rather than when it was requested
-  — the hover-switch that must not fire for a pointer merely passing through.
-
 #### Automation
 
-- `teksilo_automation::client`: the binary name, the matching version and the
-  `cargo install` command for `teksilo-automation-mcp`, plus a `$PATH` lookup
-  for it. Pure `std`; nothing spawns a process, because the only caller is on an
-  app's startup path.
 - **An agent can drive touch, a stylus and two contacts.** New operations:
   a whole multi-touch sequence in one call (reporting the arbitration after every
   step), a two-finger pinch, a fling described in simulated time, a long press
@@ -340,6 +235,313 @@ can override, and none of them changes what a mouse does.
   handles snap to cell boundaries.
 - **A finger is never reported to the child program as a mouse.** Touch reporting
   is its own policy, separate from the mouse reporting a program requests.
+
+### Fixed
+
+#### Core
+
+- **A two-finger pinch reaches the zoom it asked for instead of running into
+  `max_zoom`.** A spread to twice the starting span now leaves a `SceneView` at
+  exactly twice, whatever the sample rate; before, each sample carried the ratio
+  to the *start* of the gesture and the handler multiplied every one of them in,
+  so a single spread compounded to the product of its intermediate ratios.
+- **A trackpad twist turns content by the angle the user twisted.** One degree of
+  rotation on the trackpad rotated a `SceneView` by one radian — about 57° —
+  because winit reports degrees and the payload is read as radians. The
+  conversion now happens where the incoming unit is known.
+- `GestureEvent::PinchChanged` and `PinchPhase::Changed` now document `scale` and
+  `rotation`: both are deltas against the previous sample, and `rotation` is in
+  radians. Fold each sample in (`zoom *= scale`, `rotation += rotation`) rather
+  than assigning it.
+- **`TouchPinchRecognizer::scale` and `rotation` are renamed
+  `cumulative_scale` and `cumulative_rotation`.** They report the totals since
+  the gesture started, which is not what a `PinchChanged` carries; the names now
+  say which of the two a caller is reading.
+- **A `PointerCancel` for a touch contact reported the mouse, with no position**,
+  so an application branching on the cancelled pointer's kind behaved wrongly.
+- **A container that preserves its children across a rebuild destroyed and rebuilt
+  its whole subtree instead**, whenever any builder method wrapped it. That covers
+  every `Switcher`, `TabWidget`, `SceneView`, `DockingLayout`, `Repeater` and
+  `PopoverWidget` with a handler attached.
+- **A wrapped widget's declared shortcuts never reached the registry**, so they
+  were missing from the rebinding UI as well as from the keyboard; a wrapped widget
+  that opts out of layout memoisation was memoised anyway; a wrapped title bar
+  stopped publishing its OS caption regions — a defect its own documentation had
+  written up as a rule. Wrapped dialog content stopped lending its title to its
+  shell and stopped directing initial focus; the context-menu key opened the
+  view's menu rather than the selected row's; a table read its body to assistive
+  technology before its header; a scene stopped grafting its items into the
+  application's accessibility tree; empty tooltip content still raised a bubble.
+- **A coarser density could lower a grip's reach**: an outset and the miss-only
+  slop pass were combined in the wrong order.
+- **A caret could be left outside a viewport that shrank**; a shrink now records a
+  reveal.
+- **Two overlay-dismissal defects a mouse could feel**, and a hold dispatched
+  under a mouse identity that was never there.
+- **A target-size allow-list entry is held to the floor the audit judged against,
+  not to the generic 24 dp table.** Under a theme raising
+  `InputTokens::min_target_conformance`, a `PinnedDp::ClearsFloor` axis excused
+  the very failures the raised floor exists to report.
+  `TargetMeasurement`/`TargetViolation` carry the measured floor as
+  `conformance_floor`, and every consumer reads it instead of re-deriving one.
+
+#### Widgets
+
+- **A Fluent list or tree row can be clicked again.** The preset's selection pill
+  spans the whole row and was hit-tested ahead of the row's contents, so nothing
+  inside a Fluent row — a checkbox, a disclosure arrow, a trailing button — took
+  a press, by mouse or by finger.
+- **A macOS switch and an icon button meet the 24 dp target floor.** Both are
+  drawn at the size the preset asks for, Apple's 22 dp track and the 18 dp
+  compact icon button among them; the node around the chrome is what grew.
+- **Three controls showed no pressed appearance for a pointer at all** — the
+  `ToolBox` header, `RadioTile`, and the calendar's month/year cell, the last only
+  ever writing `false` into its own state.
+- **A declared row height inside the row-metrics dead band was silently refused**,
+  so an exact-height list reported a different total height from a uniform one.
+- **A leaf row in a tree table no longer carries an invisible pointer target.**
+- **The previewer's knob rows were unreachable by any pointer, mouse included**: an
+  infinite height cap inside a scroll area measured `inf` tall, its `y` resolved to
+  `NaN`, and a rectangle containing `NaN` contains no point.
+- **With the debug inspector installed, switching density destroyed the wrapped
+  application's tree.**
+- **Four dimensions a shipped theme sets now reach the screen.** A table header
+  cell pads by the Fluent gutter (12 dp, not 8); a calendar's navigation arrows
+  are drawn the size macOS asks for (20 dp, not 24); a search field's suggestion
+  rows carry the macOS row gutters (8 x 3 dp, not 10 x 4). Each was written on
+  the theme's recipe and discarded, because the widget measured the shipped
+  Int UI constant instead of asking the style. `TableStyle`, `CalendarStyle` and
+  `SearchFieldStyle` now hand the dimension over, and a custom style keeps the
+  ladder it had unless it says otherwise. Int UI at the default density is
+  unchanged.
+- **A theme may draw a control below the 24 dp target floor without costing the
+  app its WCAG 2.2 SC 2.5.8 conformance.** A calendar's navigation arrow keeps
+  whatever size the theme asks for and sits inside a box that reaches the floor,
+  so macOS's 20 dp stepper is drawn at 20 dp and still answers a 24 dp press —
+  from a mouse as much as from a finger. Under Int UI, whose arrow is already
+  the floor, nothing moves at any density.
+
+#### Terminal
+
+- **A terminal placed anywhere but the window's top-left corner accepted no
+  pointer input at all.**
+- **The wheel scrolled the scrollback backwards**, and its report to the child
+  program named cell (0, 0) instead of the cell under the pointer — so a
+  full-screen program that splits its window scrolled the wrong pane.
+- **Dragging a selection handle moved the selection to the neighbouring row.**
+
+#### Previewer
+
+- **The toolbar's Export PNG ignored the live density**, so exporting while the
+  previewer was set to Touch produced a Compact image — over the Compact
+  filename. The density now reaches both the render and the name.
+
+#### Text
+
+- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
+  not in the repository, and because `include_bytes!` resolves at compile time,
+  enabling one was a hard build error — so those five features, both
+  `fonts-all` meta-features, and any `--all-features` build of the workspace
+  had never compiled on any revision. A face is now embedded only if its file
+  is present; enabling a feature without it warns and names the path to drop it
+  at, rather than failing the build.
+- **Dragging the caret handle moves the on-screen keyboard's candidate window
+  with it.** Every editing surface reported the caret's position when a press
+  placed it, and none did when a finger *dragged* it, so composing Japanese,
+  Chinese or Korean after a handle drag put the candidate list at the caret's
+  old position. `RichTextEditor`, `CodeEditor`, `PlainTextEditor`, `TextInput`,
+  `PasswordField`, `SearchField`, `SpinBox` and the date/time family; the
+  assistive-technology route onto the same handle reports it too.
+- **The code editor's gutter returned from inside a clip scope when no text
+  backend was installed**, leaving the render frame unbalanced.
+- **A `PlainTextEditor` could neither replace nor suppress the context menu its
+  documentation offered it**, and the `CodeEditor` family gained the right-click
+  menu it never had.
+- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
+  not in the repository, and because `include_bytes!` resolves at compile time,
+  enabling one was a hard build error — so those five features, both
+  `fonts-all` meta-features, and any `--all-features` build of the workspace
+  had never compiled on any revision. A face is now embedded only if its file
+  is present; enabling a feature without it warns and names the path to drop it
+  at, rather than failing the build.
+
+#### Documentation
+
+- **A `ScrollArea` in the `Thin` scroll-bar mode documented a keyboard route it
+  does not have.** The bar's arrow / `Home` / `End` / `Page` handlers sit on a node
+  that cannot take focus, under every mode — the same limit the
+  `ScrollBarPolicy::AlwaysOff` documentation states from the other side.
+- **`PointerInfo::primary`'s documentation described the wrong one of three
+  similarly-named things.** The field is the W3C *per-kind* flag — a mouse and a
+  first finger are both primary at once on a hybrid machine — and the rule it
+  carried ("exactly one live pointer, a mouse always wins") belongs to the pointer
+  table's own election.
+- **`StandardListItem`'s documentation claimed the row reads its recipe's
+  projected heights.** It projects the module constants instead; those two recipe
+  fields have no reader.
+- **The soft-keyboard documentation claimed a touch-placed caret leaves a stale
+  IME area standing.** Each editing stack reports the area from its own touch path;
+  the unused core method is superseded rather than missing.
+- **Two committed catalog images had gone stale**, one of them contradicting a
+  safety fix: the message-box preview showed **Yes** as the accented default
+  after the widget had switched to **No**, and the colour-picker preview predated
+  the widget growing its HSV row.
+- **Catalog pages linked to rustdoc module pages that do not exist on docs.rs**,
+  because the module is crate-internal; each link now resolves to the nearest
+  published module.
+
+#### teksu
+
+- **`teksu!` bodies could not place `gesture_dead_zone` or `keyboard_capture`
+  before a child**; both failed with "no method named `child`". A compile-time
+  guard now keeps the DSL's builder-method list complete.
+- **31 `teksu!` UI fixtures had never run** — a glob naming a directory that does
+  not exist, which trybuild reports as "no tests enabled yet" and then passes —
+  and one of them was asserting a caret column rustc does not emit.
+- **A bare child in any popover produced the generic error** instead of the slot
+  hint.
+
+### Known limitations
+
+- **The hardware sign-off is not done.** Everything above that a headless Linux
+  host can check is checked by the suite;
+  [docs/touch-verification.md](docs/touch-verification.md) is the procedure for
+  the rest, and its [sign-off sheet](docs/touch-verification-signoff.md) is empty.
+  One question in it can only be answered on a macOS trackpad: whether a positive
+  trackpad rotation delta should be negated at the platform seam.
+- **A running application does not switch density because a finger arrived.**
+  `DensityPolicy::FollowLastPointer` has an ingress and no writer; what a stray
+  tap should cost and when hysteresis commits are unanswered.
+- **Overscroll is published but not painted.** `ScrollableAxes::overscroll`
+  carries the value; nothing renders a stretch or a glow.
+- **A plain `ScrollArea` has no keyboard scroll route.** Assistive technology can
+  scroll it and the data views bring their own key handling, but a keyboard user
+  facing a scroll region whose content holds no focus has none — a pre-existing
+  WCAG 2.1.1 gap, now written down.
+- **A finger cannot drag a window on Wayland.** No protocol for it exists.
+- **The target-size gate is green for three crates' named fixtures**, not for the
+  framework: four crates that own targets have no fixture list, and the lists
+  install one preset.
+- **Reordering a data-view row with a finger is unreliable on short rows.** A
+  deferred drag is revoked if the first sample after the hold leaves the pressed
+  row, and the touch drag slop is wider than a default tree row.
+- **`cargo check --workspace --all-features` does not build on any revision**,
+  including before this release: five of the seven optional fallback font faces
+  are named by the build and were never committed.
+- The full ledger, each entry with its measurement, is
+  [Touch & pen](docs/touch-and-pen.md) §10.
+
+## [0.9.5] - 2026-09-11
+
+Three main strands: text ranges on every visible label, one chord table for
+the bounded-scalar controls, and a submenu that survives the diagonal to
+reach it. Plus `stretch_last_column` on the tables, an assistive-technology
+whole-value write that commits, and a `FormLayout` that keeps its rows
+across a rebuild. One breaking change: `TextInputField::on_access_set_value`
+now returns whether the host accepted the string.
+
+### Added
+
+#### Bounded-scalar controls
+
+See [docs/range-keyboard.md](docs/range-keyboard.md) for the full chord table.
+
+- `common::range_nav`: the arrow, page and edge chords of a control that holds
+  one bounded number, as pure functions over
+  `(key, modifiers, kind, axis, direction)`. `Slider`, `SpinBox`, `ScrollBar`,
+  the colour picker's hue and alpha strips, the `Splitter` handle and the dock
+  resize handle each hand-rolled the same eight-key match and gave four
+  different answers for it. Like `list_nav`, it takes no platform convention:
+  Qt, GTK4, the Win32 trackbar and `<input type=range>` bind these keys
+  identically on all three desktops.
+- `PageUp` / `PageDown` in `Slider`, with `Slider::page_step` to size the jump.
+  Unset it defaults to ten times the effective `step`, so with the default step
+  of 1 % of the range a page is 10 % of it — WebKit's and Blink's rule for
+  `<input type=range>`, `QAbstractSlider::pageStep`, `GtkScale`'s page
+  increment, and the same `10 x` rule `SpinBox::page_step` already used. The
+  slider was the only one of Teksilo's bounded-scalar widgets with no coarse
+  step at all.
+- `Slider` publishes `numeric_value_jump` and services `Action::SetValue`,
+  taking either an `ActionData::NumericValue` or a numeric string and snapping
+  to `step` exactly as a drag does. AT-SPI publishes the `Value` interface off
+  `numeric_value` alone, so Orca's `Value.SetCurrentValue` already reached the
+  widget and was dropped; macOS gates `setAccessibilityValue:` settability on
+  the advertisement, which the node now carries.
+
+#### Widgets
+
+- **`Alt+ArrowDown` opens the popup and `Alt+ArrowUp` closes it** on
+  `ComboBox`, `DateEdit` and every `PopoverButton` / `PopoverIconButton` — so
+  `ColorEdit`, whose documentation has promised the chord since it was written.
+  The Win32 / WinForms / WPF drop-down chord, the Win32 `DateTimePicker` chord,
+  and the W3C ARIA combobox pattern: "displays the popup without moving focus",
+  which is why the modified form exists beside a bare `ArrowDown` that both
+  opens and advances.
+- `TextInputField::on_access_set_value` (forwarded by `TextInput`): handle an
+  assistive technology's whole-value write, given the string it set. Unset for
+  a field whose bound `Signal<String>` **is** the value — the write has already
+  landed and there is nothing to derive. `SpinBox` and the four date and time
+  editors install one, because their text is only a projection of a typed
+  value. The string is handed over rather than read back from the signal
+  because the field defers its document→signal sync to the next frame tick, so
+  a host reading the signal there would parse the text from *before* the edit.
+- **`F4` toggles the popup** on the drop-down *fields* — `ComboBox` and
+  `DateEdit` — the Win32 / Qt / WPF chord. Deliberately not on `PopoverWidget`,
+  which also backs toolbar chevrons and menu buttons and carries no such
+  convention. An app that registers `F4` as a `Shortcut` keeps it: shortcuts
+  resolve before the focused widget sees the key, and `Alt+F4` is unaffected.
+
+#### Accessibility
+
+- **Every visible label that owns its own accessible name is reviewable by
+  character, word and line**, routable on a braille display and trackable by a
+  screen magnifier. `TextWidget` — the building block behind every label in the
+  framework — now carries AccessKit text runs with real per-character extents,
+  so a screen reader's review cursor can walk a paragraph, a braille cell can
+  be routed to the word under it, and `AXBoundsForRange` / UIA's `TextPattern`
+  / AT-SPI's `GetCharacterExtents` all answer. Before, a label was one
+  unreviewable chunk; only the editors and the terminal exposed ranges, and
+  even those exposed no geometry.
+- `TextWidget::geometry_handle`, for a control that owns its name but paints
+  its text through a hidden label. `Badge`, `GroupHeader` and the scene's
+  `TextItem` use it and are now reviewable too.
+- `teksilo_core::accessibility::text_runs`: the shared emitter every text
+  surface goes through, and `teksilo_core::accessibility::audit`, which reports
+  labels that repeat an ancestor's name, labels with no text ranges, and runs
+  that disagree with the node they hang off.
+- `DocumentFlow::block_line_geometry` and the `*_with_geometry` layout methods
+  in text-typeset 1.11, which is where the per-character extents come from.
+
+#### Data views
+
+- `TableView::stretch_last_column` / `TreeTableView::stretch_last_column`:
+  the last column in display order takes the width the other columns leave
+  (Qt's `stretchLastSection`). Positional — it follows a reorder — and the
+  stretched column has no grip of its own.
+
+#### Core
+
+- `EventContext::arm_overlay_safe_region` / `overlay_safe_region_armed`: an
+  open overlay can claim a "safe triangle" from the point the pointer left its
+  anchor to its own near edge. While the pointer is inside it, the overlay's
+  pointer-leave grace is held off; leaving it starts that grace and coming back
+  cancels it. Any widget whose hover would tear the overlay down asks whether a
+  traversal is under way at all and stands aside for as long as one is, leaving
+  the dismissal to that one re-evaluated grace. Bounded to 600 ms so it stays a
+  travel allowance. Used by cascading submenus.
+- `EventContext::show_overlay_after_replacing_siblings`: like
+  `show_overlay_after_with_focus`, but the anchor's sibling overlays are
+  dismissed when the overlay actually shows rather than when it was requested
+  — the hover-switch that must not fire for a pointer merely passing through.
+
+#### Automation
+
+- `teksilo_automation::client`: the binary name, the matching version and the
+  `cargo install` command for `teksilo-automation-mcp`, plus a `$PATH` lookup
+  for it. Pure `std`; nothing spawns a process, because the only caller is on an
+  app's startup path.
+
+### Changed
 
 #### Widgets
 
@@ -579,52 +781,6 @@ can override, and none of them changes what a mouse does.
   nothing at the call site to say so. Every installed slot now fires for one
   dispatched action, and the action counts as handled if any of them says so.
 
-- **A two-finger pinch reaches the zoom it asked for instead of running into
-  `max_zoom`.** A spread to twice the starting span now leaves a `SceneView` at
-  exactly twice, whatever the sample rate; before, each sample carried the ratio
-  to the *start* of the gesture and the handler multiplied every one of them in,
-  so a single spread compounded to the product of its intermediate ratios.
-- **A trackpad twist turns content by the angle the user twisted.** One degree of
-  rotation on the trackpad rotated a `SceneView` by one radian — about 57° —
-  because winit reports degrees and the payload is read as radians. The
-  conversion now happens where the incoming unit is known.
-- `GestureEvent::PinchChanged` and `PinchPhase::Changed` now document `scale` and
-  `rotation`: both are deltas against the previous sample, and `rotation` is in
-  radians. Fold each sample in (`zoom *= scale`, `rotation += rotation`) rather
-  than assigning it.
-- **`TouchPinchRecognizer::scale` and `rotation` are renamed
-  `cumulative_scale` and `cumulative_rotation`.** They report the totals since
-  the gesture started, which is not what a `PinchChanged` carries; the names now
-  say which of the two a caller is reading.
-- **A `PointerCancel` for a touch contact reported the mouse, with no position**,
-  so an application branching on the cancelled pointer's kind behaved wrongly.
-- **A container that preserves its children across a rebuild destroyed and rebuilt
-  its whole subtree instead**, whenever any builder method wrapped it. That covers
-  every `Switcher`, `TabWidget`, `SceneView`, `DockingLayout`, `Repeater` and
-  `PopoverWidget` with a handler attached.
-- **A wrapped widget's declared shortcuts never reached the registry**, so they
-  were missing from the rebinding UI as well as from the keyboard; a wrapped widget
-  that opts out of layout memoisation was memoised anyway; a wrapped title bar
-  stopped publishing its OS caption regions — a defect its own documentation had
-  written up as a rule. Wrapped dialog content stopped lending its title to its
-  shell and stopped directing initial focus; the context-menu key opened the
-  view's menu rather than the selected row's; a table read its body to assistive
-  technology before its header; a scene stopped grafting its items into the
-  application's accessibility tree; empty tooltip content still raised a bubble.
-- **A coarser density could lower a grip's reach**: an outset and the miss-only
-  slop pass were combined in the wrong order.
-- **A caret could be left outside a viewport that shrank**; a shrink now records a
-  reveal.
-- **Two overlay-dismissal defects a mouse could feel**, and a hold dispatched
-  under a mouse identity that was never there.
-- **A target-size allow-list entry is held to the floor the audit judged against,
-  not to the generic 24 dp table.** Under a theme raising
-  `InputTokens::min_target_conformance`, a `PinnedDp::ClearsFloor` axis excused
-  the very failures the raised floor exists to report.
-  `TargetMeasurement`/`TargetViolation` carry the measured floor as
-  `conformance_floor`, and every consumer reads it instead of re-deriving one.
-
-
 #### Menus
 
 - **Menu item labels line up on one leading inset again under the Fluent and
@@ -667,152 +823,6 @@ can override, and none of them changes what a mouse does.
   used to un-highlight as soon as the pointer left the row, which is the whole
   time the submenu is up, leaving the open panel with no visible parent. Its
   `set_expanded` was reporting collapsed over the same window.
-
-#### Widgets
-
-- **A Fluent list or tree row can be clicked again.** The preset's selection pill
-  spans the whole row and was hit-tested ahead of the row's contents, so nothing
-  inside a Fluent row — a checkbox, a disclosure arrow, a trailing button — took
-  a press, by mouse or by finger.
-- **A macOS switch and an icon button meet the 24 dp target floor.** Both are
-  drawn at the size the preset asks for, Apple's 22 dp track and the 18 dp
-  compact icon button among them; the node around the chrome is what grew.
-- **Three controls showed no pressed appearance for a pointer at all** — the
-  `ToolBox` header, `RadioTile`, and the calendar's month/year cell, the last only
-  ever writing `false` into its own state.
-- **A declared row height inside the row-metrics dead band was silently refused**,
-  so an exact-height list reported a different total height from a uniform one.
-- **A leaf row in a tree table no longer carries an invisible pointer target.**
-- **The previewer's knob rows were unreachable by any pointer, mouse included**: an
-  infinite height cap inside a scroll area measured `inf` tall, its `y` resolved to
-  `NaN`, and a rectangle containing `NaN` contains no point.
-- **With the debug inspector installed, switching density destroyed the wrapped
-  application's tree.**
-- **Four dimensions a shipped theme sets now reach the screen.** A table header
-  cell pads by the Fluent gutter (12 dp, not 8); a calendar's navigation arrows
-  are drawn the size macOS asks for (20 dp, not 24); a search field's suggestion
-  rows carry the macOS row gutters (8 x 3 dp, not 10 x 4). Each was written on
-  the theme's recipe and discarded, because the widget measured the shipped
-  Int UI constant instead of asking the style. `TableStyle`, `CalendarStyle` and
-  `SearchFieldStyle` now hand the dimension over, and a custom style keeps the
-  ladder it had unless it says otherwise. Int UI at the default density is
-  unchanged.
-- **A theme may draw a control below the 24 dp target floor without costing the
-  app its WCAG 2.2 SC 2.5.8 conformance.** A calendar's navigation arrow keeps
-  whatever size the theme asks for and sits inside a box that reaches the floor,
-  so macOS's 20 dp stepper is drawn at 20 dp and still answers a 24 dp press —
-  from a mouse as much as from a finger. Under Int UI, whose arrow is already
-  the floor, nothing moves at any density.
-
-#### Terminal
-
-- **A terminal placed anywhere but the window's top-left corner accepted no
-  pointer input at all.**
-- **The wheel scrolled the scrollback backwards**, and its report to the child
-  program named cell (0, 0) instead of the cell under the pointer — so a
-  full-screen program that splits its window scrolled the wrong pane.
-- **Dragging a selection handle moved the selection to the neighbouring row.**
-
-#### Previewer
-
-- **The toolbar's Export PNG ignored the live density**, so exporting while the
-  previewer was set to Touch produced a Compact image — over the Compact
-  filename. The density now reaches both the render and the name.
-
-#### Text
-
-- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
-  not in the repository, and because `include_bytes!` resolves at compile time,
-  enabling one was a hard build error — so those five features, both
-  `fonts-all` meta-features, and any `--all-features` build of the workspace
-  had never compiled on any revision. A face is now embedded only if its file
-  is present; enabling a feature without it warns and names the path to drop it
-  at, rather than failing the build.
-- **Dragging the caret handle moves the on-screen keyboard's candidate window
-  with it.** Every editing surface reported the caret's position when a press
-  placed it, and none did when a finger *dragged* it, so composing Japanese,
-  Chinese or Korean after a handle drag put the candidate list at the caret's
-  old position. `RichTextEditor`, `CodeEditor`, `PlainTextEditor`, `TextInput`,
-  `PasswordField`, `SearchField`, `SpinBox` and the date/time family; the
-  assistive-technology route onto the same handle reports it too.
-- **The code editor's gutter returned from inside a clip scope when no text
-  backend was installed**, leaving the render frame unbalanced.
-- **A `PlainTextEditor` could neither replace nor suppress the context menu its
-  documentation offered it**, and the `CodeEditor` family gained the right-click
-  menu it never had.
-- **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
-  not in the repository, and because `include_bytes!` resolves at compile time,
-  enabling one was a hard build error — so those five features, both
-  `fonts-all` meta-features, and any `--all-features` build of the workspace
-  had never compiled on any revision. A face is now embedded only if its file
-  is present; enabling a feature without it warns and names the path to drop it
-  at, rather than failing the build.
-
-#### Documentation
-
-- **A `ScrollArea` in the `Thin` scroll-bar mode documented a keyboard route it
-  does not have.** The bar's arrow / `Home` / `End` / `Page` handlers sit on a node
-  that cannot take focus, under every mode — the same limit the
-  `ScrollBarPolicy::AlwaysOff` documentation states from the other side.
-- **`PointerInfo::primary`'s documentation described the wrong one of three
-  similarly-named things.** The field is the W3C *per-kind* flag — a mouse and a
-  first finger are both primary at once on a hybrid machine — and the rule it
-  carried ("exactly one live pointer, a mouse always wins") belongs to the pointer
-  table's own election.
-- **`StandardListItem`'s documentation claimed the row reads its recipe's
-  projected heights.** It projects the module constants instead; those two recipe
-  fields have no reader.
-- **The soft-keyboard documentation claimed a touch-placed caret leaves a stale
-  IME area standing.** Each editing stack reports the area from its own touch path;
-  the unused core method is superseded rather than missing.
-- **Two committed catalog images had gone stale**, one of them contradicting a
-  safety fix: the message-box preview showed **Yes** as the accented default
-  after the widget had switched to **No**, and the colour-picker preview predated
-  the widget growing its HSV row.
-- **Catalog pages linked to rustdoc module pages that do not exist on docs.rs**,
-  because the module is crate-internal; each link now resolves to the nearest
-  published module.
-
-#### teksu
-
-- **`teksu!` bodies could not place `gesture_dead_zone` or `keyboard_capture`
-  before a child**; both failed with "no method named `child`". A compile-time
-  guard now keeps the DSL's builder-method list complete.
-- **31 `teksu!` UI fixtures had never run** — a glob naming a directory that does
-  not exist, which trybuild reports as "no tests enabled yet" and then passes —
-  and one of them was asserting a caret column rustc does not emit.
-- **A bare child in any popover produced the generic error** instead of the slot
-  hint.
-
-### Known limitations
-
-- **The hardware sign-off is not done.** Everything above that a headless Linux
-  host can check is checked by the suite;
-  [docs/touch-verification.md](docs/touch-verification.md) is the procedure for
-  the rest, and its [sign-off sheet](docs/touch-verification-signoff.md) is empty.
-  One question in it can only be answered on a macOS trackpad: whether a positive
-  trackpad rotation delta should be negated at the platform seam.
-- **A running application does not switch density because a finger arrived.**
-  `DensityPolicy::FollowLastPointer` has an ingress and no writer; what a stray
-  tap should cost and when hysteresis commits are unanswered.
-- **Overscroll is published but not painted.** `ScrollableAxes::overscroll`
-  carries the value; nothing renders a stretch or a glow.
-- **A plain `ScrollArea` has no keyboard scroll route.** Assistive technology can
-  scroll it and the data views bring their own key handling, but a keyboard user
-  facing a scroll region whose content holds no focus has none — a pre-existing
-  WCAG 2.1.1 gap, now written down.
-- **A finger cannot drag a window on Wayland.** No protocol for it exists.
-- **The target-size gate is green for three crates' named fixtures**, not for the
-  framework: four crates that own targets have no fixture list, and the lists
-  install one preset.
-- **Reordering a data-view row with a finger is unreliable on short rows.** A
-  deferred drag is revoked if the first sample after the hold leaves the pressed
-  row, and the touch drag slop is wider than a default tree row.
-- **`cargo check --workspace --all-features` does not build on any revision**,
-  including before this release: five of the seven optional fallback font faces
-  are named by the build and were never committed.
-- The full ledger, each entry with its measurement, is
-  [Touch & pen](docs/touch-and-pen.md) §10.
 
 #### Accessibility
 

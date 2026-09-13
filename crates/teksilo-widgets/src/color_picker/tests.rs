@@ -238,16 +238,16 @@ fn a_vertical_strip_puts_its_maximum_at_the_top() {
     // A press near the top reaches the top of the range.
     let top = Point::new(10.0, 4.0);
     tree.pointer_move(top);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: top,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: top,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        top,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        top,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert!(
         hue.get() > 340.0,
         "a press near the top is near the maximum hue, got {}",
@@ -288,16 +288,16 @@ fn a_vertical_alpha_strip_is_opaque_at_the_top() {
 
     let bottom = Point::new(10.0, 196.0);
     tree.pointer_move(bottom);
-    tree.dispatch_event(WidgetEvent::PointerDown {
-        position: bottom,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
-    tree.dispatch_event(WidgetEvent::PointerUp {
-        position: bottom,
-        button: PointerButton::Primary,
-        modifiers: Modifiers::NONE,
-    });
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        bottom,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        bottom,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
     assert!(
         alpha.get() < 0.05,
         "a press near the bottom is near transparent, got {}",
@@ -622,8 +622,9 @@ fn a_finger_drag_on_the_hue_strip_inside_a_scroller_sets_the_hue() {
         100,
     ));
 
+    // The drag ends nine tenths down, a tenth of the range up from the bottom.
     assert!(
-        hue.get() > 250.0,
+        (hue.get() - 36.0).abs() < 5.0,
         "the finger drag did not reach the strip (hue {})",
         hue.get()
     );
@@ -780,8 +781,10 @@ fn a_finger_beside_the_hue_strip_still_adjusts_it() {
     let id = finger();
     tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
     tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+    // Three quarters down a strip whose maximum is at the top is a quarter of
+    // the range.
     assert!(
-        hue.get() > 200.0,
+        (hue.get() - 90.0).abs() < 5.0,
         "the outset did not carry the press (hue {})",
         hue.get()
     );
@@ -848,8 +851,10 @@ fn a_finger_beside_the_alpha_strip_still_adjusts_it() {
     let id = finger();
     tree.dispatch_pointer(touch(id, PointerPhase::Down, at, 0));
     tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 30));
+    // A quarter of the way down leaves three quarters of the range, the strip's
+    // maximum being at the top.
     assert!(
-        alpha.get() < 0.4,
+        (alpha.get() - 0.75).abs() < 0.05,
         "the outset did not carry the press (alpha {})",
         alpha.get()
     );

@@ -11345,7 +11345,7 @@ dependencies = [
 
 [[package]]
 name = "teksilo-target-conformance"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "jiff",
  "teksilo-canvas",
@@ -12218,7 +12218,7 @@ checksum = "aa7c7f42dea4b1b99439786f5633aeb9c14c1b53f75e282803c2ec2ad545873c"
 
 [[package]]
 name = "touch-playground"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "serde_json",
  "teksilo",
