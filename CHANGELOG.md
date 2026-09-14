@@ -13,6 +13,22 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-14
+
+One strand above all: the input model is a pointer model. A touchscreen, a pen
+and a trackpad reach the widget tree as real pointers, a density knob resizes
+every target with a 24 dp conformance floor at each density, and a mouse behaves
+exactly as it always has. Around it: touch and a stylus in the automation
+bridge, a target-size gate over every shipped preset, a previewer that exports
+at a chosen density, every SVG icon drawn pixel-exact, and a window that opens
+on GLES-3.1 class hardware. The rich text editor takes text-document 1.12.2,
+so a sentence cut at a paragraph's end is the sentence and nothing more.
+Breaking, pre-1.0: the pointer-event variants gained fields, two positions were
+renamed, `WebViewHandle` gained a required method and `MemoryShared` is
+non-exhaustive;
+[docs/porting-widgets-to-the-pointer-model.md](docs/porting-widgets-to-the-pointer-model.md)
+is the contract for a widget crossing over.
+
 ### Added
 
 #### Touch, pen and density
@@ -117,6 +133,8 @@ it always has.
   back from their own tables by a test, so a number lives in one place.
 
 ### Changed
+
+- `text-document` 1.12.2 and `text-typeset` 1.11.1.
 
 #### Core
 
@@ -377,6 +395,14 @@ can override, and none of them changes what a mouse does.
 
 #### Text
 
+- **A sentence cut at a paragraph's end is the sentence, and bold lands on the
+  selection.** From text-document 1.12.2. Once anything had been typed earlier
+  in the document since the last deletion, a use case addressing a range read a
+  block start the keystrokes had left behind, so Cut and Copy at a paragraph's
+  end took the paragraph break and the head of the next paragraph along with
+  the sentence, and bold, italic, replace and "make a list" landed the same
+  number of characters late. In a document holding a table the caret now also
+  reaches the last characters after it, and a selection to End includes them.
 - **`--all-features` builds.** Five `fonts-*` features named a Noto face that is
   not in the repository, and because `include_bytes!` resolves at compile time,
   enabling one was a hard build error — so those five features, both
@@ -1538,7 +1564,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/FernTech-EU/teksilo/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/FernTech-EU/teksilo/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/FernTech-EU/teksilo/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/FernTech-EU/teksilo/compare/v0.9.2...v0.9.3
