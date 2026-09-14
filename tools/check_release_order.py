@@ -27,6 +27,18 @@ then:
     actually needs resolvable), grouped into "waves" — every crate in a
     wave has all of its dependencies satisfied by earlier waves, so a
     wave can be published in any order / in parallel.
+  * leaves out a **versionless path dev-dependency**. Cargo drops it when
+    it packages the crate ("only dev-dependencies that specify a version
+    will be included in the published crate"), so no published manifest
+    carries the edge and nothing about the order depends on it. That is
+    the one shape a dev-dependency on a ``publish = false`` crate can
+    legally take: a theme testing itself against the unpublishable
+    conformance crate, which in turn tests every theme, is a dev cycle on
+    disk and no cycle at all on the registry.
+  * flags a **versioned dependency on a ``publish = false`` crate**, dev
+    or normal: the packaged manifest keeps it, the verified publish has
+    to resolve it, and the registry can never provide it — a failure
+    that would land partway through a publish loop. It fails the run.
 
 Pure standard library; no ``tomllib`` needed (works on Python 3.9). The
 TOML reading is intentionally minimal — it understands the dependency
@@ -78,6 +90,13 @@ _PUBLISH_WS_RE = re.compile(r"^\s*publish\.workspace\s*=\s*true")
 _SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
 _EXCLUDE_RE = re.compile(r"^\s*exclude\s*=\s*\[(.*)$")
 _ARRAY_STR_RE = re.compile(r'"([^"]*)"')
+# The forms a dependency line can carry a version in: a `version = ` field,
+# `workspace = true` (the version lives in the root's table), or the bare
+# string form `dep = "1.2"`. A `path = ` with none of these is versionless.
+_DEP_VERSION_RE = re.compile(r"\bversion\s*=")
+_DEP_WORKSPACE_RE = re.compile(r"\bworkspace\s*=\s*true\b")
+_DEP_PATH_RE = re.compile(r"\bpath\s*=")
+_DEP_STRING_FORM_RE = re.compile(r'^\s*[A-Za-z0-9_.-]+\s*=\s*"')
 
 
 @dataclass
@@ -87,6 +106,9 @@ class Crate:
     publish: bool  # True if this crate is publishable (publish != false)
     normal_deps: set[str] = field(default_factory=set)  # incl. build-deps
     dev_deps: set[str] = field(default_factory=set)
+    # Dev-dependencies written with a `path` and no version: cargo drops
+    # them at packaging, so they are reported but never constrain the order.
+    dev_deps_stripped: set[str] = field(default_factory=set)
 
 
 def _classify_section(header: str) -> str | None:
@@ -202,16 +224,21 @@ def is_excluded(rel: str, excluded: set[str]) -> bool:
                for i in range(1, len(parts) + 1))
 
 
-def parse_cargo_toml(text: str, workspace_publish: bool) -> tuple[str | None, bool, set[str], set[str]]:
-    """Return (package_name, publishable, normal_internal_deps, dev_internal_deps).
+def parse_cargo_toml(
+    text: str, workspace_publish: bool,
+) -> tuple[str | None, bool, set[str], set[str], set[str]]:
+    """Return (package_name, publishable, normal_deps, dev_deps, dev_deps_stripped).
 
     package_name is None for a virtual manifest (the workspace root).
     `workspace_publish` is the value inherited by `publish.workspace = true`.
+    `dev_deps_stripped` holds the dev-dependencies declared with a `path`
+    and no version — the ones cargo leaves out of the packaged manifest.
     """
     name: str | None = None
     publish = True  # absent `publish` means publishable
     normal: set[str] = set()
     dev: set[str] = set()
+    dev_stripped: set[str] = set()
 
     current = None  # 'package', 'normal', 'dev', or None
     for raw in text.splitlines():
@@ -253,9 +280,17 @@ def parse_cargo_toml(text: str, workspace_publish: bool) -> tuple[str | None, bo
             # (`teksilo-*`) used to also gate this step and silently
             # dropped the bare `teksilo` umbrella crate, which has no
             # trailing hyphen — a real dependency on it went untracked.
-            (normal if current == "normal" else dev).add(dep_name)
+            if current == "normal":
+                normal.add(dep_name)
+            elif (_DEP_PATH_RE.search(line)
+                  and not _DEP_VERSION_RE.search(line)
+                  and not _DEP_WORKSPACE_RE.search(line)
+                  and not _DEP_STRING_FORM_RE.match(line)):
+                dev_stripped.add(dep_name)
+            else:
+                dev.add(dep_name)
 
-    return name, publish, normal, dev
+    return name, publish, normal, dev, dev_stripped
 
 
 def discover_crates(root: str, include_examples: bool,
@@ -289,7 +324,7 @@ def discover_crates(root: str, include_examples: bool,
         except OSError as exc:
             print(f"warning: cannot read {manifest}: {exc}", file=sys.stderr)
             continue
-        name, publish, normal, dev = parse_cargo_toml(text, workspace_publish)
+        name, publish, normal, dev, dev_stripped = parse_cargo_toml(text, workspace_publish)
         if name is None:
             continue  # virtual manifest (workspace root)
         # Component-based, so a nested `.../examples/foo` is caught too — a
@@ -317,7 +352,8 @@ def discover_crates(root: str, include_examples: bool,
                   f"(keeping {crates[name].path})", file=sys.stderr)
             continue
         crates[name] = Crate(name=name, path=rel, publish=publish,
-                              normal_deps=normal, dev_deps=dev)
+                              normal_deps=normal, dev_deps=dev,
+                              dev_deps_stripped=dev_stripped)
     return crates, sorted(excluded)
 
 
@@ -447,6 +483,9 @@ def main() -> int:
     # deps and any crate excluded from the workspace).
     normal_edges = {n: {d for d in crates[n].normal_deps if d in name_set} for n in names}
     dev_edges = {n: {d for d in crates[n].dev_deps if d in name_set} for n in names}
+    # Present on disk, absent from every packaged manifest: reported, never ordered on.
+    stripped_edges = {n: {d for d in crates[n].dev_deps_stripped if d in name_set}
+                      for n in names}
 
     # --- Release-blocking cycles: SCCs in the normal+build graph ---
     sccs = tarjan_sccs(names, normal_edges)
@@ -479,19 +518,35 @@ def main() -> int:
 
     # A publishable crate whose normal deps include an unpublishable one
     # cannot actually reach the registry — cargo refuses to publish a
-    # package that depends on something it can't resolve there.
+    # package that depends on something it can't resolve there. A
+    # *versioned* dev-dependency on one is the same failure one step
+    # later: the packaged manifest keeps it, and the verified publish
+    # resolves the whole graph, dev-dependencies included. (A versionless
+    # path dev-dependency is not here — cargo drops it at packaging.)
     unpublishable_deps: list[tuple[str, str]] = []
+    unpublishable_dev_deps: list[tuple[str, str]] = []
     for n in names:
         if not crates[n].publish:
             continue
         for d in sorted(normal_edges[n]):
             if not crates[d].publish:
                 unpublishable_deps.append((n, d))
+        for d in sorted(dev_edges[n]):
+            if not crates[d].publish:
+                unpublishable_dev_deps.append((n, d))
+    unresolvable = bool(unpublishable_deps or unpublishable_dev_deps)
 
     if args.list:
         if leftover:
             print("error: cannot order crates — a normal or dev dependency "
                   f"cycle involves: {', '.join(leftover)}", file=sys.stderr)
+            return 1
+        if unresolvable:
+            print("error: a publishable crate depends, with a version, on a "
+                  "publish = false crate: "
+                  + ", ".join(f"{a} -> {b}" for a, b in
+                              unpublishable_deps + unpublishable_dev_deps),
+                  file=sys.stderr)
             return 1
         for n in publishable_order:
             print(n)
@@ -509,6 +564,7 @@ def main() -> int:
                     "publish": crates[n].publish,
                     "normal_deps": sorted(normal_edges[n]),
                     "dev_deps": sorted(dev_edges[n]),
+                    "dev_deps_stripped": sorted(stripped_edges[n]),
                 }
                 for n in names
             },
@@ -518,10 +574,11 @@ def main() -> int:
             "release_order": flat,
             "publishable_release_order": publishable_order,
             "publishable_depending_on_unpublishable": unpublishable_deps,
+            "publishable_dev_depending_on_unpublishable": unpublishable_dev_deps,
             "unordered_due_to_cycle": leftover,
         }
         print(json.dumps(payload, indent=2))
-        return 1 if (blocking_cycles or leftover) else 0
+        return 1 if (blocking_cycles or leftover or unresolvable) else 0
 
     # --- Human-readable report ---
     print(f"Teksilo dependency report  ({len(names)} internal crates under {root})")
@@ -543,6 +600,9 @@ def main() -> int:
         print(line + pub)
         if dev_edges[n]:
             print(f"  {'':<{width}}  (dev) {', '.join(sorted(dev_edges[n]))}")
+        if stripped_edges[n]:
+            print(f"  {'':<{width}}  (dev, versionless path: dropped at publish) "
+                  f"{', '.join(sorted(stripped_edges[n]))}")
 
     print("\n" + "-" * 72)
     if blocking_cycles:
@@ -579,12 +639,17 @@ def main() -> int:
         for n in leftover:
             print(f"      {n}")
 
-    if unpublishable_deps:
+    if unresolvable:
         print("\nPublishable crates depending on unpublishable ones:")
         for a, b in unpublishable_deps:
             print(f"  !!  {a}  -->  {b}   ({b} has publish = false)")
+        for a, b in unpublishable_dev_deps:
+            print(f"  !!  {a}  --dev-->  {b}   ({b} has publish = false, and the")
+            print("       dev-dependency carries a version, so packaging keeps it)")
         print("  `cargo publish` will reject these: the dependency can never")
-        print("  be resolved from the registry.")
+        print("  be resolved from the registry. A dev-dependency on an")
+        print("  unpublishable crate must be written as a bare `path`, which")
+        print("  cargo drops at packaging.")
 
     # Flat order for copy/paste into a publish script.
     if not leftover:
@@ -596,7 +661,7 @@ def main() -> int:
         print("  " + (" ".join(publishable_order) or "-"))
         print("  (`--list` prints just these, one per line)")
 
-    return 1 if (blocking_cycles or leftover) else 0
+    return 1 if (blocking_cycles or leftover or unresolvable) else 0
 
 
 if __name__ == "__main__":

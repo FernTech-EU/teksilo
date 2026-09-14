@@ -66,7 +66,10 @@ jobs:
   test-linux:
     name: Test (linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A warm run finishes in ~10 minutes; a cold one (no cache for this ref,
+    # which is every tag's first run) compiles the workspace twice over — once
+    # for the tests and once for the trybuild fixtures — and overran 30.
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
