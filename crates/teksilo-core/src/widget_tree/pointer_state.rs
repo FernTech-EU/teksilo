@@ -2083,36 +2083,42 @@ mod clock_tests {
         let owner = tree.add(FillWidget::new());
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
+        // Long enough that a loaded CI runner overshooting the sleep below by
+        // a few hundred milliseconds — a macOS runner has been seen to take
+        // 250 ms over a 100 ms sleep — cannot run it to completion before the
+        // take-over, which would leave nothing for the advance to move.
+        const DURATION: Duration = Duration::from_millis(4000);
+
         let value = Signal::<f32>::new_animated(0.0);
         tree.register_animated_signal(&value, owner);
-        value.animate_to(
-            1.0,
-            Duration::from_millis(400),
-            teksilo_tokens::Easing::Linear,
-        );
+        value.animate_to(1.0, DURATION, teksilo_tokens::Easing::Linear);
 
         // Promote and age it on the wall clock, exactly as a live window does.
         tree.layout(SizeProposal::exact(100.0, 100.0));
         std::thread::sleep(Duration::from_millis(100));
         tree.layout(SizeProposal::exact(100.0, 100.0));
         let on_the_wall_clock = value.get();
+        // 100 ms of 4000 is 0.025; the sleep never undershoots, and the bound
+        // above allows the runner nearly two seconds of overshoot.
         assert!(
-            (0.15..0.45).contains(&on_the_wall_clock),
-            "about a quarter through after 100 ms of 400: {on_the_wall_clock}"
+            (0.02..0.5).contains(&on_the_wall_clock),
+            "in flight after 100 ms of {DURATION:?}: {on_the_wall_clock}"
         );
 
         // Now an automation operation takes time over and advances a further
-        // 100 ms. The animation must be about half-way through, not stuck
-        // where the wall clock left it.
-        tree.advance_time(Duration::from_millis(100));
+        // 1000 ms. The animation must have moved on by exactly that share of
+        // its duration — not stuck where the wall clock left it, and not
+        // restarted from the simulated clock's own reading.
+        tree.advance_time(Duration::from_millis(1000));
         let simulated = value.get();
+        let moved = simulated - on_the_wall_clock;
+        // 1000 ms of 4000 is 0.25. Whatever wall-clock time passed between the
+        // reading above and the take-over is in there too, so the bound is
+        // loose above — by 400 ms — and tight below.
         assert!(
-            simulated > on_the_wall_clock + 0.1,
-            "the advance must move it on: {on_the_wall_clock} -> {simulated}"
-        );
-        assert!(
-            (0.4..0.7).contains(&simulated),
-            "about half-way through after 200 ms of 400: {simulated}"
+            (0.245..0.35).contains(&moved),
+            "the advance keeps the phase and adds its own 1000 ms of \
+             {DURATION:?}: {on_the_wall_clock} -> {simulated}"
         );
     }
 
@@ -2144,18 +2150,22 @@ mod clock_tests {
 
         let value = Signal::<f32>::new_animated(0.0);
         tree.register_animated_signal(&value, owner);
+        // 2 s rather than something short: the 100 ms slept after the
+        // hand-back is a floor, not a figure, and a loaded runner has
+        // overshot it by 150 ms — the "not snapped to the end" bound below
+        // must hold through that.
         value.animate_to(
             1.0,
-            Duration::from_millis(400),
+            Duration::from_millis(2000),
             teksilo_tokens::Easing::Linear,
         );
 
-        // The operation promotes it and advances it a quarter of the way.
+        // The operation promotes it and advances it a twentieth of the way.
         tree.advance_time(Duration::from_millis(100));
         let at_hand_back = value.get();
         assert!(
-            (0.15..0.4).contains(&at_hand_back),
-            "a quarter through after 100 ms of 400: {at_hand_back}"
+            (0.04..0.06).contains(&at_hand_back),
+            "a twentieth through after 100 ms of 2000: {at_hand_back}"
         );
 
         // The operation ends and the window goes back to painting frames.
@@ -2164,13 +2174,14 @@ mod clock_tests {
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
         let after = value.get();
+        // At least 100 ms of 2000 (0.05) moved it; the sleep only overshoots.
         assert!(
-            after > at_hand_back + 0.1,
+            after > at_hand_back + 0.045,
             "frozen: 100 ms of real time moved it from {at_hand_back} to {after}"
         );
         assert!(
             after < 0.95,
-            "snapped to the end: 100 ms of 400 took it from {at_hand_back} to {after}"
+            "snapped to the end: 100 ms of 2000 took it from {at_hand_back} to {after}"
         );
     }
 
@@ -2199,7 +2210,12 @@ mod clock_tests {
         use crate::test_widgets::FillWidget;
         use std::time::Duration;
 
-        const CAP: Duration = Duration::from_millis(250);
+        // The animation lives 200 ms before the final reading — 100 simulated,
+        // 100 real — and the tree at least 600 ms. The cap sits between the
+        // two with room on both sides: a loaded runner overshoots a sleep by
+        // 100 ms or more, and every overshoot ages the tree further but the
+        // animation only through the real half.
+        const CAP: Duration = Duration::from_millis(400);
         const DURATION: Duration = Duration::from_millis(2000);
 
         let mut tree = WidgetTree::new();
@@ -2207,7 +2223,7 @@ mod clock_tests {
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
         // Age the tree past the cap before the animation is armed at all.
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(500));
 
         let value = Signal::<f32>::new_animated(0.0);
         tree.register_animated_signal(&value, owner);

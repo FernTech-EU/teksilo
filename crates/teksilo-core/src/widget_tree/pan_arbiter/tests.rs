@@ -710,9 +710,15 @@ fn a_release_flings_and_advance_time_moves_it() {
         "one `advance_time` moves the fling: {after_release} -> {coasting}"
     );
 
-    // Let it run out. The clamped simulation settles well inside a second.
-    for _ in 0..40 {
+    // Let it run out. How long that takes is the platform's: the clamping
+    // curve settles well inside a second, the friction curve the Apple
+    // platforms resolve `ScrollPhysics::Platform` to decays exponentially and
+    // takes about three seconds from this velocity. The ceiling is generous
+    // for both, and what is asserted is only that the coast ends.
+    let mut advanced = Duration::ZERO;
+    while n.tree.is_flinging(n.inner) && advanced < Duration::from_secs(10) {
         n.tree.advance_time(Duration::from_millis(50));
+        advanced += Duration::from_millis(50);
     }
     assert!(
         !n.tree.is_flinging(n.inner),

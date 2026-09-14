@@ -263,7 +263,14 @@ impl WindowsDndGuard {
 }
 
 impl ExternalDndGuard for WindowsDndGuard {
-    fn begin_drag(&self, data: &OutboundDragData, _image: Option<&DragImageData>) -> bool {
+    /// `pointer` is unused here: `DoDragDrop` tracks whichever device holds
+    /// the button itself, and a finger's drag arrives as a promoted mouse one.
+    fn begin_drag(
+        &self,
+        data: &OutboundDragData,
+        _image: Option<&DragImageData>,
+        _pointer: teksilo_tokens::PointerKind,
+    ) -> bool {
         // `DoDragDrop` runs its own modal message loop, so it must NOT run
         // re-entrantly inside the in-app dispatch that armed the escalation.
         // Stash the payload and post a request; `teksilo-app` calls

@@ -173,6 +173,10 @@ pub fn keyboard_screen_rect() -> Option<(i32, i32, i32, i32)> {
 }
 
 #[cfg(target_os = "windows")]
+// `ITipInvocation::Toggle` is named for its COM vtable slot and cannot be
+// snake_cased; `#[interface]` rejects any attribute placed beside it, so the
+// allowance has to sit here.
+#[allow(non_snake_case)]
 mod windows_impl {
     //! **Verification status:** written against the `windows` crate 0.62 API
     //! and the published `ITipInvocation` GUIDs. It is
@@ -189,7 +193,7 @@ mod windows_impl {
     use windows::Win32::UI::WindowsAndMessaging::{
         FindWindowW, GetDesktopWindow, GetWindowRect, IsWindowVisible,
     };
-    use windows::core::{GUID, HRESULT, IUnknown, interface, w};
+    use windows::core::{GUID, HRESULT, IUnknown, IUnknown_Vtbl, interface, w};
 
     /// `UIHostNoLaunch` — the coclass that talks to an *already running*
     /// `TabTip.exe` without starting one.

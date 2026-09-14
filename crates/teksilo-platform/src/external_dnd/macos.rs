@@ -306,7 +306,15 @@ pub struct MacOsDndGuard {
 }
 
 impl ExternalDndGuard for MacOsDndGuard {
-    fn begin_drag(&self, data: &OutboundDragData, image: Option<&DragImageData>) -> bool {
+    /// `pointer` is unused here: `beginDraggingSessionWithItems:event:source:`
+    /// takes the live `NSApp.currentEvent`, which is already the press of
+    /// whichever device is carrying the drag.
+    fn begin_drag(
+        &self,
+        data: &OutboundDragData,
+        image: Option<&DragImageData>,
+        _pointer: teksilo_tokens::PointerKind,
+    ) -> bool {
         self.overlay.begin_drag(data, image)
     }
 }

@@ -214,10 +214,10 @@ mod platform {
     /// framework treats a live AccessKit *deactivation* as separate, harder
     /// evidence that no client is attached.
     fn query_screen_reader() -> ScreenReaderState {
-        use windows::Win32::Foundation::BOOL;
         use windows::Win32::UI::WindowsAndMessaging::{
             SPI_GETSCREENREADER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
         };
+        use windows::core::BOOL;
 
         unsafe {
             let mut on = BOOL(0);

@@ -1754,6 +1754,10 @@ fn the_documented_table_matches_the_fixtures() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/events-and-gestures.md");
     let doc = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+    // A Windows checkout under `core.autocrlf` hands the doc back with CRLF
+    // line ends; the table is compared, and rewritten, on the LF it is
+    // committed with.
+    let doc = doc.replace("\r\n", "\n");
 
     let begin = doc
         .find(DOC_BEGIN)
