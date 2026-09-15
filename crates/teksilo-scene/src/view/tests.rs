@@ -6525,17 +6525,19 @@ mod touch_pan {
         );
     }
 
-    /// With selection on, the view registers its own drag handler — the
-    /// marquee — and that is what the finger meets first.
+    /// With selection on the view registers its own drag handler — the marquee
+    /// — on the very node that carries the `PanClaim`. Which of the two a
+    /// finger gets is decided by *when*, not by which was registered last.
     ///
-    /// This is the arbitration working as designed, not a gap: a marquee
-    /// competitor inside a pan claimant is the case `arbitration_matrix.rs`
-    /// pins under "scene marquee in a scroller". What is pinned *here* is
-    /// which of the two the scene itself resolves to when it is both, so a
-    /// later change to the drag registration cannot silently swap a pan for a
-    /// marquee or the other way round.
+    /// A plain pan reaches the camera exactly as it does on a non-selecting
+    /// view: `PointerSequence::defer_own_drag` resolves the marquee's `Auto`
+    /// against the claim it is competing with, so the marquee waits out a hold
+    /// and the pan wins at `pan_slop`. Pinned here so a later change to the drag
+    /// registration cannot silently swap a pan for a marquee or the other way
+    /// round — the companion is
+    /// [`a_held_selecting_view_gives_the_finger_to_its_marquee`].
     #[test]
-    fn a_selecting_view_gives_the_finger_to_its_marquee_not_its_pan() {
+    fn a_selecting_view_still_gives_a_plain_finger_to_its_pan() {
         use crate::selection::SceneSelectionMode;
 
         let mut tree = WidgetTree::new();
@@ -6559,11 +6561,50 @@ mod touch_pan {
         }
 
         let view = view_handle(&tree, view_id);
-        assert_eq!(
+        assert!(
+            view.pan().y < -50.0,
+            "a finger dragged up moves the camera on a selecting view too, got \
+             pan.y = {}",
             view.pan().y,
-            0.0,
-            "the marquee owns the press, so the camera stays where it was",
         );
+        assert!(
+            view.marquee.get().is_none(),
+            "and the deferred marquee never took the press",
+        );
+    }
+
+    /// …and the hold is what asks for the marquee instead.
+    #[test]
+    fn a_held_selecting_view_gives_the_finger_to_its_marquee() {
+        use crate::selection::SceneSelectionMode;
+
+        let hold =
+            teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch).long_press;
+        let mut tree = WidgetTree::new();
+        let view_id =
+            tree.add(SceneView::new(Scene::new()).selection_mode(SceneSelectionMode::Multi));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let id = finger();
+        let from = Point::new(400.0, 300.0);
+        tree.dispatch_pointer(touch(id, PointerPhase::Down, from, 0));
+        let held = hold.as_millis() as u64 + 50;
+        // Still on the press point: a hold, not travel. Past `long_press_slop`
+        // here and the deferral withdraws instead of arming.
+        tree.dispatch_pointer(touch(id, PointerPhase::Move, from, held));
+        tree.dispatch_pointer(touch(
+            id,
+            PointerPhase::Move,
+            Point::new(from.x, from.y - pan_slop() - 60.0),
+            held + 16,
+        ));
+
+        let view = view_handle(&tree, view_id);
+        assert!(
+            view.marquee.get().is_some(),
+            "past the hold the marquee owns the press",
+        );
+        assert_eq!(view.pan().y, 0.0, "so the camera stays where it was",);
     }
 
     /// The wheel path is untouched: it still tweens, and still by the negated

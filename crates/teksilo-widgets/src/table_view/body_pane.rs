@@ -678,77 +678,82 @@ impl<T: 'static> Widget for BodyPane<T> {
                 let export_for_drag = self.export.clone();
                 let with_item_for_drag = self.with_item_fn.clone();
                 let snapshot_for_drag = self.snapshot_out_fn.clone();
-                row_drag = Some(HandlerSet::new().on_drag(move |phase, ctx| {
-                    if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
-                        // The source's per-row transferable gate.
-                        if (drag_gate)(drag_row) == DragEligibility::NoDrag {
-                            return;
-                        }
-                        // Selection-aware dragged set: the whole selection
-                        // when the pressed row is part of a multi-selection,
-                        // else just the pressed row.
-                        let rows: Vec<usize> = match sel_for_drag.as_ref() {
-                            Some(s) if s.is_selected(drag_row) => {
-                                let mut v = s.selected_indices();
-                                v.sort_unstable();
-                                if v.len() <= 1 { vec![drag_row] } else { v }
+                row_drag = Some(crate::data_views::row_grab_surface().on_drag(
+                    move |phase, ctx| {
+                        if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
+                            // The source's per-row transferable gate.
+                            if (drag_gate)(drag_row) == DragEligibility::NoDrag {
+                                return;
                             }
-                            _ => vec![drag_row],
-                        };
-                        // Adapt the side-effect `with_item_fn` reader to the
-                        // `RowExport::build_payload` signature (which needs a
-                        // bool-returning "did it resolve" reader).
-                        let read = |i: usize, f: &mut dyn FnMut(&T)| -> bool {
-                            read_item_local(&with_item_for_drag, i, |t| f(t)).is_some()
-                        };
-                        let Some(payload) =
-                            export_for_drag.build_payload(view_id, rows, &read, &snapshot_for_drag)
-                        else {
-                            return;
-                        };
-                        // Build a full-width preview from the PRESSED row's
-                        // cells so the floating widget reads as the picked-up
-                        // row. Cells are built eagerly here (no arena), then a
-                        // self-contained `CellRowPreview` lays them out.
-                        let display = display_for_preview.borrow().clone();
-                        let cells: Vec<Box<dyn Widget>> =
-                            read_item_local(&with_item_for_preview, drag_row, |item| {
-                                display
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(display_pos, &col_idx)| {
-                                        let col = &columns_for_preview[col_idx];
-                                        let cell_ctx = CellContext {
-                                            row_index: drag_row,
-                                            col_id: col.id.clone(),
-                                            col_index: display_pos,
-                                            is_selected: false,
-                                            is_focused: false,
-                                            is_hovered: false,
-                                            is_editing: false,
-                                            depth: None,
-                                            is_tree_column: false,
-                                        };
-                                        (col.cell)(item, &cell_ctx)
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
-                        if cells.is_empty() {
-                            ctx.start_drag(anchor, payload);
-                            return;
+                            // Selection-aware dragged set: the whole selection
+                            // when the pressed row is part of a multi-selection,
+                            // else just the pressed row.
+                            let rows: Vec<usize> = match sel_for_drag.as_ref() {
+                                Some(s) if s.is_selected(drag_row) => {
+                                    let mut v = s.selected_indices();
+                                    v.sort_unstable();
+                                    if v.len() <= 1 { vec![drag_row] } else { v }
+                                }
+                                _ => vec![drag_row],
+                            };
+                            // Adapt the side-effect `with_item_fn` reader to the
+                            // `RowExport::build_payload` signature (which needs a
+                            // bool-returning "did it resolve" reader).
+                            let read = |i: usize, f: &mut dyn FnMut(&T)| -> bool {
+                                read_item_local(&with_item_for_drag, i, |t| f(t)).is_some()
+                            };
+                            let Some(payload) = export_for_drag.build_payload(
+                                view_id,
+                                rows,
+                                &read,
+                                &snapshot_for_drag,
+                            ) else {
+                                return;
+                            };
+                            // Build a full-width preview from the PRESSED row's
+                            // cells so the floating widget reads as the picked-up
+                            // row. Cells are built eagerly here (no arena), then a
+                            // self-contained `CellRowPreview` lays them out.
+                            let display = display_for_preview.borrow().clone();
+                            let cells: Vec<Box<dyn Widget>> =
+                                read_item_local(&with_item_for_preview, drag_row, |item| {
+                                    display
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(display_pos, &col_idx)| {
+                                            let col = &columns_for_preview[col_idx];
+                                            let cell_ctx = CellContext {
+                                                row_index: drag_row,
+                                                col_id: col.id.clone(),
+                                                col_index: display_pos,
+                                                is_selected: false,
+                                                is_focused: false,
+                                                is_hovered: false,
+                                                is_editing: false,
+                                                depth: None,
+                                                is_tree_column: false,
+                                            };
+                                            (col.cell)(item, &cell_ctx)
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            if cells.is_empty() {
+                                ctx.start_drag(anchor, payload);
+                                return;
+                            }
+                            let widths = widths_for_preview.borrow().clone();
+                            let h = metrics_for_preview.borrow_mut().row_height(drag_row);
+                            let total_w = widths.iter().sum::<f32>().max(120.0);
+                            let preview = Box::new(crate::drag_preview::DragPreview::new(
+                                total_w,
+                                h,
+                                Box::new(CellRowPreview::new(cells, widths, h)),
+                            )) as Box<dyn Widget>;
+                            ctx.start_drag_with_preview(anchor, payload, preview);
                         }
-                        let widths = widths_for_preview.borrow().clone();
-                        let h = metrics_for_preview.borrow_mut().row_height(drag_row);
-                        let total_w = widths.iter().sum::<f32>().max(120.0);
-                        let preview = Box::new(crate::drag_preview::DragPreview::new(
-                            total_w,
-                            h,
-                            Box::new(CellRowPreview::new(cells, widths, h)),
-                        )) as Box<dyn Widget>;
-                        ctx.start_drag_with_preview(anchor, payload, preview);
-                    }
-                }));
+                    },
+                ));
             }
             // Row activation (open/commit) — a gesture, so it arbitrates
             // against the reorder drag via the gesture arena (a click

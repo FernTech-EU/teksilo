@@ -140,19 +140,40 @@ pointer gesture at all and so cannot collide with anything.
 ([`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)):
 
 - a reorderable row's hold no longer fires the row's own `on_long_press` as well.
-  The predicate is the **deferral itself** — a live sequence member whose
-  activation was put off to the long-press deadline — so it needs no cooperation
-  from the row, whose handler belongs to the application's delegate and which no
-  data view could gate. `LongPressRole::DragHandle` declares the same thing for a
-  grab the deferral cannot see (one taken by an explicit `capture_pointer`).
+  The framework's implicit predicate is the **deferral itself** — a live sequence
+  member whose activation was put off to the long-press deadline — but it is keyed
+  on that member's own node, and a row's drag lives one level out on its
+  `DragSurface` wrapper, so what actually answers here is the explicit
+  `LongPressRole::DragHandle` that `data_views::row_grab_surface` puts on the
+  wrapper. Either way it needs no cooperation from the row, whose handler belongs
+  to the application's delegate and which no data view could gate.
 - a row with **no** reorder opens its context menu on a hold, through the same
   `show_context_menu_for` a secondary press reaches.
 
-A mouse is unaffected by construction: it enrols no pan competitor, so nothing on
-its sequence is ever deferred.
-`a_reorderable_rows_hold_does_not_also_fire_its_own_long_press` in
-[`data_view_drag.rs`](../crates/teksilo-widgets/tests/data_view_drag.rs) is no
-longer `#[ignore]`d.
+**A mouse keeps its hold, on a reorderable row as much as on a plain one** —
+because on a row both claims are *inferred*. It enrols no pan competitor, so
+`DragActivation::Auto` is never resolved to `AfterLongPress` on its sequence and
+nothing is deferred by that route; and `long_press_is_a_grab` walks the
+`DragHandle` ancestors only for a direct pointer, because a mouse latches its
+drag on travel and so spends no hold on one. That second half is a gate, not a
+construction: without it, `.reorderable(true)` / `.exportable(..)` silently
+deleted the row delegate's `on_long_press` under the mouse. The pair
+`a_reorderable_rows_hold_does_not_also_fire_its_own_long_press` (finger, silent)
+and `a_mouse_hold_on_a_reorderable_row_still_fires_its_own_long_press` (mouse,
+fires) in [`data_view_drag.rs`](../crates/teksilo-widgets/tests/data_view_drag.rs)
+pin both, and must disagree.
+
+What a mouse does *not* keep is a hold a node asked for by name. An application
+that puts `DragActivation::AfterLongPress` on a node itself — rather than
+leaving the framework to infer it — is declaring that the hold is that node's
+drag-start route, and `PointerSequence::resolve_activation` passes a declared
+activation straight through instead of synthesising one. So that node's grab is
+deferred to the hold for every pointer kind, and its own `on_long_press` is
+suppressed under a mouse as well. No data view declares one, which is why a row
+is not affected;
+`an_explicitly_deferred_grab_takes_the_hold_from_every_pointer_kind` in
+[`touch_route.rs`](../crates/teksilo-core/src/widget_tree/touch_route.rs) pins
+the case so the two rules are not confused for one.
 
 ## 3. The column-header strip is a pan surface
 

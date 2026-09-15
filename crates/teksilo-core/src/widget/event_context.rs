@@ -124,6 +124,12 @@ pub struct EventContext<'ops> {
     /// and read by `collect_from_ctx`, which decides the pointer's sequence in
     /// the recognizer's favour.
     pub(crate) recognized_owning_gesture: bool,
+    /// A press-time [`DragActivation`](teksilo_tokens::DragActivation) chosen
+    /// for this node by its own press handler, overriding its build-time
+    /// declaration for this press alone. Applied by `collect_from_ctx` onto the
+    /// pointer's sequence, which the enrolment walk reads immediately
+    /// afterwards. See [`EventContext::set_drag_activation`].
+    pub(crate) drag_activation_override: Option<teksilo_tokens::DragActivation>,
     /// Arbitration acts the handler performed on the sequence owning the
     /// pointer it is serving, in the order it performed them. Applied by
     /// `WidgetTree::collect_from_ctx` against that sequence.
@@ -520,6 +526,7 @@ impl<'ops> EventContext<'ops> {
             in_focus_dispatch: None,
             explicit_capture: false,
             recognized_owning_gesture: false,
+            drag_activation_override: None,
             gesture_acts: Vec::new(),
             cancel_pointer_request: None,
         }
@@ -1871,6 +1878,36 @@ impl<'ops> EventContext<'ops> {
     /// position is known.
     pub fn arm_overlay_safe_region(&mut self, content_id: crate::widget_id::WidgetId) {
         self.safe_region_arm_requests.push(content_id);
+    }
+
+    /// Choose, **from this press's `PointerDown` handler**, when this node's own
+    /// drag may begin — overriding its declared
+    /// [`DragActivation`](teksilo_tokens::DragActivation) for this press alone.
+    ///
+    /// `.drag_activation(..)` is a node property, decided at build time. That is
+    /// the right grain when a node's `on_drag` means one thing. It is the wrong
+    /// grain when one handler means several: a scene viewport's single `on_drag`
+    /// is its marquee *and* its item grab *and* its magnet port drag, and which
+    /// of the three a press is cannot be known until the press has been
+    /// hit-tested. This is the per-press door — the press handler has already
+    /// done that hit test, so it can say "this one landed on an item, arm it
+    /// immediately" while leaving an empty-space press to defer to the pan.
+    ///
+    /// Stashed on the pointer's sequence, **not** written back onto the node, so
+    /// it dies with the press that chose it. That matters here more than
+    /// hygiene usually does: `on_pointer_event` previews root-first over every
+    /// strict ancestor of the press target, so a node that answers from it also
+    /// answers for presses an interactive descendant owns, and a node write
+    /// would leave the declaration changed for the *next* press.
+    ///
+    /// Read by the enrolment walk, which runs immediately after the press
+    /// dispatch. Called from anything but a press handler it is inert for the
+    /// press in flight — there is no enrolment left to read it — and applies to
+    /// nothing else.
+    ///
+    /// Last writer wins: answering twice on one press means the second answer.
+    pub fn set_drag_activation(&mut self, activation: teksilo_tokens::DragActivation) {
+        self.drag_activation_override = Some(activation);
     }
 
     /// Capture **the pointer this handler is serving**: its subsequent

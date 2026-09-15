@@ -2900,6 +2900,12 @@ impl WidgetTree {
                 self.note_explicit_capture(source_widget);
             }
         }
+        if let Some(activation) = ctx.drag_activation_override.take() {
+            // A press handler chose this node's drag activation for this press.
+            // Onto the sequence, where it dies with the press — see
+            // `EventContext::set_drag_activation`.
+            self.note_drag_activation_override(source_widget, activation);
+        }
         if ctx.recognized_owning_gesture {
             // A drag or a swipe recognized on this node owns the rest of the
             // press, however the recognizer was reached.

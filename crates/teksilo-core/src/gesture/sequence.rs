@@ -49,6 +49,48 @@
 //!    a completable gesture wins, which is the pre-existing
 //!    `arena.process(Up) -> Tap`.
 //!
+//! # A node with two roles
+//!
+//! One node holds exactly **one** member — [`PointerSequence::decide`],
+//! [`PointerSequence::reject`] and [`PointerSequence::hold`] are all keyed on
+//! that, and [`PointerSequence::enrol`] refuses a second. A node can still want
+//! two roles: a scene viewport declares a [`PanClaim`] *and* carries `on_drag`
+//! on the same `HandlerSet`, because its surface is both the camera and the
+//! marquee. Step 1 enrols it as the pan claimant before any handler runs, so
+//! the drag half arrives at an already-taken slot.
+//!
+//! [`PointerSequence::defer_own_drag`] is that half's door: it attaches the
+//! drag's [`DragActivation`] to the member the node already has. The member goes
+//! on competing as a pan at `pan_slop`, while the node's own recognizers are
+//! silenced until the activation allows them — `Auto` on a direct pointer with
+//! an eligible pan resolving, as everywhere else, to a hold. Whichever half
+//! ripens first takes the other out: a won pan withdraws the self-drag
+//! ([`PointerSequence::withdraw_own_drag`]), a recognized self-drag flips the
+//! member's reported role ([`PointerSequence::promote_own_drag`]) so
+//! [`WidgetTree::sequence_members`](crate::WidgetTree::sequence_members) names
+//! the half that actually won.
+//!
+//! The deferral is a **hold**, not a timer. A press that has already travelled
+//! past `long_press_slop` when the deadline arrives was never a hold, so its
+//! self-drag is withdrawn rather than armed — the rule
+//! [`LongPressRecognizer`](super::LongPressRecognizer) applies to itself.
+//! Without it a slow, deliberate pan would arm the grab simply by outlasting
+//! the clock, and a surface that pans only for a *fast* finger is not a surface
+//! that pans.
+//!
+//! And the hold it spends is spent **on that node**.
+//! [`PointerSequence::has_deferred_grab_for`] is keyed on a node, so a
+//! heavyweight widget inside a dual-role container keeps its own touch long
+//! press and its own touch context menu — a deferred grab on the container is
+//! not a declaration that its descendants have given theirs up. The
+//! ancestor-wide door is the explicit
+//! [`LongPressRole::DragHandle`](crate::LongPressRole::DragHandle).
+//!
+//! **The mouse cannot enter that arm at all.** `defer_own_drag` refuses anything
+//! but a live [`MemberRole::Pan`] member, and a mouse enrols none — so on a
+//! mouse a dual-role node is enrolled by step 4's ordinary `Gesture` path and
+//! latches at the 5.0 it always did.
+//!
 //! # Why the mouse is unchanged
 //!
 //! [`GestureProfile::pan_slop`] is `None` for a mouse and
@@ -131,6 +173,18 @@ pub struct SequenceMember {
     pub(crate) rejects_on_tap_slop: bool,
     /// When [`state`](Self::state) became [`MemberState::Held`].
     pub(crate) held_since: Option<EventTime>,
+    /// Whether this member's node **also** owns drag/swipe recognizers of its
+    /// own — the dual-role shape. See
+    /// [`PointerSequence::defer_own_drag`](PointerSequence::defer_own_drag).
+    ///
+    /// `false` for every member a mouse ever enrols, because the arm that sets
+    /// it is reachable only through a [`MemberRole::Pan`] membership.
+    pub(crate) has_own_drag: bool,
+    /// When those self-drag recognizers may start running. `None` means "now".
+    pub(crate) own_drag_eligible_at: Option<EventTime>,
+    /// Whether that self-drag is out of the running for the rest of the press —
+    /// the pan half won, or the press travelled past the tap boundary.
+    pub(crate) own_drag_withdrawn: bool,
 }
 
 impl SequenceMember {
@@ -143,6 +197,9 @@ impl SequenceMember {
             state: MemberState::Possible,
             rejects_on_tap_slop: false,
             held_since: None,
+            has_own_drag: false,
+            own_drag_eligible_at: None,
+            own_drag_withdrawn: false,
         }
     }
 
@@ -157,6 +214,42 @@ impl SequenceMember {
     pub fn is_eligible_at(&self, now: EventTime) -> bool {
         self.state == MemberState::Possible
             && self.eligible_at.is_none_or(|deadline| now >= deadline)
+    }
+
+    /// Whether this member's node may run its **own** drag/swipe recognizers at
+    /// `now`.
+    ///
+    /// Always `true` for a member carrying no self-drag deferral — which is
+    /// every member a mouse ever enrols, and every member of every sequence on
+    /// a node that is not dual-role — so this predicate is inert everywhere the
+    /// dual-role shape does not occur.
+    ///
+    /// Three answers, and the third is the load-bearing one:
+    ///
+    /// * no self-drag → `true`, unconditionally;
+    /// * a self-drag still inside its deferral → `false` until `now` reaches
+    ///   `own_drag_eligible_at`;
+    /// * a **withdrawn** self-drag → `false` for the rest of the press, and
+    ///   deliberately so. A withdrawal means the press is not the hold the
+    ///   deferral was waiting for — the pan half took it, or the travel
+    ///   disproved the hold — and the node's recognizers must stay silenced
+    ///   afterwards, or a deferral ripening later would start the node's drag
+    ///   under a finger that had already committed to something else. Because
+    ///   the gate this feeds (`WidgetTree::sequence_blocks_arena`'s rule) is per
+    ///   *node*, that silence covers the node's tap family too, which is the
+    ///   same thing `WidgetTree::cancel_member_taps` does to the pan winner
+    ///   explicitly. For a dual-role node mid-pan that is the wanted answer: a
+    ///   finger that has committed to a pan is not also tapping, double-tapping
+    ///   or long-pressing the surface it is panning. A **completed** tap is not
+    ///   lost to it either way: `end_sequence` nulls the sequence before the
+    ///   release is dispatched, and `TapRecognizer` decides the release against
+    ///   its own [`TapBoundary`], so a press that wandered and lifted inside the
+    ///   node still taps.
+    pub fn own_drag_armed_at(&self, now: EventTime) -> bool {
+        if !self.has_own_drag {
+            return true;
+        }
+        !self.own_drag_withdrawn && self.own_drag_eligible_at.is_none_or(|at| now >= at)
     }
 }
 
@@ -257,6 +350,19 @@ pub struct PointerSequence {
     pressed_owner: Option<WidgetId>,
     terminating: bool,
     taps_cancelled: bool,
+    /// Per-press [`DragActivation`] overrides, queued by
+    /// [`EventContext::set_drag_activation`](crate::widget::EventContext::set_drag_activation)
+    /// from a press handler and read by the enrolment walk that runs
+    /// immediately afterwards.
+    ///
+    /// On the **sequence**, not written back onto the node, because
+    /// `on_pointer_event` previews root-first over every strict ancestor of the
+    /// press target: a node whose press handler answers here fires for presses
+    /// it does not own, and a node write would leave its build-time activation
+    /// changed for the *next* press. A `Vec` rather than a map — a press has at
+    /// most a handful of answering nodes, and the order it is written in is the
+    /// order it is read back in.
+    drag_activation_overrides: Vec<(WidgetId, DragActivation)>,
 }
 
 impl PointerSequence {
@@ -286,6 +392,7 @@ impl PointerSequence {
             pressed_owner: None,
             terminating: false,
             taps_cancelled: false,
+            drag_activation_overrides: Vec::new(),
         }
     }
 
@@ -497,6 +604,171 @@ impl PointerSequence {
         true
     }
 
+    /// Give the press owner's **own** drag a say when the node is already
+    /// enrolled in another role.
+    ///
+    /// One node holds exactly one [`SequenceMember`] — [`decide`](Self::decide),
+    /// [`reject`](Self::reject) and [`hold`](Self::hold) are all keyed on that —
+    /// and [`enrol`](Self::enrol) refuses a second. But a node can genuinely
+    /// want two roles: a `SceneView` with selection or magnetism on declares a
+    /// [`PanClaim`] *and* carries `on_drag` on the same `HandlerSet`.
+    /// `begin_sequence` enrols it as the pan claimant before any handler runs,
+    /// so its drag was refused and its [`DragActivation`] was never consulted —
+    /// and its `DragRecognizer`, driven by the ordinary capture dispatch that
+    /// *precedes* the arbitration walk, then latched at `drag_slop` and decided
+    /// the sequence at half the travel the pan needed. A surface shaped like
+    /// that could not pan under a finger at all.
+    ///
+    /// Rather than enrol the node twice, the deferral is attached to the member
+    /// it already has. The member goes on competing as a pan on `pan_slop`; its
+    /// node's own recognizers are held off until `activation` allows them, by
+    /// the same [`resolve_activation`](Self::resolve_activation) every other
+    /// drag member is resolved through — so `Auto` on a direct pointer with an
+    /// eligible pan means `AfterLongPress`, and `Immediate` means "today's
+    /// behaviour, on request".
+    ///
+    /// Refused, and reported as `false`, unless the member exists, is live and
+    /// holds a [`MemberRole::Pan`] — so a mouse, which enrols no pan member at
+    /// all ([`GestureProfile::pan_slop`] is `None` for it and
+    /// [`PanClaim::devices`] admits only direct pointers), can never reach it.
+    /// A decided sequence refuses too: arbitration is over.
+    pub fn defer_own_drag(
+        &mut self,
+        id: WidgetId,
+        activation: DragActivation,
+        profile: &GestureProfile,
+    ) -> bool {
+        if self.is_decided() {
+            return false;
+        }
+        let resolved = self.resolve_activation(activation);
+        let started_at = self.started_at;
+        let Some(member) = self
+            .members
+            .iter_mut()
+            .find(|m| m.id == id && m.is_live() && matches!(m.role, MemberRole::Pan(_)))
+        else {
+            return false;
+        };
+        member.has_own_drag = true;
+        if resolved == DragActivation::AfterLongPress {
+            member.own_drag_eligible_at = Some(started_at + profile.long_press);
+        }
+        true
+    }
+
+    /// Take a member's deferred self-drag out of the running for good.
+    ///
+    /// Three callers, one rule each:
+    ///
+    /// * the **pan half won**, so the press *is* a pan and the node's
+    ///   recognizers must stay silent for the rest of it;
+    /// * the press **travelled past `long_press_slop` before the deadline**, so
+    ///   it was never a hold. That is the rule
+    ///   [`LongPressRecognizer`](super::LongPressRecognizer) applies to itself —
+    ///   it fails on the first move past that slop rather than waiting for its
+    ///   timer — and applying it here is what stops a deliberate, slow pan from
+    ///   arming a grab merely by outlasting the clock;
+    /// * the press **left the tap boundary**, the same reading
+    ///   [`enrol_drag`](Self::enrol_drag)'s `rejects_on_tap_slop` gives that
+    ///   travel.
+    ///
+    /// The last two are both positional and both apply only while the self-drag
+    /// is still unripe — see `Self::unripe_own_drag_members`. They are not
+    /// redundant: `long_press_slop` is a radius around the press and bites on a
+    /// surface the finger never leaves, while [`TapBoundary`] is the node's own
+    /// rect for a coarse pointer and bites on a small node the finger slides off
+    /// without travelling far.
+    pub fn withdraw_own_drag(&mut self, id: WidgetId) {
+        if let Some(member) = self.members.iter_mut().find(|m| m.id == id) {
+            member.own_drag_withdrawn = true;
+        }
+    }
+
+    /// Whether `id`'s **own** drag/swipe recognizers must be kept out of this
+    /// press at `now`. `false` for a node that is not a member, and for every
+    /// member carrying no self-drag.
+    pub fn own_drag_blocked(&self, id: WidgetId, now: EventTime) -> bool {
+        self.members
+            .iter()
+            .find(|m| m.id == id)
+            .is_some_and(|m| !m.own_drag_armed_at(now))
+    }
+
+    /// The self-drag half of a dual-role member ripened and took the press:
+    /// flip the member's role to [`MemberRole::Gesture`] so
+    /// [`member_report`](Self::member_report) names the half that actually won
+    /// rather than the pan claim the node was also holding.
+    ///
+    /// A no-op — and reported as `false` — for a member with no self-drag, or
+    /// one whose self-drag has been withdrawn.
+    pub(crate) fn promote_own_drag(&mut self, id: WidgetId) -> bool {
+        let Some(member) = self
+            .members
+            .iter_mut()
+            .find(|m| m.id == id && m.has_own_drag && !m.own_drag_withdrawn)
+        else {
+            return false;
+        };
+        member.role = MemberRole::Gesture;
+        true
+    }
+
+    /// Every live member whose self-drag is **still waiting out its hold** at
+    /// `now` — deferred, not withdrawn, and not yet ripe — innermost first.
+    ///
+    /// The self-drag counterpart of `rejects_on_tap_slop`, and scoped three
+    /// ways:
+    ///
+    /// * only a **deferred** self-drag is swept. An `Immediate` one is armed
+    ///   from the press and is governed by its recognizer, exactly as an
+    ///   `Immediate` drag member is.
+    /// * only an **unripe** one. Once the hold has been served the grab is live,
+    ///   and a live grab travelling is the grab doing its job — withdrawing it
+    ///   then would make hold-then-drag impossible on any node small enough for
+    ///   a drag to leave its bounds.
+    /// * only a **live** member, because a rejected one competes for nothing.
+    ///
+    /// The sweep this feeds is what makes the deferral a *hold* rather than a
+    /// timer: see `WidgetTree::tick_sequence_timers`.
+    pub(crate) fn unripe_own_drag_members(&self, now: EventTime) -> Vec<WidgetId> {
+        self.members
+            .iter()
+            .filter(|m| {
+                m.is_live()
+                    && m.has_own_drag
+                    && !m.own_drag_withdrawn
+                    && m.own_drag_eligible_at.is_some_and(|at| now < at)
+            })
+            .map(|m| m.id)
+            .collect()
+    }
+
+    /// Record a per-press [`DragActivation`] for `id`, overriding the node's
+    /// build-time declaration for this press alone.
+    ///
+    /// Last writer wins: a handler that answers twice on one press means the
+    /// second answer.
+    pub fn set_drag_activation_override(&mut self, id: WidgetId, activation: DragActivation) {
+        if let Some(slot) = self
+            .drag_activation_overrides
+            .iter_mut()
+            .find(|(other, _)| *other == id)
+        {
+            slot.1 = activation;
+        } else {
+            self.drag_activation_overrides.push((id, activation));
+        }
+    }
+
+    /// The per-press [`DragActivation`] a handler chose for `id`, if one did.
+    pub fn drag_activation_override(&self, id: WidgetId) -> Option<DragActivation> {
+        self.drag_activation_overrides
+            .iter()
+            .find(|(other, _)| *other == id)
+            .map(|(_, activation)| *activation)
+    }
+
     /// What [`DragActivation::Auto`] means for this sequence.
     ///
     /// `Immediate` for a precise pointer or a subtree that has declared
@@ -518,21 +790,51 @@ impl PointerSequence {
         }
     }
 
-    /// Whether any live member's activation was **deferred to the long-press
-    /// deadline** — i.e. the hold is what arms that member's grab.
+    /// Whether **`id`'s own** grab on this press is waiting out the long-press
+    /// deadline — i.e. the hold is what arms *that node's* grab.
     ///
-    /// Only [`enrol_drag`](Self::enrol_drag) sets a member's `eligible_at`, and
-    /// only when [`resolve_activation`](Self::resolve_activation) answered
-    /// [`DragActivation::AfterLongPress`], so this is exactly "a grab on this
-    /// sequence is waiting out the hold". A mouse never has one: the resolution
-    /// needs an eligible pan competitor and a mouse enrols none.
+    /// Two deferrals answer to this, and both are set only when
+    /// [`resolve_activation`](Self::resolve_activation) answered
+    /// [`DragActivation::AfterLongPress`]:
     ///
-    /// Read by the framework to keep one hold from meaning two things — see
-    /// [`WidgetTree::long_press_is_a_grab`](crate::WidgetTree).
-    pub fn has_deferred_grab(&self) -> bool {
-        self.members
-            .iter()
-            .any(|m| m.is_live() && m.eligible_at.is_some())
+    /// * a member deferred whole, by [`enrol_drag`](Self::enrol_drag) —
+    ///   `eligible_at`;
+    /// * the **self-drag** half of a dual-role member, by
+    ///   [`defer_own_drag`](Self::defer_own_drag) — `own_drag_eligible_at`. It
+    ///   has to count: the node's grab is armed by the same hold, so without
+    ///   this a `SceneView` with selection on would spend one hold on both its
+    ///   marquee and its own long press.
+    ///
+    /// # Why it is keyed on a node and not on the sequence
+    ///
+    /// "One hold cannot mean two things" is a statement about **one node**, not
+    /// about a press. A press reaches an ancestor chain, and a deferred grab
+    /// somewhere on it says nothing about what a hold means further in: a
+    /// `SceneView` that marquees after a hold is not thereby declaring that
+    /// every heavyweight widget inside it has given up its touch long press and
+    /// its touch context menu. A finger has no secondary button — the hold *is*
+    /// the context-menu route — so answering this sequence-wide silently
+    /// removed the only touch route to a context menu from every descendant of
+    /// any dual-role container, which is an accessibility loss and not a rule.
+    ///
+    /// The ancestor-wide door exists and is **explicit**:
+    /// `LongPressRole::DragHandle`, which `WidgetTree::long_press_is_a_grab`
+    /// walks from the queried node to the root. A container that really does
+    /// own every hold in its subtree says so there.
+    ///
+    /// A mouse never has one of these at all: both resolutions need an eligible
+    /// pan competitor and a mouse enrols none.
+    ///
+    /// Read by the framework through `WidgetTree::long_press_is_a_grab`.
+    pub fn has_deferred_grab_for(&self, id: WidgetId) -> bool {
+        self.members.iter().any(|m| {
+            m.id == id
+                && m.is_live()
+                && (m.eligible_at.is_some()
+                    || (m.has_own_drag
+                        && !m.own_drag_withdrawn
+                        && m.own_drag_eligible_at.is_some()))
+        })
     }
 
     /// Whether any live member is a pan claimant. A mouse never has one:
@@ -1108,6 +1410,272 @@ mod tests {
             !TapBoundary::Bounds.left(from_outside, position, Some(rect), touch_profile),
             "a press that began outside is bounded by its own radius, and this \
              one has barely moved",
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // The self-drag half of a dual-role member
+    // -----------------------------------------------------------------
+
+    /// `defer_own_drag` refuses anything that is not a live `Pan` member — the
+    /// structural reason a mouse can never reach it, since a mouse enrols no
+    /// pan member at all.
+    #[test]
+    fn defer_own_drag_refuses_anything_but_a_live_pan_member() {
+        let tokens = tokens();
+        let profile = tokens.profile(PointerKind::Touch);
+        let ids = ids(3);
+
+        // A `Gesture` member: the node's drag already has the slot, so there is
+        // no second half to defer.
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Gesture));
+        assert!(
+            !s.defer_own_drag(ids[0], DragActivation::Auto, profile),
+            "a Gesture member is not dual-role"
+        );
+
+        // A node that is not a member at all.
+        assert!(
+            !s.defer_own_drag(ids[1], DragActivation::Auto, profile),
+            "a non-member has nothing to attach a deferral to"
+        );
+
+        // A rejected pan member.
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        s.reject(ids[0]);
+        assert!(
+            !s.defer_own_drag(ids[0], DragActivation::Auto, profile),
+            "a member that is out of the running gets no second half"
+        );
+
+        // A decided sequence.
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        s.decide(ids[0]);
+        assert!(
+            !s.defer_own_drag(ids[0], DragActivation::Auto, profile),
+            "arbitration is over"
+        );
+
+        // …and the one shape that is accepted.
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(s.defer_own_drag(ids[0], DragActivation::Auto, profile));
+    }
+
+    /// A mouse sequence never has a pan member, so the shape `defer_own_drag`
+    /// exists for cannot arise. Stated on the object rather than through a
+    /// tree, so it is a property of the type and not of one fixture.
+    #[test]
+    fn a_mouse_can_never_defer_its_own_drag() {
+        let tokens = tokens();
+        let profile = tokens.profile(PointerKind::Mouse);
+        let ids = ids(1);
+        let mut s = seq(mouse(), TouchAction::AUTO, ids.clone());
+
+        // `pan_is_eligible` is what `begin_sequence` gates the enrolment on, and
+        // for a mouse it is false whatever the claim asks for — so no `Pan`
+        // member is ever created and the arm has nothing to attach to.
+        assert!(
+            !s.pan_is_eligible(&PanClaim::both(), profile),
+            "the mouse profile has no pan_slop, so no claim is eligible"
+        );
+        assert!(!s.defer_own_drag(ids[0], DragActivation::Auto, profile));
+        assert!(!s.has_deferred_grab_for(ids[0]));
+    }
+
+    /// `Auto` on a direct pointer with an eligible pan defers the self-drag to
+    /// the long-press deadline; `Immediate` arms it at the press.
+    #[test]
+    fn defer_own_drag_resolves_auto_the_way_every_other_drag_resolves_it() {
+        let tokens = tokens();
+        let profile = tokens.profile(PointerKind::Touch);
+        let ids = ids(1);
+
+        let mut deferred = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(deferred.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(deferred.defer_own_drag(ids[0], DragActivation::Auto, profile));
+        assert!(
+            deferred.own_drag_blocked(ids[0], EventTime::ZERO),
+            "Auto + an eligible pan means a hold"
+        );
+        assert!(
+            !deferred.own_drag_blocked(ids[0], EventTime::ZERO + profile.long_press),
+            "…and the hold ends at long_press"
+        );
+        assert!(
+            deferred.has_deferred_grab_for(ids[0]),
+            "so the hold is spent on the grab and cannot also be a long press"
+        );
+
+        let mut immediate = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(immediate.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(immediate.defer_own_drag(ids[0], DragActivation::Immediate, profile));
+        assert!(
+            !immediate.own_drag_blocked(ids[0], EventTime::ZERO),
+            "Immediate arms at the press"
+        );
+        assert!(
+            !immediate.has_deferred_grab_for(ids[0]),
+            "and spends no hold, so a long press on the same node still fires"
+        );
+    }
+
+    /// A withdrawal is permanent for the press. That is what keeps a deferral
+    /// ripening mid-pan from starting a grab under a scrolling finger.
+    #[test]
+    fn a_withdrawn_self_drag_stays_blocked_past_its_own_deadline() {
+        let tokens = tokens();
+        let profile = tokens.profile(PointerKind::Touch);
+        let ids = ids(1);
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(s.defer_own_drag(ids[0], DragActivation::Auto, profile));
+
+        s.withdraw_own_drag(ids[0]);
+        assert!(
+            s.own_drag_blocked(ids[0], EventTime::ZERO + profile.long_press * 10),
+            "a withdrawn self-drag does not come back when its timer ripens"
+        );
+        assert!(
+            !s.has_deferred_grab_for(ids[0]),
+            "and stops spending the hold, so the node's long press is free again"
+        );
+    }
+
+    /// `promote_own_drag` is what makes the member report name the half that
+    /// actually won, and it is a no-op on anything else.
+    #[test]
+    fn promote_own_drag_renames_the_half_that_won() {
+        let tokens = tokens();
+        let profile = tokens.profile(PointerKind::Touch);
+        let ids = ids(1);
+
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(s.defer_own_drag(ids[0], DragActivation::Immediate, profile));
+        assert!(matches!(s.members()[0].role, MemberRole::Pan(_)));
+        assert!(s.promote_own_drag(ids[0]));
+        assert_eq!(s.members()[0].role, MemberRole::Gesture);
+
+        // A plain claimant is untouched.
+        let mut plain = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(plain.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(!plain.promote_own_drag(ids[0]));
+        assert!(matches!(plain.members()[0].role, MemberRole::Pan(_)));
+
+        // …and so is one whose self-drag has been withdrawn: the pan won, and
+        // renaming the member would make the report say otherwise.
+        let mut withdrawn = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(withdrawn.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(withdrawn.defer_own_drag(ids[0], DragActivation::Auto, profile));
+        withdrawn.withdraw_own_drag(ids[0]);
+        assert!(!withdrawn.promote_own_drag(ids[0]));
+        assert!(matches!(withdrawn.members()[0].role, MemberRole::Pan(_)));
+    }
+
+    /// Only a **deferred** self-drag answers the positional sweep, mirroring
+    /// `rejects_on_tap_slop`: an `Immediate` one is governed by its recognizer.
+    #[test]
+    fn only_a_deferred_self_drag_is_swept_positionally() {
+        let tokens = tokens();
+        let profile = tokens.profile(PointerKind::Touch);
+        let ids = ids(1);
+
+        let mut deferred = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(deferred.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(deferred.defer_own_drag(ids[0], DragActivation::Auto, profile));
+        assert_eq!(
+            deferred.unripe_own_drag_members(EventTime::ZERO),
+            vec![ids[0]]
+        );
+
+        let mut immediate = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(immediate.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(immediate.defer_own_drag(ids[0], DragActivation::Immediate, profile));
+        assert!(
+            immediate
+                .unripe_own_drag_members(EventTime::ZERO)
+                .is_empty()
+        );
+
+        // A plain claimant never appears.
+        let mut plain = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(plain.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(plain.unripe_own_drag_members(EventTime::ZERO).is_empty());
+    }
+
+    /// …and only while it is still **unripe**. Once the hold has been served the
+    /// grab is live, and a live grab travelling is the grab doing its job: a
+    /// sweep that still fired then would make hold-then-drag impossible on any
+    /// node small enough for the drag to leave its bounds.
+    #[test]
+    fn a_ripe_self_drag_is_no_longer_swept() {
+        let tokens = tokens();
+        let profile = tokens.profile(PointerKind::Touch);
+        let ids = ids(1);
+
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Pan(PanClaim::both())));
+        assert!(s.defer_own_drag(ids[0], DragActivation::Auto, profile));
+
+        let deadline = EventTime::ZERO + profile.long_press;
+        assert_eq!(
+            s.unripe_own_drag_members(
+                EventTime::ZERO + (profile.long_press - std::time::Duration::from_millis(1)),
+            ),
+            vec![ids[0]],
+            "still inside the hold"
+        );
+        assert!(
+            s.unripe_own_drag_members(deadline).is_empty(),
+            "the hold has been served; the grab is live and answers to its own \
+             recognizer from here"
+        );
+    }
+
+    /// `own_drag_armed_at` is inert for every member carrying no self-drag,
+    /// which is what makes the gate it feeds free for every other sequence.
+    #[test]
+    fn own_drag_armed_is_true_for_a_member_with_no_self_drag() {
+        let ids = ids(1);
+        let mut s = seq(mouse(), TouchAction::AUTO, ids.clone());
+        assert!(s.enrol(ids[0], MemberRole::Gesture));
+        for at in [
+            EventTime::ZERO,
+            EventTime::ZERO + std::time::Duration::from_secs(10),
+        ] {
+            assert!(s.members()[0].own_drag_armed_at(at));
+            assert!(!s.own_drag_blocked(ids[0], at));
+        }
+    }
+
+    /// The per-press activation override is recorded per node,
+    /// last-writer-wins, and answers `None` for a node that never spoke.
+    #[test]
+    fn a_drag_activation_override_is_recorded_per_node() {
+        let ids = ids(2);
+        let mut s = seq(finger(), TouchAction::AUTO, ids.clone());
+        assert_eq!(s.drag_activation_override(ids[0]), None);
+
+        s.set_drag_activation_override(ids[0], DragActivation::Immediate);
+        s.set_drag_activation_override(ids[1], DragActivation::AfterLongPress);
+        assert_eq!(
+            s.drag_activation_override(ids[0]),
+            Some(DragActivation::Immediate)
+        );
+        assert_eq!(
+            s.drag_activation_override(ids[1]),
+            Some(DragActivation::AfterLongPress)
+        );
+
+        s.set_drag_activation_override(ids[0], DragActivation::Auto);
+        assert_eq!(
+            s.drag_activation_override(ids[0]),
+            Some(DragActivation::Auto),
+            "answering twice on one press means the second answer"
         );
     }
 }

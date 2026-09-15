@@ -43,12 +43,37 @@ fn contact(id: PointerId, phase: PointerPhase, at: Point, ms: u64) -> PointerSam
     }
 }
 
-/// A finger press, one move past the touch drag slop, and a lift.
+/// The hold a scene grab is armed by, in milliseconds, plus a margin.
+///
+/// A `SceneView` with selection or magnetism on declares a `PanClaim` **and**
+/// carries `on_drag` on the same node, so its own drag is deferred behind a hold
+/// (`PointerSequence::defer_own_drag`) and a finger that simply moves pans the
+/// camera instead. Every test in this section is about *where* a finger may
+/// press, not about *when*, so each drives the press shape that actually
+/// produces a grab: press, hold, then travel.
+fn hold_ms() -> u64 {
+    teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch)
+        .long_press
+        .as_millis() as u64
+        + 50
+}
+
+/// A finger press, a hold past the profile's `long_press`, one move past the
+/// touch drag slop, and a lift.
+///
+/// The intermediate sample is at the **press point**, not on the way to `to`:
+/// the deferral is a hold, so a press that has already travelled past
+/// `long_press_slop` when the deadline arrives is withdrawn rather than armed.
+/// Move during the hold and this helper produces a pan, which is the behaviour
+/// [`crate::view::tests::touch_camera`] pins and not what the grab-reach tests
+/// are measuring.
 fn finger_drag(tree: &mut WidgetTree, from: Point, to: Point) {
     let id = finger();
+    let held = hold_ms();
     tree.dispatch_pointer(contact(id, PointerPhase::Down, from, 0));
-    tree.dispatch_pointer(contact(id, PointerPhase::Move, to, 16));
-    tree.dispatch_pointer(contact(id, PointerPhase::Up, to, 32));
+    tree.dispatch_pointer(contact(id, PointerPhase::Move, from, held));
+    tree.dispatch_pointer(contact(id, PointerPhase::Move, to, held + 16));
+    tree.dispatch_pointer(contact(id, PointerPhase::Up, to, held + 32));
 }
 
 fn mouse_drag(tree: &mut WidgetTree, from: Point, to: Point) {
@@ -258,6 +283,13 @@ fn a_finger_does_not_get_a_thin_items_whole_bounding_box() {
 /// A target already at least the density's target size on its smaller axis earns
 /// nothing, for any pointer. This is the arithmetic that keeps a scene full of
 /// large cards from acquiring an eight-pixel halo each.
+///
+/// Both halves are asserted, and the second is what stops this reading as a
+/// pass for the wrong reason: the same five-pixel miss on the *thin* stroke in
+/// [`a_finger_grabs_a_thin_item_a_mouse_has_to_hit_exactly`] does grab, driven by
+/// the same helper, so "no grab here" is a statement about the item's size and
+/// not about whether a finger can grab anything at all. And the press has to go
+/// **somewhere** — it falls through to the marquee, exactly as a mouse's does.
 #[test]
 fn a_large_item_earns_no_grab_slop_even_for_a_finger() {
     let mut scene = Scene::new();
@@ -277,6 +309,12 @@ fn a_large_item_earns_no_grab_slop_even_for_a_finger() {
     assert!(
         view.drag_target.get().is_none() && view.pending_item_move.get().is_none(),
         "a card that is already bigger than the target size earns no widening",
+    );
+    assert!(
+        view.marquee.get().is_some() || view.pending_marquee_commit.get().is_some(),
+        "and the press that missed it swept the background instead — without \
+         this the assertion above would pass on a press that grabbed nothing \
+         because nothing could be grabbed at all",
     );
 }
 
@@ -320,8 +358,16 @@ fn a_finger_earns_reach_on_a_magnet_handle_and_a_mouse_does_not() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     // Nine pixels from the handle at (40, 20), and outside the item's own box.
     let f = finger();
+    let held = hold_ms();
     tree.dispatch_pointer(contact(f, PointerPhase::Down, Point::new(49.0, 20.0), 0));
-    tree.dispatch_pointer(contact(f, PointerPhase::Move, Point::new(49.0, 45.0), 16));
+    // The hold that arms the view's own drag — see `finger_drag`.
+    tree.dispatch_pointer(contact(f, PointerPhase::Move, Point::new(49.0, 20.0), held));
+    tree.dispatch_pointer(contact(
+        f,
+        PointerPhase::Move,
+        Point::new(49.0, 45.0),
+        held + 16,
+    ));
     assert!(
         view_handle(&tree, view_id).port_drag.borrow().is_some(),
         "a finger nine pixels from a six-pixel handle grabs it",

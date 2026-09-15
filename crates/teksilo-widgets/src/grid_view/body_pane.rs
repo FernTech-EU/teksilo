@@ -426,54 +426,56 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let export_for_drag = self.export.clone();
                 let read_for_drag = self.read_item_fn.clone();
                 let snapshot_for_drag = self.snapshot_out_fn.clone();
-                tile_drag = Some(HandlerSet::new().on_drag(move |phase, ctx| {
-                    if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
-                        // The source's per-tile transferable gate.
-                        if (drag_gate)(idx) == DragEligibility::NoDrag {
-                            return;
-                        }
-                        // Selection-aware dragged set: the whole selection
-                        // when the pressed tile is part of a
-                        // multi-selection, else just the pressed tile.
-                        let rows: Vec<usize> = match sel_for_drag.as_ref() {
-                            Some(s) if s.is_selected(idx) => {
-                                let mut v = s.selected_indices();
-                                v.sort_unstable();
-                                if v.len() <= 1 { vec![idx] } else { v }
+                tile_drag = Some(crate::data_views::row_grab_surface().on_drag(
+                    move |phase, ctx| {
+                        if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
+                            // The source's per-tile transferable gate.
+                            if (drag_gate)(idx) == DragEligibility::NoDrag {
+                                return;
                             }
-                            _ => vec![idx],
-                        };
-                        let Some(payload) = export_for_drag.build_payload(
-                            model_id,
-                            rows,
-                            &*read_for_drag,
-                            &snapshot_for_drag,
-                        ) else {
-                            return;
-                        };
-                        let r = strategy.tile_rect(idx, vp_w.get());
-                        let (w, h) = (r.width.max(40.0), r.height.max(40.0));
-                        let delegate = delegate.clone();
-                        let (row, col) = strategy.tile_row_col(idx, vp_w.get());
-                        let preview = (with_item)(idx, &|item| {
-                            let tc = TileContext {
-                                index: idx,
-                                row,
-                                col,
-                                item,
-                                is_selected: false,
-                                is_focused: false,
+                            // Selection-aware dragged set: the whole selection
+                            // when the pressed tile is part of a
+                            // multi-selection, else just the pressed tile.
+                            let rows: Vec<usize> = match sel_for_drag.as_ref() {
+                                Some(s) if s.is_selected(idx) => {
+                                    let mut v = s.selected_indices();
+                                    v.sort_unstable();
+                                    if v.len() <= 1 { vec![idx] } else { v }
+                                }
+                                _ => vec![idx],
                             };
-                            Box::new(crate::drag_preview::DragPreview::new(w, h, delegate(&tc)))
-                                as Box<dyn Widget>
-                        });
-                        if let Some(preview) = preview {
-                            ctx.start_drag_with_preview(anchor, payload, preview);
-                        } else {
-                            ctx.start_drag(anchor, payload);
+                            let Some(payload) = export_for_drag.build_payload(
+                                model_id,
+                                rows,
+                                &*read_for_drag,
+                                &snapshot_for_drag,
+                            ) else {
+                                return;
+                            };
+                            let r = strategy.tile_rect(idx, vp_w.get());
+                            let (w, h) = (r.width.max(40.0), r.height.max(40.0));
+                            let delegate = delegate.clone();
+                            let (row, col) = strategy.tile_row_col(idx, vp_w.get());
+                            let preview = (with_item)(idx, &|item| {
+                                let tc = TileContext {
+                                    index: idx,
+                                    row,
+                                    col,
+                                    item,
+                                    is_selected: false,
+                                    is_focused: false,
+                                };
+                                Box::new(crate::drag_preview::DragPreview::new(w, h, delegate(&tc)))
+                                    as Box<dyn Widget>
+                            });
+                            if let Some(preview) = preview {
+                                ctx.start_drag_with_preview(anchor, payload, preview);
+                            } else {
+                                ctx.start_drag(anchor, payload);
+                            }
                         }
-                    }
-                }));
+                    },
+                ));
             }
             // AT / automation `Action::Click`. `TileA11y` advertises it,
             // but every pointer handler above is `on_pointer_event` /

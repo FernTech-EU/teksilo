@@ -1071,14 +1071,24 @@ impl<T: 'static> RowExport<T> {
 ///
 /// [`DragActivation`](teksilo_tokens::DragActivation) — the policy that holds a
 /// touch drag back until a long press so the scroll underneath can win first —
-/// is read in exactly one place: the ancestor walk of the tree's sequence
-/// enrolment. The node that *captures* the press is enrolled by a different
-/// path, which never arms a deferral. So a row that carries both its tap and
-/// its reorder `on_drag` latches that drag at `drag_slop` on the first sample
-/// past 18 dp, decides the arbitration, and the scrollable's `PanClaim` — which
-/// needs 36 dp — is never even evaluated. The view then neither scrolls nor
-/// reorders: the drag won and, for a marquee that declines a press on a tile,
-/// did nothing.
+/// is read on two paths, and the node that *captures* the press is on neither
+/// of them unless it is **already** the sequence's pan claimant:
+///
+/// * the **ancestor walk** of the tree's sequence enrolment, through
+///   `PointerSequence::enrol_drag`;
+/// * `PointerSequence::defer_own_drag`, the dual-role arm, which attaches the
+///   activation to a member the node already holds — and which refuses anything
+///   but a live `MemberRole::Pan`. A `SceneView` is such a node. A **row** is
+///   not: the claim is the scrollable's, several levels out.
+///
+/// So a row that carries both its tap and its reorder `on_drag` is enrolled by
+/// the captured branch's plain `enrol`, which consults no activation at all. It
+/// latches that drag at `drag_slop` on the first sample past 18 dp, decides the
+/// arbitration, and the scrollable's `PanClaim` — which needs 36 dp — is never
+/// even evaluated. The view then neither scrolls nor reorders: the drag won and,
+/// for a marquee that declines a press on a tile, did nothing. That is the
+/// `list row · touch` row of `crates/teksilo-core/tests/arbitration_matrix.rs`,
+/// read as a defect rather than as a rule.
 ///
 /// Hanging the drag one level out fixes both halves at once, with no change to
 /// the framework: the pressed node has no drag, so the walk reaches this
@@ -1151,6 +1161,45 @@ impl Widget for DragSurface {
     fn children(&self) -> Vec<WidgetId> {
         self.child.into_iter().collect()
     }
+}
+
+/// The `HandlerSet` a row's or tile's [`DragSurface`] carries, before its own
+/// `on_drag` is chained onto it: the declaration that **the hold inside this
+/// wrapper belongs to that drag**.
+///
+/// A19's ruling is that where a row has both a reorder and a context menu the
+/// reorder wins the hold, and the menu moves to an overflow affordance plus
+/// Secondary / `Shift+F10` / the AccessKit `ShowContextMenu` action. The
+/// framework enforces "one hold, one meaning" implicitly, from the deferral on
+/// the drag member — but that rule is keyed on the **node**, because a deferred
+/// grab on some enclosing container is not a claim on the holds of everything
+/// inside it (a `SceneView` that marquees after a hold must not thereby take the
+/// touch context menu away from every widget placed in it; a finger has no
+/// secondary button, so the hold is the only route those have).
+///
+/// A [`DragSurface`] is the one place that implicit rule reads one node too far
+/// out. The wrapper is not an enclosing container: it is layout-, hit- and
+/// accessibility-transparent, its subtree is exactly one row, and the drag it
+/// carries is that row's own. So it says so, with the explicit subtree-wide
+/// declaration [`LongPressRole::DragHandle`](teksilo_core::LongPressRole::DragHandle),
+/// which `WidgetTree::long_press_is_a_grab` walks from the pressed node to the
+/// root.
+///
+/// **It takes a hold only from a direct pointer**, because a hold is a
+/// drag-start route only where a drag waits for one — which is the finger and
+/// the pen. A mouse latches this same reorder on travel, at `drag_slop`, with no
+/// deadline in it, so its hold is spent on nothing and stays the application's:
+/// a row's own `on_long_press` still fires under a mouse however this wrapper is
+/// declared. That gate lives in `long_press_is_a_grab`, not here, so every
+/// `DragHandle` declaration gets it.
+///
+/// Deliberately **not** applied to the body-pane `DragSurface` that hosts
+/// `GridView`'s marquee. That one *is* an enclosing container — its subtree is
+/// every tile in the grid — and declaring it there would take the touch context
+/// menu away from all of them, which is the defect this distinction exists to
+/// avoid.
+pub(crate) fn row_grab_surface() -> HandlerSet {
+    HandlerSet::new().long_press_role(teksilo_core::LongPressRole::DragHandle)
 }
 
 /// The no-op tap that guarantees a node its own gesture arena.

@@ -525,11 +525,98 @@ pub struct SequenceMember {
     pub role: MemberRole,             // Gesture | Pan(PanClaim) | RawDrag | RawPreview
     pub eligible_at: Option<EventTime>,
     pub state: MemberState,           // Possible | Held | Rejected | Won
+    // …plus the self-drag half of a dual-role node — see below.
 }
 ```
 
 Read it with `WidgetTree::sequence_members(PointerId)` and
 `WidgetTree::sequence_winner(PointerId)`.
+
+#### One node, one member — and the node that wants two roles
+
+A node holds exactly **one** `SequenceMember`. `decide`, `reject` and `hold` are
+all keyed on that, and `enrol` refuses a second.
+
+Some nodes genuinely want two roles. A `SceneView` with selection or magnetism
+on declares a `PanClaim` *and* carries `on_drag` on the same `HandlerSet`,
+because its surface is both the camera and the marquee. Step 3 below enrols it
+as the pan claimant **before any handler runs**, so when the enrolment walk later
+reaches its drag, the slot is taken: `enrol` (for a node that took the press)
+and `enrol_drag` (for one reached as an ancestor) both refuse, and its
+`DragActivation` is never consulted. Its `DragRecognizer` then runs through the
+ordinary capture dispatch, which *precedes* the arbitration walk, and latches at
+`drag_slop` — half the travel the claim needs at `pan_slop`. A surface shaped
+like that cannot pan under a finger at all.
+
+`PointerSequence::defer_own_drag` is the second half's door. Rather than enrol
+the node twice, it attaches the drag's activation to the member the node already
+has:
+
+```rust
+pub(crate) has_own_drag: bool,                    // this member's node also owns on_drag
+pub(crate) own_drag_eligible_at: Option<EventTime>,  // when its recognizers may run
+pub(crate) own_drag_withdrawn: bool,                 // …or never again this press
+```
+
+The member goes on competing as a pan at `pan_slop`, while the node's own
+recognizers are silenced until `resolve_activation` allows them — so `Auto` on a
+direct pointer with an eligible pan means a hold, exactly as it does for any
+other deferred drag. Whichever half ripens first takes the other out: a won pan
+calls `withdraw_own_drag` (so a deferral ripening mid-pan cannot start a grab
+under a scrolling finger) and a recognized self-drag calls `promote_own_drag`,
+flipping the member's reported role to `Gesture` so `sequence_members` names the
+half that actually won.
+
+**The deferral is a hold, not a timer.** A press that has already travelled past
+`long_press_slop` when the deadline arrives was never a hold, so
+`tick_sequence_timers` withdraws its self-drag instead of arming it — the rule
+`LongPressRecognizer` applies to itself, which fails on the first move past that
+slop rather than waiting for its own timer. Without it a slow, deliberate pan
+arms the grab simply by outlasting the clock: 18 dp at 400 ms and 30 dp at 600 ms
+would start a marquee and kill the pan for the rest of the press, so the surface
+would pan only for a *fast* finger. `TapBoundary` stays beside it as the second
+positional rule and is not redundant — a radius bites on a surface the finger
+never leaves, the node's own rect bites on a small node it slides off without
+travelling far. Both apply only while the self-drag is still unripe: once the
+hold has been served, travel is the grab doing its job.
+
+**The hold it spends is spent on one node.** `has_deferred_grab_for(id)` is keyed
+on a node, and `long_press_is_a_grab` reads it that way, so a deferred grab on a
+container is *not* a declaration that everything inside it has given up its own
+hold. Read sequence-wide it was: a `SceneView` with selection on took the touch
+long press and the touch context menu away from every heavyweight widget placed
+in it, and a drag-capable ancestor inside a scroller did the same to every
+control beneath it. A finger has no secondary button, so the hold is the only
+route those controls have to a context menu. `arm_touch_route` asks over the span
+the route actually spends — the press target up to and including the node whose
+affordance the hold would open — so the node arming a grab still cannot also open
+its own menu, while a descendant's own menu is untouched. The subtree-wide claim
+has one door and it is explicit: `LongPressRole::DragHandle`.
+
+**Neither door is open to a mouse.** `defer_own_drag` refuses anything but a live
+`Pan` member, and a mouse enrols none — so a dual-role node is enrolled by the
+ordinary `Gesture` path and latches at the 5.0 dp it always did. The explicit
+door is closed the same way, but by a gate rather than by construction:
+`long_press_is_a_grab` walks the `DragHandle` ancestors only for a **direct**
+pointer, because the declaration means *the hold is this node's drag-start
+route* and a hold is that only where a drag waits for one. A mouse starts its
+drag by moving while pressed, spends no hold, and therefore keeps it: a control
+inside a `DragHandle` subtree still hears its own `on_long_press` under a mouse.
+Without that gate, chaining `data_views::row_grab_surface` — which is what
+`.reorderable(true)` and `.exportable(..)` do — deleted an application's
+`on_long_press` on every data-view row under the mouse. The five `scene
+view with its own claim` rows in the matrix below pin both halves;
+`crates/teksilo-core/tests/dual_role_arbitration.rs` pins the timing and scoping
+rules above.
+
+One `on_drag` can also *mean* several things — a marquee, an item grab, a magnet
+port — and which one a press is cannot be known until the press has been
+hit-tested. `EventContext::set_drag_activation`, called from a press handler,
+overrides the node's declared activation **for that press alone**. It is stashed
+on the `PointerSequence`, not written back onto the node, because
+`on_pointer_event` previews root-first over every strict ancestor of the target:
+a node that answers there also answers for presses an interactive descendant
+owns, and a node write would outlive the press that chose it.
 
 #### The ordered decision procedure
 
@@ -576,6 +663,13 @@ Read it with `WidgetTree::sequence_members(PointerId)` and
      innermost;
    - a member with `DragActivation::AfterLongPress` cannot win before its timer
      and **self-rejects** the instant the press leaves the tap boundary;
+   - a **dual-role** `Pan` member — one whose node also owns `on_drag` — is
+     evaluated here only as the pan it is enrolled as; its own recognizers are
+     driven by the ordinary move bubble and gated there by the same deferral.
+     While that self-drag is still unripe it withdraws on **either** positional
+     rule — travel past `long_press_slop`, which is what makes the deferral a
+     hold rather than a timer, or leaving the tap boundary, the way a deferred
+     member self-rejects — and it withdraws for good once the pan wins;
    - `slop_precise` applies **only** to a direct pointer under a frozen
      `TouchAction::NONE`. A precise pointer always uses `profile.drag_slop`.
    A **`Gesture`** member that took the press (the `pressed_owner`) is driven
@@ -639,6 +733,15 @@ per press — when the pointer slides off, and (c) what will clear the framework
 press visual. WCAG 2.2 SC 2.5.2's "slide off to abort" is exactly rule (b): the
 activation is abandoned, and a drag the same press started is not.
 
+There is a fourth trigger for `cancel_taps`, and it exists because `Bounds` has
+no answer for a surface that fills the window. **A pan claimant that wins its
+sequence has its own tap family revoked**, at the same `cancel_taps` grain. A pan
+that won *is* the press; leaving its `TapRecognizer` armed fires the claimant's
+`on_tap` on the release as well, and on a viewport-filling claimant the slide-off
+rule above never revokes it — the finger never leaves the node's rect. The
+winner is not cancelled: it lost nothing, so it receives no `PointerCancel`, and
+a drag the same press is driving is untouched.
+
 #### Handler-side arbitration API
 
 | Call | Meaning |
@@ -648,6 +751,7 @@ activation is abandoned, and a drag the same press started is not.
 | `ctx.hold_gesture()` | Defer this node's own answer — **no peer may win while it holds**, on the sample path and on the gesture timer alike. The silence is not a queue: a peer's gesture that ripens inside the hold is *dropped*, and the release does not deliver it late. Auto-releases at `profile.max_hold` (250 ms in every shipped profile). For an *application* recognizer awaiting an answer it does not have yet; the framework never holds. |
 | `ctx.release_gesture()` | End the hold. |
 | `ctx.owns_pointer()` | Whether this node still holds the pointer's capture. A widget driving an interaction from `PointerMove` should gate on it: capture is an arbitration act, so a widget that lost the press must stop driving even though its own state says it started one. |
+| `ctx.set_drag_activation(a)` | From a **press** handler: choose when this node's own drag may begin, for this press alone, overriding the build-time `.drag_activation(..)`. For a node whose single `on_drag` means several things — a marquee, an item grab, a magnet port — because the answer depends on what the press landed on and the press handler has already hit-tested. Stashed on the sequence, so it dies with the press. Inert anywhere but a press handler. |
 
 #### `gesture_dead_zone` stays itself
 
@@ -707,6 +811,11 @@ Each row is a **core-only fixture** reproducing the named widget's arbitration s
 | scene marquee | touch | `AUTO` | `container` Gesture/Possible | (+17, +0) → —; (+19, +0) → `container` | — | with no pan claimant above it, DragActivation::Auto resolves to Immediate and the marquee latches at drag_slop |
 | scene marquee in a scroller | touch | `AUTO` | `container` Gesture/Possible, `scroller` Pan/Possible | (+0, +20) → —; (+0, +37) → `scroller` | `container` PeerClaimed | an eligible pan defers the marquee to AfterLongPress, so it cannot win at 19 dp the way the unscrolled marquee does; the pan takes the press at 36 and cancels it |
 | scene marquee in a scroller, press at the edge | touch | `AUTO` | `container` Gesture/Possible, `scroller` Pan/Possible | (+0, +20) → —; (+0, +37) → `scroller` | — | a coarse pointer's tap boundary is the member's own bounds, not a slop radius: 20 dp off a press near the edge leaves them, the deferred marquee withdraws itself, and a member that withdrew is never cancelled |
+| scene view with its own claim | mouse | `AUTO` | `view` Gesture/Possible | (+0, +4) → —; (+0, +6) → `view` | — | the mouse cannot reach the dual-role arm at all: it enrols no pan member, so the node's own drag takes the slot by the ordinary `enrol` and latches at 5 dp. `defer_own_drag` refuses anything but a live Pan member, which is what makes that a structural guarantee rather than an observation |
+| scene view with its own claim | touch | `AUTO` | `view` Pan/Possible | (+0, +20) → —; (+0, +37) → `view` | — | one node, one member — enrolled as the Pan claim `begin_sequence` put there before any handler ran. Its own drag gets a say through `defer_own_drag`, which resolves Auto against that claim to AfterLongPress: so 20 dp latches nothing and the pan takes the press at 36. Before that arm existed the drag latched at 18 and this surface could not pan under a finger at all |
+| scene view with its own claim | pen | `AUTO` | `view` Pan/Possible | (+0, +4) → —; (+0, +9) → `view` | — | a pen is precise but *direct*, so `resolve_activation` defers its drag too and it pans at PEN's own pan_slop (8) rather than marqueeing at its drag_slop (2). Consistent with `column grip · pen`, and the lever for a surface that wants otherwise is `EventContext::set_drag_activation` per press, not a pointer-kind clause in the resolution |
+| scene view with its own claim, over a widget item | touch | `AUTO` | `view` Pan/Possible | (+0, +20) → —; (+0, +37) → `view` | — | the second door to the same refusal: the captor is the item, so the view is reached by the ancestor walk, whose `enrol_drag` opens with the same `enrol`. Same answer — the pan at 36 — but reached through the branch a heavyweight scene item's press goes through |
+| scene view with its own claim, over a widget item | mouse | `AUTO` | `view` Gesture/Possible | (+0, +4) → —; (+0, +6) → `view` | — | and the mouse is unreachable at that door too: with no pan member the ancestor walk's `enrol_drag` succeeds, so the view is an ordinary Gesture ancestor latching at 5 dp — the `scene marquee` rows' behaviour, on a node that also declares a claim |
 | drag region | mouse | `AUTO` | `region` Gesture/Possible | (+4, +0) → —; (+5, +0) → `region` | — | the window move starts from DragPhase::Started, never from the press: an implicit arena capture decides nothing |
 | drag region | touch | `AUTO` | `region` Gesture/Possible | (+17, +0) → —; (+19, +0) → `region` | — | same rule for a finger, at the finger's slop |
 | tab strip vs tab drag | mouse | `AUTO` | `tab` Gesture/Possible | (+4, +0) → —; (+5, +0) → `tab` | — | the horizontal twin of the list row: the tab's own drag is the only mouse competitor, and the same three redundant gates keep the strip's claim out — the rule, not one implementation of it |

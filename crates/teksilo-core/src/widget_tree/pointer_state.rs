@@ -497,13 +497,29 @@ impl WidgetTree {
     ///
     /// The captured widget's arena has already seen this `Down` through the
     /// normal bubble, so only the ancestors are fed here.
+    ///
+    /// **Both enrolment doors have a dual-role fallback.** A node that declares
+    /// a [`PanClaim`] is already a member by the time this runs —
+    /// `begin_sequence` enrols pan claimants before any handler does anything —
+    /// so if that same node also carries `on_drag`, `enrol` (captured) and
+    /// `enrol_drag` (ancestor) both refuse it. Neither refusal is a decision: it
+    /// is a slot collision. Each falls through to
+    /// [`PointerSequence::defer_own_drag`](crate::gesture::PointerSequence::defer_own_drag),
+    /// which attaches the drag's activation to the member the node already has.
+    ///
+    /// The ancestor door additionally **feeds** the deferred node its `Down`,
+    /// exactly as an ordinarily-enrolled drag ancestor is fed: the press bubble
+    /// stops at the captor (`try_handler_bubble`'s `Down` arm answers `Handled`
+    /// the moment a node has an arena), so without that feed the ancestor's
+    /// `DragRecognizer` has no origin and could never latch however the
+    /// arbitration ruled. The *move* bubble has no such stop, so nothing
+    /// afterwards needs feeding.
     pub(super) fn enrol_sequence_members(
         &mut self,
         down_event: &WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) {
         use crate::gesture::MemberRole;
-        use teksilo_tokens::DragActivation;
 
         let captured = self.current_pointer_capture();
         let profile = self.current_profile();
@@ -527,8 +543,20 @@ impl WidgetTree {
                 // The innermost drag owns the gesture: it is the member, and no
                 // ancestor is. Its own arena drives it through the capture
                 // route, so it is never fed here.
-                if sequence.enrol(captured, MemberRole::Gesture) && decided {
-                    sequence.reject(captured);
+                if sequence.enrol(captured, MemberRole::Gesture) {
+                    if decided {
+                        sequence.reject(captured);
+                    }
+                } else {
+                    // Already enrolled — today only as the pan claimant
+                    // `begin_sequence` put there before any handler ran. One
+                    // node, one member, so its drag does not get a slot of its
+                    // own; `defer_own_drag` gives it a say on the member it
+                    // has, resolving its `DragActivation` against the pan it is
+                    // competing with. A mouse enrols no pan member, so it never
+                    // reaches this arm.
+                    let activation = Self::sequence_drag_activation(tree, sequence, captured);
+                    sequence.defer_own_drag(captured, activation, &profile);
                 }
                 return Vec::new();
             }
@@ -544,17 +572,26 @@ impl WidgetTree {
                     break;
                 }
                 if tree.widget_has_drag(id) {
-                    let activation = tree
-                        .arena
-                        .get(id)
-                        .map(|n| n.drag_activation)
-                        .unwrap_or(DragActivation::Auto);
+                    let activation = Self::sequence_drag_activation(tree, sequence, id);
                     if sequence.enrol_drag(id, MemberRole::Gesture, activation, &profile) {
                         if decided {
                             sequence.reject(id);
                         } else {
                             out.push((id, true));
                         }
+                    } else if sequence.defer_own_drag(id, activation, &profile) {
+                        // The second door to the same refusal, and the one a
+                        // *heavyweight* child's press goes through: `enrol_drag`
+                        // opens with `enrol`, which declines an ancestor already
+                        // enrolled as this sequence's pan claimant. Without this
+                        // arm that ancestor's drag is never fed the press at all
+                        // — so a dual-role container could not be dragged from
+                        // anywhere its own content took the capture.
+                        //
+                        // No `decided` guard, unlike the branch above: a decided
+                        // sequence is `defer_own_drag`'s own first refusal, so
+                        // this arm is unreachable once one exists.
+                        out.push((id, true));
                     }
                 }
                 current = tree.arena.parent(id);
@@ -582,6 +619,47 @@ impl WidgetTree {
             }
             self.feed_member_arena(id, down_event, &mut *ops);
         }
+    }
+
+    /// The [`DragActivation`](teksilo_tokens::DragActivation) that governs
+    /// `id`'s own drag for **this** press: the per-press override a handler
+    /// queued with
+    /// [`set_drag_activation`](crate::widget::EventContext::set_drag_activation),
+    /// or failing that the node's build-time declaration.
+    ///
+    /// The override is read off the sequence rather than the node because a
+    /// press handler answers per *press*, not per node — see
+    /// `PointerSequence::drag_activation_overrides`.
+    fn sequence_drag_activation(
+        tree: &WidgetTree,
+        sequence: &crate::gesture::PointerSequence,
+        id: WidgetId,
+    ) -> teksilo_tokens::DragActivation {
+        sequence.drag_activation_override(id).unwrap_or_else(|| {
+            tree.arena
+                .get(id)
+                .map(|n| n.drag_activation)
+                .unwrap_or(teksilo_tokens::DragActivation::Auto)
+        })
+    }
+
+    /// A handler chose a [`DragActivation`](teksilo_tokens::DragActivation) for
+    /// **this press** with
+    /// [`set_drag_activation`](crate::widget::EventContext::set_drag_activation).
+    ///
+    /// Stashed on the sequence, so it dies with the press. Writing it back onto
+    /// the node would outlive the press it was chosen for — and
+    /// `on_pointer_event` previews root-first over every strict ancestor of the
+    /// target, so a node that answers here also answers for presses it does not
+    /// own.
+    pub(super) fn note_drag_activation_override(
+        &mut self,
+        source: WidgetId,
+        activation: teksilo_tokens::DragActivation,
+    ) {
+        self.with_sequence(|_, sequence| {
+            sequence.set_drag_activation_override(source, activation);
+        });
     }
 
     /// Record where the pointer is, so every positional threshold reads one
@@ -627,14 +705,21 @@ impl WidgetTree {
     ///   that never moves is released on time too;
     /// * a member armed by [`DragActivation::AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress) withdraws once
     ///   the press leaves the tap boundary — that travel is a pan, not a
-    ///   considered grab;
+    ///   considered grab — and so does the *self-drag* half of a dual-role
+    ///   member, which is deferred by the same resolution but cannot withdraw
+    ///   the member itself (the member is a pan claimant and goes on competing).
+    ///   The self-drag has a **second** positional rule the whole-member case
+    ///   does not: travel past `long_press_slop` before the deadline, the rule
+    ///   [`LongPressRecognizer`](crate::gesture::LongPressRecognizer) applies to
+    ///   itself, which is what makes its deferral a hold rather than a timer;
     /// * the pressed node's **tap family** is revoked, once, when the press
     ///   leaves the tap boundary — WCAG 2.2 SC 2.5.2's "slide off to abort":
     ///   the activation is abandoned, a drag the same press started is not.
     ///
-    /// All three read the one [`TapBoundary`](crate::gesture::TapBoundary)
-    /// predicate, which is also what `TapRecognizer` fails on, so the router
-    /// and the recognizer cannot disagree about whether a press has slid off.
+    /// All of them but that second self-drag rule read the one
+    /// [`TapBoundary`](crate::gesture::TapBoundary) predicate, which is also
+    /// what `TapRecognizer` fails on, so the router and the recognizer cannot
+    /// disagree about whether a press has slid off.
     pub(super) fn tick_sequence_timers(&mut self) {
         use crate::gesture::MemberState;
 
@@ -661,6 +746,37 @@ impl WidgetTree {
                 .collect();
             for id in rejects {
                 sequence.reject(id);
+            }
+            // The *self*-drag half of a dual-role member withdraws on either
+            // positional rule, because the member itself is a pan claimant and
+            // goes on competing — only its drag half can be taken out.
+            //
+            // `long_press_slop` is the load-bearing one, and it is the rule
+            // `LongPressRecognizer` applies to itself: it fails on the first
+            // move past that slop rather than waiting for its timer. Arming the
+            // self-drag on the clock alone made the deferral a *timer*, so a
+            // deliberate, slow pan — a finger positioning precisely, which is
+            // exactly when a scene is panned slowly — crossed the deadline
+            // mid-travel, armed the grab and lost the pan for the rest of the
+            // press. A hold that has already wandered 18 dp is not a hold.
+            //
+            // `TapBoundary` stays beside it and is not redundant: it is the
+            // node's own rect for a coarse pointer, so it bites on a small node
+            // the finger slides off without travelling far, where the radius
+            // does not. Conversely a viewport-filling claimant is never left, so
+            // on that shape the radius is the only positional rule there is.
+            //
+            // Both apply only while the self-drag is still unripe. Once the hold
+            // has been served the grab is live, and travel is the grab doing its
+            // job.
+            let travelled_past_hold = sequence.travel() > profile.long_press_slop;
+            let withdraw: Vec<WidgetId> = sequence
+                .unripe_own_drag_members(now)
+                .into_iter()
+                .filter(|id| travelled_past_hold || left(*id))
+                .collect();
+            for id in withdraw {
+                sequence.withdraw_own_drag(id);
             }
             let owner = sequence.pressed_owner()?;
             if sequence.taps_cancelled() || !left(owner) {
@@ -704,6 +820,23 @@ impl WidgetTree {
     /// `RawPreview` rides along in the same match and is dead there: a preview
     /// claim decides the sequence as it is enrolled, and a decided sequence
     /// yields no candidates at all.
+    ///
+    /// A **dual-role** member — one whose node also owns `on_drag`, so
+    /// [`PointerSequence::defer_own_drag`](crate::gesture::PointerSequence::defer_own_drag)
+    /// attached its self-drag to the same slot — is evaluated here **only** as
+    /// the pan it is enrolled as. Its own recognizers are driven by the ordinary
+    /// move bubble and gated there by `sequence_blocks_arena`, which reads the
+    /// same deferral, so its drag half needs nothing from this walk.
+    ///
+    /// That asymmetry is the bubble's, not this walk's, and it is worth stating
+    /// because it decides where a dual-role node's press and its moves each come
+    /// from. `try_handler_bubble`'s **`Down`** arm returns `Handled` the moment a
+    /// node has an arena, so the press bubble stops at the captor and an
+    /// *ancestor*'s recognizers never see the origin — which is why
+    /// `enrol_sequence_members` feeds the `Down` explicitly, for a dual-role
+    /// ancestor exactly as for an ordinary drag ancestor. Its **`Move`** arm
+    /// returns `Ignored` when nothing recognized, so the move bubble carries on
+    /// past the captor and reaches every ancestor by itself.
     pub(super) fn advance_sequence(
         &mut self,
         move_event: &WidgetEvent,
@@ -757,6 +890,10 @@ impl WidgetTree {
                 MemberRole::RawDrag => self
                     .current_sequence()
                     .is_some_and(|s| s.travel() >= s.latch_slop(&profile)),
+                // A **dual-role** member is evaluated here only as the pan it is
+                // enrolled as; its own recognizers ride the ordinary move
+                // bubble, which reaches them either way. See this function's
+                // doc comment for why that asymmetry is the bubble's.
                 MemberRole::Pan(claim) => self
                     .current_sequence()
                     .and_then(|s| s.pan_axis_past_slop(&claim, &profile))
@@ -785,6 +922,24 @@ impl WidgetTree {
                 if won && matches!(role, MemberRole::Pan(_)) {
                     let pointer = self.current_pointer_id();
                     self.note_pan_claimed(pointer, winner);
+                    // The pan half of a dual-role member won, so its self-drag
+                    // is out for the rest of the press. Without this the
+                    // member's `Won` state would unblock its arena and a
+                    // deferral ripening mid-pan would start its drag under a
+                    // scrolling finger. Inert for a claimant that carries no
+                    // drag of its own.
+                    self.with_sequence(|_, sequence| sequence.withdraw_own_drag(winner));
+                    // …and the claimant's own **tap family** goes with it. A pan
+                    // that won IS the press; leaving the winner's
+                    // `TapRecognizer` armed fires its `on_tap` on the release as
+                    // well, and on a viewport-filling claimant the slide-off
+                    // sweep never revokes it — a coarse pointer's tap boundary
+                    // is the node's own rect, and a finger panning a full-window
+                    // surface never leaves it. Tap-family only: the same
+                    // `cancel_taps` grain WCAG 2.2 SC 2.5.2's slide-off rule
+                    // uses, so a drag the same press started is untouched and
+                    // the winner receives no `PointerCancel`.
+                    self.cancel_member_taps(winner, pointer);
                 }
                 return;
             }
@@ -837,6 +992,21 @@ impl WidgetTree {
                 crate::pointer::CancelReason::PeerClaimed,
                 &mut *ops,
             );
+        }
+    }
+
+    /// Revoke only `id`'s **tap family** for `pointer` — tap, double tap,
+    /// triple tap, long press — and leave everything else on the node running.
+    ///
+    /// The [`cancel_taps`](crate::gesture::GestureArenaSet::cancel_taps) grain,
+    /// not [`cancel`](crate::gesture::GestureArenaSet::cancel): the node has not
+    /// had an interaction taken away, so it is sent no `PointerCancel`, and a
+    /// drag the same press is driving survives.
+    pub(super) fn cancel_member_taps(&mut self, id: WidgetId, pointer: crate::pointer::PointerId) {
+        if let Some(node) = self.arena.get_mut(id)
+            && let Some(set) = node.handlers.gesture_arena.as_mut()
+        {
+            set.cancel_taps(pointer);
         }
     }
 
@@ -1051,14 +1221,27 @@ impl WidgetTree {
     pub(super) fn note_gesture_recognized(&mut self, source: WidgetId) {
         use crate::gesture::MemberRole;
 
+        let now = self.sequence_now();
         let claimed = self
             .with_sequence(|_, sequence| {
                 if sequence.is_decided() {
                     return false;
                 }
+                // A self-drag still inside its deferral cannot claim. The arena
+                // gate normally makes this unreachable — a blocked recognizer
+                // produces nothing to report — but the guard is what makes "the
+                // deferral binds every route" true by *reading* it rather than
+                // by enumerating the routes.
+                if sequence.own_drag_blocked(source, now) {
+                    return false;
+                }
                 if !sequence.has_member(source) {
                     sequence.enrol(source, MemberRole::Gesture);
                 }
+                // The self-drag half of a dual-role member won: say so, so
+                // `sequence_members` names the half that took the press rather
+                // than the pan claim the node was also holding.
+                sequence.promote_own_drag(source);
                 sequence.has_member(source)
             })
             .unwrap_or(false);
@@ -1121,10 +1304,22 @@ impl WidgetTree {
         let Some(member) = sequence.members().iter().find(|m| m.id == id) else {
             return false;
         };
+        // A node that also claims a pan has its *own* drag recognizers gated
+        // separately from its membership: the member goes on competing as a pan
+        // while its self-drag waits out the deferral its `DragActivation` asked
+        // for, and stays silenced for good once that self-drag is withdrawn —
+        // which is why the clause is read in the `Won` arm too. A withdrawal
+        // means the pan took the press, and a pan that owns the press owns the
+        // node's recognizers with it. Inert for every member carrying no
+        // self-drag, which is every member a mouse ever enrols.
+        let own_drag_armed = member.own_drag_armed_at(now);
         match member.state {
             MemberState::Rejected => true,
-            MemberState::Won => false,
+            MemberState::Won => !own_drag_armed,
             _ => {
+                if !own_drag_armed {
+                    return true;
+                }
                 if let Some(winner) = sequence.winner() {
                     return winner != id;
                 }
@@ -1439,9 +1634,21 @@ impl WidgetTree {
                 }
                 // One hold cannot mean two things. Where the hold is what arms
                 // a grab — a reorderable row under a finger, whose drag member
-                // was deferred to this very deadline — the row's own long press
-                // does not also fire. A mouse is untouched: it enrols no pan
-                // competitor, so nothing on its sequence is ever deferred.
+                // was deferred to this very deadline, or one inside a node that
+                // declared `LongPressRole::DragHandle` — the row's own long
+                // press does not also fire.
+                //
+                // A mouse keeps its hold wherever the claim was *inferred*: it
+                // enrols no pan competitor, so `DragActivation::Auto` is never
+                // resolved to `AfterLongPress` on its sequence and nothing is
+                // deferred by that route, and the `DragHandle` walk is gated on
+                // a direct pointer because a mouse spends no hold arming a drag
+                // it never asked for. A node that *declares*
+                // `DragActivation::AfterLongPress` has asked: the declaration
+                // passes through `resolve_activation` untouched, so the grab is
+                // deferred to the hold for every pointer kind and that node's
+                // own long press is spent under a mouse too. See
+                // `long_press_is_a_grab` for the three doors.
                 if matches!(gesture, crate::gesture::GestureEvent::LongPress(_))
                     && self.long_press_is_a_grab(pointer, id)
                 {

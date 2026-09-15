@@ -6,11 +6,14 @@
 //! A drag and a scroll want the same gesture from the same contact, and the
 //! framework settles that with [`DragActivation`]: a precise pointer latches
 //! immediately, a direct one waits for a long press so the scrollable
-//! underneath gets first refusal. The policy is read in exactly one place — the
-//! ancestor walk of the tree's sequence enrolment — so it only binds a drag
-//! hung on a node that **strictly encloses** whatever captured the press. A
-//! drag on the capturing node itself is invisible to it and latches at
-//! `drag_slop` regardless.
+//! underneath gets first refusal. The policy is read on two paths — the ancestor
+//! walk of the tree's sequence enrolment, and `PointerSequence::defer_own_drag`
+//! for a node that is *already* the sequence's pan claimant — so a drag on the
+//! capturing node binds it only when that node holds the claim itself. A row
+//! never does: the claim is the scrollable's, several levels out. So a drag on
+//! the row that captured the press is invisible to the policy and latches at
+//! `drag_slop` regardless, which is why every data view hangs its drag on an
+//! enclosing `DragSurface`.
 //!
 //! `GridView`'s rubber-band marquee used to be exactly that: on the same node as
 //! the `PanClaim`, latching at 18 dp before the claim could win at 36 — so a
@@ -231,9 +234,9 @@ fn a_mouse_still_reorders_a_list_row() {
 /// reorder, so a row that is a drag source can no longer offer it for anything
 /// else and its context menu has to move to an overflow affordance plus
 /// Secondary / Shift+F10 / the AccessKit `ShowContextMenu` action. The other
-/// half — that nothing else fires on that same hold — is **not** true yet, and
-/// `a_reorderable_rows_hold_does_not_also_fire_its_own_long_press` is the
-/// `#[ignore]`d measurement of it.
+/// half — that nothing else fires on that same hold — is asserted by
+/// `a_reorderable_rows_hold_does_not_also_fire_its_own_long_press`, together
+/// with the mouse twin that pins the hold the rule must *not* take.
 #[test]
 fn a_finger_reorders_a_list_row_after_a_long_press() {
     let model = ListModel::from_vec((0..ITEMS).collect());
@@ -1009,14 +1012,37 @@ fn a_finger_marquee_auto_scrolls_from_further_out_than_a_mouse_marquee() {
 /// nothing, so the row's own recognizer reached its own deadline and nothing had
 /// silenced it.
 ///
-/// The predicate that silences it is **the deferral itself** — a live sequence
-/// member whose activation was put off to the long-press deadline — so the rule
-/// needs no cooperation from the row, whose handler belongs to the application's
-/// delegate and which no data view could gate. A mouse is unaffected by
-/// construction: it enrols no pan competitor, so nothing on its sequence is ever
-/// deferred. See `teksilo_core::widget_tree::touch_route` and
-/// `LongPressRole::DragHandle`, which declares the same thing for a grab the
-/// deferral cannot see.
+/// The rule needs no cooperation from the row, whose handler belongs to the
+/// application's delegate and which no data view could gate. It is the row's
+/// `DragSurface` that says so, with `LongPressRole::DragHandle` (see
+/// `data_views::row_grab_surface`) — the explicit, subtree-wide form of "one
+/// hold, one meaning", which `WidgetTree::long_press_is_a_grab` walks from the
+/// pressed node to the root.
+///
+/// The framework's *implicit* form — a live sequence member whose activation was
+/// put off to the long-press deadline — is deliberately keyed on that member's
+/// own node and does not reach here, because the drag lives one level out on the
+/// wrapper. Read across the whole sequence instead it would also have silenced
+/// every control inside any deferred container, which for a finger — with no
+/// secondary button — removes the only route they have to a context menu. The
+/// wrapper is transparent and its subtree is exactly this row, so it is entitled
+/// to the claim and makes it in the open.
+///
+/// What silences the row here is the **recognition** gate in
+/// `WidgetTree::tick_gestures_with_ops`, which drops a recognized `LongPress`
+/// whose hold `long_press_is_a_grab` says is already a grab — not
+/// `arm_touch_route`, which only decides whether the *tree's* menu-or-tip route
+/// is armed and never touches a widget's own handler. So the two clauses that
+/// used to stand here explained neither half: the deferral is not the mechanism
+/// in play (the drag lives on the wrapper, and the rule is keyed on the member's
+/// own node), and `arm_touch_route`'s touch-only gate is a different question.
+///
+/// A mouse is unaffected because `long_press_is_a_grab` gates its role walk on a
+/// direct pointer: a hold is a drag-start route only where a drag waits for one,
+/// and a mouse's never does. Its twin below,
+/// `a_mouse_hold_on_a_reorderable_row_still_fires_its_own_long_press`, is the
+/// half that pins that, and the two must disagree — a gate wide enough to take
+/// both, or narrow enough to take neither, reddens one of them.
 #[test]
 fn a_reorderable_rows_hold_does_not_also_fire_its_own_long_press() {
     let fired = std::rc::Rc::new(std::cell::Cell::new(false));
@@ -1050,6 +1076,131 @@ fn a_reorderable_rows_hold_does_not_also_fire_its_own_long_press() {
         !fired.get(),
         "the reorder took the hold, so the row's own long press must not fire",
     );
+}
+
+/// The other half of that rule, and the one it silently cost: a **mouse** hold
+/// on the very same reorderable row must still fire the row's own long press.
+///
+/// `LongPressRole::DragHandle` means *the hold is this node's drag-start route*
+/// — which a hold only ever is for a **direct** pointer. A mouse starts a drag
+/// by moving while pressed; it never spends a hold on one, so there is nothing
+/// for the declaration to be protecting and the hold stays the application's.
+/// Before the gate in `WidgetTree::long_press_is_a_grab` the role's ancestor
+/// walk answered for every pointer kind, so merely turning on `.reorderable(true)`
+/// — or `.exportable(..)`, the same wrapper — deleted an app's `on_long_press`
+/// under the mouse, where nothing was competing for the hold at all.
+///
+/// This is the pair that discriminates: the finger case above must still be
+/// silent, this one must still fire. A gate that took both would pass one and
+/// redden the other.
+#[test]
+fn a_mouse_hold_on_a_reorderable_row_still_fires_its_own_long_press() {
+    let fired = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let model = ListModel::from_vec((0..ITEMS).collect::<Vec<usize>>());
+    let fired_for_rows = fired.clone();
+    let view = teksilo_widgets::ListView::new(model, move |i, _item, _s| {
+        let f = fired_for_rows.clone();
+        Box::new(teksilo_core::widget_builder::WidgetBuilder::on_long_press(
+            TextWidget::new(lit!(i.to_string())),
+            move |_e, _c| f.set(f.get() + 1),
+        ))
+    })
+    .item_height(TILE_H)
+    .reorderable(true);
+    let (mut tree, _id) = tree_with(view);
+
+    let at = Point::new(200.0, 60.0); // row 1
+    tree.pointer_move(at);
+    tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+    tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+
+    assert_eq!(
+        fired.get(),
+        1,
+        "a mouse spends no hold arming a drag, so the row's own long press is \
+         still the application's to hear",
+    );
+    tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+}
+
+/// The same for a `GridView` tile, which reaches `row_grab_surface` through its
+/// own body pane rather than through a row body.
+///
+/// Worth its own case because the grid is the one view whose body pane *also*
+/// carries a `DragSurface` (the marquee) and a press absorber, so the press it
+/// hands a tile has travelled a different route than a list row's.
+#[test]
+fn a_mouse_hold_on_a_reorderable_grid_tile_still_fires_its_own_long_press() {
+    let fired = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let fired_for_tiles = fired.clone();
+    let view = GridView::new(
+        ListModel::from_vec((0..ITEMS).collect::<Vec<usize>>()),
+        move |tc| {
+            let f = fired_for_tiles.clone();
+            Box::new(teksilo_core::widget_builder::WidgetBuilder::on_long_press(
+                TextWidget::new(lit!(tc.item.to_string())),
+                move |_e, _c| f.set(f.get() + 1),
+            ))
+        },
+    )
+    .sizing(GridSizing::Fixed {
+        width: TILE_W,
+        height: TILE_H,
+    })
+    .reorderable(true);
+    let (mut tree, _id) = tree_with(view);
+
+    let at = Point::new(TILE_W / 2.0, TILE_H / 2.0); // tile 0
+    tree.pointer_move(at);
+    tree.pointer_down_button(at, teksilo_core::event::PointerButton::Primary);
+    tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+
+    assert_eq!(
+        fired.get(),
+        1,
+        "the tile's own long press survives the grab surface under a mouse",
+    );
+    tree.pointer_up_button(at, teksilo_core::event::PointerButton::Primary);
+}
+
+/// And the finger half of that grid pair, without which the mouse half alone
+/// would pass with the whole rule deleted.
+///
+/// A contact's hold on a reorderable tile arms the tile's grab, so the tile's
+/// own `on_long_press` must stay silent — the same ruling the list row gets, on
+/// the one view whose body pane also carries a marquee `DragSurface`.
+#[test]
+fn a_finger_hold_on_a_reorderable_grid_tile_does_not_fire_its_own_long_press() {
+    let fired = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let fired_for_tiles = fired.clone();
+    let view = GridView::new(
+        ListModel::from_vec((0..ITEMS).collect::<Vec<usize>>()),
+        move |tc| {
+            let f = fired_for_tiles.clone();
+            Box::new(teksilo_core::widget_builder::WidgetBuilder::on_long_press(
+                TextWidget::new(lit!(tc.item.to_string())),
+                move |_e, _c| f.set(f.get() + 1),
+            ))
+        },
+    )
+    .sizing(GridSizing::Fixed {
+        width: TILE_W,
+        height: TILE_H,
+    })
+    .reorderable(true);
+    let (mut tree, _id) = tree_with(view);
+
+    let at = Point::new(TILE_W / 2.0, TILE_H / 2.0); // tile 0
+    let f = tree.new_contact();
+    tree.touch_down(f, at);
+    tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+
+    assert_eq!(
+        fired.get(),
+        0,
+        "the reorder took the hold, so the tile's own long press must not fire",
+    );
+    tree.touch_up(f, at);
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,4 +1307,46 @@ fn a_mouse_reorder_keeps_the_narrower_band_at_the_same_position() {
         PointerButton::Primary,
         Modifiers::NONE,
     ));
+}
+
+/// A tile inside a marquee-sweeping grid keeps its **own** touch context menu.
+///
+/// The marquee's `DragSurface` encloses the whole body pane, and its drag is
+/// deferred to the long-press deadline — but that deferral is the surface's
+/// business, not a claim on every tile beneath it. Read across the sequence
+/// instead of per node, it silenced them all: a `Multi`-selection grid had no
+/// touch route to a tile's context menu at all. A finger has no secondary
+/// button, so that is the whole route, and losing it is an accessibility loss
+/// rather than a trade-off.
+///
+/// The tiles here are not drag sources, so nothing declares
+/// `LongPressRole::DragHandle` over them — which is the distinction
+/// `data_views::row_grab_surface` draws and this test is the other side of.
+#[test]
+fn a_tile_in_a_marquee_grid_keeps_its_touch_context_menu() {
+    let opened = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let counter = opened.clone();
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let view = multi_grid(&sel).tile_context_menu(move |_i, _pos, _ctx| {
+        counter.set(counter.get() + 1);
+        Some(Box::new(TextWidget::new(lit!("menu"))) as Box<dyn teksilo_core::widget::Widget>)
+    });
+    let (mut tree, _id) = tree_with(view);
+
+    // On a tile, not on the background.
+    let at = Point::new(80.0, 20.0);
+    let f = tree.new_contact();
+    tree.touch_down(f, at);
+    assert_eq!(opened.get(), 0, "not on the press");
+
+    tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+    assert_eq!(
+        opened.get(),
+        1,
+        "the hold opens the tile's menu; the marquee surface's deferral is not \
+         a claim on it",
+    );
+
+    tree.touch_up(f, at);
+    tree.assert_no_leaked_pointer_state();
 }

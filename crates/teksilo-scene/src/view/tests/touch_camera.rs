@@ -138,30 +138,27 @@ fn a_coast_stops_at_the_pan_bound() {
     );
 }
 
-/// Why a finger does not pan a view that has selection on, stated as the two
-/// measurements that identify the mechanism.
+/// The hold that arms the marquee, in the shape it is actually driven.
+fn hold() -> Duration {
+    teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch).long_press
+}
+
+/// A finger pans a view that has selection on — the marquee waits for a hold.
 ///
 /// The view carries a `PanClaim` **and** its own `on_drag`, and a node can hold
 /// only one role in a `PointerSequence`. It is enrolled as the pan claimant
-/// first, so its own drag is never enrolled as a competitor and its
-/// `DragActivation` is never consulted — the deferral that makes a `GridView`'s
-/// marquee wait for a hold cannot reach it. Its drag recognizer is then driven
-/// through the ordinary capture dispatch, which runs *before* the arbitration
-/// walk, and it latches at the touch **drag** slop of 18 dp — half the touch
-/// **pan** slop of 36 dp. Recognition alone decides the sequence, so by the time
-/// the pan is eligible the sequence has an owner and the pan never gets one.
+/// before any handler runs, so the drag half arrives at a taken slot;
+/// `PointerSequence::defer_own_drag` attaches the drag's `DragActivation` to the
+/// member the node already has, and `Auto` on a direct pointer with an eligible
+/// pan resolves to `AfterLongPress`. So the marquee no longer latches at the
+/// 18 dp touch drag slop — under which this surface could not pan under a finger
+/// at all — and the pan wins at its own 36 dp.
 ///
-/// The two numbers below are what pins that reading: the marquee is already
-/// running at 20 dp of travel, where the pan is not yet eligible, and the camera
-/// has still not moved at 120 dp, where it long since would have been. A slop
-/// race alone would show the pan winning once it passed 36.
-///
-/// Fixing it means giving the press owner's own `DragActivation` a say when it
-/// also holds an eligible pan claim, which is core arbitration and not the
-/// scene's to change. Recorded here so the next reader has the measurement
-/// rather than the inference.
+/// The two numbers below are what pin that: nothing is running at 20 dp, where
+/// the drag slop alone would already have taken the press, and the camera has
+/// moved by 120 dp, where the pan became eligible.
 #[test]
-fn a_selecting_views_marquee_latches_before_its_pan_is_eligible() {
+fn a_selecting_view_still_pans_under_a_finger() {
     let mut tree = WidgetTree::new();
     let view_id = tree.add(
         SceneView::new(Scene::new()).selection_mode(crate::selection::SceneSelectionMode::Multi),
@@ -178,9 +175,9 @@ fn a_selecting_views_marquee_latches_before_its_pan_is_eligible() {
         Point::new(from.x, from.y + 20.0),
     ));
     assert!(
-        view_handle(&tree, view_id).marquee.get().is_some(),
-        "the marquee is already running at 20 dp — past the 18 dp drag slop and \
-         short of the 36 dp pan slop",
+        view_handle(&tree, view_id).marquee.get().is_none(),
+        "20 dp is past the drag slop and short of the pan slop: the deferred \
+         marquee must not take the press there",
     );
 
     tree.dispatch_pointer(contact(
@@ -188,11 +185,50 @@ fn a_selecting_views_marquee_latches_before_its_pan_is_eligible() {
         PointerPhase::Move,
         Point::new(from.x, from.y + 120.0),
     ));
+    assert!(
+        view_handle(&tree, view_id).pan().y != 0.0,
+        "and past the pan slop the camera moves, which is what this surface \
+         could not do at all while the marquee latched first",
+    );
+    assert!(
+        view_handle(&tree, view_id).marquee.get().is_none(),
+        "the pan owns the press, so the marquee stays out for the rest of it",
+    );
+}
+
+/// The other half of the same rule: hold first and the marquee is what the
+/// finger gets.
+///
+/// The hold has to be a hold. A press that has already wandered past
+/// `long_press_slop` when the deadline arrives is withdrawn rather than armed,
+/// which is what stops a slow, deliberate pan from becoming a marquee merely by
+/// outlasting the clock — so this test moves *after* the hold, not during it.
+#[test]
+fn a_hold_gives_the_selecting_view_its_marquee() {
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(
+        SceneView::new(Scene::new()).selection_mode(crate::selection::SceneSelectionMode::Multi),
+    );
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+
+    let id = finger();
+    let from = Point::new(400.0, 300.0);
+    tree.dispatch_pointer(contact(id, PointerPhase::Down, from));
+    tree.advance_time(hold() + Duration::from_millis(50));
+
+    tree.dispatch_pointer(contact(
+        id,
+        PointerPhase::Move,
+        Point::new(from.x, from.y + 20.0),
+    ));
+    assert!(
+        view_handle(&tree, view_id).marquee.get().is_some(),
+        "past the hold the marquee is armed and latches at the drag slop",
+    );
     assert_eq!(
         view_handle(&tree, view_id).pan().y,
         0.0,
-        "and the camera has still not moved at 120 dp, so the pan did not win \
-         once it became eligible — the sequence was already decided",
+        "and the camera stays where it was",
     );
 }
 

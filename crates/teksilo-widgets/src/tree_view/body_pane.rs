@@ -634,7 +634,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     let snapshot_for_drag = self.source.dnd.snapshot_out_fn.clone();
                     ctx.apply_handlers(
                         row_root,
-                        HandlerSet::new().on_drag(move |phase, ctx| {
+                        crate::data_views::row_grab_surface().on_drag(move |phase, ctx| {
                             if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
                                 // Selection-aware dragged set: the whole
                                 // selection when the pressed row is part of a

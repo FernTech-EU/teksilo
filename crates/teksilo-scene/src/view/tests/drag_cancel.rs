@@ -61,7 +61,12 @@ fn a_revoked_item_drag_leaves_the_item_where_it_was() {
     // Several move samples: the first crosses the slop and *starts* the drag
     // (anchor == that position), the rest carry the item away from it.
     for (n, y) in [(1u64, 140.0f32), (2, 180.0), (3, 240.0)] {
-        tree.dispatch_pointer(contact(id, PointerPhase::Move, Point::new(100.0, y), n * 16));
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Move,
+            Point::new(100.0, y),
+            n * 16,
+        ));
     }
 
     {
@@ -73,7 +78,12 @@ fn a_revoked_item_drag_leaves_the_item_where_it_was() {
     }
 
     // The system revokes the pointer mid-drag.
-    tree.dispatch_pointer(contact(id, PointerPhase::Cancel, Point::new(100.0, 240.0), 64));
+    tree.dispatch_pointer(contact(
+        id,
+        PointerPhase::Cancel,
+        Point::new(100.0, 240.0),
+        64,
+    ));
     // Let every deferred rebuild / relayout the cancel scheduled run.
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
@@ -129,9 +139,19 @@ fn a_revoked_item_drag_paints_the_item_back_at_its_model_position() {
     let id = finger();
     tree.dispatch_pointer(contact(id, PointerPhase::Down, Point::new(100.0, 90.0), 0));
     for (n, y) in [(1u64, 140.0f32), (2, 180.0), (3, 240.0)] {
-        tree.dispatch_pointer(contact(id, PointerPhase::Move, Point::new(100.0, y), n * 16));
+        tree.dispatch_pointer(contact(
+            id,
+            PointerPhase::Move,
+            Point::new(100.0, y),
+            n * 16,
+        ));
     }
-    tree.dispatch_pointer(contact(id, PointerPhase::Cancel, Point::new(100.0, 240.0), 64));
+    tree.dispatch_pointer(contact(
+        id,
+        PointerPhase::Cancel,
+        Point::new(100.0, 240.0),
+        64,
+    ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let after = transform_commands(&tree.render());

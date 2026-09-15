@@ -31,12 +31,22 @@
 //! 1. **A widget's own `on_long_press` wins.** If any *enabled* node on the
 //!    press's frozen path carries one, no tree route is armed. The widget said
 //!    what its hold means.
-//! 2. **A hold that is a grab is spent.** Where the hold is the mechanism that
-//!    arms a drag — a reorderable row under a finger, whose drag member is
-//!    deferred to the long-press deadline — the hold belongs to the grab, and
-//!    long-press *recognition* on that path is suppressed as well (see
-//!    `WidgetTree::long_press_is_a_grab`). [`LongPressRole::DragHandle`]
-//!    declares the same thing for a node whose grab the deferral cannot see.
+//! 2. **A hold that is a grab is spent — on the node whose grab it arms.**
+//!    Where the hold is the mechanism that arms a drag — a reorderable row
+//!    under a finger, or a scene view whose marquee waits one out — the hold
+//!    belongs to that node's grab, and its long-press *recognition* is
+//!    suppressed as well (see `WidgetTree::long_press_is_a_grab`). The rule is
+//!    keyed on the node, not on the press: an ancestor whose own grab is
+//!    deferred does not thereby take the hold away from the controls inside it,
+//!    which for a finger — with no secondary button — would be taking away the
+//!    only route they have to a context menu. [`LongPressRole::DragHandle`] is
+//!    the explicit, subtree-wide form of the same claim, for a node that really
+//!    does own every hold beneath it — and it applies only to a **direct**
+//!    pointer, because a mouse spends no hold arming a drag *it never asked
+//!    for*. A node that asks, by declaring
+//!    [`DragActivation::AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress)
+//!    rather than leaving it to `Auto`, does spend a mouse's hold too; see
+//!    `WidgetTree::long_press_is_a_grab`.
 //! 3. Otherwise the resolved [`LongPressRole`] selects the route, and
 //!    [`LongPressRole::Auto`] — the default — resolves to the context menu if
 //!    one is reachable, else the tooltip, else nothing.
@@ -95,6 +105,11 @@ pub enum LongPressRole {
     /// on this node and everything below it. Declare it on a node whose grab
     /// the framework's own deferral cannot see — one that takes the pointer by
     /// an explicit `capture_pointer` rather than through a drag recognizer.
+    ///
+    /// **Direct pointers only.** A hold is a drag-start route for a finger or a
+    /// pen; a mouse latches its drag on travel and never spends one, so this
+    /// variant takes nothing from it and a mouse hold inside the subtree still
+    /// reaches the node's own `on_long_press` and the tree's own route.
     DragHandle,
 }
 
@@ -124,29 +139,87 @@ impl WidgetTree {
     /// Whether a hold on `id` is already spoken for as a grab, for the pointer
     /// whose sequence is `pointer`.
     ///
-    /// Two ways it can be:
+    /// Two ways it can be, and they are deliberately scoped differently:
     ///
-    /// * a live member of the sequence has had its activation **deferred to the
+    /// * **`id` itself** is a live member whose grab was **deferred to the
     ///   long-press deadline** — which is what `DragActivation::Auto` resolves
     ///   to for a direct pointer with a pan competitor, i.e. a reorderable row
-    ///   under a finger. The deferral *is* the mechanism, so a node whose grab
-    ///   it arms cannot also fire a long press;
+    ///   under a finger, or a scene view whose marquee waits out a hold. The
+    ///   deferral *is* the mechanism, so the node whose grab it arms cannot also
+    ///   fire a long press;
     /// * a node at or above `id` on the frozen path declared
-    ///   [`LongPressRole::DragHandle`].
+    ///   [`LongPressRole::DragHandle`] **and the pointer is a direct one** (see
+    ///   below).
     ///
-    /// A mouse is unaffected by construction: it enrols no pan claimant, so
-    /// `resolve_activation` never returns `AfterLongPress` and nothing is
-    /// deferred.
+    /// # Why only the first is per node
+    ///
+    /// A deferral is an *implicit* consequence of a node carrying a drag while
+    /// something claims a pan. Reading it across the whole sequence made it an
+    /// assertion about the node's descendants as well — so a `SceneView` with
+    /// selection on took the touch long press and the touch context menu away
+    /// from every heavyweight widget placed inside it, and a drag-capable
+    /// ancestor inside a scroller did the same to every control beneath it. A
+    /// finger has no secondary button, so the hold is the *only* route to a
+    /// context menu: that is an accessibility loss, and nothing in the press
+    /// said the ancestor wanted it.
+    ///
+    /// [`LongPressRole::DragHandle`] is the explicit form of the same claim and
+    /// keeps its ancestor walk, because declaring it *is* the node saying every
+    /// hold in its subtree is a grab.
+    ///
+    /// # Why the role walk is gated on a direct pointer
+    ///
+    /// The declaration says *the hold is this node's drag-start route* — and a
+    /// hold is only ever a drag-start route for a **direct** pointer, which is
+    /// the one kind `DragActivation::Auto` puts off to the long-press deadline.
+    /// A mouse starts a drag by moving while pressed, at `drag_slop`, with no
+    /// deadline in it at all: there is no grab for the declaration to protect,
+    /// so the hold is still the application's.
+    ///
+    /// Without the gate, chaining `data_views::row_grab_surface` onto a row —
+    /// which is what `.reorderable(true)` and `.exportable(..)` do — silently
+    /// deleted that row's own `on_long_press` under a mouse, where nothing was
+    /// competing for the hold at all. `DragHandle` was the framework's first
+    /// production declaration, so the loss arrived with it.
+    ///
+    /// # Why the deferral branch above is *not* gated
+    ///
+    /// Not because a mouse can never reach it — it can — but because the two
+    /// ways in are already the right shape, and the third is deliberate:
+    ///
+    /// * the **implicit** door is closed to a mouse by construction, not by a
+    ///   gate. [`DragActivation::Auto`](teksilo_tokens::DragActivation::Auto)
+    ///   is the only activation `resolve_activation` ever *synthesises* an
+    ///   `AfterLongPress` from, and it does so only for a direct pointer with
+    ///   an eligible pan competitor. A mouse enrols no pan claimant, so nothing
+    ///   an `Auto` node declares is deferred on its sequence;
+    /// * the **role** door is closed to a mouse by the `is_direct()` gate above;
+    /// * an **explicitly declared**
+    ///   [`DragActivation::AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress)
+    ///   is open to every pointer kind, on purpose. `resolve_activation` passes
+    ///   a declared activation straight through, so the grab really is deferred
+    ///   to the hold under a mouse as much as under a finger — the node said
+    ///   its drag starts on a hold — and the node's own long press must not
+    ///   fire as well. Gating this branch on `is_direct()` would silently
+    ///   demote such a declaration to `Auto` for a mouse;
+    ///   `an_explicitly_deferred_grab_takes_the_hold_from_every_pointer_kind`
+    ///   pins that.
+    ///
+    /// So "a mouse is unaffected" is a statement about the two *inferred*
+    /// claims, `Auto` and `DragHandle`, and not about a node that asked for the
+    /// deferral by name. No shipped widget declares one today.
     pub(super) fn long_press_is_a_grab(&self, pointer: PointerId, id: WidgetId) -> bool {
-        let Some(sequence) = self
-            .pointers
-            .get(pointer)
-            .and_then(|entry| entry.sequence.as_ref())
-        else {
+        let Some(entry) = self.pointers.get(pointer) else {
             return false;
         };
-        if sequence.has_deferred_grab() {
+        let Some(sequence) = entry.sequence.as_ref() else {
+            return false;
+        };
+        if sequence.has_deferred_grab_for(id) {
             return true;
+        }
+        if !entry.info.is_direct() {
+            return false;
         }
         let path = sequence.path();
         let Some(cut) = path.iter().position(|&n| n == id) else {
@@ -206,13 +279,15 @@ impl WidgetTree {
         }) {
             return;
         }
-        // Rule 2: the hold is a grab.
-        if self.long_press_is_a_grab(pointer.id, target) {
-            return;
-        }
-        let Some(route) = self.resolve_touch_route(&path) else {
+        let Some((route, owner)) = self.resolve_touch_route(&path) else {
             return;
         };
+        // Rule 2: the hold is a grab — asked over the span this route actually
+        // spends, the press target up to and including the node whose
+        // affordance the hold would open.
+        if self.hold_is_spent_on_a_grab(pointer.id, target, owner, &path) {
+            return;
+        }
         let profile = self.effective_theme.input.profile(pointer.kind);
         let started = self
             .pointers
@@ -233,7 +308,12 @@ impl WidgetTree {
 
     /// Rule 3: what the innermost node that has an opinion says, else the
     /// `Auto` fallback order.
-    fn resolve_touch_route(&self, path: &[WidgetId]) -> Option<Route> {
+    ///
+    /// Reports the route **and the node that owns it** — the one whose factory
+    /// will be asked, or whose tooltip will be shown. Rule 2 needs it: a hold
+    /// spends the affordance of that node, so that node is the one to ask
+    /// whether the hold is already arming a grab.
+    fn resolve_touch_route(&self, path: &[WidgetId]) -> Option<(Route, WidgetId)> {
         // The path runs target → root, so this walk is innermost-first: a row
         // inside a menu-owning list decides for itself.
         for &id in path {
@@ -248,22 +328,77 @@ impl WidgetTree {
             .or_else(|| self.tooltip_route(path))
     }
 
-    fn context_menu_route(&self, path: &[WidgetId]) -> Option<Route> {
+    /// The innermost context-menu factory at or above the pressed node, and the
+    /// node carrying it — which is the node `show_context_menu_for` will reach,
+    /// since it walks up from the target the same way.
+    fn context_menu_route(&self, path: &[WidgetId]) -> Option<(Route, WidgetId)> {
         path.iter()
-            .any(|&id| {
+            .copied()
+            .find(|&id| {
                 self.arena
                     .get(id)
                     .is_some_and(|node| node.context_menu_factory.is_some())
             })
-            .then_some(Route::ContextMenu)
+            .map(|owner| (Route::ContextMenu, owner))
     }
 
     /// The innermost tooltip anchored at or above the pressed node — the same
     /// choice `tooltip_pointer_enter` makes for a hover, and made the same way,
     /// so a hold and a hover surface the same tip.
-    fn tooltip_route(&self, path: &[WidgetId]) -> Option<Route> {
+    fn tooltip_route(&self, path: &[WidgetId]) -> Option<(Route, WidgetId)> {
         let target = *path.first()?;
-        self.tooltip_index_for(target).map(Route::Tooltip)
+        let index = self.tooltip_index_for(target)?;
+        let anchor = self.tooltips.get(index)?.anchor_id;
+        Some((Route::Tooltip(index), anchor))
+    }
+
+    /// Whether the hold that would open `owner`'s affordance, for a press on
+    /// `target`, is already spoken for as a grab.
+    ///
+    /// The span asked is `target` **up to and including `owner`** on the frozen
+    /// path, plus whatever [`long_press_is_a_grab`](Self::long_press_is_a_grab)
+    /// answers for `target` itself (its own deferred grab, and the
+    /// [`LongPressRole::DragHandle`] walk to the root).
+    ///
+    /// That span is the rule stated precisely: *a hold is spent by any node
+    /// between the press and the affordance it would open*. Both ends matter.
+    /// Stopping at `target` would let a container whose marquee this very hold
+    /// arms have its own context menu opened by the same hold — one hold, two
+    /// things. Running to the root is what the sequence-wide reading did, and
+    /// it took the hold away from descendants whose affordance no ancestor had
+    /// any claim on: a finger has no secondary button, so that removed the only
+    /// touch route to their context menus.
+    ///
+    /// A node *above* `owner` with a deferred grab is a third party — the hold
+    /// is not opening anything of its. A container that really does own every
+    /// hold beneath it says so with [`LongPressRole::DragHandle`], which is
+    /// walked to the root and is deliberately the only subtree-wide door.
+    ///
+    /// An `owner` that is not on the frozen path — which the two finders above
+    /// cannot produce, since both search it — degrades to the target alone,
+    /// i.e. to arming the route. That direction is deliberate: a missing
+    /// affordance is the failure this whole module exists to prevent.
+    fn hold_is_spent_on_a_grab(
+        &self,
+        pointer: PointerId,
+        target: WidgetId,
+        owner: WidgetId,
+        path: &[WidgetId],
+    ) -> bool {
+        if self.long_press_is_a_grab(pointer, target) {
+            return true;
+        }
+        let Some(sequence) = self
+            .pointers
+            .get(pointer)
+            .and_then(|entry| entry.sequence.as_ref())
+        else {
+            return false;
+        };
+        let cut = path.iter().position(|&n| n == owner).unwrap_or(0);
+        path[..=cut]
+            .iter()
+            .any(|&id| sequence.has_deferred_grab_for(id))
     }
 
     /// Disarm the hold: the press ended, was revoked, or travelled far enough
@@ -633,6 +768,167 @@ mod tests {
             fired.get(),
             0,
             "the hold arms the grab, so the node's own long press must not also fire"
+        );
+    }
+
+    /// The gate on the role walk, at the mechanism rather than through a data
+    /// view: the identical hold under a **mouse** must still reach the node's
+    /// own `on_long_press`.
+    ///
+    /// `DragHandle` says the hold is this node's drag-start route, and a hold is
+    /// that only for a direct pointer — a mouse latches its drag on travel, so
+    /// it spends no hold and has none to lose. This is the twin of
+    /// `a_drag_handle_role_suppresses_the_nodes_own_long_press`: the two must
+    /// disagree, or the gate is either absent (both silent — the regression that
+    /// arrived with the framework's first production declaration) or too wide
+    /// (both firing, which loses the finger rule).
+    #[test]
+    fn a_mouse_hold_under_a_drag_handle_role_still_fires_the_nodes_own_long_press() {
+        let fired = Rc::new(Cell::new(0usize));
+        let counter = fired.clone();
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new());
+        let _outer = tree.add(
+            StackWidget::new()
+                .add_child(inner)
+                .long_press_role(LongPressRole::DragHandle)
+                .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let at = tree.bounds(inner).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, crate::event::PointerButton::Primary);
+        tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+        assert_eq!(
+            fired.get(),
+            1,
+            "a mouse spends no hold arming a drag, so `DragHandle` takes nothing \
+             from it and the node's own long press is still heard"
+        );
+    }
+
+    /// And the tree-owned route stays declined for a mouse on its own terms, not
+    /// on `DragHandle`'s: `arm_touch_route` is coarse-only, so a mouse never had
+    /// a route here for the role to stand down. Pinned so that the gate above
+    /// cannot be read as having opened one.
+    #[test]
+    fn a_mouse_hold_under_a_drag_handle_role_still_opens_no_context_menu() {
+        let opened = Rc::new(Cell::new(0usize));
+        let counter = opened.clone();
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new());
+        let _outer = tree.add(
+            StackWidget::new()
+                .add_child(inner)
+                .long_press_role(LongPressRole::DragHandle)
+                .context_menu(move |_pos, _ctx| {
+                    counter.set(counter.get() + 1);
+                    Some(menu())
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let at = tree.bounds(inner).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, crate::event::PointerButton::Primary);
+        tree.advance_input_time(hold() * 4);
+        assert_eq!(
+            opened.get(),
+            0,
+            "a mouse has a secondary button; a held primary is not a menu request",
+        );
+    }
+
+    /// The **third** door into the deferral branch, and the one the mouse can
+    /// walk through: a node that declares
+    /// [`DragActivation::AfterLongPress`](teksilo_tokens::DragActivation::AfterLongPress)
+    /// outright.
+    ///
+    /// `PointerSequence::resolve_activation` only *synthesises* that answer
+    /// from `Auto`, and only for a direct pointer with an eligible pan
+    /// competitor; an explicitly declared one is passed through untouched for
+    /// every pointer kind. So the deferral — and with it the suppression of the
+    /// deferred node's own long press — reaches a mouse here, where it never
+    /// reaches one through `Auto`.
+    ///
+    /// That is deliberate, not a hole the `is_direct()` gate below it forgot to
+    /// close: the node said its drag starts on a hold, so the hold genuinely
+    /// arms its grab whatever is pressing it, and firing its `on_long_press`
+    /// too would be the one hold meaning two things. Gating this branch on
+    /// `is_direct()` would make an explicit declaration silently mean `Auto`
+    /// under a mouse — this test is what reddens if someone does.
+    #[test]
+    fn an_explicitly_deferred_grab_takes_the_hold_from_every_pointer_kind() {
+        /// `list` declares the deferral and owns the long press; `row` takes
+        /// the press, because the deferral is armed by the ancestor walk that
+        /// runs *through* a captor.
+        fn tree_with_explicit_deferral() -> (WidgetTree, WidgetId, Rc<Cell<usize>>) {
+            let fired = Rc::new(Cell::new(0usize));
+            let counter = fired.clone();
+            let mut tree = WidgetTree::new();
+            let row = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
+            let _list = tree.add(
+                StackWidget::new()
+                    .add_child(row)
+                    .drag_activation(teksilo_tokens::DragActivation::AfterLongPress)
+                    .on_drag(|_phase, _c| {})
+                    .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
+            );
+            tree.layout(SizeProposal::exact(200.0, 50.0));
+            (tree, row, fired)
+        }
+
+        let (mut tree, row, fired) = tree_with_explicit_deferral();
+        let at = tree.bounds(row).center();
+        tree.pointer_move(at);
+        tree.pointer_down_button(at, crate::event::PointerButton::Primary);
+        tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+        assert_eq!(
+            fired.get(),
+            0,
+            "an explicit `AfterLongPress` is not synthesised, so it is not \
+             gated: the mouse's hold arms the declared grab and is spent"
+        );
+
+        let (mut tree, row, fired) = tree_with_explicit_deferral();
+        let at = tree.bounds(row).center();
+        let f = tree.new_contact();
+        tree.touch_down(f, at);
+        tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+        assert_eq!(
+            fired.get(),
+            0,
+            "and a finger reaches the same branch, by the same declaration \
+             rather than by `Auto`"
+        );
+    }
+
+    /// A **pen** is direct, so the role takes its hold exactly as it takes a
+    /// finger's — the gate is `is_direct()`, not `is_coarse()`. A pen rests and
+    /// then moves the way a finger does, and `DragActivation::Auto` defers its
+    /// grab to the same deadline, so the same claim must reach it.
+    #[test]
+    fn a_pen_hold_under_a_drag_handle_role_is_taken_like_a_fingers() {
+        let fired = Rc::new(Cell::new(0usize));
+        let counter = fired.clone();
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(FillWidget::new());
+        let _outer = tree.add(
+            StackWidget::new()
+                .add_child(inner)
+                .long_press_role(LongPressRole::DragHandle)
+                .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let at = tree.bounds(inner).center();
+        tree.pen_down(at, 0.5, (0.0, 0.0));
+        tree.advance_input_time(hold() + std::time::Duration::from_millis(10));
+        assert_eq!(
+            fired.get(),
+            0,
+            "a pen is a direct pointer, so its hold arms the grab and is spent"
         );
     }
 

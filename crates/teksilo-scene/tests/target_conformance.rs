@@ -1056,10 +1056,23 @@ fn a_port_drag_connects_from(d: f32, density: TargetDensity, coarse: bool) -> bo
     let from = Point::new(140.0 + d, 120.0);
     let to = Point::new(300.0, 120.0);
     if coarse {
+        // Press, hold, then travel. A `SceneView` with magnetism on declares a
+        // `PanClaim` and carries `on_drag` on the same node, so its own drag —
+        // the port drag included — is deferred behind a hold
+        // (`PointerSequence::defer_own_drag`) and a finger that simply moves
+        // pans the camera instead. The hold sample stays on the press point: the
+        // deferral is a hold, so travel past `long_press_slop` before the
+        // deadline withdraws the grab rather than arming it. What this probe
+        // measures is the *reach* of the handle, not the timing.
+        let held = teksilo_core::gesture::default_profile(PointerKind::Touch)
+            .long_press
+            .as_millis() as u64
+            + 50;
         let id = finger();
         tree.dispatch_pointer(sample(id, PointerPhase::Down, from, 0));
-        tree.dispatch_pointer(sample(id, PointerPhase::Move, to, 16));
-        tree.dispatch_pointer(sample(id, PointerPhase::Up, to, 32));
+        tree.dispatch_pointer(sample(id, PointerPhase::Move, from, held));
+        tree.dispatch_pointer(sample(id, PointerPhase::Move, to, held + 16));
+        tree.dispatch_pointer(sample(id, PointerPhase::Up, to, held + 32));
     } else {
         tree.pointer_move(from);
         tree.dispatch_event(WidgetEvent::pointer_down(

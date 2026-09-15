@@ -392,7 +392,10 @@ opens a context menu or shows a tooltip, resolved from what your subtree offers.
 `long_press_role(..)` picks; `LongPressRole::DragHandle` says the hold *is* your
 grab, and suppresses long-press recognition on your subtree — declare it when
 your grab is one the framework's own deferral cannot see, i.e. an explicit
-`capture_pointer` rather than a drag recognizer.
+`capture_pointer` rather than a drag recognizer. It binds **direct pointers
+only**: a mouse latches a drag on travel and spends no hold, so a control inside
+your subtree still hears its own hold under one, and you must not rely on
+`DragHandle` to suppress anything there.
 
 ## 12. A new `Widget` hook has to be forwarded, and that is now a compile error
 

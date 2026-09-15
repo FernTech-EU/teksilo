@@ -73,6 +73,30 @@
 //! `a_pen_loses_an_explicit_capture_to_a_drag_capable_ancestor`. Either gate
 //! alone produces that set, and the two sets are identical failure for
 //! failure: between them these rows say a device gate moved, never which.
+//! `PointerSequence::defer_own_drag` → the three *scene view with its own
+//! claim* rows on a **direct** pointer, and no other row in the table, but each
+//! call site is singly observable only on its own rows and the ancestor call has
+//! a companion it cannot be separated from. Measured, deletion by deletion:
+//! removing the call in `enrol_sequence_members`' **captured** arm reddens
+//! *scene view with its own claim · touch* and *· pen* (plus ten rows of
+//! `tests/dual_role_arbitration.rs`); removing its **ancestor** arm's call
+//! reddens *no row here at all*, because that arm also feeds the ancestor's
+//! `Down` and without the feed its recognizer cannot latch either way — the
+//! single witness is
+//! `an_ancestor_dual_role_nodes_own_drag_runs_after_a_hold`. Keep the feed and
+//! drop only the deferral and *scene view with its own claim, over a widget item
+//! · touch* goes red, which is what that row is for. The two **mouse** rows of
+//! the same two scenarios stay green through every one of those deletions, and
+//! that is the structural statement the pair is here to make: the arm refuses
+//! anything but a live `Pan` member, and a mouse enrols none.
+//! The arena gate (`sequence_blocks_member`'s `own_drag_armed_at` clause) and
+//! `note_gesture_recognized`'s `own_drag_blocked` guard **mask each other** for
+//! the *winner* these rows assert: with only the first removed the drag fires
+//! but never claims the sequence, so every row here stays green while six rows
+//! of `dual_role_arbitration.rs` — which count the handler calls — go red.
+//! Remove both and the same three direct-pointer rows redden. The guard alone
+//! is not singly observable anywhere, which is what a deliberately redundant
+//! read looks like; its comment says so.
 //!
 //! The rows that cover a **rule** rather than one implementation of it are
 //! *slider thumb · touch* and the four mouse rows whose fixture does carry a
@@ -212,15 +236,39 @@ enum Scenario {
     /// one axis is the shape in which a frozen single-axis action and a claim
     /// agreeing with it meet.
     TextSelection,
-    /// **A5 scenario 4 — a `SceneView` marquee**
-    /// (`teksilo-scene/src/view/build_impl.rs:451`): a draggable container
-    /// above tappable cards, with nothing claiming a pan.
+    /// **A5 scenario 4 — a `SceneView` marquee**: a draggable container above
+    /// tappable cards, with nothing claiming a pan.
+    ///
+    /// The *shipped* view is [`Scenario::SceneViewDualRole`] — this shape is the
+    /// one it has when `interactive` is off, so nothing declares a claim. (This
+    /// doc comment used to cite `teksilo-scene/src/view/build_impl.rs:451` for
+    /// the drag; the declaration is at `:479`, inside the `if self.interactive`
+    /// block that opens at `:447`, and the same block declares the claim at
+    /// `:464` — which is the shape this scenario deliberately does *not* have.)
     SceneMarquee,
-    /// [`Scenario::SceneMarquee`] inside a scroller — the one shape in which
-    /// [`teksilo_tokens::DragActivation`] reaches production behaviour, because
-    /// it is the only one whose drag owner is a strict *ancestor* of the
-    /// captor.
+    /// [`Scenario::SceneMarquee`] inside a scroller — a shape in which
+    /// [`teksilo_tokens::DragActivation`] reaches production behaviour, its drag
+    /// owner being a strict *ancestor* of the captor.
     SceneMarqueeInScroller,
+    /// **The shipped `SceneView` with selection or magnetism on**: one node
+    /// declaring a [`PanClaim`] *and* carrying `on_drag`, plus the `on_tap` its
+    /// empty-space click needs.
+    ///
+    /// `teksilo-scene/src/view/build_impl.rs:464` declares the claim and `:479`
+    /// the drag handlers, both onto the same `HandlerSet` inside the
+    /// `if self.interactive` block that opens at `:447` — so this is one node
+    /// wanting two roles, and no other row in this table has that shape. Its
+    /// absence is why the defect it pins shipped: the claim is enrolled by
+    /// `begin_sequence` before any handler runs, so the drag's `enrol` was
+    /// refused and its `DragActivation` never consulted.
+    SceneViewDualRole,
+    /// [`Scenario::SceneViewDualRole`] with an interactive child between the
+    /// press and the dual-role node — a heavyweight (`add_widget_item`) scene
+    /// item, which takes the capture itself.
+    ///
+    /// The second door to the same refusal: the ancestor walk reaches it
+    /// through `enrol_drag`, which opens with the same `enrol`.
+    SceneViewDualRoleOverItem,
     /// **A5 scenario 5 — a `DragRegion` window move**
     /// (`teksilo-widgets/src/title_bar/drag_region.rs:168`): drag plus
     /// double-tap on the node the pointer lands on, no capture, no claim.
@@ -418,6 +466,35 @@ fn build(scenario: Scenario) -> Fixture {
                 Stack::new()
                     .add_child(container)
                     .pan_claim(PanClaim::vertical())
+            );
+        }
+        Scenario::SceneViewDualRole => {
+            let leaf = node!("leaf", Leaf::new());
+            let t = taps.clone();
+            node!(
+                "view",
+                Stack::new()
+                    .add_child(leaf)
+                    .pan_claim(PanClaim::both())
+                    .on_drag(|_p, _c| {})
+                    .on_tap(move |_e, _c| t.set(t.get() + 1))
+            );
+        }
+        Scenario::SceneViewDualRoleOverItem => {
+            let leaf = node!("leaf", Leaf::new());
+            let t = taps.clone();
+            let item = node!(
+                "item",
+                Stack::new()
+                    .add_child(leaf)
+                    .on_tap(move |_e, _c| t.set(t.get() + 1))
+            );
+            node!(
+                "view",
+                Stack::new()
+                    .add_child(item)
+                    .pan_claim(PanClaim::both())
+                    .on_drag(|_p, _c| {})
             );
         }
         Scenario::DragRegion => {
@@ -766,6 +843,87 @@ fn rows() -> Vec<Row> {
                    not a slop radius: 20 dp off a press near the edge leaves \
                    them, the deferred marquee withdraws itself, and a member \
                    that withdrew is never cancelled",
+        },
+        // -------------------------------------------------------------
+        // The shipped SceneView: one node, a claim AND its own drag
+        // -------------------------------------------------------------
+        Row {
+            name: "scene view with its own claim · mouse",
+            scenario: Scenario::SceneViewDualRole,
+            kind: PointerKind::Mouse,
+            frozen: TouchAction::AUTO,
+            members: &[("view", Role::Gesture, MemberState::Possible)],
+            press_at: None,
+            movement: &[(0.0, 4.0, None), (0.0, 6.0, Some("view"))],
+            cancels: &[],
+            note: "the mouse cannot reach the dual-role arm at all: it enrols \
+                   no pan member, so the node's own drag takes the slot by the \
+                   ordinary `enrol` and latches at 5 dp. `defer_own_drag` \
+                   refuses anything but a live Pan member, which is what makes \
+                   that a structural guarantee rather than an observation",
+        },
+        Row {
+            name: "scene view with its own claim · touch",
+            scenario: Scenario::SceneViewDualRole,
+            kind: PointerKind::Touch,
+            frozen: TouchAction::AUTO,
+            members: &[("view", Role::Pan, MemberState::Possible)],
+            press_at: None,
+            movement: &[(0.0, 20.0, None), (0.0, 37.0, Some("view"))],
+            cancels: &[],
+            note: "one node, one member — enrolled as the Pan claim \
+                   `begin_sequence` put there before any handler ran. Its own \
+                   drag gets a say through `defer_own_drag`, which resolves \
+                   Auto against that claim to AfterLongPress: so 20 dp latches \
+                   nothing and the pan takes the press at 36. Before that arm \
+                   existed the drag latched at 18 and this surface could not \
+                   pan under a finger at all",
+        },
+        Row {
+            name: "scene view with its own claim · pen",
+            scenario: Scenario::SceneViewDualRole,
+            kind: PEN,
+            frozen: TouchAction::AUTO,
+            members: &[("view", Role::Pan, MemberState::Possible)],
+            press_at: None,
+            movement: &[(0.0, 4.0, None), (0.0, 9.0, Some("view"))],
+            cancels: &[],
+            note: "a pen is precise but *direct*, so `resolve_activation` defers \
+                   its drag too and it pans at PEN's own pan_slop (8) rather \
+                   than marqueeing at its drag_slop (2). Consistent with `column \
+                   grip · pen`, and the lever for a surface that wants \
+                   otherwise is `EventContext::set_drag_activation` per press, \
+                   not a pointer-kind clause in the resolution",
+        },
+        Row {
+            name: "scene view with its own claim, over a widget item · touch",
+            scenario: Scenario::SceneViewDualRoleOverItem,
+            kind: PointerKind::Touch,
+            frozen: TouchAction::AUTO,
+            members: &[("view", Role::Pan, MemberState::Possible)],
+            press_at: None,
+            movement: &[(0.0, 20.0, None), (0.0, 37.0, Some("view"))],
+            cancels: &[],
+            note: "the second door to the same refusal: the captor is the item, \
+                   so the view is reached by the ancestor walk, whose \
+                   `enrol_drag` opens with the same `enrol`. Same answer — the \
+                   pan at 36 — but reached through the branch a heavyweight \
+                   scene item's press goes through",
+        },
+        Row {
+            name: "scene view with its own claim, over a widget item · mouse",
+            scenario: Scenario::SceneViewDualRoleOverItem,
+            kind: PointerKind::Mouse,
+            frozen: TouchAction::AUTO,
+            members: &[("view", Role::Gesture, MemberState::Possible)],
+            press_at: None,
+            movement: &[(0.0, 4.0, None), (0.0, 6.0, Some("view"))],
+            cancels: &[],
+            note: "and the mouse is unreachable at that door too: with no pan \
+                   member the ancestor walk's `enrol_drag` succeeds, so the \
+                   view is an ordinary Gesture ancestor latching at 5 dp — the \
+                   `scene marquee` rows' behaviour, on a node that also \
+                   declares a claim",
         },
         // -------------------------------------------------------------
         // A5 scenario 5 — a DragRegion window move

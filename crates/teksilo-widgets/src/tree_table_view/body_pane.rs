@@ -770,99 +770,101 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let sel_for_drag = selection.clone();
                 let export_for_drag = self.export.clone();
                 let source_for_drag = source.clone();
-                row_drag = Some(HandlerSet::new().on_drag(move |phase, ctx| {
-                    if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
-                        // Selection-aware dragged set: the whole selection
-                        // when the pressed row is part of a
-                        // multi-selection, else just the pressed row.
-                        let rows: Vec<usize> = match sel_for_drag.as_ref() {
-                            Some(s) if s.is_selected(preview_flat) => {
-                                let mut v = s.selected_indices();
-                                v.sort_unstable();
-                                if v.len() <= 1 { vec![preview_flat] } else { v }
-                            }
-                            _ => vec![preview_flat],
-                        };
+                row_drag = Some(crate::data_views::row_grab_surface().on_drag(
+                    move |phase, ctx| {
+                        if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
+                            // Selection-aware dragged set: the whole selection
+                            // when the pressed row is part of a
+                            // multi-selection, else just the pressed row.
+                            let rows: Vec<usize> = match sel_for_drag.as_ref() {
+                                Some(s) if s.is_selected(preview_flat) => {
+                                    let mut v = s.selected_indices();
+                                    v.sort_unstable();
+                                    if v.len() <= 1 { vec![preview_flat] } else { v }
+                                }
+                                _ => vec![preview_flat],
+                            };
 
-                        // Reader: pulls the item at a flat visible index
-                        // through the projection (skips a row that isn't
-                        // currently resident — the shared `build_payload`
-                        // drops it so `rows`/`items` stay index-aligned).
-                        let src_r = source_for_drag.clone();
-                        let read =
-                            move |i: usize, f: &mut dyn FnMut(&T)| (src_r.read_item_fn)(i, f);
+                            // Reader: pulls the item at a flat visible index
+                            // through the projection (skips a row that isn't
+                            // currently resident — the shared `build_payload`
+                            // drops it so `rows`/`items` stay index-aligned).
+                            let src_r = source_for_drag.clone();
+                            let read =
+                                move |i: usize, f: &mut dyn FnMut(&T)| (src_r.read_item_fn)(i, f);
 
-                        // Snapshot-out: resolve the dragged flat indices to
-                        // stable `NodeId`s NOW, at drag-start, so the
-                        // default move-out removal stays correct even if
-                        // the tree reshuffles before the drag ends.
-                        // Re-checks existence right before each removal, so
-                        // a descendant already removed by its ancestor's
-                        // subtree removal (`nodes` is in ascending
-                        // pre-order — an ancestor always precedes its
-                        // descendants) is safely skipped instead of the
-                        // stale-key panic `TreeModel::remove` would raise.
-                        let snapshot_out = source_for_drag.dnd.snapshot_out_fn.clone();
+                            // Snapshot-out: resolve the dragged flat indices to
+                            // stable `NodeId`s NOW, at drag-start, so the
+                            // default move-out removal stays correct even if
+                            // the tree reshuffles before the drag ends.
+                            // Re-checks existence right before each removal, so
+                            // a descendant already removed by its ancestor's
+                            // subtree removal (`nodes` is in ascending
+                            // pre-order — an ancestor always precedes its
+                            // descendants) is safely skipped instead of the
+                            // stale-key panic `TreeModel::remove` would raise.
+                            let snapshot_out = source_for_drag.dnd.snapshot_out_fn.clone();
 
-                        let Some(payload) = export_for_drag.build_payload(
-                            drag_model_id,
-                            rows,
-                            &read,
-                            &snapshot_out,
-                        ) else {
-                            return;
-                        };
-
-                        // Flat multi-cell preview of the PRESSED row (indent
-                        // is dropped in the floating preview — it reads as
-                        // the row's content picked up, even when a
-                        // multi-row selection is being dragged).
-                        let widths = widths_for_preview.borrow().clone();
-                        let h = metrics_for_preview.borrow_mut().row_height(preview_flat);
-                        let total_w = widths.iter().sum::<f32>().max(120.0);
-                        let mut cells: Vec<Box<dyn Widget>> = Vec::new();
-                        // Both halves must come from the same row: if the meta
-                        // is missing the row is not really resident, so build no
-                        // preview rather than one at a fabricated depth 0.
-                        let preview_meta = source_for_preview.meta(preview_flat);
-                        (source_for_preview.read_item_fn)(preview_flat, &mut |item| {
-                            let Some(e) = preview_meta else {
+                            let Some(payload) = export_for_drag.build_payload(
+                                drag_model_id,
+                                rows,
+                                &read,
+                                &snapshot_out,
+                            ) else {
                                 return;
                             };
-                            cells = {
-                                display_for_preview
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(display_pos, &col_idx)| {
-                                        let col = &columns_for_preview[col_idx];
-                                        let cell_ctx = CellContext {
-                                            row_index: preview_flat,
-                                            col_id: col.id.clone(),
-                                            col_index: display_pos,
-                                            is_selected: false,
-                                            is_focused: false,
-                                            is_hovered: false,
-                                            is_editing: false,
-                                            depth: Some(e.depth),
-                                            is_tree_column: display_pos == tree_pos_for_preview,
-                                        };
-                                        (col.cell)(item, &cell_ctx)
-                                    })
-                                    .collect::<Vec<_>>()
-                            };
-                        });
-                        if cells.is_empty() {
-                            ctx.start_drag(anchor, payload);
-                            return;
+
+                            // Flat multi-cell preview of the PRESSED row (indent
+                            // is dropped in the floating preview — it reads as
+                            // the row's content picked up, even when a
+                            // multi-row selection is being dragged).
+                            let widths = widths_for_preview.borrow().clone();
+                            let h = metrics_for_preview.borrow_mut().row_height(preview_flat);
+                            let total_w = widths.iter().sum::<f32>().max(120.0);
+                            let mut cells: Vec<Box<dyn Widget>> = Vec::new();
+                            // Both halves must come from the same row: if the meta
+                            // is missing the row is not really resident, so build no
+                            // preview rather than one at a fabricated depth 0.
+                            let preview_meta = source_for_preview.meta(preview_flat);
+                            (source_for_preview.read_item_fn)(preview_flat, &mut |item| {
+                                let Some(e) = preview_meta else {
+                                    return;
+                                };
+                                cells = {
+                                    display_for_preview
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(display_pos, &col_idx)| {
+                                            let col = &columns_for_preview[col_idx];
+                                            let cell_ctx = CellContext {
+                                                row_index: preview_flat,
+                                                col_id: col.id.clone(),
+                                                col_index: display_pos,
+                                                is_selected: false,
+                                                is_focused: false,
+                                                is_hovered: false,
+                                                is_editing: false,
+                                                depth: Some(e.depth),
+                                                is_tree_column: display_pos == tree_pos_for_preview,
+                                            };
+                                            (col.cell)(item, &cell_ctx)
+                                        })
+                                        .collect::<Vec<_>>()
+                                };
+                            });
+                            if cells.is_empty() {
+                                ctx.start_drag(anchor, payload);
+                                return;
+                            }
+                            let preview = Box::new(crate::drag_preview::DragPreview::new(
+                                total_w,
+                                h,
+                                Box::new(CellRowPreview::new(cells, widths, h)),
+                            )) as Box<dyn Widget>;
+                            ctx.start_drag_with_preview(anchor, payload, preview);
                         }
-                        let preview = Box::new(crate::drag_preview::DragPreview::new(
-                            total_w,
-                            h,
-                            Box::new(CellRowPreview::new(cells, widths, h)),
-                        )) as Box<dyn Widget>;
-                        ctx.start_drag_with_preview(anchor, payload, preview);
-                    }
-                }));
+                    },
+                ));
             }
             // Row activation (open/commit) — a gesture, so it arbitrates
             // against the reorder drag via the gesture arena (a click
