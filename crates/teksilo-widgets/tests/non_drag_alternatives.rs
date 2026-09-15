@@ -208,6 +208,38 @@ fn nodes_with_role(
     found
 }
 
+/// Press the **indent** chord this build's platform actually binds.
+///
+/// A tree reparent has two spellings, and which one is live is a platform fact
+/// rather than a choice: `Alt+→` is the outliner convention on Windows and
+/// Linux, while macOS spends `⌥→` on expand-subtree (AppKit's own outline view
+/// claims it) and binds the accelerator plus `]` instead — see
+/// `TreeMove::from_key_for`. A test that asserts the reparent *happened* has to
+/// press whichever chord is bound on the host it runs on, or it passes
+/// vacuously on the other platform: an unbound chord moves nothing, and "the
+/// row did not move" is indistinguishable from "the row moved back".
+///
+/// That the pair is spelled this way on each platform is pinned separately, by
+/// `TreeMove`'s own `from_key_for` convention tests and by
+/// `the_bracket_pair_reparents_on_every_platform` below.
+fn press_indent(tree: &mut WidgetTree) {
+    if cfg!(target_os = "macos") {
+        tree.press_key(Key::Character(']'), Modifiers::COMMAND);
+    } else {
+        tree.press_key(Key::ArrowRight, Modifiers::ALT);
+    }
+}
+
+/// Press the **outdent** chord this build's platform binds — the inverse of
+/// [`press_indent`], and bound the same way.
+fn press_outdent(tree: &mut WidgetTree) {
+    if cfg!(target_os = "macos") {
+        tree.press_key(Key::Character('['), Modifiers::COMMAND);
+    } else {
+        tree.press_key(Key::ArrowLeft, Modifiers::ALT);
+    }
+}
+
 /// Run a full pointer drag: down, past the threshold, to the target, up.
 fn drag(tree: &mut WidgetTree, from: Point, to: Point) {
     tree.dispatch_event(WidgetEvent::pointer_down(
@@ -574,9 +606,11 @@ mod tree_view_row_reorder {
     }
 
     /// **Keyboard-reachable** — the two reparents had no keyboard route at all
-    /// before, and the far ends had none either.
+    /// before, and the far ends had none either. The reparent presses go
+    /// through [`press_indent`] / [`press_outdent`] because its chord is
+    /// spelled differently on macOS.
     #[test]
-    fn alt_arrows_reorder_reparent_and_reach_the_ends() {
+    fn the_keyboard_reorders_reparents_and_reaches_the_ends() {
         let mut f = fixture();
         f.selection.select(1);
         assert_reachable_by_tab(&f.tree, f.view);
@@ -585,12 +619,12 @@ mod tree_view_row_reorder {
         assert_eq!(shape(&f)[0].1, vec!["A", "C", "D", "B"]);
         f.tree.layout(SizeProposal::exact(400.0, 400.0));
         // B is last; indent it under D, its previous sibling.
-        f.tree.press_key(Key::ArrowRight, Modifiers::ALT);
+        press_indent(&mut f.tree);
         assert_eq!(shape(&f)[0].1, vec!["A", "C", "D"]);
         assert_eq!(f.model.children(f.model.root(2)).len(), 1, "B is under D");
         // And straight back out, which is the inverse.
         f.tree.layout(SizeProposal::exact(400.0, 400.0));
-        f.tree.press_key(Key::ArrowLeft, Modifiers::ALT);
+        press_outdent(&mut f.tree);
         assert_eq!(shape(&f)[0].1, vec!["A", "C", "D", "B"]);
     }
 
@@ -637,7 +671,7 @@ mod tree_view_row_reorder {
             let mut f = fixture();
             f.selection.select(1);
             f.tree.focus(f.view);
-            f.tree.press_key(Key::ArrowRight, Modifiers::ALT);
+            press_indent(&mut f.tree);
             shape(&f)
         };
         let by_action = {
@@ -713,7 +747,7 @@ mod tree_view_row_reorder {
         let mut g = fixture();
         g.selection.select(1);
         g.tree.focus(g.view);
-        g.tree.press_key(Key::ArrowRight, Modifiers::ALT);
+        press_indent(&mut g.tree);
         assert_eq!(spoken(&mut g.tree), vec!["B moved to level 2"]);
     }
 
@@ -827,7 +861,7 @@ mod tree_view_row_reorder {
         let mut f = fixture();
         f.selection.select(1);
         f.tree.focus(f.view);
-        f.tree.press_key(Key::ArrowRight, Modifiers::ALT);
+        press_indent(&mut f.tree);
         f.tree.layout(SizeProposal::exact(400.0, 400.0));
         let rows = nodes_with_role(&f.tree, f.view, teksilo_core::accesskit::Role::TreeItem);
         assert_eq!(rows.len(), 4, "the indented row is still on screen");
@@ -1086,7 +1120,7 @@ mod tree_table_view_row_reorder {
 
     /// **Keyboard-reachable** — the reparents had no keyboard route before.
     #[test]
-    fn alt_arrows_reorder_and_reparent_from_the_keyboard() {
+    fn the_keyboard_reorders_and_reparents() {
         let mut f = fixture();
         f.selection.select(1);
         assert_reachable_by_tab(&f.tree, f.view);
@@ -1094,7 +1128,7 @@ mod tree_table_view_row_reorder {
         f.tree.press_key(Key::End, Modifiers::ALT);
         assert_eq!(roots(&f), vec!["A", "C", "D", "B"]);
         f.tree.layout(SizeProposal::exact(400.0, 300.0));
-        f.tree.press_key(Key::ArrowRight, Modifiers::ALT);
+        press_indent(&mut f.tree);
         assert_eq!(roots(&f), vec!["A", "C", "D"]);
         assert_eq!(child_names(&f, f.model.root(2)), vec!["B"]);
     }
@@ -1142,7 +1176,7 @@ mod tree_table_view_row_reorder {
             let mut f = fixture();
             f.selection.select(1);
             f.tree.focus(f.view);
-            f.tree.press_key(Key::ArrowRight, Modifiers::ALT);
+            press_indent(&mut f.tree);
             (roots(&f), child_names(&f, f.model.root(0)))
         };
         let by_action = {
@@ -1183,7 +1217,7 @@ mod tree_table_view_row_reorder {
         let mut g = fixture();
         g.selection.select(1);
         g.tree.focus(g.view);
-        g.tree.press_key(Key::ArrowRight, Modifiers::ALT);
+        press_indent(&mut g.tree);
         assert_eq!(spoken(&mut g.tree), vec!["B moved to level 2"]);
     }
 }

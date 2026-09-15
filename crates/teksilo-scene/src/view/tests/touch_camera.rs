@@ -34,6 +34,23 @@ fn contact(id: PointerId, phase: PointerPhase, at: Point) -> PointerSample {
     }
 }
 
+/// Tick the virtual clock until `view` stops flinging, up to a budget that no
+/// shipped physics can outlast. Answers whether the coast ended.
+///
+/// The budget is six seconds and not a tuned number, because how long a coast
+/// runs is a *platform* fact: `ScrollPhysics::Platform` selects the Android
+/// spline off macOS, which runs out in well under two seconds, and the Flutter
+/// exponential decay on macOS, which only crosses the 20 px/s settle tolerance
+/// at `ln(20 / v) / ln(0.135)` — 3 s even at the 8000 px/s velocity cap. A
+/// fixed tick count that clears one clears the other only by accident, and this
+/// assertion is about a coast *ending*, not about when.
+fn settles_within(tree: &mut WidgetTree, view: WidgetId) -> bool {
+    (0..120).any(|_| {
+        tree.advance_time(Duration::from_millis(50));
+        !tree.is_flinging(view)
+    })
+}
+
 /// A flick and its release, timed on a `ManualClock` so the velocity comes off
 /// the same axis the coast is later ticked on. Returns the release point.
 fn flick_up(tree: &mut WidgetTree, clock: &Rc<ManualClock>, from: Point) -> Point {
@@ -85,11 +102,8 @@ fn a_flicked_finger_keeps_the_camera_moving_after_the_lift() {
         "and it does it by setting the camera, not by aiming a tween at it",
     );
 
-    for _ in 0..40 {
-        tree.advance_time(Duration::from_millis(50));
-    }
     assert!(
-        !tree.is_flinging(view_id),
+        settles_within(&mut tree, view_id),
         "and it settles rather than coasting for ever",
     );
 }
@@ -113,11 +127,8 @@ fn a_coast_stops_at_the_pan_bound() {
         "the flick still starts a coast — without this the rest of the test would \
          pass on a view that never flings at all",
     );
-    for _ in 0..40 {
-        tree.advance_time(Duration::from_millis(50));
-    }
     assert!(
-        !tree.is_flinging(view_id),
+        settles_within(&mut tree, view_id),
         "a coast that can no longer move anything is stopped, not left spinning",
     );
     let pan_y = view_handle(&tree, view_id).pan().y;
