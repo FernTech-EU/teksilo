@@ -6,6 +6,8 @@
 // out of this file. The mechanical split of the legacy section
 // is a follow-up.
 mod a11y;
+mod audit_probes;
+mod drag_cancel;
 mod edge_cases;
 mod magnetism;
 mod multi_view;
