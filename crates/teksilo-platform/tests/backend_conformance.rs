@@ -357,6 +357,38 @@ fn pen_hover_only() -> Vec<PenPacket> {
     ]
 }
 
+/// **One drain carrying a whole coalesced batch.**
+///
+/// The shape a Windows `WM_POINTERUPDATE` with a populated history produces,
+/// and the shape a Wayland dispatch thread produces whenever the event loop was
+/// busy: several digitizer packets, each with its own device stamp, arriving in
+/// a single `poll_pen`. Every other pen vector here is drained one packet at a
+/// time, so the multi-packet path — where the back-dating in `poll_pen` lives —
+/// is otherwise unexercised by the six invariants, and invariant 3 in
+/// particular has nothing to say about it.
+///
+/// The stamps are 4 ms apart: a 250 Hz stylus through one 32 ms turn.
+fn pen_batch_with_device_stamps() -> Vec<PenPacket> {
+    let tool = PenKind::Pen;
+    let at = |x: f32, y: f32| Point::new(x, y);
+    let ms = |i: u32| 60_000 + i * 4;
+    vec![
+        PenPacket::hovering(tool, at(200.0, 100.0)).at_device_ms(ms(0)),
+        PenPacket::hovering(tool, at(202.0, 101.0)).at_device_ms(ms(1)),
+        PenPacket::hovering(tool, at(204.0, 103.0))
+            .down_at(0.3)
+            .at_device_ms(ms(2)),
+        PenPacket::hovering(tool, at(208.0, 108.0))
+            .down_at(0.6)
+            .at_device_ms(ms(3)),
+        PenPacket::hovering(tool, at(214.0, 115.0))
+            .down_at(0.9)
+            .at_device_ms(ms(4)),
+        PenPacket::hovering(tool, at(214.0, 115.0)).at_device_ms(ms(5)),
+        PenPacket::out_of_proximity(tool, at(214.0, 115.0)).at_device_ms(ms(6)),
+    ]
+}
+
 /// A [`PenSource`] that hands back a recorded list, so a pen vector goes
 /// through the same `poll_pen` the event loop calls rather than through a
 /// private entry point.
@@ -455,6 +487,24 @@ impl Conformance {
                 self.observe(&sample);
                 self.samples.push(sample);
             }
+        }
+        backend.take_pen_source();
+        self
+    }
+
+    /// Drive a whole recorded pen session through **one** drain, the way a
+    /// coalescing platform delivers it.
+    ///
+    /// The counterpart of [`run_pen`](Self::run_pen), which gives each packet
+    /// its own poll. Here the shim hands over the whole batch at once and
+    /// `poll_pen` has to place it on the tree's timeline itself — so the six
+    /// invariants, invariant 3 above all, are checked against the back-dated
+    /// times rather than against one `now` per packet.
+    fn run_pen_batch(mut self, backend: &mut TranslationState, packets: &[PenPacket]) -> Self {
+        backend.set_pen_source(Box::new(RecordedPenSource(packets.to_vec())));
+        for sample in backend.poll_pen(EventTime::from_millis(100)) {
+            self.observe(&sample);
+            self.samples.push(sample);
         }
         backend.take_pen_source();
         self
@@ -1045,4 +1095,45 @@ fn cancel_all_ends_a_pen_session_exactly_once() {
         .filter(|s| s.phase == PointerPhase::Cancel)
         .count();
     assert_eq!(cancels, 1, "one session, one end");
+}
+
+/// A coalesced batch is conformant, and its samples carry the digitizer's own
+/// spacing rather than the drain's single clock.
+///
+/// Invariant 3 is checked by `observe` on every sample here, which is the point
+/// of routing this through `Conformance` at all: back-dating a batch is exactly
+/// the operation that could hand a consumer time running backwards, and the
+/// suite is where that promise is kept.
+#[test]
+fn a_coalesced_pen_batch_is_conformant_and_keeps_its_own_spacing() {
+    let mut backend = backend_for(WindowSystem::Wayland);
+    let run = Conformance::new("pen/batch")
+        .run_pen_batch(&mut backend, &pen_batch_with_device_stamps())
+        .finish(&mut backend, 500);
+    run.assert_no_duplicate_streams();
+
+    let samples = run.pointer_samples();
+    let times: Vec<EventTime> = samples.iter().map(|s| s.pointer.time).collect();
+
+    // The batch is not one instant. Before `poll_pen` back-dated, every one of
+    // these was the drain's `now`.
+    let distinct: HashSet<_> = times.iter().map(|t| t.as_duration()).collect();
+    assert!(
+        distinct.len() > 1,
+        "a seven-packet drain must not collapse onto one timestamp: {times:?}"
+    );
+
+    // Spacing is the device's: 24 ms from the first packet to the last.
+    let span = times
+        .last()
+        .unwrap()
+        .saturating_since(*times.first().unwrap());
+    assert_eq!(
+        span,
+        std::time::Duration::from_millis(24),
+        "the six 4 ms device gaps must survive the drain: {times:?}"
+    );
+
+    // And the newest packet is the one the poll's clock actually describes.
+    assert_eq!(*times.last().unwrap(), EventTime::from_millis(100));
 }

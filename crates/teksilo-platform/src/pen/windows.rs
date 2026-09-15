@@ -48,6 +48,21 @@
 //! from it; the translator folds that into
 //! `PointerAxes::contact` for the matching winit `Touch`.
 //!
+//! # A message is not a packet
+//!
+//! Windows coalesces the digitizer packets that arrive between two window
+//! messages and reports the count in `POINTER_INFO::historyCount`.
+//! `GetPointerPenInfo` returns only the newest of them, so a shim built on it
+//! alone is capped at the message rate — roughly the display's — no matter how
+//! fast the tablet is, and every intermediate packet's pressure and tilt are
+//! lost with it. This module calls `GetPointerPenInfoHistory` whenever the
+//! count says there is more, and hands the whole run to the translator.
+//!
+//! The array that call fills is **newest-first**; [`PenSource::poll`] promises
+//! oldest-first. [`decode::decode_pen_history`] is the reversal, and it says so
+//! at length, because a stroke drawn backwards is a bug that looks like a
+//! rendering problem.
+//!
 //! # Layout, and testing it without Windows
 //!
 //! The decoding lives in [`decode`], over a `&[u8]`, and is compiled on every
@@ -56,6 +71,8 @@
 //! wrote, so the tested code and the shipped code are one.
 //!
 //! Reference: `docs/touch-and-pen.md`, "Pen and stylus".
+//!
+//! [`PenSource::poll`]: crate::pen::PenSource::poll
 
 pub mod decode;
 
@@ -78,8 +95,8 @@ mod imp {
     use windows::Win32::Graphics::Gdi::ScreenToClient;
     use windows::Win32::UI::HiDpi::GetDpiForWindow;
     use windows::Win32::UI::Input::Pointer::{
-        GetPointerPenInfo, GetPointerTouchInfo, GetPointerType, POINTER_PEN_INFO,
-        POINTER_TOUCH_INFO,
+        GetPointerPenInfo, GetPointerPenInfoHistory, GetPointerTouchInfo, GetPointerType,
+        POINTER_PEN_INFO, POINTER_TOUCH_INFO,
     };
     use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -240,21 +257,103 @@ mod imp {
         }
     }
 
-    /// Read one pen packet for `pointer_id`, if the OS still has it.
-    fn read_pen(hwnd: HWND, pointer_id: u32, left_window: bool) -> Option<PenPacket> {
+    /// Read every pen packet the OS coalesced into the current message for
+    /// `pointer_id`, **oldest first**.
+    ///
+    /// A `WM_POINTERUPDATE` is not one digitizer packet. Windows merges the
+    /// packets that arrived since the last message and reports how many in
+    /// `POINTER_INFO::historyCount`; `GetPointerPenInfo` — the singular form,
+    /// and all this shim used to call — hands back only the newest of them.
+    /// That capped a 200-360 Hz stylus at the window message rate, threw away
+    /// each intermediate packet's own pressure and tilt, and left the
+    /// remaining samples with no spacing to be timed by.
+    ///
+    /// So: ask `GetPointerPenInfo` once (it is the packet the message is
+    /// *about*, and it is the one that answers `historyCount`), and where that
+    /// says the message coalesced anything, pull the rest with
+    /// `GetPointerPenInfoHistory`. The window's client origin and scale factor
+    /// are read once for the whole run: both are properties of the window, and
+    /// every entry belongs to the same message.
+    fn read_pen(hwnd: HWND, pointer_id: u32, left_window: bool) -> Vec<PenPacket> {
         // `zeroed`, not `default`: see `as_bytes`.
         let mut info: POINTER_PEN_INFO = unsafe { std::mem::zeroed() };
-        unsafe { GetPointerPenInfo(pointer_id, &mut info) }.ok()?;
-        let raw = decode::decode_pen_info(unsafe { as_bytes(&info) })?;
-        let mut packet = raw.to_packet(client_origin(hwnd, raw.screen), scale_factor(hwnd));
+        if unsafe { GetPointerPenInfo(pointer_id, &mut info) }.is_err() {
+            return Vec::new();
+        }
+        let Some(newest) = decode::decode_pen_info(unsafe { as_bytes(&info) }) else {
+            return Vec::new();
+        };
+        let origin = client_origin(hwnd, newest.screen);
+        let scale = scale_factor(hwnd);
+
         if left_window {
             // A tool that has left this window is, as far as this window can
             // tell, out of range: the hover must end here even though the
             // digitizer can still see the pen over the desktop.
+            //
+            // No history on this path on purpose. A leave is one transition,
+            // not a stroke, and replaying its coalesced positions as a run of
+            // out-of-range packets would say the tool left several times.
+            let mut packet = newest.to_packet(origin, scale);
             packet.in_proximity = false;
             packet.down = false;
+            return vec![packet];
         }
-        Some(packet)
+
+        match read_pen_history(pointer_id, newest.history_count) {
+            Some(history) => history
+                .iter()
+                .map(|entry| entry.to_packet(origin, scale))
+                .collect(),
+            None => vec![newest.to_packet(origin, scale)],
+        }
+    }
+
+    /// The coalesced packets behind one message, decoded oldest-first.
+    ///
+    /// `None` when there is nothing to fetch (`history_count` of 0 or 1), when
+    /// the call fails, or when it returns nothing decodable — in every case
+    /// the caller falls back to the single packet it already has, so a driver
+    /// that does not support history costs a failed syscall and nothing else.
+    fn read_pen_history(pointer_id: u32, history_count: u32) -> Option<Vec<decode::RawPenInfo>> {
+        let wanted = decode::history_entries_to_request(history_count)?;
+
+        // Fully initialised, padding included, before the OS or `as_bytes`
+        // ever looks at it — the same reason the singular path uses `zeroed()`
+        // rather than `default()`. `write_bytes` over the whole allocation is
+        // the only form that promises that for a run of structs: a `vec![v; n]`
+        // clones a typed value `n` times, and a typed copy carries no promise
+        // about padding bytes.
+        let mut buffer: Vec<POINTER_PEN_INFO> = Vec::with_capacity(wanted);
+        // SAFETY: `with_capacity(wanted)` allocated room for exactly `wanted`
+        // elements, so writing `wanted` zeroed elements stays inside it, and
+        // `POINTER_PEN_INFO` is a plain `#[repr(C)]` aggregate of integers,
+        // handles and points for which the all-zero bit pattern is valid.
+        unsafe {
+            std::ptr::write_bytes(buffer.as_mut_ptr(), 0, wanted);
+            buffer.set_len(wanted);
+        }
+
+        let mut count = wanted as u32;
+        unsafe { GetPointerPenInfoHistory(pointer_id, &mut count, Some(buffer.as_mut_ptr())) }
+            .ok()?;
+
+        // The OS writes back how many it actually filled; it must never be
+        // read as more than was asked for.
+        let filled = (count as usize).min(wanted);
+        // SAFETY: `buffer` holds `wanted` fully initialised `POINTER_PEN_INFO`
+        // values (zeroed above, the first `filled` of them since overwritten
+        // by the OS), so `filled * size_of::<POINTER_PEN_INFO>()` bytes from
+        // its start are initialised and contiguous.
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                buffer.as_ptr() as *const u8,
+                filled * std::mem::size_of::<POINTER_PEN_INFO>(),
+            )
+        };
+        // Win32 fills this newest-first; `decode_pen_history` reverses it.
+        let decoded = decode::decode_pen_history(bytes, filled);
+        (!decoded.is_empty()).then_some(decoded)
     }
 
     /// Read one contact patch for `pointer_id`, if the OS reports one.
@@ -298,10 +397,14 @@ mod imp {
         match kind.0 as u32 {
             decode::PT_PEN => {
                 let left = msg == WM_POINTERLEAVE;
-                if let Some(packet) = read_pen(hwnd, pointer_id, left)
+                let read = read_pen(hwnd, pointer_id, left);
+                if !read.is_empty()
                     && let Ok(mut packets) = shared.packets.try_borrow_mut()
                 {
-                    packets.push(packet);
+                    // Oldest first, appended in order: `PenSource::poll`
+                    // hands the whole buffer to the translator as one forward
+                    // timeline.
+                    packets.extend(read);
                 }
             }
             decode::PT_TOUCH => {

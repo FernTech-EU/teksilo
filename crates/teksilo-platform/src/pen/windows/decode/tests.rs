@@ -27,9 +27,10 @@ use super::*;
 ///
 /// `pointerType = PT_PEN`, `pointerId = 0x2A`,
 /// `pointerFlags = INRANGE | INCONTACT | FIRSTBUTTON | PRIMARY` (`0x2016`),
-/// `ptPixelLocation = (1920, 540)`, `dwTime = 0x0012D687`,
-/// `penFlags = PEN_FLAG_BARREL`, `penMask = PRESSURE | ROTATION | TILT_X |
-/// TILT_Y`, `pressure = 512`, `rotation = 271`, `tiltX = -37`, `tiltY = 60`.
+/// `ptPixelLocation = (1920, 540)`, `dwTime = 0x0012D687`, `historyCount = 1`
+/// (nothing coalesced), `penFlags = PEN_FLAG_BARREL`, `penMask = PRESSURE |
+/// ROTATION | TILT_X | TILT_Y`, `pressure = 512`, `rotation = 271`,
+/// `tiltX = -37`, `tiltY = 60`.
 #[rustfmt::skip]
 const GOLDEN_PEN_DOWN: [u8; 120] = [
     0x03, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x00, 0x00,
@@ -40,7 +41,7 @@ const GOLDEN_PEN_DOWN: [u8; 120] = [
     0x70, 0xc6, 0x00, 0x00, 0xcf, 0x37, 0x00, 0x00,
     0x80, 0x07, 0x00, 0x00, 0x1c, 0x02, 0x00, 0x00,
     0x70, 0xc6, 0x00, 0x00, 0xcf, 0x37, 0x00, 0x00,
-    0x87, 0xd6, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x87, 0xd6, 0x12, 0x00, 0x01, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x33, 0x1c, 0x5d, 0x04, 0x00, 0x00, 0x00,
     0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -83,6 +84,30 @@ fn pen_bytes(
     bytes
 }
 
+/// Build a `POINTER_PEN_INFO` image for one history entry: a pen in contact,
+/// at `screen`, stamped `time_ms`, with a rising pressure so the ordering of a
+/// decoded run is visible in the data and not only in the timestamps.
+fn history_entry(time_ms: u32, pressure: u32, screen: (i32, i32)) -> [u8; layout::PEN_INFO_SIZE] {
+    let mut bytes = pen_bytes(
+        POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT,
+        0,
+        ALL_AXES,
+        pressure,
+        0,
+        0,
+        0,
+        screen,
+    );
+    bytes[layout::TIME..layout::TIME + 4].copy_from_slice(&time_ms.to_le_bytes());
+    bytes
+}
+
+/// Concatenate entries into the buffer `GetPointerPenInfoHistory` would fill —
+/// i.e. **newest first**, which is the order Win32 documents.
+fn history_buffer(newest_first: &[[u8; layout::PEN_INFO_SIZE]]) -> Vec<u8> {
+    newest_first.iter().flatten().copied().collect()
+}
+
 /// Build a `POINTER_TOUCH_INFO` image the same way.
 fn touch_bytes(
     pointer_id: u32,
@@ -122,6 +147,7 @@ fn the_golden_vector_decodes_field_for_field() {
     assert_eq!(info.flags, 0x2016);
     assert_eq!(info.screen, (1920, 540));
     assert_eq!(info.time_ms, 0x0012_D687);
+    assert_eq!(info.history_count, 1, "an uncoalesced message");
     assert_eq!(info.pen_flags, PEN_FLAG_BARREL);
     assert_eq!(info.pen_mask, ALL_AXES);
     assert_eq!(info.pressure, 512);
@@ -424,5 +450,132 @@ fn an_unreported_or_degenerate_contact_area_is_none() {
         decode_touch_info(&degenerate).unwrap().contact_size(1.0),
         None,
         "a zero-area rectangle is not a measurement"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The coalescing history
+// ---------------------------------------------------------------------------
+
+/// The one that silently draws every stroke backwards if it is wrong: Win32
+/// fills the history newest-first, `PenSource::poll` promises oldest-first,
+/// and `decode_pen_history` is the reversal between them.
+#[test]
+fn the_history_comes_back_oldest_first() {
+    // The OS's own order: index 0 is the most recent packet.
+    let buffer = history_buffer(&[
+        history_entry(3_012, 900, (30, 30)),
+        history_entry(3_008, 600, (20, 20)),
+        history_entry(3_004, 300, (10, 10)),
+    ]);
+
+    let decoded = decode_pen_history(&buffer, 3);
+    assert_eq!(decoded.len(), 3);
+    assert_eq!(
+        decoded.iter().map(|e| e.time_ms).collect::<Vec<_>>(),
+        vec![3_004, 3_008, 3_012],
+        "time must run forwards through the decoded run"
+    );
+    assert_eq!(
+        decoded.iter().map(|e| e.pressure).collect::<Vec<_>>(),
+        vec![300, 600, 900],
+        "and so must the pressure ramp: a reversed stroke starts hard and \
+         ends soft, which is exactly what a bad sort looks like"
+    );
+    assert_eq!(
+        decoded.iter().map(|e| e.screen).collect::<Vec<_>>(),
+        vec![(10, 10), (20, 20), (30, 30)]
+    );
+}
+
+/// Each entry carries its **own** axes and its own stamp — that is the whole
+/// reason to make the extra call. A history that repeated the newest packet's
+/// pressure three times would be no better than not calling it.
+#[test]
+fn every_history_entry_keeps_its_own_axes_and_stamp() {
+    let buffer = history_buffer(&[
+        history_entry(80, 1_024, (5, 5)),
+        history_entry(76, 512, (4, 4)),
+    ]);
+    let decoded = decode_pen_history(&buffer, 2);
+    let packets: Vec<_> = decoded.iter().map(|e| e.to_packet((0, 0), 1.0)).collect();
+
+    assert_eq!(packets[0].device_time_ms, Some(76));
+    assert_eq!(packets[1].device_time_ms, Some(80));
+    assert_eq!(packets[0].pressure, 0.5);
+    assert_eq!(packets[1].pressure, 1.0);
+    assert!(packets.iter().all(|p| p.down && p.in_proximity));
+}
+
+/// `entriesCount` is what the OS wrote back, and a buffer shorter than it is a
+/// driver bug we decline to read past rather than a slice to trust.
+#[test]
+fn a_short_history_buffer_yields_only_whole_entries() {
+    let buffer = history_buffer(&[
+        history_entry(20, 100, (1, 1)),
+        history_entry(10, 50, (0, 0)),
+    ]);
+
+    // The OS claims four entries and supplied two.
+    let decoded = decode_pen_history(&buffer, 4);
+    assert_eq!(decoded.len(), 2);
+    assert_eq!(decoded[0].time_ms, 10, "still oldest first");
+
+    // A trailing partial struct is not half-decoded.
+    let truncated = &buffer[..buffer.len() - 1];
+    let decoded = decode_pen_history(truncated, 2);
+    assert_eq!(decoded.len(), 1);
+    assert_eq!(decoded[0].time_ms, 20, "the only whole entry is the newest");
+
+    assert!(decode_pen_history(&[], 3).is_empty());
+    assert!(decode_pen_history(&buffer, 0).is_empty());
+}
+
+/// The syscall is skipped when there is nothing to fetch, and the count a
+/// driver reports is never trusted as an allocation size.
+#[test]
+fn the_history_request_is_bounded_and_skipped_when_empty() {
+    assert_eq!(history_entries_to_request(0), None, "no field, no call");
+    assert_eq!(history_entries_to_request(1), None, "nothing coalesced");
+    assert_eq!(history_entries_to_request(2), Some(2));
+    assert_eq!(
+        history_entries_to_request(MAX_PEN_HISTORY_ENTRIES as u32),
+        Some(MAX_PEN_HISTORY_ENTRIES)
+    );
+    assert_eq!(
+        history_entries_to_request(u32::MAX),
+        Some(MAX_PEN_HISTORY_ENTRIES),
+        "a nonsense count must not become a nonsense allocation"
+    );
+}
+
+/// End to end on the platform-independent half: a coalesced Windows message
+/// becomes a batch whose back-dated times are the digitizer's, not the poll's.
+#[test]
+fn a_coalesced_message_back_dates_to_the_digitizers_spacing() {
+    use crate::pen::back_date;
+    use teksilo_core::pointer::EventTime;
+
+    let buffer = history_buffer(&[
+        history_entry(5_012, 900, (30, 30)),
+        history_entry(5_008, 600, (20, 20)),
+        history_entry(5_004, 300, (10, 10)),
+    ]);
+    let packets: Vec<_> = decode_pen_history(&buffer, 3)
+        .iter()
+        .map(|e| e.to_packet((0, 0), 1.0))
+        .collect();
+    let stamps: Vec<_> = packets.iter().map(|p| p.device_time_ms).collect();
+
+    let now = EventTime::from_millis(90_000);
+    let times = back_date(now, &stamps);
+    assert_eq!(
+        times,
+        vec![
+            EventTime::from_millis(89_992),
+            EventTime::from_millis(89_996),
+            now,
+        ],
+        "4 ms apart, which is what the digitizer said and not what the poll did"
     );
 }

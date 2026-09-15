@@ -56,11 +56,22 @@
 //!
 //! # Testing without a compositor
 //!
-//! The `Dispatch` impls do one thing: translate a `zwp_tablet_tool_v2::Event`
-//! into a [`ToolEvent`] and hand it to [`ToolState::apply`]. All the state —
-//! the axis accumulator, the proximity machine, the frame commit — lives in
-//! `ToolState`, which knows nothing about wayland-client and is driven by
-//! recorded event sequences in this module's tests.
+//! All the state — the axis accumulator, the proximity machine, the frame
+//! commit — lives in [`ToolState`], which knows nothing about wayland-client
+//! and is driven by recorded event sequences in this module's tests.
+//!
+//! `translate_tool_event` is tested one layer below that, against real
+//! `zwp_tablet_tool_v2::Event` values. It is worth its own tests because it is
+//! **not** a variant rename: `frame` carries a millisecond stamp, `motion` a
+//! coordinate pair, `button` a code and a state, so a decode that drops a field
+//! compiles and runs and is wrong — which is how `frame`'s clock went missing
+//! once already. A protocol `Event` is plain data, so every arm that reads a
+//! field can be pushed through the decode on a host with no compositor.
+//!
+//! The exception is `proximity_in`: it carries live `zwp_tablet_v2` and
+//! `wl_surface` proxies, and a `Proxy` needs a connection. So does the `Dispatch`
+//! glue, which transforms nothing — it looks the tool up by `ObjectId`, calls
+//! [`ToolState::apply`], and forgets a removed tool.
 //!
 //! Reference: `docs/touch-and-pen.md`, "Pen and stylus".
 
@@ -70,7 +81,6 @@ use std::sync::{Arc, Mutex};
 
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use teksilo_canvas::Point;
-use teksilo_core::pointer::EventTime;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::trace_input;
 use teksilo_tokens::PenKind;
@@ -142,9 +152,16 @@ pub enum ToolEvent {
     /// `button`, with a Linux button code.
     Button { button: u32, pressed: bool },
     /// `frame` — commit everything accumulated since the last one.
-    Frame,
+    ///
+    /// `time_ms` is the protocol's own stamp ("the time of the event with
+    /// millisecond granularity", `tablet-v2.xml`). It is on the compositor's
+    /// clock, so it reaches a [`PenPacket`] as
+    /// [`device_time_ms`](PenPacket::device_time_ms) and is only ever read as
+    /// a difference.
+    Frame { time_ms: u32 },
     /// `removed` — the tool is gone. Treated as a proximity-out that cannot be
-    /// followed by anything.
+    /// followed by anything, so it commits its own leave packet rather than
+    /// waiting for a `frame` that will never arrive.
     Removed,
 }
 
@@ -187,6 +204,14 @@ pub struct ToolState {
     /// Whether the last committed packet said `in_proximity`. Drives the one
     /// trailing packet a proximity-out has to produce so the hover ends.
     reported_proximity: bool,
+    /// The stamp of the last `frame` seen, so the leave packet a `removed`
+    /// synthesises can be dated at all. `None` until the first frame, which is
+    /// a state no leave is ever built from: a tool that has not framed has not
+    /// announced a hover either, so [`Self::commit`]'s
+    /// `!in_proximity && !reported_proximity` guard turns its `removed` into no
+    /// packet rather than into a packet with no time. See
+    /// `a_tool_that_never_announced_a_hover_never_retracts_one`.
+    last_frame_ms: Option<u32>,
     /// Whether anything changed since the last `frame`.
     dirty: bool,
 }
@@ -208,12 +233,26 @@ impl ToolState {
                 self.buttons = PenButtons::NONE;
                 self.dirty = true;
             }
-            ToolEvent::ProximityOut | ToolEvent::Removed => {
+            ToolEvent::ProximityOut => {
                 self.in_proximity = false;
                 self.down = false;
                 self.pressure = 0.0;
                 self.buttons = PenButtons::NONE;
                 self.dirty = true;
+            }
+            ToolEvent::Removed => {
+                self.in_proximity = false;
+                self.down = false;
+                self.pressure = 0.0;
+                self.buttons = PenButtons::NONE;
+                self.dirty = true;
+                // A removed tool never frames again, so the leave is committed
+                // here rather than waiting for a frame that will not come. It
+                // carries the last frame's stamp, which is the most recent
+                // time the compositor gave us for this tool.
+                if let Some(packet) = self.commit(our_surface, self.last_frame_ms) {
+                    out.push(packet);
+                }
             }
             ToolEvent::Down => {
                 self.down = true;
@@ -252,16 +291,26 @@ impl ToolState {
                 self.buttons = self.buttons.with(which, pressed);
                 self.dirty = true;
             }
-            ToolEvent::Frame => {
-                if let Some(packet) = self.commit(our_surface) {
+            ToolEvent::Frame { time_ms } => {
+                self.last_frame_ms = Some(time_ms);
+                if let Some(packet) = self.commit(our_surface, Some(time_ms)) {
                     out.push(packet);
                 }
             }
         }
     }
 
-    /// The packet this `frame` commits, if any.
-    fn commit(&mut self, our_surface: u32) -> Option<PenPacket> {
+    /// The packet this `frame` commits, if any, stamped with the frame's own
+    /// millisecond time.
+    ///
+    /// `time_ms` is an `Option` because `Removed` passes
+    /// [`Self::last_frame_ms`], which is `None` until the first frame. No
+    /// packet is ever built from that `None`: reaching the constructor needs
+    /// `reported_proximity`, which only a `Frame` can set, and a `Frame` writes
+    /// `last_frame_ms` before it commits. The `None` is carried rather than
+    /// defaulted to `0` so that a future path which *did* reach it would
+    /// produce an honestly undated packet instead of one claiming the epoch.
+    fn commit(&mut self, our_surface: u32, time_ms: Option<u32>) -> Option<PenPacket> {
         if !self.dirty {
             return None;
         }
@@ -293,9 +342,11 @@ impl ToolState {
             buttons: self.buttons,
             in_proximity: self.in_proximity,
             down: self.down,
-            // See `PenPacket::time`: `frame`'s millisecond stamp is on the
-            // compositor's clock, with no known offset from the tree's epoch.
-            time: EventTime::ZERO,
+            // `frame`'s millisecond stamp. On the compositor's clock, with no
+            // known offset from the tree's epoch — which is exactly why it is
+            // carried as a raw counter and read only as a difference within
+            // one drained batch. See `PenPacket::device_time_ms`.
+            device_time_ms: time_ms,
         })
     }
 }
@@ -442,12 +493,8 @@ impl Dispatch<ZwpTabletToolV2, ()> for TabletState {
         let removed = matches!(translated, ToolEvent::Removed);
         let id = tool.id();
         if let Some(accumulator) = state.tools.get_mut(&id) {
+            // `Removed` commits its own leave packet — see `ToolState::apply`.
             accumulator.apply(translated, our_surface, &mut out);
-            if removed {
-                // A `removed` tool never frames again, so commit the leave now
-                // rather than waiting for a frame that will not come.
-                accumulator.apply(ToolEvent::Frame, our_surface, &mut out);
-            }
         }
         if removed {
             state.tools.remove(&id);
@@ -549,7 +596,7 @@ fn translate_tool_event(event: &zwp_tablet_tool_v2::Event) -> Option<ToolEvent> 
                 WEnum::Value(zwp_tablet_tool_v2::ButtonState::Pressed)
             ),
         },
-        E::Frame { .. } => ToolEvent::Frame,
+        E::Frame { time } => ToolEvent::Frame { time_ms: *time },
         E::Removed => ToolEvent::Removed,
         _ => return None,
     })

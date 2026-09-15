@@ -56,7 +56,7 @@ use teksilo_core::pointer::{
 use teksilo_core::trace_input;
 use teksilo_tokens::{InputTokens, PenKind, PointerKind};
 
-use crate::pen::{PenButtons, PenPacket, PenSource};
+use crate::pen::{PenButtons, PenPacket, PenSource, back_date_into};
 use crate::pointer_backend::{
     BackendCaps, BackendEvent, InputSample, PlatformKind, PointerBackend,
 };
@@ -216,6 +216,11 @@ pub struct TranslationState {
     pen_contact: Option<PenContact>,
     /// Reused packet buffer, so polling a pen allocates nothing per turn.
     pen_scratch: Vec<PenPacket>,
+    /// Reused back-dating buffer, the timeline twin of `pen_scratch`.
+    pen_times: Vec<EventTime>,
+    /// Device stamps lifted out of the drained batch, so `back_date_into` can
+    /// read them while `pen_scratch` is borrowed for translation.
+    pen_device_times: Vec<Option<u32>>,
 }
 
 impl TranslationState {
@@ -238,6 +243,8 @@ impl TranslationState {
             pen: None,
             pen_contact: None,
             pen_scratch: Vec::new(),
+            pen_times: Vec::new(),
+            pen_device_times: Vec::new(),
         }
     }
 
@@ -573,8 +580,32 @@ impl TranslationState {
     ///
     /// Call once per event-loop turn, alongside the winit events. Cheap and
     /// allocation-free when no stylus is in use: the shim returns nothing and
-    /// the packet buffer is reused.
+    /// both scratch buffers are reused.
+    ///
+    /// # The batch gets its own timeline
+    ///
+    /// A drain is not one instant. The packets in it are separate digitizer
+    /// frames that happened at separate times, and stamping every one of them
+    /// with the poll's `now` — which is what this did before
+    /// [`PenPacket::device_time_ms`] existed — destroys every velocity,
+    /// smoothing and time-offset computation downstream of it.
+    ///
+    /// So the batch is placed on the tree's timeline by
+    /// [`back_date`](crate::pen::back_date): the newest packet is `now`, and
+    /// each earlier one sits at the device's own delta before the one after
+    /// it. A batch of one is `now` exactly, so the single-packet case — which
+    /// is the steady state at a 4 ms poll — is unchanged.
+    ///
+    /// One clamp is applied on top of the pure rule: no sample is stamped
+    /// earlier than the translator's previous `now`. A shim filling its buffer
+    /// from its own thread (the Wayland one) can hand over a packet the
+    /// compositor stamped *before* the last drain returned, and this window has
+    /// already told the tree that time had reached `now`. Invariant 3 of the
+    /// backend conformance suite — "time is monotone" — is a promise to every
+    /// consumer downstream, and honouring it costs at worst the collapse that
+    /// used to be unconditional.
     pub fn poll_pen(&mut self, now: EventTime) -> Vec<InputSample> {
+        let floor = self.now;
         self.set_now(now);
         // Take the source out so the translation below can borrow `self`
         // mutably; it goes straight back.
@@ -586,19 +617,41 @@ impl TranslationState {
         source.poll(&mut packets);
         self.pen = Some(source);
 
+        // Lift the device stamps out first: `packets` is borrowed for the
+        // whole translation loop below, and `back_date_into` needs a slice.
+        let mut device_times = std::mem::take(&mut self.pen_device_times);
+        device_times.clear();
+        device_times.extend(packets.iter().map(|packet| packet.device_time_ms));
+        let mut times = std::mem::take(&mut self.pen_times);
+        back_date_into(self.now, &device_times, &mut times);
+
         let mut samples = Vec::new();
-        for packet in &packets {
-            samples.append(&mut self.translate_pen_packet(packet));
+        for (packet, time) in packets.iter().zip(times.iter().copied()) {
+            samples.append(&mut self.translate_pen_packet(packet, time.max(floor)));
         }
+
         packets.clear();
         self.pen_scratch = packets;
+        device_times.clear();
+        self.pen_device_times = device_times;
+        times.clear();
+        self.pen_times = times;
         samples
     }
 
-    /// Turn one digitizer packet into the samples its transitions imply.
+    /// Turn one digitizer packet into the samples its transitions imply, all
+    /// stamped `time`.
     ///
     /// Public so a replay backend, or a platform shim Teksilo has not met, can
     /// feed the same state machine without reimplementing it.
+    ///
+    /// `time` is on the **tree's** timeline and is the caller's to supply —
+    /// deliberately, because a packet only carries the device's own counter
+    /// ([`PenPacket::device_time_ms`]), whose epoch is unknown. A caller
+    /// draining a whole batch turns those counters into times with
+    /// [`back_date`](crate::pen::back_date), which is what
+    /// [`poll_pen`](Self::poll_pen) does; a caller with one packet and nothing
+    /// better to say passes its own `now`.
     ///
     /// # The state machine
     ///
@@ -628,12 +681,11 @@ impl TranslationState {
     /// exactly what happened — and it is the right thing for the down case
     /// too, where a stylus yanked off the tablet mid-stroke must not read as a
     /// deliberate lift.
-    pub fn translate_pen_packet(&mut self, packet: &PenPacket) -> Vec<InputSample> {
-        let time = if packet.time == EventTime::ZERO {
-            self.now
-        } else {
-            packet.time
-        };
+    pub fn translate_pen_packet(
+        &mut self,
+        packet: &PenPacket,
+        time: EventTime,
+    ) -> Vec<InputSample> {
         let mut samples = Vec::new();
 
         // End the session first when the tool left range, or when the tool

@@ -27,6 +27,21 @@
 //! the assertions below will refuse to compile there rather than decode
 //! garbage.
 //!
+//! # The coalescing history
+//!
+//! A `WM_POINTERUPDATE` is not one digitizer packet. Windows merges the
+//! packets that arrived between two messages and tells you how many in
+//! `POINTER_INFO::historyCount`; `GetPointerPenInfo` hands back only the
+//! newest of them. Reading just that caps a 200-360 Hz stylus at the window
+//! message rate, which is roughly the display's.
+//!
+//! [`decode_pen_history`] is the other half: it parses the array
+//! `GetPointerPenInfoHistory` fills and **reverses** it, because Win32 orders
+//! that array newest-first and `PenSource::poll` promises oldest-first. That
+//! reversal is the single most reversible mistake in this file — get it wrong
+//! and every stroke is drawn backwards — so it is stated at the function, and
+//! pinned by a test that decodes a synthesised three-entry history.
+//!
 //! Reference: `docs/touch-and-pen.md`, "Pen and stylus".
 
 use teksilo_canvas::{Point, Size};
@@ -54,6 +69,9 @@ pub mod layout {
     pub const PIXEL_Y: usize = 36;
     /// `POINTER_INFO::dwTime`, a `GetTickCount`-based millisecond stamp.
     pub const TIME: usize = 64;
+    /// `POINTER_INFO::historyCount` — how many digitizer packets the OS
+    /// coalesced into this one message. `1` when nothing was coalesced.
+    pub const HISTORY_COUNT: usize = 68;
     /// `size_of::<POINTER_INFO>()`.
     pub const POINTER_INFO_SIZE: usize = 96;
 
@@ -108,6 +126,7 @@ mod abi_assertions {
     const _: () = assert!(offset_of!(POINTER_INFO, pointerFlags) == POINTER_FLAGS);
     const _: () = assert!(offset_of!(POINTER_INFO, ptPixelLocation) == PIXEL_X);
     const _: () = assert!(offset_of!(POINTER_INFO, dwTime) == TIME);
+    const _: () = assert!(offset_of!(POINTER_INFO, historyCount) == HISTORY_COUNT);
 
     const _: () = assert!(offset_of!(POINTER_PEN_INFO, penFlags) == PEN_FLAGS);
     const _: () = assert!(offset_of!(POINTER_PEN_INFO, penMask) == PEN_MASK);
@@ -208,6 +227,18 @@ pub struct RawPenInfo {
     pub screen: (i32, i32),
     /// `dwTime`, milliseconds on the OS's tick clock.
     pub time_ms: u32,
+    /// `historyCount` — how many digitizer packets the OS coalesced into the
+    /// message this struct came from.
+    ///
+    /// `1` when nothing was coalesced (and `0` from a driver that does not
+    /// fill the field at all); anything above that is the number of entries
+    /// [`GetPointerPenInfoHistory`] has waiting, each with its own `dwTime`,
+    /// its own pressure and its own tilt. Reading only the newest — which is
+    /// what `GetPointerPenInfo` alone gives you — throws the rest away and
+    /// caps a stylus at the window message rate.
+    ///
+    /// [`GetPointerPenInfoHistory`]: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getpointerpeninfohistory
+    pub history_count: u32,
 }
 
 impl RawPenInfo {
@@ -328,10 +359,11 @@ impl RawPenInfo {
             buttons: self.buttons(),
             in_proximity: self.in_proximity(),
             down,
-            // See `PenPacket::time`: `dwTime` is a tick-clock stamp with no
-            // known offset from the tree's epoch, so the translator stamps its
-            // own `now` instead of a converted lie.
-            time: teksilo_core::pointer::EventTime::ZERO,
+            // `dwTime` is a `GetTickCount` stamp with no known offset from the
+            // tree's epoch, so it is carried as the raw counter it is and read
+            // only as a difference within one drained batch. See
+            // `PenPacket::device_time_ms`.
+            device_time_ms: Some(self.time_ms),
         }
     }
 }
@@ -420,7 +452,76 @@ pub fn decode_pen_info(bytes: &[u8]) -> Option<RawPenInfo> {
             i32_at(bytes, layout::PIXEL_Y)?,
         ),
         time_ms: u32_at(bytes, layout::TIME)?,
+        history_count: u32_at(bytes, layout::HISTORY_COUNT)?,
     })
+}
+
+// ---------------------------------------------------------------------------
+// The coalescing history
+// ---------------------------------------------------------------------------
+
+/// The most history entries this shim will ever ask the OS for.
+///
+/// `POINTER_INFO::historyCount` is a number a driver writes, and a buffer
+/// sized from an untrusted count is a buffer waiting to be told to be a
+/// gigabyte. 512 is far past anything a digitizer produces between two window
+/// messages — a 360 Hz tablet fills about six entries per 16 ms frame — so the
+/// cap costs nothing real and bounds the allocation absolutely.
+pub const MAX_PEN_HISTORY_ENTRIES: usize = 512;
+
+/// How many `POINTER_PEN_INFO` entries to request for a message whose
+/// `POINTER_INFO::historyCount` is `history_count`.
+///
+/// `None` means "do not call the history API at all": a count of `0` or `1` is
+/// a message that coalesced nothing (and `0` is also what a driver that never
+/// fills the field leaves behind), so the single `GetPointerPenInfo` the shim
+/// already made is the whole story and a second syscall would buy one
+/// duplicate packet.
+pub const fn history_entries_to_request(history_count: u32) -> Option<usize> {
+    if history_count <= 1 {
+        return None;
+    }
+    let wanted = history_count as usize;
+    Some(if wanted > MAX_PEN_HISTORY_ENTRIES {
+        MAX_PEN_HISTORY_ENTRIES
+    } else {
+        wanted
+    })
+}
+
+/// Decode a `GetPointerPenInfoHistory` buffer into **oldest-first** packets.
+///
+/// # Ordering — the thing that silently reverses a stroke
+///
+/// Win32 fills the array in **reverse chronological order**: index 0 is the
+/// **newest** entry, and the oldest is at `entries - 1`. (`GetPointerInfoHistory`
+/// and its per-type siblings all document this the same way, and
+/// `GetPointerPenInfoHistory` inherits it.)
+///
+/// [`PenSource::poll`](crate::pen::PenSource::poll) promises the opposite —
+/// oldest first, because the caller reads a drained batch as one forward
+/// timeline and back-dates it from the last entry. **This function is where
+/// the two meet, and it reverses.** Getting it wrong does not fail: it draws
+/// every stroke backwards, with the pressure ramp inverted and the velocity
+/// pointing the wrong way.
+///
+/// `entries` is the count the OS wrote back through `entriesCount`, not the
+/// count that was asked for. Entries past the end of `bytes`, and any entry
+/// whose fixed-size image is short, are dropped rather than guessed at.
+pub fn decode_pen_history(bytes: &[u8], entries: usize) -> Vec<RawPenInfo> {
+    let available = bytes.len() / layout::PEN_INFO_SIZE;
+    let entries = entries.min(available);
+    let mut decoded = Vec::with_capacity(entries);
+    for index in 0..entries {
+        let start = index * layout::PEN_INFO_SIZE;
+        let Some(info) = decode_pen_info(&bytes[start..start + layout::PEN_INFO_SIZE]) else {
+            break;
+        };
+        decoded.push(info);
+    }
+    // Newest-first in, oldest-first out. See the ordering note above.
+    decoded.reverse();
+    decoded
 }
 
 /// Decode a `POINTER_TOUCH_INFO`. `None` if the slice is short.

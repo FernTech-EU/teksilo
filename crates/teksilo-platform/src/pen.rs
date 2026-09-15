@@ -40,6 +40,20 @@
 //! pretending: `reports_pen_kind` and friends stay `false`, and a consumer that
 //! must know asks instead of guessing from `cfg!(target_os = ...)`.
 //!
+//! # A drained batch has its own timeline
+//!
+//! A poll drains everything buffered since the last one, and those packets did
+//! **not** all happen at the instant the poll ran. Each carries the device's
+//! own millisecond counter in [`PenPacket::device_time_ms`]; [`back_date`]
+//! turns that batch into one [`EventTime`] per packet — newest at the poll's
+//! `now`, earlier ones at the device's own deltas before it — so a stroke's
+//! velocity, its smoothing and its per-sample time offsets are computed from
+//! when the digitizer says the samples happened rather than from when the
+//! event loop got round to asking. A batch of one is stamped `now` exactly.
+//!
+//! The device counters themselves never escape the platform layer: their epoch
+//! is unknown, so only their *differences* are ever read.
+//!
 //! # Proximity is a first-class state
 //!
 //! A pen in proximity with no contact is a **hovering pointer**: it moves,
@@ -256,15 +270,25 @@ pub struct PenPacket {
     pub in_proximity: bool,
     /// Whether the tip is touching the surface.
     pub down: bool,
-    /// The backend's timestamp **on the tree's timeline**, or
-    /// [`EventTime::ZERO`] when it has none.
+    /// The device's own millisecond counter, on whatever clock the OS uses,
+    /// or `None` from a source that has no clock at all.
     ///
-    /// Both shipped shims stamp `ZERO`: Wayland's `frame` time and Win32's
-    /// `dwTime` are millisecond counters on device clocks with no known offset
-    /// from the tree's epoch, and inventing one would be a lie dressed as
-    /// precision. The translator then stamps the poll's `now`, which is the
-    /// tree's own clock and is never more than one event-loop turn late.
-    pub time: EventTime,
+    /// Deliberately **not** an [`EventTime`]: the epoch is unknown. Wayland's
+    /// `frame` time is the compositor's, Win32's `dwTime` is
+    /// `GetTickCount`'s, and neither has a known offset from the tree's epoch,
+    /// so as an absolute this number is a lie dressed as precision.
+    ///
+    /// **Within one drained batch it is exact as a relative**, and that is the
+    /// only way it is ever read: [`back_date`] places a batch on the tree's
+    /// timeline by anchoring the newest packet at the poll's `now` and walking
+    /// backwards through these deltas. That is what stops twenty packets
+    /// spanning one drain from all claiming a single instant, which is what
+    /// they did while this field did not exist.
+    ///
+    /// A `u32` because both platforms report one, wrap included: `back_date`
+    /// reads the deltas with `wrapping_sub`, so a counter rolling over inside
+    /// a batch costs nothing.
+    pub device_time_ms: Option<u32>,
 }
 
 impl PenPacket {
@@ -279,7 +303,7 @@ impl PenPacket {
             buttons: PenButtons::NONE,
             in_proximity: true,
             down: false,
-            time: EventTime::ZERO,
+            device_time_ms: None,
         }
     }
 
@@ -297,6 +321,124 @@ impl PenPacket {
         self.down = true;
         self.pressure = pressure.clamp(0.0, 1.0);
         self
+    }
+
+    /// This packet stamped with the device's own millisecond counter.
+    ///
+    /// The value a shim reads off the digitizer — Wayland's `frame` time,
+    /// Win32's `dwTime`. See [`device_time_ms`](Self::device_time_ms) for why
+    /// it stays a raw counter rather than becoming an [`EventTime`].
+    pub const fn at_device_ms(mut self, ms: u32) -> Self {
+        self.device_time_ms = Some(ms);
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Placing a drained batch on the tree's timeline
+// ---------------------------------------------------------------------------
+
+/// A device delta longer than this is read as the counter having run
+/// *backwards* — an out-of-order stamp, or a counter reset — rather than as a
+/// real pause inside one drained batch.
+///
+/// The number only has to separate a plausible forward delta from the ~4.29
+/// billion a `wrapping_sub` yields when `cur < prev`, so it is set generously.
+/// A drained batch spans one [`PEN_POLL_INTERVAL`] in the steady state; ten
+/// seconds inside one drain is already nonsense.
+pub const MAX_DEVICE_GAP_MS: u64 = 10_000;
+
+/// Place a drained batch of packets on the tree's timeline, newest at `now`.
+///
+/// `device_ms` is each packet's [`PenPacket::device_time_ms`], **oldest
+/// first**, exactly as [`PenSource::poll`] appends them. The result is the
+/// same length and the same order.
+///
+/// The rule:
+///
+/// - The newest packet is `now`. It is the one the poll's clock actually
+///   describes, and a batch of one is therefore stamped `now` exactly — which
+///   is what every packet was stamped before this function existed.
+/// - Each earlier packet sits at the device's own delta before the one after
+///   it, read with `wrapping_sub` so a `u32` counter rolling over inside the
+///   batch costs nothing. A delta past [`MAX_DEVICE_GAP_MS`] is the counter
+///   running backwards and falls through to the step below.
+/// - Where either neighbour reports no device clock, the step is one
+///   [`PEN_POLL_INTERVAL`] divided evenly across the batch, so the whole batch
+///   still fits inside the window it was buffered in.
+/// - Times saturate at [`EventTime::ZERO`] and never exceed `now`.
+///
+/// Monotone non-decreasing by construction, and **strictly** increasing
+/// whenever the device's own stamps strictly increase. Two packets the
+/// digitizer stamped in the same millisecond stay equal: that is what the
+/// device said, and inventing a gap would be inventing precision.
+///
+/// Pure, so the rule is testable with no digitizer:
+///
+/// ```
+/// use teksilo_platform::pen::back_date;
+/// use teksilo_core::pointer::EventTime;
+///
+/// let now = EventTime::from_millis(1_000);
+/// assert_eq!(
+///     back_date(now, &[Some(40), Some(44), Some(52)]),
+///     vec![
+///         EventTime::from_millis(988),
+///         EventTime::from_millis(992),
+///         now,
+///     ],
+/// );
+/// // A batch of one is `now`.
+/// assert_eq!(back_date(now, &[Some(7)]), vec![now]);
+/// ```
+pub fn back_date(now: EventTime, device_ms: &[Option<u32>]) -> Vec<EventTime> {
+    let mut out = Vec::with_capacity(device_ms.len());
+    back_date_into(now, device_ms, &mut out);
+    out
+}
+
+/// [`back_date`] into a caller-owned buffer, so the pen pump allocates nothing
+/// per drain.
+///
+/// `out` is cleared first and left the same length as `device_ms`.
+pub fn back_date_into(now: EventTime, device_ms: &[Option<u32>], out: &mut Vec<EventTime>) {
+    out.clear();
+    let count = device_ms.len();
+    if count == 0 {
+        return;
+    }
+    // One poll interval divided evenly is the step wherever the device says
+    // nothing — `count`, not `count - 1`, so even the oldest packet stays
+    // strictly inside the interval it was buffered in.
+    let step = PEN_POLL_INTERVAL / count as u32;
+
+    // Pass one: a relative timeline, `EventTime` standing in for a `Duration`
+    // since the batch's own start so no second buffer is needed.
+    let mut elapsed = std::time::Duration::ZERO;
+    out.push(EventTime::from_duration(elapsed));
+    for index in 1..count {
+        let advance = match (device_ms[index - 1], device_ms[index]) {
+            (Some(previous), Some(current)) => {
+                let delta = u64::from(current.wrapping_sub(previous));
+                if delta <= MAX_DEVICE_GAP_MS {
+                    std::time::Duration::from_millis(delta)
+                } else {
+                    step
+                }
+            }
+            _ => step,
+        };
+        elapsed = elapsed.saturating_add(advance);
+        out.push(EventTime::from_duration(elapsed));
+    }
+
+    // Pass two: slide the timeline so its newest entry lands on `now`.
+    let span = elapsed;
+    for slot in out.iter_mut() {
+        // `span >= slot` always: the timeline is non-decreasing and `span` is
+        // its last entry.
+        let before_now = span - slot.as_duration();
+        *slot = EventTime::from_duration(now.as_duration().saturating_sub(before_now));
     }
 }
 
@@ -319,6 +461,17 @@ pub trait PenSource: std::fmt::Debug {
     ///
     /// Appending rather than returning a `Vec` lets the caller reuse one
     /// scratch buffer for the life of the window.
+    ///
+    /// **Oldest first is load-bearing**, not a convenience: the caller reads
+    /// the run as one timeline and back-dates it from the last entry (see
+    /// [`back_date`]). A source whose OS hands it the newest entry first —
+    /// Win32's `GetPointerPenInfoHistory` does exactly that — reverses before
+    /// appending.
+    ///
+    /// Each packet should carry the device's own stamp in
+    /// [`PenPacket::device_time_ms`] where the platform reports one. A source
+    /// that leaves it `None` is not wrong; its batch is simply spread evenly
+    /// over one [`PEN_POLL_INTERVAL`] instead of by the device's deltas.
     fn poll(&mut self, out: &mut Vec<PenPacket>);
 
     /// What this source reports. Defaults to [`PenCaps::NONE`], which is the
@@ -445,6 +598,135 @@ mod tests {
             "a poll interval at or past the {STOP_GAP:?} stop gap clears the \
              velocity history between samples"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // back_date
+    // -----------------------------------------------------------------------
+
+    /// The invariant the old behaviour got right and a back-dating design must
+    /// not break: one packet is the poll's clock, exactly.
+    #[test]
+    fn a_batch_of_one_is_the_polls_own_clock() {
+        let now = EventTime::from_millis(1234);
+        assert_eq!(back_date(now, &[Some(99_000)]), vec![now]);
+        assert_eq!(back_date(now, &[None]), vec![now]);
+        assert!(back_date(now, &[]).is_empty());
+    }
+
+    /// The defect this exists to kill: every packet in a drain claiming one
+    /// instant. With the device's own stamps the batch is strictly increasing
+    /// and carries the digitizer's spacing, not the poll's.
+    #[test]
+    fn a_batch_keeps_the_devices_own_spacing() {
+        let now = EventTime::from_millis(1_000);
+        let times = back_date(now, &[Some(40), Some(44), Some(52), Some(53)]);
+        assert_eq!(
+            times,
+            vec![
+                EventTime::from_millis(987),
+                EventTime::from_millis(991),
+                EventTime::from_millis(999),
+                now,
+            ]
+        );
+        for pair in times.windows(2) {
+            assert!(pair[1] > pair[0], "{times:?} must strictly increase");
+        }
+    }
+
+    /// A device whose counter rolls over mid-batch is still a forward stroke.
+    /// `wrapping_sub` is what makes the `u32` safe to subtract.
+    #[test]
+    fn a_wrapping_counter_is_still_a_forward_delta() {
+        let now = EventTime::from_millis(500);
+        let times = back_date(now, &[Some(u32::MAX - 3), Some(u32::MAX), Some(4)]);
+        assert_eq!(
+            times,
+            vec![
+                EventTime::from_millis(492),
+                EventTime::from_millis(495),
+                now,
+            ],
+            "MAX-3 → MAX is 3 ms and MAX → 4 is 5 ms across the wrap"
+        );
+    }
+
+    /// A stamp that goes *backwards* is not a 49-day pause. It falls through
+    /// to the even step rather than back-dating the batch into the last
+    /// century.
+    #[test]
+    fn a_backwards_stamp_falls_back_to_the_even_step() {
+        let now = EventTime::from_millis(100);
+        let times = back_date(now, &[Some(900), Some(100)]);
+        let step = PEN_POLL_INTERVAL / 2;
+        assert_eq!(
+            times,
+            vec![EventTime::from_duration(now.as_duration() - step), now]
+        );
+    }
+
+    /// No device clock at all: the batch is still spread, because the packets
+    /// are separate digitizer frames and calling them simultaneous is the
+    /// original bug in miniature.
+    #[test]
+    fn a_batch_with_no_device_clock_divides_the_poll_interval() {
+        let now = EventTime::from_millis(100);
+        let times = back_date(now, &[None, None, None]);
+        let step = PEN_POLL_INTERVAL / 3;
+        assert_eq!(
+            times,
+            vec![
+                EventTime::from_duration(now.as_duration() - step * 2),
+                EventTime::from_duration(now.as_duration() - step),
+                now,
+            ]
+        );
+        // The whole batch stays inside the window it was buffered in.
+        assert!(now.saturating_since(times[0]) < PEN_POLL_INTERVAL);
+    }
+
+    /// A source that stamps some packets and not others is pathological, not
+    /// impossible. It must still come out ordered.
+    #[test]
+    fn a_partly_stamped_batch_stays_monotone() {
+        let now = EventTime::from_millis(1_000);
+        let times = back_date(now, &[Some(10), None, Some(30), Some(31)]);
+        assert_eq!(times.len(), 4);
+        for pair in times.windows(2) {
+            assert!(pair[0] <= pair[1], "{times:?} must not go backwards");
+        }
+        assert_eq!(*times.last().unwrap(), now);
+    }
+
+    /// Equal device stamps stay equal. Two packets the digitizer stamped in
+    /// the same millisecond really were in the same millisecond, and
+    /// manufacturing a gap would be manufacturing precision.
+    #[test]
+    fn equal_device_stamps_stay_equal() {
+        let now = EventTime::from_millis(50);
+        assert_eq!(back_date(now, &[Some(7), Some(7)]), vec![now, now]);
+    }
+
+    /// Nothing is ever placed in the future, and nothing underflows the epoch.
+    #[test]
+    fn the_batch_is_clamped_to_the_epoch_and_to_now() {
+        let now = EventTime::from_millis(2);
+        let times = back_date(now, &[Some(0), Some(500), Some(1_000)]);
+        assert_eq!(times, vec![EventTime::ZERO, EventTime::ZERO, now]);
+        assert!(times.iter().all(|&t| t <= now));
+    }
+
+    /// `back_date_into` is the allocation-free twin, and answers identically.
+    #[test]
+    fn the_into_form_agrees_with_the_allocating_one() {
+        let now = EventTime::from_millis(777);
+        let stamps = [Some(1), Some(3), None, Some(9)];
+        let mut buffer = vec![EventTime::from_millis(42); 9];
+        back_date_into(now, &stamps, &mut buffer);
+        assert_eq!(buffer, back_date(now, &stamps));
+        back_date_into(now, &[], &mut buffer);
+        assert!(buffer.is_empty(), "an empty drain clears the buffer");
     }
 
     #[test]

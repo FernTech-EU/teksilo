@@ -635,7 +635,9 @@ revisited against 0.31's own phase reporting.
 `crates/teksilo-platform/tests/backend_conformance.rs` runs *recorded* winit
 vectors — a Windows two-finger `WM_TOUCH` sequence, an X11 first touch with its
 phantom `CursorMoved`, a macOS wheel-with-momentum ordering, an OS contact id
-reused across two taps, a Wayland cancel — through six invariants:
+reused across two taps, a Wayland cancel — plus recorded pen sessions driven
+through `poll_pen`, one of them a **coalesced batch** arriving in a single drain
+with the device's own stamps on it, through six invariants:
 
 1. **Identity is unique across OS id reuse.**
 2. **Cancel completeness** — every `Down` is terminated by exactly one `Up` or
@@ -684,6 +686,44 @@ caller drains them once per event-loop turn. That keeps the OS callbacks free of
 Teksilo state, and it hands the translator the caller's clock rather than a
 device one, which is what the one-clock rule (§2) demands.
 
+**A drain is not one instant.** The packets in it are separate digitizer frames
+that happened at separate times, and a poll that stamps every one of them with
+its single `now` — which is what `poll_pen` did — collapses a whole stroke onto
+one timestamp. Everything computed from the gaps between samples is then
+computed from zero: velocity, any temporal smoothing, and the per-sample time
+offsets an ink representation stores.
+
+Each packet therefore carries the device's own millisecond counter in
+`PenPacket::device_time_ms` — Wayland's `frame` time, Win32's `dwTime` — and
+`pen::back_date` turns a drained batch into one `EventTime` per packet:
+
+- The **newest packet is `now`**. It is the one the poll's clock actually
+  describes, so a batch of one is stamped `now` exactly, which is what every
+  packet used to get.
+- Each earlier packet sits at the device's own delta before the one after it,
+  read with `wrapping_sub` so a `u32` counter rolling over inside the batch
+  costs nothing. A delta long enough to be the counter running *backwards*
+  falls through to the step below rather than back-dating the stroke into the
+  last century.
+- Where a packet reports no device clock at all, the step is one
+  `PEN_POLL_INTERVAL` divided evenly across the batch — so the run still fits
+  inside the window it was buffered in, and separate frames are still separate
+  instants.
+- One clamp on top: **no sample is stamped earlier than the translator's
+  previous `now`**. A shim filling its buffer from its own thread can hand over
+  a packet the device stamped before the last drain returned, and this window
+  has already told the tree that time had reached `now`. Invariant 3 of the
+  conformance suite (§5.7) — time is monotone — is a promise to every consumer
+  downstream.
+
+The device counters themselves never escape the platform layer. Their epoch is
+unknown — Wayland's is the compositor's, Win32's is `GetTickCount`'s — so as an
+absolute each is a lie dressed as precision, and only their *differences* are
+ever read. That is why `device_time_ms` is a raw `u32` and not an `EventTime`,
+and why `TranslationState::translate_pen_packet` takes the tree-timeline time
+as an argument instead of reading one off the packet: the caller owns the
+clock, always.
+
 A `PenPacket` is a **level, not an edge**: it describes the tool's whole state
 at one instant, and the translator derives the transitions by comparing
 consecutive packets. Both backends produce that shape naturally (Wayland
@@ -697,12 +737,19 @@ off switch is not installing a source.
 
 ### 6.2 The support matrix
 
-| | pen at all | tool kind | pressure | tilt | twist | contact patch |
-| --- | --- | --- | --- | --- | --- | --- |
-| Wayland | `zwp_tablet_v2` | yes | yes | yes | yes | — |
-| Windows | `WM_POINTER*` subclass | yes | yes | yes | yes | **yes** (touch) |
-| X11 | — | no | no | no | no | no |
-| macOS | — | no | no | no | no | no |
+| | pen at all | tool kind | pressure | tilt | twist | contact patch | per-sample time | coalesced packets |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Wayland | `zwp_tablet_v2` | yes | yes | yes | yes | — | `frame`'s `time` | one packet per `frame`, all drained |
+| Windows | `WM_POINTER*` subclass | yes | yes | yes | yes | **yes** (touch) | `dwTime` | `GetPointerPenInfoHistory` |
+| X11 | — | no | no | no | no | no | no | no |
+| macOS | — | no | no | no | no | no | no | no |
+
+The last two columns are what makes the stylus rate real rather than nominal.
+Wayland delivers one packet per `frame` into an accumulating queue and the poll
+drains all of them, so the full 200-360 Hz stream already reaches the widget
+tree. Windows delivers one *message* per display frame with the rest folded into
+its history buffer, which is why the shim reads that buffer (§6.6). Both then
+get their own timeline (§6.1).
 
 A source folds its capabilities into the window's `BackendCaps`, raising
 `reports_pen_kind` / `reports_pressure` / `reports_tilt` / `reports_twist`. It
@@ -818,6 +865,17 @@ time for an already-plugged tablet, within one idle interval for one plugged in
 later, which is well before a hand can reach the pen. Nothing is dropped in that
 window; the events are buffered in our queue and dispatched at the next look.
 
+**The `frame` carries the time.** `tablet-v2.xml` defines `frame`'s `time`
+argument as "the time of the event with millisecond granularity", and since a
+`frame` is exactly what commits a `PenPacket`, that stamp is the packet's. It
+reaches `PenPacket::device_time_ms` and is read only as a difference (§6.1). The
+one packet with no frame behind it is the leave a `removed` tool synthesises —
+a removed tool never frames again, so the leave is committed on the spot,
+carrying the last frame's stamp. A tool removed **before** it ever framed
+carries no stamp because it produces no packet: nothing framed, so no hover was
+ever announced, and `commit`'s `!in_proximity && !reported_proximity` guard
+retracts nothing rather than synthesising an undated leave.
+
 Motion arrives in **surface-local** coordinates, which on Wayland are already
 logical — the compositor has divided by the buffer scale. So this arm passes
 positions straight through, where the Windows arm reads screen *physical* pixels
@@ -884,6 +942,38 @@ into `PointerAxes::contact` for the matching winit `Touch`. This is the one
 place a *pen* source answers a question about a finger, and it is worth the
 oddity: nothing else in winit 0.30 can answer it.
 
+**A message is not a packet.** Windows coalesces the digitizer packets that
+arrive between two window messages and reports how many in
+`POINTER_INFO::historyCount`; `GetPointerPenInfo` — the singular form — hands
+back only the newest of them. A shim built on that alone is capped at the window
+message rate, roughly the display's, no matter how fast the tablet is, and every
+intermediate packet's pressure and tilt goes with it. So the shim calls
+`GetPointerPenInfoHistory` whenever the count says there is more, and appends the
+whole run.
+
+Two details of that API are worth stating because getting either wrong is
+silent:
+
+- **`historyCount` is read from the `POINTER_INFO`**, not guessed. `1` means
+  nothing was coalesced (and `0` is what a driver that does not fill the field
+  leaves behind); either way the extra call is skipped, because it would buy one
+  duplicate packet. Above that, the count is clamped to
+  `MAX_PEN_HISTORY_ENTRIES` before it sizes a buffer — a length a driver writes
+  is not a length to allocate from.
+- **The array comes back newest-first.** `PenSource::poll` promises oldest-first,
+  because the caller reads a drained batch as one forward timeline and back-dates
+  it from the last entry. `decode::decode_pen_history` is the reversal between
+  the two conventions, and it is the single most reversible mistake in the file:
+  get it wrong and every stroke is drawn backwards, with its pressure ramp
+  inverted and its velocity pointing the wrong way, which looks like a rendering
+  bug rather than a sort order. Four tests fail if the `reverse()` goes away.
+
+Each history entry is a whole `POINTER_PEN_INFO` with its own `dwTime`, its own
+pressure and its own tilt — which is the entire reason to make the extra call.
+The leave path (`WM_POINTERLEAVE`) deliberately reads no history: a leave is one
+transition, not a stroke, and replaying its coalesced positions would say the
+tool left several times.
+
 **Normalisations.** `POINTER_PEN_INFO::pressure` is `0..=1024` (`0 → 0.0`,
 `512 → 0.5`, `1024 → 1.0`); `tiltX` / `tiltY` are `-90..=90` degrees;
 `rotation` is `0..=359` degrees and becomes `twist`. An axis whose `PEN_MASK`
@@ -908,18 +998,53 @@ the *decoding* is tested target-independently:
   Windows, the module asserts every offset against `windows-rs`'s own
   `POINTER_PEN_INFO` with `offset_of!`, so a wrong constant is a build failure
   on the platform that matters.
+  The same split carries the coalescing history: `decode_pen_history` takes the
+  `&[u8]` the OS would have filled and returns decoded entries, so its
+  newest-first-to-oldest-first reversal, its short-buffer handling and its
+  clamped request size are all exercised from Linux against synthesised
+  `POINTER_PEN_INFO` images. What the Windows target contributes is the other
+  jaw of the pincer: `offset_of!(POINTER_INFO, historyCount) == HISTORY_COUNT`
+  is a `const` assertion, so `cargo check --target x86_64-pc-windows-msvc`
+  fails on a wrong offset from a host with no Windows on it.
 - `pen/wayland.rs` keeps all its logic in `ToolState`, which knows nothing about
-  wayland-client and is driven by recorded `zwp_tablet_tool_v2` sequences. The
-  `Dispatch` impls do one thing: translate a protocol event into a `ToolEvent`
-  and hand it over.
+  wayland-client and is driven by recorded `zwp_tablet_tool_v2` sequences.
+  Below it, `translate_tool_event` is tested **at the protocol layer**, against
+  real `zwp_tablet_tool_v2::Event` values built in the test: the enum is plain
+  data, so a `Frame`, a `Motion`, a `Button` or a `Type` can be constructed on a
+  host with no compositor and pushed through the decode. That test exists
+  because the decode is not a variant rename — it moves *numbers*, and a dropped
+  field compiles and runs. It is exactly how the frame stamp went missing: the
+  arm read `E::Frame { .. }` and the compositor's own millisecond clock never
+  reached the packet, so a whole drained batch claimed one instant. Every arm
+  that reads a field is now pinned, including the ones deliberately dropped
+  (`distance`, `slider`, `wheel`, the identity burst), so a drop stays a
+  decision rather than becoming an accident.
+  The one exception is `proximity_in`, which carries live `zwp_tablet_v2` and
+  `wl_surface` proxies: a `Proxy` cannot exist without a connection, so that arm
+  has no off-device test and would need a fake Wayland server to get one. It is
+  the safest arm to leave uncovered — `ToolEvent::ProximityIn` has no default
+  for `surface`, so a decode that stopped reading it would not compile, and one
+  that read the *wrong* surface would put every stroke in the wrong window. What
+  *consumes* the id is covered.
+  What is still untested by construction is the glue in the `Dispatch` impls:
+  look the tool up by `ObjectId`, call `ToolState::apply`, drop a removed tool.
+  It transforms nothing, and reaching it needs a proxy.
 - The translator's proximity machine is tested through a scripted `PenSource`,
   so hover, contact, buttons, tool change and `cancel_all` are all covered with
-  no device at all.
+  no device at all — and so is the batch timeline: a scripted drain carrying the
+  device stamps a digitizer would produce must come out strictly increasing, at
+  the device's own spacing, with the newest sample on the poll's clock.
+- `pen::back_date` is a pure function over `&[Option<u32>]`, so the placement
+  rule itself — wrap, backwards stamp, missing clock, equal stamps, the epoch
+  and `now` clamps — is unit-tested with no digitizer, no shim and no
+  translator.
 
 What none of that covers is the OS boundary itself: that the subclass installs
 alongside AccessKit's, that a real compositor's tablet seat behaves as the
 protocol says, that a Wacom's `dwTime` and frame cadence are what the
-documentation claims. Those belong on a hardware checklist, not in CI.
+documentation claims, and that `GetPointerPenInfoHistory` really orders its
+array the way Microsoft documents. Those belong on a hardware checklist, not in
+CI.
 
 ### 6.8 Both shims have an expiry date
 
@@ -1302,6 +1427,20 @@ tell a right answer from a missing one:
   but the arms that call it need a compositor with a tablet manager, so
   deleting the call leaves the suite green while a real stylus drops to the
   idle rate.
+- the `proximity_in` arm of `translate_tool_event` — it carries two live
+  protocol objects (`zwp_tablet_v2`, `wl_surface`) and a `Proxy` cannot exist
+  without a connection, so the line reading `surface.id().protocol_id()` has no
+  off-device test short of a fake Wayland server. Measured, not assumed:
+  deleting the arm leaves the suite green. It is the **only** arm of either the
+  decode or the fold for which that is still true — every other arm of
+  `translate_tool_event`, `ToolState::apply` and `ToolState::commit` was mutated
+  one at a time and each reddens a named test. The mitigations are that the
+  field is not droppable (`ToolEvent::ProximityIn` has no default for `surface`,
+  so a decode that stopped reading it would not compile) and that reading the
+  *wrong* surface puts every stroke in the wrong window, which is loud rather
+  than silent; the routing that consumes the id is covered by
+  `a_tool_over_a_sibling_window_is_not_ours` and
+  `a_new_proximity_session_starts_clean`.
 
 External drag-and-drop adds its own, all in the same class — the answer is a
 protocol behaviour no headless host can produce:

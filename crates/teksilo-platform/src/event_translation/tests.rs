@@ -1245,6 +1245,148 @@ fn a_pen_stamps_the_polls_clock_when_the_device_has_none() {
     assert_eq!(state.now(), now);
 }
 
+// ---------------------------------------------------------------------------
+// A drained batch is not one instant
+// ---------------------------------------------------------------------------
+
+/// **The defect this section exists for.** A poll drains everything the shim
+/// buffered since the last one, and those packets are separate digitizer
+/// frames at separate times. Stamping them all with the poll's single `now` —
+/// which is what this did — collapses a whole stroke onto one instant and
+/// destroys every velocity, smoothing and time-offset computation downstream.
+///
+/// Delete the back-dating in `poll_pen` and this reddens on the first
+/// assertion.
+#[test]
+fn a_drained_batch_carries_the_devices_own_times_not_the_polls() {
+    // Six packets 4 ms apart on the device's clock: a 250 Hz stylus drawing
+    // through one 20 ms event-loop turn.
+    let packets: Vec<PenPacket> = (0..6)
+        .map(|i| hover(10.0 + i as f32, 20.0).at_device_ms(7_000 + i * 4))
+        .collect();
+    let mut state = state_with_pen(packets);
+
+    let now = EventTime::from_millis(50_000);
+    let samples = state.poll_pen(now);
+    let times: Vec<EventTime> = pointers(&samples)
+        .iter()
+        .map(|sample| sample.pointer.time)
+        .collect();
+
+    assert_eq!(times.len(), 6, "one sample per packet");
+    for pair in times.windows(2) {
+        assert!(
+            pair[1] > pair[0],
+            "every sample must be strictly later than the one before it: {times:?}"
+        );
+    }
+    assert_eq!(
+        times
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        times.len(),
+        "and therefore all distinct: {times:?}"
+    );
+
+    // The spacing is the digitizer's, exactly.
+    for pair in times.windows(2) {
+        assert_eq!(pair[1].saturating_since(pair[0]), Duration::from_millis(4));
+    }
+    // The newest packet is the one the poll's clock actually describes.
+    assert_eq!(*times.last().unwrap(), now);
+    assert_eq!(
+        now.saturating_since(times[0]),
+        Duration::from_millis(20),
+        "the batch spans the 20 ms the device says it does"
+    );
+}
+
+/// The same run through a source that reports no device clock. The batch is
+/// still spread — the packets are still separate frames — but over one poll
+/// interval rather than over a span nobody measured.
+#[test]
+fn a_drained_batch_with_no_device_clock_is_still_not_one_instant() {
+    let mut state = state_with_pen(vec![hover(1.0, 1.0), hover(2.0, 2.0), hover(3.0, 3.0)]);
+    let now = EventTime::from_millis(9_000);
+    let samples = state.poll_pen(now);
+    let times: Vec<EventTime> = pointers(&samples)
+        .iter()
+        .map(|sample| sample.pointer.time)
+        .collect();
+
+    assert_eq!(times.len(), 3);
+    for pair in times.windows(2) {
+        assert!(pair[1] > pair[0], "{times:?} must strictly increase");
+    }
+    assert_eq!(*times.last().unwrap(), now);
+    assert!(
+        now.saturating_since(times[0]) < crate::pen::PEN_POLL_INTERVAL,
+        "a batch nobody timed still fits in the window it was buffered in"
+    );
+}
+
+/// Every transition inside one packet shares that packet's time — the `Move`
+/// that positions a press and the `Down` itself are one digitizer frame, and
+/// splitting them across two instants would be inventing a gesture.
+#[test]
+fn the_transitions_of_one_packet_share_its_time() {
+    let mut state = state_with_pen(vec![
+        hover(0.0, 0.0).at_device_ms(100),
+        hover(30.0, 40.0).down_at(0.5).at_device_ms(108),
+    ]);
+    let now = EventTime::from_millis(2_000);
+    let samples = state.poll_pen(now);
+    let pointers = pointers(&samples);
+
+    // enter (packet 1), then move + down (packet 2).
+    assert_eq!(pointers.len(), 3);
+    assert_eq!(pointers[0].pointer.time, EventTime::from_millis(1_992));
+    assert_eq!(pointers[1].pointer.time, now);
+    assert_eq!(pointers[2].pointer.time, now);
+}
+
+/// Invariant 3 of the conformance suite — time is monotone — is a promise to
+/// every consumer downstream. A shim filling its buffer from its own thread
+/// can hand over a packet the device stamped before the last drain returned,
+/// and this window has already said time had reached that point.
+#[test]
+fn back_dating_never_reaches_behind_a_time_already_reported() {
+    let mut state = state_with_pen(vec![hover(1.0, 1.0).at_device_ms(1_000)]);
+    let first = EventTime::from_millis(10_000);
+    assert_eq!(pointers(&state.poll_pen(first))[0].pointer.time, first);
+
+    // The next drain is 2 ms later by the tree's clock but claims 50 ms of
+    // device time: back-dating it honestly would put its oldest sample 48 ms
+    // before a time this window has already reported.
+    state.set_pen_source(Box::new(ScriptedPen::with(vec![
+        hover(2.0, 2.0).at_device_ms(1_002),
+        hover(3.0, 3.0).at_device_ms(1_052),
+    ])));
+    let second = EventTime::from_millis(10_002);
+    let times: Vec<EventTime> = pointers(&state.poll_pen(second))
+        .iter()
+        .map(|sample| sample.pointer.time)
+        .collect();
+
+    assert!(
+        times.iter().all(|&t| t >= first),
+        "no sample may precede {first:?}, which was already reported: {times:?}"
+    );
+    assert_eq!(*times.last().unwrap(), second);
+}
+
+/// `translate_pen_packet` is the public door for a shim Teksilo has not met,
+/// and the tree's clock is the caller's to supply — so a packet fed through it
+/// lands exactly where the caller says, device stamp or no device stamp.
+#[test]
+fn the_public_packet_door_stamps_what_the_caller_says() {
+    let mut state = TranslationState::new();
+    let at = EventTime::from_millis(4_242);
+    let samples = state.translate_pen_packet(&hover(5.0, 6.0).at_device_ms(77), at);
+    assert_eq!(pointers(&samples)[0].pointer.time, at);
+}
+
 #[test]
 fn a_pen_shim_raises_the_windows_capability_row() {
     let mut bare = TranslationState::new();
