@@ -457,6 +457,75 @@ let view = SceneView::new(scene)
 
 ---
 
+## The minimap
+
+[`SceneMinimap`](../crates/teksilo-scene/src/minimap.rs) is a sibling of the
+view, not part of its two-tier tree, so it answers for itself — and it has to,
+because click-to-recentre is its only function.
+
+It emits a `Role::Group` named `"Scene minimap"` whose **value** is where the
+viewport sits:
+
+> Viewport at 42% across, 17% down; showing 25% of the width and 33% of the height
+
+Text rather than `numeric_value` because a 2-D position has no ARIA role and
+four numbers do not fit in one field — the reasoning `HsvCanvas` uses for the
+saturation-and-brightness field, which is this widget's nearest relative in the
+workspace. Read off the same `effective_extent` the picture is projected
+through, and refreshed by an `AccessibilityOnly` binding on the viewport signal
+beside the `RepaintOnly` one, so panning updates the words as well as the
+overlay without a rebuild. `access_readout(|MinimapReadout| …)` replaces the
+phrasing (that is the `tr!` seam); `.access_label(tr!(…))` renames the node
+through the framework's ordinary override chain.
+
+With an `on_click` callback installed it is focusable and advertises five
+actions, all landing in that callback:
+
+| | keyboard | assistive technology |
+| --- | --- | --- |
+| move the view | arrows; `Shift` for a whole viewport | `ScrollLeft` / `ScrollRight` / `ScrollUp` / `ScrollDown` |
+| centre on the content | `Home`, `Enter`, `Space` | `Click` |
+
+`Click` is the position-free half of the tap — an AT client has no point to give
+it, so the primary action is the one destination the widget can name on its own.
+
+Both of those routes announce the resulting position through
+[`EventContext::announce`], because an arrow press on an unannotated graphic is
+otherwise completely silent; the announcement describes the move that was
+*asked for*, since the app owns whether and when the pan lands.
+
+The **pointer** route does not announce. The tap has feedback the other two
+lack — the user picked the destination by aiming at the picture — and
+click-to-recentre is a gesture people repeat, so an utterance per click is a
+metronome over whatever was being read. That matches `HsvCanvas`, which
+announces from its arrows and its custom actions and not from its drag, and the
+data views, whose row reorder announces from the *non-drag* alternative while
+the drop is silent. The workspace's one speaking pointer route is the charts'
+readout, and only for a coarse pointer that pressed and released without
+travelling: that tap is an *inspection* standing in for a hover a finger cannot
+perform, so the utterance is its whole product. A minimap tap is a command, so
+the exception does not reach it. The node's value carries the new position for
+any client that asks.
+
+With **no** callback the node is still emitted — it is a useful read-out — but
+it takes no focus and advertises nothing. Reaching it and focusing it are
+separate questions: a named, valued node is reached by object / browse
+navigation and by the rotor, while Tab is for things you can operate, and a
+read-only minimap answers Tab with no arrow, no `Enter` and no action. That is
+the dead stop the ARIA practices warn about. An app that wants it in the Tab
+order anyway says `.focusable(true)` through the framework's ordinary
+`WidgetBuilder` chain — the default is an opinion, not a refusal.
+
+Pinned by [`crates/teksilo-scene/tests/minimap_a11y.rs`](../crates/teksilo-scene/tests/minimap_a11y.rs),
+which asserts reachability with `test_api::tab_stops_within` rather than by
+focusing the node: `WidgetTree::focus(id)` does not check `focusable`, so
+focusing proves the handlers run and nothing about a keyboard user getting
+there.
+
+[`EventContext::announce`]: ../crates/teksilo-core/src/announcer.rs
+
+---
+
 ## Reference
 
 - Implementation: [`crates/teksilo-scene/src/a11y.rs`](../crates/teksilo-scene/src/a11y.rs),

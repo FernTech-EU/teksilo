@@ -1737,6 +1737,32 @@ def _summary_block(
     return "\n".join(lines)
 
 
+def book_subdir(out_dir: Path, book_src: Path) -> "str | None":
+    """`out_dir` as a book-relative posix path, or `None` when it is outside
+    the book source.
+
+    `SUMMARY.md` is the book's table of contents and every link in it resolves
+    against the book source root (`docs/`, per `book.toml`'s `src`). A run that
+    writes its pages anywhere else — a scratch directory used to diff a
+    regeneration, say — has produced nothing the book contains, so patching
+    `SUMMARY.md` from it can only point chapters at a directory that is not
+    there. `mdbook build` is a pre-commit gate, so the next person to run it
+    fails for a reason that has nothing to do with their change.
+
+    This replaced an `out_dir.name` fallback, which made that silent and
+    plausible: a run into `/tmp/gen` rewrote a whole generated region to
+    `- [Overview](gen/index.md)` and twenty-one sibling links, all valid-looking
+    and all dead.
+
+    Resolves both sides first, so a symlinked scratch path or a relative
+    `--md-dir` is judged by where it actually lands.
+    """
+    try:
+        return out_dir.resolve().relative_to(book_src.resolve()).as_posix()
+    except (ValueError, OSError):
+        return None
+
+
 def patch_summary(summary_path: Path, block: str, begin: str, end: str) -> bool:
     """Replace the `begin`..`end` marked region of SUMMARY.md with `block`.
     Returns False if the markers are absent (caller then prints guidance)."""
@@ -1881,13 +1907,15 @@ def cmd_md_dir(
     )
 
     book_src = REPO_ROOT / "docs"
-    try:
-        md_subdir = out_dir.resolve().relative_to(book_src.resolve()).as_posix()
-    except ValueError:
-        md_subdir = out_dir.name
-    block = _summary_block(reg, parsed, slugs, md_subdir)
+    md_subdir = book_subdir(out_dir, book_src)
     summary = book_src / "SUMMARY.md"
-    if summary.exists() and patch_summary(summary, block, SPEC.marker_begin, SPEC.marker_end):
+    if md_subdir is None:
+        # Outside the book: the pages are not chapters, so the table of
+        # contents is left exactly as it was. See `book_subdir`.
+        note = f"SUMMARY.md untouched — {out_dir} is outside the book source ({book_src})"
+    elif summary.exists() and patch_summary(
+        summary, _summary_block(reg, parsed, slugs, md_subdir), SPEC.marker_begin, SPEC.marker_end
+    ):
         note = "patched docs/SUMMARY.md"
     else:
         note = (
@@ -1986,6 +2014,35 @@ def _test_density_images() -> None:
     assert _density_image_stem("touch_target") == "touch_target"
 
 
+def _test_summary_scope() -> None:
+    """`--md-dir` patches `SUMMARY.md` only for an output directory inside the
+    book, and leaves the repo's own table of contents alone otherwise."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        book = Path(td) / "docs"
+        (book / "scene").mkdir(parents=True)
+        (book / "widgets" / "extra").mkdir(parents=True)
+        assert book_subdir(book / "scene", book) == "scene", "in-book dir rejected"
+        assert book_subdir(book / "widgets" / "extra", book) == "widgets/extra", "nested dir"
+        assert book_subdir(Path(td) / "gen", book) is None, "scratch dir accepted"
+        assert book_subdir(Path(td), book) is None, "the book's own parent accepted"
+
+    # End to end, against the real tree: a regeneration into a scratch
+    # directory must leave `docs/SUMMARY.md` byte-identical. This is the
+    # failure the rule exists for — a diff run that quietly rewrote the
+    # generated region to links the book does not contain, and an `mdbook
+    # build` gate that then failed for someone else's change.
+    reg = build_registry()
+    summary = REPO_ROOT / "docs" / "SUMMARY.md"
+    before = summary.read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as td:
+        cmd_md_dir(reg, str(Path(td) / "gen"), None, None)
+    assert summary.read_text(encoding="utf-8") == before, (
+        "a --md-dir run outside docs/ rewrote docs/SUMMARY.md"
+    )
+
+
 def run_self_tests() -> int:
     """Smoke tests for the catalog generator (`--test`). stdlib-only, runs
     against the live source tree."""
@@ -1993,6 +2050,7 @@ def run_self_tests() -> int:
 
     _test_prune()
     _test_density_images()
+    _test_summary_scope()
     reg = build_registry()
     fp = reg.module_to_file["button"]
     pf = parse_file(fp, fp.stem, reg.cfg_by_file.get(fp.resolve(), []))
@@ -2141,7 +2199,9 @@ def main(argv: list[str]) -> int:
         metavar="DIR",
         help="Generate one mdBook catalog page per widget into DIR "
         "(e.g. docs/widgets), plus index.md, and patch the generated region of "
-        "docs/SUMMARY.md. Ignores positional widget names (always emits all).",
+        "docs/SUMMARY.md — only when DIR is inside docs/, so a scratch-directory "
+        "run leaves the book's table of contents alone. Ignores positional widget "
+        "names (always emits all).",
     )
     parser.add_argument(
         "--api-base",

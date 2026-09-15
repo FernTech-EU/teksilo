@@ -55,6 +55,13 @@
 //! - **Live colour mutation:** the toolbar's "Recolour swatch" button calls
 //!   `SceneModel::set_item_fill` on Section 5's swatch — a paint-only
 //!   repaint, no scene rebuild.
+//! - **Minimap, as a control:** the bottom-trailing `SceneMinimap` is wired
+//!   with `on_click`, so it is the *interactive* variant rather than the
+//!   read-out. Click it to recentre the view; Tab to it and drive it with the
+//!   arrows (`Shift` for a whole viewport) or `Home` / `Enter` / `Space` to go
+//!   back to the content. The keyboard and assistive-technology routes each
+//!   announce where they left the viewport; the click does not — see
+//!   `SceneMinimap`'s "Accessibility" for why.
 //!
 //! Run with: `cargo run -p scene-showcase`
 
@@ -1013,13 +1020,9 @@ fn build_root() -> impl Widget + 'static {
         let (w, h) = scene_extent();
         Rect::new(0.0, 0.0, w, h)
     });
-    let minimap = SceneMinimap::new(content, view.viewport_in_scene_signal())
-        .items(view.scene().item_thumbnails())
-        .size(240.0, 160.0)
-        .background(Color::new(0.10, 0.11, 0.15, 0.82))
-        .border(Some((Color::new(1.0, 1.0, 1.0, 0.35), 1.0)))
-        .content_outline(Some((Color::new(1.0, 1.0, 1.0, 0.18), 1.0)))
-        .viewport_color(Color::new(0.40, 0.66, 1.0, 0.95));
+    let item_thumbs = view.scene().item_thumbnails();
+    let visible_scene = view.viewport_in_scene_signal();
+    let minimap_zoom = view.zoom_signal();
 
     // Wrap the view in a SceneScrollView so the viewport gains overlay scroll
     // bars. They track pan/zoom and let the user scroll by dragging; native
@@ -1030,6 +1033,56 @@ fn build_root() -> impl Widget + 'static {
         .scroll_bar_mode(ScrollBarMode::Overlay)
         .vertical_policy(ScrollBarPolicy::AsNeeded)
         .horizontal_policy(ScrollBarPolicy::AsNeeded);
+
+    // `on_click` asks the app to **centre the view on this scene point**, and
+    // the minimap's keyboard / AT routes compute their destination and their
+    // announcement on the assumption that it does. `SceneView` has no
+    // one-call "centre here", so drive the camera through the scroll view's
+    // own door: its `scroll_pos_*` signals are the pan the scroll bars write,
+    // expressed in screen pixels from the leading edge of the scrollable
+    // extent, and `max_scroll_*` is exactly how far that extent allows. Going
+    // through them (rather than writing `pan_x_signal` directly) keeps the
+    // move inside the scene's `set_pan_bounds` clamp and leaves the bars in
+    // step with the thumbnail for free.
+    //
+    // The delta is computed in scene units and scaled by zoom: scroll grows as
+    // the content moves toward the viewport's leading edge, which is the same
+    // direction the target is from the current centre.
+    let scroll_x = scrollable.scroll_pos_x_signal().clone();
+    let scroll_y = scrollable.scroll_pos_y_signal().clone();
+    let max_scroll_x = scrollable.max_scroll_x_signal().clone();
+    let max_scroll_y = scrollable.max_scroll_y_signal().clone();
+    let visible_for_click = visible_scene.clone();
+    let recentre_on = move |scene_pt: Point| {
+        let zoom = minimap_zoom.get();
+        if !zoom.is_finite() || zoom <= 0.0 {
+            return;
+        }
+        let centre = visible_for_click.get().center();
+        // `max.max(0.0)` rather than a bare `max`: `f32::clamp` panics on a
+        // NaN bound, and the scroll metrics are the scroll view's numbers,
+        // not ours to assume finite.
+        let to = |pos: f32, delta: f32, max: f32| (pos + delta * zoom).clamp(0.0, max.max(0.0));
+        scroll_x.set(to(
+            scroll_x.get(),
+            scene_pt.x - centre.x,
+            max_scroll_x.get(),
+        ));
+        scroll_y.set(to(
+            scroll_y.get(),
+            scene_pt.y - centre.y,
+            max_scroll_y.get(),
+        ));
+    };
+
+    let minimap = SceneMinimap::new(content, visible_scene)
+        .items(item_thumbs)
+        .size(240.0, 160.0)
+        .background(Color::new(0.10, 0.11, 0.15, 0.82))
+        .border(Some((Color::new(1.0, 1.0, 1.0, 0.35), 1.0)))
+        .content_outline(Some((Color::new(1.0, 1.0, 1.0, 0.18), 1.0)))
+        .viewport_color(Color::new(0.40, 0.66, 1.0, 0.95))
+        .on_click(move |scene_pt, _ctx| recentre_on(scene_pt));
 
     VStack::new()
         .spacing(8.0)
@@ -1065,6 +1118,138 @@ fn main() {
 mod tests {
     use super::*;
     use teksilo::core::WidgetTree;
+    use teksilo::core::widget_id::WidgetId;
+
+    /// Depth-first search for the one widget of a given concrete Rust type.
+    ///
+    /// `widget_type_name` returns the fully-qualified path, so the needle is
+    /// matched as a suffix — that survives the module moving without matching
+    /// a different crate's same-named widget.
+    fn find_by_type(tree: &WidgetTree, from: WidgetId, needle: &str) -> Option<WidgetId> {
+        if tree
+            .widget_type_name(from)
+            .is_some_and(|n| n.ends_with(needle))
+        {
+            return Some(from);
+        }
+        tree.children(from)
+            .into_iter()
+            .find_map(|child| find_by_type(tree, child, needle))
+    }
+
+    /// The showcase's minimap is the **interactive** variant, and the wiring
+    /// behind its `on_click` really moves the camera.
+    ///
+    /// Worth an end-to-end test rather than a reading of the source, because
+    /// every non-pointer route on `SceneMinimap` is gated on an `on_click`
+    /// being installed: focus, the arrow / `Home` / `Enter` / `Space` keys and
+    /// all five advertised AccessKit actions. A showcase that omitted the
+    /// callback would ship the read-only variant, and a reviewer who came here
+    /// to try the arrows would find the minimap takes no focus at all and
+    /// conclude the feature does not work. That is exactly what it did.
+    ///
+    /// Asserting the Tab stop alone would pass on a minimap whose callback did
+    /// nothing, so this taps it and watches the view move. The minimap's own
+    /// accessible value is the probe: it reads the live viewport out of the
+    /// same signal the overlay is drawn from, so it changes if and only if the
+    /// camera did.
+    #[test]
+    fn the_showcase_minimap_is_a_control_that_recentres_the_view() {
+        use teksilo::core::accessibility::widget_id_to_node_id;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
+        let root = tree.add(build_root());
+        tree.layout(SizeProposal::exact(1500.0, 950.0));
+        let _ = tree.render();
+
+        let minimap = find_by_type(&tree, root, "SceneMinimap")
+            .expect("build_root places a SceneMinimap over the scene viewport");
+        assert!(
+            tree.tab_stops_within(root).contains(&minimap),
+            "the showcase minimap must be keyboard-reachable — it is only \
+             focusable when an `on_click` is installed, so this failing means \
+             the demo ships the read-out variant"
+        );
+
+        let position = |tree: &mut WidgetTree| -> String {
+            let update = tree.sync_accessibility();
+            update
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == widget_id_to_node_id(minimap))
+                .and_then(|(_, node)| node.value().map(str::to_owned))
+                .expect("the minimap announces where the viewport is")
+        };
+        let before = position(&mut tree);
+
+        // The view starts at the scene's top-leading corner (pan 0, zoom 1.4),
+        // so a tap well down and across the thumbnail has somewhere to go.
+        let b = tree.bounds(minimap);
+        tree.tap_with(
+            teksilo::tokens::PointerKind::Mouse,
+            Point::new(b.x + b.width * 0.8, b.y + b.height * 0.8),
+        );
+        tree.layout(SizeProposal::exact(1500.0, 950.0));
+        let _ = tree.render();
+
+        assert_ne!(
+            before,
+            position(&mut tree),
+            "tapping the minimap must recentre the view — `on_click` is wired \
+             to the scroll view's scroll position, and the minimap reads the \
+             viewport back out of the signal the camera writes"
+        );
+    }
+
+    /// The keyboard route the module doc advertises works in this tree, not
+    /// only in the widget's own unit tests.
+    ///
+    /// This is the exact thing a reviewer does — run the demo, Tab to the
+    /// minimap, press an arrow — and the thing that silently did nothing
+    /// before, because the arrows are installed alongside the pointer handler
+    /// and neither existed without `on_click`.
+    #[test]
+    fn the_showcase_minimap_moves_the_view_from_the_keyboard() {
+        use teksilo::core::accessibility::widget_id_to_node_id;
+        use teksilo::core::event::{Key, Modifiers, WidgetEvent};
+
+        let mut tree = WidgetTree::new().with_theme(teksilo::presets::intui::light());
+        let root = tree.add(build_root());
+        tree.layout(SizeProposal::exact(1500.0, 950.0));
+        let _ = tree.render();
+
+        let minimap = find_by_type(&tree, root, "SceneMinimap").expect("a minimap");
+        let position = |tree: &mut WidgetTree| -> String {
+            let update = tree.sync_accessibility();
+            update
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == widget_id_to_node_id(minimap))
+                .and_then(|(_, node)| node.value().map(str::to_owned))
+                .expect("the minimap announces where the viewport is")
+        };
+        let before = position(&mut tree);
+
+        // The view starts at the scene's top-leading corner, so both of these
+        // have room to move; `Shift` is the page step, a whole viewport.
+        tree.focus(minimap);
+        for key in [Key::ArrowRight, Key::ArrowDown] {
+            tree.dispatch_event(WidgetEvent::KeyDown {
+                key,
+                modifiers: Modifiers::SHIFT,
+                text: None,
+            });
+        }
+        tree.layout(SizeProposal::exact(1500.0, 950.0));
+        let _ = tree.render();
+
+        assert_ne!(
+            before,
+            position(&mut tree),
+            "Shift+Arrow on the focused minimap must page the view — the demo \
+             has to exercise the keyboard route, not just compile it"
+        );
+    }
 
     #[test]
     fn showcase_root_lays_out_without_panicking() {
