@@ -51,6 +51,7 @@ Mis = "Mis"
 
 # Domain / spec terms
 ALPH = "ALPH"      # WebP container chunk name
+wdth = "wdth"      # OpenType width-axis tag, in the bundled Noto filenames
 Canva = "Canva"    # design tool referenced in styling docs
 Sur = "Sur"        # "Big Sur" — macOS 11, cited throughout the macOS preset
 Wil = "Wil"        # rich-text engine test fixture string

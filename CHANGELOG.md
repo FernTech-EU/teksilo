@@ -62,6 +62,17 @@ one name and that name takes a `WidgetId` or a widget.
   namespace per block, so two bindings sharing a name alias, both attach sites
   resolving to the later widget while the earlier one is built and attached
   nowhere.
+- A root `NOTICE` file records what the theme presets derive from and on what
+  terms: the WinUI theme-resource values under Microsoft's MIT licence, the
+  Material 3 baseline tokens from documentation Google publishes under CC-BY-4.0,
+  the macOS preset's mix of published and measured numbers, and every bundled
+  font with its licence, its copyright line, and whether it is embedded by
+  default.
+- The trademark policy gains a **Third-party trademarks** section: it names the
+  owners of macOS, Fluent, Material Design and Int UI, states that Teksilo is
+  neither affiliated with nor endorsed by any of them, and separates the
+  `fluent` theme preset from Project Fluent, the unrelated localization system
+  behind Teksilo's translations.
 
 ### Changed
 
