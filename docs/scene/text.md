@@ -28,6 +28,16 @@ default for scene text, since a scene has its own pan/zoom. Opt in via
 `.follow_text_scale(true)` for labels that should track the app-wide
 setting instead.
 
+## Accessibility
+
+The item emits a `Role::Label` carrying `Role::TextRun` children, so a
+screen reader can review it by character, word and line, braille can be
+routed into it, and a magnifier can follow it. The per-character extents
+are the layout the last paint drew, projected into window space — real
+when the item is upright under a pan/zoom view, degenerate (present but
+zero-width) when it is rotated, when the view advertises scene-space
+bounds, or before the first paint.
+
 ## When to use
 
 Use `TextItem` for card labels, node titles, annotation text, or any text

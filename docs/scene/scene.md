@@ -60,7 +60,7 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 
 ## Builder methods at a glance
 
-`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `item`, `remove`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_at`, `colliding_items`, `items_along_path`, `items_at`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`
+`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `cascade_budget`, `set_cascade_budget`, `mutation_version`, `structural_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `item`, `remove`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_at`, `colliding_items`, `items_along_path`, `items_at`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`
 
 ## API reference
 
@@ -69,10 +69,12 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 ## `pub enum ItemChange`
 
 A change to an item's state, fired through
-`Scene::item_change_signal` for every mutation. Apps observe
-to wire snap-to-grid, validation, side effects, etc. The model
-is "fire after the change has been applied" — by the time the
-observer sees the event, the Scene already reflects it.
+`Scene::item_change_signal` for every mutation. Apps observe to wire
+validation, persistence, telemetry, mirroring to a data layer, and other
+side effects. The model is "fire after the change has been applied" — by
+the time the observer sees the event, the Scene already reflects it, and
+(when the mutation came through a `SceneModel`) the
+observer may freely read *and* write the scene back.
 
 ```rust
 pub enum ItemChange { /* variants */ }
@@ -93,6 +95,126 @@ pub enum ItemChange { /* variants */ }
 - **`Added`** — `add_item` / `add_widget`: item was inserted.
 - **`PayloadChanged`** — `set_payload`: the type-erased payload of a `Delegated` heavyweight entry was replaced. A `SceneView` rebuilds that entry's widget (re-invokes its delegate) on the next build. Routed through `emit_item_change`, so `mutation_seq` advances and the AT-walk gate notices.
 - **`AppearanceChanged`** — `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight item's paint-only appearance (fill / stroke colour or style) changed. Never moves geometry, so the observing `SceneView` evicts the item's cached frame and repaints **without** relayout or rebuild.
+
+### Methods
+
+#### `pub fn id(&self) -> ItemId`
+
+The item this change is about.
+
+Every variant names exactly one item, so an observer that only needs
+*which* item moved need not match the whole enum. The fan-out's runaway
+detector reads it too: it charges each delivery to the subject it is
+about, so it needs that subject without caring what kind of change it
+is. (Those per-subject counts name the culprit in the panic; the bound
+that trips is a flat total — see `CascadeBudget`.)
+
+## `pub struct CascadeBudget`
+
+The runaway-detection budget for one scene's change fan-out — how much work
+**observers** may generate from one batch before the drain declares the
+cascade non-terminating and panics.
+
+# Why a budget at all
+
+The drain runs until its queue is empty, which is what lets an observer read
+the scene and write it back. An observer whose write never converges
+therefore never empties it, and — unlike `Signal::try_set`, which recurses
+and so blows the stack loudly on its own — this is an iterative loop whose
+only other exit is an empty queue. Unchecked it is a frozen UI thread with
+no diagnostic. The limit is enforced in **every** build profile for that
+reason.
+
+"Never converges" is the precise condition, and it is not the same as
+"unguarded". The geometry mutators already suppress a write that changes
+nothing — `Scene::set_local_pos` returns without emitting when the
+position is unchanged — so an observer that keeps writing the *same*
+position settles on its own. A geometry cascade that does not settle is one
+computing a *different* value every time: an accumulating offset, a rounding
+drift, a spring with no rest state. The `set_a11y_*` mutators do not
+self-suppress; they bump on every call, so there an equality check before
+the call is a real guard.
+
+# One trip condition, and why it is flat
+
+**Total observer-generated deliveries in a single drain**, counted across
+both channels and every subject. Nothing else trips.
+
+Two earlier shapes of this budget each fixed the previous one's false
+positive and bought a worse problem, and the third is why this one is flat:
+
+- A cap on **rounds** aborted a legitimate 300-link settling chain, because a
+  round is what was queued when it began, so an N-link chain costs N rounds.
+- A cap **per subject** moved the limit onto fan-in: a guarded relaxation
+  over a hub passed at 4000 incident edges and aborted at 4200.
+- **Scaling** the per-subject cap with the scene's entry count fixed the
+  fan-in false positive and destroyed the guard, because the bound it
+  resolved grew with the model.
+
+A flat total is the only one of the three that bounds a runaway to the same
+amount of work whatever the scene's size. Measured in release, changing only
+this budget: an unguarded write-back aborts after 100 001 deliveries in a
+10 000-entry scene and in a 50 000-entry one alike, where the budget the
+scaled design resolved for those scenes (640 000 and 3 200 000) let the same
+loop run 6× and 32× longer — 3.10 s and 131 s against 520 ms and 3.95 s. A
+spawner allocates ~100 000 items before tripping at either size, against
+640 002 and **3 200 002** under the scaled budget.
+
+(The flat write-back's wall clock still grows with the scene, and that is the
+*app's* write, not the drain: `Scene::set_local_pos` re-buckets the moved
+subtree, which walks every entry. The identical runaway on the logical-AT
+channel, whose mutator does not, aborts in 4.8 ms at both sizes — that is
+what this loop itself costs. The budget bounds how many times an observer's
+write runs, not what one costs.)
+
+The default also clears every legitimate shape this tier runs by more than an
+order of magnitude: a 4200-edge guarded aggregate is about 4 200 deliveries,
+and a 2000-link chain that re-places eight port magnets and refreshes three
+AT properties per link is about 24 000.
+
+# What it still does not decide
+
+"Guarded cascade that is genuinely enormous" and "unguarded write-back" are
+not distinguishable from the queue alone. This budget does not pretend
+otherwise: it draws the line where the shapes this tier actually runs stop,
+reports the subject with the highest delivery count so the diagnostic points
+somewhere, and
+`SceneModel::set_cascade_budget` is
+the supported answer for a graph that genuinely lives past it. Mechanism in
+the framework, policy in the consumer.
+
+# What is exempt
+
+The caller's own batch — everything already queued when the drain began — is
+not charged, however large. A bulk load, a ten-thousand-item teardown, or a
+scene-wide a11y re-tag inside one `SceneWriteGuard`
+is finite by construction, so charging it would make the budget a cap on
+batch size instead — the mistake a plain delivery counter makes, whose fix is
+to raise it until it catches nothing. Cascade depth and the number of
+*distinct* subjects a cascade touches are not limited either.
+
+```
+use teksilo_scene::{CascadeBudget, SceneModel};
+
+let model = SceneModel::new();
+model.set_cascade_budget(CascadeBudget::new(1_000_000));
+assert_eq!(model.cascade_budget().total, 1_000_000);
+```
+
+```rust
+pub struct CascadeBudget { /* fields */ }
+```
+
+### Methods
+
+#### `pub fn new(total: u64) -> Self`
+
+A budget of `total` observer-generated deliveries per drain, clamped up
+to the smallest usable value.
+
+The clamp is here rather than at the trip so that a nonsensical budget is
+rejected where it is written, instead of producing a panic whose numbers
+describe no cascade that happened.
 
 ## `pub enum SceneLayer`
 
@@ -267,12 +389,52 @@ since it otherwise suppresses per-frame AT re-walks during the animation.
 
 #### `pub fn item_change_signal(&self) -> Signal<ItemChange>`
 
-Reactive notification stream for every Scene mutation. Apps
-observe via `signal.observe(|change| …)` to wire snap-to-grid,
-clamping, validation, and side effects without having to
-poll the Scene each frame. The signal fires *after* the
-mutation has been applied — by the time the observer runs
-the Scene already reflects the new state.
+Reactive notification stream for every Scene mutation. Apps observe via
+`signal.observe(|change| …)` to wire validation, persistence,
+telemetry, or mirroring into a data layer without polling the Scene
+each frame. The signal fires *after* the mutation has been applied — by
+the time the observer runs, the Scene already reflects the new state.
+
+# Notification timing
+
+Where the fan-out happens depends on which door mutated the scene, and
+the difference is exactly the `RefCell` an observer would have to
+re-enter:
+
+- **Through a `SceneModel`** (the normal path,
+  including `SceneWriteGuard`) the mutation
+  runs inside a *write scope*: changes queue in emission order and fan
+  out once the model has released its `borrow_mut()`. An observer may
+  therefore read the scene, and write it back — a write made from an
+  observer queues in turn and is delivered by the same drain, after the
+  changes already queued ahead of it.
+- **Through a bare `&mut Scene`** there is nothing holding a `RefCell`
+  open to escape from, so the fan-out is synchronous, inside the
+  mutator, exactly as before.
+
+  This is safe for a `Scene` you own outright — no second handle to it
+  can exist. It is **not** safe for a `&mut Scene` reborrowed out of a
+  `SceneModel`: a `RefMut` taken from the shared
+  cell leaves `defer_depth` at zero, so observers still run under the
+  live exclusive borrow and one that re-enters the model panics. Take
+  `SceneModel::write_guard` instead —
+  it derefs to `&mut Scene`, so the call sites are identical, and it
+  opens the write scope the observers need.
+
+Either way the notification has been delivered by the time the mutator
+call returns.
+
+# What is not deferred
+
+The scene's constraint signals — `pan_axes_signal`,
+`zoomable_signal`,
+`pan_bounds_signal`,
+`zoom_range_signal` — carry *state*, not
+events (`current_pan_axes` and friends read
+them back), so queueing their writes would make the scene contradict
+itself inside an open write scope. They still fan out synchronously
+under the borrow: an observer on one of those four must not re-enter
+the `SceneModel`.
 
 #### `pub fn a11y_change_signal(&self) -> Signal<u64>`
 
@@ -285,18 +447,61 @@ these changes don't flow through `item_change_signal`
 because they aren't item geometry, and the AT tree is separate from the
 visual scene.
 
+#### `pub fn cascade_budget(&self) -> CascadeBudget`
+
+The runaway-detection budget for this scene's change fan-out.
+
+#### `pub fn set_cascade_budget(&self, budget: CascadeBudget)`
+
+Replace the runaway-detection budget for this scene's change fan-out.
+
+The default is tuned for the graph shapes this tier runs; see
+`CascadeBudget` for the rule and for when raising it is the right
+answer rather than a way to silence a real cycle.
+
+A budget of zero is clamped to the smallest usable one rather than
+stored: it would forbid the reactive write-back this channel exists for,
+and would trip with no cascade for the diagnostic to describe.
+
+Takes effect on the next drain — a budget raised from inside an observer
+does not enlarge the drain already running, which is why the budget is
+read once at its start.
+
 #### `pub fn mutation_version(&self) -> u64`
 
 Monotonic counter of every model mutation applied so far — item geometry
 / visibility / structure (each `ItemChange`) **and** logical-AT
 structure (groups, parents, relations, live, landmarks, categories).
 
-`SceneView` snapshots this each `build()` and only
+Includes the per-frame churn of
+`refresh_dynamic_bounds`; a consumer
+gating an expensive rebuild on "did anything *meaningful* change" wants
+`structural_version` instead. The counter
+wraps; compare for equality, not ordering.
+
+#### `pub fn structural_version(&self) -> u64`
+
+`mutation_version` with the per-frame
+dynamic-bounds churn subtracted out: it advances on every mutation
+**except** the `LocalBoundsChanged` events
+`refresh_dynamic_bounds` emits.
+
+The version to gate an expensive rebuild on.
+`SceneView` snapshots it each `build()` and only
 re-walks the (separate, expensive) AccessKit tree when it has advanced
 since the previous walk — so an actively-animating
 `add_item_dynamic` item, which rebuilds every
-frame, does not issue an AT re-walk per frame. The counter wraps; compare
-for equality, not ordering.
+frame, does not issue an AT re-walk per frame for sub-pixel bounds drift
+a screen reader cannot use.
+
+Naming the exclusion is the point. The alternative — snapshotting
+`mutation_version` before `refresh_dynamic_bounds` and again after, and
+treating the difference as churn — is wrong now that the refresh fans
+its changes out: an observer may legally mutate the scene from that
+fan-out, and its mutation lands inside the bracket where it is
+indistinguishable from churn. Folded into the baseline, an AT-structural
+change made there would never un-gate a re-walk, in that build or any
+later one. The counter wraps; compare for equality, not ordering.
 
 #### `pub fn local_pos(&self, id: ItemId) -> Option<Point>`
 

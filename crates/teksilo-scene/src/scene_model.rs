@@ -25,20 +25,48 @@
 //!
 //! ## Borrow / observer contract
 //!
-//! Every mutator takes `&self`, borrows the inner `RefCell<Scene>` mutably,
-//! mutates, and the borrow drops at the end of the statement. The change
-//! signal fires *inside* that borrow (via `Scene::emit_item_change`), but
-//! `Signal::try_set` snapshots its observers and releases the signal's own
-//! cell before invoking them — so the only rule is: **an observer registered
-//! on [`item_change_signal`](SceneModel::item_change_signal) /
-//! [`a11y_change_signal`](SceneModel::a11y_change_signal) must not re-borrow
-//! the `SceneModel` in its callback.** A `SceneView` observer only bumps its
-//! own per-view signals, so it is safe. Likewise a view **delegate** must not
-//! synchronously mutate the model during a build-time call (the view drops all
-//! model borrows before invoking it; the delegate's *handlers* may mutate
-//! later).
+//! Every mutator takes `&self` and runs through [`SceneModel::write`], which
+//! is the `teksilo-data` **mutate-then-notify** discipline adapted to a borrow
+//! that spans a whole `&mut Scene` method. `ListModel` can scope its
+//! `borrow_mut()` and call `notify` after it (`list_model.rs`); `Scene` cannot,
+//! because the notification is emitted from *inside* a `&mut self` method whose
+//! borrow Rust only releases on return. So the notification is **queued in the
+//! `Scene`** and drained by the owner of the borrow — `write`, or
+//! [`SceneWriteGuard`] — once that borrow has dropped.
+//!
+//! The consequence is the contract app authors actually want: **an observer
+//! registered on [`item_change_signal`](SceneModel::item_change_signal) or
+//! [`a11y_change_signal`](SceneModel::a11y_change_signal) may read the scene
+//! and write it back.** A write made from an observer queues in turn and is
+//! delivered by the same drain, after whatever was already queued ahead of it —
+//! see [`SceneModel::flush_changes`] for ordering, re-entrancy and termination.
+//!
+//! Three doors are **not** covered, each for a stated reason:
+//!
+//! - A bare `&mut Scene` fans out synchronously, because nothing is holding a
+//!   `RefCell` open for it to escape from. For a `Scene` you own outright that
+//!   is safe — no second handle to it can exist. For a `&mut Scene` *reborrowed
+//!   out of a `SceneModel`* it is not: a raw `RefMut` from the shared cell
+//!   leaves the write scope closed, so observers run under the live exclusive
+//!   borrow and one that re-enters the model panics, exactly as every mutator
+//!   used to. [`SceneModel::write_guard`] is the fix and the substitute — it
+//!   derefs to `&mut Scene`, so the call sites are unchanged.
+//! - The four constraint signals (`pan_axes` / `zoomable` / `pan_bounds` /
+//!   `zoom_range`) are scene *state*, read back by `current_pan_axes` and
+//!   friends, so their writes stay synchronous — deferring them would make the
+//!   scene contradict itself inside a write scope. An observer on one of those
+//!   four must not re-enter the `SceneModel`.
+//! - [`with_handlers_mut`](SceneModel::with_handlers_mut) runs the caller's
+//!   closure *inside* the borrow (it hands out a `&mut` into the scene, which
+//!   cannot outlive it), so that closure must not re-enter the `SceneModel`
+//!   either. It is unwind-safe — a panic in the closure cannot strand the write
+//!   scope — but it is not re-entrant.
+//!
+//! A view **delegate** must also not synchronously mutate the model during a
+//! build-time call (the view drops all model borrows before invoking it; the
+//! delegate's *handlers* may mutate later).
 
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect, StrokeStyle, Transform2D};
@@ -52,7 +80,7 @@ use crate::index::SpatialIndex;
 use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
 use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
-use crate::scene::{ItemChange, PanAxes, Scene, SceneLayer};
+use crate::scene::{CascadeBudget, ItemChange, PanAxes, Scene, SceneLayer};
 use teksilo_canvas::Vec2;
 
 /// A shared, cloneable handle to a [`Scene`].
@@ -88,7 +116,280 @@ impl std::fmt::Debug for SceneModel {
     }
 }
 
+/// Write guard over a [`SceneModel`]'s [`Scene`]: `Deref`/`DerefMut` to the
+/// scene, with the deferred-notification contract of a `SceneModel` mutator.
+///
+/// Holding one keeps a *write scope* open, so every notification the edits
+/// produce queues in emission order. On drop the guard closes the scope,
+/// releases the `RefCell` borrow, and **then** fans the whole batch out — so a
+/// block of edits is one notification round, and an observer may read the
+/// scene or write it back.
+///
+/// ```
+/// # use teksilo_scene::{RectItem, SceneModel};
+/// # use teksilo_canvas::{Point, Rect};
+/// let model = SceneModel::new();
+/// let a = model.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+/// {
+///     let mut scene = model.write_guard();
+///     scene.set_local_pos(a, Point::new(10.0, 10.0));
+///     scene.set_visible(a, false);
+/// } // both changes fan out here, in this order
+/// ```
+///
+/// If the thread is unwinding when the guard drops, the scope is closed and
+/// the borrow released but the fan-out is **skipped**: running observers from
+/// a `Drop` during an unwind would abort the process the moment one of them
+/// panicked. The queued changes survive and are delivered by the next
+/// [`flush_changes`](SceneModel::flush_changes) — which a `catch_unwind`
+/// recovery path can call explicitly.
+pub struct SceneWriteGuard<'a> {
+    /// `Some` for the guard's whole life; `None` only inside `Drop`, which
+    /// takes the `RefMut` out in order to release the borrow *before* the
+    /// fan-out.
+    scene: Option<RefMut<'a, Scene>>,
+    model: &'a SceneModel,
+}
+
+impl std::fmt::Debug for SceneWriteGuard<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SceneWriteGuard")
+            .field("len", &self.scene.as_ref().map(|s| s.len()))
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::ops::Deref for SceneWriteGuard<'_> {
+    type Target = Scene;
+    fn deref(&self) -> &Scene {
+        self.scene.as_ref().expect("guard alive outside Drop")
+    }
+}
+
+impl std::ops::DerefMut for SceneWriteGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Scene {
+        self.scene.as_mut().expect("guard alive outside Drop")
+    }
+}
+
+impl Drop for SceneWriteGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(scene) = self.scene.take() {
+            scene.exit_write_scope();
+            drop(scene); // borrow released here, before any observer runs
+        }
+        if std::thread::panicking() {
+            return;
+        }
+        self.model.flush_changes();
+    }
+}
+
 impl SceneModel {
+    // -----------------------------------------------------------------
+    // Write scope / deferred fan-out
+    // -----------------------------------------------------------------
+
+    /// Open a write scope over the scene; see [`SceneWriteGuard`].
+    ///
+    /// The one door for a *block* of edits that must fan out together, and the
+    /// door a `&mut Scene` escape hatch should be built on.
+    pub fn write_guard(&self) -> SceneWriteGuard<'_> {
+        let scene = self.0.borrow_mut();
+        scene.enter_write_scope();
+        SceneWriteGuard {
+            scene: Some(scene),
+            model: self,
+        }
+    }
+
+    /// Mutate the scene under a write scope, then fan out.
+    ///
+    /// The body every `&self` mutator on this type is. Unwind-safe by
+    /// construction: the scope is closed by [`SceneWriteGuard`]'s `Drop`, so a
+    /// panic inside `f` cannot strand the scene in "deferring forever, never
+    /// flushing" — the one way this mechanism could fail silently.
+    fn write<R>(&self, f: impl FnOnce(&mut Scene) -> R) -> R {
+        let mut guard = self.write_guard();
+        let out = f(&mut guard);
+        drop(guard); // release the borrow, then fan out
+        out
+    }
+
+    /// Deliver every queued notification.
+    ///
+    /// Called automatically when a write scope closes, so apps rarely need it.
+    /// The exception is recovering from a caught panic: an unwinding
+    /// [`SceneWriteGuard`] deliberately skips its fan-out, and a panicking
+    /// observer stops the drain where it stood, so a `catch_unwind` boundary
+    /// that intends to keep using the scene calls this once.
+    ///
+    /// # When it does nothing
+    ///
+    /// *Where* it is called from never makes it panic — this is the door a
+    /// recovery path is told to knock on, so it cannot be one that only works
+    /// from some of them. (An observer can still panic once the drain reaches
+    /// it, and so can the runaway budgets below; both are the observer's
+    /// doing, not the call site's.) It is a no-op, and says so rather than
+    /// delivering half a batch, when:
+    ///
+    /// - nothing is queued (overwhelmingly the common case — every mutator that
+    ///   early-returned on an unchanged value, and every per-frame
+    ///   [`refresh_dynamic_bounds`](Self::refresh_dynamic_bounds));
+    /// - **any** borrow on the scene is outstanding. A write scope is the
+    ///   obvious one — it owns its batch and fans out when it closes, so
+    ///   flushing from inside it would deliver a half-finished mutation, and
+    ///   the old implementation's `borrow()` simply panicked there. But a
+    ///   *shared* borrow disqualifies a flush just as firmly, because an
+    ///   observer is allowed to write and a write needs the cell exclusively:
+    ///   draining under a read-only policy closure (`SceneView::focus_order`,
+    ///   `MagnetismConfig`'s predicate) would panic the first observer that
+    ///   took the invitation. So the probe is `try_borrow_mut`, the only
+    ///   question whose answer is "the cell is completely free";
+    /// - a drain is already running, i.e. this call came from inside an
+    ///   observer. The outermost drain owns the queue and picks that observer's
+    ///   changes up on its next round, which is what keeps delivery in emission
+    ///   order rather than depth-first.
+    ///
+    /// # Ordering
+    ///
+    /// FIFO. Observers see changes in the order they were emitted, including
+    /// across a batch — so `remove`'s documented leaves-then-root order, and
+    /// the interleaving of the item and logical-AT channels, both survive.
+    ///
+    /// # Termination
+    ///
+    /// The drain keeps going until the queue is empty, so an observer's own
+    /// writes are always delivered rather than silently dropped. Most cycles
+    /// terminate on their own — `Scene::set_local_pos` and friends early-return
+    /// when the value is unchanged, so the snap-to-grid shape settles in two
+    /// rounds.
+    ///
+    /// An observer that writes on **every** change with no equality guard never
+    /// settles, and is stopped by a budget that panics with a diagnostic naming
+    /// the item at fault.
+    ///
+    /// **What the budget counts is total observer-generated deliveries in one
+    /// drain, and nothing else.** The caller's own batch — everything queued
+    /// before the first observer ran — is free at any size, because it is finite
+    /// by construction; so are cascade depth and the number of distinct subjects
+    /// a cascade touches. A cap on **rounds** would cap how long a legitimate
+    /// chain may be (a settling 300-link chain is 300 rounds); a cap **per
+    /// subject** would cap how wide a graph may be, and scaling that cap with
+    /// the scene makes the work a runaway gets to do scale with the scene too. A
+    /// flat total is the one bound under which a runaway costs the same number
+    /// of deliveries and the same peak memory whatever the model's size, and the
+    /// shapes this tier runs clear it by more than an order of magnitude. See
+    /// [`CascadeBudget`] for the measurements.
+    ///
+    /// Per-subject counts are still kept — they are what lets the panic name the
+    /// culprit, which a round counter never could — but they are diagnostics,
+    /// not a second trip condition.
+    ///
+    /// The budget is **not** debug-only, and this is the one place the
+    /// mechanism deliberately does not copy `Signal::try_set`: `try_set`
+    /// *recurses*, so an unchecked feedback loop there exhausts the stack and
+    /// aborts loudly by itself. This drain is an iterative loop, so an unchecked
+    /// loop here is a frozen UI thread with no diagnostic and no core dump — the
+    /// one failure mode a release build must not have. Trading a hang for a
+    /// panic is not a close call.
+    ///
+    /// The queue is left intact when a budget trips (dropping it would be the
+    /// silent notification loss the whole mechanism exists to prevent), so a
+    /// later flush with the same observer still installed panics again. That is
+    /// the intended reading: the observer, not the flush, is what has to change.
+    ///
+    /// # Unwind
+    ///
+    /// An observer that panics costs exactly its own delivery. Each
+    /// notification leaves the queue immediately before it is handed to the
+    /// signal and is never parked in a local batch, so everything not yet
+    /// delivered is still queued, in order, when the unwind passes through —
+    /// and the next call here delivers it. (A local batch would have its
+    /// untouched tail dropped by the unwind with nothing able to redeliver it:
+    /// the scene would have advanced with no notification, permanently.)
+    ///
+    /// # Coalescing
+    ///
+    /// None. Repeated `LocalPosChanged` for one item are delivered once each.
+    /// Two reasons: the advertised uses of this channel — persistence,
+    /// validation, audit, mirroring to a data layer — are the ones that need
+    /// every event; and collapsing two changes would require merging one's
+    /// `old` with the other's `new`, a transaction semantic this crate does not
+    /// define. A drag is not a reason to reconsider: each pointer sample is its
+    /// own `SceneModel` call, hence its own one-element batch, exactly as
+    /// before. If a transaction layer ever wants coalescing, [`SceneWriteGuard`]
+    /// is already its boundary.
+    ///
+    /// # Lifetime
+    ///
+    /// Queued notifications live in the `Scene`. Dropping the last
+    /// `SceneModel` handle drops the scene and discards anything still queued —
+    /// which can only be a batch abandoned by an unwind, and by then there is
+    /// no scene left to observe.
+    pub fn flush_changes(&self) {
+        let (queue, budget) = {
+            // `try_borrow_mut` is the probe, not `try_borrow`: it is the only
+            // one that answers "is this cell completely free?", and anything
+            // less means an observer taking up the invitation to write would
+            // panic on the borrow. Failure is a no-op by contract — see the
+            // "When it does nothing" section above.
+            let Ok(scene) = self.0.try_borrow_mut() else {
+                return;
+            };
+            if !scene.has_pending_notifications() {
+                return;
+            }
+            // Read here, under the borrow, because the drain below has none
+            // — and read once, so an observer cannot raise its own ceiling
+            // mid-drain.
+            (scene.change_queue(), scene.cascade_budget())
+        };
+        // The borrow above is gone: the observers below run with the scene
+        // free, and may read it or write it back.
+        queue.drain(budget);
+    }
+
+    /// The runaway-detection budget for this scene's change fan-out — how much
+    /// work **observers** may generate from one batch before the drain declares
+    /// the cascade non-terminating and panics.
+    ///
+    /// See [`CascadeBudget`] for the rule and its default.
+    pub fn cascade_budget(&self) -> CascadeBudget {
+        self.0.borrow().cascade_budget()
+    }
+
+    /// Replace the runaway-detection budget for this scene's change fan-out.
+    ///
+    /// The mechanism is in the framework; this is where the policy lives. The
+    /// default — 100 000 observer-generated deliveries per drain — is more than
+    /// an order of magnitude above the legitimate shapes this tier runs, but it
+    /// cannot tell a guarded cascade that is genuinely enormous from an
+    /// unguarded write-back: the two look identical from the queue's side. An
+    /// app whose graph genuinely settles past the default therefore has a
+    /// supported answer here rather than a crash:
+    ///
+    /// ```
+    /// use teksilo_scene::{CascadeBudget, SceneModel};
+    ///
+    /// let model = SceneModel::new();
+    /// model.set_cascade_budget(CascadeBudget::new(1_000_000));
+    /// assert_eq!(model.cascade_budget().total, 1_000_000);
+    /// ```
+    ///
+    /// Raising it to silence a cycle that does **not** settle only postpones
+    /// the freeze it is there to prevent — the drain is still unbounded in
+    /// time, just later. Check the write is guarded first.
+    ///
+    /// A budget of zero is clamped to the smallest usable one rather than
+    /// stored: it would forbid the reactive write-back this channel exists for.
+    ///
+    /// Takes effect on the next drain: a drain already running read its budget
+    /// when it began, so an observer cannot enlarge its own.
+    pub fn set_cascade_budget(&self, budget: CascadeBudget) {
+        self.0.borrow().set_cascade_budget(budget);
+    }
+
     // -----------------------------------------------------------------
     // Construction
     // -----------------------------------------------------------------
@@ -122,15 +423,13 @@ impl SceneModel {
     /// view to build drains it; a second view sharing this model produces no
     /// child for it. For multi-view, use [`add_widget_item`](Self::add_widget_item).
     pub fn add_widget<W: Widget + 'static>(&self, widget: W, rect: Rect) -> ItemId {
-        self.0.borrow_mut().add_widget(widget, rect)
+        self.write(|s| s.add_widget(widget, rect))
     }
 
     /// Multi-view heavyweight item: store a typed `payload`; each view builds
     /// its own widget instance from it via its delegate. Returns the [`ItemId`].
     pub fn add_widget_item<P: 'static>(&self, payload: P, rect: Rect) -> ItemId {
-        self.0
-            .borrow_mut()
-            .add_widget_delegated(Rc::new(payload), rect)
+        self.write(|s| s.add_widget_delegated(Rc::new(payload), rect))
     }
 
     /// Replace the payload of a `Delegated` heavyweight item; every view
@@ -141,7 +440,7 @@ impl SceneModel {
     /// Panics if `id` is unknown, refers to a single-view `add_widget` (Once)
     /// entry, or refers to a lightweight item.
     pub fn set_payload<P: 'static>(&self, id: ItemId, payload: P) {
-        self.0.borrow_mut().set_payload(id, Rc::new(payload));
+        self.write(|s| s.set_payload(id, Rc::new(payload)));
     }
 
     /// The current type-erased payload of a `Delegated` item, if any.
@@ -155,19 +454,19 @@ impl SceneModel {
 
     /// Add a lightweight [`SceneItem`] at `local_pos`.
     pub fn add_item<I: SceneItem + 'static>(&self, item: I, local_pos: Point) -> ItemId {
-        self.0.borrow_mut().add_item(item, local_pos)
+        self.write(|s| s.add_item(item, local_pos))
     }
 
     /// Add a lightweight item with signal-driven (dynamic) bounds.
     pub fn add_item_dynamic<I: SceneItem + 'static>(&self, item: I, local_pos: Point) -> ItemId {
-        self.0.borrow_mut().add_item_dynamic(item, local_pos)
+        self.write(|s| s.add_item_dynamic(item, local_pos))
     }
 
     /// Add an already-boxed lightweight item at `local_pos`. The boxed-`dyn`
     /// counterpart of [`add_item`](Self::add_item), used by
     /// [`SceneListAdapter`](crate::SceneListAdapter).
     pub fn add_boxed_item(&self, item: Box<dyn SceneItem>, local_pos: Point) -> ItemId {
-        self.0.borrow_mut().add_boxed_item(item, local_pos)
+        self.write(|s| s.add_boxed_item(item, local_pos))
     }
 
     // -----------------------------------------------------------------
@@ -176,15 +475,15 @@ impl SceneModel {
 
     /// Move `id` to `local_pos` in its parent's coordinate space; notifies all views.
     pub fn set_local_pos(&self, id: ItemId, local_pos: Point) {
-        self.0.borrow_mut().set_local_pos(id, local_pos);
+        self.write(|s| s.set_local_pos(id, local_pos));
     }
     /// Replace the local bounding rect of `id`; notifies all views.
     pub fn set_local_bounds(&self, id: ItemId, local_bounds: Rect) {
-        self.0.borrow_mut().set_local_bounds(id, local_bounds);
+        self.write(|s| s.set_local_bounds(id, local_bounds));
     }
     /// Set an additional local-to-parent transform (rotation, scale) on `id`; notifies all views.
     pub fn set_transform(&self, id: ItemId, transform: Transform2D) {
-        self.0.borrow_mut().set_transform(id, transform);
+        self.write(|s| s.set_transform(id, transform));
     }
 
     // -----------------------------------------------------------------
@@ -193,19 +492,19 @@ impl SceneModel {
 
     /// Replace the complete [`ItemFlags`] bitset for `id`; notifies all views.
     pub fn set_flags(&self, id: ItemId, flags: ItemFlags) {
-        self.0.borrow_mut().set_flags(id, flags);
+        self.write(|s| s.set_flags(id, flags));
     }
     /// Set or clear a single [`ItemFlags`] bit on `id`; notifies all views.
     pub fn set_flag(&self, id: ItemId, flag: ItemFlags, on: bool) {
-        self.0.borrow_mut().set_flag(id, flag, on);
+        self.write(|s| s.set_flag(id, flag, on));
     }
     /// Show or hide `id` (also hides its descendants); notifies all views.
     pub fn set_visible(&self, id: ItemId, visible: bool) {
-        self.0.borrow_mut().set_visible(id, visible);
+        self.write(|s| s.set_visible(id, visible));
     }
     /// Set the paint opacity of `id` (0.0 = transparent, 1.0 = opaque); notifies all views.
     pub fn set_opacity(&self, id: ItemId, opacity: f32) {
-        self.0.borrow_mut().set_opacity(id, opacity);
+        self.write(|s| s.set_opacity(id, opacity));
     }
 
     // -----------------------------------------------------------------
@@ -217,20 +516,20 @@ impl SceneModel {
     /// a theme role, a `Signal<Color>`, or a `Signal<Role>`. See
     /// [`Scene::set_item_fill`] for the reactive-colour contract.
     pub fn set_item_fill(&self, id: ItemId, fill: impl Into<ColorProp>) {
-        self.0.borrow_mut().set_item_fill(id, fill);
+        self.write(|s| s.set_item_fill(id, fill));
     }
     /// Clear a lightweight item's fill; every view repaints.
     pub fn clear_item_fill(&self, id: ItemId) {
-        self.0.borrow_mut().clear_item_fill(id);
+        self.write(|s| s.clear_item_fill(id));
     }
     /// Replace a lightweight item's stroke (colour + [`StrokeStyle`]) live;
     /// every view repaints (no relayout/rebuild).
     pub fn set_item_stroke(&self, id: ItemId, color: impl Into<ColorProp>, style: StrokeStyle) {
-        self.0.borrow_mut().set_item_stroke(id, color, style);
+        self.write(|s| s.set_item_stroke(id, color, style));
     }
     /// Clear a lightweight item's stroke; every view repaints.
     pub fn clear_item_stroke(&self, id: ItemId) {
-        self.0.borrow_mut().clear_item_stroke(id);
+        self.write(|s| s.clear_item_stroke(id));
     }
 
     // -----------------------------------------------------------------
@@ -239,23 +538,23 @@ impl SceneModel {
 
     /// Set the z-order of `id` within its layer; higher values paint on top.
     pub fn set_z(&self, id: ItemId, z: f32) {
-        self.0.borrow_mut().set_z(id, z);
+        self.write(|s| s.set_z(id, z));
     }
     /// Give `id` the highest z-value in its layer so it paints on top of all siblings.
     pub fn bring_to_front(&self, id: ItemId) {
-        self.0.borrow_mut().bring_to_front(id);
+        self.write(|s| s.bring_to_front(id));
     }
     /// Give `id` the lowest z-value in its layer so it paints beneath all siblings.
     pub fn send_to_back(&self, id: ItemId) {
-        self.0.borrow_mut().send_to_back(id);
+        self.write(|s| s.send_to_back(id));
     }
     /// Move `id` to a different [`SceneLayer`] (background, default, foreground); notifies all views.
     pub fn set_layer(&self, id: ItemId, layer: SceneLayer) {
-        self.0.borrow_mut().set_layer(id, layer);
+        self.write(|s| s.set_layer(id, layer));
     }
     /// Re-parent `child` under `parent` (or under the scene root when `None`); notifies all views.
     pub fn set_item_parent(&self, child: ItemId, parent: Option<ItemId>) {
-        self.0.borrow_mut().set_item_parent(child, parent);
+        self.write(|s| s.set_item_parent(child, parent));
     }
 
     // -----------------------------------------------------------------
@@ -265,11 +564,11 @@ impl SceneModel {
     /// Remove an item and its descendants. Drops any `Delegated` payload `Rc`
     /// and cleans the item's a11y mappings; alive logical children re-root.
     pub fn remove(&self, id: ItemId) {
-        self.0.borrow_mut().remove(id);
+        self.write(|s| s.remove(id));
     }
     /// Promote an item's children to the scene root.
     pub fn orphan(&self, id: ItemId) {
-        self.0.borrow_mut().orphan(id);
+        self.write(|s| s.orphan(id));
     }
 
     // -----------------------------------------------------------------
@@ -278,7 +577,7 @@ impl SceneModel {
 
     /// Replace the [`SceneItemHandlerSet`] of `id`, or clear it with `None`.
     pub fn set_item_handlers(&self, id: ItemId, handlers: Option<SceneItemHandlerSet>) {
-        self.0.borrow_mut().set_item_handlers(id, handlers);
+        self.write(|s| s.set_item_handlers(id, handlers));
     }
     /// Mutate an item's handler set through a closure (avoids returning a
     /// borrow guard tied to the `RefMut`).
@@ -287,7 +586,7 @@ impl SceneModel {
         id: ItemId,
         f: impl FnOnce(&mut SceneItemHandlerSet) -> R,
     ) -> Option<R> {
-        self.0.borrow_mut().handlers_mut(id).map(f)
+        self.write(|s| s.handlers_mut(id).map(f))
     }
 
     // -----------------------------------------------------------------
@@ -296,23 +595,23 @@ impl SceneModel {
 
     /// Attach a [`Magnet`] to `item`; see [`Scene::add_magnet`].
     pub fn add_magnet(&self, item: ItemId, magnet: Magnet) -> MagnetId {
-        self.0.borrow_mut().add_magnet(item, magnet)
+        self.write(|s| s.add_magnet(item, magnet))
     }
     /// Remove a magnet by id; see [`Scene::remove_magnet`].
     pub fn remove_magnet(&self, magnet: MagnetId) {
-        self.0.borrow_mut().remove_magnet(magnet);
+        self.write(|s| s.remove_magnet(magnet));
     }
     /// Remove every magnet on `item`; see [`Scene::clear_magnets`].
     pub fn clear_magnets(&self, item: ItemId) {
-        self.0.borrow_mut().clear_magnets(item);
+        self.write(|s| s.clear_magnets(item));
     }
     /// Move a magnet in its item's local frame; see [`Scene::set_magnet_local_pos`].
     pub fn set_magnet_local_pos(&self, magnet: MagnetId, local_pos: Point) {
-        self.0.borrow_mut().set_magnet_local_pos(magnet, local_pos);
+        self.write(|s| s.set_magnet_local_pos(magnet, local_pos));
     }
     /// Enable or disable a magnet; see [`Scene::set_magnet_enabled`].
     pub fn set_magnet_enabled(&self, magnet: MagnetId, enabled: bool) {
-        self.0.borrow_mut().set_magnet_enabled(magnet, enabled);
+        self.write(|s| s.set_magnet_enabled(magnet, enabled));
     }
     /// Ids of every magnet on `item`; see [`Scene::magnet_ids_of`].
     pub fn magnet_ids_of(&self, item: ItemId) -> Vec<MagnetId> {
@@ -368,23 +667,23 @@ impl SceneModel {
 
     /// Set the logical extent of the scene (used for scroll-bar sizing); `None` = unbounded.
     pub fn set_scene_rect(&self, rect: Option<Rect>) {
-        self.0.borrow_mut().set_scene_rect(rect);
+        self.write(|s| s.set_scene_rect(rect));
     }
     /// Restrict panning to horizontal, vertical, or both axes; updates [`pan_axes_signal`](Self::pan_axes_signal).
     pub fn pan_axes(&self, axes: PanAxes) {
-        self.0.borrow_mut().pan_axes(axes);
+        self.write(|s| s.pan_axes(axes));
     }
     /// Enable or disable pinch/scroll zoom; updates [`zoomable_signal`](Self::zoomable_signal).
     pub fn zoomable(&self, on: bool) {
-        self.0.borrow_mut().zoomable(on);
+        self.write(|s| s.zoomable(on));
     }
     /// Clamp the camera pan to `bounds` (scene coordinates); `None` = no limit; updates [`pan_bounds_signal`](Self::pan_bounds_signal).
     pub fn set_pan_bounds(&self, bounds: Option<Rect>) {
-        self.0.borrow_mut().set_pan_bounds(bounds);
+        self.write(|s| s.set_pan_bounds(bounds));
     }
     /// Restrict the zoom factor to `range`; `None` = no limit; updates [`zoom_range_signal`](Self::zoom_range_signal).
     pub fn set_zoom_range(&self, range: Option<std::ops::RangeInclusive<f32>>) {
-        self.0.borrow_mut().set_zoom_range(range);
+        self.write(|s| s.set_zoom_range(range));
     }
 
     // -----------------------------------------------------------------
@@ -393,31 +692,31 @@ impl SceneModel {
 
     /// Register a logical AT group (landmark / rotor category container); returns its stable [`A11yGroupId`].
     pub fn add_a11y_group(&self, builder: A11yGroupBuilder) -> A11yGroupId {
-        self.0.borrow_mut().add_a11y_group(builder)
+        self.write(|s| s.add_a11y_group(builder))
     }
     /// Remove a previously registered AT group; triggers an `a11y_change_signal` bump.
     pub fn remove_a11y_group(&self, id: A11yGroupId) {
-        self.0.borrow_mut().remove_a11y_group(id);
+        self.write(|s| s.remove_a11y_group(id));
     }
     /// Re-parent `child` in the AT tree, overriding the default visual parent; `None` re-attaches under the scene root.
     pub fn set_a11y_parent(&self, child: A11yNode, parent: Option<A11yNode>) {
-        self.0.borrow_mut().set_a11y_parent(child, parent);
+        self.write(|s| s.set_a11y_parent(child, parent));
     }
     /// Declare a cross-node AT relationship (controls, describes, labels) from `from` to `to`.
     pub fn add_a11y_relation(&self, from: A11yNode, kind: A11yRelation, to: A11yNode) {
-        self.0.borrow_mut().add_a11y_relation(from, kind, to);
+        self.write(|s| s.add_a11y_relation(from, kind, to));
     }
     /// Mark `node` as a live region (`Polite` or `Assertive`) so assistive tech announces changes to it.
     pub fn set_a11y_live(&self, node: A11yNode, live: accesskit::Live) {
-        self.0.borrow_mut().set_a11y_live(node, live);
+        self.write(|s| s.set_a11y_live(node, live));
     }
     /// Assign a landmark `role` to `node` (e.g. `Role::Region`, `Role::Main`) for rotor navigation.
     pub fn set_a11y_landmark(&self, node: A11yNode, role: accesskit::Role) {
-        self.0.borrow_mut().set_a11y_landmark(node, role);
+        self.write(|s| s.set_a11y_landmark(node, role));
     }
     /// Register `node` under the given rotor [`A11yCategory`] slices so it appears in category-filtered navigation.
     pub fn set_a11y_categories(&self, node: A11yNode, categories: &[A11yCategory]) {
-        self.0.borrow_mut().set_a11y_categories(node, categories);
+        self.write(|s| s.set_a11y_categories(node, categories));
     }
 
     // -----------------------------------------------------------------
@@ -427,7 +726,7 @@ impl SceneModel {
     /// Re-read signal-driven bounds for `add_item_dynamic` entries; returns
     /// `true` if any changed.
     pub fn refresh_dynamic_bounds(&self) -> bool {
-        self.0.borrow_mut().refresh_dynamic_bounds()
+        self.write(|s| s.refresh_dynamic_bounds())
     }
 
     // -----------------------------------------------------------------
@@ -445,6 +744,13 @@ impl SceneModel {
     /// Monotonic counter incremented on every mutation; useful for cache invalidation without observing a signal.
     pub fn mutation_version(&self) -> u64 {
         self.0.borrow().mutation_version()
+    }
+    /// [`mutation_version`](Self::mutation_version) with the per-frame churn of
+    /// [`refresh_dynamic_bounds`](Self::refresh_dynamic_bounds) excluded — the
+    /// version to gate an expensive rebuild on. See
+    /// [`Scene::structural_version`].
+    pub fn structural_version(&self) -> u64 {
+        self.0.borrow().structural_version()
     }
     /// Reactive current [`PanAxes`] restriction; updated by [`pan_axes`](Self::pan_axes).
     pub fn pan_axes_signal(&self) -> Signal<PanAxes> {
@@ -582,7 +888,7 @@ impl SceneModel {
 
     /// Drain every still-pending single-view (`Once`) widget, in entry order.
     pub(crate) fn drain_all_once(&self) -> Vec<(ItemId, Box<dyn Widget>)> {
-        self.0.borrow_mut().drain_all_once()
+        self.write(|s| s.drain_all_once())
     }
     /// `(id, payload)` for every multi-view (`Delegated`) item, in entry order.
     pub(crate) fn delegated_payloads(&self) -> Vec<(ItemId, Rc<dyn std::any::Any>)> {

@@ -56,9 +56,10 @@
 //! assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 //! ```
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
@@ -72,12 +73,15 @@ use teksilo_canvas::{Path, Point, Rect, StrokeStyle, Transform2D, Vec2};
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::Widget;
+use teksilo_core::widget_id::WidgetId;
 
 /// A change to an item's state, fired through
-/// [`Scene::item_change_signal`] for every mutation. Apps observe
-/// to wire snap-to-grid, validation, side effects, etc. The model
-/// is "fire after the change has been applied" — by the time the
-/// observer sees the event, the Scene already reflects it.
+/// [`Scene::item_change_signal`] for every mutation. Apps observe to wire
+/// validation, persistence, telemetry, mirroring to a data layer, and other
+/// side effects. The model is "fire after the change has been applied" — by
+/// the time the observer sees the event, the Scene already reflects it, and
+/// (when the mutation came through a [`SceneModel`](crate::SceneModel)) the
+/// observer may freely read *and* write the scene back.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ItemChange {
     /// `set_local_pos`: position in parent coords moved.
@@ -125,6 +129,482 @@ pub enum ItemChange {
     /// Never moves geometry, so the observing `SceneView` evicts the item's
     /// cached frame and repaints **without** relayout or rebuild.
     AppearanceChanged { id: ItemId },
+}
+
+impl ItemChange {
+    /// The item this change is about.
+    ///
+    /// Every variant names exactly one item, so an observer that only needs
+    /// *which* item moved need not match the whole enum. The fan-out's runaway
+    /// detector reads it too: it charges each delivery to the subject it is
+    /// about, so it needs that subject without caring what kind of change it
+    /// is. (Those per-subject counts name the culprit in the panic; the bound
+    /// that trips is a flat total — see [`CascadeBudget`].)
+    pub fn id(&self) -> ItemId {
+        match *self {
+            ItemChange::LocalPosChanged { id, .. }
+            | ItemChange::LocalBoundsChanged { id, .. }
+            | ItemChange::TransformChanged { id }
+            | ItemChange::VisibilityChanged { id, .. }
+            | ItemChange::FlagsChanged { id, .. }
+            | ItemChange::OpacityChanged { id, .. }
+            | ItemChange::ZChanged { id, .. }
+            | ItemChange::LayerChanged { id, .. }
+            | ItemChange::ParentChanged { id, .. }
+            | ItemChange::Removed { id }
+            | ItemChange::Added { id }
+            | ItemChange::PayloadChanged { id }
+            | ItemChange::AppearanceChanged { id } => id,
+        }
+    }
+}
+
+/// One queued notification, awaiting a drain by whoever opened the write
+/// scope that produced it.
+///
+/// The two change channels share a single FIFO so that a mutation touching
+/// item geometry **and** logical AT structure delivers in the order it
+/// happened, rather than splitting into two independently-ordered streams.
+///
+/// Deliberately covers only the two *notification* channels. The scene's
+/// constraint signals (`pan_axes` / `zoomable` / `pan_bounds` / `zoom_range`)
+/// are **state**, not events — [`Scene::current_pan_axes`] and friends read
+/// them back — so deferring their writes would make the scene lie about its
+/// own configuration inside an open write scope. They stay synchronous.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PendingNotification {
+    /// One [`ItemChange`] through `item_change_signal`.
+    Item(ItemChange),
+    /// One `a11y_change_signal` bump, carrying the node the mutation was
+    /// *about* (groups / parents / relations / live / landmarks / categories /
+    /// magnets).
+    ///
+    /// The delivery itself is a bare counter bump — the signal carries no
+    /// payload, because an AT re-walk reads the whole logical tree back. The
+    /// node rides along for one reason: the runaway detector charges each
+    /// delivery to its subject, and an AT channel with no subject would put
+    /// every logical-AT notification in the scene on a single budget. On a
+    /// crate whose differentiator is per-item accessibility, that is the one
+    /// channel that must not be the bottleneck.
+    A11y(A11yNode),
+}
+
+/// What the runaway detector counts a delivery against: the **subject** a
+/// notification is about, on either channel.
+///
+/// Per *subject*, not per change kind or per channel: a runaway rewrites the
+/// same subject over and over, and which field of it — or which of the two
+/// signals — is not what makes it a runaway. Keying on `(subject, kind)` would
+/// let a two-field ping-pong (`set_local_pos` reacting to `ZChanged` and back)
+/// spend two budgets instead of one, and keying the whole logical-AT channel on
+/// one key would charge an app that maintains AT structure per item — the
+/// intended use — as if every item were the same subject.
+///
+/// So an `ItemChange` about item *i* and an `a11y_change_signal` bump about
+/// `A11yNode::Item(i)` share one budget: they are the same subject seen through
+/// two channels, and a cycle that ping-pongs between them is one runaway, not
+/// two half-runaways.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum NotifyKey {
+    /// One scene entry: every [`ItemChange`] about it, and every logical-AT
+    /// notification whose subject is `A11yNode::Item(id)`.
+    Item(ItemId),
+    /// One virtual AT group (`A11yNode::Group`).
+    A11yGroup(A11yGroupId),
+    /// One widget addressed directly in the logical AT tree
+    /// (`A11yNode::Widget`) — a descendant relocated into the scene's AT tree
+    /// without being a scene entry of its own.
+    A11yWidget(WidgetId),
+}
+
+impl From<A11yNode> for NotifyKey {
+    fn from(node: A11yNode) -> Self {
+        match node {
+            A11yNode::Item(id) => NotifyKey::Item(id),
+            A11yNode::Group(id) => NotifyKey::A11yGroup(id),
+            A11yNode::Widget(id) => NotifyKey::A11yWidget(id),
+        }
+    }
+}
+
+/// Observer-generated deliveries one drain may make before it is called a
+/// runaway. See [`CascadeBudget::total`].
+const DEFAULT_CASCADE_TOTAL: u64 = 100_000;
+
+/// The smallest budget a scene will hold. A budget of zero would trip on the
+/// first delivery an observer generated — i.e. it would forbid the reactive
+/// write-back this whole channel is advertised for — and its diagnostic would
+/// have no cascade to describe, so [`Scene::set_cascade_budget`] clamps to
+/// this instead of storing it. See [`CascadeBudget::new`].
+const MIN_CASCADE_TOTAL: u64 = 1;
+
+/// The runaway-detection budget for one scene's change fan-out — how much work
+/// **observers** may generate from one batch before the drain declares the
+/// cascade non-terminating and panics.
+///
+/// # Why a budget at all
+///
+/// The drain runs until its queue is empty, which is what lets an observer read
+/// the scene and write it back. An observer whose write never converges
+/// therefore never empties it, and — unlike `Signal::try_set`, which recurses
+/// and so blows the stack loudly on its own — this is an iterative loop whose
+/// only other exit is an empty queue. Unchecked it is a frozen UI thread with
+/// no diagnostic. The limit is enforced in **every** build profile for that
+/// reason.
+///
+/// "Never converges" is the precise condition, and it is not the same as
+/// "unguarded". The geometry mutators already suppress a write that changes
+/// nothing — [`Scene::set_local_pos`] returns without emitting when the
+/// position is unchanged — so an observer that keeps writing the *same*
+/// position settles on its own. A geometry cascade that does not settle is one
+/// computing a *different* value every time: an accumulating offset, a rounding
+/// drift, a spring with no rest state. The `set_a11y_*` mutators do not
+/// self-suppress; they bump on every call, so there an equality check before
+/// the call is a real guard.
+///
+/// # One trip condition, and why it is flat
+///
+/// **Total observer-generated deliveries in a single drain**, counted across
+/// both channels and every subject. Nothing else trips.
+///
+/// Two earlier shapes of this budget each fixed the previous one's false
+/// positive and bought a worse problem, and the third is why this one is flat:
+///
+/// - A cap on **rounds** aborted a legitimate 300-link settling chain, because a
+///   round is what was queued when it began, so an N-link chain costs N rounds.
+/// - A cap **per subject** moved the limit onto fan-in: a guarded relaxation
+///   over a hub passed at 4000 incident edges and aborted at 4200.
+/// - **Scaling** the per-subject cap with the scene's entry count fixed the
+///   fan-in false positive and destroyed the guard, because the bound it
+///   resolved grew with the model.
+///
+/// A flat total is the only one of the three that bounds a runaway to the same
+/// amount of work whatever the scene's size. Measured in release, changing only
+/// this budget: an unguarded write-back aborts after 100 001 deliveries in a
+/// 10 000-entry scene and in a 50 000-entry one alike, where the budget the
+/// scaled design resolved for those scenes (640 000 and 3 200 000) let the same
+/// loop run 6× and 32× longer — 3.10 s and 131 s against 520 ms and 3.95 s. A
+/// spawner allocates ~100 000 items before tripping at either size, against
+/// 640 002 and **3 200 002** under the scaled budget.
+///
+/// (The flat write-back's wall clock still grows with the scene, and that is the
+/// *app's* write, not the drain: `Scene::set_local_pos` re-buckets the moved
+/// subtree, which walks every entry. The identical runaway on the logical-AT
+/// channel, whose mutator does not, aborts in 4.8 ms at both sizes — that is
+/// what this loop itself costs. The budget bounds how many times an observer's
+/// write runs, not what one costs.)
+///
+/// The default also clears every legitimate shape this tier runs by more than an
+/// order of magnitude: a 4200-edge guarded aggregate is about 4 200 deliveries,
+/// and a 2000-link chain that re-places eight port magnets and refreshes three
+/// AT properties per link is about 24 000.
+///
+/// # What it still does not decide
+///
+/// "Guarded cascade that is genuinely enormous" and "unguarded write-back" are
+/// not distinguishable from the queue alone. This budget does not pretend
+/// otherwise: it draws the line where the shapes this tier actually runs stop,
+/// reports the subject with the highest delivery count so the diagnostic points
+/// somewhere, and
+/// [`SceneModel::set_cascade_budget`](crate::SceneModel::set_cascade_budget) is
+/// the supported answer for a graph that genuinely lives past it. Mechanism in
+/// the framework, policy in the consumer.
+///
+/// # What is exempt
+///
+/// The caller's own batch — everything already queued when the drain began — is
+/// not charged, however large. A bulk load, a ten-thousand-item teardown, or a
+/// scene-wide a11y re-tag inside one [`SceneWriteGuard`](crate::SceneWriteGuard)
+/// is finite by construction, so charging it would make the budget a cap on
+/// batch size instead — the mistake a plain delivery counter makes, whose fix is
+/// to raise it until it catches nothing. Cascade depth and the number of
+/// *distinct* subjects a cascade touches are not limited either.
+///
+/// ```
+/// use teksilo_scene::{CascadeBudget, SceneModel};
+///
+/// let model = SceneModel::new();
+/// model.set_cascade_budget(CascadeBudget::new(1_000_000));
+/// assert_eq!(model.cascade_budget().total, 1_000_000);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CascadeBudget {
+    /// Observer-generated deliveries one drain may make before it panics.
+    ///
+    /// Flat: not scaled by the scene's entry count, by design — see the type's
+    /// own docs for the measurements that settled that. Default 100 000.
+    ///
+    /// Zero is not a usable budget and is clamped to 1 by
+    /// [`CascadeBudget::new`] and by
+    /// [`SceneModel::set_cascade_budget`](crate::SceneModel::set_cascade_budget).
+    pub total: u64,
+}
+
+impl Default for CascadeBudget {
+    fn default() -> Self {
+        Self {
+            total: DEFAULT_CASCADE_TOTAL,
+        }
+    }
+}
+
+impl CascadeBudget {
+    /// A budget of `total` observer-generated deliveries per drain, clamped up
+    /// to the smallest usable value.
+    ///
+    /// The clamp is here rather than at the trip so that a nonsensical budget is
+    /// rejected where it is written, instead of producing a panic whose numbers
+    /// describe no cascade that happened.
+    pub fn new(total: u64) -> Self {
+        Self {
+            total: total.max(MIN_CASCADE_TOTAL),
+        }
+    }
+}
+
+/// The scene's deferred-notification queue and the two signals it feeds.
+///
+/// Lives behind an `Rc` *beside* the scene rather than inside the borrow, so a
+/// drain runs holding **no** borrow on the [`Scene`] at all — which is exactly
+/// what lets an observer read the scene and write it back (see
+/// [`SceneModel::flush_changes`](crate::SceneModel::flush_changes)).
+pub(crate) struct ChangeQueue {
+    /// Queued notifications in emission order. A `VecDeque` because the drain
+    /// consumes from the front one at a time while observers append to the
+    /// back; see [`ChangeQueue::drain`] for why it is never emptied in bulk.
+    notifications: RefCell<VecDeque<PendingNotification>>,
+    /// `true` while a drain loop is running, so a drain re-entered from inside
+    /// an observer returns immediately and lets the outermost loop pick that
+    /// observer's changes up. Cleared by [`DrainGuard`], so an observer that
+    /// panics mid-drain cannot leave it stuck — a stuck flag would silence the
+    /// scene permanently, which is worse than the panic this whole mechanism
+    /// replaced.
+    draining: Cell<bool>,
+    item_signal: Signal<ItemChange>,
+    a11y_signal: Signal<u64>,
+}
+
+impl std::fmt::Debug for ChangeQueue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChangeQueue")
+            .field("queued", &self.notifications.borrow().len())
+            .field("draining", &self.draining.get())
+            .finish()
+    }
+}
+
+/// RAII clear of [`ChangeQueue::draining`]. Holds the queue `Rc` directly, so
+/// `Drop` never needs the `RefCell<Scene>` — which may be unavailable during an
+/// unwind out of a panicking observer.
+struct DrainGuard(Rc<ChangeQueue>);
+
+impl Drop for DrainGuard {
+    fn drop(&mut self) {
+        self.0.draining.set(false);
+    }
+}
+
+impl ChangeQueue {
+    fn new() -> Self {
+        Self {
+            notifications: RefCell::new(VecDeque::new()),
+            draining: Cell::new(false),
+            item_signal: Signal::new(ItemChange::Added { id: ItemId(0) }),
+            a11y_signal: Signal::new(0),
+        }
+    }
+
+    pub(crate) fn item_signal(&self) -> Signal<ItemChange> {
+        self.item_signal.clone()
+    }
+
+    pub(crate) fn a11y_signal(&self) -> Signal<u64> {
+        self.a11y_signal.clone()
+    }
+
+    /// Whether anything is waiting to be delivered.
+    pub(crate) fn has_work(&self) -> bool {
+        !self.notifications.borrow().is_empty()
+    }
+
+    /// Append one notification to the back of the queue.
+    fn push(&self, notification: PendingNotification) {
+        self.notifications.borrow_mut().push_back(notification);
+    }
+
+    /// Deliver every queued notification, FIFO, until the queue is empty.
+    ///
+    /// Holds no borrow on anything across an observer call, so an observer may
+    /// read the scene and write it back; a write queues at the back and is
+    /// delivered by this same loop on a later round.
+    ///
+    /// # Rounds
+    ///
+    /// A round is exactly the notifications that were queued when it began.
+    /// Anything an observer appends while a round runs belongs to the next one,
+    /// which is what keeps delivery in emission order rather than depth-first.
+    ///
+    /// The round *count* is not a runaway signal and nothing here caps it: a
+    /// cascade that settles link by link — the chain-drag observer this channel
+    /// is advertised for — takes one round per link, so capping rounds means
+    /// capping how long a legitimate chain may be.
+    ///
+    /// # Termination
+    ///
+    /// The first round is the caller's own batch: finite by construction,
+    /// however large, so it is delivered free. From the second round on, every
+    /// delivery is work an observer queued from inside this drain, and is
+    /// counted against one flat bound — `budget.total`. Exceeding it panics,
+    /// naming the notification that did it and the subject charged most often.
+    /// The bound is unconditional in every build profile: unlike
+    /// `Signal::try_set`, which recurses and so blows the stack loudly on its
+    /// own, this is an iterative loop whose only other exit is an empty queue —
+    /// unchecked it would be a silent hang.
+    ///
+    /// Per-subject counts are still kept, because they are what lets the panic
+    /// point at a culprit — but they are **diagnostics only** and trip nothing.
+    /// A per-subject *limit* is a limit on fan-in (a guarded relaxation over a
+    /// hub aborted at 4200 incident edges against a flat 4096), and scaling it
+    /// with the scene makes the abort cost scale with the scene too. See
+    /// [`CascadeBudget`] for the measurements.
+    ///
+    /// # Unwind
+    ///
+    /// Each notification is removed from the queue immediately **before** it is
+    /// delivered, and nothing is held out of the queue in a local batch, so an
+    /// observer that panics costs exactly its own delivery: everything not yet
+    /// delivered is still in the queue, in order, and the next
+    /// [`flush_changes`](crate::SceneModel::flush_changes) delivers it. Draining
+    /// into a local `Vec` instead would let the unwind discard the untouched
+    /// tail with nothing left able to redeliver it — the scene would advance
+    /// with no notification, permanently, which is the corruption this
+    /// mechanism exists to prevent.
+    pub(crate) fn drain(self: &Rc<Self>, budget: CascadeBudget) {
+        if self.draining.get() {
+            // Re-entered from an observer: the outermost drain owns the queue
+            // and will pick up whatever that observer just emitted.
+            return;
+        }
+        self.draining.set(true);
+        // Clears the flag even if an observer panics out of the loop below.
+        let _guard = DrainGuard(Rc::clone(self));
+
+        // Observer-generated deliveries so far, and how they split across
+        // subjects. The total is the trip condition; the split is the
+        // diagnostic. The caller's own batch — round one — is counted in
+        // neither: it is finite by construction, so charging it would make the
+        // budget a cap on batch size, which is the mistake a plain delivery
+        // counter makes and the reason it gets raised until it catches nothing.
+        //
+        // Both are bounded by `budget.total`, so this bookkeeping — and the
+        // number of observer writes a runaway gets to make before it is
+        // stopped — is constant in the size of the scene.
+        let mut charged: HashMap<NotifyKey, u32> = HashMap::new();
+        let mut charged_total: u64 = 0;
+        let mut cascading = false;
+        loop {
+            let mut remaining = self.notifications.borrow().len();
+            if remaining == 0 {
+                break;
+            }
+            while remaining > 0 {
+                // Popped before delivery, and never held in a local buffer: an
+                // observer panic must cost its own delivery and nothing else.
+                let next = self.notifications.borrow_mut().pop_front();
+                let Some(notification) = next else {
+                    break;
+                };
+                remaining -= 1;
+                if cascading {
+                    // Charged *before* delivery, so the notification named in
+                    // the diagnostic is the one that broke the budget.
+                    Self::charge(&mut charged, &mut charged_total, notification, budget.total);
+                }
+                match notification {
+                    PendingNotification::Item(change) => self.item_signal.set(change),
+                    PendingNotification::A11y(_) => {
+                        self.a11y_signal.set(self.a11y_signal.get().wrapping_add(1));
+                    }
+                }
+            }
+            // Everything from here on was queued by an observer this drain ran.
+            cascading = true;
+        }
+    }
+
+    /// Count one observer-generated delivery, and hand off to
+    /// [`runaway`](Self::runaway) if that takes the drain past `limit`.
+    ///
+    /// Split out of [`drain`](Self::drain) so the hot path stays a counter bump
+    /// and a hash-map bump, with the whole diagnostic — which walks every
+    /// subject counted so far — behind a `#[cold]` call that only a trip
+    /// reaches.
+    fn charge(
+        charged: &mut HashMap<NotifyKey, u32>,
+        charged_total: &mut u64,
+        notification: PendingNotification,
+        limit: u64,
+    ) {
+        *charged_total += 1;
+        let key: NotifyKey = match notification {
+            PendingNotification::Item(change) => NotifyKey::Item(change.id()),
+            PendingNotification::A11y(node) => node.into(),
+        };
+        // Saturating: this count is a diagnostic, and a budget raised past
+        // `u32::MAX` must not make the *counter* the thing that panics.
+        let seen = charged.entry(key).or_insert(0);
+        *seen = seen.saturating_add(1);
+        if *charged_total > limit {
+            Self::runaway(charged, *charged_total, notification, limit);
+        }
+    }
+
+    /// Panic for a cascade that passed its budget, describing **what was
+    /// observed** and naming the likeliest cause as a likely cause.
+    ///
+    /// It cannot prove one: a guarded cascade that is genuinely enormous and an
+    /// unguarded write-back are the same picture from the queue's side. So the
+    /// message states the bound this scene enforced, how much was delivered
+    /// against it, and the subject charged most often — the number that
+    /// separates the two runaway shapes from each other, since a write-back
+    /// piles up on one subject while a spawner leaves every count near 1 — and
+    /// then says how to raise the bound.
+    #[cold]
+    #[inline(never)]
+    fn runaway(
+        charged: &HashMap<NotifyKey, u32>,
+        delivered: u64,
+        notification: PendingNotification,
+        limit: u64,
+    ) -> ! {
+        let (top_key, top_count) = charged
+            .iter()
+            .max_by_key(|(_, count)| **count)
+            .map(|(key, count)| (*key, *count))
+            .expect("every charged delivery records its subject, so a trip has at least one");
+        panic!(
+            "scene change fan-out did not settle: scene observers have generated \
+             {delivered} notifications from one batch without the queue emptying, past \
+             this scene's budget of {limit} (`CascadeBudget::total`). The last delivery \
+             was {notification:?}, and the most-charged subject was {top_key:?}, with \
+             {top_count} of the {delivered}. The likeliest cause is a scene observer \
+             writing one subject back on every change. What to do depends on the \
+             channel, because the two do not behave alike. The geometry mutators \
+             already suppress a write that changes nothing (`set_local_pos` returns \
+             without emitting when the position is unchanged), so a geometry trip means \
+             the observer computes a *different* value each time — an accumulating \
+             offset, a rounding drift, a spring that never reaches rest. Re-adding an \
+             equality guard there changes nothing; make the reaction converge, or \
+             record it in the observer and apply it after the mutation returns. The \
+             `set_a11y_*` mutators do *not* self-suppress: they bump on every call, so \
+             comparing before you call one is a real fix there. A most-charged count \
+             near 1 means the other shape instead: an observer that keeps producing \
+             *new* subjects, typically by adding or removing an item on every change. \
+             If the cascade is genuinely this large and does settle, raise \
+             `CascadeBudget::total` via `SceneModel::set_cascade_budget` — which only \
+             postpones the freeze if the cycle does not terminate."
+        )
+    }
 }
 
 /// Which paint band a lightweight [`SceneItem`] sits in, relative to
@@ -375,25 +855,57 @@ pub struct Scene {
     /// the underlying signals via the `*_signal` accessors for
     /// live observation.
     constraints: SceneConstraints,
-    /// Reactive change signal. Every mutation fires an
-    /// [`ItemChange`] through this signal so apps can observe
-    /// geometry / visibility / parent / z / opacity changes.
-    item_change_signal: Signal<ItemChange>,
-    /// Reactive change counter for the *logical AT structure* (groups,
-    /// parents, relations, live, landmarks, categories). These mutations are
-    /// not item geometry, so they do not flow through `item_change_signal`;
-    /// `SceneView` observes this separately to re-walk the AccessKit tree. The
-    /// AT tree is fully separate from the visual scene, so it needs its own
-    /// notification channel.
-    a11y_change_signal: Signal<u64>,
+    /// The deferred-notification queue plus the two signals it feeds
+    /// (`item_change_signal` and `a11y_change_signal`).
+    ///
+    /// Behind an `Rc` so a drain can run with **no** borrow on this `Scene`,
+    /// which is what lets an observer read the scene and write it back. Both
+    /// notification channels share the one queue, so a mutation touching item
+    /// geometry *and* logical AT structure still delivers in the order it
+    /// happened rather than splitting into two independently-ordered streams.
+    pending: Rc<ChangeQueue>,
     /// Monotonic counter of *every* model mutation — item geometry / visibility
     /// / structure (each [`ItemChange`] fire) **and** logical-AT structure (each
-    /// `bump_a11y_change`). Read via [`Scene::mutation_version`]. `SceneView`
-    /// gates its (expensive) AccessKit re-walk on this advancing, so a `build()`
-    /// triggered purely by dynamic-bounds churn it already accounted for doesn't
-    /// re-walk the AT tree every frame. A plain `Cell` because the bump path
+    /// `bump_a11y_change`). Read via [`Scene::mutation_version`], or as
+    /// [`Scene::structural_version`] with the per-frame dynamic-bounds churn
+    /// subtracted out — which is the form `SceneView` gates its (expensive)
+    /// AccessKit re-walk on. A plain `Cell` because the bump path
     /// (`bump_mutation`) is `&self` (shared with `bump_a11y_change`).
     mutation_seq: Cell<u64>,
+
+    /// Per-frame dynamic-bounds churn, subtracted out of
+    /// [`mutation_version`](Scene::mutation_version) by
+    /// [`structural_version`](Scene::structural_version).
+    ///
+    /// Every `LocalBoundsChanged` that [`refresh_dynamic_bounds`](Scene::refresh_dynamic_bounds)
+    /// emits is counted here as well as in `mutation_seq`, so a consumer gating
+    /// an expensive rebuild (the `SceneView`'s AccessKit re-walk) can exclude
+    /// that churn by *name* rather than by bracketing the call with two version
+    /// snapshots — which silently swallows anything an observer wrote during
+    /// the refresh's fan-out.
+    dynamic_seq: Cell<u64>,
+
+    // --- deferred change fan-out -------------------------------------
+    /// Number of write scopes currently open on this scene.
+    ///
+    /// Raised for the lifetime of the `RefMut` held by
+    /// [`SceneModel`](crate::SceneModel)'s mutators and by
+    /// [`SceneWriteGuard`](crate::SceneWriteGuard), so `emit_item_change`
+    /// queues instead of fanning out under a live `borrow_mut()`. Zero for a
+    /// bare `&mut Scene`, which keeps the historical synchronous behaviour —
+    /// see the "Notification timing" section on [`Scene::item_change_signal`].
+    ///
+    /// A counter rather than a flag: a scope is only ever *closed* by the guard
+    /// that opened it, so nesting (were a second door ever to open one inside
+    /// another) must not clear the outer scope early.
+    defer_depth: Cell<u32>,
+
+    /// How much observer-generated work a single drain of this scene's queue
+    /// may do before it is declared a runaway. Read once on the way into a
+    /// drain and not again, so an observer cannot enlarge the drain it is
+    /// already inside; a `Cell` because that read sits on the `&self` notify
+    /// path.
+    cascade_budget: Cell<CascadeBudget>,
 
     // --- logical AT structure ----------------------------------------
     pub(crate) a11y_groups: Vec<A11yGroup>,
@@ -428,9 +940,11 @@ impl Scene {
             index,
             user_scene_rect: None,
             constraints: SceneConstraints::new(),
-            item_change_signal: Signal::new(ItemChange::Added { id: ItemId(0) }),
-            a11y_change_signal: Signal::new(0),
+            pending: Rc::new(ChangeQueue::new()),
             mutation_seq: Cell::new(0),
+            dynamic_seq: Cell::new(0),
+            defer_depth: Cell::new(0),
+            cascade_budget: Cell::new(CascadeBudget::default()),
             a11y_groups: Vec::new(),
             a11y_group_index: HashMap::new(),
             a11y_parents: HashMap::new(),
@@ -666,6 +1180,7 @@ impl Scene {
             .map(|e| e.id)
             .collect();
         let mut changed = false;
+        let seq_before = self.mutation_seq.get();
         for id in dynamic_ids {
             let Some(&pos) = self.entry_index.get(&id) else {
                 continue;
@@ -679,6 +1194,16 @@ impl Scene {
                 changed = true;
             }
         }
+        // Everything this pass emitted is per-frame dynamic-bounds churn, not a
+        // structural change: record it so `structural_version` can exclude it
+        // by name. Counting here (rather than at the call site, by bracketing
+        // this call with two `mutation_version` snapshots) is what keeps a
+        // mutation an *observer* makes during the fan-out out of the exclusion —
+        // it happens after this line, so it lands in `mutation_seq` alone and
+        // `structural_version` sees it.
+        let churn = self.mutation_seq.get().wrapping_sub(seq_before);
+        self.dynamic_seq
+            .set(self.dynamic_seq.get().wrapping_add(churn));
         changed
     }
 
@@ -693,14 +1218,54 @@ impl Scene {
         id
     }
 
-    /// Reactive notification stream for every Scene mutation. Apps
-    /// observe via `signal.observe(|change| …)` to wire snap-to-grid,
-    /// clamping, validation, and side effects without having to
-    /// poll the Scene each frame. The signal fires *after* the
-    /// mutation has been applied — by the time the observer runs
-    /// the Scene already reflects the new state.
+    /// Reactive notification stream for every Scene mutation. Apps observe via
+    /// `signal.observe(|change| …)` to wire validation, persistence,
+    /// telemetry, or mirroring into a data layer without polling the Scene
+    /// each frame. The signal fires *after* the mutation has been applied — by
+    /// the time the observer runs, the Scene already reflects the new state.
+    ///
+    /// # Notification timing
+    ///
+    /// Where the fan-out happens depends on which door mutated the scene, and
+    /// the difference is exactly the `RefCell` an observer would have to
+    /// re-enter:
+    ///
+    /// - **Through a [`SceneModel`](crate::SceneModel)** (the normal path,
+    ///   including [`SceneWriteGuard`](crate::SceneWriteGuard)) the mutation
+    ///   runs inside a *write scope*: changes queue in emission order and fan
+    ///   out once the model has released its `borrow_mut()`. An observer may
+    ///   therefore read the scene, and write it back — a write made from an
+    ///   observer queues in turn and is delivered by the same drain, after the
+    ///   changes already queued ahead of it.
+    /// - **Through a bare `&mut Scene`** there is nothing holding a `RefCell`
+    ///   open to escape from, so the fan-out is synchronous, inside the
+    ///   mutator, exactly as before.
+    ///
+    ///   This is safe for a `Scene` you own outright — no second handle to it
+    ///   can exist. It is **not** safe for a `&mut Scene` reborrowed out of a
+    ///   [`SceneModel`](crate::SceneModel): a `RefMut` taken from the shared
+    ///   cell leaves `defer_depth` at zero, so observers still run under the
+    ///   live exclusive borrow and one that re-enters the model panics. Take
+    ///   [`SceneModel::write_guard`](crate::SceneModel::write_guard) instead —
+    ///   it derefs to `&mut Scene`, so the call sites are identical, and it
+    ///   opens the write scope the observers need.
+    ///
+    /// Either way the notification has been delivered by the time the mutator
+    /// call returns.
+    ///
+    /// # What is not deferred
+    ///
+    /// The scene's constraint signals — [`pan_axes_signal`](Self::pan_axes_signal),
+    /// [`zoomable_signal`](Self::zoomable_signal),
+    /// [`pan_bounds_signal`](Self::pan_bounds_signal),
+    /// [`zoom_range_signal`](Self::zoom_range_signal) — carry *state*, not
+    /// events ([`current_pan_axes`](Self::current_pan_axes) and friends read
+    /// them back), so queueing their writes would make the scene contradict
+    /// itself inside an open write scope. They still fan out synchronously
+    /// under the borrow: an observer on one of those four must not re-enter
+    /// the `SceneModel`.
     pub fn item_change_signal(&self) -> Signal<ItemChange> {
-        self.item_change_signal.clone()
+        self.pending.item_signal()
     }
 
     /// Reactive notification for logical-AT-structure mutations
@@ -712,7 +1277,7 @@ impl Scene {
     /// because they aren't item geometry, and the AT tree is separate from the
     /// visual scene.
     pub fn a11y_change_signal(&self) -> Signal<u64> {
-        self.a11y_change_signal.clone()
+        self.pending.a11y_signal()
     }
 
     /// Bump the logical-AT-structure change counter. Called at the end of every
@@ -720,19 +1285,120 @@ impl Scene {
     /// unified [`mutation_version`](Self::mutation_version) so a logical-AT
     /// mutation (which never fires `item_change_signal`) still un-gates the
     /// SceneView's AT re-walk.
-    fn bump_a11y_change(&self) {
-        self.a11y_change_signal
-            .set(self.a11y_change_signal.get().wrapping_add(1));
+    ///
+    /// While a **write scope** is open the bump is queued and fans out once the
+    /// scope's owner has released its `RefCell<Scene>` borrow, exactly as
+    /// `emit_item_change` does — the two channels share one FIFO so their
+    /// relative order survives.
+    ///
+    /// Note the bump/notify order: `bump_mutation` runs **first**, so an
+    /// observer always sees a [`mutation_version`](Self::mutation_version)
+    /// that already accounts for the change it is being told about. That
+    /// matches `emit_item_change`; the two channels used to disagree.
+    ///
+    /// `subject` is the node the mutation was about. It never reaches an
+    /// observer — the signal is a bare counter — but the runaway detector
+    /// charges the delivery to it, so every a11y mutator has to name one. That
+    /// is what keeps an app maintaining AT structure per item off a single
+    /// scene-wide budget; see [`CascadeBudget`].
+    fn bump_a11y_change(&self, subject: A11yNode) {
         self.bump_mutation();
+        self.notify_or_queue(PendingNotification::A11y(subject));
     }
 
     /// Fire an [`ItemChange`] through `item_change_signal` and advance the
     /// unified [`mutation_version`](Self::mutation_version). The single choke
     /// point every geometry / visibility / structure mutation routes through, so
     /// the version counts each one without per-site bookkeeping.
+    ///
+    /// While a **write scope** is open the change is appended to
+    /// `pending_notifications` instead, and fans out once the scope's owner has
+    /// released its `RefCell<Scene>` borrow — see
+    /// [`SceneModel::flush_changes`](crate::SceneModel::flush_changes).
+    /// `mutation_seq` advances either way: the version is the scene's own
+    /// state, not a notification, and the scene is exclusively borrowed for the
+    /// whole window in which the two are transiently out of step.
     fn emit_item_change(&self, change: ItemChange) {
         self.bump_mutation();
-        self.item_change_signal.set(change);
+        self.notify_or_queue(PendingNotification::Item(change));
+    }
+
+    /// Queue one notification, then deliver the queue if no write scope is
+    /// open.
+    ///
+    /// The queue is appended to *unconditionally*, even at depth zero. That is
+    /// deliberate: anything already queued was emitted **earlier**, and firing
+    /// this change past it would deliver the scene's own history out of order —
+    /// an item would appear to move backwards once the older change finally
+    /// landed. FIFO is the one ordering guarantee this channel makes, and it
+    /// has to hold across the seam between the deferred and the synchronous
+    /// door too. (Reachable only after an observer panicked mid-drain and left
+    /// a partly-delivered queue behind, which is precisely when an app is least
+    /// able to reason about ordering for itself.)
+    fn notify_or_queue(&self, notification: PendingNotification) {
+        self.pending.push(notification);
+        if self.defer_depth.get() > 0 {
+            // A write scope owns the fan-out: it drains once its borrow drops.
+            return;
+        }
+        self.pending.drain(self.cascade_budget.get());
+    }
+
+    /// The runaway-detection budget for this scene's change fan-out.
+    pub fn cascade_budget(&self) -> CascadeBudget {
+        self.cascade_budget.get()
+    }
+
+    /// Replace the runaway-detection budget for this scene's change fan-out.
+    ///
+    /// The default is tuned for the graph shapes this tier runs; see
+    /// [`CascadeBudget`] for the rule and for when raising it is the right
+    /// answer rather than a way to silence a real cycle.
+    ///
+    /// A budget of zero is clamped to the smallest usable one rather than
+    /// stored: it would forbid the reactive write-back this channel exists for,
+    /// and would trip with no cascade for the diagnostic to describe.
+    ///
+    /// Takes effect on the next drain — a budget raised from inside an observer
+    /// does not enlarge the drain already running, which is why the budget is
+    /// read once at its start.
+    pub fn set_cascade_budget(&self, budget: CascadeBudget) {
+        self.cascade_budget.set(CascadeBudget::new(budget.total));
+    }
+
+    // -----------------------------------------------------------------
+    // Write scope / deferred fan-out (drained by `SceneModel`)
+    // -----------------------------------------------------------------
+
+    /// Open a write scope: every later notification queues rather than fanning
+    /// out, until the matching [`exit_write_scope`](Self::exit_write_scope).
+    ///
+    /// Called by the owner of the `RefCell<Scene>` borrow, never by a `Scene`
+    /// method — the point of the scope is to outlive the borrow's *creator*,
+    /// which a `&mut self` method cannot do for its own `&mut self`.
+    pub(crate) fn enter_write_scope(&self) {
+        self.defer_depth.set(self.defer_depth.get() + 1);
+    }
+
+    /// Close a write scope opened by [`enter_write_scope`](Self::enter_write_scope).
+    pub(crate) fn exit_write_scope(&self) {
+        self.defer_depth
+            .set(self.defer_depth.get().saturating_sub(1));
+    }
+
+    /// The notification queue, as a handle that outlives any borrow on this
+    /// scene. [`SceneModel::flush_changes`](crate::SceneModel::flush_changes)
+    /// takes one, releases its borrow, and only then drains — so observers run
+    /// with the scene free.
+    pub(crate) fn change_queue(&self) -> Rc<ChangeQueue> {
+        Rc::clone(&self.pending)
+    }
+
+    /// Whether anything is waiting to be delivered. Cheaper than
+    /// [`change_queue`](Self::change_queue) for the "is there anything to do?"
+    /// question a flush asks on every frame.
+    pub(crate) fn has_pending_notifications(&self) -> bool {
+        self.pending.has_work()
     }
 
     /// Advance the unified model-mutation counter (wrapping). Shared by
@@ -747,14 +1413,38 @@ impl Scene {
     /// / visibility / structure (each [`ItemChange`]) **and** logical-AT
     /// structure (groups, parents, relations, live, landmarks, categories).
     ///
-    /// [`SceneView`](crate::SceneView) snapshots this each `build()` and only
+    /// Includes the per-frame churn of
+    /// [`refresh_dynamic_bounds`](Self::refresh_dynamic_bounds); a consumer
+    /// gating an expensive rebuild on "did anything *meaningful* change" wants
+    /// [`structural_version`](Self::structural_version) instead. The counter
+    /// wraps; compare for equality, not ordering.
+    pub fn mutation_version(&self) -> u64 {
+        self.mutation_seq.get()
+    }
+
+    /// [`mutation_version`](Self::mutation_version) with the per-frame
+    /// dynamic-bounds churn subtracted out: it advances on every mutation
+    /// **except** the `LocalBoundsChanged` events
+    /// [`refresh_dynamic_bounds`](Self::refresh_dynamic_bounds) emits.
+    ///
+    /// The version to gate an expensive rebuild on.
+    /// [`SceneView`](crate::SceneView) snapshots it each `build()` and only
     /// re-walks the (separate, expensive) AccessKit tree when it has advanced
     /// since the previous walk — so an actively-animating
     /// [`add_item_dynamic`](Self::add_item_dynamic) item, which rebuilds every
-    /// frame, does not issue an AT re-walk per frame. The counter wraps; compare
-    /// for equality, not ordering.
-    pub fn mutation_version(&self) -> u64 {
-        self.mutation_seq.get()
+    /// frame, does not issue an AT re-walk per frame for sub-pixel bounds drift
+    /// a screen reader cannot use.
+    ///
+    /// Naming the exclusion is the point. The alternative — snapshotting
+    /// `mutation_version` before `refresh_dynamic_bounds` and again after, and
+    /// treating the difference as churn — is wrong now that the refresh fans
+    /// its changes out: an observer may legally mutate the scene from that
+    /// fan-out, and its mutation lands inside the bracket where it is
+    /// indistinguishable from churn. Folded into the baseline, an AT-structural
+    /// change made there would never un-gate a re-walk, in that build or any
+    /// later one. The counter wraps; compare for equality, not ordering.
+    pub fn structural_version(&self) -> u64 {
+        self.mutation_seq.get().wrapping_sub(self.dynamic_seq.get())
     }
 
     // -----------------------------------------------------------------
@@ -1790,7 +2480,7 @@ impl Scene {
         }
         self.magnets.entry(item).or_default().push((id, magnet));
         self.magnet_owner.insert(id, item);
-        self.bump_a11y_change();
+        self.bump_a11y_change(A11yNode::Item(item));
         id
     }
 
@@ -1805,7 +2495,7 @@ impl Scene {
                 self.magnets.remove(&owner);
             }
         }
-        self.bump_a11y_change();
+        self.bump_a11y_change(A11yNode::Item(owner));
     }
 
     /// Remove every magnet attached to `item`. No-op if none.
@@ -1814,7 +2504,7 @@ impl Scene {
             for (mid, _) in list {
                 self.magnet_owner.remove(&mid);
             }
-            self.bump_a11y_change();
+            self.bump_a11y_change(A11yNode::Item(item));
         }
     }
 
@@ -1828,7 +2518,7 @@ impl Scene {
             && let Some((_, m)) = list.iter_mut().find(|(mid, _)| *mid == magnet)
         {
             m.local_pos = local_pos;
-            self.bump_a11y_change();
+            self.bump_a11y_change(A11yNode::Item(owner));
         }
     }
 
@@ -1844,7 +2534,7 @@ impl Scene {
             && m.enabled != enabled
         {
             m.enabled = enabled;
-            self.bump_a11y_change();
+            self.bump_a11y_change(A11yNode::Item(owner));
         }
     }
 
@@ -2127,7 +2817,7 @@ impl Scene {
         let pos = self.a11y_groups.len();
         self.a11y_groups.push(group);
         self.a11y_group_index.insert(id, pos);
-        self.bump_a11y_change();
+        self.bump_a11y_change(A11yNode::Group(id));
         id
     }
 
@@ -2151,7 +2841,7 @@ impl Scene {
         self.a11y_live.remove(&target);
         self.a11y_landmarks.remove(&target);
         self.a11y_categories.remove(&target);
-        self.bump_a11y_change();
+        self.bump_a11y_change(target);
     }
 
     /// Borrow a logical group by id.
@@ -2171,7 +2861,7 @@ impl Scene {
                 self.a11y_parents.remove(&child);
             }
         }
-        self.bump_a11y_change();
+        self.bump_a11y_change(child);
     }
 
     /// The currently-declared logical parent of a node.
@@ -2182,7 +2872,7 @@ impl Scene {
     /// Declare an AT relationship between two nodes.
     pub fn add_a11y_relation(&mut self, from: A11yNode, kind: A11yRelation, to: A11yNode) {
         self.a11y_relations.push((from, kind, to));
-        self.bump_a11y_change();
+        self.bump_a11y_change(from);
     }
 
     /// All declared AT relations.
@@ -2197,7 +2887,7 @@ impl Scene {
         } else {
             self.a11y_live.insert(node, live);
         }
-        self.bump_a11y_change();
+        self.bump_a11y_change(node);
     }
 
     /// Mark a node as a landmark by overriding its role. Pass
@@ -2208,7 +2898,7 @@ impl Scene {
         } else {
             self.a11y_landmarks.insert(node, role);
         }
-        self.bump_a11y_change();
+        self.bump_a11y_change(node);
     }
 
     /// Tag a node with rotor / quick-nav categories.
@@ -2218,7 +2908,7 @@ impl Scene {
         } else {
             self.a11y_categories.insert(node, categories.to_vec());
         }
-        self.bump_a11y_change();
+        self.bump_a11y_change(node);
     }
 
     /// Read declared categories for a node.

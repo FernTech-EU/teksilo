@@ -199,11 +199,11 @@ stroke makes it *visual* — it starts hit-testing and will absorb clicks that
 used to fall through to the items it groups.
 
 > **Minimap caveat.** `SceneItem::thumbnail_color` (what
-> [`SceneMinimap`](../crates/teksilo-scene/src/minimap.rs) renders) is
-> theme-free by signature, so an item whose colour is a **theme role** has no
-> theme to resolve against and falls back to a neutral grey on the minimap.
-> Use a concrete `Color` or a `Signal<Color>` for items you want faithfully
-> represented there.
+> [`SceneMinimap`](../crates/teksilo-scene/src/minimap.rs) renders — see
+> [Minimap](#minimap)) is theme-free by signature, so an item whose colour is a
+> **theme role** has no theme to resolve against and falls back to a neutral
+> grey on the minimap. Use a concrete `Color` or a `Signal<Color>` for items you
+> want faithfully represented there.
 
 > **Cache caveat.** A custom item that opts into `CacheMode::ItemCoordinate`
 > bakes its *resolved* colours into the cached frame. The `SceneView`
@@ -399,21 +399,36 @@ chain, hard-clamped, so a bounded scene stops at its edge instead of
 rubber-banding. A pan the scene's own `pan_axes` has closed is declined,
 which re-offers the gesture to whatever scrolls outside the view.
 
-**A view that registers the marquee/item-drag handler does not pan under a
-finger** — which it does whenever selection is on or magnetism is
-configured. That handler puts a drag recognizer on the same node as the
-pan claim, and a node can hold only one role in a
-pointer sequence: it is enrolled as the pan claimant, so its own drag is
-never enrolled as a competitor and the deferral that makes a `GridView`'s
-marquee wait for a hold cannot reach it. The drag recognizer is then
-driven from the capture dispatch, which runs before the arbitration walk,
-and it latches at the touch **drag** slop — half the touch **pan** slop —
-so the sequence has an owner before the pan is ever eligible. Fixing that
-means letting the press owner's own `DragActivation` speak when it also
-holds an eligible pan claim, which is core arbitration rather than the
-scene's to change. Until then, a scene that must pan under a finger *and*
-select can offer `DragMode::ScrollHandDrag` on a toolbar toggle, which is
-read live.
+**A view that registers the marquee/item-drag handler — which it does
+whenever selection is on or magnetism is configured — pans under a plain
+finger and marquees after a hold.** That handler puts a drag recognizer on
+the same node as the pan claim, and a node can hold only one role in a
+pointer sequence: it is enrolled as the pan claimant before any handler
+runs, so the drag half arrives at a taken slot.
+`PointerSequence::defer_own_drag` is that half's door — it attaches the
+drag's `DragActivation` to the member the node already has, and `Auto` on a
+direct pointer with an eligible pan resolves to `AfterLongPress`. So a
+finger pans at the touch **pan** slop, a hold arms the marquee (or the item
+grab, or a magnet port drag) and it then latches at the **drag** slop, and
+a mouse — which enrols no pan claimant at all — latches at the 5 dp it
+always did. Before that arm existed the drag latched at 18 dp through the
+capture dispatch and decided the sequence before the pan was ever eligible,
+so this surface could not pan under a finger at all.
+
+Two consequences worth stating. The hold has to be a **hold**: a press that
+has already travelled past `long_press_slop` when the deadline arrives is
+withdrawn rather than armed, so a slow, deliberate pan stays a pan instead
+of becoming a marquee by outlasting the clock. And the hold is spent **on
+this node only** — a heavyweight `add_widget_item` widget inside the view
+keeps its own touch long press and its own touch context menu; what the
+view gives up is its *own* hold, on a press that landed on its background.
+A view that wants its background hold back for a menu answers
+`EventContext::set_drag_activation(DragActivation::Immediate)` from its
+press handler for that press, which spends no hold. `DragMode::ScrollHandDrag`
+on a toolbar toggle remains available and is read live.
+
+See `docs/events-and-gestures.md` §4.2 and
+`crates/teksilo-core/tests/dual_role_arbitration.rs`.
 
 ### The grab tolerances a finger earns
 
@@ -480,20 +495,226 @@ command through whatever the app puts on the item's tap.
 ## Reactive observers — `item_change_signal`
 
 Every Scene mutation fires an [`ItemChange`](../crates/teksilo-scene/src/scene.rs)
-event through `Scene::item_change_signal()`. Apps observe to wire
-snap-to-grid, validation, persistence:
+event through `Scene::item_change_signal()`. Apps observe to wire validation,
+persistence, telemetry, or mirroring into a data layer:
 
 ```rust
-let _h = scene.item_change_signal().observe(|change| {
-    if let ItemChange::LocalPosChanged { id, new, .. } = change {
-        snap(id, *new);
+// `model` is a SceneModel; `writer` is a clone of it.
+let writer = model.clone();
+let _h = model.item_change_signal().observe(move |change| {
+    if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        // Reading the scene from an observer is allowed …
+        if let Some(r) = writer.scene_rect(id) {
+            audit_log(id, r);
+        }
+        // … and so is writing it back. Guard the write, or you have a cycle.
+        let snapped = Point::new((new.x / 25.0).round() * 25.0,
+                                 (new.y / 25.0).round() * 25.0);
+        if snapped != new {
+            writer.set_local_pos(id, snapped);
+        }
     }
 });
 ```
 
 `ItemChange` variants: `Added`, `Removed`, `LocalPosChanged`,
 `LocalBoundsChanged`, `TransformChanged`, `VisibilityChanged`,
-`OpacityChanged`, `FlagsChanged`, `ZChanged`, `ParentChanged`.
+`OpacityChanged`, `FlagsChanged`, `ZChanged`, `LayerChanged`, `ParentChanged`,
+`PayloadChanged`, `AppearanceChanged`.
+
+Logical-AT-structure mutations (groups, parents, relations, live regions,
+landmarks, rotor categories, magnets) are not item geometry, so they go through
+a second channel — `a11y_change_signal`, a monotonic counter. It behaves
+identically to the one above, including for the termination policy below: each
+bump names the `A11yNode` it was about — a magnet's names its owning item — and
+is charged to that node. Nothing caps a single node's share, and nothing caps
+the channel's: "keep AT structure in step per node" is the intended use, not a
+runaway, and it only has to stay inside the one whole-drain budget both channels
+share.
+
+### Deferred fan-out — why an observer may touch the scene
+
+A `SceneModel` mutator holds `borrow_mut()` on the scene for the whole call, and
+`Scene::emit_item_change` is reached from *inside* a `&mut self` method, whose
+borrow Rust only releases on return. A synchronous fan-out therefore ran every
+observer under a live exclusive borrow, and the two things this section
+advertises — reading the scene, writing it back — both panicked with
+`RefCell already (mutably) borrowed`.
+
+So the scene does what `teksilo-data` does, adapted: **mutate, then notify.**
+`ListModel` can scope its borrow and call `notify` after it; `Scene` cannot lift
+the notification out of a `&mut self` method, so the notification is **queued in
+the scene** and drained by whoever opened the write scope, once that borrow has
+dropped. The seven properties worth knowing:
+
+- **Ordering is emission order.** FIFO, one queue shared by both channels — so a
+  batch that moves an item and then declares a landmark on it delivers in that
+  order, and `Scene::remove`'s documented leaves-then-root sequence survives.
+- **An observer's own write queues behind what is already queued.** A drain
+  re-entered from an observer returns immediately and lets the outermost one
+  pick the new changes up, which is what keeps delivery in emission order rather
+  than depth-first. The drain runs until the queue is empty, so an observer's
+  writes are never dropped — the price is that an observer whose write never
+  converges never settles. The two channels differ here, and the difference
+  decides what the fix is. The geometry mutators already suppress a write that
+  changes nothing (`set_local_pos` returns without emitting when the position is
+  unchanged), so an observer that keeps writing the *same* value settles on its
+  own; a geometry cascade that does not settle is one computing a *different*
+  value each time — an accumulating offset, a rounding drift, a spring with no
+  rest state. The `set_a11y_*` mutators do not self-suppress: they bump on every
+  call, so comparing before calling one is a real guard there.
+- **A runaway is stopped by a flat cap on total deliveries, not by a cap on
+  depth, width, or batch size.** The distinction matters, because the shapes
+  look identical from far enough away and only two of them are bugs:
+
+  | shape | what it does to the queue | verdict |
+  | --- | --- | --- |
+  | caller's own batch — a bulk load, a subtree teardown, a scene-wide a11y re-tag | one round, however many changes | free, at any size |
+  | settling cascade — "when a node moves, drag the one chained to it", guarded | one round *per link*, one delivery per link | passes, at any chain length |
+  | guarded aggregate over a hub — every incident edge recomputes it | one subject re-notified once per edge that changes it | passes, at any fan-in the budget can pay for |
+  | runaway write-back — one subject rewritten to a *new* value on every change | the same subject re-notified for ever | panics, naming that subject |
+  | runaway spawner — adds or removes an item on every change | a *new* subject every round, so no subject repeats | panics, with every subject count near 1 |
+
+  So one number trips: **observer-generated deliveries in a single drain**,
+  across both channels and every subject. The caller's own batch — everything
+  queued before the first observer ran — is not counted; nor are cascade depth,
+  fan-in, or the number of distinct subjects a cascade touches.
+
+  Per-subject counts are still kept, and the panic reports the most-charged
+  subject with its count — that is what turns "something did not settle" into
+  "*this* did not settle", and it is what separates row 4 from row 5 for a
+  reader. They are **diagnostics**, not a second trip condition.
+
+  The cap is enforced in **every** build profile. That is deliberately unlike
+  `Signal::try_set`'s guard, which can be debug-only because `try_set` recurses
+  and an unchecked loop there blows the stack and aborts loudly by itself; this
+  drain is an iterative loop, so unchecked it would be a frozen UI thread with
+  no diagnostic and no core dump.
+
+- **The cap is flat, and it is a knob.** Two earlier shapes of this budget each
+  fixed the previous one's false positive and bought a worse problem:
+
+  - a cap on **rounds** aborted a legitimate 300-link settling chain, because a
+    round is what was queued when it began, so an N-link chain costs N rounds;
+  - a cap **per subject** moved the limit onto fan-in — a guarded aggregate over
+    a hub passed at 4000 incident edges and aborted at 4200 against a flat 4096;
+  - **scaling** the per-subject cap with the scene's entry count fixed that and
+    destroyed the guard, because the budget it resolved grew with the model.
+
+  A flat total is the only one of the three that bounds a runaway to the **same
+  amount of work whatever the scene's size**. Measured in release, changing only
+  the budget (`crates/teksilo-scene`, one `set_cascade_budget` call apart):
+
+  | runaway | 10 000 entries | 50 000 entries |
+  | --- | --- | --- |
+  | unguarded write-back, flat 100 000 | 520 ms | 3.95 s |
+  | unguarded write-back, what the scaled budget allowed (640 000 / 3 200 000) | 3.10 s | 131 s |
+  | spawner, flat 100 000 | 43 ms, **+100 002 items** | 52 ms, **+100 002 items** |
+  | spawner, what the scaled budget allowed | 435 ms, **+640 002 items** | 2.85 s, **+3 200 002 items** |
+
+  Both flat rows do the same *work* at both sizes — the same 100 001 deliveries,
+  the same ~100 000 items allocated. The write-back row's wall clock still grows,
+  and that is worth knowing: it is the **app's own** write that is O(entries),
+  not the drain. `Scene::set_local_pos` re-buckets the moved subtree, which
+  rebuilds a parent→children map over every entry, so 100 001 of them cost
+  100 001 × O(entries). The same runaway on the logical-AT channel, whose mutator
+  does no re-bucketing, aborts in **4.8 ms at both sizes** — that is the drain's
+  own cost, and it is flat. The budget bounds how many times an observer's write
+  runs; how expensive each one is remains the scene's business.
+
+  ```text
+  budget = CascadeBudget::total    # flat, default 100 000 deliveries per drain
+  ```
+
+  Every legitimate shape this tier runs clears it by more than an order of
+  magnitude: a 4200-edge guarded aggregate is ~4 200 deliveries, and a 2000-link
+  chain that re-places eight port magnets and refreshes three AT properties per
+  link is ~24 000.
+
+  **What it cannot decide:** "guarded cascade that is genuinely enormous" and
+  "unguarded write-back" are the same picture from the queue's side. The drain
+  does not claim otherwise — the panic states the bound it enforced, the total
+  delivered, and the most-charged subject, then offers a cause as the *likeliest*
+  one rather than the proven one.
+
+  **How to raise it**, for a graph that genuinely settles past the default —
+  mechanism in the framework, policy in the consumer:
+
+  ```rust
+  model.set_cascade_budget(CascadeBudget::new(1_000_000));
+  ```
+
+  Raising it to silence a cycle that does *not* settle only postpones the freeze
+  it exists to prevent — the drain is still unbounded in time, just later. Check
+  the write is guarded first. A budget of zero is clamped to the smallest usable
+  one at the setter rather than stored, so a panic's numbers always describe a
+  cascade that happened.
+
+- **A panicking observer costs one delivery, not the rest of the batch.** Each
+  notification leaves the queue immediately before it is handed to the signal and
+  is never parked in a local buffer, so whatever the panic did not reach is still
+  queued, in order, and the next `flush_changes()` delivers it. (Anything else
+  would let the scene advance with changes nothing can ever report — the
+  corruption the termination policy above exists to avoid.)
+- **No coalescing.** Two moves of one item are two notifications. Persistence
+  and audit observers need every event, and merging two changes would mean
+  merging one's `old` with the other's `new` — a transaction semantic this crate
+  does not define.
+- **A batch, not a change, is the unit.** `SceneModel::write_guard()` holds the
+  write scope open across several edits, which then fan out together:
+
+  ```rust
+  {
+      let mut scene = model.write_guard();
+      scene.set_local_pos(card, Point::new(120.0, 80.0));
+      scene.set_z(card, 10.0);
+  } // both changes fan out here, borrow already released
+  ```
+
+Three doors are deliberately **not** covered, and each will still trap an
+observer that re-enters the model:
+
+- A bare `&mut Scene` fans out synchronously, because nothing is holding a
+  `RefCell` open for it to escape from.
+
+  For a `Scene` you own outright that is safe: no second handle to it can exist.
+  It is **not** safe for a `&mut Scene` reborrowed out of a `SceneModel` —
+  `SceneView::scene_mut()` today hands out a raw `RefMut` from the shared cell,
+  which leaves the write scope closed, so observers still run under the live
+  exclusive borrow and one that re-enters the model panics exactly as every
+  mutator used to. **With any observer installed, edit through
+  `model.write_guard()` rather than `view.scene_mut()`.** The guard derefs to
+  `&mut Scene`, so the call sites read the same.
+- The four constraint signals (`pan_axes`, `zoomable`, `pan_bounds`,
+  `zoom_range`) carry scene *state*, read back by `current_pan_axes` and
+  friends; queueing their writes would make the scene contradict itself inside a
+  write scope, so they stay synchronous.
+- `SceneModel::with_handlers_mut` runs the caller's closure inside the borrow,
+  because it hands out a `&mut` into the scene. It is unwind-safe but not
+  re-entrant.
+
+If a panic unwinds out of an open write scope, the guard releases the borrow and
+**skips** the fan-out — running observers from a `Drop` during an unwind would
+abort the process on the first one that panicked. The abandoned batch stays
+queued; a `catch_unwind` recovery path that intends to keep using the scene
+calls `SceneModel::flush_changes()` once. A scene dropped with a batch still
+queued discards it.
+
+`flush_changes()` is that recovery door, so it never panics, from any call site.
+It is a no-op — and says so rather than delivering half a batch — when nothing is
+queued, when a drain is already running (a call from inside an observer collapses
+into the outer drain), or when **any** borrow on the scene is outstanding. That
+last case covers both a write scope, which owns its batch and fans out when it
+closes, and a live *shared* borrow such as a `SceneView::focus_order` callback or
+a magnetism predicate: an observer is invited to write, and a write needs the
+cell exclusively, so draining under a read-only closure would hand out that
+invitation and then panic on it.
+
+Constraining a move *before* it is applied — snap-to-grid on the drag ghost,
+axis lock, bounds clamping — is a different problem, and an observer is the
+wrong tool for it even now: it runs after the write, so it produces a second
+`LocalPosChanged` for one gesture and cannot touch the mid-drag ghost at all.
+That needs a pre-mutation hook and does not exist yet.
 
 ---
 
@@ -1005,6 +1226,215 @@ others.
 
 ---
 
+## Minimap
+
+[`SceneMinimap`](../crates/teksilo-scene/src/minimap.rs) is a **standalone
+sibling** of the view, not something `SceneView` embeds: the app places it
+where it wants (typically a bottom-trailing overlay, as in `scene_showcase`)
+and feeds it three things.
+
+```rust
+let view = SceneView::new(scene);
+let minimap = SceneMinimap::new(
+        view.scene_content_bounds().unwrap_or(Rect::new(0.0, 0.0, 1000.0, 1000.0)),
+        view.viewport_in_scene_signal(),
+    )
+    .items(view.scene().item_thumbnails())   // both tiers
+    .size(200.0, 150.0)
+    // The contract is "centre the view on this scene point". `SceneView` has
+    // no one-call form, so the app moves the camera it owns — see
+    // "It is a control, not a picture" below.
+    .on_click(move |scene_pt, _ctx| { /* centre the camera on scene_pt */ });
+```
+
+`items` is a **snapshot** — rebuild the widget tree (or wire a
+`Signal<Vec<…>>`) when items move. The viewport overlay is reactive on its own:
+the minimap binds `viewport_in_scene` at `RepaintOnly`, so pan / zoom re-render
+it with no plumbing.
+
+### `content_bounds` is a floor, not a frame
+
+The rect actually projected onto the drawing area is the **effective extent**:
+
+```text
+effective_extent = content_bounds ∪ every item rect ∪ viewport_in_scene
+```
+
+This is not a refinement — it is what keeps the minimap inside its own frame.
+The inputs are unrelated: `content_bounds` is usually the union of item rects
+(`scene_content_bounds`), while `viewport_in_scene` is the viewport through the
+*inverse view transform*, and **pan is unbounded by default**
+(`Scene::current_pan_bounds()` is `None`). Zoom in and pan away, or zoom out
+past the content, and the viewport sits wholly outside `content_bounds`. A
+minimap that mapped `content_bounds` alone would draw the indicator outside
+itself, over whatever sibling widget is there.
+
+Expanding the extent — tldraw's `Box.Expand(contentBounds, viewportBounds)` —
+is chosen over the two alternatives because it is the only one that stays
+*useful*: a **clamped** indicator lies about position and size and freezes
+while the user is still panning; a **cropped** one disappears exactly when the
+user most needs to know where they are. With expansion, position and size stay
+truthful and the content visibly shrinks as you wander off — which *is* the
+"you are out here, the content is over there" signal.
+
+Consequences worth knowing:
+
+- Pass a **larger** `content_bounds` than the item union to keep the scale
+  steady while the user pans inside it.
+- `content_outline(Some(..))` outlines `content_bounds` *through the same
+  projection*, so it shrinks and offsets away from the frame as the extent
+  grows. That is the cue, not a bug.
+- The fit is **uniform** — one scale for both axes, centred — so a square item
+  reads as a square. Expect letterbox margins when the widget's aspect ratio
+  differs from the extent's.
+- `on_click` inverts the **exact projection the last paint used** — `paint`
+  stores it, the tap handler reads it back — so click-to-recentre lands on what
+  the user is looking at even while the viewport is off the content, or the
+  parent handed the minimap less room than it asked for. The extent formula
+  lives in one place (`effective_extent`) and the tap does not re-derive it;
+  two copies of it is exactly how a paint-vs-click desync gets in.
+
+### It clips its own paint — and `clips_children` cannot
+
+`SceneMinimap::paint` wraps **everything it emits** — background, content
+outline, thumbnails, viewport indicator *and the widget's own border* — in one
+`Canvas::set_clip` / `clear_clip`. Nothing it draws leaves its frame, at any
+caller-supplied stroke width. That is a structural backstop under the extent
+policy above: the policy is something a later edit — or an app that expects a
+hand-picked `content_bounds` honoured verbatim — could regress; the clip is a
+guarantee.
+
+The clip is set **after** the canvas is translated to `bounds.origin`, and is
+given the widget-*local* area, so it lands on the widget wherever the parent
+placed it. At the root of a tree that translation is the identity and the
+ordering is unobservable — which is why `minimap_clip.rs` runs the load-bearing
+cases inside a `Padding` as well.
+
+It is also the **only** mechanism available. `Widget::clips_children` does not
+clip a widget's *own* `paint()`: the render walker emits a plain clipping node's
+`SetClip` **after** that node's paint
+([`rendering_impl.rs`](../crates/teksilo-core/src/widget_tree/rendering_impl.rs)),
+so for a self-painting leaf with no children it is a complete no-op. Any scene
+widget that paints unbounded geometry has to reach for `set_clip` by hand, as
+`ListView`, `TableView`, `CodeEditor` and `Terminal` already do.
+
+`SceneView` is the exception that proves the rule: its own paint *is* clipped,
+because it is a `clips_children` **plus** content-transform node, the one
+combination for which the walker emits the clip before the node's paint.
+
+### The border is drawn inside the frame
+
+`Canvas::stroke_rect` centres each edge line on the rect boundary. Stroking the
+widget area directly would therefore hang half the width *outside* the widget —
+12 px on every side for `border(Some((c, 24.0)))`, over whatever sibling is
+underneath, from a public builder with no clamp and no warning. So the border is
+stroked on the area **inset by half its width**: the band lands wholly inside,
+the CSS `border-box` convention. `width` is consumed from the picture, never
+from the neighbours, and it is honoured as asked rather than clamped (clamping
+would silently render something other than the request, and still leave the last
+half-pixel straddling). The clip then bounds even a width wider than the widget.
+
+### It is a control, not a picture
+
+The minimap answers two questions — *where am I* and *take me somewhere else* —
+and both are on its AccessKit node. `Role::Group`, named `"Scene minimap"`, with
+the position as its **value**:
+
+> Viewport at 42% across, 17% down; showing 25% of the width and 33% of the height
+
+A 2-D position has no ARIA role (there is no `slider2d`) and `numeric_value`
+holds one number where this reading has four, so the value is text — the same
+answer `HsvCanvas` reaches for the same reason. The value is recomputed on every
+AT walk from the same `effective_extent` the picture is projected through, so
+the words are the picture; the viewport signal is bound at `AccessibilityOnly`
+as well as `RepaintOnly` so a pan refreshes both with no rebuild.
+`access_readout(|MinimapReadout| …)` replaces the phrasing — that is the seam
+for `tr!`, and for saying something the widget cannot know (page numbers, map
+coordinates).
+
+Installing `on_click` is what turns the read-out into a control. It then takes
+focus and offers three routes into that one callback:
+
+| | pointer | keyboard | assistive technology |
+| --- | --- | --- | --- |
+| move the view | tap a point | arrows; `Shift` = a whole viewport | `ScrollLeft` / `Right` / `Up` / `Down` |
+| centre on the content | — | `Home`, `Enter`, `Space` | `Click` |
+
+`Action::Click` is the position-free half of the tap: a click needs a point and
+an AT client has none, so the primary action is the one destination the widget
+can name by itself. Arrow steps are a fraction of the **viewport** (a tenth, or
+a whole one with `Shift`) — a scroll view's line-and-page pair, scaled to what
+the user is looking at instead of to a count of scene units that would be a
+screenful at one zoom and a hair at another. They do not mirror under RTL,
+because the picture does not either.
+
+`on_click`'s contract is specifically *centre the view on this scene point*,
+because the keyboard and AT routes compute their destination from the current
+viewport and then say where the move left it — and both of those are only true
+if the app centres. `SceneView` has no single call for that, so the app drives
+the camera it already owns: either its `pan_x_signal` / `pan_y_signal` (or the
+app-owned pair handed to `view_state`), or, when the view is wrapped in a
+`SceneScrollView`, that wrapper's `scroll_pos_x_signal` / `scroll_pos_y_signal`
+— the same pan through the door the scroll bars use, already expressed against
+the scrollable extent so a target can be clamped to it. `scene_showcase` wires
+the second, and its tests tap the minimap and watch the view move.
+
+### Who announces, and who stays quiet
+
+The keyboard and assistive-technology routes announce where they left the
+viewport, through the same phrasing the value uses. **The pointer route does
+not.**
+
+An arrow press on an unannotated graphic tells a screen-reader user nothing at
+all, and an AT client invoking `Click` was never told where "the content" is —
+for those two the utterance is the entire feedback. A tap already has some: the
+user picked the destination by aiming at the picture, and clicking a minimap is
+a gesture people repeat, so one utterance per click is a metronome over
+whatever was being read.
+
+That is the rule the workspace already follows, from both directions.
+`HsvCanvas` — the other 2-D manipulator — announces from its arrows and its
+custom actions and not from its drag or its tap. The five data views' row
+reorder announces from `common::ordered_move`, which is the *non-drag*
+alternative; the drop itself is silent. The one pointer route that does speak
+is the charts' readout, and only for a **coarse** pointer that pressed and
+released without travelling — because that tap is an *inspection* standing in
+for a hover a finger cannot perform, so the utterance is its whole product, and
+a scrub is deliberately coalesced into nothing. A minimap tap is a *command*
+whose destination the user chose, so the exception does not reach it.
+
+Nothing is lost by the silence: the node's value is the same sentence, so a
+client that re-reads the control after a click gets the new position — it is
+simply not interrupted with it.
+
+What *is* announced describes the move that was **asked for** rather than one
+read back afterwards: the app owns the pan and may not have applied it yet
+(`with_widget_mut` lands after the handler returns, an animated pan later
+still), so re-reading the signal would announce the position just left.
+
+### Why a read-out is not in the Tab order
+
+Without `on_click` the node is still emitted and still says where the viewport
+is — but it takes no focus and advertises no action.
+
+Worth arguing rather than assuming, because a minimap *displays* something and
+a display is worth reaching. The answer is that reaching it and focusing it are
+separate questions: the node is in the accessibility tree with a name and a
+value, so object / browse navigation and the rotor all arrive at it and read
+the position out. What the gate withholds is the **Tab** order, and Tab is for
+things you can operate. A read-only minimap answers Tab with nothing — no arrow
+does anything, `Enter` does nothing, no action is advertised, and the focus ring
+has parked on a picture. That is the dead stop the ARIA practices warn about,
+and it costs every keyboard user a press on the way past.
+
+An app that disagrees for its own layout is not blocked: `.focusable(true)` from
+the framework's ordinary `WidgetBuilder` chain puts any widget in the Tab order,
+this one included. The default is the answer that is right without knowing the
+app. Renaming likewise goes through that chain (`.access_label(tr!(…))`), not
+through a second set of builders here.
+
+---
+
 ## i18n
 
 User-visible strings on `SceneItem` builders (`label`, `tooltip`,
@@ -1056,34 +1486,56 @@ through `ctx.with_widget_mut::<SceneView>(view_id, …)` (see *Runtime mutation*
 above); the live `scene-corkboard` example does exactly that for its "Add Act"
 button.
 
+`scene_mut()` hands out a raw `RefMut` into the shared cell, so it does **not**
+open a write scope: its changes fan out synchronously, under the live exclusive
+borrow, and an observer that re-enters the model from one of them panics. With
+any observer installed, take `model.write_guard()` instead — it derefs to
+`&mut Scene`, so every line above reads identically, and it batches. See
+*Deferred fan-out* above.
+
 ---
 
 ## Worked example: simple node-graph editor
 
 ```rust
 // Each node is a draggable RectItem with a child TextItem label.
-let mut scene = Scene::new();
-let node = scene.add_item(
+let model = SceneModel::new();
+let node = model.add_item(
     RectItem::new(Rect::new(0.0, 0.0, 120.0, 60.0))
         .fill(Color::WHITE).stroke(Color::BLACK, 1.0)
         .draggable(true),
     Point::new(100.0, 100.0),
 );
-let label = scene.add_item(
+let label = model.add_item(
     TextItem::new(tr!(node_name()), Rect::new(8.0, 8.0, 100.0, 24.0)),
     Point::ZERO,
 );
-scene.set_item_parent(label, Some(node));
+model.set_item_parent(label, Some(node));
 
-// React to drag-end with snap-to-grid.
-let _h = scene.item_change_signal().observe(|c| {
-    if let ItemChange::LocalPosChanged { id, new, .. } = c {
-        snap_to_grid(*id, *new, 20.0);
+// Snap onto a 20 dp grid once a drag has landed. The observer writes the
+// model back, which is legal (see *Deferred fan-out*) — but the write must be
+// guarded, or each correction produces the next and the drain never settles.
+// Note this snaps on *commit* only: the drag ghost is not the model, so the
+// item slides freely and lands on the grid when released.
+let writer = model.clone();
+let _h = model.item_change_signal().observe(move |c| {
+    if let ItemChange::LocalPosChanged { id, new, .. } = *c {
+        let snapped = Point::new((new.x / 20.0).round() * 20.0,
+                                 (new.y / 20.0).round() * 20.0);
+        if snapped != new {
+            writer.set_local_pos(id, snapped);
+        }
     }
 });
 
-let view = SceneView::new(scene);
+let view = SceneView::with_model(model);
 ```
+
+With that observer installed, later edits to this scene go through the model
+(`model.set_local_pos(..)`) or `model.write_guard()`, never
+`view.scene_mut()` — the raw `RefMut` the latter hands out leaves the write scope
+closed, so the observer above would run under a live exclusive borrow and panic
+on its own write-back. See *Deferred fan-out*.
 
 ---
 

@@ -90,11 +90,11 @@ pub use magnet::{
     Magnet, MagnetConnection, MagnetFeedback, MagnetId, MagnetMarker, MagnetRef, MagnetRole,
     MagnetSnap, MagnetVerdict, MagnetVisualState, MagnetismConfig, MarkerVisibility,
 };
-pub use minimap::SceneMinimap;
+pub use minimap::{MinimapReadout, SceneMinimap};
 pub use scene::Scene;
-pub use scene::{ItemChange, PanAxes, SceneConstraints, SceneLayer};
+pub use scene::{CascadeBudget, ItemChange, PanAxes, SceneConstraints, SceneLayer};
 pub use scene_list_adapter::SceneListAdapter;
-pub use scene_model::SceneModel;
+pub use scene_model::{SceneModel, SceneWriteGuard};
 pub use scroll_view::{SceneScrollView, ScrollBarMode, ScrollBarPolicy};
 pub use selection::{SceneSelection, SceneSelectionMode};
 pub use state::SceneViewState;
