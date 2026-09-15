@@ -103,6 +103,10 @@ for a dashed outline, or `StrokeStyle::dotted(1.5, 3.0)` for a dotted
 guide. The style is stored verbatim, so all of `StrokeStyle`'s knobs
 (dash pattern/offset, `Logical` vs `Device` space) apply.
 
+A dashing style costs a CPU-rasterized path: `Canvas` diverts it away
+from the decoration-rect / SDF pipelines, which cannot express a dash.
+Solid and cosmetic strokes keep the cheap route.
+
 #### `pub fn corner_radius(mut self, radius: f32) -> Self`
 
 Rounded corners for fill and stroke, in scene-coordinate pixels.

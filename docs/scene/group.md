@@ -108,6 +108,10 @@ Border stroke with an explicit `StrokeStyle` — dashed / dotted /
 custom caps. E.g. `.stroke_styled(color, StrokeStyle::dashed(2.0, 6.0, 4.0))`
 for a dashed lane boundary.
 
+A dashing style costs a CPU-rasterized path: `Canvas` diverts it away
+from the decoration-rect / SDF pipelines, which cannot express a dash.
+Solid and cosmetic strokes keep the cheap route.
+
 #### `pub fn corner_radius(mut self, radius: f32) -> Self`
 
 Rounded corners for fill and stroke. Default `0.0`.

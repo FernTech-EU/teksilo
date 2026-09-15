@@ -854,12 +854,14 @@ pub(crate) fn draw_mark_tooltip(
 /// override wins over the recipe's own [`BorderStyle`] when set.
 ///
 /// Gridlines are drawn via `stroke_path` (Tier 3, CPU-rasterized through
-/// tiny-skia) rather than `Canvas::draw_line` (Tier 1) because
-/// `draw_line`'s `StrokeSpace::Logical` branch bakes a plain
-/// `DecorationRect` and never reads `StrokeStyle::dash_pattern` — dashing
-/// would be silently dropped. `stroke_path`'s `PathEntry.stroke_style` is
-/// carried through to `tiny_skia::StrokeDash` by the path atlas
-/// rasterizer, so it is the only draw path that actually honors dashing.
+/// tiny-skia), whose `PathEntry.stroke_style` the path-atlas rasterizer
+/// carries through to `tiny_skia::StrokeDash`. That used to be the *only*
+/// draw path that honored dashing: `Canvas::draw_line` (Tier 1) baked a
+/// plain `DecorationRect` and dropped the pattern silently. `Canvas` now
+/// routes any dashing style to `stroke_path` itself (see
+/// `StrokeStyle::is_dashed`), so calling it here is no longer load-bearing
+/// — but it is still the honest description of what a dashed gridline is,
+/// and it skips the routing check.
 pub(crate) fn resolve_gridline_stroke(
     recipe: &BorderRecipe,
     dash_override: Option<(f32, f32)>,

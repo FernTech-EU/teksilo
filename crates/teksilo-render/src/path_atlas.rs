@@ -68,7 +68,15 @@ pub struct PathPlacement {
 }
 
 /// Cache key derived from path geometry + stroke style + rasterized size +
-/// the device-space origin the bitmap was baked against.
+/// the device-space origin the bitmap was baked against + the geometry
+/// scale it was baked at.
+///
+/// `geom_scale` is in the key because it is a rasterization input the size
+/// does not always recover: `w`/`h` are the bounds *ceiled* into texels, so
+/// a sub-pixel path aliases several scales onto one bitmap size, and a
+/// cosmetic stroke's `geom_scale` moves continuously with the view zoom.
+/// It scales the dash pattern (a length along the path), so a collision
+/// would serve a bitmap whose dashes are cut for a different zoom.
 ///
 /// Deliberately does **not** include color: the atlas now always
 /// rasterizes an opaque-white AA coverage mask (see [`rasterize_path`]),
@@ -86,6 +94,7 @@ impl PathCacheKey {
         origin: [f32; 2],
         w: u32,
         h: u32,
+        geom_scale: f32,
     ) -> Self {
         let mut hasher = std::hash::DefaultHasher::new();
         // Hash path commands
@@ -157,6 +166,10 @@ impl PathCacheKey {
         // first's phase.
         origin[0].to_bits().hash(&mut hasher);
         origin[1].to_bits().hash(&mut hasher);
+        // And the scale the geometry (and the dash pattern along it) was
+        // baked at — see this type's doc comment for why `w`/`h` don't
+        // already say it.
+        geom_scale.to_bits().hash(&mut hasher);
         PathCacheKey(hasher.finish())
     }
 }
@@ -401,7 +414,15 @@ impl PathAtlas {
             return None;
         }
 
-        let key = PathCacheKey::new(path, style, fill_rule, raster_origin, raster_w, raster_h);
+        let key = PathCacheKey::new(
+            path,
+            style,
+            fill_rule,
+            raster_origin,
+            raster_w,
+            raster_h,
+            geom_scale,
+        );
 
         // Cache hit
         if let Some(region) = self.cache.get_mut(&key) {
@@ -784,10 +805,27 @@ fn rasterize_path(
             LineJoin::Round => tiny_skia::LineJoin::Round,
             LineJoin::Bevel => tiny_skia::LineJoin::Bevel,
         };
-        let dash = style
-            .dash_pattern
-            .as_ref()
-            .and_then(|pattern| tiny_skia::StrokeDash::new(pattern.clone(), style.dash_offset));
+        // Dash lengths are measured ALONG the path, so they live in the
+        // path's units and must be scaled by `geom_scale` — the same factor
+        // the geometry was baked with — not by `stroke_scale`, which is the
+        // across-the-path thickness. Passing the pattern unscaled made a
+        // dash shorter by exactly `1 / geom_scale`: a `dashed(2, 4, 4)` line
+        // showed 3 dashes at scale 1 and 5 at scale 2, so every dashed
+        // stroke in the framework — chart gridlines included — was drawn
+        // with half-length dashes on a 2× HiDPI display, and a cosmetic
+        // dashed stroke re-cut its pattern on every zoom step.
+        //
+        // `StrokeSpace::Device` still only pins the *thickness*: the doc on
+        // `StrokeStyle::hairline` says position follows the full transform,
+        // and a longitudinal measure is position, not thickness. So a
+        // cosmetic dashed connector zooms its dashes with its geometry while
+        // holding its width.
+        let dash = style.dash_pattern.as_ref().and_then(|pattern| {
+            tiny_skia::StrokeDash::new(
+                pattern.iter().map(|d| d * geom_scale).collect(),
+                style.dash_offset * geom_scale,
+            )
+        });
         let stroke = tiny_skia::Stroke {
             width: style.width * stroke_scale,
             line_cap,
@@ -1079,8 +1117,8 @@ mod tests {
             ..StrokeStyle::solid(2.0)
         };
         assert_ne!(
-            PathCacheKey::new(&path, &miter, FillRule::Winding, [0.0, 0.0], 12, 12),
-            PathCacheKey::new(&path, &round, FillRule::Winding, [0.0, 0.0], 12, 12),
+            PathCacheKey::new(&path, &miter, FillRule::Winding, [0.0, 0.0], 12, 12, 1.0),
+            PathCacheKey::new(&path, &round, FillRule::Winding, [0.0, 0.0], 12, 12, 1.0),
             "miter and round joins must hash to different cache keys"
         );
     }
@@ -1099,8 +1137,8 @@ mod tests {
         path.commands.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
         assert_ne!(
-            PathCacheKey::new(&path, &style, FillRule::Winding, [0.0, 0.0], 12, 12),
-            PathCacheKey::new(&path, &style, FillRule::EvenOdd, [0.0, 0.0], 12, 12),
+            PathCacheKey::new(&path, &style, FillRule::Winding, [0.0, 0.0], 12, 12, 1.0),
+            PathCacheKey::new(&path, &style, FillRule::EvenOdd, [0.0, 0.0], 12, 12, 1.0),
             "winding and even-odd fills must hash to different cache keys"
         );
     }
@@ -1183,8 +1221,8 @@ mod tests {
         let path = Path::circle(Point::new(8.0, 8.0), 5.5);
         let style = StrokeStyle::solid(1.0);
         assert_ne!(
-            PathCacheKey::new(&path, &style, FillRule::Winding, [1.0, 1.0], 13, 13),
-            PathCacheKey::new(&path, &style, FillRule::Winding, [1.5, 1.5], 13, 13),
+            PathCacheKey::new(&path, &style, FillRule::Winding, [1.0, 1.0], 13, 13, 1.0),
+            PathCacheKey::new(&path, &style, FillRule::Winding, [1.5, 1.5], 13, 13, 1.0),
             "a snapped and an unsnapped raster of one path must key apart"
         );
     }
@@ -1426,6 +1464,7 @@ mod tests {
             [0.0, 0.0],
             40,
             40,
+            1.0,
         )));
     }
 
@@ -1668,11 +1707,124 @@ mod tests {
         );
 
         // Same width/dims but different stroke space must not collide.
-        let k_cos = PathCacheKey::new(&path, &cosmetic, FillRule::Winding, [0.0, 0.0], 40, 4);
-        let k_log = PathCacheKey::new(&path, &logical, FillRule::Winding, [0.0, 0.0], 40, 4);
+        let k_cos = PathCacheKey::new(&path, &cosmetic, FillRule::Winding, [0.0, 0.0], 40, 4, 1.0);
+        let k_log = PathCacheKey::new(&path, &logical, FillRule::Winding, [0.0, 0.0], 40, 4, 1.0);
         assert_ne!(
             k_cos, k_log,
             "cache key must distinguish cosmetic vs logical"
+        );
+    }
+
+    // ── Dash lengths are measured along the path, so they scale with it ──
+
+    /// A 20-logical-px horizontal line, dashed 4 on / 4 off, rasterized at
+    /// `geom_scale`. Returns how many separate ink runs the middle row has.
+    fn dashed_line_runs(geom_scale: f32) -> usize {
+        let mut path = Path::new();
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 4.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(20.0, 4.0)));
+        let style = StrokeStyle::dashed(2.0, 4.0, 4.0);
+
+        let w = (20.0 * geom_scale).ceil() as u32;
+        let h = (8.0 * geom_scale).ceil() as u32;
+        let px = rasterize_path(
+            &path,
+            &style,
+            FillRule::Winding,
+            [0.0, 0.0],
+            w,
+            h,
+            geom_scale,
+            geom_scale,
+        )
+        .expect("rasterizes");
+
+        let row = (4.0 * geom_scale) as u32;
+        let mut runs = 0usize;
+        let mut inked = false;
+        for x in 0..w {
+            let now = px[((row * w + x) * 4 + 3) as usize] > 100;
+            if now && !inked {
+                runs += 1;
+            }
+            inked = now;
+        }
+        runs
+    }
+
+    /// The defect: the dash pattern reached tiny-skia unscaled while the
+    /// geometry was baked at `geom_scale`, so the dashes came out
+    /// `1 / geom_scale` too short. A `dashed(2, 4, 4)` line showed 3 dashes
+    /// at scale 1 and 5 at scale 2 — i.e. every dashed stroke, chart
+    /// gridlines included, was drawn with half-length dashes on a 2× HiDPI
+    /// display, and a cosmetic dashed stroke re-cut its pattern at every
+    /// zoom step.
+    #[test]
+    fn dash_count_is_invariant_to_the_geometry_scale() {
+        let baseline = dashed_line_runs(1.0);
+        assert!(baseline > 1, "the probe line must actually dash");
+        for scale in [2.0f32, 3.0, 4.0] {
+            assert_eq!(
+                dashed_line_runs(scale),
+                baseline,
+                "a dash is a length along the path: scaling the geometry by \
+                 {scale} must scale the dashes with it, not cut more of them"
+            );
+        }
+    }
+
+    /// The dash pattern is a rasterization input that `w` / `h` do not
+    /// always recover — they are the bounds *ceiled* into texels, so a
+    /// sub-pixel path aliases several scales onto one bitmap size, and a
+    /// cosmetic stroke's `geom_scale` slides continuously with the view
+    /// zoom. Without `geom_scale` in the key, the second zoom step would
+    /// be served the first's dashes.
+    #[test]
+    fn cache_key_distinguishes_the_geometry_scale() {
+        let mut path = Path::new();
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(0.4, 0.0)));
+        let style = StrokeStyle::dashed(1.0, 4.0, 4.0);
+        // Same ceiled bitmap size (1x1) and same origin at both scales.
+        assert_ne!(
+            PathCacheKey::new(&path, &style, FillRule::Winding, [0.0, 0.0], 1, 1, 1.0),
+            PathCacheKey::new(&path, &style, FillRule::Winding, [0.0, 0.0], 1, 1, 2.0),
+            "two geometry scales that ceil to the same bitmap must not share \
+             an atlas entry — their dashes are cut differently"
+        );
+    }
+
+    /// A dashed stroke really does leave gaps — the rasterizer is what the
+    /// canvas routing exists to reach, so pin that it does the job.
+    #[test]
+    fn a_dashed_stroke_leaves_gaps_where_a_solid_one_does_not() {
+        let mut path = Path::new();
+        path.commands
+            .push(PathCommand::MoveTo(Point::new(0.0, 4.0)));
+        path.commands
+            .push(PathCommand::LineTo(Point::new(20.0, 4.0)));
+
+        let ink = |style: &StrokeStyle| -> usize {
+            let px = rasterize_path(&path, style, FillRule::Winding, [0.0, 0.0], 20, 8, 1.0, 1.0)
+                .expect("rasterizes");
+            (0..20)
+                .filter(|x| px[((4 * 20 + x) * 4 + 3) as usize] > 100)
+                .count()
+        };
+
+        let solid = ink(&StrokeStyle::solid(2.0));
+        let dashed = ink(&StrokeStyle::dashed(2.0, 4.0, 4.0));
+        assert!(
+            solid >= 19,
+            "solid stroke inks the whole line (got {solid})"
+        );
+        assert!(
+            dashed < solid,
+            "dashed stroke must leave gaps (solid={solid}, dashed={dashed})"
         );
     }
 }

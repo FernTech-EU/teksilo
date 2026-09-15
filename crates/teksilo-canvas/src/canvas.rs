@@ -90,6 +90,10 @@ impl Canvas {
     }
 
     /// Draw a horizontal or vertical line as a thin decoration rect.
+    ///
+    /// A **dashing** style ([`StrokeStyle::is_dashed`]) is routed to
+    /// [`stroke_path`](Self::stroke_path) instead — see
+    /// [`stroke_rect`](Self::stroke_rect) for why.
     pub fn draw_line(
         &mut self,
         from: Point,
@@ -98,6 +102,10 @@ impl Canvas {
         style: impl Into<StrokeStyle>,
     ) {
         let style = style.into();
+        if needs_dash_path(&style) {
+            self.stroke_path(&Path::line(from, to), color, style);
+            return;
+        }
         if style.space == StrokeSpace::Device {
             // Cosmetic / hairline: keep the width un-baked so the renderer can
             // apply a transform-invariant device-pixel thickness.
@@ -133,8 +141,25 @@ impl Canvas {
     }
 
     /// Stroke the outline of an axis-aligned rectangle.
+    ///
+    /// A **dashing** style ([`StrokeStyle::is_dashed`]) is routed to
+    /// [`stroke_path`](Self::stroke_path) over `Path::rect(rect)` rather than
+    /// decomposed into four edges. Two reasons, and both are load-bearing:
+    /// the four-edge decomposition emits `DecorationRect`s, which carry no
+    /// dash field and no shader that could use one — the pattern would be
+    /// silently dropped and the rect would render *solid*; and even if it
+    /// could dash, four independent segments restart the pattern at every
+    /// corner, where SVG, Qt and every other 2D API run one continuous dash
+    /// around the perimeter.
+    ///
+    /// Solid strokes keep the cheap four-edge path, so this costs a
+    /// CPU-rasterized path only where one is the only way to be correct.
     pub fn stroke_rect(&mut self, rect: Rect, color: Color, style: impl Into<StrokeStyle>) {
         let style = style.into();
+        if needs_dash_path(&style) {
+            self.stroke_path(&Path::rect(rect), color, style);
+            return;
+        }
         // Pass the full style (not just the width) so `StrokeSpace::Device`
         // (cosmetic) propagates to each edge line.
         // Top
@@ -196,6 +221,13 @@ impl Canvas {
     /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) border:
     /// its width stays constant in device pixels regardless of the view
     /// transform's zoom, while the shape body still zooms.
+    ///
+    /// A **dashing** style ([`StrokeStyle::is_dashed`]) is routed to
+    /// [`stroke_path_with_paint`](Self::stroke_path_with_paint): a
+    /// [`ShapeQuad`] has no dash field and the SDF shader has no way to
+    /// derive one, so emitting a dashed style here would render solid.
+    /// `Path::rounded_rect(rect, radii).bounds() == rect`, so the gradient
+    /// convention is unchanged — endpoints stay rect-local either way.
     pub fn stroke_rounded_rect(
         &mut self,
         rect: Rect,
@@ -204,8 +236,12 @@ impl Canvas {
         style: impl Into<StrokeStyle>,
     ) {
         let style = style.into();
-        let (color, paint_data) = paint_to_data(&paint.into());
         let clamped = corner_radius.clamped(rect.width, rect.height);
+        if needs_dash_path(&style) {
+            self.stroke_path_with_paint(&Path::rounded_rect(rect, clamped), paint, style);
+            return;
+        }
+        let (color, paint_data) = paint_to_data(&paint.into());
         let idx = self.frame.shapes.len();
         self.frame.shapes.push(ShapeQuad {
             screen: rect.to_array(),
@@ -243,7 +279,9 @@ impl Canvas {
     /// Stroke a circle outline using SDF rendering.
     ///
     /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) border —
-    /// see [`stroke_rounded_rect`](Self::stroke_rounded_rect).
+    /// see [`stroke_rounded_rect`](Self::stroke_rounded_rect), which also
+    /// explains why a **dashing** style is routed to
+    /// [`stroke_path_with_paint`](Self::stroke_path_with_paint).
     pub fn stroke_circle(
         &mut self,
         center: Point,
@@ -252,6 +290,10 @@ impl Canvas {
         style: impl Into<StrokeStyle>,
     ) {
         let style = style.into();
+        if needs_dash_path(&style) {
+            self.stroke_path_with_paint(&Path::circle(center, radius), paint, style);
+            return;
+        }
         let (color, paint_data) = paint_to_data(&paint.into());
         let idx = self.frame.shapes.len();
         self.frame.shapes.push(ShapeQuad {
@@ -290,7 +332,9 @@ impl Canvas {
     /// Stroke an ellipse outline using SDF rendering.
     ///
     /// A [`StrokeSpace::Device`] style renders a cosmetic (hairline) border —
-    /// see [`stroke_rounded_rect`](Self::stroke_rounded_rect).
+    /// see [`stroke_rounded_rect`](Self::stroke_rounded_rect), which also
+    /// explains why a **dashing** style is routed to
+    /// [`stroke_path_with_paint`](Self::stroke_path_with_paint).
     pub fn stroke_ellipse(
         &mut self,
         rect: Rect,
@@ -298,6 +342,10 @@ impl Canvas {
         style: impl Into<StrokeStyle>,
     ) {
         let style = style.into();
+        if needs_dash_path(&style) {
+            self.stroke_path_with_paint(&Path::ellipse(rect), paint, style);
+            return;
+        }
         let (color, paint_data) = paint_to_data(&paint.into());
         let idx = self.frame.shapes.len();
         self.frame.shapes.push(ShapeQuad {
@@ -994,6 +1042,22 @@ impl std::fmt::Debug for DebugElide<'_> {
             f.write_str("…")
         }
     }
+}
+
+/// Whether a stroke has to be emitted as a Tier-3 path to come out right.
+///
+/// Only [`PathEntry`] carries a [`StrokeStyle`] through to the renderer; a
+/// [`DecorationRect`] (Tier 1) and a [`ShapeQuad`] (Tier 2) have no dash
+/// field, and no shader behind either could derive one. So a dashing style
+/// handed to `stroke_rect` / `stroke_rounded_rect` / `stroke_circle` /
+/// `stroke_ellipse` / `draw_line` has to be re-expressed as a path, or it
+/// renders **solid** — accepted, round-tripped, and silently wrong.
+///
+/// The width guard is not an optimization: `PathEntry::stroke_style` uses a
+/// zero width to mean *fill*, so routing a zero-width stroke to the path
+/// pipeline would turn an invisible outline into a filled shape.
+fn needs_dash_path(style: &StrokeStyle) -> bool {
+    style.width > 0.0 && style.is_dashed()
 }
 
 /// Translate a paint's gradient geometry by `(dx, dy)`.
@@ -1706,5 +1770,271 @@ mod tests {
         canvas.fill_circle(Point::new(10.0, 10.0), 5.0, Color::RED);
         let fill_frame = canvas.into_render_frame();
         assert_eq!(fill_frame.shapes[0].stroke_space, StrokeSpace::Logical);
+    }
+
+    // ── Dashed strokes reach a pipeline that can honor them ──────────────
+    //
+    // Only `PathEntry` carries a `StrokeStyle` to the renderer. Every test
+    // here asserts on the produced `RenderFrame`, because the defect these
+    // pin was invisible at the API surface: the style was accepted, stored
+    // and round-tripped, and then dropped on the way to pixels.
+
+    fn dashed() -> StrokeStyle {
+        StrokeStyle::dashed(2.0, 6.0, 4.0)
+    }
+
+    /// The whole point: a dashed rect must not become four solid
+    /// `DecorationRect`s. It used to, and the call looked fine.
+    #[test]
+    fn dashed_stroke_rect_emits_one_dashed_path_not_four_solid_decorations() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(Rect::new(0.0, 0.0, 100.0, 50.0), Color::BLACK, dashed());
+        let frame = canvas.into_render_frame();
+
+        assert!(
+            frame.decorations.is_empty(),
+            "a dashed rect must not decompose into solid decoration rects"
+        );
+        assert!(frame.cosmetic_lines.is_empty());
+        assert_eq!(
+            frame.paths.len(),
+            1,
+            "one continuous path around the perimeter, not four segments"
+        );
+        assert_eq!(
+            frame.paths[0].stroke_style.dash_pattern,
+            Some(vec![6.0, 4.0]),
+            "the dash pattern must reach the renderer"
+        );
+        assert_eq!(frame.paths[0].stroke_style.width, 2.0);
+        assert!(matches!(frame.draw_order[0], DrawCommand::Path(0)));
+    }
+
+    /// The perimeter is one closed subpath, so the dash runs continuously
+    /// round the corners (SVG / Qt behaviour) instead of restarting four
+    /// times.
+    #[test]
+    fn dashed_stroke_rect_path_is_one_closed_perimeter() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(Rect::new(0.0, 0.0, 100.0, 50.0), Color::BLACK, dashed());
+        let frame = canvas.into_render_frame();
+        let cmds = &frame.paths[0].path.commands;
+        let move_tos = cmds
+            .iter()
+            .filter(|c| matches!(c, crate::path::PathCommand::MoveTo(_)))
+            .count();
+        assert_eq!(move_tos, 1, "four subpaths would restart the dash per edge");
+        assert!(matches!(cmds.last(), Some(crate::path::PathCommand::Close)));
+    }
+
+    #[test]
+    fn dashed_stroke_rounded_rect_emits_a_path_not_a_shape_quad() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rounded_rect(
+            Rect::new(0.0, 0.0, 100.0, 50.0),
+            CornerRadius::uniform(8.0),
+            Color::BLACK,
+            dashed(),
+        );
+        let frame = canvas.into_render_frame();
+        assert!(
+            frame.shapes.is_empty(),
+            "a ShapeQuad has no dash field — the pattern would be dropped"
+        );
+        assert_eq!(frame.paths.len(), 1);
+        assert_eq!(
+            frame.paths[0].stroke_style.dash_pattern,
+            Some(vec![6.0, 4.0])
+        );
+    }
+
+    #[test]
+    fn dashed_stroke_circle_and_ellipse_emit_paths() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_circle(Point::new(50.0, 50.0), 25.0, Color::BLACK, dashed());
+        canvas.stroke_ellipse(Rect::new(0.0, 0.0, 100.0, 50.0), Color::BLACK, dashed());
+        let frame = canvas.into_render_frame();
+        assert!(frame.shapes.is_empty());
+        assert_eq!(frame.paths.len(), 2);
+        for entry in &frame.paths {
+            assert_eq!(entry.stroke_style.dash_pattern, Some(vec![6.0, 4.0]));
+        }
+    }
+
+    #[test]
+    fn dashed_draw_line_emits_a_path() {
+        let mut canvas = Canvas::new();
+        canvas.draw_line(
+            Point::new(0.0, 10.0),
+            Point::new(100.0, 10.0),
+            Color::BLACK,
+            dashed(),
+        );
+        let frame = canvas.into_render_frame();
+        assert!(frame.decorations.is_empty());
+        assert!(frame.cosmetic_lines.is_empty());
+        assert_eq!(frame.paths.len(), 1);
+        assert_eq!(
+            frame.paths[0].stroke_style.dash_pattern,
+            Some(vec![6.0, 4.0])
+        );
+    }
+
+    /// A cosmetic dashed stroke keeps BOTH properties: the dash reaches the
+    /// renderer and the width stays device-space. Routing to the path
+    /// pipeline must not quietly turn a hairline into a logical stroke.
+    #[test]
+    fn dashed_cosmetic_stroke_keeps_device_space() {
+        let style = StrokeStyle {
+            space: StrokeSpace::Device,
+            ..dashed()
+        };
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(Rect::new(0.0, 0.0, 40.0, 20.0), Color::BLACK, style);
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.paths.len(), 1);
+        assert_eq!(frame.paths[0].stroke_style.space, StrokeSpace::Device);
+        assert_eq!(
+            frame.paths[0].stroke_style.dash_pattern,
+            Some(vec![6.0, 4.0])
+        );
+    }
+
+    /// `StrokeStyle::dotted` sets a round cap, which the Tier-1 / Tier-2
+    /// pipelines also cannot express. It rides the same route out.
+    #[test]
+    fn dotted_stroke_rect_carries_its_round_cap() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(
+            Rect::new(0.0, 0.0, 40.0, 20.0),
+            Color::BLACK,
+            StrokeStyle::dotted(1.5, 3.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.paths.len(), 1);
+        assert_eq!(frame.paths[0].stroke_style.line_cap, crate::LineCap::Round);
+        assert_eq!(
+            frame.paths[0].stroke_style.dash_pattern,
+            Some(vec![1.5, 3.0])
+        );
+    }
+
+    // ── …and solid strokes stay on their cheap pipelines ─────────────────
+
+    #[test]
+    fn solid_strokes_keep_their_fast_paths() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(
+            Rect::new(0.0, 0.0, 100.0, 50.0),
+            Color::BLACK,
+            StrokeStyle::solid(2.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.decorations.len(), 4, "still four cheap edge quads");
+        assert!(frame.paths.is_empty());
+
+        let mut canvas = Canvas::new();
+        canvas.stroke_rounded_rect(
+            Rect::new(0.0, 0.0, 100.0, 50.0),
+            CornerRadius::uniform(8.0),
+            Color::BLACK,
+            StrokeStyle::solid(2.0),
+        );
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.shapes.len(), 1, "still one SDF quad");
+        assert!(frame.paths.is_empty());
+    }
+
+    /// A pattern that cannot dash (odd count, all-zero, negative, non-finite
+    /// offset) renders solid wherever it lands, so it must NOT be diverted
+    /// to the CPU-rasterized path pipeline for nothing.
+    #[test]
+    fn a_pattern_that_cannot_dash_stays_on_the_fast_path() {
+        for style in [
+            StrokeStyle {
+                dash_pattern: Some(vec![4.0]),
+                ..StrokeStyle::solid(2.0)
+            },
+            StrokeStyle {
+                dash_pattern: Some(vec![]),
+                ..StrokeStyle::solid(2.0)
+            },
+            StrokeStyle {
+                dash_pattern: Some(vec![0.0, 0.0]),
+                ..StrokeStyle::solid(2.0)
+            },
+            StrokeStyle {
+                dash_pattern: Some(vec![4.0, -2.0]),
+                ..StrokeStyle::solid(2.0)
+            },
+            StrokeStyle {
+                dash_pattern: Some(vec![4.0, 2.0]),
+                dash_offset: f32::NAN,
+                ..StrokeStyle::solid(2.0)
+            },
+        ] {
+            let mut canvas = Canvas::new();
+            canvas.stroke_rect(Rect::new(0.0, 0.0, 40.0, 20.0), Color::BLACK, style.clone());
+            let frame = canvas.into_render_frame();
+            assert!(
+                frame.paths.is_empty() && frame.decorations.len() == 4,
+                "{style:?} draws solid anyway — no reason to rasterize it"
+            );
+        }
+    }
+
+    /// `PathEntry` reads a zero stroke width as *fill*. A zero-width dashed
+    /// stroke is invisible; routing it to the path pipeline would paint a
+    /// filled rect instead.
+    #[test]
+    fn a_zero_width_dashed_stroke_never_becomes_a_fill() {
+        let mut canvas = Canvas::new();
+        canvas.stroke_rect(
+            Rect::new(0.0, 0.0, 40.0, 20.0),
+            Color::BLACK,
+            StrokeStyle {
+                width: 0.0,
+                ..dashed()
+            },
+        );
+        let frame = canvas.into_render_frame();
+        assert!(
+            frame.paths.is_empty(),
+            "a zero-width stroke must not turn into a filled path"
+        );
+    }
+
+    /// The gradient convention is the same on both routes, because every
+    /// shape builder's path bounds equal the shape rect and
+    /// `stroke_path_with_paint` re-bases against them. Pinned so a future
+    /// change to either side cannot silently offset a dashed gradient
+    /// stroke away from the identical solid one.
+    #[test]
+    fn dashed_shape_paths_keep_the_shape_rect_as_their_bounds() {
+        let rect = Rect::new(7.0, 11.0, 100.0, 50.0);
+        let cases: Vec<(&str, Path)> = vec![
+            ("rect", Path::rect(rect)),
+            (
+                "rounded_rect",
+                Path::rounded_rect(rect, CornerRadius::uniform(8.0)),
+            ),
+            ("ellipse", Path::ellipse(rect)),
+            ("circle", Path::circle(Point::new(50.0, 40.0), 25.0)),
+        ];
+        for (name, path) in cases {
+            let b = path.bounds();
+            let expect = if name == "circle" {
+                Rect::new(25.0, 15.0, 50.0, 50.0)
+            } else {
+                rect
+            };
+            assert!(
+                (b.x - expect.x).abs() < 1e-3
+                    && (b.y - expect.y).abs() < 1e-3
+                    && (b.width - expect.width).abs() < 1e-3
+                    && (b.height - expect.height).abs() < 1e-3,
+                "{name}: path bounds {b:?} must equal the shape rect {expect:?}"
+            );
+        }
     }
 }

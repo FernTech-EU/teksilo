@@ -137,6 +137,15 @@ impl StrokeStyle {
         }
     }
 
+    /// A dashed stroke: `dash` logical pixels of ink, then `gap` of nothing,
+    /// repeating along the path.
+    ///
+    /// Only the Tier-3 (CPU-rasterized) path pipeline can express a dash, so
+    /// [`Canvas`](crate::Canvas) re-expresses a dashed rect / rounded rect /
+    /// circle / ellipse / line as a path rather than emitting the cheap
+    /// primitive that would drop the pattern. Dashing therefore costs a
+    /// rasterized path wherever it is used — not a reason to avoid it, but
+    /// the reason `StrokeStyle::solid` stays on the fast route.
     pub fn dashed(width: f32, dash: f32, gap: f32) -> Self {
         Self {
             width,
@@ -149,6 +158,9 @@ impl StrokeStyle {
         }
     }
 
+    /// A dotted stroke: round dots of `width` diameter, `spacing` apart.
+    /// Carries the same Tier-3 cost as [`dashed`](Self::dashed) — and its
+    /// round cap is likewise only expressible there.
     pub fn dotted(width: f32, spacing: f32) -> Self {
         Self {
             width,
@@ -182,6 +194,30 @@ impl StrokeStyle {
             miter_limit: 4.0,
             space: StrokeSpace::Device,
         }
+    }
+
+    /// Whether this style will actually *break* the stroke into dashes.
+    ///
+    /// The rule is SVG's `stroke-dasharray`, which is also exactly what the
+    /// renderer's rasterizer (`tiny_skia::StrokeDash`) accepts: an even
+    /// count of at least two lengths, none negative, summing to something
+    /// positive. A pattern that fails any of those renders solid.
+    ///
+    /// This is the predicate to ask — **not** `dash_pattern.is_some()`.
+    /// [`Canvas`](crate::Canvas) routes a dashing stroke away from the
+    /// Tier-1 / Tier-2 primitives that cannot express one (see
+    /// [`Canvas::stroke_rect`](crate::Canvas::stroke_rect)), and routing on
+    /// the weaker test would send a would-be-solid pattern down the slow
+    /// CPU-rasterized path for no visible difference.
+    pub fn is_dashed(&self) -> bool {
+        let Some(pattern) = self.dash_pattern.as_ref() else {
+            return false;
+        };
+        pattern.len() >= 2
+            && pattern.len().is_multiple_of(2)
+            && self.dash_offset.is_finite()
+            && pattern.iter().all(|d| d.is_finite() && *d >= 0.0)
+            && pattern.iter().sum::<f32>() > 0.0
     }
 }
 

@@ -139,6 +139,10 @@ impl GroupItem {
     /// Border stroke with an explicit [`StrokeStyle`] — dashed / dotted /
     /// custom caps. E.g. `.stroke_styled(color, StrokeStyle::dashed(2.0, 6.0, 4.0))`
     /// for a dashed lane boundary.
+    ///
+    /// A dashing style costs a CPU-rasterized path: `Canvas` diverts it away
+    /// from the decoration-rect / SDF pipelines, which cannot express a dash.
+    /// Solid and cosmetic strokes keep the cheap route.
     pub fn stroke_styled(mut self, color: impl Into<ColorProp>, style: StrokeStyle) -> Self {
         self.stroke = Some((color.into(), style));
         self
@@ -373,11 +377,39 @@ mod tests {
 
     #[test]
     fn group_item_stroke_styled_stores_dash_pattern() {
-        // #5: a dashed lane boundary keeps its pattern.
+        // #5: a dashed lane boundary keeps its pattern. Storage only — the
+        // test below is the one that says it reaches pixels.
         let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0))
             .stroke_styled(Color::BLACK, StrokeStyle::dashed(2.0, 6.0, 4.0));
         let (_, style) = g.stroke.as_ref().expect("stroke set");
         assert!(style.dash_pattern.is_some());
+    }
+
+    #[test]
+    fn group_item_dashed_stroke_reaches_the_frame_as_a_dashed_path() {
+        // Both branches: the square-cornered one used to emit four solid
+        // `DecorationRect` edges, the rounded one a dash-less `ShapeQuad`.
+        let theme = teksilo_core::presets::intui::light();
+        let ctx = SceneItemPaintContext::new(Transform2D::identity(), None, &theme);
+        for radius in [0.0, 8.0] {
+            let mut canvas = teksilo_canvas::Canvas::new();
+            GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0))
+                .corner_radius(radius)
+                .stroke_styled(Color::BLACK, StrokeStyle::dashed(2.0, 6.0, 4.0))
+                .paint(&mut canvas, &ctx);
+            let frame = canvas.into_render_frame();
+            assert!(
+                frame.decorations.is_empty() && frame.shapes.is_empty(),
+                "radius {radius}: neither a DecorationRect nor a ShapeQuad \
+                 can carry a dash pattern"
+            );
+            assert_eq!(frame.paths.len(), 1, "radius {radius}");
+            assert_eq!(
+                frame.paths[0].stroke_style.dash_pattern,
+                Some(vec![6.0, 4.0]),
+                "radius {radius}"
+            );
+        }
     }
 
     #[test]

@@ -122,6 +122,10 @@ impl RectItem {
     /// for a dashed outline, or `StrokeStyle::dotted(1.5, 3.0)` for a dotted
     /// guide. The style is stored verbatim, so all of `StrokeStyle`'s knobs
     /// (dash pattern/offset, `Logical` vs `Device` space) apply.
+    ///
+    /// A dashing style costs a CPU-rasterized path: `Canvas` diverts it away
+    /// from the decoration-rect / SDF pipelines, which cannot express a dash.
+    /// Solid and cosmetic strokes keep the cheap route.
     pub fn stroke_styled(mut self, color: impl Into<ColorProp>, style: StrokeStyle) -> Self {
         self.stroke = Some((color.into(), style));
         self
@@ -357,12 +361,58 @@ mod tests {
     #[test]
     fn rect_item_stroke_styled_stores_dash_pattern() {
         // #5: a styled stroke stores the caller's StrokeStyle verbatim.
+        // Storage only — see the two tests below for what reaches pixels.
+        // This assertion passed for the whole time a dashed RectItem drew
+        // solid, which is why it is not on its own enough.
         let item = RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0))
             .stroke_styled(Color::BLUE, StrokeStyle::dashed(2.0, 6.0, 4.0));
         let (_, style) = item.stroke.as_ref().expect("stroke set");
         assert!(
             style.dash_pattern.is_some(),
             "dashed stroke must keep its dash pattern"
+        );
+    }
+
+    #[test]
+    fn rect_item_dashed_stroke_reaches_the_frame_as_a_dashed_path() {
+        // The stored pattern has to survive `paint`. A square-cornered rect
+        // used to decompose into four solid `DecorationRect`s, which carry
+        // no dash field — the item drew a solid box.
+        let theme = teksilo_core::presets::intui::light();
+        let mut canvas = Canvas::new();
+        RectItem::new(Rect::new(0.0, 0.0, 100.0, 50.0))
+            .stroke_styled(Color::BLUE, StrokeStyle::dashed(2.0, 6.0, 4.0))
+            .paint(&mut canvas, &test_ctx(&theme));
+        let frame = canvas.into_render_frame();
+
+        assert!(
+            frame.decorations.is_empty(),
+            "a dashed border must not become solid decoration rects"
+        );
+        assert_eq!(frame.paths.len(), 1);
+        assert_eq!(
+            frame.paths[0].stroke_style.dash_pattern,
+            Some(vec![6.0, 4.0])
+        );
+    }
+
+    #[test]
+    fn rect_item_dashed_rounded_stroke_reaches_the_frame_as_a_dashed_path() {
+        // Same for the rounded branch, which used to emit a `ShapeQuad` —
+        // also dash-less, and with no shader that could derive one.
+        let theme = teksilo_core::presets::intui::light();
+        let mut canvas = Canvas::new();
+        RectItem::new(Rect::new(0.0, 0.0, 100.0, 50.0))
+            .corner_radius(8.0)
+            .stroke_styled(Color::BLUE, StrokeStyle::dashed(2.0, 6.0, 4.0))
+            .paint(&mut canvas, &test_ctx(&theme));
+        let frame = canvas.into_render_frame();
+
+        assert!(frame.shapes.is_empty(), "a ShapeQuad cannot carry a dash");
+        assert_eq!(frame.paths.len(), 1);
+        assert_eq!(
+            frame.paths[0].stroke_style.dash_pattern,
+            Some(vec![6.0, 4.0])
         );
     }
 
