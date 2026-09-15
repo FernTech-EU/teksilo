@@ -179,6 +179,9 @@ fn lower_body_attach(
                 .child(#child_expr)
             })
         }
+        BodyItem::ExprChild { expr, span } => Ok(quote_spanned! { *span =>
+            .child(#expr)
+        }),
         BodyItem::Binding { name, element } => {
             let element_expr = lower_element(element, ctx_tok, hoisted)?;
             let name_span = name.span();

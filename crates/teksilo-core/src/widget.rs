@@ -758,3 +758,168 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         None
     }
 }
+
+/// A boxed widget is a widget.
+///
+/// Without this, `Box<dyn Widget>` is the one widget-shaped value that cannot
+/// go where a widget goes: `.child(..)`, a `Vec` of children, a `match` arm.
+/// 238 functions in `teksilo-widgets` alone return it, the `teksu!` macro's own
+/// over-four-arms advice recommends it, and only two containers in the whole
+/// catalog (`Switcher`, `Cycle`) shipped a `child_boxed` to take it. Every
+/// other call site had to invent an adapter widget, which costs a real arena
+/// node per use.
+///
+/// Every method forwards to the inner widget, so the box is invisible to the
+/// arena: it adds no node, no layout pass and no AT element. In particular
+/// `as_any` / `as_any_mut` forward, so `EventContext::with_widget_mut::<W>`
+/// downcasts to the widget that was boxed rather than to the box.
+impl Widget for Box<dyn Widget> {
+    fn type_name(&self) -> &'static str {
+        (**self).type_name()
+    }
+
+    fn build(
+        &mut self,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Vec<crate::widget_id::WidgetId> {
+        (**self).build(ctx)
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
+        (**self).layout_response(proposal, ctx)
+    }
+
+    fn cacheable_layout(&self) -> bool {
+        (**self).cacheable_layout()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        ctx: &LayoutContext,
+    ) {
+        (**self).place_children(bounds, proposal, children, ctx)
+    }
+
+    fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        (**self).paint(bounds, canvas, ctx)
+    }
+
+    fn wants_after_paint(&self) -> bool {
+        (**self).wants_after_paint()
+    }
+
+    fn after_paint(&self, view: &WidgetTreeView<'_>, ctx: &PaintContext) {
+        (**self).after_paint(view, ctx)
+    }
+
+    fn wants_post_paint(&self) -> bool {
+        (**self).wants_post_paint()
+    }
+
+    fn post_paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        (**self).post_paint(bounds, canvas, ctx)
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        (**self).accessibility(builder)
+    }
+
+    fn wants_descendant_redirects(&self) -> bool {
+        (**self).wants_descendant_redirects()
+    }
+
+    fn a11y_redirect_descendant(
+        &self,
+        self_id: WidgetId,
+        descendant: WidgetId,
+    ) -> Option<accesskit::NodeId> {
+        (**self).a11y_redirect_descendant(self_id, descendant)
+    }
+
+    fn accessible_title_hint(&self) -> Option<String> {
+        (**self).accessible_title_hint()
+    }
+
+    fn accessible_title_node(&self) -> Option<crate::widget_id::WidgetId> {
+        (**self).accessible_title_node()
+    }
+
+    fn initial_focus_hint(&self) -> Option<WidgetId> {
+        (**self).initial_focus_hint()
+    }
+
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        (**self).context_menu_key_target()
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        (**self).children()
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        (**self).accessibility_children()
+    }
+
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        (**self).as_any()
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        (**self).as_any_mut()
+    }
+
+    fn clips_children(&self) -> bool {
+        (**self).clips_children()
+    }
+
+    fn focus_reveal_rect(&self, bounds: Rect) -> Option<Rect> {
+        (**self).focus_reveal_rect(bounds)
+    }
+
+    fn hit_shape(&self, local_point: Point, bounds: Rect) -> bool {
+        (**self).hit_shape(local_point, bounds)
+    }
+
+    fn hit_outset(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> teksilo_canvas::EdgeInsets {
+        (**self).hit_outset(kind, tokens)
+    }
+
+    fn hit_slop(
+        &self,
+        kind: teksilo_tokens::PointerKind,
+        tokens: &teksilo_tokens::InputTokens,
+    ) -> Option<crate::pointer::hit_slop::HitSlop> {
+        (**self).hit_slop(kind, tokens)
+    }
+
+    fn hit_distance(&self, local_point: Point, bounds: Rect) -> Option<f32> {
+        (**self).hit_distance(local_point, bounds)
+    }
+
+    fn target_regions(&self, bounds: Rect) -> Vec<crate::partition::TargetRegion> {
+        (**self).target_regions(bounds)
+    }
+
+    fn preserves_children_on_rebuild(&self) -> bool {
+        (**self).preserves_children_on_rebuild()
+    }
+
+    fn tooltip_has_content(&self) -> bool {
+        (**self).tooltip_has_content()
+    }
+
+    fn declare_shortcuts(&self) -> Vec<crate::shortcut::Shortcut> {
+        (**self).declare_shortcuts()
+    }
+
+    fn take_handler_set(&mut self) -> Option<crate::widget_builder::HandlerSet> {
+        (**self).take_handler_set()
+    }
+}

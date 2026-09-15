@@ -104,6 +104,38 @@ fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
         }
     }
 
+    // An expression start that is not an identifier but still cannot be
+    // anything except a widget-valued Rust expression: a keyword-rooted path
+    // (`self.row(x)`, `Self::header()`, `crate::ui::header()`, `super::row()`).
+    // Route it to `.child(expr)` rather than to the catch-all error. The
+    // structural keywords, `#{ }` and `..` were all handled above.
+    //
+    // The list is exactly the starts that cannot CONTINUE the previous item.
+    // Body items are separated by whitespace, not punctuation, so any start
+    // that Rust would read as a continuation of the expression before it does
+    // not belong here, however plausible it looks on its own:
+    //
+    //   - `(`: `(a) (b)` is a call, so a parenthesised item swallows its
+    //     neighbour as an argument. Write `child: (expr)`, where the argument
+    //     list is delimited.
+    //   - `*`: `a *b` is a multiplication, so `section("x")` followed by
+    //     `*boxed` silently becomes one expression. `Box<dyn Widget>` now
+    //     implements `Widget`, so the deref buys nothing anyway.
+    //   - `&`: `a &b` is a bitwise and, AND no reference type implements
+    //     `Widget`, so this form can only ever be a mistake.
+    //
+    // A keyword path is safe on both counts: no Rust expression continues into
+    // `self`, `Self`, `crate` or `super`.
+    if input.peek(Token![self])
+        || input.peek(Token![Self])
+        || input.peek(Token![crate])
+        || input.peek(Token![super])
+    {
+        let expr: Expr = input.parse()?;
+        let span = syn::spanned::Spanned::span(&expr);
+        return Ok(BodyItem::ExprChild { expr, span });
+    }
+
     if !input.peek(syn::Ident) {
         let span = input.span();
         return Err(diag::error(
@@ -128,8 +160,39 @@ fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
         return Ok(BodyItem::Child(element));
     }
 
+    // A bare lowercase ident ALONE is an argument-free property
+    // (`fills_stack`). A lowercase ident that continues into a call, a
+    // method chain, a path or an index is a Rust *expression* producing a
+    // widget: the `section("Header")` / `row(x).bold()` component-call
+    // shape. Routing it to `.child(expr)` is a pure extension - every one
+    // of these was a parse error before - and it is what lets a helper
+    // function be a bare child.
+    if !is_bare_no_arg_property(input) {
+        let expr: Expr = input.parse()?;
+        let span = syn::spanned::Spanned::span(&expr);
+        return Ok(BodyItem::ExprChild { expr, span });
+    }
+
     let property = super::property::parse_property_no_args(input)?;
     Ok(BodyItem::Property(property))
+}
+
+/// True when the cursor sits on a lowercase ident that ends right there:
+/// the argument-free property form. Anything that continues (`(`, `.`,
+/// `::`, `[`, `?`) is an expression.
+fn is_bare_no_arg_property(input: ParseStream) -> bool {
+    let fork = input.fork();
+    if fork.parse::<syn::Ident>().is_err() {
+        return false;
+    }
+    fork.is_empty()
+        || fork.peek(Token![,])
+        || (fork.peek(syn::Ident) && !fork.peek(Token![as]))
+        || fork.peek(Token![if])
+        || fork.peek(Token![for])
+        || fork.peek(Token![match])
+        || fork.peek(Token![let])
+        || fork.peek(Token![#])
 }
 
 fn parse_property(input: ParseStream) -> Result<crate::ir::TeksiProperty> {
