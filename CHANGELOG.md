@@ -73,6 +73,12 @@ one name and that name takes a `WidgetId` or a widget.
   neither affiliated with nor endorsed by any of them, and separates the
   `fluent` theme preset from Project Fluent, the unrelated localization system
   behind Teksilo's translations.
+- The two bundled-font license files are corrected. `roboto-LICENSE.txt` carried
+  a summary of Apache-2.0 -- four of its nine clauses, paraphrased, with the
+  redistribution conditions collapsed to one line -- where section 4(a) requires
+  a copy; it now carries the complete text. `noto-LICENSE.txt` named one project
+  and one year for two faces; it now carries the copyright line each font's own
+  name table declares, `notofonts/arabic` 2022 and `notofonts/hebrew` 2024.
 
 ### Changed
 

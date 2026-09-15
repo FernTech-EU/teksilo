@@ -1,4 +1,12 @@
-Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)
+Noto Sans Arabic (NotoSansArabic-VariableFont_wdth,wght.ttf)
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
+
+Noto Sans Hebrew (NotoSansHebrew-VariableFont_wdth,wght.ttf)
+Copyright 2024 The Noto Project Authors (https://github.com/notofonts/hebrew)
+
+Both faces are bundled with the `teksilo-text` crate -- Arabic behind its
+`fonts-arabic` feature, Hebrew behind `fonts-hebrew`, both on by default --
+and are redistributed unmodified. Noto is a trademark of Google LLC.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
