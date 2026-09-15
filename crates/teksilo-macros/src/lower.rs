@@ -16,12 +16,16 @@
 //!   rather than a method-chain link.
 //!
 //! Bindings anywhere in the tree hoist to the outermost teksu! block
-//! per spec §3.3. Per-structural-arm hoist scoping is a known
-//! limitation: bindings declared inside an `if`/`else`/`match`/`for`
-//! body currently hoist to the outer block rather than the arm.
-//! Widgets are then created unconditionally even when the arm doesn't
-//! run; the parent still only attaches to the child when the arm is
-//! taken, so this is a performance rather than correctness concern.
+//! per spec §3.3: one flat `hoisted` vector, every `let` emitted at the
+//! root of the expansion, then the tree expression. There is no
+//! per-arm scoping question to answer, because a binding is not a legal
+//! structural-arm body: every arm parses through `parse_element`.
+//! What the flat block does cost is aliasing. Two bindings sharing a
+//! name shadow, and since the tree expression is emitted after all the
+//! lets, *both* attach sites resolve to the later widget while the
+//! earlier one is constructed and attached nowhere. That is a
+//! correctness trap rather than the performance concern this comment
+//! used to claim; spec §3.3 documents it.
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};

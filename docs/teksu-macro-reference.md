@@ -572,6 +572,10 @@ teksu!(ctx =>
 }
 ```
 
+A binding name is scoped to the whole block, not to the body it appears
+in, and two bindings sharing a name silently alias. See
+[Limitations](#limitations).
+
 ### Binding at a slot position
 
 A binding works at a slot position with no special routing: a slot method
@@ -864,9 +868,9 @@ Panel {
 | Bare `UpperCamel(...)` at body | `.child(‹E›)` |
 | Bare lowercase call or method chain at body | `.child(expr)` |
 | `name = ‹E›` at body | hoisted `let name = ctx.add(‹E›);` + `.child(name)` |
-| `name = ‹E›` in slot `s` | hoisted `let` + `.s_id(name)` |
+| `name = ‹E›` in slot `s` | hoisted `let` + `.s(name)` |
 | `#{ expr }` at body | `.child(expr)` (an id or a widget) |
-| `#{ id_expr }` in slot `s` | `.s_id(id_expr)` |
+| `#{ expr }` in slot `s` | `.s(expr)` (an id or a widget) |
 | `if cond { ‹E› }` | `.child_opt(if cond { Some(‹E›) } else { None })` |
 | `if cond { ‹A› } else { ‹B› }` | `.child(if cond { TeksiBranch::L(‹A›) } else { TeksiBranch::R(‹B›) })` |
 | `match x { p => ‹E›, … }` | `.child(match x { p => TeksiBranchN::…(‹E›), … })` |
@@ -897,11 +901,19 @@ diagnostic under the user's token, thanks to span-preserving emission.
   into a helper returning `Box<dyn Widget>` (or refactored to `match`).
   `Box<dyn Widget>` implements `Widget`, so the helper's result is a bare
   child like any other.
-- **Binding hoist scope**: bindings declared inside `if`/`else`/`match`/
-  `for` bodies currently hoist to the outermost `teksu!` block. The
-  widget is created unconditionally; only the parent's attachment is
-  gated by the arm. Usually a non-issue; rearrange the binding site if
-  construction cost matters.
+- **Binding names are one flat namespace per block**: every binding
+  hoists to the same `let` list at the root of the expansion, and the
+  tree expression is emitted after all of them. Two bindings sharing a
+  name therefore alias. The second shadows the first, *both* attach
+  sites resolve to the later widget, and the earlier one is constructed
+  and attached nowhere. Nothing rejects it and nothing looks wrong until
+  it is on screen, so keep names distinct within a block. (The case does
+  not arise from structural arms: a binding is not legal inside an `if` /
+  `else` / `match` / `for` arm, which holds exactly one element.)
+- **A hoisted `let` runs unconditionally**: a binding is `ctx.add(...)`,
+  so the widget is built and inserted into the arena whether or not the
+  branch that mentions it is taken. Binding is not a way to build a
+  subtree lazily.
 - **Reactive-if is not special-cased**: `if signal { ... }` where
   `signal: Signal<bool>` does **not** auto-bind `visible_when`. Bind
   visibility through `ctx.visible_when(id, signal)` directly on a
@@ -940,8 +952,10 @@ diagnostic under the user's token, thanks to span-preserving emission.
 ## Further reading
 
 - [teksu-language-spec-v3.md](teksu-language-spec-v3.md): the design
-  rationale, its worked translations, and a changelog of where the shipped
-  macro diverged from the design.
+  rationale, its worked translations, a changelog of where the shipped
+  macro diverged from the design, and **Why there is no v4**, which
+  carries the September 2026 measurements and the two exits that stay
+  available if the question reopens.
 - [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
   — trybuild fixtures exercising every supported form.
 - [crates/teksilo-macros/src/](../crates/teksilo-macros/src/) — the

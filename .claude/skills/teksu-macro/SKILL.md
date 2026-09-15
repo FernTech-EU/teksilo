@@ -54,58 +54,41 @@ When the user asks about `teksu!`, match against these situations:
 | Explain a block | Walk through it top-down, annotating each body item with its desugaring. Use the cheat-sheet expansions. |
 | Write from scratch | Start from a builder-chain mental model, then rewrite as DSL. Keep closures and Rust expressions verbatim. |
 | Convert builder → `teksu!` | Element-by-element. Flatten `.child(...)` chains into bare elements at body position. Move `.prop(v)` into `name: v` body items. Preserve explicit constructors (`Button::new_literal`, `Padding::uniform`, etc.). |
-| Convert `teksu!` → builder | Mechanical: elements to `Type::new(args)`, properties to `.prop(args)`, bare children to `.child(...)`, bindings to hoisted `let name = ctx.add(...); ...add_child(name)`. |
+| Convert `teksu!` → builder | Mechanical: elements to `Type::new(args)`, properties to `.prop(args)`, bare children to `.child(...)`, bindings to hoisted `let name = ctx.add(...); ...child(name)`. |
 | Debug a compile error | First check whether rust-analyzer or cargo surfaced it (see Diagnostics below). For cargo errors on `.child()`/arity/type mismatch, the usual cause is the macro routing through the wrong method. |
 | Migrate widget_catalog / example | Stage by logical section, verify with `cargo test -p <example>` after each chunk. The existing `scroll_area_fills_remaining_space`-style structural tests catch tree shape regressions. |
 
 ## Important routing rules (get these right or it won't compile)
 
-1. **Multi-child containers** (`VStack`, `HStack`, `ZStack`, `Wrap`,
-   `Grid`, `Masonry`, `Toolbar`, `StatusBar`) use `.add_child(id)`
-   for pre-registered children. A body-position `#{ some_id }` or a
-   body-position binding `name = Element` lowers to `.add_child(...)`
-   — good on these containers.
+1. **One method per slot, and it takes either.** Every widget-accepting slot
+   method takes `impl IntoTeksiChild`, implemented for `WidgetId` (attach the
+   node that already exists) and for every `Widget` (insert a new one). So
+   `.child(w)` and `.child(id)` are both fine, and so are `.content(id)`,
+   `.header(id)`, `.pane(id)`. There are no `add_child` / `child_id` /
+   `*_id` twins: they were removed. Two containers take a widget only,
+   `Cycle` and `RadioGroup`, because neither has anywhere to put an id.
 
-2. **Single-child wrappers** (`Panel`, `Padding`, `Expand`, `Center`,
-   `FixedSize`, `MinSize`, `MaxSize`, `AspectRatio`, `FocusRing`,
-   `GroupBox`) use `.child_id(id)` — NOT `.add_child`. Using `#{ id }`
-   at body position on these will emit a call to a method that doesn't
-   exist. Workaround: write the id via a property — `child_id: id` —
-   which is plain Rust inside the arg position.
+2. **A helper call is a child.** A lowercase identifier that continues into a
+   call, a method chain or an index at body position lowers to `.child(expr)`:
+   `VStack { my_row(x) }`, `VStack { row(1).spacing(4.0) }`. A keyword-rooted
+   head works too (`self.row(x)`, `crate::ui::header()`). A lowercase
+   identifier **standing alone** is still the argument-free property, so a
+   pre-built local still needs `child: footer`.
 
-3. **Category B widgets** (Card, Accordion, SplitView, TitleBar,
-   DialogContent, Breadcrumb, TabWidget, Popover, Snackbar, Dialog,
-   Wizard) have no `.child()`. Content goes through named slots. A
-   bare child element inside one produces a targeted compile-time
-   error pointing at the right slot name.
+3. **Three heads are rejected**, because body items are whitespace-separated
+   and Rust would read them as continuing the item before: `(` (a call),
+   `*` (a multiplication) and `&` (a bitwise and). Write `child: (expr)`.
 
-4. **`#{ }` vs plain ident as property value**: at a Category B slot,
-   `#{ id_expr }` forces the `_id` routing — `header: #{ toolbar_id }`
-   emits `.header_id(toolbar_id)`. The alternative is writing the `_id`
-   method name directly: `header_id: toolbar_id` emits the same call
-   without the escape. At a multi-child container (VStack, Panel, …),
-   the property form `add_child: toolbar_id` emits `.add_child(toolbar_id)`
-   and is usually the cleanest. Plain idents at property-value positions
-   are just Rust expressions passed to the named method; the escape is
-   only needed when you want the `_id` auto-suffix or when the value
-   looks like an element prefix the parser would commit on.
+4. **Category B widgets** (Card, Accordion, TitleBar, DialogContent,
+   Breadcrumb, TabWidget, Popover, Snackbar, Dialog, Wizard) have no
+   `.child()`. Content goes through named slots. A bare child element inside
+   one produces a targeted compile-time error naming the right slot.
 
-5. **Bindings (`name = Element`) hoist to the outermost `teksu!` block**
-   and always use `ctx.add(...)`. `ctx` must be in scope — either via
-   the `teksu!(ctx => ...)` preamble or as a local at the call site.
-
-6. **Handler-attachment properties are auto-reordered to the end** of
-   the emitted chain. Methods on `WidgetBuilder` (`on_tap`, `on_hover`,
-   `on_key`, `focusable`, `tab_index`, `cursor`, `clips_children_on`,
-   `context_menu`, `on_drag_hover`, `on_drop`, all the gesture
-   handlers) wrap the widget in `WidgetWithHandlers<T>` which doesn't
-   expose per-widget setters — so the macro silently moves them past
-   any `.child(...)`, `.spacing(...)`, or other widget-specific call.
-   Write `on_tap: cb` before or after children; both compile. If you
-   see a `WidgetWithHandlers<T>` error at expansion, check whether the
-   property name matches a known handler — if not, it's a widget
-   method and ordering within the widget's own setters is the
-   builder's concern.
+5. **`#{ expr }` is the Rust escape**, and it carries a widget value as well as
+   a `WidgetId`. It is how a Rust struct literal is passed at body position,
+   where the element form would otherwise claim it:
+   `#{ Card { title: t, root: None } }`. At a slot it needs no special
+   routing either: `header: #{ id }` emits `.header(id)`.
 
 ## Writing `teksu!` — preferred patterns
 
@@ -179,12 +162,12 @@ Scan for these shapes and translate mentally:
 - `name: a, b` → `.name(a, b)` multi-arg
 - `fills_stack` (bare lowercase) → `.fills_stack()` zero-arg call
 - Bare `UpperCamel(...)` at body → `.child(UpperCamel::new(...))`
-- `name = Element` → hoisted `let name = ctx.add(...); ... .add_child(name)`
-- `#{ id }` → routes through `add_child(id)` or `.slot_id(id)` per position
+- `name = Element` → hoisted `let name = ctx.add(...); ... .child(name)`
+- `#{ expr }` → `.child(expr)` at body position, `.slot(expr)` at a slot; carries a widget or a `WidgetId`
 - `if cond { E }` (no else) → `.child_opt(if cond { Some(E) } else { None })`
 - `if cond { A } else { B }` / multi-arm `if` / `match` → `.child(TeksiBranch[N]::...(E))` dispatched by arm index
 - `for pat in iter { E }` → `.children(iter.map(|pat| E))`
-- `..expr` → statement-form spread: `for id in expr { __parent = __parent.add_child(id); }`
+- `..expr` → statement-form spread: `for id in expr { __parent = __parent.child(id); }`
 - `rust { ... }` → block either produces a child (no trailing `;`) or runs for side effect
 
 ## Diagnostics

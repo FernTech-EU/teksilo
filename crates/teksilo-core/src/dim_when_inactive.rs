@@ -55,7 +55,7 @@ pub struct DimWhenInactive {
 
 impl DimWhenInactive {
     /// New dim wrapper with the [`DEFAULT_DIM_FACTOR`]. Attach a child with
-    /// [`child`](Self::child) / [`child`](Self::child).
+    /// [`child`](Self::child), which takes a widget or a `WidgetId`.
     pub fn new() -> Self {
         Self {
             pending_child: None,

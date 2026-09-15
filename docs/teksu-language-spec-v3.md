@@ -25,8 +25,158 @@ implementation, which did not survive contact with it in every particular.
 The body text below has been corrected so that no section asserts something the implementation
 does not do. Where a v3 promise was never implemented, the section now says so and points at
 what shipped instead, rather than being deleted: the promise is part of the rationale, and any
-future v4 discussion needs to see it. For where that discussion stands, see
-[teksu-v4-decision.md](teksu-v4-decision.md).
+future v4 discussion needs to see it. For where that discussion stands, see **Why there is no
+v4** immediately below.
+
+---
+
+## Why there is no v4
+
+A September 2026 review asked whether the grammar should be revised. The answer was that v3 is
+close enough to good enough not to start a v4, but not because the DSL was fine: it shipped
+three silent-wrong-program bugs and one grammar rule that demonstrably shaped how the flagship
+application was written. Those were fixed instead. The evidence is recorded here because the
+standalone write-up it came from has been folded into this file, and because a future v4
+discussion should not have to re-derive it. Method: eight parallel corpus and prior-art
+investigations, six independent design positions, one adversarial verifier per position, plus
+first-hand probes compiled in a worktree. Every number below was reproduced by at least two
+independent runs.
+
+### What was measured
+
+`teksu!` reaches **0.85 %** of Skribisto's UI crate (1,972 of 235,110 lines), **1.48 %** of its
+widget-building code, **4 of 55** Teksilo examples, and **zero** of the framework's own ~100
+widgets. 88 blocks in Skribisto and 61 in Skribisto-Pro; the largest is 81 lines. Twenty-seven
+of the 115 `teksu!` mentions in Skribisto are comments explaining why it was *not* used. The
+August 2026 migration campaign converted six files, and the author then wrote the next 42
+without it.
+
+### Four charges that did not survive verification
+
+**"It costs 48 % more source."** It costs **+3.0 %**. The 48 % came from `widget_catalog`,
+where the `classic()` functions delegate to helpers defined outside their bodies while the
+`teksu()` twins inline them; with call-graph attribution the same corpus is +35 %, by token
+count +17.5 %. On the only real before-and-after migration in evidence, Skribisto commit
+`c6b022c9e` (same six files, both directions), lines go 3,107 to 3,200. On the metric that
+commit message itself chose, builder-child call sites, `teksu!` wins **144 to 59**.
+
+**"It forces duplication."** Fifteen near-identical copies of one modal-card chrome are 41 % of
+Skribisto's teksu corpus, and the stated cause was that a `fn modal_card(h, b, f) -> impl
+Widget` could not be called from inside a block. A verifier rebuilt that factoring against the
+real widget catalog: it compiles and mounts, both from a plain Rust call site and inline. The
+duplication was a refactor not done, not a refactor forbidden.
+
+**"Follow Freya and delete it."** Freya removed its `rsx!` in 0.4 for three stated reasons;
+none holds here. *Typos*: `spacng: 8.0` gives `E0599: no method named 'spacng' found for struct
+'VStack'`, caret on the user's token, with a did-you-mean; Freya's attributes were stringly
+typed, `teksu!` properties lower to real method calls. *Autocomplete*: rust-analyzer 0.3.3049
+driven over raw LSP returned **116 completion items at a teksu property position against 116
+identical items for the equivalent builder chain**, 120 of `Panel`'s own surface when nested in
+`VStack`, hover with the real signature, go-to-definition landing on `vstack.rs:60`, 18 enum
+items at a property value and 122 at a Category B slot. *Stack traces*: a panic inside a block
+names the user's file, line and column, with no `teksilo-macros` frame. The one real limit is
+that completion returns null inside a block that does not parse, which is the state you are in
+while typing. That argues for a more forgiving grammar, not for deletion.
+
+**"The parse traps are live."** The dangerous `(expr, ELEMENT)` mis-parse has **zero instances**
+across all 178 blocks in all three corpora. The traps are latent, which is why they are
+documented in the reference rather than designed around.
+
+### What stood, and what was done about it
+
+Three silent-wrong-program bugs, all of them reachable from a pure builder chain with no macro
+anywhere, which is why the fixes live in `teksilo-core` rather than in the grammar.
+
+1. `dim_when_inactive` and `dim_when_inactive_default` were the only `WidgetBuilder` methods
+   returning a foreign wrapper instead of `WidgetWithHandlers<Self>`, so the reorder rule did
+   not protect them and `Probe { dim_when_inactive: 0.7  Leaf(1)  Leaf(2) }` compiled clean
+   while building `DimWhenInactive > Leaf(2)`, silently dropping the parent and the first
+   child. **Removed from the trait**; the wrapper is constructed directly, and
+   `teksilo_teksu_guard::foreign_wrapper_returns` now pins that set at empty, so reintroducing
+   one reddens the build.
+2. `.on_tap(cb).clips_children_on(true)` double-wrapped to
+   `WidgetWithHandlers<WidgetWithHandlers<T>>` and `take_handler_set` returned only the outer
+   set, so the tap handler never fired. **Fixed** by `EventHandlers::merge_under` +
+   `HandlerSet::merge_under` + a recursive `take_handler_set`.
+3. Binding hoist and shadowing. The write-up named the trigger wrongly, as two `if` / `else`
+   arms binding the same name; every structural arm is parsed by `parse_element` and a binding
+   is not a legal element, so that case does not reach the lowering. The reachable defect is
+   the same mechanism one level out: **two bindings sharing a name anywhere in one block**
+   hoist two `let`s into the same flat root block, and since the element expression is emitted
+   after all of them, *both* attach sites resolve to the later widget. **Still open**, and
+   documented as a trap in §3.3 rather than left in a source comment that called it a
+   performance concern.
+
+**One grammar rule shaped the flagship.** `parse/body.rs` decided child-versus-property by the
+first letter's case, so a lowercase helper call could not be a bare child. Skribisto has **469**
+widget-returning helper functions, 5.3 per teksu block, and **98 of its 110 `child:` values are
+lowercase**; the archetypal block, `tabs/analysis.rs:613`, had ten children and not one was
+bare, so it read as the builder chain it replaced. **Fixed**: a lowercase identifier that
+continues into a call, chain or index is now a child, as is a keyword-rooted path. Converting
+that same block under the new rule took `child:` from 6 to 1, `child_opt:` from 3 to 0, and
+bare children from 0 to 5, at -99 characters and +1 line. The gain is that the block reads as a
+tree; it is not a terseness gain, which is consistent with the +3.0 %.
+
+**One absent gate.** `cargo teksilo-fmt --check` was documented as a pre-commit gate and wired
+into no workflow. It runs over 1,166 files in 0.57 s and renders the trailing-comma trap as a
+diff. **Added to `ci.yml`.**
+
+Three further changes landed alongside: `impl Widget for Box<dyn Widget>` (32 forwarding
+methods, no arena node, `as_any` forwards so `with_widget_mut::<W>` still reaches through);
+`child_opt` on **38 of 38** containers, up from 7; and **45** accumulator plurals added across
+36 types (the first count of "25 missing" was an undercount from scanning only `mut self`
+receivers; the real figure was 113 accumulators, 18 already plural).
+
+**The downstream cost.** Established by compiling Skribisto against the branch. Phases 0 and 1
+alone broke five `FormLayout::line_ids` call sites and nothing else, in any of the three
+consumers. The `*_id` removal that followed is much larger: it is the one genuinely breaking
+change in the set, and it cost Skribisto 74 call sites across 33 files.
+
+### The tooling was already fine
+
+- `teksilo-fmt` reproduces **177 of 178** real corpus blocks byte for byte. The one exception
+  (`FixedSize { height: height }`) is a deliberate skip that `--check` reports clean.
+- The designer's 27 % round-trip fidelity is therefore its own fault. It reuses
+  `teksilo-parse` and `teksilo-fmt` and then throws the result away for a mirror IR that loses
+  argument-free properties, reorders params before children, discards blank lines, and reads
+  the first block while writing the last. Rebuilding it on the parser it already depends on has
+  no grammar prerequisite.
+- Compile cost is a non-issue: token output is 1.00x the hand-written chain, and a wall-clock
+  A/B at 200 elements puts `teksu!` at or below hand-written builder code in every clean repeat.
+- A no-rustc preview interpreter is more viable than assumed: **63.6 %** of real property values
+  are evaluable without Rust (literals, paths, consts, `lit!` / `tr!`), and `teksilo-preview`'s
+  `CatalogEntry` registry already covers **80.3 %** of the widget instances in the corpus,
+  reaching 99.6 % with 17 more registrations.
+
+### The two exits, if the question reopens
+
+**A two-rule v4.** Parse the element head as a `syn::Expr` with eager struct braces; a `{` left
+in the stream is the body. Rust's own grammar makes the cases disjoint: `Foo { a: 1 }` consumes
+its braces and is a struct literal, `VStack::new() { .. }` does not and is an element. That one
+rule dissolves all five parse defects by construction and lets you delete both hardcoded widget
+tables, the reorder rule, the binding hoist, the structural forms, the statement-sequence
+lowering, `TeksiBranch` and `teksilo-teksu-guard`. An independent verifier implemented that
+parser plus a migrator and ran it over every real block: **142 blocks, 0 parse errors, 0
+structural divergence from the v3 IR**. Costs, measured: no implicit `::new` means roughly **793
+constructor rewrites across ~250 blocks**; `tab: label, Card { .. }` (documented, 1 live site)
+becomes inexpressible; and a widget held in a local or a const can never carry a body.
+
+**Deletion.** A 197-line converter was written and independently reproduced: **178 of 178
+blocks, 0 errors**, all 28 converted example files compile clean, 42 of 905 comments lost. The
+door is mechanical.
+
+### What not to do
+
+Do not break the grammar before Skribisto ships. Skribisto-Pro is a live path dependency and
+would take 61 compile errors the moment a grammar change lands on main; the flagship would take
+88. A language revision is the wrong thing to be holding when the flagship needs a stable floor.
+
+Do not build the designer on a new grammar. It does not need one. It needs to stop
+reimplementing the parser it already depends on.
+
+Do not delete `teksu!` on the Freya precedent. Freya deleted a stringly-typed, HTML-shaped macro
+inherited from a web framework. `teksu!` is a typed, Rust-shaped macro that lowers to real
+method calls, and all three of Freya's stated reasons measure in its favour.
 
 ---
 
@@ -34,6 +184,23 @@ future v4 discussion needs to see it. For where that discussion stands, see
 
 Eleven places where v3 as written does not describe v3 as built. Each was verified against the
 source before the body text was changed, and every corrected code example was compiled.
+
+**The `*_id` twins of Appendix A.3 no longer exist, and neither does `add_child`.** Every
+widget-accepting slot method takes `impl IntoTeksiChild`, implemented for `WidgetId` and
+blanket for every `Widget`, so one name carries both: `.child(id)`, `.content(id)`,
+`.header(id)`, `.pane(id)`. 80 methods were removed. Appendices A.2 and A.3 are kept as the
+record of a refactor that has since been undone, and are marked superseded where they stand.
+The macro lost the matching rule: `lower_property` no longer appends an `_id` suffix when a
+slot value is a binding or an escape, because there is no second method to route to.
+
+**A bare child need not be an element (§3.6, §4.1).** A lowercase identifier that continues
+into a call, a method chain or an index is a Rust expression producing a widget and lowers to
+`.child(expr)`, as does a keyword-rooted head. `(`, `*` and `&` are rejected at that position,
+because body items are whitespace-separated and Rust would read each as continuing the item
+before it.
+
+**`#{ expr }` carries a widget value, not only a `WidgetId` (§6.1).** It lowers to
+`.child(expr)`, which is what makes it the answer to a Rust struct literal at body position.
 
 **Reactive conditionals by type-directed inference (§5.1) were never implemented.** `if signal
 { ... }` does not lower to `.visible_when(signal)`. Every `if` at body position lowers to a
@@ -65,19 +232,20 @@ new child.
 and the diagnostics live in `teksilo-parse`, not `teksilo-macros`.
 
 **SplitView (§4.2, Appendix A) no longer exists.** It was replaced by `Splitter`
-(`crates/teksilo-widgets/src/splitter.rs`), an N-pane container with `.child()` and
-`.pane_id()`, so it belongs in Category A, not Category B. The `Popover` entry is stale a
+(`crates/teksilo-widgets/src/splitter.rs`), an N-pane container whose `.child()` and
+`.pane()` both take `impl IntoTeksiChild`, so it belongs in Category A, not Category B. The `Popover` entry is stale a
 second way: no type is spelled `Popover`. The family is `PopoverWidget<T>` and its three
 aliases (`crates/teksilo-parse/src/diag.rs:145`).
 
-**Appendix A's "the `*_id` convention is universal" is false.** It is a convention the framework
-follows where someone applied it, not an invariant. Measured over `crates/teksilo-widgets/src`:
-of 69 types exposing a widget-taking builder setter, 50 have an id-taking twin for every one of
-them and 19 do not; 37 of 101 such methods have no twin. Appendix A.6 carries the measurement
-and names the gaps, because a binding in a slot position is unusable without one.
+**Appendix A's `*_id` convention no longer exists at all.** It was never the invariant the
+appendix claimed — measured over `crates/teksilo-widgets/src`, 37 of 101 widget-taking setters
+had no id-taking twin, so a binding in a slot position was unusable at 37 places. Rather than
+fill the gaps, the twins were deleted: every slot is now **one** method taking
+`impl IntoTeksiChild`, which accepts a `WidgetId` and any `Widget + 'static` alike. Appendix A.6
+keeps the old measurement as the record of why. See the `*_id` removal entry above.
 
 **§6.1's `IntoTeksiChild` dispatch was never implemented either.** A body-position
-`#{ expr }` always emits `.add_child(expr)` and always requires a `WidgetId`
+`#{ expr }` emits `.child(expr)` and carries a widget value or a `WidgetId`
 (`crates/teksilo-macros/src/lower.rs:195`); a widget-valued expression there is a compile error.
 `crates/teksilo-parse/src/ir.rs:76` records this in the IR's own doc comment.
 
@@ -98,7 +266,7 @@ parenthesis escape an UpperCamel-rooted method chain needs
 broken shape was v3's own worked example in two places.
 
 **Spread (§5.5) takes ids, not widgets.** v3 said `..expr` inlines "a `Vec<WidgetId>` or an
-iterator of widgets". The emitted loop calls `.add_child(id)`
+iterator of widgets". The emitted loop calls `.child(id)`
 (`crates/teksilo-macros/src/lower.rs:142`), so a widget value there does not compile. §5.5's
 desugaring illustration also named the wrong locals; it now matches what the macro emits.
 
@@ -125,9 +293,9 @@ Four structural changes, all driven by review of v2 against the actual widget ca
 
 **Widget categories are now two, not three.** The framework refactor (see Appendix A) dissolves the former Category C by moving primary content from constructors to setter methods on ScrollArea, Popover, Snackbar, and Dialog. ScrollArea joins Category A (has `.child()`). Popover, Snackbar, and Dialog join Category B (named slots). Wizard is not Category C and was never intended to be; v2 misclassified it.
 
-**The `*_id` convention is extended.** A widget-accepting slot method should have a twin taking a `WidgetId`, named `*_id`, because a body-position binding and a `#{ expr }` escape both route through the id form. The `.set_child(id)` methods on Panel, Padding, Expand, GroupBox, and Accordion are renamed to `.child_id(id)` / `.content_id(id)` for consistency, and TabWidget gets `.tab_id(label, id)` to match.
+**The `*_id` convention is extended.** *(Superseded: the twins below were removed; a slot method now takes `impl IntoTeksiChild`. See the changelog at the top.)* A widget-accepting slot method should have a twin taking a `WidgetId`, named `*_id`, because a body-position binding and a `#{ expr }` escape both route through the id form. The `.set_child(id)` methods on Panel, Padding, Expand, GroupBox, and Accordion are renamed to `.child_id(id)` / `.content_id(id)` for consistency, and TabWidget gets `.tab_id(label, id)` to match.
 
-> **As shipped, this is a convention, not an invariant.** v3 said "every widget-accepting slot method on every container now has a twin", and that was never true. Appendix A carries the measurement and names the gaps. Multi-child containers also spell the twin `.add_child(id)` rather than `.child_id(id)`, and `ScrollArea`'s id path is the `from_id(id)` constructor, not a setter twin.
+> **As shipped, there is no twin at all.** v3 said "every widget-accepting slot method on every container now has a twin", and that was never true: 75 slots had one and 89 did not. Rather than add the missing 89, the twins were removed and the slot method widened to `impl IntoTeksiChild`, so one name takes a `WidgetId` and a widget alike.
 
 **Worked translations reflect the refactored API.** Every code example in §7 is against post-refactor builder signatures. The seven uploaded example files themselves are assumed to be migrated; the framework changes required are listed in Appendix A.
 
@@ -257,7 +425,7 @@ Desugars to:
     );
     ctx.add(
         VStack::new()
-            .add_child(open_btn)
+            .child(open_btn)
             .child(
                 TextWidget::new("Status")
                     .linked_to(open_btn)
@@ -266,7 +434,7 @@ Desugars to:
 }
 ```
 
-The binding is hoisted to the nearest enclosing statement-forming block (the `teksu!` expansion here), where it remains in scope for the rest of the block. The container uses `.add_child(id)` to attach the bound element at its body position.
+The binding is hoisted to the nearest enclosing statement-forming block (the `teksu!` expansion here), where it remains in scope for the rest of the block. The container uses `.child(id)` to attach the bound element at its body position.
 
 **Binding in property-argument position** (Category B slots):
 
@@ -292,7 +460,7 @@ Desugars to:
         TextWidget::new("Manuscript").style(t.body_bold.clone())
     );
     Card::new()
-        .header_id(title)
+        .header(title)
         .content(
             VStack::new()
                 .child(TextWidget::new("Set title:"))
@@ -304,7 +472,7 @@ Desugars to:
 }
 ```
 
-The slot method switches from `.header(widget)` (widget-taking) to `.header_id(id)` (id-taking) to accommodate the binding. Every Category B slot method has an `*_id` twin by framework convention (see Appendix A).
+The slot method does not change: `.header` takes `impl IntoTeksiChild`, so the same name accepts the widget and the id. There is no `*_id` twin to route to, and the macro no longer rewrites the method name.
 
 **Scope rules.** A binding is in scope from the point of declaration to the end of the
 `teksu!(...)` expansion, and nowhere outside it. v3 listed five kinds of statement-forming block
@@ -320,10 +488,19 @@ situation that cannot arise anyway: a binding is not a legal body item inside an
 or `match` arm, which must contain exactly one element
 (`if-body must contain exactly one element — wrap multiple in a container like VStack`).
 
-One consequence worth stating outright, since a single flat block hides it: **a hoisted `let`
-runs unconditionally**. A binding is `ctx.add(...)`, so the widget is constructed and inserted
-into the arena whether or not the branch that mentions it is taken. Binding inside a
-conditionally-mounted subtree is therefore not a way to build it lazily.
+Two consequences worth stating outright, since a single flat block hides both.
+
+**A hoisted `let` runs unconditionally.** A binding is `ctx.add(...)`, so the widget is
+constructed and inserted into the arena whether or not the branch that mentions it is taken.
+Binding inside a conditionally-mounted subtree is therefore not a way to build it lazily.
+
+**Two bindings sharing a name in one block silently alias.** The lets are emitted in traversal
+order and the whole tree expression comes after all of them, so the second `let` shadows the
+first and *every* reference to that name, including the attach site of the first binding,
+resolves to the later widget. The earlier widget is still constructed and added to the arena,
+and is then attached nowhere; the later one is attached twice. Nothing in the macro rejects it
+and nothing in the tree looks wrong until it is on screen. Names in one block are one flat
+namespace: keep them distinct.
 
 ### 3.4 Properties
 
@@ -641,7 +818,7 @@ Every Teksilo widget falls into one of two categories based on how it accepts co
 
 ### 4.1 Category A: Has `.child()`
 
-These widgets accept one or more children through a `.child(widget)` method and an `.add_child(id)` or `.child_id(id)` twin. Body-block child syntax in the DSL maps directly.
+These widgets accept one or more children through a `.child(..)` method taking `impl IntoTeksiChild`, so the same name takes a widget or a `WidgetId`. Body-block child syntax in the DSL maps directly.
 
 **Members:**
 
@@ -649,7 +826,7 @@ Layout primitives: VStack, HStack, ZStack, Padding, Expand, Switcher, Center, Mi
 
 Flat containers: Panel, Toolbar, StatusBar, GroupBox, DropTarget, FocusScope.
 
-Splitting: Splitter, the N-pane container that replaced SplitView. `.pane(w)` is the primary name and `.child(w)` is its alias; the id form is `.pane_id(id)`.
+Splitting: Splitter, the N-pane container that replaced SplitView. `.pane(..)` is the primary name and `.child(..)` is its alias; both take an id or a widget.
 
 Scrolling: ScrollArea (post-refactor; see Appendix A).
 
@@ -657,7 +834,7 @@ Animation wrappers: Collapse, Fade, Blur, Pulse, Rotate, Scale, Shake, Slide, Sm
 
 This list is illustrative, not exhaustive: Category A is defined by having `.child()`, and new containers join it without an entry here.
 
-**Bound children.** A body-position binding attaches with the container's id-taking twin. Multi-child containers spell that `.add_child(id)`; single-child wrappers spell it `.child_id(id)`. The macro picks by name, so a container with neither cannot take a bound child (Appendix A).
+**Bound children.** A body-position binding attaches with `.child(id)`, the same method a bare child uses. There is no id-taking twin and nothing for the macro to pick between.
 
 **DSL form:**
 
@@ -669,11 +846,11 @@ VStack {
 }
 ```
 
-Bare children desugar to `.child(widget)`. Bound children desugar to `.add_child(id)` (or `.child_id(id)` where the container uses that name).
+Bare children and bound children both desugar to `.child(..)`.
 
 ### 4.2 Category B: Named Slots
 
-These widgets have no `.child()` method. Content goes through named setter methods, one per semantic slot. Each slot method has both a widget-taking form (`.slot_name(widget)`) and an id-taking twin (`.slot_name_id(id)`).
+These widgets have no `.child()` method. Content goes through named setter methods, one per semantic slot. Each slot method takes `impl IntoTeksiChild`, so `.slot_name(..)` accepts a widget or a `WidgetId`; there is no `*_id` twin.
 
 **Members and their slots:**
 
@@ -709,7 +886,7 @@ Card {
 
 Slot values and decoration properties use identical syntax. The widget's own documentation tells the reader which properties are slots. The DSL grammar does not distinguish.
 
-A binding or a `#{ expr }` escape in a slot position rewrites the method name to `slot_id`, so it needs the slot's id-taking twin to exist. Appendix A measures how often it does not.
+A binding or a `#{ expr }` escape in a slot position uses the slot's own name. The method name is never rewritten.
 
 ### 4.3 Leaf Widgets
 
@@ -878,7 +1055,7 @@ When a body contains `let` bindings, the desugaring switches from a pure builder
 ### 5.5 Spread Forms
 
 A spread `..expr` inlines an iterable of `WidgetId` as children at that position. v3 said "or an
-iterator of widgets"; it is ids only, because the emitted loop calls `.add_child(id)`
+iterator of widgets"; it is ids only, because the emitted loop calls `.child(id)`
 (`crates/teksilo-macros/src/lower.rs:142`). For a run of widget *values*, use the container's own
 `.children(iter)` as a property.
 
@@ -894,7 +1071,7 @@ VStack {
     let mut __parent = VStack::new();
     __parent = __parent.child(TextWidget::new("Header"));
     for __spread_id in plugin_widgets {
-        __parent = __parent.add_child(__spread_id);
+        __parent = __parent.child(__spread_id);
     }
     __parent = __parent.child(TextWidget::new("Footer"));
     __parent
@@ -964,29 +1141,16 @@ One escape into host Rust, in addition to the `rust { }` block.
 ### 6.1 Expression Escape: `#{ expr }`
 
 Anywhere a child element or property value is expected, `#{ expr }` takes a Rust expression and
-inserts its value at that position. At child position it emits `.add_child(expr)`; at a slot
-position it rewrites the method name and emits `.slot_id(expr)`.
+inserts its value at that position. At child position it emits `.child(expr)`; at a slot
+position it emits `.slot(expr)` under the slot's own name.
 
-**The expression must be a `WidgetId`.** v3 specified dispatch through an `IntoTeksiChild`
-blanket trait that would route a widget-valued expression to `.child(widget)` and an id-valued
-one to `.add_child(id)`. That dispatch was never implemented: the lowering is unconditional
-(`crates/teksilo-macros/src/lower.rs:195`), and the IR records the gap in its own doc comment
-(`crates/teksilo-parse/src/ir.rs:76`). `IntoTeksiChild`
-(`crates/teksilo-core/src/widget_builder_branching.rs:257`) is exported and unused, like
-`IntoTeksiCondition`. A widget-valued expression inside `#{ }` therefore fails against a method
-the user never wrote:
-
-```text
-error[E0599]: no method named `add_child` found for struct `Probe` in the current scope
-   |
-   |             #{ section("five") }
-   |             ^
-   |
-help: there is a method `child` with a similar name
-```
-
-For a widget value, use the property form (`child: expr`) or, since the §3.6 extension, a bare
-expression child.
+**The expression may be either a widget or a `WidgetId`.** v3 specified dispatch through an
+`IntoTeksiChild` trait and left it unimplemented; it is implemented now. The lowering is still
+unconditional — `#{ expr }` always emits `.child(expr)` — but every child- and slot-taking
+method takes `impl IntoTeksiChild`
+(`crates/teksilo-core/src/widget_builder_branching.rs:257`), whose two impls cover `WidgetId`
+and any `Widget + 'static`. The routing therefore happens in the type system rather than in the
+macro, which is why the one lowering serves both.
 
 ```rust
 // Inserting a pre-built widget as a child
@@ -1008,9 +1172,9 @@ teksu!(ctx =>
 )
 ```
 
-The second case uses `title` (declared with `name = Element` binding) via `#{ title }` in a Category B slot. The escape pulls the `WidgetId` into the slot position; the macro routes it through `.header_id(title)` automatically.
+The second case uses `title` (declared with `name = Element` binding) via `#{ title }` in a Category B slot. The escape pulls the `WidgetId` into the slot position and `.header` takes it directly; the macro rewrites nothing.
 
-For bare identifiers at property-value positions, `#{ }` is not required: `text: selected_label` parses as a property with a Rust expression value. The escape is only needed where the parser would otherwise try to interpret the value as something else (an element, a structural form), or where you specifically want the `_id` routing.
+For bare identifiers at property-value positions, `#{ }` is not required: `text: selected_label` parses as a property with a Rust expression value. The escape is only needed where the parser would otherwise try to interpret the value as something else (an element, a structural form), or at child position where the head token is one the bare-expression-child rule rejects — see §3.6.
 
 ---
 
@@ -1703,7 +1867,7 @@ let title_id = ctx.add(
 );
 
 let card = Card::new()
-    .header_id(title_id)
+    .header(title_id)
     .content(
         VStack::new()
             .spacing(12.0)
@@ -1739,7 +1903,7 @@ teksu!(
 )
 ```
 
-`title =` binds the TextWidget's id at the slot position; the id is available anywhere in the enclosing block, including the `on_tap` closure in the content slot's Button. The macro emits `ctx.add(TextWidget::new(...)...)` as a hoisted statement, then uses `.header_id(title)` on the Card. The on_tap handler captures `title` by value through `move`, which is what the user wrote.
+`title =` binds the TextWidget's id at the slot position; the id is available anywhere in the enclosing block, including the `on_tap` closure in the content slot's Button. The macro emits `ctx.add(TextWidget::new(...)...)` as a hoisted statement, then uses `.header(title)` on the Card. The on_tap handler captures `title` by value through `move`, which is what the user wrote.
 
 ---
 
@@ -2000,6 +2164,11 @@ Joins Category B. `.content()` takes the factory closure (the lazy construction 
 
 ### A.2 Rename `.set_*` Methods
 
+> **Superseded.** The `*_id` family this section renames into was removed; a slot method
+> now takes `impl IntoTeksiChild` and there is one name per slot. Kept as the record of
+> the refactor that was actually performed at the time.
+
+
 The `.set_*` prefix convention becomes `*_id`, matching the id twins already present elsewhere.
 
 **Rename:**
@@ -2011,14 +2180,21 @@ The `.set_*` prefix convention becomes `*_id`, matching the id twins already pre
 
 ### A.3 New Id-Taking Twins
 
+> **Superseded.** These twins existed and were then removed: 75 slots had one and 89 did
+> not, so the convention had more exceptions than instances. A slot method now takes
+> `impl IntoTeksiChild`, so the same name accepts a `WidgetId` and a widget alike. Kept
+> as the record of what was built at the time.
+
+
 Every Category B slot method gains an `*_id` twin. The list below is what was asked for; A.6
 measures what the framework has.
 
 > **`SplitView` is gone**, so its `.first_id` / `.second_id` are not the precedent this appendix
-> cited. The replacement is `Splitter`, whose id form is `.pane_id(id)` and whose `.child()`
-> alias has no `child_id`. **`TabWidget` did not get `.tab_id(label, id)`** under that name
-> either, and `tab_item` / `TabItem` do not exist; the shipped id twins there are `.tab_id`,
-> `.static_tab_id`, `.bar_leading_slot_id` and `.bar_trailing_slot_id`.
+> cited. The replacement was `Splitter`, whose id form was `.pane_id(id)` while its `.child()`
+> alias had no `child_id`. **`TabWidget` never got `.tab_id(label, id)`** under that name
+> either, and `tab_item` / `TabItem` do not exist; the id twins that did ship there were
+> `.tab_id`, `.static_tab_id`, `.bar_leading_slot_id` and `.bar_trailing_slot_id`. All of them
+> are now deleted — see the banner above.
 
 **Card:**
 ```rust
@@ -2089,6 +2265,11 @@ pub trait IntoTeksiChild { ... }
 // Used by child(), add_child(), slot_id() routing.
 ```
 
+**This one landed**, in `crates/teksilo-core/src/widget_builder_branching.rs`, with one
+correction to the last comment line: there is no `add_child` and no `slot_id`. A slot is one
+method taking `impl IntoTeksiChild`, so the trait *is* the routing rather than something three
+method families consult.
+
 ### A.5 Summary of Effort
 
 Category C dissolution: 4 widgets, roughly 20 lines of change each. Method renames: 5 widgets, roughly 3 lines each. Id-taking twins: 8 widgets, roughly 30 new methods total at 3 lines each. TeksiBranch infrastructure: 1 new file, roughly 200 lines including the impls.
@@ -2096,6 +2277,11 @@ Category C dissolution: 4 widgets, roughly 20 lines of change each. Method renam
 Total: an afternoon of mechanical work, plus test updates. The seven uploaded example files need migration to the new API; each example is a dozen lines of change on average.
 
 ### A.6 What the framework actually has
+
+> **Superseded.** This measured the `*_id` gap in order to ask whether to close it. It was
+> closed the other way: the twins were deleted and each slot became one method taking
+> `impl IntoTeksiChild`, so none of the 37 gaps below is reachable any more. Kept because the
+> numbers are why that decision went the way it did.
 
 A.3's twins landed for the eight widgets it named, minus `PopoverWidget`. What did **not**
 happen is the universality this appendix and the v2 changelog both claimed. The convention was
