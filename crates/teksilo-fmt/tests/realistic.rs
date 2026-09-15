@@ -15,18 +15,18 @@ fn widget_catalog_right_content_col() {
     let src = r#"ctx =>
         VStack {
             spacing: 24.0
-            add_child: r_palette
+            child: r_palette
             Divider { }
-            add_child: r_primitives
+            child: r_primitives
             Divider { }
-            add_child: r_controls
+            child: r_controls
         }"#;
     let out = fmt(src);
     let twice = fmt(&out);
     assert_eq!(out, twice, "not idempotent. once:\n{out}\ntwice:\n{twice}");
     assert!(out.contains("ctx =>"));
     assert!(out.contains("spacing: 24.0"));
-    assert!(out.contains("add_child: r_palette"));
+    assert!(out.contains("child: r_palette"));
 }
 
 #[test]

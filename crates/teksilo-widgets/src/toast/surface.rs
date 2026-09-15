@@ -209,7 +209,7 @@ impl Widget for ToastSurface {
         );
         let mut text_column = VStack::new()
             .spacing(toast_tokens::TOAST_TITLE_BODY_GAP)
-            .add_child(title);
+            .child(title);
         if let Some(body) = &self.data.body {
             // Not a bare `TextWidget`: a body is whatever the app hands over, and apps
             // hand over error text with no length bound. `CollapsibleBody` clamps it and
@@ -223,7 +223,7 @@ impl Widget for ToastSurface {
                 )
                 .on_expand(move || registry_for_expand.cancel_auto_dismiss(entry_id)),
             );
-            text_column = text_column.add_child(body_widget);
+            text_column = text_column.child(body_widget);
         }
         let text_column_id = ctx.add(text_column);
 
@@ -241,23 +241,23 @@ impl Widget for ToastSurface {
         // Body column: text + inline link row (if any) + footer row (if any).
         let mut body_column = VStack::new()
             .spacing(toast_tokens::TOAST_BODY_ACTIONS_GAP)
-            .add_child(text_column_id);
+            .child(text_column_id);
         if !inline_link_ids.is_empty() {
             let mut link_row = HStack::new().spacing(toast_tokens::TOAST_CONTENT_GAP);
             for id in inline_link_ids {
-                link_row = link_row.add_child(id);
+                link_row = link_row.child(id);
             }
-            body_column = body_column.add_child(ctx.add(link_row));
+            body_column = body_column.child(ctx.add(link_row));
         }
         if !footer_button_ids.is_empty() {
             let spacer_id = ctx.add(Spacer::new());
             let mut footer = HStack::new()
                 .spacing(toast_tokens::TOAST_CONTENT_GAP)
-                .add_child(spacer_id);
+                .child(spacer_id);
             for id in footer_button_ids {
-                footer = footer.add_child(id);
+                footer = footer.child(id);
             }
-            body_column = body_column.add_child(ctx.add(footer));
+            body_column = body_column.child(ctx.add(footer));
         }
         let body_id = ctx.add(body_column);
 

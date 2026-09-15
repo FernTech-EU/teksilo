@@ -317,8 +317,8 @@ fn multi_view_magnet_at_nodes_are_per_view() {
     let view_b_id = tree.add(SceneView::with_model(model.clone()));
     tree.add(
         HStack::new()
-            .child(Expand::new().child_id(view_a_id))
-            .child(Expand::new().child_id(view_b_id)),
+            .child(Expand::new().child(view_a_id))
+            .child(Expand::new().child(view_b_id)),
     );
     tree.layout(SizeProposal::exact(800.0, 600.0));
 

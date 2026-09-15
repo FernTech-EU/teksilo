@@ -108,9 +108,9 @@ impl Root {
             VStack::new()
                 .spacing(8.0)
                 .child(GroupHeader::new(lit!("Banner")))
-                .add_child(info_id)
-                .add_child(warn_id)
-                .add_child(error_id)
+                .child(info_id)
+                .child(warn_id)
+                .child(error_id)
                 .child(HStack::new().child(Spacer::new()).child(restore)),
         )
     }
@@ -327,9 +327,9 @@ impl Widget for Root {
 
         let body = VStack::new()
             .spacing(20.0)
-            .add_child(banner_id)
-            .add_child(search_id)
-            .add_child(input_id)
+            .child(banner_id)
+            .child(search_id)
+            .child(input_id)
             .child(command_link);
 
         let root = ctx.add(Panel::new().padding(24.0).child(body));

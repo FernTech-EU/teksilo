@@ -67,7 +67,7 @@ pub struct TouchTarget {
 
 impl TouchTarget {
     /// A new wrapper at the density's own `target_size`. Attach content with
-    /// [`child`](Self::child) or [`child_id`](Self::child_id).
+    /// [`child`](Self::child) or [`child`](Self::child).
     pub fn new() -> Self {
         Self {
             size: None,
@@ -92,15 +92,29 @@ impl TouchTarget {
     }
 
     /// Wrap an inline widget.
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending = Some(Box::new(widget));
-        self
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => {
+                self.child = Some(id);
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                self.pending = Some(w);
+                self
+            }
+        }
     }
-
-    /// Wrap a pre-registered widget by id.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.child = Some(id);
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// The target this wrapper aims for under `tokens`, or `None` when it is
@@ -224,7 +238,7 @@ mod tests {
         for density in [TargetDensity::Compact, TargetDensity::Comfortable] {
             let mut tree = tree_at(density);
             let inner = tree.add(FixedSize::new().width(16.0).height(16.0));
-            let slot = tree.add(TouchTarget::new().child_id(inner));
+            let slot = tree.add(TouchTarget::new().child(inner));
             tree.layout(SizeProposal::unspecified());
             assert_eq!(
                 tree.bounds(slot).size(),
@@ -241,7 +255,7 @@ mod tests {
     fn touch_gives_the_slot_the_target_and_centres_the_child() {
         let mut tree = tree_at(TargetDensity::Touch);
         let inner = tree.add(FixedSize::new().width(16.0).height(16.0));
-        let slot = tree.add(TouchTarget::new().child_id(inner));
+        let slot = tree.add(TouchTarget::new().child(inner));
         tree.layout(SizeProposal::unspecified());
         assert_eq!(tree.bounds(slot).size(), Size::new(44.0, 44.0));
         assert_eq!(tree.bounds(inner).size(), Size::new(16.0, 16.0));
@@ -253,7 +267,7 @@ mod tests {
     fn an_explicit_size_wins_over_the_density() {
         let mut tree = tree_at(TargetDensity::Touch);
         let inner = tree.add(FixedSize::new().width(16.0).height(16.0));
-        let slot = tree.add(TouchTarget::new().size(48.0).child_id(inner));
+        let slot = tree.add(TouchTarget::new().size(48.0).child(inner));
         tree.layout(SizeProposal::unspecified());
         assert_eq!(tree.bounds(slot).size(), Size::new(48.0, 48.0));
     }
@@ -263,7 +277,7 @@ mod tests {
     fn a_conforming_child_is_untouched() {
         let mut tree = tree_at(TargetDensity::Touch);
         let inner = tree.add(FixedSize::new().width(60.0).height(50.0));
-        let slot = tree.add(TouchTarget::new().child_id(inner));
+        let slot = tree.add(TouchTarget::new().child(inner));
         tree.layout(SizeProposal::unspecified());
         assert_eq!(tree.bounds(slot).size(), Size::new(60.0, 50.0));
     }
@@ -276,7 +290,7 @@ mod tests {
         let slot = tree.add(
             TouchTarget::new()
                 .reserve_space(false)
-                .child_id(inner)
+                .child(inner)
                 .on_tap(|_e, _c| {}),
         );
         tree.layout(SizeProposal::unspecified());
@@ -311,7 +325,7 @@ mod tests {
             ),
         );
         let rigid = tree.add(FixedSize::new().width(100.0).height(20.0));
-        tree.add(HStack::new().add_child(rigid).add_child(slot));
+        tree.add(HStack::new().child(rigid).child(slot));
         tree.layout(SizeProposal::exact(120.0, 20.0));
         let w = tree.bounds(slot).width;
         assert!(

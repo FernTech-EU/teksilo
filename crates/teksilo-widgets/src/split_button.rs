@@ -312,6 +312,14 @@ impl SplitButton {
         self
     }
 
+    /// Add several menu items from an iterator, in order.
+    ///
+    /// The loop form of [`item`](Self::item), and the usual one: a split
+    /// button's dropdown is normally built from a list of commands.
+    pub fn items(self, items: impl IntoIterator<Item = MenuItem>) -> Self {
+        items.into_iter().fold(self, Self::item)
+    }
+
     /// Add a separator row in the dropdown. Separators are skipped when
     /// computing item indices for `initial_selected`.
     pub fn separator(mut self) -> Self {
@@ -713,8 +721,8 @@ impl Widget for SplitButton {
             ctx.add(
                 HStack::new()
                     .spacing(split_button_icon_label_gap(&ctx.theme().input))
-                    .add_child(icon_id)
-                    .add_child(label_id),
+                    .child(icon_id)
+                    .child(label_id),
             )
         } else {
             label_id
@@ -729,19 +737,19 @@ impl Widget for SplitButton {
                 split_button_padding_vertical(&ctx.theme().input),
                 split_button_padding_horizontal(&ctx.theme().input),
             )
-            .child_id(main_inner_id),
+            .child(main_inner_id),
         );
         // ZStack (default CENTER alignment) centers the padded label within
         // the MinSize bounds when the region is wider than the text — same
         // pattern Button uses. Without this, MinSize stretches Padding to
         // fill and the label pins to the top-left inset corner.
-        let main_content_id = ctx.add(ZStack::new().add_child(main_padding_id));
+        let main_content_id = ctx.add(ZStack::new().child(main_padding_id));
 
         let main_region = {
             let actions_for_tap = actions_rc.clone();
             let selected_for_tap = selected.clone();
             MinSize::new(split_button_min_width(&ctx.theme().input), region_height)
-                .child_id(main_content_id)
+                .child(main_content_id)
                 .on_tap(move |_pos, ctx: &mut EventContext| {
                     let idx = selected_for_tap.get();
                     if let Some(Some(action)) = actions_for_tap.get(idx) {
@@ -772,7 +780,7 @@ impl Widget for SplitButton {
             FixedSize::new()
                 .width(SPLIT_BUTTON_DIVIDER_WIDTH)
                 .height(region_height)
-                .child_id(divider_fill_id),
+                .child(divider_fill_id),
         );
 
         // ---- Chevron region ----
@@ -785,7 +793,7 @@ impl Widget for SplitButton {
         let chevron_icon_id = ctx.add(
             IconWidget::chevron_down(SPLIT_BUTTON_CHEVRON_ICON_SIZE).color(label_color.clone()),
         );
-        let chevron_centered_id = ctx.add(Center::new().child_id(chevron_icon_id));
+        let chevron_centered_id = ctx.add(Center::new().child(chevron_icon_id));
 
         let chevron_region = {
             let int_for_tap = interaction.clone();
@@ -853,9 +861,9 @@ impl Widget for SplitButton {
         let content_id = ctx.add(
             HStack::new()
                 .spacing(0.0)
-                .add_child(main_region_id)
-                .add_child(divider_id)
-                .add_child(chevron_region_id)
+                .child(main_region_id)
+                .child(divider_id)
+                .child(chevron_region_id)
                 .hover_within(hovered_signal),
         );
 
@@ -1070,6 +1078,36 @@ mod tests {
 
     fn themed_tree() -> WidgetTree {
         WidgetTree::new().with_theme(teksilo_core::presets::intui::light())
+    }
+
+    /// `items` is a fold over `item`, so N singular calls and one plural call
+    /// over the same values must leave the same row list behind. The rows are
+    /// drained into the dropdown at build time, so this reads the field.
+    #[test]
+    fn items_plural_matches_the_singular_chain() {
+        fn rows(b: &SplitButton) -> Vec<String> {
+            b.rows
+                .iter()
+                .map(|r| match r {
+                    Row::Item(item) => format!("item {}", item.label_localized().resolve_now()),
+                    Row::Separator => "separator".to_string(),
+                })
+                .collect()
+        }
+        let singular = SplitButton::new()
+            .item(MenuItem::new(lit!("One")))
+            .item(MenuItem::new(lit!("Two")))
+            .separator()
+            .item(MenuItem::new(lit!("Three")));
+        let plural = SplitButton::new()
+            .items([MenuItem::new(lit!("One")), MenuItem::new(lit!("Two"))])
+            .separator()
+            .items([MenuItem::new(lit!("Three"))]);
+        assert_eq!(
+            rows(&singular),
+            ["item One", "item Two", "separator", "item Three"]
+        );
+        assert_eq!(rows(&singular), rows(&plural));
     }
 
     /// Regression: the dropdown menu must be linked as a child of the

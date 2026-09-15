@@ -133,7 +133,7 @@ impl ButtonStyle for RecipeButtonStyle {
                 recipe.padding.bottom,
                 recipe.padding.leading,
             )
-            .child_id(cfg.label),
+            .child(cfg.label),
         );
 
         // Border geometry (position / per-side widths) is state-
@@ -151,9 +151,9 @@ impl ButtonStyle for RecipeButtonStyle {
         }
         let rect_id = ctx.add(rect);
 
-        let zstack_id = ctx.add(ZStack::new().add_child(rect_id).add_child(padding_id));
+        let zstack_id = ctx.add(ZStack::new().child(rect_id).child(padding_id));
 
-        ctx.add(MinSize::new(recipe.min_size.width, recipe.min_size.height).child_id(zstack_id))
+        ctx.add(MinSize::new(recipe.min_size.width, recipe.min_size.height).child(zstack_id))
     }
 
     fn label_text_role(&self, variant: ButtonVariant) -> Option<TextRole> {

@@ -630,14 +630,14 @@ impl StandardListItem {
                 .alignment(VAlignment::Center);
             if let Some(w) = self.subtitle_leading_slot.take() {
                 let id = ctx.add_boxed(w);
-                sub_row = sub_row.add_child(id);
+                sub_row = sub_row.child(id);
             }
             sub_row = sub_row
-                .add_child(subtitle_text_id)
-                .add_child(ctx.add(Spacer::new()));
+                .child(subtitle_text_id)
+                .child(ctx.add(Spacer::new()));
             if let Some(w) = self.subtitle_trailing_slot.take() {
                 let id = ctx.add_boxed(w);
-                sub_row = sub_row.add_child(id);
+                sub_row = sub_row.child(id);
             }
             let sub_row_id = ctx.add(sub_row);
 
@@ -645,8 +645,8 @@ impl StandardListItem {
                 VStack::new()
                     .spacing(si::STANDARD_ITEM_LABEL_SUBTITLE_GAP)
                     .alignment(HAlignment::Leading)
-                    .add_child(label_id)
-                    .add_child(sub_row_id),
+                    .child(label_id)
+                    .child(sub_row_id),
             )
         } else {
             // Single-line: just the label.
@@ -663,7 +663,7 @@ impl StandardListItem {
             ctx.add(
                 Shrinkable::new()
                     .min_width(si::STANDARD_ITEM_LABEL_COLUMN_MIN_WIDTH)
-                    .child_id(label_column_id),
+                    .child(label_column_id),
             )
         } else {
             label_column_id
@@ -695,22 +695,20 @@ impl StandardListItem {
             }
             .labels_hidden(true);
             let cb_id = ctx.add(cb.access_label(self.label.clone()));
-            row = row.add_child(cb_id);
+            row = row.child(cb_id);
         }
         if let Some(w) = self.leading_slot.take() {
             let id = ctx.add_boxed(w);
-            row = row.add_child(id);
+            row = row.child(id);
         }
         if let Some(w) = self.center_slot.take() {
             let id = ctx.add_boxed(w);
-            row = row.add_child(id);
+            row = row.child(id);
         }
-        row = row
-            .add_child(label_column_id)
-            .add_child(ctx.add(Spacer::new()));
+        row = row.child(label_column_id).child(ctx.add(Spacer::new()));
         if let Some(w) = self.trailing_slot.take() {
             let id = ctx.add_boxed(w);
-            row = row.add_child(id);
+            row = row.child(id);
         }
 
         ctx.add(row)
@@ -1288,9 +1286,9 @@ impl Widget for StandardTreeItem {
             HStack::new()
                 .spacing(0.0)
                 .alignment(VAlignment::Center)
-                .add_child(indent_id)
-                .add_child(chevron_column_id)
-                .add_child(inner_content_id),
+                .child(indent_id)
+                .child(chevron_column_id)
+                .child(inner_content_id),
         );
 
         // 5. Wrap with the rounded selection bg + interaction handler

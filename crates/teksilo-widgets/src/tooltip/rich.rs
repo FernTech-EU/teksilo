@@ -401,8 +401,8 @@ impl Widget for RichTooltipWidget {
                     .columns(vec![TrackSize::Fractional(1.0), TrackSize::Auto])
                     .rows(vec![TrackSize::Auto])
                     .column_gap(8.0)
-                    .add_child(body_id)
-                    .add_child(shortcut_id),
+                    .child(body_id)
+                    .child(shortcut_id),
             )
         } else {
             body_id
@@ -437,7 +437,7 @@ impl Widget for RichTooltipWidget {
             None
         };
 
-        let mut root_vstack = VStack::new().spacing(6.0).add_child(header);
+        let mut root_vstack = VStack::new().spacing(6.0).child(header);
 
         if self.is_cascade_child {
             // Cascade children are opened by an explicit click and are
@@ -446,7 +446,7 @@ impl Widget for RichTooltipWidget {
             // be meaningless. Drop it; keep only the "more" accordion
             // when the entry has one.
             if let Some(accordion) = more_accordion {
-                root_vstack = root_vstack.add_child(accordion);
+                root_vstack = root_vstack.child(accordion);
             }
         } else {
             // Dwell indicator, right-anchored in a footer row.
@@ -473,10 +473,10 @@ impl Widget for RichTooltipWidget {
                     .columns(vec![TrackSize::Fractional(1.0), TrackSize::Auto])
                     .rows(vec![TrackSize::Auto])
                     .column_gap(8.0)
-                    .add_child(footer_left)
-                    .add_child(indicator),
+                    .child(footer_left)
+                    .child(indicator),
             );
-            root_vstack = root_vstack.add_child(footer_row);
+            root_vstack = root_vstack.child(footer_row);
         }
 
         let root_content = ctx.add(root_vstack);
@@ -486,7 +486,7 @@ impl Widget for RichTooltipWidget {
         // plain TooltipWidget uses.
         let padded = ctx.add(
             Padding::symmetric(tt::TOOLTIP_PADDING_VERTICAL, tt::TOOLTIP_PADDING_HORIZONTAL)
-                .child_id(root_content),
+                .child(root_content),
         );
 
         self.root_child_id = Some(padded);

@@ -204,21 +204,21 @@ impl CalendarStyle for RecipeCalendarStyle {
             .single_line()
             .a11y_hidden();
         let label_id = ctx.add(label);
-        let centered = ctx.add(Center::new().child_id(label_id));
+        let centered = ctx.add(Center::new().child(label_id));
 
         // ── Compose: ZStack[bg, today_ring?, focus_ring, label]
-        let mut z = ZStack::new().add_child(bg_id);
+        let mut z = ZStack::new().child(bg_id);
         if let Some(ring) = ring_id {
-            z = z.add_child(ring);
+            z = z.child(ring);
         }
-        z = z.add_child(focus_ring_id).add_child(centered);
+        z = z.child(focus_ring_id).child(centered);
         let z_id = ctx.add(z);
 
         ctx.add(
             FixedSize::new()
                 .width(cfg.cell_size)
                 .height(cfg.cell_size)
-                .child_id(z_id),
+                .child(z_id),
         )
     }
 
@@ -260,12 +260,12 @@ impl CalendarStyle for RecipeCalendarStyle {
             .a11y_hidden();
         let text_id = ctx.add(Center::new().child(text));
 
-        let z_id = ctx.add(ZStack::new().add_child(bg_id).add_child(text_id));
+        let z_id = ctx.add(ZStack::new().child(bg_id).child(text_id));
         ctx.add(
             FixedSize::new()
                 .width(cfg.cell_width)
                 .height(cfg.cell_height)
-                .child_id(z_id),
+                .child(z_id),
         )
     }
 
@@ -273,21 +273,21 @@ impl CalendarStyle for RecipeCalendarStyle {
         // Wrap the title in an `Expand::horizontal()` so it fills the
         // slack between the leading and trailing arrow pairs — the
         // pre-migration layout used the same trick.
-        let title_filled = ctx.add(Expand::horizontal().child_id(cfg.title));
+        let title_filled = ctx.add(Expand::horizontal().child(cfg.title));
 
         let mut row = HStack::new().spacing(self.recipe.header_gap);
         if let Some(id) = cfg.prev_double {
-            row = row.add_child(id);
+            row = row.child(id);
         }
         if let Some(id) = cfg.prev {
-            row = row.add_child(id);
+            row = row.child(id);
         }
-        row = row.add_child(title_filled);
+        row = row.child(title_filled);
         if let Some(id) = cfg.next {
-            row = row.add_child(id);
+            row = row.child(id);
         }
         if let Some(id) = cfg.next_double {
-            row = row.add_child(id);
+            row = row.child(id);
         }
         ctx.add(row)
     }

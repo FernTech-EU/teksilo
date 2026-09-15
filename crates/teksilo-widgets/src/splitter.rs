@@ -135,22 +135,48 @@ impl Splitter {
 
     /// Append a content pane (model order). Call once per pane; the count
     /// must match `model.pane_count()`.
-    pub fn pane(mut self, widget: impl Widget + 'static) -> Self {
+    pub fn pane(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
         self.pane_content
-            .push(Some(PendingChild::Deferred(Box::new(widget))));
+            .push(Some(teksilo_core::IntoTeksiChild::into_pending(widget)));
         self
     }
 
-    /// Append a pre-registered content pane by id.
-    pub fn pane_id(mut self, id: WidgetId) -> Self {
-        self.pane_content.push(Some(PendingChild::Id(id)));
-        self
+    /// Append several content panes from an iterator, in model order.
+    ///
+    /// The loop form of [`pane`](Self::pane). The total pane count still has to
+    /// match `model.pane_count()`.
+    pub fn panes(self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>) -> Self {
+        iter.into_iter().fold(self, Self::pane)
     }
 
     /// `teksu!` ergonomic alias for [`pane`](Self::pane): a bare child in a
     /// `Splitter { ... }` block lowers to `.child(...)`.
-    pub fn child(self, widget: impl Widget + 'static) -> Self {
-        self.pane(widget)
+    pub fn child(self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => self.pane(id),
+            teksilo_core::PendingChild::Deferred(w) => self.pane(w),
+        }
+    }
+
+    /// `teksu!` ergonomic alias for [`panes`](Self::panes): a `for` loop in a
+    /// `Splitter { ... }` block lowers to `.children(...)`.
+    pub fn children(
+        self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
+        iter.into_iter().fold(self, Self::child)
+    }
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// Set an accessible region name for pane `index` (locale-reactive).
@@ -397,7 +423,7 @@ impl Widget for Splitter {
             }
         });
 
-        self.children()
+        Widget::children(self)
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {

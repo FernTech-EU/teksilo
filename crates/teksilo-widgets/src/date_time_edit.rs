@@ -680,15 +680,15 @@ impl Widget for DateTimeEdit {
         // overflowing the layout. `Shrinkable` preserves each half's natural
         // width when there's room, so the wide-case layout (date at natural
         // width, time fixed/Fill) is unchanged.
-        let date_shrinkable = ctx.add(crate::primitives::Shrinkable::new().child_id(date_field_id));
-        let time_shrinkable = ctx.add(crate::primitives::Shrinkable::new().child_id(time_field_id));
+        let date_shrinkable = ctx.add(crate::primitives::Shrinkable::new().child(date_field_id));
+        let time_shrinkable = ctx.add(crate::primitives::Shrinkable::new().child(time_field_id));
         let mut row = HStack::new()
             .spacing(0.0)
-            .add_child(date_shrinkable)
-            .add_child(separator_id)
-            .add_child(time_shrinkable);
+            .child(date_shrinkable)
+            .child(separator_id)
+            .child(time_shrinkable);
         if let Some(trigger_id) = trigger_id_opt {
-            row = row.add_child(trigger_id);
+            row = row.child(trigger_id);
         }
         let inline_row_id = ctx.add(row);
         let row_id = ctx.add(
@@ -698,7 +698,7 @@ impl Widget for DateTimeEdit {
                 0.0,
                 field_dims::TEXT_FIELD_PADDING_HORIZONTAL,
             )
-            .child_id(inline_row_id),
+            .child(inline_row_id),
         );
 
         // ── Frame: bg + border driven by focus + validation ───
@@ -736,13 +736,13 @@ impl Widget for DateTimeEdit {
             .border_width(border_width_signal)
             .corner_radius(CornerRadius::uniform(field_dims::TEXT_FIELD_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
-        let framed_id = ctx.add(ZStack::new().add_child(bg_id).add_child(row_id));
+        let framed_id = ctx.add(ZStack::new().child(bg_id).child(row_id));
         let sized_id = ctx.add(
             MinSize::new(
                 0.0,
                 crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
             )
-            .child_id(framed_id),
+            .child(framed_id),
         );
 
         // ── Inline validation strip below the frame ───────────
@@ -762,13 +762,13 @@ impl Widget for DateTimeEdit {
         let framed_in_vstack = ctx.add(
             crate::primitives::Expand::horizontal()
                 .respect_intrinsic()
-                .child_id(sized_id),
+                .child(sized_id),
         );
         let root_with_strip = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
-                .add_child(framed_in_vstack)
-                .add_child(strip_id),
+                .child(framed_in_vstack)
+                .child(strip_id),
         );
         let style = crate::styles::recipe_date_edit_style::resolve_date_edit_style(
             &self.style_override,
@@ -1197,7 +1197,7 @@ impl DateTimeEdit {
                 field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 4.0,
             )
-            .child_id(field_id),
+            .child(field_id),
         );
         // Width policy: date (leading) half is always at its natural
         // mask width; time (trailing) half follows `time_width_policy`.
@@ -1207,7 +1207,7 @@ impl DateTimeEdit {
         let is_time = matches!(kind, DateTimeHalfKind::Time { .. });
         let sized_field_id =
             if is_time && self.time_width_policy == crate::date_edit::WidthPolicy::Fill {
-                ctx.add(crate::primitives::Expand::horizontal().child_id(padded_field_id))
+                ctx.add(crate::primitives::Expand::horizontal().child(padded_field_id))
             } else {
                 padded_field_id
             };
@@ -1274,7 +1274,7 @@ impl DateTimeEdit {
         // `on_key_preview` — runs.
         let read_only = self.read_only;
         let step_for_key = segment_step.clone();
-        let stepping_id = ctx.add(ZStack::new().add_child(sized_field_id).on_key_preview(
+        let stepping_id = ctx.add(ZStack::new().child(sized_field_id).on_key_preview(
             move |event, ctx_evt| {
                 if read_only {
                     return EventResponse::Ignored;

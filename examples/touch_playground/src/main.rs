@@ -108,13 +108,13 @@ impl Widget for Root {
                     .style(TextStyleRole::BodyBold),
             )
             .child(MinSize::new(0.0, 180.0).child(pad::PointerPad::new(self.state.clone())))
-            .add_child(ctx.add(pad::PointerReadout::new(self.state.clone())));
+            .child(ctx.add(pad::PointerReadout::new(self.state.clone())));
         let left = ctx.add(Padding::uniform(10.0).child(ScrollArea::new().child(left)));
 
         let controls = VStack::new()
             .spacing(4.0)
-            .add_child(panels::density_toggle(ctx, &self.state))
-            .add_child(panels::kinetic_panel(ctx, &self.state));
+            .child(panels::density_toggle(ctx, &self.state))
+            .child(panels::kinetic_panel(ctx, &self.state));
 
         let mut column = VStack::new().spacing(4.0).child(
             Padding::uniform(10.0).child(
@@ -126,7 +126,7 @@ impl Widget for Root {
             ),
         );
         for id in scenarios::all(ctx, &self.state) {
-            column = column.add_child(id);
+            column = column.child(id);
         }
         let right = ctx
             .add(ScrollArea::new().child(VStack::new().spacing(4.0).child(controls).child(column)));
@@ -134,8 +134,8 @@ impl Widget for Root {
         let root = ctx.add(
             HStack::new()
                 .spacing(4.0)
-                .child(Expand::new().flex(1.0).child_id(left))
-                .child(Expand::new().flex(1.0).child_id(right)),
+                .child(Expand::new().flex(1.0).child(left))
+                .child(Expand::new().flex(1.0).child(right)),
         );
         self.child = Some(root);
         vec![root]

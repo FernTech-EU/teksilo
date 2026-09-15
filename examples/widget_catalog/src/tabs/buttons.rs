@@ -172,17 +172,17 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(variants)
-            .add_child(states)
-            .add_child(with_icon)
-            .add_child(icon_btns)
-            .add_child(icon_sizes)
-            .add_child(cmd_link)
-            .add_child(popover_btn)
-            .add_child(popover_icon)
-            .add_child(split),
+            .child(variants)
+            .child(states)
+            .child(with_icon)
+            .child(icon_btns)
+            .child(icon_sizes)
+            .child(cmd_link)
+            .child(popover_btn)
+            .child(popover_icon)
+            .child(split),
     )
 }
 

@@ -155,13 +155,13 @@ impl IconButtonStyle for RecipeIconButtonStyle {
                 .corner_radius(CornerRadius::uniform(corner_radius)),
         );
 
-        let centered_id = ctx.add(Center::new().child_id(cfg.icon));
-        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(centered_id));
+        let centered_id = ctx.add(Center::new().child(cfg.icon));
+        let zstack_id = ctx.add(ZStack::new().child(bg_id).child(centered_id));
         let painted = ctx.add(
             FixedSize::new()
                 .width(button_dim)
                 .height(button_dim)
-                .child_id(zstack_id),
+                .child(zstack_id),
         );
         // The conformance box (see `common::conformance_box` for the bargain).
         // The shipped recipe routes every rung through `dp(.., Target, ..)`

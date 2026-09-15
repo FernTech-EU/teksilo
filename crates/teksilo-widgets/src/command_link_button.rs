@@ -305,7 +305,7 @@ impl Widget for CommandLinkButton {
                 &ctx.theme().input,
             ))
             .alignment(HAlignment::Leading)
-            .add_child(title_id);
+            .child(title_id);
         if let Some(description) = &self.description {
             let desc_color: teksilo_core::color_prop::ColorProp = self
                 .description_color
@@ -321,7 +321,7 @@ impl Widget for CommandLinkButton {
                     .color(desc_color)
                     .a11y_hidden(),
             );
-            text_column = text_column.add_child(desc);
+            text_column = text_column.child(desc);
         }
         let text_column_id = ctx.add(text_column);
 
@@ -334,9 +334,9 @@ impl Widget for CommandLinkButton {
                 icon.icon_size(COMMAND_LINK_BUTTON_ICON_SIZE)
                     .color(icon_role),
             );
-            row = row.add_child(icon_id);
+            row = row.child(icon_id);
         }
-        row = row.add_child(text_column_id);
+        row = row.child(text_column_id);
         let row_id = ctx.add(row);
 
         // Padding inside the surface.
@@ -345,7 +345,7 @@ impl Widget for CommandLinkButton {
                 command_link_button_padding_vertical(&ctx.theme().input),
                 command_link_button_padding_horizontal(&ctx.theme().input),
             )
-            .child_id(row_id),
+            .child(row_id),
         );
 
         // Surface (background + border, drives hover / press / focus).
@@ -357,13 +357,13 @@ impl Widget for CommandLinkButton {
                 .corner_radius(CornerRadius::uniform(corner_radius)),
         );
 
-        let zstack = ctx.add(ZStack::new().add_child(rect).add_child(padded));
+        let zstack = ctx.add(ZStack::new().child(rect).child(padded));
         let root = ctx.add(
             crate::primitives::MinSize::new(
                 0.0,
                 command_link_button_min_height(&ctx.theme().input),
             )
-            .child_id(zstack),
+            .child(zstack),
         );
 
         // Attached handlers via the shared button-family helper

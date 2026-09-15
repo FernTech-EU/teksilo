@@ -239,7 +239,7 @@ fn build(stack: &[NodeSpec]) -> (WidgetTree, Vec<WidgetId>, CancelLog) {
         let (log_for_node, slot_for_node) = (log.clone(), slot.clone());
         let base = Stack::new();
         let base = match ids.last() {
-            Some(&child) => base.add_child(child),
+            Some(&child) => base.child(child),
             None => base,
         };
         // A leaf that declares nothing at all would still be a legal node, but

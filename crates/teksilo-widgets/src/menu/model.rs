@@ -487,6 +487,14 @@ impl MenuItems {
         self
     }
 
+    /// Append several leaf commands from an iterator, in order.
+    ///
+    /// The loop form of [`item`](Self::item), and the usual one for a menu whose
+    /// rows come from data (a recent-files list, a window list).
+    pub fn items(self, entries: impl IntoIterator<Item = MenuEntry>) -> Self {
+        entries.into_iter().fold(self, Self::item)
+    }
+
     /// Append a separator.
     pub fn separator(mut self) -> Self {
         self.nodes.push(MenuNode::Separator);
@@ -583,6 +591,15 @@ impl MenuModel {
         self.nodes.borrow_mut().push(MenuNode::Standard(menu));
         self.bump();
         self
+    }
+
+    /// Append several platform-standard top-level menus from an iterator.
+    ///
+    /// The loop form of [`standard_menu`](Self::standard_menu). Use it to place
+    /// the whole standard set in one call; build each entry with
+    /// [`StandardMenu::for_role`] when the labels stay at their defaults.
+    pub fn standard_menus(self, menus: impl IntoIterator<Item = StandardMenu>) -> Self {
+        menus.into_iter().fold(self, Self::standard_menu)
     }
 
     /// A `Signal<u64>` bumped whenever the tree's *structure* changes. The

@@ -986,7 +986,7 @@ mod tests {
     fn an_at_focus_on_a_plain_container_does_not_walk_into_it() {
         let mut tree = WidgetTree::new();
         let leaf = tree.add(ClickableWidget.focusable(true));
-        let root = tree.add(StackWidget::new().add_child(leaf));
+        let root = tree.add(StackWidget::new().child(leaf));
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
         let mut ops = crate::window::NoopWindowOps;
@@ -1201,7 +1201,7 @@ mod tests {
         let child = tree.add(FillWidget::new().label("inner"));
         let parent = tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .context_menu(|_pos, _ctx| Some(Box::new(FillWidget::new()) as Box<dyn Widget>)),
         );
         tree.layout(SizeProposal::exact(100.0, 20.0));
@@ -1549,7 +1549,7 @@ mod tests {
         // container, so this exercises the parent→child push (not pruning).
         let parent = tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .access_label_literal("Parent"),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -1579,11 +1579,11 @@ mod tests {
         // A *labeled* container is semantic and survives.
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new().label("Leaf")); // Role::Label
-        let inner = tree.add(StackWidget::new().add_child(leaf)); // bare → pruned
-        let outer = tree.add(StackWidget::new().add_child(inner)); // bare → pruned
+        let inner = tree.add(StackWidget::new().child(leaf)); // bare → pruned
+        let outer = tree.add(StackWidget::new().child(inner)); // bare → pruned
         let labeled = tree.add(
             StackWidget::new()
-                .add_child(outer)
+                .child(outer)
                 .access_label_literal("Group"),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -1636,7 +1636,7 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().label("Child"));
-        let parent = tree.add(StackWidget::new().add_child(child));
+        let parent = tree.add(StackWidget::new().child(child));
         tree.enabled_when(parent, Signal::new(false));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -1682,9 +1682,9 @@ mod tests {
         // manual check here provides a more actionable failure message.
         let mut tree = WidgetTree::new();
         let grandchild = tree.add(FillWidget::new().label("Grandchild"));
-        let child_a = tree.add(StackWidget::new().add_child(grandchild));
+        let child_a = tree.add(StackWidget::new().child(grandchild));
         let child_b = tree.add(FillWidget::new().label("Sibling"));
-        let _root = tree.add(StackWidget::new().add_child(child_a).add_child(child_b));
+        let _root = tree.add(StackWidget::new().child(child_a).child(child_b));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let update = tree.sync_accessibility();
@@ -1707,7 +1707,7 @@ mod tests {
     fn no_dangling_relationships_in_basic_tree() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().label("Child"));
-        let _parent = tree.add(StackWidget::new().add_child(child));
+        let _parent = tree.add(StackWidget::new().child(child));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let update = tree.sync_accessibility();
@@ -2324,8 +2324,8 @@ mod tests {
         let inner2 = tree.add(FillWidget::new().label("B"));
         let outer = tree.add(
             StackWidget::new()
-                .add_child(inner1)
-                .add_child(inner2)
+                .child(inner1)
+                .child(inner2)
                 // A label keeps `outer` from being collapsed as a
                 // presentational container, so the test exercises Exclude
                 // (not the new presentational-pruning pass).
@@ -2353,8 +2353,8 @@ mod tests {
         let subtitle = tree.add(FillWidget::new().label("Subtitle"));
         let card = tree.add(
             StackWidget::new()
-                .add_child(title)
-                .add_child(subtitle)
+                .child(title)
+                .child(subtitle)
                 .access_merge_subtree(),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -2373,8 +2373,8 @@ mod tests {
         let click_b = tree.add(ClickableWidget);
         let card = tree.add(
             StackWidget::new()
-                .add_child(click_a)
-                .add_child(click_b)
+                .child(click_a)
+                .child(click_b)
                 .access_merge_subtree(),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -2417,8 +2417,8 @@ mod tests {
         let v2 = tree.add(ValueWidget("second"));
         let card = tree.add(
             StackWidget::new()
-                .add_child(v1)
-                .add_child(v2)
+                .child(v1)
+                .child(v2)
                 .access_merge_subtree(),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -2431,15 +2431,11 @@ mod tests {
         let mut tree = WidgetTree::new();
         let visible = tree.add(FillWidget::new().label("VISIBLE"));
         let pruned = tree.add(FillWidget::new().label("PRUNED"));
-        let inner_excluded = tree.add(
-            StackWidget::new()
-                .add_child(pruned)
-                .access_exclude_subtree(),
-        );
+        let inner_excluded = tree.add(StackWidget::new().child(pruned).access_exclude_subtree());
         let card = tree.add(
             StackWidget::new()
-                .add_child(visible)
-                .add_child(inner_excluded)
+                .child(visible)
+                .child(inner_excluded)
                 .access_merge_subtree(),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -2461,15 +2457,15 @@ mod tests {
         let inner_b = tree.add(FillWidget::new().label("b"));
         let inner_card = tree.add(
             StackWidget::new()
-                .add_child(inner_a)
-                .add_child(inner_b)
+                .child(inner_a)
+                .child(inner_b)
                 .access_merge_subtree(),
         );
         let outer_extra = tree.add(FillWidget::new().label("X"));
         let outer = tree.add(
             StackWidget::new()
-                .add_child(inner_card)
-                .add_child(outer_extra)
+                .child(inner_card)
+                .child(outer_extra)
                 .access_merge_subtree(),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));

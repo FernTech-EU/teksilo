@@ -5080,11 +5080,7 @@ mod tests {
         fn build(&mut self, ctx: &mut teksilo_core::BuildContext) -> Vec<WidgetId> {
             let first = ctx.add(Button::new(lit!("First")));
             let second = ctx.add(Button::new(lit!("Second")));
-            let row = ctx.add(
-                teksilo_widgets::HStack::new()
-                    .add_child(first)
-                    .add_child(second),
-            );
+            let row = ctx.add(teksilo_widgets::HStack::new().child(first).child(second));
             self.root = Some(row);
             self.second = Some(second);
             vec![row]

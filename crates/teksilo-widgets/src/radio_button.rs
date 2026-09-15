@@ -244,7 +244,7 @@ impl Widget for RadioButton {
 
         let mut row = HStack::new()
             .spacing(radio_dims::RADIO_LABEL_GAP)
-            .add_child(body_id);
+            .child(body_id);
         if let Some(ref label) = self.label {
             let label_widget = TextWidget::new(label.clone())
                 .style(TextStyleRole::Body)
@@ -259,16 +259,11 @@ impl Widget for RadioButton {
                     .color(TextRole::Secondary)
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
-                ctx.add(
-                    VStack::new()
-                        .spacing(2.0)
-                        .add_child(label_id)
-                        .add_child(caption_id),
-                )
+                ctx.add(VStack::new().spacing(2.0).child(label_id).child(caption_id))
             } else {
                 label_id
             };
-            row = row.add_child(label_column_id);
+            row = row.child(label_column_id);
         }
         // Top-align so the radio circle sits next to the label's first line
         // instead of the vertical center of the label+caption column.
@@ -280,7 +275,7 @@ impl Widget for RadioButton {
         // a density switch moves both together.
         let hit_area = crate::styles::RadioRecipe::for_tokens(&ctx.theme().input).hit_area;
         let row_id = ctx.add(row);
-        let root_id = ctx.add(MinSize::new(hit_area, hit_area).child_id(row_id));
+        let root_id = ctx.add(MinSize::new(hit_area, hit_area).child(row_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
@@ -501,7 +496,7 @@ mod tests {
         let r0 = tree.add(RadioButton::new(0, selected.clone()).label(lit!("A")));
         let r1 = tree.add(RadioButton::new(1, selected.clone()).label(lit!("B")));
         let r2 = tree.add(RadioButton::new(2, selected.clone()).label(lit!("C")));
-        let _root = tree.add(VStack::new().add_child(r0).add_child(r1).add_child(r2));
+        let _root = tree.add(VStack::new().child(r0).child(r1).child(r2));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         assert_eq!(selected.get(), 0);
@@ -789,7 +784,7 @@ mod hit_distance_tests {
         let selected = Signal::new(1_usize);
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let radio = tree.add(RadioButton::new(0, selected.clone()));
-        tree.add(Center::new().child_id(radio));
+        tree.add(Center::new().child(radio));
         tree.layout(SizeProposal::exact(200.0, 200.0));
         let b = tree.bounds(radio);
         let corner = Point::new(b.x + 1.0, b.y + 1.0);

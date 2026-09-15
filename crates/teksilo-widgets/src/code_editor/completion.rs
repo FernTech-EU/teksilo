@@ -853,7 +853,7 @@ impl Widget for CompletionPanel {
             if highlighted {
                 active_row = Some(id);
             }
-            rows = rows.add_child(id);
+            rows = rows.child(id);
         }
         self.state.borrow().completion.active_row.set(active_row);
 

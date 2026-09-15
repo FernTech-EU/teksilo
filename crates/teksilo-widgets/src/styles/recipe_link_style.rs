@@ -139,14 +139,14 @@ impl LinkStyle for RecipeLinkStyle {
         let underline_sized = ctx.add(
             FixedSize::new()
                 .height(self.recipe.underline_thickness)
-                .child_id(underline),
+                .child(underline),
         );
 
         let content_id = ctx.add(
             VStack::new()
                 .spacing(0.0)
-                .add_child(text_id)
-                .add_child(underline_sized),
+                .child(text_id)
+                .child(underline_sized),
         );
 
         // Focus ring — accent border drawn only when the link holds
@@ -171,6 +171,6 @@ impl LinkStyle for RecipeLinkStyle {
                 .corner_radius(CornerRadius::uniform(self.recipe.corner_radius)),
         );
 
-        ctx.add(ZStack::new().add_child(focus_rect_id).add_child(content_id))
+        ctx.add(ZStack::new().child(focus_rect_id).child(content_id))
     }
 }

@@ -50,13 +50,13 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
         // is mounted in.
         if cfg.is_read_only {
             let content = match cfg.content_padding {
-                Some((t, r, b, l)) => ctx.add(Padding::new(t, r, b, l).child_id(cfg.viewport)),
+                Some((t, r, b, l)) => ctx.add(Padding::new(t, r, b, l).child(cfg.viewport)),
                 None => cfg.viewport,
             };
             return match cfg.background.clone() {
                 Some(bg) => {
                     let bg_id = ctx.add(RectWidget::new().background(bg));
-                    ctx.add(ZStack::new().add_child(bg_id).add_child(content))
+                    ctx.add(ZStack::new().child(bg_id).child(content))
                 }
                 None => content,
             };
@@ -100,7 +100,7 @@ impl RichTextEditorStyle for RecipeRichTextEditorStyle {
             field.padding_vertical,
             field.padding_horizontal,
         ));
-        let padded = ctx.add(Padding::new(pt, pr, pb, pl).child_id(cfg.viewport));
-        ctx.add(ZStack::new().add_child(bg_id).add_child(padded))
+        let padded = ctx.add(Padding::new(pt, pr, pb, pl).child(cfg.viewport));
+        ctx.add(ZStack::new().child(bg_id).child(padded))
     }
 }

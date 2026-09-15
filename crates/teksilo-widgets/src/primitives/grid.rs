@@ -100,24 +100,22 @@ impl Grid {
         self
     }
 
-    /// Append a pre-registered child by ID; children are placed in row-major
-    /// order starting at `(row=0, col=0)`.
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.pending.push(PendingChild::Id(id));
-        self
-    }
-
     /// Append an inline child widget in the next cell (row-major order).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Append multiple inline children from an iterator, each occupying the
     /// next cell in row-major order.
-    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
         for widget in iter {
-            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         }
         self
     }
@@ -126,7 +124,8 @@ impl Grid {
     /// subsequent children at their original cell positions.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
-            self.pending.push(PendingChild::Deferred(Box::new(w)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(w));
         }
         self
     }
@@ -527,8 +526,8 @@ mod tests {
             Grid::new()
                 .columns(vec![TrackSize::Fixed(50.0), TrackSize::Fractional(1.0)])
                 .rows(vec![TrackSize::Fixed(40.0)])
-                .add_child(a)
-                .add_child(b),
+                .child(a)
+                .child(b),
         );
         // Total 100: col0 Fixed 50 leaves 50 for the fr column — below the 80
         // floor, so it clamps to 80 (residual overflow).
@@ -551,8 +550,8 @@ mod tests {
             Grid::new()
                 .columns(vec![TrackSize::Fixed(50.0), TrackSize::Fractional(1.0)])
                 .rows(vec![TrackSize::Fixed(40.0)])
-                .add_child(a)
-                .add_child(b),
+                .child(a)
+                .child(b),
         );
         tree.layout(SizeProposal::exact(100.0, 60.0));
         // fr column gets 100 - 50 = 50, below the rigid child's 200 intrinsic.
@@ -574,10 +573,10 @@ mod tests {
             Grid::new()
                 .columns(vec![TrackSize::Fixed(100.0), TrackSize::Fixed(100.0)])
                 .rows(vec![TrackSize::Fixed(50.0), TrackSize::Fixed(50.0)])
-                .add_child(a)
-                .add_child(b)
-                .add_child(c)
-                .add_child(d),
+                .child(a)
+                .child(b)
+                .child(c)
+                .child(d),
         );
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
@@ -601,8 +600,8 @@ mod tests {
             Grid::new()
                 .columns(vec![TrackSize::Auto, TrackSize::Auto])
                 .rows(vec![TrackSize::Auto])
-                .add_child(a)
-                .add_child(b),
+                .child(a)
+                .child(b),
         );
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
@@ -626,9 +625,9 @@ mod tests {
                     TrackSize::Fractional(2.0),
                 ])
                 .rows(vec![TrackSize::Fixed(40.0)])
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
+                .child(a)
+                .child(b)
+                .child(c),
         );
         tree.layout(SizeProposal::exact(350.0, 100.0));
 
@@ -651,10 +650,10 @@ mod tests {
                 .rows(vec![TrackSize::Fixed(30.0), TrackSize::Fixed(30.0)])
                 .column_gap(10.0)
                 .row_gap(5.0)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c)
-                .add_child(d),
+                .child(a)
+                .child(b)
+                .child(c)
+                .child(d),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -672,8 +671,8 @@ mod tests {
                 .columns(vec![TrackSize::Auto, TrackSize::Auto])
                 .rows(vec![TrackSize::Auto])
                 .column_gap(10.0)
-                .add_child(a)
-                .add_child(b),
+                .child(a)
+                .child(b),
         );
         tree.layout(SizeProposal::unspecified());
 
@@ -706,8 +705,8 @@ mod tests {
                 .columns(vec![TrackSize::Fractional(1.0), TrackSize::Fractional(1.0)])
                 .rows(vec![TrackSize::Auto])
                 .column_gap(8.0)
-                .add_child(a)
-                .add_child(b),
+                .child(a)
+                .child(b),
         );
         tree.layout(SizeProposal::unspecified());
 
@@ -738,8 +737,8 @@ mod tests {
             Grid::new()
                 .columns(vec![TrackSize::Fractional(1.0), TrackSize::Fractional(3.0)])
                 .rows(vec![TrackSize::Fixed(20.0)])
-                .add_child(a)
-                .add_child(b),
+                .child(a)
+                .child(b),
         );
         tree.layout(SizeProposal::exact(400.0, 100.0));
 
@@ -763,10 +762,10 @@ mod tests {
                 .rows(vec![TrackSize::Fixed(40.0), TrackSize::Fixed(40.0)])
                 .column_gap(10.0)
                 .row_gap(5.0)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c)
-                .add_child(d),
+                .child(a)
+                .child(b)
+                .child(c)
+                .child(d),
         );
         tree.layout(SizeProposal::exact(300.0, 200.0));
 

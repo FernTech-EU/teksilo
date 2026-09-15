@@ -59,7 +59,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`new_static`, `item`, `separator`, `variant`, `icon`, `style`, `text_style`, `text_role`, `enabled`, `initial_selected`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `chevron_tooltip`, `chevron_rich_tooltip`, `chevron_rich_tooltip_content`, `chevron_composite_tooltip`
+`new_static`, `item`, `items`, `separator`, `variant`, `icon`, `style`, `text_style`, `text_role`, `enabled`, `initial_selected`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`, `chevron_tooltip`, `chevron_rich_tooltip`, `chevron_rich_tooltip_content`, `chevron_composite_tooltip`
 
 ## API reference
 
@@ -210,6 +210,13 @@ not displace the primary.
 Add a menu item. The item is reused verbatim as a row of the
 dropdown, and its label + action are also used to drive the main
 region (when its index is the current default).
+
+#### `pub fn items(self, items: impl IntoIterator<Item = MenuItem>) -> Self`
+
+Add several menu items from an iterator, in order.
+
+The loop form of `item`, and the usual one: a split
+button's dropdown is normally built from a list of commands.
 
 #### `pub fn separator(mut self) -> Self`
 

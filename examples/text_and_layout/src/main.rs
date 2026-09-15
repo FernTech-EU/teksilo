@@ -217,9 +217,9 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(60.0, 25.0));
         let b = tree.add(FixedLeaf(40.0, 25.0));
-        let row = tree.add(HStack::new().spacing(5.0).add_child(a).add_child(b));
+        let row = tree.add(HStack::new().spacing(5.0).child(a).child(b));
         let c = tree.add(FixedLeaf(80.0, 30.0));
-        let _col = tree.add(VStack::new().spacing(10.0).add_child(row).add_child(c));
+        let _col = tree.add(VStack::new().spacing(10.0).child(row).child(c));
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
         assert!((tree.bounds(a).width - 60.0).abs() < 0.01);
@@ -257,12 +257,7 @@ mod tests {
         let left = tree.add(FixedLeaf(50.0, 20.0));
         let spacer = tree.add(Spacer::new());
         let right = tree.add(FixedLeaf(50.0, 20.0));
-        let _row = tree.add(
-            HStack::new()
-                .add_child(left)
-                .add_child(spacer)
-                .add_child(right),
-        );
+        let _row = tree.add(HStack::new().child(left).child(spacer).child(right));
         tree.layout(SizeProposal::exact(300.0, 40.0));
 
         assert!((tree.bounds(left).x - 0.0).abs() < 0.01);

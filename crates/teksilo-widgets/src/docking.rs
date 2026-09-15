@@ -126,10 +126,26 @@ impl DockingLayout {
         self
     }
 
+    /// Configure several sides' activity rails from an iterator.
+    ///
+    /// The loop form of [`rail`](Self::rail). Each rail carries its own side, so
+    /// a later entry for a side already configured replaces it.
+    pub fn rails(self, rails: impl IntoIterator<Item = DockRail>) -> Self {
+        rails.into_iter().fold(self, Self::rail)
+    }
+
     /// Set the always-present centre content (the app's main area).
-    pub fn center(mut self, widget: impl Widget + 'static) -> Self {
-        self.center = Some(Box::new(widget));
-        self
+    pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => {
+                self.center_id = Some(id);
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                self.center = Some(w);
+                self
+            }
+        }
     }
 
     /// Lock down end-user layout edits (sugar for [`DockingModel::set_policy`]).
@@ -146,12 +162,6 @@ impl DockingLayout {
         self
     }
 
-    /// Set the centre content by a pre-registered id.
-    pub fn center_id(mut self, id: WidgetId) -> Self {
-        self.center_id = Some(id);
-        self
-    }
-
     /// Declare a dock widget (its content factory + chrome metadata). The
     /// dock is registered immediately, so the app may set the initial layout
     /// on the model (`open_dock` / `import_state`) before mounting.
@@ -160,6 +170,14 @@ impl DockingLayout {
         self.model.register_meta(id, meta);
         self.registry.borrow_mut().insert(id, factory);
         self
+    }
+
+    /// Declare several dock widgets from an iterator, in order.
+    ///
+    /// The loop form of [`dock`](Self::dock), and the usual one once an app has
+    /// more than a couple of panels to register.
+    pub fn docks(self, docks: impl IntoIterator<Item = DockWidget>) -> Self {
+        docks.into_iter().fold(self, Self::dock)
     }
 }
 
@@ -214,7 +232,7 @@ impl Widget for DockingLayout {
             } else {
                 ctx.add(RectWidget::new().background(SurfaceRole::Content))
             };
-            ctx.add(crate::primitives::Expand::new().child_id(inner))
+            ctx.add(crate::primitives::Expand::new().child(inner))
         };
 
         let mut ordered = vec![center];

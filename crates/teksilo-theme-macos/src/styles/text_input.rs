@@ -80,8 +80,8 @@ impl TextInputStyle for MacOsTextInputStyle {
         });
         // Horizontal only — see the module doc.
         let pad_h = spacing(PADDING_H, tokens);
-        let padded = ctx.add(Padding::new(0.0, pad_h, 0.0, pad_h).child_id(cfg.editor));
-        let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
+        let padded = ctx.add(Padding::new(0.0, pad_h, 0.0, pad_h).child(cfg.editor));
+        let stack = ctx.add(ZStack::new().child(chrome).child(padded));
         // See `styles::button` — the same 22 → 24 dp floor, for the same
         // reason: a `MinSize` is a hit box, and the floor governs hit boxes.
         let min = density_min_size(
@@ -89,7 +89,7 @@ impl TextInputStyle for MacOsTextInputStyle {
             TargetAxes::HEIGHT,
             tokens,
         );
-        ctx.add(MinSize::new(0.0, min.height).child_id(stack))
+        ctx.add(MinSize::new(0.0, min.height).child(stack))
     }
 }
 

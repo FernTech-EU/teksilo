@@ -197,12 +197,12 @@ impl Widget for ControlButton {
             .a11y_hidden();
         let centred_glyph = ctx.add(Center::new().child(glyph_text));
 
-        let stack = ctx.add(ZStack::new().add_child(bg_rect).add_child(centred_glyph));
+        let stack = ctx.add(ZStack::new().child(bg_rect).child(centred_glyph));
         let sized = ctx.add(
             FixedSize::new()
                 .width(self.width)
                 .height(self.height)
-                .child_id(stack),
+                .child(stack),
         );
 
         // Self handlers: tap fires the action, hover drives the `hovered`
@@ -492,8 +492,8 @@ impl Widget for WindowControls {
         let max_normal_id = ctx.add(maximize_normal);
         let max_zoomed_id = ctx.add(maximize_zoomed);
         let maximize_switcher = Switcher::new(switcher_idx)
-            .child_id(max_normal_id)
-            .child_id(max_zoomed_id);
+            .child(max_normal_id)
+            .child(max_zoomed_id);
         let switcher_id = ctx.add(maximize_switcher);
 
         // U+00D7 (Latin-1 ×) instead of U+2715 (Dingbats ✕): the latter
@@ -509,9 +509,9 @@ impl Widget for WindowControls {
 
         let row = HStack::new()
             .spacing(0.0)
-            .add_child(minimize_id)
-            .add_child(switcher_id)
-            .add_child(close_id);
+            .child(minimize_id)
+            .child(switcher_id)
+            .child(close_id);
 
         let root = ctx.add(row);
         self.root_child_id = Some(root);

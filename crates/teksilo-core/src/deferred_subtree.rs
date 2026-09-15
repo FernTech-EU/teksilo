@@ -44,7 +44,7 @@
 //!   construction rather than rebuilding per open.
 //! * **The id is stable from the start.** [`BuildContext::add_deferred`] returns a real arena
 //!   node immediately, so everything downstream — `set_dormant` / `activate`,
-//!   `visible_when`, `OverlayRequest::content_id`, descendant checks, dismissal —
+//!   `visible_when`, `OverlayRequest::content`, descendant checks, dismissal —
 //!   is unchanged. Only *when* the subtree below that id exists has moved.
 //! * **Layout-transparent.** Reports the child's size, and nothing (a zero-size
 //!   node) while still unbuilt.

@@ -123,7 +123,7 @@ impl Widget for TextInput {
             field_dims::TEXT_FIELD_PADDING_VERTICAL,
             0.0,
         )
-        .child_id(field_id);
+        .child(field_id);
 
         // The placeholder lives in a local ZStack with the text field so
         // it shares the same column in the HStack — no overlap with
@@ -178,7 +178,7 @@ impl Widget for TextInput {
                 Shrinkable::new().child(
                     Expand::horizontal().respect_intrinsic().child(
                         ZStack::new()
-                            .add_child(ph_id) // below (placeholder)
+                            .child(ph_id) // below (placeholder)
                             .child(padded_field), // on top (text field, gets hits)
                     ),
                 ),
@@ -195,10 +195,10 @@ impl Widget for TextInput {
 
         if let Some(leading) = self.leading_slot.take() {
             let leading_id = ctx.add_boxed(leading);
-            row = row.add_child(leading_id);
+            row = row.child(leading_id);
         }
 
-        row = row.add_child(text_column_id);
+        row = row.child(text_column_id);
 
         // Clear button (opt-in). The clear affordance clears the
         // bound text signal — the field's ext→internal effect
@@ -243,12 +243,12 @@ impl Widget for TextInput {
                     })
                     .cursor(CursorIcon::Pointer),
             );
-            row = row.add_child(clear_id);
+            row = row.child(clear_id);
         }
 
         if let Some(trailing) = self.trailing_slot.take() {
             let trailing_id = ctx.add_boxed(trailing);
-            row = row.add_child(trailing_id);
+            row = row.child(trailing_id);
         }
 
         let row_id = ctx.add(row);
@@ -299,7 +299,7 @@ impl Widget for TextInput {
                 min_w,
                 crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
             )
-            .child_id(chrome_id),
+            .child(chrome_id),
         );
 
         // ── Inline validation strip ────────────────────────────────
@@ -333,12 +333,12 @@ impl Widget for TextInput {
         // width, not stretched) while keeping the frame's natural width as the
         // basis when unconstrained. A bounded proposal narrows it and the
         // `Shrinkable` column compresses to fit.
-        let framed_id = ctx.add(Expand::horizontal().respect_intrinsic().child_id(frame_id));
+        let framed_id = ctx.add(Expand::horizontal().respect_intrinsic().child(frame_id));
         let root_id = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
-                .add_child(framed_id)
-                .add_child(strip_id),
+                .child(framed_id)
+                .child(strip_id),
         );
 
         // Tooltip — three mutually-exclusive setters; setters clear

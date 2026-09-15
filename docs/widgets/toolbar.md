@@ -87,7 +87,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`item`, `action`, `child`, `add_child`, `orientation`, `button_size`, `button_style`, `spacing`, `label`, `compact`, `is_overflowing`
+`item`, `items`, `action`, `actions`, `child`, `children`, `child_opt`, `add_child`, `add_children`, `orientation`, `button_size`, `button_style`, `spacing`, `label`, `compact`, `is_overflowing`
 
 ## API reference
 
@@ -301,9 +301,23 @@ or layout items with `item`.
 
 Add an item (action, pinned widget, separator, flexible space).
 
+#### `pub fn items(self, items: impl IntoIterator<Item = ToolbarItem>) -> Self`
+
+Add several items from an iterator, in order.
+
+The loop form of `item`: reach for it when the command set
+is data-driven rather than written out call by call.
+
 #### `pub fn action(self, action: ToolbarAction) -> Self`
 
 Sugar for `.item(ToolbarItem::action(a))`.
+
+#### `pub fn actions(self, actions: impl IntoIterator<Item = ToolbarAction>) -> Self`
+
+Add several collapsible commands from an iterator.
+
+The loop form of `action`, for a command set built from
+data rather than spelled out one call at a time.
 
 #### `pub fn child(self, widget: impl Widget + 'static) -> Self`
 
@@ -312,10 +326,33 @@ Add a pinned inline child widget (sugar for
 into the overflow menu — use `action` for collapsible
 commands.
 
+#### `pub fn children(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+Add several pinned inline children from an iterator.
+
+The loop form of `child`. Like `child`, every widget added
+this way is pinned and never collapses into the overflow menu.
+
+#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
+
 #### `pub fn add_child(self, id: WidgetId) -> Self`
 
 Add a pinned inline child by pre-registered id (sugar for
 `.item(ToolbarItem::custom_id(id))`).
+
+#### `pub fn add_children(self, ids: impl IntoIterator<Item = WidgetId>) -> Self`
+
+Add several pinned children by pre-registered id, in iterator order.
+
+The id-carrying twin of `children`. Reach for it when a
+loop has already registered its widgets and holds the `WidgetId`s.
 
 #### `pub fn orientation(mut self, orientation: ToolbarOrientation) -> Self`
 

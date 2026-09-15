@@ -60,8 +60,8 @@ fn two_views(
     );
     tree.add(
         HStack::new()
-            .child(Expand::new().child_id(a))
-            .child(Expand::new().child_id(b)),
+            .child(Expand::new().child(a))
+            .child(Expand::new().child(b)),
     );
     tree.layout(viewport());
     (tree, a, b, count_a, count_b)
@@ -195,8 +195,8 @@ fn add_widget_once_is_single_view_only() {
     let b = tree.add(SceneView::with_model(model.clone()));
     tree.add(
         HStack::new()
-            .child(Expand::new().child_id(a))
-            .child(Expand::new().child_id(b)),
+            .child(Expand::new().child(a))
+            .child(Expand::new().child(b)),
     );
     tree.layout(viewport());
     assert_eq!(

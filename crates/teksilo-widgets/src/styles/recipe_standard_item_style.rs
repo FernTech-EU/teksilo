@@ -197,7 +197,7 @@ impl StandardItemStyle for RecipeStandardItemStyle {
                 0.0,
                 self.recipe.bg_horizontal_inset,
             )
-            .child_id(bg_rect),
+            .child(bg_rect),
         );
 
         // Content padding so slot widgets don't touch the bg edges.
@@ -205,13 +205,13 @@ impl StandardItemStyle for RecipeStandardItemStyle {
         // even when its slot widgets have small intrinsic sizes —
         // without this, ZStack would center the natural-width content
         // and leave (e.g.) tree chevrons shifted off the leading edge.
-        let content_expanded = ctx.add(Expand::horizontal().child_id(cfg.content));
+        let content_expanded = ctx.add(Expand::horizontal().child(cfg.content));
         let content_padded = ctx.add(
             Padding::symmetric(self.recipe.padding_vertical, self.recipe.padding_horizontal)
-                .child_id(content_expanded),
+                .child(content_expanded),
         );
 
-        ctx.add(ZStack::new().add_child(bg_padded).add_child(content_padded))
+        ctx.add(ZStack::new().child(bg_padded).child(content_padded))
     }
 }
 

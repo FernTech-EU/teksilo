@@ -134,7 +134,7 @@ impl DropTargetStyle for RecipeDropTargetStyle {
         };
 
         // The wrapped child fills the bounds and is always visible.
-        let mut zstack = ZStack::new().add_child(cfg.content_id);
+        let mut zstack = ZStack::new().child(cfg.content_id);
 
         // Full-bounds rounded border for the whole-bounds states: a reject error
         // border, and the `Center` accept border (so single-zone accept keeps its
@@ -163,7 +163,7 @@ impl DropTargetStyle for RecipeDropTargetStyle {
                     // Decorative highlight border — keep it out of the AT tree.
                     .access_hidden(true),
             );
-            zstack = zstack.add_child(rect);
+            zstack = zstack.child(rect);
         }
 
         // Per-region hint cards, each shown only while *its* region is the
@@ -173,7 +173,7 @@ impl DropTargetStyle for RecipeDropTargetStyle {
         // rect) by the `DropRegionOverlay` below — so we pass their ids on.
         let mut hint_cards: Vec<(DropRegion, WidgetId)> = Vec::new();
         for &(region, hint_id) in &cfg.region_hints {
-            let card = ctx.add(Card::new().content_id(hint_id).access_live(Live::Polite));
+            let card = ctx.add(Card::new().content(hint_id).access_live(Live::Polite));
             let visible = cfg.active_region.map(move |r| *r == Some(region));
             ctx.visible_when(card, visible);
             hint_cards.push((region, card));
@@ -195,7 +195,7 @@ impl DropTargetStyle for RecipeDropTargetStyle {
                 border_width,
                 hint_cards,
             ));
-            zstack = zstack.add_child(overlay);
+            zstack = zstack.child(overlay);
         }
 
         ctx.add(zstack)

@@ -133,8 +133,8 @@ impl TeksiloAppBuilderToastExt for TeksiloAppBuilder {
             // leave the lower area blank. Wrap it in an `Expand` so it
             // fills the ZStack exactly as it filled the window when it
             // was the bare root — the wrapping stays layout-transparent.
-            let filled_root = tree.add(Expand::new().respect_intrinsic().child_id(root_id));
-            let stack = ZStack::new().add_child(filled_root).add_child(host_id);
+            let filled_root = tree.add(Expand::new().respect_intrinsic().child(root_id));
+            let stack = ZStack::new().child(filled_root).child(host_id);
             tree.add(stack)
         });
 

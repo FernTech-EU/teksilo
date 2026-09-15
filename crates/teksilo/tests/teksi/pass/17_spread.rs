@@ -31,14 +31,18 @@ impl Stack {
         Self::default()
     }
 
-    fn add_child(mut self, id: WidgetId) -> Self {
+    fn child(mut self, c: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(c) {
+            teksilo_core::PendingChild::Id(id) => {
         self.ids.push(id);
+            }
+            // This stub only records ids; an inline widget is ignored,
+            // exactly as the generic `child` it replaces did.
+            teksilo_core::PendingChild::Deferred(_) => {}
+        }
         self
     }
 
-    fn child<W: Widget + 'static>(self, _w: W) -> Self {
-        self
-    }
 }
 
 impl Widget for Stack {

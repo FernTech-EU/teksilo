@@ -321,7 +321,7 @@ impl Widget for Root {
         let header = ctx.add(
             VStack::new()
                 .spacing(8.0)
-                .add_child(breadcrumb)
+                .child(breadcrumb)
                 .child(
                     TextWidget::new(lit!("TabWidget — full showcase"))
                         .style(TextStyleRole::BodyBold)
@@ -361,15 +361,15 @@ impl Widget for Root {
         let tabs_filling = ctx.add(
             teksilo::widgets::Expand::vertical()
                 .respect_intrinsic()
-                .child_id(tabs),
+                .child(tabs),
         );
         let root_id = ctx.add(
             Panel::new().padding(20.0).child(
                 VStack::new()
                     .spacing(12.0)
-                    .add_child(header)
-                    .add_child(tabs_filling)
-                    .add_child(status),
+                    .child(header)
+                    .child(tabs_filling)
+                    .child(status),
             ),
         );
 

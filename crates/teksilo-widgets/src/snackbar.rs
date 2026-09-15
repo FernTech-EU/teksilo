@@ -313,15 +313,8 @@ impl Snackbar {
     /// is dark and renders nearly invisible on the dark surface in light
     /// theme. If you install a light-surface `SnackbarStyle`, color the
     /// content to match that instead.
-    pub fn content(mut self, content: impl Widget + 'static) -> Self {
-        self.pending_content = Some(PendingChild::Deferred(Box::new(content)));
-        self
-    }
-
-    /// Supply the notification body by `WidgetId` (already added to the
-    /// tree). Mutually exclusive with `.content(...)`.
-    pub fn content_id(mut self, id: WidgetId) -> Self {
-        self.pending_content = Some(PendingChild::Id(id));
+    pub fn content(mut self, content: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_content = Some(teksilo_core::IntoTeksiChild::into_pending(content));
         self
     }
 
@@ -360,14 +353,8 @@ impl Snackbar {
     /// Replace the default `Button` trigger with a custom widget. The
     /// widget is wired for tap, keyboard (Enter/Space), and AT Click
     /// activation automatically.
-    pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
-        self.pending_trigger = Some(PendingChild::Deferred(Box::new(trigger)));
-        self
-    }
-
-    /// Supply the custom trigger by `WidgetId` (already added to the tree).
-    pub fn trigger_id(mut self, id: WidgetId) -> Self {
-        self.pending_trigger = Some(PendingChild::Id(id));
+    pub fn trigger(mut self, trigger: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_trigger = Some(teksilo_core::IntoTeksiChild::into_pending(trigger));
         self
     }
 

@@ -34,9 +34,9 @@ fn vstack_with_mixed_sizes_and_center_alignment() {
         VStack::new()
             .alignment(HAlignment::Center)
             .spacing(5.0)
-            .add_child(a)
-            .add_child(b)
-            .add_child(c),
+            .child(a)
+            .child(b)
+            .child(c),
     );
     tree.layout(SizeProposal::exact(200.0, 300.0));
 
@@ -64,10 +64,10 @@ fn hstack_toolbar_pattern_with_spacer() {
     let _toolbar = tree.add(
         HStack::new()
             .spacing(8.0)
-            .add_child(back)
-            .add_child(spacer)
-            .add_child(edit)
-            .add_child(save),
+            .child(back)
+            .child(spacer)
+            .child(edit)
+            .child(save),
     );
     tree.layout(SizeProposal::exact(400.0, 40.0));
 
@@ -89,9 +89,9 @@ fn zstack_per_child_alignment_overrides() {
     let _stack = tree.add(
         ZStack::new()
             .alignment(Alignment::CENTER)
-            .add_child(bg)
-            .add_child(title)
-            .add_child(button),
+            .child(bg)
+            .child(title)
+            .child(button),
     );
     // title centered, button overridden to bottom-trailing
     tree.set_alignment(button, Alignment::BOTTOM_TRAILING);
@@ -112,15 +112,15 @@ fn nested_hstack_in_vstack() {
     // Row 1: two fixed leaves
     let a = tree.add(FixedLeaf(60.0, 25.0));
     let b = tree.add(FixedLeaf(40.0, 25.0));
-    let row1 = tree.add(HStack::new().spacing(5.0).add_child(a).add_child(b));
+    let row1 = tree.add(HStack::new().spacing(5.0).child(a).child(b));
     // Row 2: single item
     let c = tree.add(FixedLeaf(80.0, 30.0));
     let _col = tree.add(
         VStack::new()
             .alignment(HAlignment::Center)
             .spacing(10.0)
-            .add_child(row1)
-            .add_child(c),
+            .child(row1)
+            .child(c),
     );
     tree.layout(SizeProposal::exact(200.0, 200.0));
 
@@ -135,8 +135,8 @@ fn nested_hstack_in_vstack() {
 fn min_size_wrapping_small_widget() {
     let mut tree = WidgetTree::new();
     let small = tree.add(FixedLeaf(20.0, 10.0));
-    let min = tree.add(MinSize::new(48.0, 48.0).child_id(small));
-    let _stack = tree.add(HStack::new().add_child(min));
+    let min = tree.add(MinSize::new(48.0, 48.0).child(small));
+    let _stack = tree.add(HStack::new().child(min));
     tree.layout(SizeProposal::exact(200.0, 60.0));
 
     let mb = tree.bounds(min);
@@ -153,8 +153,8 @@ fn expand_horizontal_in_hstack() {
     let mut tree = WidgetTree::new();
     let fixed = tree.add(FixedLeaf(60.0, 30.0));
     let inner = tree.add(FixedLeaf(40.0, 20.0));
-    let expanded = tree.add(Expand::horizontal().child_id(inner));
-    let _stack = tree.add(HStack::new().add_child(fixed).add_child(expanded));
+    let expanded = tree.add(Expand::horizontal().child(inner));
+    let _stack = tree.add(HStack::new().child(fixed).child(expanded));
     tree.layout(SizeProposal::exact(300.0, 50.0));
 
     assert!((tree.bounds(fixed).width - 60.0).abs() < 0.01);
@@ -170,7 +170,7 @@ fn expand_horizontal_in_hstack() {
 fn center_widget() {
     let mut tree = WidgetTree::new();
     let child = tree.add(FixedLeaf(40.0, 20.0));
-    let _center = tree.add(Center::new().child_id(child));
+    let _center = tree.add(Center::new().child(child));
     tree.layout(SizeProposal::exact(200.0, 100.0));
 
     let cb = tree.bounds(child);
@@ -182,9 +182,9 @@ fn center_widget() {
 fn fixed_size_in_hstack_resists_stretching() {
     let mut tree = WidgetTree::new();
     let a = tree.add(FixedLeaf(40.0, 20.0));
-    let fixed = tree.add(FixedSize::new().child_id(a));
+    let fixed = tree.add(FixedSize::new().child(a));
     let b = tree.add(FixedLeaf(60.0, 30.0));
-    let _stack = tree.add(HStack::new().spacing(5.0).add_child(fixed).add_child(b));
+    let _stack = tree.add(HStack::new().spacing(5.0).child(fixed).child(b));
     tree.layout(SizeProposal::exact(300.0, 50.0));
 
     // FixedSize reports 40x20 regardless of proposal
@@ -216,12 +216,7 @@ fn demo_layout_no_overlap_between_sections() {
     let title = tree.add(TextWidget::new(lit!("Title text here"))); // 15*8=120 wide
     let toolbar_spacer = tree.add(Spacer::new());
     let btn = tree.add(FixedLeaf(140.0, 36.0)); // mock button
-    let toolbar = tree.add(
-        HStack::new()
-            .add_child(title)
-            .add_child(toolbar_spacer)
-            .add_child(btn),
-    );
+    let toolbar = tree.add(HStack::new().child(title).child(toolbar_spacer).child(btn));
 
     // -- Typography section --
     let typo_heading = tree.add(TextWidget::new(lit!("Typography"))); // 10*8=80
@@ -230,9 +225,9 @@ fn demo_layout_no_overlap_between_sections() {
     let typography = tree.add(
         VStack::new()
             .spacing(6.0)
-            .add_child(typo_heading)
-            .add_child(typo_body1)
-            .add_child(typo_body2),
+            .child(typo_heading)
+            .child(typo_body1)
+            .child(typo_body2),
     );
 
     // -- Layout showcase section --
@@ -243,9 +238,9 @@ fn demo_layout_no_overlap_between_sections() {
     let color_row = tree.add(
         HStack::new()
             .spacing(8.0)
-            .add_child(box_a)
-            .add_child(box_b)
-            .add_child(box_c),
+            .child(box_a)
+            .child(box_b)
+            .child(box_c),
     );
     let caption1 = tree.add(TextWidget::new(lit!("Three colored boxes"))); // 19*8=152
     let leading = tree.add(TextWidget::new(lit!("Leading"))); // 7*8=56
@@ -253,31 +248,31 @@ fn demo_layout_no_overlap_between_sections() {
     let trailing = tree.add(TextWidget::new(lit!("Trailing"))); // 8*8=64
     let spacer_row = tree.add(
         HStack::new()
-            .add_child(leading)
-            .add_child(inner_spacer)
-            .add_child(trailing),
+            .child(leading)
+            .child(inner_spacer)
+            .child(trailing),
     );
     let caption2 = tree.add(TextWidget::new(lit!("Spacer pushing items to edges"))); // 30*8=240
 
     let showcase = tree.add(
         VStack::new()
             .spacing(6.0)
-            .add_child(section_heading)
-            .add_child(color_row)
-            .add_child(caption1)
-            .add_child(spacer_row)
-            .add_child(caption2),
+            .child(section_heading)
+            .child(color_row)
+            .child(caption1)
+            .child(spacer_row)
+            .child(caption2),
     );
 
     // -- Outer VStack with Padding --
     let outer = tree.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(toolbar)
-            .add_child(typography)
-            .add_child(showcase),
+            .child(toolbar)
+            .child(typography)
+            .child(showcase),
     );
-    let _root = tree.add(Padding::uniform(24.0).child_id(outer));
+    let _root = tree.add(Padding::uniform(24.0).child(outer));
     tree.layout(SizeProposal::exact(600.0, 500.0));
 
     // === Check that each section starts BELOW the previous section ===

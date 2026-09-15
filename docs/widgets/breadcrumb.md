@@ -54,7 +54,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`label`, `item`, `item_id`, `trailing_slot`, `trailing_slot_id`, `is_overflowing`
+`label`, `item`, `items`, `item_id`, `item_ids`, `trailing_slot`, `trailing_slot_id`, `is_overflowing`
 
 ## API reference
 
@@ -185,6 +185,13 @@ Append a `BreadcrumbItem` segment to the trail. Items are rendered
 in insertion order, separated by chevron glyphs. Middle items (neither
 root nor current) may be collapsed into the `…` overflow menu.
 
+#### `pub fn items(self, items: impl IntoIterator<Item = BreadcrumbItem>) -> Self`
+
+Append several `BreadcrumbItem` segments from an iterator, in order.
+
+The loop form of `item`, and the usual one: a trail is
+normally walked out of a path rather than written crumb by crumb.
+
 #### `pub fn item_id(mut self, id: WidgetId) -> Self`
 
 Insert a pre-registered widget as a breadcrumb segment slot.
@@ -192,6 +199,13 @@ The caller is responsible for the segment's visual + interaction.
 Note: a pre-registered crumb never collapses into the overflow menu
 (the breadcrumb has no label/action to synthesize a menu row from) —
 it is treated like the root/current crumbs as always-visible.
+
+#### `pub fn item_ids(self, ids: impl IntoIterator<Item = WidgetId>) -> Self`
+
+Insert several pre-registered widgets as breadcrumb segment slots.
+
+The id-carrying twin of `items`. Like `item_id`, none of
+these crumbs ever collapses into the overflow menu.
 
 #### `pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
 

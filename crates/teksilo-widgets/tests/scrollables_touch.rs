@@ -183,7 +183,7 @@ fn assert_the_whole_pan_chains_outward(
     let total = outer_total.clone();
     let _outer = tree.add(
         VStack::new()
-            .add_child(inner)
+            .child(inner)
             .scroll_container(teksilo_core::pointer::touch_action::PanAxes::BOTH)
             .pan_claim(teksilo_core::pointer::touch_action::PanClaim::vertical())
             .on_scroll(move |event, _ctx| {
@@ -718,14 +718,10 @@ fn a_shift_notch_a_table_cannot_take_sideways_does_not_scroll_its_rows() {
     let seen = outer_seen.clone();
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     let inner = tree.add(view);
-    let _outer = tree.add(
-        VStack::new()
-            .add_child(inner)
-            .on_scroll(move |_event, _ctx| {
-                seen.set(seen.get() + 1);
-                EventResponse::Handled
-            }),
-    );
+    let _outer = tree.add(VStack::new().child(inner).on_scroll(move |_event, _ctx| {
+        seen.set(seen.get() + 1);
+        EventResponse::Handled
+    }));
     tree.layout(SizeProposal::exact(VIEWPORT, VIEWPORT));
     assert_eq!(
         y.animation_target(),

@@ -2095,8 +2095,12 @@ impl Stack {
     fn new() -> Self {
         Self::default()
     }
-    fn add_child(mut self, id: WidgetId) -> Self {
-        self.children.push(id);
+
+    fn child(mut self, c: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(c) {
+            teksilo_core::PendingChild::Id(id) => self.children.push(id),
+            teksilo_core::PendingChild::Deferred(_) => unreachable!("Stack takes ids"),
+        }
         self
     }
 }
@@ -2184,7 +2188,7 @@ fn a_programmatic_scroll_bubbles_and_no_pan_claimant_competes_for_it() {
     let inner = tree.add(probe);
     let scroller = tree.add(
         Stack::new()
-            .add_child(inner)
+            .child(inner)
             .pan_claim(teksilo_core::PanClaim::vertical()),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -2392,13 +2396,13 @@ fn a_scripted_touch_sequence_reproduces_the_documented_arbitration_row() {
     let leaf = tree.add(Leaf);
     let row_id = tree.add(
         Stack::new()
-            .add_child(leaf)
+            .child(leaf)
             .on_tap(|_e: &TapEvent, _c| {})
             .on_drag(|_p, _c| {}),
     );
     let scroller = tree.add(
         Stack::new()
-            .add_child(row_id)
+            .child(row_id)
             .pan_claim(teksilo_core::PanClaim::vertical()),
     );
     tree.layout(SizeProposal::exact(400.0, 300.0));

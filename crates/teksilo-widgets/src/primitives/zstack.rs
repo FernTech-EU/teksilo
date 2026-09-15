@@ -66,22 +66,21 @@ impl ZStack {
         self
     }
 
-    /// Add a pre-registered child by ID.
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.pending.push(PendingChild::Id(id));
-        self
-    }
-
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
         for widget in iter {
-            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         }
         self
     }
@@ -89,7 +88,8 @@ impl ZStack {
     /// Conditionally add a child. No-op if None.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
-            self.pending.push(PendingChild::Deferred(Box::new(w)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(w));
         }
         self
     }
@@ -305,7 +305,7 @@ mod tests {
             natural_width: 400.0,
             line_height: 16.0,
         });
-        let stack = tree.add(ZStack::new().add_child(bg).add_child(text));
+        let stack = tree.add(ZStack::new().child(bg).child(text));
 
         // Width bound, height open — what a toast surface is offered.
         tree.layout(SizeProposal {
@@ -329,7 +329,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let bg = tree.add(GreedyLeaf);
         let content = tree.add(FixedLeaf(40.0, 20.0));
-        let stack = tree.add(ZStack::new().add_child(bg).add_child(content));
+        let stack = tree.add(ZStack::new().child(bg).child(content));
 
         tree.layout(SizeProposal {
             width: Some(300.0),
@@ -348,7 +348,7 @@ mod tests {
     fn default_centers_children() {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(40.0, 20.0));
-        let _stack = tree.add(ZStack::new().add_child(a));
+        let _stack = tree.add(ZStack::new().child(a));
         tree.layout(SizeProposal::exact(100.0, 60.0));
 
         // Root widget gets the full 100x60 proposal bounds.
@@ -366,8 +366,8 @@ mod tests {
         let _stack = tree.add(
             ZStack::new()
                 .alignment(Alignment::TOP_LEADING)
-                .add_child(bg)
-                .add_child(fg),
+                .child(bg)
+                .child(fg),
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
@@ -384,8 +384,8 @@ mod tests {
         let _stack = tree.add(
             ZStack::new()
                 .alignment(Alignment::BOTTOM_TRAILING)
-                .add_child(bg)
-                .add_child(fg),
+                .child(bg)
+                .child(fg),
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
@@ -399,7 +399,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let bg = tree.add(FixedLeaf(100.0, 60.0));
         let fg = tree.add(FixedLeaf(40.0, 20.0));
-        let _stack = tree.add(ZStack::new().add_child(bg).add_child(fg)); // default: center
+        let _stack = tree.add(ZStack::new().child(bg).child(fg)); // default: center
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         let b = tree.bounds(fg);
@@ -416,9 +416,9 @@ mod tests {
         let _stack = tree.add(
             ZStack::new()
                 .alignment(Alignment::TOP_LEADING)
-                .add_child(bg)
-                .add_child(a)
-                .add_child(b),
+                .child(bg)
+                .child(a)
+                .child(b),
         );
         // Override b to bottom-trailing
         tree.set_alignment(b, Alignment::BOTTOM_TRAILING);
@@ -438,7 +438,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(40.0, 60.0));
         let b = tree.add(FixedLeaf(80.0, 30.0));
-        let stack = tree.add(ZStack::new().add_child(a).add_child(b));
+        let stack = tree.add(ZStack::new().child(a).child(b));
         tree.layout(SizeProposal {
             width: None,
             height: None,

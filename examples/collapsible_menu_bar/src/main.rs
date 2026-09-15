@@ -156,11 +156,7 @@ impl Widget for Root {
                         .on_activate_fn(|_| println!("Help")),
                 ),
         );
-        let demo_bar_slot = ctx.add(
-            FixedSize::new()
-                .width(demo_width.clone())
-                .child_id(demo_bar),
-        );
+        let demo_bar_slot = ctx.add(FixedSize::new().width(demo_width.clone()).child(demo_bar));
         let demo_state = demo_collapsed.map(|c| {
             if *c {
                 "State: collapsed → click the ☰ to reveal the bar trailing it".to_string()
@@ -225,7 +221,7 @@ impl Widget for Root {
                                             .label(lit!("Bar width")),
                                     ),
                             )
-                            .add_child(demo_bar_slot)
+                            .child(demo_bar_slot)
                             .child(
                                 TextWidget::new(lit!(""))
                                     .text(demo_state)
@@ -239,17 +235,17 @@ impl Widget for Root {
         let content = ctx.add(
             VStack::new()
                 .spacing(24.0)
-                .add_child(intro)
+                .child(intro)
                 .child(Divider::new().thickness(1.0))
-                .add_child(responsive_panel),
+                .child(responsive_panel),
         );
-        let padded = ctx.add(Padding::uniform(24.0).child_id(content));
+        let padded = ctx.add(Padding::uniform(24.0).child(content));
         let scroll = ctx.add(ScrollArea::from_id(padded));
 
         let root = ctx.add(
             VStack::new()
-                .add_child(top_bar)
-                .child(Expand::new().child_id(scroll))
+                .child(top_bar)
+                .child(Expand::new().child(scroll))
                 .child(
                     StatusBar::new().child(
                         TextWidget::new(lit!("Collapsible MenuBar showcase"))

@@ -34,13 +34,24 @@ impl Holder {
         Self::default()
     }
 
-    fn add_child(mut self, id: WidgetId) -> Self {
-        self.child_ids.push(id);
+    /// The body-position escape lowers to `child`, which every container in
+    /// the catalog takes as `impl IntoTeksiChild`, so one method carries a
+    /// `WidgetId` and a widget value alike.
+    fn child(mut self, c: impl teksilo_core::IntoTeksiChild) -> Self {
+        match c.into_pending() {
+            teksilo_core::PendingChild::Id(id) => self.child_ids.push(id),
+            teksilo_core::PendingChild::Deferred(_) => unreachable!("fixture passes ids"),
+        }
         self
     }
 
-    fn header_id(mut self, id: WidgetId) -> Self {
+    fn header(mut self, c: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(c) {
+            teksilo_core::PendingChild::Id(id) => {
         self.header_id = Some(id);
+            }
+            teksilo_core::PendingChild::Deferred(_) => unreachable!("this fixture passes ids"),
+        }
         self
     }
 }
@@ -53,7 +64,7 @@ impl Widget for Holder {
 
 fn build(ctx: &mut BuildContext) -> WidgetId {
     let external = ctx.add(Leaf::new());
-    // #{ external } at body position -> .add_child(external)
+    // #{ external } at body position -> .child(external)
     // #{ external } at slot position -> .header_id(external)
     teksu!(ctx => Holder {
             header: #{ external }

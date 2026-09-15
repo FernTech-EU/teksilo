@@ -219,19 +219,19 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(panel)
-            .add_child(card)
-            .add_child(tab_widget)
-            .add_child(styled_tabs)
-            .add_child(group_box)
-            .add_child(group_header)
-            .add_child(accordion)
-            .add_child(tool_box)
-            .add_child(scroll_area)
-            .add_child(scrollbar)
-            .add_child(split),
+            .child(panel)
+            .child(card)
+            .child(tab_widget)
+            .child(styled_tabs)
+            .child(group_box)
+            .child(group_header)
+            .child(accordion)
+            .child(tool_box)
+            .child(scroll_area)
+            .child(scrollbar)
+            .child(split),
     )
 }
 
@@ -408,10 +408,10 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 VStack {
                     spacing: 6.0
                     Accordion::new(tr!(cnt_accordion_1_title()), acc_open) {
-                        content_id: acc_body_1
+                        content: acc_body_1
                     }
                     Accordion::new(tr!(cnt_accordion_2_title()), acc2_open) {
-                        content_id: acc_body_2
+                        content: acc_body_2
                     }
                 }
             }
@@ -424,7 +424,7 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 }
                 FixedSize {
                     height: 220.0_f32
-                    child_id: toolbox_widget
+                    child: toolbox_widget
                 }
             }
 
@@ -435,7 +435,7 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 MaxSize::new(280.0_f32, 120.0_f32) {
-                    child_id: scroll_area_widget
+                    child: scroll_area_widget
                 }
             }
 
@@ -446,7 +446,7 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 MaxSize::new(280.0_f32, 14.0_f32) {
-                    child_id: scrollbar_widget
+                    child: scrollbar_widget
                 }
             }
 
@@ -457,7 +457,7 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                     color: TextRole::Accent
                 }
                 MaxSize::new(360.0_f32, 120.0_f32) {
-                    child_id: splitview_widget
+                    child: splitview_widget
                 }
             }
         }

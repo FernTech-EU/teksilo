@@ -214,7 +214,7 @@ impl WidgetCatalog for VStack {
     ) -> Box<dyn Widget> {
         let mut s = VStack::new().spacing(knobs.f32_("spacing").get());
         for c in children {
-            s = s.add_child(c.id);
+            s = s.child(c.id);
         }
         Box::new(s)
     }
@@ -259,7 +259,7 @@ impl WidgetCatalog for HStack {
     ) -> Box<dyn Widget> {
         let mut s = HStack::new().spacing(knobs.f32_("spacing").get());
         for c in children {
-            s = s.add_child(c.id);
+            s = s.child(c.id);
         }
         Box::new(s)
     }
@@ -299,7 +299,7 @@ impl WidgetCatalog for ZStack {
     ) -> Box<dyn Widget> {
         let mut s = ZStack::new();
         for c in children {
-            s = s.add_child(c.id);
+            s = s.child(c.id);
         }
         Box::new(s)
     }
@@ -354,7 +354,7 @@ impl WidgetCatalog for Grid {
             .column_gap(gap)
             .row_gap(gap);
         for c in children {
-            g = g.add_child(c.id);
+            g = g.child(c.id);
         }
         Box::new(g)
     }
@@ -393,7 +393,7 @@ impl WidgetCatalog for Padding {
     ) -> Box<dyn Widget> {
         let mut p = Padding::uniform(knobs.f32_("amount").get());
         if let Some(c) = children.into_iter().next() {
-            p = p.child_id(c.id);
+            p = p.child(c.id);
         }
         Box::new(p)
     }
@@ -438,7 +438,7 @@ impl WidgetCatalog for Expand {
     ) -> Box<dyn Widget> {
         let mut e = Expand::new().flex(knobs.f32_("flex").get());
         if let Some(c) = children.into_iter().next() {
-            e = e.child_id(c.id);
+            e = e.child(c.id);
         }
         Box::new(e)
     }
@@ -479,7 +479,7 @@ impl WidgetCatalog for Center {
     ) -> Box<dyn Widget> {
         let mut c0 = Center::new();
         if let Some(c) = children.into_iter().next() {
-            c0 = c0.child_id(c.id);
+            c0 = c0.child(c.id);
         }
         Box::new(c0)
     }
@@ -1669,9 +1669,9 @@ impl WidgetCatalog for Card {
             .padding(knobs.f32_("padding").get());
         for c in children {
             match c.slot.as_deref() {
-                Some("header") => card = card.header_id(c.id),
-                Some("footer") => card = card.footer_id(c.id),
-                _ => card = card.content_id(c.id),
+                Some("header") => card = card.header(c.id),
+                Some("footer") => card = card.footer(c.id),
+                _ => card = card.content(c.id),
             }
         }
         Box::new(card)
@@ -1751,7 +1751,7 @@ impl WidgetCatalog for Panel {
             .corner_radius(knobs.f32_("corner_radius").get())
             .padding(knobs.f32_("padding").get());
         if let Some(c) = children.into_iter().next() {
-            p = p.child_id(c.id);
+            p = p.child(c.id);
         }
         Box::new(p)
     }

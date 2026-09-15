@@ -168,7 +168,7 @@ fn main() {
 
                     // --- Tabbed body ---
                     let body = Switcher::new(selected.clone())
-                        .child_id(webview_id)
+                        .child(webview_id)
                         .child(native_panel);
 
                     // --- Toolbar ---

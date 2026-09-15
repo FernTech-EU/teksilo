@@ -116,7 +116,7 @@ impl<K: Eq + Clone + 'static> Widget for Crossfade<K> {
             } else {
                 opacity.animate_to(0.0, duration, easing);
             }
-            zstack = zstack.add_child(outgoing_id);
+            zstack = zstack.child(outgoing_id);
         }
 
         let incoming = (self.builder)(&current_key);
@@ -131,7 +131,7 @@ impl<K: Eq + Clone + 'static> Widget for Crossfade<K> {
                 opacity.animate_to(1.0, duration, easing);
             }
         }
-        zstack = zstack.add_child(incoming_id);
+        zstack = zstack.child(incoming_id);
 
         // Trigger a full rebuild on key change so the next transition
         // can mount fresh outgoing+incoming pair.

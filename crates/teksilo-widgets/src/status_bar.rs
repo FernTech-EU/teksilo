@@ -97,15 +97,33 @@ impl StatusBar {
     }
 
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
-    /// Add a pre-registered child widget by ID.
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.pending.push(PendingChild::Id(id));
-        self
+    /// Add several inline children from an iterator.
+    ///
+    /// The loop form of [`child`](Self::child): one call where a chain of
+    /// `.child(..)` would otherwise repeat per element.
+    pub fn children(
+        self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
+        iter.into_iter().fold(self, Self::child)
+    }
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// Override the background surface. Accepts `Color`, a
@@ -204,7 +222,7 @@ impl Widget for StatusBar {
 
         let mut row = HStack::new().spacing(spacing);
         for &id in &self.child_ids {
-            row = row.add_child(id);
+            row = row.child(id);
         }
 
         let row_id = ctx.add(row);
@@ -217,7 +235,7 @@ impl Widget for StatusBar {
             .corner_radius(self.corner_radius.take().unwrap_or(Prop::Static(0.0)))
             .padding(spacing)
             .a11y_presentational()
-            .child_id(row_id);
+            .child(row_id);
         if let Some(border_color) = self.border_color.take() {
             panel = panel.border_color(border_color);
         }

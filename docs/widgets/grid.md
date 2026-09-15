@@ -42,7 +42,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`columns`, `rows`, `column_gap`, `row_gap`, `add_child`, `child`, `children`, `child_opt`
+`columns`, `rows`, `column_gap`, `row_gap`, `add_child`, `add_children`, `child`, `children`, `child_opt`
 
 ## API reference
 
@@ -100,6 +100,13 @@ Set the inter-row gap. Accepts static `f32` or `Signal<f32>`.
 
 Append a pre-registered child by ID; children are placed in row-major
 order starting at `(row=0, col=0)`.
+
+#### `pub fn add_children(self, ids: impl IntoIterator<Item = WidgetId>) -> Self`
+
+Add several pre-registered children by ID, in iterator order.
+
+The id-carrying twin of `children`. Reach for it when a
+loop has already registered its widgets and holds the `WidgetId`s.
 
 #### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
 

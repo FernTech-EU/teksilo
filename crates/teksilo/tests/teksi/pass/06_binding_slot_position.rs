@@ -37,8 +37,13 @@ impl CardWithIds {
         Self::default()
     }
 
-    fn header_id(mut self, id: WidgetId) -> Self {
+    fn header(mut self, c: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(c) {
+            teksilo_core::PendingChild::Id(id) => {
         self.header_id = Some(id);
+            }
+            teksilo_core::PendingChild::Deferred(_) => unreachable!("this fixture passes ids"),
+        }
         self
     }
 

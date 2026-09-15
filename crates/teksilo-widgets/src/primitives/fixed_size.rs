@@ -56,16 +56,22 @@ impl FixedSize {
         }
     }
 
-    /// Set child by pre-registered ID.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// Bind width to a reactive state. When the state changes, relayout is triggered.
@@ -183,7 +189,7 @@ mod tests {
     fn reports_child_natural_size() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().child_id(child));
+        let fixed = tree.add(FixedSize::new().child(child));
         tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
@@ -195,7 +201,7 @@ mod tests {
     fn ignores_parent_proposal() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().child_id(child));
+        let fixed = tree.add(FixedSize::new().child(child));
         tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
@@ -208,7 +214,7 @@ mod tests {
         let width = Signal::new(150.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().width(width.clone()).child_id(child));
+        let fixed = tree.add(FixedSize::new().width(width.clone()).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let fb = tree.bounds(fixed);
@@ -221,7 +227,7 @@ mod tests {
         let width = Signal::new(200.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let fixed = tree.add(FixedSize::new().width(width.clone()).child_id(child));
+        let fixed = tree.add(FixedSize::new().width(width.clone()).child(child));
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(fixed).width - 200.0).abs() < 0.01);
 

@@ -773,7 +773,7 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
 /// arena: it adds no node, no layout pass and no AT element. In particular
 /// `as_any` / `as_any_mut` forward, so `EventContext::with_widget_mut::<W>`
 /// downcasts to the widget that was boxed rather than to the box.
-impl Widget for Box<dyn Widget> {
+impl<W: Widget + ?Sized> Widget for Box<W> {
     fn type_name(&self) -> &'static str {
         (**self).type_name()
     }

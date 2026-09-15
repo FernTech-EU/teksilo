@@ -87,10 +87,10 @@ impl TextInputStyle for FluentTextInputStyle {
                 0.0,
                 spacing(PADDING_LEADING, tokens),
             )
-            .child_id(cfg.editor),
+            .child(cfg.editor),
         );
-        let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
-        ctx.add(MinSize::new(0.0, dp(MIN_HEIGHT, TargetRole::Target, tokens)).child_id(stack))
+        let stack = ctx.add(ZStack::new().child(chrome).child(padded));
+        ctx.add(MinSize::new(0.0, dp(MIN_HEIGHT, TargetRole::Target, tokens)).child(stack))
     }
 }
 

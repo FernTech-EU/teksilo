@@ -999,7 +999,7 @@ fn field_in_a_tappable_row(
     let field = tree.add(TextInput::new(text).show_clear_button(true));
     let row = tree.add(
         crate::primitives::HStack::new()
-            .add_child(field)
+            .child(field)
             .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
     );
     let _ = row;

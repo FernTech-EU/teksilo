@@ -143,10 +143,10 @@ impl Widget for PreviewCanvas {
         // Center the previewed widget. Use Center (which fills the
         // available proposal) over the inner widget so the inner
         // widget appears in the middle regardless of its natural size.
-        let preview_centered = ctx.add(Center::new().child_id(inner_id));
+        let preview_centered = ctx.add(Center::new().child(inner_id));
 
         // Stage = ZStack(bg, centered preview), inside the zoom stage.
-        let stage = ZStack::new().add_child(bg_id).add_child(preview_centered);
+        let stage = ZStack::new().child(bg_id).child(preview_centered);
         let stage_inner_id = ctx.add(stage);
         let stage_id = ctx.add(ZoomStage::new(
             self.state.zoom_percent.clone(),
@@ -158,7 +158,7 @@ impl Widget for PreviewCanvas {
         // its own — important because ZStack with all-fill children
         // reports 0×0 intrinsic, which would propagate up and starve
         // the layout otherwise.
-        let stage_expanded = ctx.add(Expand::new().child_id(stage_id));
+        let stage_expanded = ctx.add(Expand::new().child(stage_id));
 
         // Footer strip: thin divider + size readout.
         let divider = ctx.add(MaxSize::new(f32::INFINITY, 1.0).child(Divider::horizontal()));
@@ -166,9 +166,9 @@ impl Widget for PreviewCanvas {
         let footer_id = ctx.add(footer);
 
         let column = VStack::new()
-            .add_child(stage_expanded)
-            .add_child(divider)
-            .add_child(footer_id);
+            .child(stage_expanded)
+            .child(divider)
+            .child(footer_id);
         let root_id = ctx.add(column);
         self.root_id = Some(root_id);
         vec![root_id]

@@ -72,12 +72,12 @@ pub(crate) fn conformance_box(
     if boxed.width <= painted_size.width && boxed.height <= painted_size.height {
         return (painted, painted_size);
     }
-    let centred = ctx.add(Center::new().child_id(painted));
+    let centred = ctx.add(Center::new().child(painted));
     let id = ctx.add(
         FixedSize::new()
             .width(boxed.width)
             .height(boxed.height)
-            .child_id(centred),
+            .child(centred),
     );
     (id, boxed)
 }
@@ -130,7 +130,7 @@ mod tests {
                 FixedSize::new()
                     .width(self.painted)
                     .height(self.painted)
-                    .child_id(rect),
+                    .child(rect),
             );
             let (root, extent) =
                 conformance_box(ctx, chrome, Size::new(self.painted, self.painted));

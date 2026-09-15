@@ -271,7 +271,7 @@ impl MenuBar {
                 .collect();
         }
         for &id in cache.iter() {
-            row = row.add_child(id);
+            row = row.child(id);
         }
         row
     }
@@ -385,8 +385,16 @@ impl MenuBar {
     /// model-version rebuild.
     pub fn leading_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.leading_slot
-            .push(PendingChild::Deferred(Box::new(widget)));
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
+    }
+
+    /// Add several widgets before the menu buttons, in iterator order.
+    ///
+    /// The loop form of [`leading_slot`](Self::leading_slot), which already
+    /// stacks on repeat calls: this is the same thing in one call.
+    pub fn leading_slots(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+        iter.into_iter().fold(self, Self::leading_slot)
     }
 
     /// Add content after the menu buttons (e.g. a search box or avatar).
@@ -394,8 +402,16 @@ impl MenuBar {
     /// across rebuilds.
     pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.trailing_slot
-            .push(PendingChild::Deferred(Box::new(widget)));
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
+    }
+
+    /// Add several widgets after the menu buttons, in iterator order.
+    ///
+    /// The loop form of [`trailing_slot`](Self::trailing_slot), which already
+    /// stacks on repeat calls: this is the same thing in one call.
+    pub fn trailing_slots(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+        iter.into_iter().fold(self, Self::trailing_slot)
     }
 
     /// macOS `Suppress` path: a zero-chrome bar that renders only the

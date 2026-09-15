@@ -800,7 +800,7 @@ mod overflow_tests {
         let out = Rc::new(RefCell::new(Vec::new()));
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FixedLeaf(child_w, 20.0));
-        let hstack = tree.add(HStack::new().add_child(leaf));
+        let hstack = tree.add(HStack::new().child(leaf));
         let _probe = tree.add(OverflowProbe {
             root: hstack,
             out: out.clone(),

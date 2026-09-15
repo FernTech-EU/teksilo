@@ -1151,15 +1151,15 @@ impl teksilo_core::widget::Widget for Button {
                     Box::new(
                         VStack::new()
                             .spacing(btn::BUTTON_ICON_LABEL_GAP)
-                            .add_child(first)
-                            .add_child(second),
+                            .child(first)
+                            .child(second),
                     )
                 } else {
                     Box::new(
                         HStack::new()
                             .spacing(btn::BUTTON_ICON_LABEL_GAP)
-                            .add_child(first)
-                            .add_child(second),
+                            .child(first)
+                            .child(second),
                     )
                 };
                 ctx.add_boxed(row)
@@ -1176,12 +1176,12 @@ impl teksilo_core::widget::Widget for Button {
             let mut row = HStack::new().spacing(btn::BUTTON_ICON_LABEL_GAP);
             if let Some(leading) = self.leading.take() {
                 let id = ctx.add_boxed(leading);
-                row = row.add_child(id);
+                row = row.child(id);
             }
-            row = row.add_child(content_id);
+            row = row.child(content_id);
             if let Some(trailing) = self.trailing.take() {
                 let id = ctx.add_boxed(trailing);
-                row = row.add_child(id);
+                row = row.child(id);
             }
             ctx.add(row)
         } else {
@@ -1461,8 +1461,8 @@ mod tests {
         let _root = tree.add(
             crate::primitives::HStack::new()
                 .spacing(40.0)
-                .add_child(target)
-                .add_child(trigger),
+                .child(target)
+                .child(trigger),
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
@@ -1638,7 +1638,7 @@ mod tests {
                 teksilo_canvas::MockTextBackend::new(),
             )));
         let btn = tree.add(Button::new(lit!("Save Document As…")).on_activate_fn(|_| {}));
-        let _row = tree.add(HStack::new().add_child(btn));
+        let _row = tree.add(HStack::new().child(btn));
 
         tree.layout(SizeProposal::unspecified());
         let natural = tree.bounds(btn).width;
@@ -1824,11 +1824,7 @@ mod tests {
                         .background(Color::new(1.0, 0.0, 1.0, 1.0))
                         .corner_radius(teksilo_tokens::CornerRadius::uniform(0.0)),
                 );
-                ctx.add(
-                    crate::primitives::ZStack::new()
-                        .add_child(bg)
-                        .add_child(cfg.label),
-                )
+                ctx.add(crate::primitives::ZStack::new().child(bg).child(cfg.label))
             }
         }
 
@@ -1867,7 +1863,7 @@ mod tests {
                 cfg: &ButtonStyleConfig,
                 ctx: &mut teksilo_core::build_context::BuildContext,
             ) -> teksilo_core::widget_id::WidgetId {
-                ctx.add(crate::primitives::ZStack::new().add_child(cfg.label))
+                ctx.add(crate::primitives::ZStack::new().child(cfg.label))
             }
             fn label_text_role(&self, _variant: ButtonVariant) -> Option<TextRole> {
                 Some(TextRole::Error)
@@ -1915,11 +1911,7 @@ mod tests {
                         .background(Color::new(1.0, 0.0, 1.0, 1.0)) // magenta
                         .corner_radius(teksilo_tokens::CornerRadius::uniform(0.0)),
                 );
-                ctx.add(
-                    crate::primitives::ZStack::new()
-                        .add_child(bg)
-                        .add_child(cfg.label),
-                )
+                ctx.add(crate::primitives::ZStack::new().child(bg).child(cfg.label))
             }
         }
 
@@ -1935,11 +1927,7 @@ mod tests {
                         .background(Color::new(0.0, 1.0, 0.0, 1.0)) // green
                         .corner_radius(teksilo_tokens::CornerRadius::uniform(0.0)),
                 );
-                ctx.add(
-                    crate::primitives::ZStack::new()
-                        .add_child(bg)
-                        .add_child(cfg.label),
-                )
+                ctx.add(crate::primitives::ZStack::new().child(bg).child(cfg.label))
             }
         }
 
@@ -1982,7 +1970,7 @@ mod tests {
             ctx: &mut BuildContext,
         ) -> WidgetId {
             *self.0.borrow_mut() = Some((cfg.is_pressed.clone(), cfg.is_hovered.clone()));
-            ctx.add(crate::primitives::ZStack::new().add_child(cfg.label))
+            ctx.add(crate::primitives::ZStack::new().child(cfg.label))
         }
     }
 
@@ -2260,7 +2248,7 @@ mod tests {
             ) -> WidgetId {
                 *self.0.borrow_mut() = Some(cfg.is_pressed.clone());
                 self.1.set(self.1.get() + 1);
-                ctx.add(crate::primitives::ZStack::new().add_child(cfg.label))
+                ctx.add(crate::primitives::ZStack::new().child(cfg.label))
             }
         }
 
@@ -2306,7 +2294,7 @@ mod tests {
                 .on_activate_fn(|_| {}),
         );
         let src = tree.add(DragSource(dragging.clone()));
-        let _row = tree.add(HStack::new().add_child(btn).add_child(idle).add_child(src));
+        let _row = tree.add(HStack::new().child(btn).child(idle).child(src));
         tree.layout(SizeProposal::exact(400.0, 100.0));
         let first_pass = builds.get();
         assert_eq!(first_pass, 1, "the style ran once for the first build");

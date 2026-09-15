@@ -61,7 +61,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`child`, `child_id`
+`child`, `child_opt`, `child_id`
 
 ## API reference
 
@@ -87,6 +87,15 @@ Accepts any `Prop<f32>` source — `f32`, `Signal<f32>`, or
 #### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
 
 Inline child widget (deferred insertion).
+
+#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
 
 #### `pub fn child_id(mut self, id: WidgetId) -> Self`
 

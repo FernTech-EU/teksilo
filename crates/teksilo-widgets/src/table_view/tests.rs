@@ -1565,7 +1565,7 @@ fn ctrl_tab_escapes_the_cell_grid() {
     );
     // A focusable sibling after the table so focus cycling has somewhere to go.
     let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
-    let _root = tree.add(VStack::new().add_child(table).add_child(sink));
+    let _root = tree.add(VStack::new().child(table).child(sink));
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: Some(200.0),
@@ -2553,7 +2553,7 @@ fn header_resize_works_when_table_is_nested_in_panel() {
     let table_id = tree.add(table);
     let layout = VStack::new()
         .spacing(6.0)
-        .child(Panel::new().child_id(table_id));
+        .child(Panel::new().child(table_id));
     tree.add(layout);
     tree.layout(SizeProposal {
         width: Some(400.0),
@@ -2674,7 +2674,7 @@ fn header_resizing_works_in_full_data_grid_layout() {
     let table_id = tree.add(table);
     let layout = VStack::new()
         .spacing(6.0)
-        .child(Panel::new().child_id(table_id));
+        .child(Panel::new().child(table_id));
     tree.add(layout);
     tree.layout(SizeProposal {
         width: Some(600.0),
@@ -3303,14 +3303,14 @@ fn nested_table_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>, 
         .overscroll_behavior(inner);
     let inner_y = tv.scroll_y_signal().clone();
     let tv_id = tree.add(tv);
-    let viewport = tree.add(FixedSize::new().width(220.0).height(120.0).child_id(tv_id));
+    let viewport = tree.add(FixedSize::new().width(220.0).height(120.0).child(tv_id));
     let filler = tree.add(
         FixedSize::new()
             .width(220.0)
             .height(300.0)
             .child(TextWidget::new(lit!(""))),
     );
-    let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(viewport).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);
@@ -3382,14 +3382,14 @@ fn keyboard_selection_chases_outer_scroll_area() {
         .add_column(name_col())
         .row_height(20.0);
     let tv_id = tree.add(tv);
-    let tv_box = tree.add(FixedSize::new().width(220.0).height(200.0).child_id(tv_id));
+    let tv_box = tree.add(FixedSize::new().width(220.0).height(200.0).child(tv_id));
     let filler = tree.add(
         FixedSize::new()
             .width(220.0)
             .height(200.0)
             .child(TextWidget::new(lit!(""))),
     );
-    let outer_content = tree.add(VStack::new().add_child(tv_box).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(tv_box).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);

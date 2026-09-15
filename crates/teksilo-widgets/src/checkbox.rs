@@ -388,7 +388,7 @@ impl Widget for Checkbox {
 
         let mut row = HStack::new()
             .spacing(cb_dims::CHECKBOX_LABEL_GAP)
-            .add_child(body_id);
+            .child(body_id);
         if !self.labels_hidden
             && let Some(ref label) = self.label
         {
@@ -405,16 +405,11 @@ impl Widget for Checkbox {
                     .color(TextRole::Secondary)
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
-                ctx.add(
-                    VStack::new()
-                        .spacing(2.0)
-                        .add_child(label_id)
-                        .add_child(caption_id),
-                )
+                ctx.add(VStack::new().spacing(2.0).child(label_id).child(caption_id))
             } else {
                 label_id
             };
-            row = row.add_child(label_column_id);
+            row = row.child(label_column_id);
         }
         // When a caption is present, top-align the row so the box sits next
         // to the label's first line rather than the center of both lines.
@@ -426,9 +421,8 @@ impl Widget for Checkbox {
         // a density switch moves both together.
         let style_recipe = crate::styles::CheckboxRecipe::for_tokens(&ctx.theme().input);
         let row_id = ctx.add(row);
-        let root_id = ctx.add(
-            MinSize::new(style_recipe.box_hit_area, style_recipe.box_hit_area).child_id(row_id),
-        );
+        let root_id = ctx
+            .add(MinSize::new(style_recipe.box_hit_area, style_recipe.box_hit_area).child(row_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;

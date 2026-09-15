@@ -1289,7 +1289,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 0.0,
             )
-            .child_id(field_id),
+            .child(field_id),
         );
 
         // ── Step buttons ───────────────────────────────────────────
@@ -1381,7 +1381,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 min_width,
                 crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
             )
-            .child_id(zstack_id),
+            .child(zstack_id),
         );
         // Stash the resolved cap + floor on `self` for
         // `size_that_fits` to read at layout time.

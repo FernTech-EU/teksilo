@@ -1264,7 +1264,7 @@ mod tests {
         let _row = tree.add(
             HStack::new()
                 .child(FixedSize::new().width(40.0).height(60.0))
-                .add_child(sid),
+                .child(sid),
         );
         tree.layout(SizeProposal::exact(240.0, 60.0));
         tree.render();
@@ -1407,7 +1407,7 @@ mod tests {
         let slider = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         let _list = tree.add(
             crate::primitives::VStack::new()
-                .add_child(slider)
+                .child(slider)
                 .scroll_container(teksilo_core::pointer::touch_action::PanAxes::BOTH)
                 .pan_claim(PanClaim::vertical())
                 .on_scroll(move |_e, _c| {
@@ -1477,7 +1477,7 @@ mod tests {
         let n = started.clone();
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let slider = tree.add(Slider::new(Signal::new(0.0_f32), 0.0, 100.0));
-        let _surface = tree.add(crate::primitives::ZStack::new().add_child(slider).on_pinch(
+        let _surface = tree.add(crate::primitives::ZStack::new().child(slider).on_pinch(
             move |phase, _c| {
                 if matches!(phase, PinchPhase::Started { .. }) {
                     n.set(n.get() + 1);

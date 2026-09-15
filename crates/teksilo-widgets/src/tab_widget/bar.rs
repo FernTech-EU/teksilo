@@ -841,27 +841,15 @@ impl<T: 'static> TabBar<T> {
 
     /// Bar-level leading slot — a widget rendered before the headers
     /// row (and before any pinned region in later phases).
-    pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self {
-        self.bar_leading_slot = Some(PendingChild::Deferred(Box::new(w)));
-        self
-    }
-
-    /// Bar-level leading slot accepting a pre-registered widget id.
-    pub fn bar_leading_slot_id(mut self, id: WidgetId) -> Self {
-        self.bar_leading_slot = Some(PendingChild::Id(id));
+    pub fn bar_leading_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.bar_leading_slot = Some(teksilo_core::IntoTeksiChild::into_pending(w));
         self
     }
 
     /// Bar-level trailing slot — a widget rendered after the headers
     /// row (and after any overflow dropdown in later phases).
-    pub fn bar_trailing_slot(mut self, w: impl Widget + 'static) -> Self {
-        self.bar_trailing_slot = Some(PendingChild::Deferred(Box::new(w)));
-        self
-    }
-
-    /// Bar-level trailing slot accepting a pre-registered widget id.
-    pub fn bar_trailing_slot_id(mut self, id: WidgetId) -> Self {
-        self.bar_trailing_slot = Some(PendingChild::Id(id));
+    pub fn bar_trailing_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.bar_trailing_slot = Some(teksilo_core::IntoTeksiChild::into_pending(w));
         self
     }
 
@@ -1684,9 +1672,9 @@ impl<T: 'static> Widget for TabBar<T> {
                         if i > 0
                             && let Some(div) = make_divider(ctx)
                         {
-                            pinned = pinned.add_child(div);
+                            pinned = pinned.child(div);
                         }
-                        pinned = pinned.add_child(*id);
+                        pinned = pinned.child(*id);
                     }
                     ctx.add(pinned)
                 }
@@ -1696,9 +1684,9 @@ impl<T: 'static> Widget for TabBar<T> {
                         if i > 0
                             && let Some(div) = make_divider(ctx)
                         {
-                            pinned = pinned.add_child(div);
+                            pinned = pinned.child(div);
                         }
-                        pinned = pinned.add_child(*id);
+                        pinned = pinned.child(*id);
                     }
                     ctx.add(pinned)
                 }
@@ -1727,8 +1715,8 @@ impl<T: 'static> Widget for TabBar<T> {
 
         // The scroll area takes all the slack along the layout axis.
         let scroll_slot = match self.orientation {
-            TabBarOrientation::Horizontal => ctx.add(Expand::horizontal().child_id(scroll_id)),
-            TabBarOrientation::Vertical => ctx.add(Expand::vertical().child_id(scroll_id)),
+            TabBarOrientation::Horizontal => ctx.add(Expand::horizontal().child(scroll_id)),
+            TabBarOrientation::Vertical => ctx.add(Expand::vertical().child(scroll_id)),
         };
         outer_children.push(scroll_slot);
 
@@ -1799,14 +1787,14 @@ impl<T: 'static> Widget for TabBar<T> {
             TabBarOrientation::Horizontal => {
                 let mut row = HStack::new().spacing(DEFAULT_BAR_SLOT_SPACING);
                 for id in &outer_children {
-                    row = row.add_child(*id);
+                    row = row.child(*id);
                 }
                 ctx.add(row)
             }
             TabBarOrientation::Vertical => {
                 let mut col = crate::VStack::new().spacing(DEFAULT_BAR_SLOT_SPACING);
                 for id in &outer_children {
-                    col = col.add_child(*id);
+                    col = col.child(*id);
                 }
                 ctx.add(col)
             }

@@ -55,7 +55,7 @@ pub struct DimWhenInactive {
 
 impl DimWhenInactive {
     /// New dim wrapper with the [`DEFAULT_DIM_FACTOR`]. Attach a child with
-    /// [`child`](Self::child) / [`child_id`](Self::child_id).
+    /// [`child`](Self::child) / [`child`](Self::child).
     pub fn new() -> Self {
         Self {
             pending_child: None,
@@ -65,14 +65,8 @@ impl DimWhenInactive {
     }
 
     /// Inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Pre-registered child by `WidgetId`.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
+    pub fn child(mut self, widget: impl crate::IntoTeksiChild) -> Self {
+        self.pending_child = Some(crate::IntoTeksiChild::into_pending(widget));
         self
     }
 

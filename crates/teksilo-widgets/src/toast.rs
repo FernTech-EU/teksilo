@@ -513,6 +513,14 @@ impl Toast {
         self.actions.push(action);
         self
     }
+
+    /// Append several [`ToastAction`]s from an iterator, in order.
+    ///
+    /// The loop form of [`action`](Self::action). Toasts carry few actions, so
+    /// reach for it only when the set is genuinely data-driven.
+    pub fn actions(self, actions: impl IntoIterator<Item = ToastAction>) -> Self {
+        actions.into_iter().fold(self, Self::action)
+    }
     /// Shorthand for appending a filled-button primary action — equivalent to
     /// `.action(ToastAction::primary(label, on_invoke))`.
     pub fn primary_action(
@@ -685,6 +693,28 @@ impl Toast {
 mod tests {
     use super::*;
     use teksilo_i18n::lit;
+
+    /// `actions` is a fold over `action`, so N singular calls and one plural
+    /// call over the same values must leave the same list behind. Compared by
+    /// label, so a dropped or reordered action reddens rather than an equal
+    /// count passing.
+    #[test]
+    fn actions_plural_matches_the_singular_chain() {
+        fn labels(t: &Toast) -> Vec<String> {
+            t.actions.iter().map(|a| a.label.resolve_now()).collect()
+        }
+        let singular = Toast::info(lit!("x"))
+            .action(ToastAction::new(lit!("One"), |_| {}))
+            .action(ToastAction::new(lit!("Two"), |_| {}))
+            .action(ToastAction::new(lit!("Three"), |_| {}));
+        let plural = Toast::info(lit!("x")).actions([
+            ToastAction::new(lit!("One"), |_| {}),
+            ToastAction::new(lit!("Two"), |_| {}),
+            ToastAction::new(lit!("Three"), |_| {}),
+        ]);
+        assert_eq!(labels(&singular), ["One", "Two", "Three"]);
+        assert_eq!(labels(&singular), labels(&plural));
+    }
 
     #[test]
     fn severity_constructors_round_trip() {

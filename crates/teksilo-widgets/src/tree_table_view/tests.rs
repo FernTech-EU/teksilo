@@ -2323,7 +2323,7 @@ fn ctrl_tab_escapes_the_cell_grid() {
             .row_height(20.0),
     );
     let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
-    let _root = tree.add(VStack::new().add_child(id).add_child(sink));
+    let _root = tree.add(VStack::new().child(id).child(sink));
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: Some(200.0),
@@ -2707,14 +2707,14 @@ fn nested_tree_table_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f
         .overscroll_behavior(inner);
     let inner_y = tt.scroll_y_signal().clone();
     let tt_id = tree.add(tt);
-    let viewport = tree.add(FixedSize::new().width(220.0).height(120.0).child_id(tt_id));
+    let viewport = tree.add(FixedSize::new().width(220.0).height(120.0).child(tt_id));
     let filler = tree.add(
         FixedSize::new()
             .width(220.0)
             .height(300.0)
             .child(TextWidget::new(lit!(""))),
     );
-    let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(viewport).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);
@@ -3761,9 +3761,9 @@ fn header_drag_from_a_different_table_is_rejected() {
     let order2 = tt2.column_order_signal().clone();
     let id2 = tree.add(tt2);
 
-    let fixed1 = tree.add(FixedSize::new().width(200.0).height(150.0).child_id(id1));
-    let fixed2 = tree.add(FixedSize::new().width(200.0).height(150.0).child_id(id2));
-    tree.add(HStack::new().add_child(fixed1).add_child(fixed2));
+    let fixed1 = tree.add(FixedSize::new().width(200.0).height(150.0).child(id1));
+    let fixed2 = tree.add(FixedSize::new().width(200.0).height(150.0).child(id2));
+    tree.add(HStack::new().child(fixed1).child(fixed2));
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: Some(150.0),

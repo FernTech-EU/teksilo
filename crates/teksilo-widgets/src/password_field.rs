@@ -437,7 +437,7 @@ impl Widget for PasswordField {
                 field_dims::TEXT_FIELD_PADDING_VERTICAL,
                 0.0,
             )
-            .child_id(field_id),
+            .child(field_id),
         );
 
         // Placeholder overlay (never masked) shares the field's column.
@@ -448,11 +448,8 @@ impl Widget for PasswordField {
         // (Mirrors `TextInput`.)
         let text_column_id = if self.placeholder.resolve_now().is_empty() {
             ctx.add(
-                Shrinkable::new().child(
-                    Expand::horizontal()
-                        .respect_intrinsic()
-                        .child_id(padded_field),
-                ),
+                Shrinkable::new()
+                    .child(Expand::horizontal().respect_intrinsic().child(padded_field)),
             )
         } else {
             let ph = TextWidget::new(self.placeholder.clone())
@@ -477,14 +474,14 @@ impl Widget for PasswordField {
                 Shrinkable::new().child(
                     Expand::horizontal()
                         .respect_intrinsic()
-                        .child(ZStack::new().add_child(ph_id).add_child(padded_field)),
+                        .child(ZStack::new().child(ph_id).child(padded_field)),
                 ),
             )
         };
 
         // ── Editor row: [text_column] [caps?] [reveal?] ─────────────
         let mut row = HStack::new().spacing(4.0);
-        row = row.add_child(text_column_id);
+        row = row.child(text_column_id);
 
         // Caps Lock warning glyph + polite live region.
         if self.caps_lock_warning
@@ -501,7 +498,7 @@ impl Widget for PasswordField {
             let warn_id = ctx.add(warn);
             let visible = caps.zip(&focused).map(|(c, f)| *c && *f);
             ctx.visible_when(warn_id, visible);
-            row = row.add_child(warn_id);
+            row = row.child(warn_id);
         }
 
         // Reveal affordance.
@@ -511,7 +508,7 @@ impl Widget for PasswordField {
                     .embedded()
                     .focusable(true)
                     .access_label(teksilo_i18n::tr_widget!(a11y_password_reveal()));
-                row = row.add_child(ctx.add(reveal));
+                row = row.child(ctx.add(reveal));
             }
             RevealMode::Hold => {
                 let icon = (BuiltInIcons::global().eye)();
@@ -539,7 +536,7 @@ impl Widget for PasswordField {
                     .cursor(CursorIcon::Pointer)
                     .access_role(Role::Button)
                     .access_label(teksilo_i18n::tr_widget!(a11y_password_reveal()));
-                row = row.add_child(ctx.add(hold));
+                row = row.child(ctx.add(hold));
             }
             RevealMode::None => {}
         }
@@ -586,7 +583,7 @@ impl Widget for PasswordField {
                 min_w,
                 crate::styles::TextInputRecipe::for_tokens(&ctx.theme().input).height,
             )
-            .child_id(chrome_id),
+            .child(chrome_id),
         );
 
         // ── Inline validation strip ─────────────────────────────────
@@ -600,12 +597,12 @@ impl Widget for PasswordField {
         // claims the VStack's full width (a VStack lays a child out at its
         // measured width, not stretched) while keeping the frame's natural
         // width as the basis when unconstrained. Mirrors `TextInput`.
-        let framed_id = ctx.add(Expand::horizontal().respect_intrinsic().child_id(frame_id));
+        let framed_id = ctx.add(Expand::horizontal().respect_intrinsic().child(frame_id));
         let root_id = ctx.add(
             VStack::new()
                 .spacing(field_dims::TEXT_FIELD_VALIDATION_STRIP_GAP)
-                .add_child(framed_id)
-                .add_child(strip_id),
+                .child(framed_id)
+                .child(strip_id),
         );
 
         // Tooltips — mutually exclusive (setters clear the others).

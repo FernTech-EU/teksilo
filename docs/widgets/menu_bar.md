@@ -60,7 +60,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`from_model`, `native_on_macos`, `collapsible`, `collapsed_signal`, `collapse_policy`, `hamburger_size`, `is_collapsed`, `no_dispatcher_install`, `menu`, `leading_slot`, `trailing_slot`
+`from_model`, `native_on_macos`, `collapsible`, `collapsed_signal`, `collapse_policy`, `hamburger_size`, `is_collapsed`, `no_dispatcher_install`, `menu`, `leading_slot`, `leading_slots`, `trailing_slot`, `trailing_slots`
 
 ## API reference
 
@@ -182,8 +182,22 @@ builds it once and reuses it across rebuilds (it
 so the slot — and any state it holds — survives a theme / locale /
 model-version rebuild.
 
+#### `pub fn leading_slots(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+Add several widgets before the menu buttons, in iterator order.
+
+The loop form of `leading_slot`, which already
+stacks on repeat calls: this is the same thing in one call.
+
 #### `pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
 
 Add content after the menu buttons (e.g. a search box or avatar).
 Like `leading_slot`, taken by value and preserved
 across rebuilds.
+
+#### `pub fn trailing_slots(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+Add several widgets after the menu buttons, in iterator order.
+
+The loop form of `trailing_slot`, which already
+stacks on repeat calls: this is the same thing in one call.

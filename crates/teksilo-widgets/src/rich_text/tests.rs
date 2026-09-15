@@ -5524,19 +5524,14 @@ mod affinity_tests {
             s.needs_full_layout = true;
         }
         let editor_id = tree.add(editor);
-        let editor_box = tree.add(
-            FixedSize::new()
-                .width(220.0)
-                .height(48.0)
-                .child_id(editor_id),
-        );
+        let editor_box = tree.add(FixedSize::new().width(220.0).height(48.0).child(editor_id));
         let filler = tree.add(
             FixedSize::new()
                 .width(220.0)
                 .height(300.0)
                 .child(TextWidget::new(lit!(""))),
         );
-        let outer_content = tree.add(VStack::new().add_child(editor_box).add_child(filler));
+        let outer_content = tree.add(VStack::new().child(editor_box).child(filler));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
         let outer_y = outer.scroll_y_signal().clone();
         let _outer = tree.add(outer);
@@ -5630,19 +5625,14 @@ mod affinity_tests {
             st.needs_full_layout = true;
         }
         let editor_id = tree.add(editor);
-        let editor_box = tree.add(
-            FixedSize::new()
-                .width(220.0)
-                .height(160.0)
-                .child_id(editor_id),
-        );
+        let editor_box = tree.add(FixedSize::new().width(220.0).height(160.0).child(editor_id));
         let filler = tree.add(
             FixedSize::new()
                 .width(220.0)
                 .height(600.0)
                 .child(TextWidget::new(lit!(""))),
         );
-        let outer_content = tree.add(VStack::new().add_child(editor_box).add_child(filler));
+        let outer_content = tree.add(VStack::new().child(editor_box).child(filler));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
         let outer_y = outer.scroll_y_signal().clone();
         let _outer = tree.add(outer);
@@ -5799,19 +5789,14 @@ mod affinity_tests {
             s.needs_full_layout = true;
         }
         let editor_id = tree.add(editor);
-        let editor_box = tree.add(
-            FixedSize::new()
-                .width(220.0)
-                .height(150.0)
-                .child_id(editor_id),
-        );
+        let editor_box = tree.add(FixedSize::new().width(220.0).height(150.0).child(editor_id));
         let filler = tree.add(
             FixedSize::new()
                 .width(220.0)
                 .height(200.0)
                 .child(TextWidget::new(lit!(""))),
         );
-        let outer_content = tree.add(VStack::new().add_child(editor_box).add_child(filler));
+        let outer_content = tree.add(VStack::new().child(editor_box).child(filler));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
         let outer_y = outer.scroll_y_signal().clone();
         let _outer = tree.add(outer);
@@ -5876,13 +5861,8 @@ mod affinity_tests {
             s.needs_full_layout = true;
         }
         let editor_id = tree.add(editor);
-        let editor_box = tree.add(
-            FixedSize::new()
-                .width(220.0)
-                .height(900.0)
-                .child_id(editor_id),
-        );
-        let outer_content = tree.add(VStack::new().add_child(editor_box));
+        let editor_box = tree.add(FixedSize::new().width(220.0).height(900.0).child(editor_id));
+        let outer_content = tree.add(VStack::new().child(editor_box));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
         let outer_y = outer.scroll_y_signal().clone();
         let _outer = tree.add(outer);
@@ -5937,12 +5917,7 @@ mod affinity_tests {
             s.needs_full_layout = true;
         }
         let editor_id = tree.add(editor);
-        let _box = tree.add(
-            FixedSize::new()
-                .width(220.0)
-                .height(100.0)
-                .child_id(editor_id),
-        );
+        let _box = tree.add(FixedSize::new().width(220.0).height(100.0).child(editor_id));
         tree.layout(SizeProposal::exact(220.0, 100.0));
         pump(&mut tree, 220.0, 100.0);
 
@@ -6006,13 +5981,8 @@ mod affinity_tests {
             s.needs_full_layout = true;
         }
         let editor_id = tree.add(editor);
-        let editor_box = tree.add(
-            FixedSize::new()
-                .width(220.0)
-                .height(900.0)
-                .child_id(editor_id),
-        );
-        let outer_content = tree.add(VStack::new().add_child(editor_box));
+        let editor_box = tree.add(FixedSize::new().width(220.0).height(900.0).child(editor_id));
+        let outer_content = tree.add(VStack::new().child(editor_box));
         // SMOOTH scrolling ON (default) — this is the untested path.
         let outer = ScrollArea::from_id(outer_content);
         let outer_y = outer.scroll_y_signal().clone();
@@ -6095,7 +6065,7 @@ mod affinity_tests {
             FixedSize::new()
                 .width(220.0)
                 .height(2000.0)
-                .child_id(editor_id),
+                .child(editor_id),
         );
         let spacer = tree.add(
             FixedSize::new()
@@ -6103,7 +6073,7 @@ mod affinity_tests {
                 .height(IME_FIXTURE_SPACER_H)
                 .child(crate::primitives::RectWidget::new()),
         );
-        let outer_content = tree.add(VStack::new().add_child(spacer).add_child(editor_box));
+        let outer_content = tree.add(VStack::new().child(spacer).child(editor_box));
         let outer = ScrollArea::from_id(outer_content);
         let outer_y = outer.scroll_y_signal().clone();
         let _outer = tree.add(outer);
@@ -6306,9 +6276,9 @@ mod affinity_tests {
             FixedSize::new()
                 .width(220.0)
                 .height(2000.0)
-                .child_id(editor_id),
+                .child(editor_id),
         );
-        let outer_content = tree.add(VStack::new().add_child(header).add_child(editor_box));
+        let outer_content = tree.add(VStack::new().child(header).child(editor_box));
         let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
         let outer_y = outer.scroll_y_signal().clone();
         let _outer = tree.add(outer);
@@ -6739,7 +6709,7 @@ fn typewriter_fixture(
     let rec = recorded.clone();
     let _container = tree.add(
         VStack::new()
-            .add_child(id)
+            .child(id)
             .on_scroll(move |ev, _ctx| match ev {
                 WidgetEvent::ScrollIntoView { align, .. } => {
                     rec.set(Some(*align));
@@ -8973,7 +8943,7 @@ mod regression_vertical {
             crate::primitives::FixedSize::new()
                 .width(380.0)
                 .height(120.0)
-                .child_id(editor_id),
+                .child(editor_id),
         );
         tree.layout(SizeProposal::exact(W, H));
         tree.focus(editor_id);
@@ -10026,7 +9996,7 @@ mod invariant_fuzz {
                 crate::primitives::FixedSize::new()
                     .width(410.0)
                     .height(140.0)
-                    .child_id(id),
+                    .child(id),
             );
             tree.layout(SizeProposal::exact(430.0, 160.0));
             focus_editor(&mut tree, id);
@@ -10248,13 +10218,8 @@ fn reveal_widget_scrolls_a_row_that_has_never_been_painted() {
             .height(2000.0)
             .child(TextWidget::new(lit!(""))),
     );
-    let row = tree.add(
-        FixedSize::new()
-            .width(220.0)
-            .height(300.0)
-            .child_id(editor_id),
-    );
-    let content = tree.add(VStack::new().add_child(header).add_child(row));
+    let row = tree.add(FixedSize::new().width(220.0).height(300.0).child(editor_id));
+    let content = tree.add(VStack::new().child(header).child(row));
     let page = ScrollArea::from_id(content).smooth_scrolling(false);
     let page_y = page.scroll_y_signal().clone();
     let _page = tree.add(page);

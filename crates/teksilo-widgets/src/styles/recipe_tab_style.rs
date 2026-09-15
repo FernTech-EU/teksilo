@@ -132,15 +132,15 @@ impl TabStyle for RecipeTabStyle {
         // impls may use the three slots directly, so we honour them.
         let mut row = HStack::new();
         if let Some(id) = cfg.leading {
-            row = row.add_child(id);
+            row = row.child(id);
         }
-        row = row.add_child(cfg.label);
+        row = row.child(cfg.label);
         if let Some(id) = cfg.trailing {
-            row = row.add_child(id);
+            row = row.child(id);
         }
         let row_id = ctx.add(row);
 
-        ctx.add(ZStack::new().add_child(painter).add_child(row_id))
+        ctx.add(ZStack::new().child(painter).child(row_id))
     }
 
     fn make_bar(&self, cfg: &TabBarChromeConfig, ctx: &mut BuildContext) -> WidgetId {

@@ -131,7 +131,7 @@ fn scrollable_full(
     let cancel_log = log;
     let mut stack = StackWidget::new();
     for child in children {
-        stack = stack.add_child(child);
+        stack = stack.child(child);
     }
     let widget = stack
         .scroll_container(axes)
@@ -439,7 +439,7 @@ fn a_boundary_pan_never_reaches_a_spin_box_shaped_on_scroll_handler() {
     // No `.scroll_container(..)`: a SpinBox is not a pan surface.
     let spin_box = tree.add(
         StackWidget::new()
-            .add_child(inner)
+            .child(inner)
             .on_scroll(move |_event, _ctx| {
                 *value.borrow_mut() += 1;
                 EventResponse::Handled
@@ -475,7 +475,7 @@ fn a_boundary_pan_never_reaches_a_tab_bar_shaped_wheel_remap() {
     let inner = tree.add(scrollable(inner_log.clone(), 0.0, vec![]));
     let tab_bar = tree.add(
         StackWidget::new()
-            .add_child(inner)
+            .child(inner)
             .on_scroll(move |event, _ctx| {
                 // A TabBar's remap: any vertical wheel becomes a tab step.
                 if let WidgetEvent::Scroll { delta, .. } = event {
@@ -512,7 +512,7 @@ fn a_mouse_wheel_still_reaches_a_non_claimant_on_scroll_handler() {
         *counter.borrow_mut() += 1;
         EventResponse::Handled
     }));
-    let _root = tree.add(StackWidget::new().add_child(spin_box));
+    let _root = tree.add(StackWidget::new().child(spin_box));
     tree.layout(SizeProposal::exact(200.0, 200.0));
 
     tree.dispatch_event(WidgetEvent::pointer_move(Point::new(100.0, 100.0)));
@@ -1163,7 +1163,7 @@ fn touch_action_none_permits_no_pinch() {
     // The ancestor narrows to NONE, which intersection makes absorbing.
     let _root = tree.add(
         StackWidget::new()
-            .add_child(inner)
+            .child(inner)
             .touch_action(TouchAction::NONE),
     );
     tree.layout(SizeProposal::exact(400.0, 400.0));

@@ -67,8 +67,8 @@ impl ButtonStyle for GlowButton {
                 .background(bg)
                 .corner_radius(CornerRadius::uniform(16.0)),
         );
-        let padded_label = ctx.add(Padding::new(6.0, 20.0, 6.0, 20.0).child_id(cfg.label));
-        ctx.add(ZStack::new().add_child(body).add_child(padded_label))
+        let padded_label = ctx.add(Padding::new(6.0, 20.0, 6.0, 20.0).child(cfg.label));
+        ctx.add(ZStack::new().child(body).child(padded_label))
     }
 }
 
@@ -102,7 +102,7 @@ impl ToggleStyle for SquareToggle {
             FixedSize::new()
                 .width(36.0_f32)
                 .height(20.0_f32)
-                .child_id(rect),
+                .child(rect),
         )
     }
 }
@@ -306,14 +306,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(button_variants)
-            .add_child(toggle_variants)
-            .add_child(checkbox_variants)
-            .add_child(card_variants)
-            .add_child(custom_button)
-            .add_child(custom_toggle),
+            .child(button_variants)
+            .child(toggle_variants)
+            .child(checkbox_variants)
+            .child(card_variants)
+            .child(custom_button)
+            .child(custom_toggle),
     )
 }
 

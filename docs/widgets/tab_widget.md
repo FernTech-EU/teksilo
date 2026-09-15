@@ -81,7 +81,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`enabled`, `bar_visibility`, `tab_bar_height`, `compact_bar`, `vertical`, `horizontal`, `orientation`, `static_tab`, `tab`, `tab_id`, `static_tab_factory`, `static_tab_id`, `static_tab_with_id`, `static_tab_factory_with_id`, `dynamic_tab`, `dynamic_model`, `tab_sizing`, `sizing`, `tab_display`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `min_tab_width`, `max_tab_width`, `pinned_tab_width`, `show_scroll_arrows`, `overflow_button`, `show_overflow_dropdown`, `reorderable`, `on_close`, `on_reorder`, `on_pin_toggle`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`, `bar_leading_slot`, `bar_trailing_slot`, `bar_leading_slot_id`, `bar_trailing_slot_id`
+`enabled`, `bar_visibility`, `tab_bar_height`, `compact_bar`, `vertical`, `horizontal`, `orientation`, `static_tab`, `static_tabs`, `tab`, `tabs`, `tab_id`, `tab_ids`, `static_tab_factory`, `static_tab_id`, `static_tab_ids`, `static_tab_with_id`, `static_tab_factory_with_id`, `dynamic_tab`, `dynamic_model`, `tab_sizing`, `sizing`, `tab_display`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `min_tab_width`, `max_tab_width`, `pinned_tab_width`, `show_scroll_arrows`, `overflow_button`, `show_overflow_dropdown`, `reorderable`, `on_close`, `on_reorder`, `on_pin_toggle`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`, `bar_leading_slot`, `bar_trailing_slot`, `bar_leading_slot_id`, `bar_trailing_slot_id`
 
 ## API reference
 
@@ -182,6 +182,14 @@ subsequent rebuilds (caused by adjacent dynamic-model
 mutations) reuse the same pane WidgetId, preserving any
 internal state the content owns.
 
+#### `pub fn static_tabs<W>(self, tabs: impl IntoIterator<Item = (TabInfo, W)>) -> Self where W: Widget + 'static,`
+
+Add several static tabs from an iterator of `(info, content)` pairs.
+
+The loop form of `static_tab`. Reach for it when the
+tab set is data-driven and each tab needs more than a title; when a title
+is all it needs, `tabs` is shorter.
+
 #### `pub fn tab(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self`
 
 Ergonomic shorthand for a title-only static tab:
@@ -190,12 +198,28 @@ content)`. `label` accepts `tr!(...)` (translated) or `lit!(...)`.
 This is the method the `teksu!` `tab:` slot lowers to
 (`tab: lit!("Overview"), Card { … }`).
 
+#### `pub fn tabs<L, W>(self, tabs: impl IntoIterator<Item = (L, W)>) -> Self where L: Into<LocalizedString>, W: Widget + 'static,`
+
+Add several title-only static tabs from an iterator of
+`(label, content)` pairs.
+
+The loop form of `tab`, and the usual one once the tab set
+comes from data rather than being written out tab by tab.
+
 #### `pub fn tab_id(self, label: impl Into<LocalizedString>, id: WidgetId) -> Self`
 
 `WidgetId` twin of `tab` — `tab_id(label, id)` is
 `static_tab_id(TabInfo::new().title(label), id)`. This is what the
 `teksu!` `tab:` slot lowers to when its content is an id binding
 (`#{…}` / `name = Element`).
+
+#### `pub fn tab_ids<L>(self, tabs: impl IntoIterator<Item = (L, WidgetId)>) -> Self where L: Into<LocalizedString>,`
+
+`WidgetId` twin of `tabs`: several title-only static tabs
+from an iterator of `(label, id)` pairs.
+
+Reach for it when a loop has already registered its panes and holds the
+`WidgetId`s.
 
 #### `pub fn static_tab_factory( mut self, info: TabInfo, factory: impl Fn(&TabHandle) -> Box<dyn Widget> + 'static, ) -> Self`
 
@@ -211,6 +235,13 @@ pre-registered widget id rather than a `Box<dyn Widget>`.
 Equivalent to `static_tab` with an
 already-built child; the id is wrapped in a tab pane on
 first build and the pane id is memoized thereafter.
+
+#### `pub fn static_tab_ids(self, tabs: impl IntoIterator<Item = (TabInfo, WidgetId)>) -> Self`
+
+Add several static tabs from an iterator of `(info, content_id)` pairs.
+
+The id-carrying twin of `static_tabs`, for panes the
+caller has already registered.
 
 #### `pub fn static_tab_with_id( mut self, id: TabId, info: TabInfo, content: impl Widget + 'static, ) -> Self`
 

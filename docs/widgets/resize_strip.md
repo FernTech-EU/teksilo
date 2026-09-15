@@ -50,7 +50,7 @@ gate never fires for one.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/resize_strip/index.html)
 
 ## `pub struct ResizeStrip`
 

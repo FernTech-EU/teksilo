@@ -44,7 +44,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`pane`, `pane_id`, `child`, `pane_label`, `style`, `enabled`
+`pane`, `panes`, `pane_id`, `pane_ids`, `child`, `children`, `child_opt`, `pane_label`, `style`, `enabled`
 
 ## API reference
 
@@ -73,14 +73,42 @@ with `pane` in model order.
 Append a content pane (model order). Call once per pane; the count
 must match `model.pane_count()`.
 
+#### `pub fn panes(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+Append several content panes from an iterator, in model order.
+
+The loop form of `pane`. The total pane count still has to
+match `model.pane_count()`.
+
 #### `pub fn pane_id(mut self, id: WidgetId) -> Self`
 
 Append a pre-registered content pane by id.
+
+#### `pub fn pane_ids(self, ids: impl IntoIterator<Item = WidgetId>) -> Self`
+
+Append several pre-registered content panes by id, in model order.
+
+The id-carrying twin of `panes`. Reach for it when a loop
+has already registered its panes and holds the `WidgetId`s.
 
 #### `pub fn child(self, widget: impl Widget + 'static) -> Self`
 
 `teksu!` ergonomic alias for `pane`: a bare child in a
 `Splitter { ... }` block lowers to `.child(...)`.
+
+#### `pub fn children(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+`teksu!` ergonomic alias for `panes`: a `for` loop in a
+`Splitter { ... }` block lowers to `.children(...)`.
+
+#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
 
 #### `pub fn pane_label(mut self, index: usize, label: impl Into<Prop<String>>) -> Self`
 

@@ -39,7 +39,7 @@ surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/widget/index.html)
 
 ## `pub struct CodeEditor`
 

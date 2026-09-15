@@ -66,7 +66,7 @@ fn segmented_overflow_demo(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     let sized = ctx.add(
         FixedSize::new()
             .width(sigs.segment_demo_width.clone())
-            .child_id(control_id),
+            .child(control_id),
     );
 
     let state = overflowing.map(|over| {
@@ -105,7 +105,7 @@ fn segmented_overflow_demo(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                             .label(lit!("Segmented control width")),
                     ),
             )
-            .add_child(sized)
+            .child(sized)
             .child(
                 TextWidget::new(lit!(""))
                     .text(state)
@@ -206,7 +206,7 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         VStack::new()
             .spacing(16.0)
             .child(segmented_basic(sigs))
-            .add_child(overflow_demo),
+            .child(overflow_demo),
     );
     let radio_tile = section(
         ctx,
@@ -278,17 +278,17 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(checkbox)
-            .add_child(radio)
-            .add_child(toggle)
-            .add_child(slider_h)
-            .add_child(slider_stepped)
-            .add_child(slider_v)
-            .add_child(segmented)
-            .add_child(radio_tile)
-            .add_child(combo),
+            .child(checkbox)
+            .child(radio)
+            .child(toggle)
+            .child(slider_h)
+            .child(slider_stepped)
+            .child(slider_v)
+            .child(segmented)
+            .child(radio_tile)
+            .child(combo),
     )
 }
 
@@ -300,7 +300,7 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
         VStack::new()
             .spacing(16.0)
             .child(segmented_basic(sigs))
-            .add_child(overflow_demo),
+            .child(overflow_demo),
     );
     // RadioTileGroup's `.tile(...)` chain can't be expressed in teksu! ctor
     // syntax — pre-register it and reference by id.
@@ -517,7 +517,7 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
                 }
                 FixedSize {
                     width: 220.0_f32
-                    child_id: combo_widget
+                    child: combo_widget
                 }
             }
         }

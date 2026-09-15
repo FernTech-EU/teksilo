@@ -329,10 +329,10 @@ impl Widget for NotificationCenterButton {
         // hit-testing, so the click falls through to the bell beneath.
         let mut stack = ZStack::new()
             .alignment(Alignment::TOP_TRAILING)
-            .add_child(pib_id);
+            .child(pib_id);
         if unread_count > 0 || show_when_zero {
             let badge_id = ctx.add(Badge::new(lit!(label)).hit_transparent(true));
-            stack = stack.add_child(badge_id);
+            stack = stack.child(badge_id);
         }
         let root = ctx.add(stack);
 
@@ -476,7 +476,7 @@ mod tests {
         // A spacer pushes the bell to the bottom edge (status bar).
         let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
         let bell = tree.add(NotificationCenterButton::new(archive.clone()));
-        let user_root = tree.add(VStack::new().add_child(spacer).add_child(bell));
+        let user_root = tree.add(VStack::new().child(spacer).child(bell));
 
         if with_toast_host {
             // Mirror install_toast: ZStack { Expand(user_root), host }.
@@ -485,9 +485,9 @@ mod tests {
                 ..ToastInstallOptions::default()
             };
             let registry = ToastRegistry::new(opts.clone());
-            let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
+            let filled = tree.add(Expand::new().respect_intrinsic().child(user_root));
             let host = tree.add(ToastHost::new(registry, opts));
-            tree.add(ZStack::new().add_child(filled).add_child(host));
+            tree.add(ZStack::new().child(filled).child(host));
         }
 
         tree.layout(SizeProposal::exact(400.0, 600.0));
@@ -520,7 +520,7 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
         let bell = tree.add(NotificationCenterButton::new(archive.clone()));
-        tree.add(VStack::new().add_child(spacer).add_child(bell));
+        tree.add(VStack::new().child(spacer).child(bell));
         tree.layout(SizeProposal::exact(400.0, 600.0));
 
         tree.click(bell);
@@ -565,7 +565,7 @@ mod tests {
             let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
             let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
             let bell = tree.add(NotificationCenterButton::new(archive.clone()));
-            tree.add(VStack::new().add_child(spacer).add_child(bell));
+            tree.add(VStack::new().child(spacer).child(bell));
             tree.layout(SizeProposal::exact(400.0, 600.0));
             tree.render();
             tree
@@ -765,7 +765,7 @@ mod tests {
         let spacer = tree.add(FixedSize::new().height(500.0).child(Spacer::new()));
         let bell =
             tree.add(NotificationCenterButton::new(archive.clone()).for_audience(audience_a));
-        tree.add(VStack::new().add_child(spacer).add_child(bell));
+        tree.add(VStack::new().child(spacer).child(bell));
         tree.layout(SizeProposal::exact(400.0, 600.0));
 
         // Open then close the popover — closing is what triggers the

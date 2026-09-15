@@ -574,8 +574,8 @@ fn main() {
                             Expand::new().child(
                                 HStack::new()
                                     // Editor pane gets 2/3, overview 1/3.
-                                    .child(Expand::new().flex(2.0).child_id(main_id))
-                                    .child(Expand::new().child_id(overview_id)),
+                                    .child(Expand::new().flex(2.0).child(main_id))
+                                    .child(Expand::new().child(overview_id)),
                             ),
                         ),
                     )
@@ -603,8 +603,8 @@ mod tests {
         let _root = tree.add(
             VStack::new().child(
                 HStack::new()
-                    .child(Expand::new().child_id(main_id))
-                    .child(Expand::new().child_id(overview_id)),
+                    .child(Expand::new().child(main_id))
+                    .child(Expand::new().child(overview_id)),
             ),
         );
         tree.layout(SizeProposal::exact(1200.0, 600.0));
@@ -708,8 +708,8 @@ mod tests {
             VStack::new().child(TextWidget::new(lit!("toolbar"))).child(
                 Expand::new().child(
                     HStack::new()
-                        .child(Expand::new().flex(2.0).child_id(main_id))
-                        .child(Expand::new().child_id(overview_id)),
+                        .child(Expand::new().flex(2.0).child(main_id))
+                        .child(Expand::new().child(overview_id)),
                 ),
             ),
         );

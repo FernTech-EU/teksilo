@@ -437,16 +437,16 @@ fn scope_row(
 
     HStack::new()
         .spacing(12.0)
-        .add_child(
+        .child(
             ctx.add(
                 VStack::new()
                     .spacing(2.0)
-                    .add_child(label_id)
-                    .add_child(description_id),
+                    .child(label_id)
+                    .child(description_id),
             ),
         )
         .child(Spacer::new())
-        .add_child(toggle_id)
+        .child(toggle_id)
 }
 
 fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {

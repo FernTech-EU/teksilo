@@ -185,8 +185,8 @@ impl Widget for Root {
                         VStack::new()
                             .spacing(8.0)
                             .child(GroupHeader::new(lit!("Calendar (single)")))
-                            .add_child(calendar_single_id)
-                            .add_child(single_status_id),
+                            .child(calendar_single_id)
+                            .child(single_status_id),
                     ),
                 ),
             )
@@ -196,8 +196,8 @@ impl Widget for Root {
                         VStack::new()
                             .spacing(8.0)
                             .child(GroupHeader::new(lit!("Calendar (range)")))
-                            .add_child(calendar_range_id)
-                            .add_child(range_status_id),
+                            .child(calendar_range_id)
+                            .child(range_status_id),
                     ),
                 ),
             );
@@ -210,32 +210,32 @@ impl Widget for Root {
                     .child(
                         HStack::new()
                             .spacing(12.0)
-                            .add_child(date_edit_id)
-                            .add_child(date_edit_status_id),
+                            .child(date_edit_id)
+                            .child(date_edit_status_id),
                     )
                     .child(
                         HStack::new()
                             .spacing(12.0)
-                            .add_child(time_24h_id)
-                            .add_child(time24_status_id),
+                            .child(time_24h_id)
+                            .child(time24_status_id),
                     )
                     .child(
                         HStack::new()
                             .spacing(12.0)
-                            .add_child(time_12h_id)
-                            .add_child(time12_status_id),
+                            .child(time_12h_id)
+                            .child(time12_status_id),
                     )
                     .child(
                         HStack::new()
                             .spacing(12.0)
-                            .add_child(dt_edit_id)
-                            .add_child(dt_status_id),
+                            .child(dt_edit_id)
+                            .child(dt_status_id),
                     )
                     .child(
                         HStack::new()
                             .spacing(12.0)
-                            .add_child(range_edit_id)
-                            .add_child(range_edit_status_id),
+                            .child(range_edit_id)
+                            .child(range_edit_status_id),
                     ),
             ),
         );

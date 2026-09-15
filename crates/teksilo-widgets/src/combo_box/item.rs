@@ -52,7 +52,7 @@ pub(super) fn build_default_item(
     // than shrinking to the label's intrinsic width.
     let row = HStack::new()
         .spacing(0.0)
-        .add_child(text_id)
+        .child(text_id)
         .child(Spacer::new());
     let row_id = ctx.add(row);
 
@@ -64,7 +64,7 @@ pub(super) fn build_default_item(
     let body = &theme.typography.body;
     let body_line = body.size * body.line_height;
     let pad_v = ((menu::menu_item_height(&ctx.theme().input) - body_line) * 0.5).max(0.0);
-    let padding = Padding::symmetric(pad_v, menu::MENU_ITEM_PADDING_HORIZONTAL).child_id(row_id);
+    let padding = Padding::symmetric(pad_v, menu::MENU_ITEM_PADDING_HORIZONTAL).child(row_id);
     ctx.add(padding)
 }
 
@@ -143,7 +143,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
             .corner_radius(CornerRadius::uniform(menu::MENU_ITEM_CORNER_RADIUS));
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(inner_id);
+        let zstack = ZStack::new().child(bg_id).child(inner_id);
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 

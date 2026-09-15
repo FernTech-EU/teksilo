@@ -700,8 +700,8 @@ impl Widget for Avatar {
                 ctx.visible_when(init_id, v_clone.map(|v| !*v));
                 ctx.add(
                     crate::primitives::ZStack::new()
-                        .add_child(img_id)
-                        .add_child(init_id),
+                        .child(img_id)
+                        .child(init_id),
                 )
             }
             (None, _) => ctx.add(make_initials_leaf()),
@@ -2017,8 +2017,8 @@ mod tests {
         let name = tree.add(crate::primitives::TextWidget::new(lit!("Jane Doe")));
         let _row = tree.add(
             crate::primitives::HStack::new()
-                .add_child(av)
-                .add_child(name)
+                .child(av)
+                .child(name)
                 .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
         );
         tree.layout(SizeProposal::exact(200.0, 60.0));

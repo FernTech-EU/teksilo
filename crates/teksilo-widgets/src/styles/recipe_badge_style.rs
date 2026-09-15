@@ -97,8 +97,8 @@ impl BadgeStyle for RecipeBadgeStyle {
         );
         let padding_id = ctx.add(
             Padding::symmetric(self.recipe.padding_vertical, self.recipe.padding_horizontal)
-                .child_id(cfg.content),
+                .child(cfg.content),
         );
-        ctx.add(ZStack::new().add_child(bg_rect).add_child(padding_id))
+        ctx.add(ZStack::new().child(bg_rect).child(padding_id))
     }
 }

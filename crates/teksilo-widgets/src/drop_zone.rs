@@ -368,7 +368,7 @@ impl Widget for DropZone {
 
         if let Some(icon) = self.icon.take() {
             let icon_id = ctx.add_boxed(icon);
-            content = content.add_child(icon_id);
+            content = content.child(icon_id);
         }
 
         // Kept by id: the zone names itself by pointing at the prompt it
@@ -376,7 +376,7 @@ impl Widget for DropZone {
         // rather than a string announced only as the group's name.
         let label_id = ctx.add(TextWidget::new(self.label.clone()));
         self.label_node = Some(label_id);
-        content = content.add_child(label_id);
+        content = content.child(label_id);
 
         if let Some(subtitle) = &self.subtitle {
             content = content.child(TextWidget::new(subtitle.clone()).color(TextRole::Secondary));

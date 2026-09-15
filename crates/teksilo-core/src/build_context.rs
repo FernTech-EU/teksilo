@@ -94,7 +94,7 @@ impl<'a> BuildContext<'a> {
     ///
     /// Pass the same signal the content's `visible_when` gate uses. Everything
     /// downstream of the returned id — `set_dormant` / `activate`,
-    /// `visible_when`, `OverlayRequest::content_id`, descendant checks,
+    /// `visible_when`, `OverlayRequest::content`, descendant checks,
     /// dismissal — is unchanged; only when the subtree below it exists moves.
     pub fn add_deferred(
         &mut self,

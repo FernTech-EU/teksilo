@@ -46,7 +46,7 @@ pub(crate) fn parse_body(input: ParseStream) -> Result<Vec<BodyItem>> {
 
 fn parse_body_item(input: ParseStream) -> Result<BodyItem> {
     // `#{ expr }` — body-position escape. A WidgetId expression that
-    // attaches via `.add_child(...)` on the parent.
+    // attaches via `.child(...)` on the parent.
     if peek_escape(input) {
         let pound_span = input.span();
         let _pound: Token![#] = input.parse()?;

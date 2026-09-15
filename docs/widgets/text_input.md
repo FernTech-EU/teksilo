@@ -165,7 +165,7 @@ Typically an `IconButton` or `IconWidget`.
 
 Closure invoked on Enter. Forwarded to `TextInputField`.
 
-#### `pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self`
+#### `pub fn on_access_set_value( mut self, f: impl Fn(&str, &mut EventContext) -> bool + 'static, ) -> Self`
 
 Handle an assistive technology's whole-value write, given the string it
 set. Forwarded 1:1 to `TextInputField::on_access_set_value`, where the

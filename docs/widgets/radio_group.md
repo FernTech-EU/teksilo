@@ -44,7 +44,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`orientation`, `spacing`, `label`, `radio`, `child`
+`orientation`, `spacing`, `label`, `radio`, `radios`, `child`, `children`, `child_opt`
 
 ## API reference
 
@@ -86,7 +86,31 @@ Add a radio button. The group's shared sibling-id buffer is
 injected into the radio at build time so its accessibility
 impl can publish group membership via `push_to_radio_group`.
 
+#### `pub fn radios(self, buttons: impl IntoIterator<Item = RadioButton>) -> Self`
+
+Add several radio buttons from an iterator, in order.
+
+The loop form of `radio`, and the usual one: a radio group
+is normally generated from the list of choices it offers. Each button
+gets the group's shared sibling-id buffer exactly as `radio` gives it.
+
 #### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
 
 Add a non-radio child (divider, caption label, etc.). Passed
 straight through to the internal stack without a11y wiring.
+
+#### `pub fn children(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+Add several non-radio children from an iterator, in order.
+
+The loop form of `child`. Like `child`, none of these get
+the group's a11y wiring: use `radios` for the buttons.
+
+#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.

@@ -8,7 +8,7 @@
 FormLayout — a two-column settings or preferences form layout.
 
 Children are added as label/field pairs via `FormLayout::line` (inline
-widgets) or `FormLayout::line_ids` (pre-registered IDs). Full-width rows
+widgets) or `FormLayout::line_id` (pre-registered IDs). Full-width rows
 that span both columns — section headers, `Divider`s, or banners — are
 added via `FormLayout::full_width` / `FormLayout::full_width_id`. The
 label column auto-sizes to the widest label across all pairs so all field
@@ -41,7 +41,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`label_gap`, `row_spacing`, `label`, `line`, `line_ids`, `full_width`, `full_width_id`
+`label_gap`, `row_spacing`, `label`, `line`, `lines`, `line_id`, `line_ids`, `full_width`, `full_width_rows`, `full_width_id`, `full_width_row_ids`
 
 ## API reference
 
@@ -98,14 +98,43 @@ landmark for AT users.
 
 Add a label/field pair row.
 
-#### `pub fn line_ids(mut self, label_id: WidgetId, field_id: WidgetId) -> Self`
+#### `pub fn lines<L, F>(self, rows: impl IntoIterator<Item = (L, F)>) -> Self where L: Widget + 'static, F: Widget + 'static,`
+
+Add several label/field pair rows from an iterator of `(label, field)`
+pairs, in order.
+
+The loop form of `line`, and the usual one once the form is
+generated from a settings schema rather than written row by row.
+
+#### `pub fn line_id(mut self, label_id: WidgetId, field_id: WidgetId) -> Self`
 
 Add a label/field pair row with pre-registered widget IDs.
+
+#### `pub fn line_ids(self, rows: impl IntoIterator<Item = (WidgetId, WidgetId)>) -> Self`
+
+Add several label/field pair rows from an iterator of
+`(label_id, field_id)` pairs, in order.
+
+The id-carrying twin of `lines`. Reach for it when a loop
+has already registered both columns and holds the `WidgetId`s.
 
 #### `pub fn full_width(mut self, widget: impl Widget + 'static) -> Self`
 
 Add a full-width row spanning both columns.
 
+#### `pub fn full_width_rows(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+Add several full-width rows from an iterator, in order.
+
+The loop form of `full_width`, for a run of banners
+or section headers that comes from data.
+
 #### `pub fn full_width_id(mut self, id: WidgetId) -> Self`
 
 Add a full-width row with a pre-registered widget ID.
+
+#### `pub fn full_width_row_ids(self, ids: impl IntoIterator<Item = WidgetId>) -> Self`
+
+Add several full-width rows by pre-registered id, in iterator order.
+
+The id-carrying twin of `full_width_rows`.

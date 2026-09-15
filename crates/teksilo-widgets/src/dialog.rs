@@ -491,27 +491,15 @@ impl DialogContent {
     }
 
     /// Main scrollable content slot (any widget).
-    pub fn body(mut self, body: impl Widget + 'static) -> Self {
-        self.pending_body = Some(PendingChild::Deferred(Box::new(body)));
-        self
-    }
-
-    /// Main content slot by pre-registered `WidgetId`.
-    pub fn body_id(mut self, id: WidgetId) -> Self {
-        self.pending_body = Some(PendingChild::Id(id));
+    pub fn body(mut self, body: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_body = Some(teksilo_core::IntoTeksiChild::into_pending(body));
         self
     }
 
     /// Footer slot separated from the body by a `Divider` (typically action
     /// buttons like "OK" / "Cancel").
-    pub fn footer(mut self, footer: impl Widget + 'static) -> Self {
-        self.pending_footer = Some(PendingChild::Deferred(Box::new(footer)));
-        self
-    }
-
-    /// Footer slot by pre-registered `WidgetId`.
-    pub fn footer_id(mut self, id: WidgetId) -> Self {
-        self.pending_footer = Some(PendingChild::Id(id));
+    pub fn footer(mut self, footer: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_footer = Some(teksilo_core::IntoTeksiChild::into_pending(footer));
         self
     }
 }
@@ -549,7 +537,7 @@ impl Widget for DialogContent {
                         .single_line(),
                 );
                 self.title_node = Some(title_id);
-                header = header.add_child(title_id);
+                header = header.child(title_id);
             }
             if let Some(text) = self.supporting_text.clone() {
                 header = header.child(
@@ -559,7 +547,7 @@ impl Widget for DialogContent {
                 );
             }
             let header_id = ctx.add(header);
-            stack = stack.add_child(header_id);
+            stack = stack.child(header_id);
         }
 
         if let Some(body) = self.pending_body.take() {
@@ -567,7 +555,7 @@ impl Widget for DialogContent {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
-            stack = stack.add_child(body_id);
+            stack = stack.child(body_id);
         }
 
         if let Some(footer) = self.pending_footer.take() {
@@ -576,7 +564,7 @@ impl Widget for DialogContent {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
-            stack = stack.add_child(divider_id).add_child(footer_id);
+            stack = stack.child(divider_id).child(footer_id);
         }
 
         let root = ctx.add(stack);
@@ -703,14 +691,8 @@ impl Dialog {
 
     /// Replace the default `Button` trigger with a custom widget. The widget
     /// receives the same tap / key / AT-action handlers as the button would.
-    pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self {
-        self.pending_trigger = Some(PendingChild::Deferred(Box::new(trigger)));
-        self
-    }
-
-    /// Custom trigger by pre-registered `WidgetId`.
-    pub fn trigger_id(mut self, id: WidgetId) -> Self {
-        self.pending_trigger = Some(PendingChild::Id(id));
+    pub fn trigger(mut self, trigger: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_trigger = Some(teksilo_core::IntoTeksiChild::into_pending(trigger));
         self
     }
 }
@@ -1366,7 +1348,7 @@ mod scrim_hit_targeting_tests {
                 .height(20.0)
                 .child(ModalScrim::new().click_to_dismiss(true)),
         );
-        tree.add(ZStack::new().add_child(scrim));
+        tree.add(ZStack::new().child(scrim));
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
         let b = tree.bounds(scrim);

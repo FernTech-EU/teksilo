@@ -35,16 +35,16 @@ pub fn build_navigator(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
     let scroll_id = ctx.add(scroll);
     // The list scroll area must fill the remaining height below the
     // header — otherwise the VStack collapses to header height.
-    let scroll_expanded = ctx.add(Expand::vertical().child_id(scroll_id));
+    let scroll_expanded = ctx.add(Expand::vertical().child(scroll_id));
 
-    let column = VStack::new().add_child(header).add_child(scroll_expanded);
+    let column = VStack::new().child(header).child(scroll_expanded);
     let bg = RectWidget::new()
         .background(SurfaceRole::Sunken)
         .border_color(BorderRole::Default)
         .border_width(1.0);
     let bg_id = ctx.add(bg);
     let column_id = ctx.add(column);
-    let stack = ZStack::new().add_child(bg_id).add_child(column_id);
+    let stack = ZStack::new().child(bg_id).child(column_id);
     ctx.add(stack)
 }
 
@@ -101,7 +101,7 @@ fn build_list(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
 
         for entry in group_entries {
             let row = build_entry_row(ctx, state, entry);
-            column = column.add_child(row);
+            column = column.child(row);
         }
     }
     ctx.add(column)
@@ -134,7 +134,7 @@ fn build_entry_row(
     let bg_id = ctx.add(bg);
     let header_id = ctx.add(header_row);
 
-    let stack = ZStack::new().add_child(bg_id).add_child(header_id);
+    let stack = ZStack::new().child(bg_id).child(header_id);
     let header_min = teksilo_core::styles::density::density_min_size(
         teksilo_canvas::Size::new(0.0, 28.0),
         teksilo_tokens::TargetAxes::HEIGHT,
@@ -146,7 +146,7 @@ fn build_entry_row(
     // Click to select this widget.
     let st = state.clone();
     let row_clickable = MaxSize::new(f32::INFINITY, f32::INFINITY)
-        .child_id(stack_id)
+        .child(stack_id)
         .on_tap(move |_pos, _ctx| {
             st.select_widget(widget_id);
         })
@@ -159,11 +159,11 @@ fn build_entry_row(
     for variant in entry.variants() {
         let variant_name = variant.name();
         let variant_row = build_variant_row(ctx, state, widget_id, variant_name);
-        variants_col = variants_col.add_child(variant_row);
+        variants_col = variants_col.child(variant_row);
     }
     let variants_id = ctx.add(variants_col);
 
-    let combined = VStack::new().add_child(row_id).add_child(variants_id);
+    let combined = VStack::new().child(row_id).child(variants_id);
     ctx.add(combined)
 }
 
@@ -193,7 +193,7 @@ fn build_variant_row(
     let bg_id = ctx.add(bg);
     let label_id = ctx.add(row_padding);
 
-    let stack = ZStack::new().add_child(bg_id).add_child(label_id);
+    let stack = ZStack::new().child(bg_id).child(label_id);
     // 22 dp was below the 24 dp WCAG 2.2 SC 2.5.8 floor, and a `MinSize` is
     // exactly the hit box that floor governs, so this row is raised to it.
     let row_min = teksilo_core::styles::density::density_min_size(
@@ -206,7 +206,7 @@ fn build_variant_row(
 
     let st = state.clone();
     let clickable = MaxSize::new(f32::INFINITY, f32::INFINITY)
-        .child_id(stack_id)
+        .child(stack_id)
         .on_tap(move |_pos, _ctx| {
             st.select_widget(widget_id);
             st.select_variant(variant_name);

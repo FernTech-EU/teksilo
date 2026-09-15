@@ -230,15 +230,15 @@ impl Widget for Root {
                             .style(TextStyleRole::Small)
                             .color(TextRole::Secondary),
                         )
-                        .add_child(controls),
+                        .child(controls),
                 ),
             ),
         );
 
         let root = ctx.add(
             VStack::new()
-                .add_child(menu_bar)
-                .child(Expand::new().child(Padding::uniform(24.0).child_id(body)))
+                .child(menu_bar)
+                .child(Expand::new().child(Padding::uniform(24.0).child(body)))
                 .child(
                     StatusBar::new().child(
                         TextWidget::new(lit!(""))

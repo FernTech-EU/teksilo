@@ -1103,7 +1103,7 @@ mod tests {
         let mut tree = tree_with_mock_backend();
         // "hello world" = 11 chars × 8px = 88px natural width.
         let label = tree.add(TextWidget::new(lit!("hello world")).single_line());
-        let _stack = tree.add(HStack::new().add_child(label));
+        let _stack = tree.add(HStack::new().child(label));
         tree.layout(SizeProposal::exact(40.0, 20.0));
         // Single-line text opts into shrink: it compresses to fit the 40px
         // stack and ellipsizes, instead of overflowing to 88px.
@@ -1123,7 +1123,7 @@ mod tests {
                 .single_line()
                 .no_shrink(),
         );
-        let _stack = tree.add(HStack::new().add_child(label));
+        let _stack = tree.add(HStack::new().child(label));
         tree.layout(SizeProposal::exact(40.0, 20.0));
         // Opted out → keeps its full 88px and overflows.
         assert!(
@@ -1140,7 +1140,7 @@ mod tests {
         // Wrap mode (default) is height-variable → rigid; overflows rather than
         // shrinking. (Opt in via `Shrinkable`.)
         let label = tree.add(TextWidget::new(lit!("hello world")));
-        let _stack = tree.add(HStack::new().add_child(label));
+        let _stack = tree.add(HStack::new().child(label));
         tree.layout(SizeProposal::exact(40.0, 20.0));
         assert!(
             (tree.bounds(label).width - 88.0).abs() < 1.0,

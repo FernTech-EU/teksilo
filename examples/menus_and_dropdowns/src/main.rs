@@ -667,15 +667,15 @@ impl Widget for Root {
         let content = ctx.add(
             VStack::new()
                 .spacing(32.0)
-                .add_child(combo_section)
+                .child(combo_section)
                 .child(Divider::new().thickness(2.0))
-                .add_child(context_menu_section)
+                .child(context_menu_section)
                 .child(Divider::new().thickness(2.0))
-                .add_child(menu_showcase_section)
+                .child(menu_showcase_section)
                 .child(Divider::new().thickness(2.0))
-                .add_child(rich_menu_section),
+                .child(rich_menu_section),
         );
-        let padded = ctx.add(Padding::uniform(24.0).child_id(content));
+        let padded = ctx.add(Padding::uniform(24.0).child(content));
         let scroll = ctx.add(
             ScrollArea::from_id(padded).scroll_bar_style(teksilo::widgets::ScrollBarMode::Overlay),
         );
@@ -852,9 +852,9 @@ impl Widget for Root {
 
         let root = ctx.add(
             VStack::new()
-                .add_child(menu_bar)
-                .add_child(toolbar)
-                .child(Expand::new().child_id(scroll))
+                .child(menu_bar)
+                .child(toolbar)
+                .child(Expand::new().child(scroll))
                 .child(
                     StatusBar::new().child(
                         TextWidget::new(lit!("Milestone 4 -- Menus & Dropdowns"))

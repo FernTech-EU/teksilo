@@ -458,7 +458,7 @@ impl ToolbarItem {
     pub fn custom(widget: impl Widget + 'static) -> Self {
         Self {
             kind: ToolbarItemKind::Custom {
-                pending: PendingChild::Deferred(Box::new(widget)),
+                pending: teksilo_core::IntoTeksiChild::into_pending(widget),
                 menu_form: None,
             },
         }
@@ -481,7 +481,7 @@ impl ToolbarItem {
         let menu_form = widget.toolbar_menu_form();
         Self {
             kind: ToolbarItemKind::Custom {
-                pending: PendingChild::Deferred(Box::new(widget)),
+                pending: teksilo_core::IntoTeksiChild::into_pending(widget),
                 menu_form: Some(OverflowMenuForm::Action(Box::new(menu_form))),
             },
         }
@@ -607,23 +607,59 @@ impl Toolbar {
         self
     }
 
+    /// Add several items from an iterator, in order.
+    ///
+    /// The loop form of [`item`](Self::item): reach for it when the command set
+    /// is data-driven rather than written out call by call.
+    pub fn items(self, items: impl IntoIterator<Item = ToolbarItem>) -> Self {
+        items.into_iter().fold(self, Self::item)
+    }
+
     /// Sugar for `.item(ToolbarItem::action(a))`.
     pub fn action(self, action: ToolbarAction) -> Self {
         self.item(ToolbarItem::action(action))
+    }
+
+    /// Add several collapsible commands from an iterator.
+    ///
+    /// The loop form of [`action`](Self::action), for a command set built from
+    /// data rather than spelled out one call at a time.
+    pub fn actions(self, actions: impl IntoIterator<Item = ToolbarAction>) -> Self {
+        actions.into_iter().fold(self, Self::action)
     }
 
     /// Add a pinned inline child widget (sugar for
     /// `.item(ToolbarItem::custom(widget))`). Pinned widgets never collapse
     /// into the overflow menu — use [`action`](Self::action) for collapsible
     /// commands.
-    pub fn child(self, widget: impl Widget + 'static) -> Self {
-        self.item(ToolbarItem::custom(widget))
+    pub fn child(self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => self.item(ToolbarItem::custom_id(id)),
+            teksilo_core::PendingChild::Deferred(w) => self.item(ToolbarItem::custom(w)),
+        }
     }
 
-    /// Add a pinned inline child by pre-registered id (sugar for
-    /// `.item(ToolbarItem::custom_id(id))`).
-    pub fn add_child(self, id: WidgetId) -> Self {
-        self.item(ToolbarItem::custom_id(id))
+    /// Add several pinned inline children from an iterator.
+    ///
+    /// The loop form of [`child`](Self::child). Like `child`, every widget added
+    /// this way is pinned and never collapses into the overflow menu.
+    pub fn children(
+        self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
+        iter.into_iter().fold(self, Self::child)
+    }
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// Set the layout axis (default [`ToolbarOrientation::Horizontal`]).
@@ -917,13 +953,13 @@ impl Widget for Toolbar {
         let row: WidgetId = if horizontal {
             let mut r = HStack::new().spacing(self.resolved_spacing(&ctx.theme().input));
             for id in &child_ids {
-                r = r.add_child(*id);
+                r = r.child(*id);
             }
             ctx.add(r)
         } else {
             let mut r = VStack::new().spacing(self.resolved_spacing(&ctx.theme().input));
             for id in &child_ids {
-                r = r.add_child(*id);
+                r = r.child(*id);
             }
             ctx.add(r)
         };
@@ -940,7 +976,7 @@ impl Widget for Toolbar {
                 .background(teksilo_tokens::SurfaceRole::Transparent)
                 .border_width(0.0)
                 .padding(0.0)
-                .child_id(row),
+                .child(row),
         );
         self.root_child_id = Some(root);
         vec![root]

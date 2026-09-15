@@ -2244,9 +2244,9 @@ fn nested_list_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>, S
     .overscroll_behavior(inner);
     let inner_y = lv.scroll_y_signal().clone();
     let lv_id = tree.add(lv);
-    let viewport = tree.add(FixedSize::new().width(200.0).height(100.0).child_id(lv_id));
+    let viewport = tree.add(FixedSize::new().width(200.0).height(100.0).child(lv_id));
     let filler = tree.add(FixedLeaf(200.0, 200.0));
-    let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(viewport).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);
@@ -2331,9 +2331,9 @@ fn keyboard_selection_chases_outer_scroll_area() {
         .item_height(20.0)
         .selection(selection);
     let lv_id = tree.add(lv);
-    let lv_box = tree.add(FixedSize::new().width(200.0).height(200.0).child_id(lv_id));
+    let lv_box = tree.add(FixedSize::new().width(200.0).height(200.0).child(lv_id));
     let filler = tree.add(FixedLeaf(200.0, 200.0));
-    let outer_content = tree.add(VStack::new().add_child(lv_box).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(lv_box).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);

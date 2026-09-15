@@ -37,7 +37,7 @@ let _w = Switcher::new(page.clone())
 
 ## Builder methods at a glance
 
-`capture_child_ids_into`, `child`, `child_boxed`, `child_id`, `children`
+`capture_child_ids_into`, `child`, `child_opt`, `child_boxed`, `children_boxed`, `child_id`, `child_ids`, `children`
 
 ## API reference
 
@@ -104,15 +104,38 @@ Add a child page. The widget stays Boxed until its index is
 selected for the first time, then is mounted into the arena
 and kept alive across selection changes.
 
+#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
+
 #### `pub fn child_boxed(mut self, widget: Box<dyn Widget>) -> Self`
 
 Add a pre-boxed child page (lazy, same as `Self::child`).
+
+#### `pub fn children_boxed(self, iter: impl IntoIterator<Item = Box<dyn Widget>>) -> Self`
+
+Add several pre-boxed child pages from an iterator.
+
+The heterogeneous twin of `children`: `children` needs
+every page to be the same concrete type, this one does not.
 
 #### `pub fn child_id(mut self, id: WidgetId) -> Self`
 
 Add a child page by its already-allocated `WidgetId`. Pre-mounted
 pages are wired eagerly — the lazy path doesn't apply because
 the caller has already paid the construction cost.
+
+#### `pub fn child_ids(self, ids: impl IntoIterator<Item = WidgetId>) -> Self`
+
+Add several already-allocated child pages by id, in iterator order.
+
+The id-carrying twin of `children`. Reach for it when a
+loop has already mounted its pages and holds the `WidgetId`s.
 
 #### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
 

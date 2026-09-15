@@ -1281,12 +1281,8 @@ mod tests {
         use crate::gesture::{MemberRole, MemberState};
         let mut tree = WidgetTree::new();
         let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
-        let inner = tree.add(StackWidget::new().add_child(button));
-        let ancestor = tree.add(
-            StackWidget::new()
-                .add_child(inner)
-                .on_drag(|_phase, _ctx| {}),
-        );
+        let inner = tree.add(StackWidget::new().child(button));
+        let ancestor = tree.add(StackWidget::new().child(inner).on_drag(|_phase, _ctx| {}));
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
         let b = tree.bounds(button);
@@ -1315,10 +1311,10 @@ mod tests {
         use crate::widget_builder::WidgetBuilder;
         let mut tree = WidgetTree::new();
         let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
-        let dead_zone = tree.add(StackWidget::new().add_child(button).gesture_dead_zone(true));
+        let dead_zone = tree.add(StackWidget::new().child(button).gesture_dead_zone(true));
         let _ancestor = tree.add(
             StackWidget::new()
-                .add_child(dead_zone)
+                .child(dead_zone)
                 .on_drag(|_phase, _ctx| {}),
         );
         tree.layout(SizeProposal::exact(100.0, 100.0));
@@ -1351,10 +1347,10 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let button = tree.add(FillWidget::new().on_tap(|_e, _ctx| {}));
-        let dead_zone = tree.add(StackWidget::new().add_child(button).gesture_dead_zone(true));
+        let dead_zone = tree.add(StackWidget::new().child(button).gesture_dead_zone(true));
         tree.add(
             StackWidget::new()
-                .add_child(dead_zone)
+                .child(dead_zone)
                 .on_drag(|_phase, _ctx| {}),
         );
         tree.layout(SizeProposal::exact(100.0, 100.0));
@@ -1449,7 +1445,7 @@ mod tests {
                 .on_drag_leave(move |_ctx| lv.set(lv.get() + 1)),
         );
         // Ancestor container wrapping the child: engages conditionally.
-        let _ancestor = tree.add(StackWidget::new().add_child(child).on_drag_hover(
+        let _ancestor = tree.add(StackWidget::new().child(child).on_drag_hover(
             move |_payload, _pos, _ctx| {
                 if eg.get() {
                     crate::drag_state::DropFeedback::Accept
@@ -1614,7 +1610,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let source = tree.add(FillWidget::new());
         let child = tree.add(FillWidget::new());
-        let _parent = tree.add(StackWidget::new().add_child(child).on_drop(
+        let _parent = tree.add(StackWidget::new().child(child).on_drop(
             move |_payload, _pos, _ctx| {
                 pf.set(true);
                 true
@@ -1666,12 +1662,14 @@ mod tests {
                     false // reject → the framework should bubble past
                 }),
         );
-        let _parent = tree.add(StackWidget::new().add_child(child).on_drop(
-            move |_p, _pos, _ctx| {
-                pd.set(true);
-                true
-            },
-        ));
+        let _parent = tree.add(
+            StackWidget::new()
+                .child(child)
+                .on_drop(move |_p, _pos, _ctx| {
+                    pd.set(true);
+                    true
+                }),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let mut ctx = crate::widget::EventContext::new();

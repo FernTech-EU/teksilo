@@ -167,7 +167,7 @@ fn nested_scroll_areas_bound_the_window_to_their_intersection() {
     let mut tree = WidgetTree::new();
     let id = tree.add(ed);
     let inner = tree.add(ScrollArea::from_id(id));
-    let boxed = tree.add(FixedSize::new().width(W).height(250.0).child_id(inner));
+    let boxed = tree.add(FixedSize::new().width(W).height(250.0).child(inner));
     tree.add(ScrollArea::from_id(boxed));
     settle(&mut tree, W, H);
 

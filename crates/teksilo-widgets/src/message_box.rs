@@ -673,6 +673,17 @@ impl MessageBox {
         self
     }
 
+    /// Append several buttons from an iterator, in order.
+    ///
+    /// The loop form of [`add_button`](Self::add_button), for a bespoke button
+    /// row built from data rather than spelled out one call at a time.
+    pub fn add_buttons(
+        self,
+        buttons: impl IntoIterator<Item = impl Into<MessageBoxButton>>,
+    ) -> Self {
+        buttons.into_iter().fold(self, Self::add_button)
+    }
+
     /// Mark which button activates on Enter and receives initial
     /// focus. Must refer to one of the buttons configured via
     /// `buttons` / `add_button`.
@@ -866,22 +877,22 @@ impl Widget for MessageBox {
                 self.default_button_id.set(Some(btn_id));
             }
             state.button_ids.borrow_mut().push((btn_id, kind));
-            footer = footer.add_child(btn_id);
+            footer = footer.child(btn_id);
         }
 
         let mut stack = VStack::new().spacing(16.0);
-        stack = stack.add_child(ctx.add_boxed(header));
+        stack = stack.child(ctx.add_boxed(header));
         if let Some(det) = detailed_child {
-            stack = stack.add_child(ctx.add_boxed(det));
+            stack = stack.child(ctx.add_boxed(det));
         }
         if let Some(cb) = checkbox_child {
-            stack = stack.add_child(ctx.add_boxed(cb));
+            stack = stack.child(ctx.add_boxed(cb));
         }
         // Push the footer to the bottom of the dialog by absorbing any
         // vertical slack with a Spacer (flex=1).
-        stack = stack.add_child(ctx.add(Spacer::new()));
+        stack = stack.child(ctx.add(Spacer::new()));
         let footer_id = ctx.add(footer);
-        stack = stack.add_child(footer_id);
+        stack = stack.child(footer_id);
 
         let root = ctx.add(stack);
         self.root_child_id = Some(root);

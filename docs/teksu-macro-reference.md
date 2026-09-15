@@ -9,8 +9,11 @@ at macro-expansion time. No hidden allocation, no runtime parsing, no
 virtual tree — the output is exactly the code you could have written by
 hand.
 
-This document is the user-facing reference. For the design rationale and
-full grammar, see [teksu-language-spec-v3.md](teksu-language-spec-v3.md).
+This document is the user-facing reference, and it is **normative for
+behaviour**: where it and the design spec disagree, this document is right.
+For the design rationale (why the grammar has this shape, what was left out,
+and what shipped differently from what was designed), see
+[teksu-language-spec-v3.md](teksu-language-spec-v3.md).
 
 > **Labels in these examples.** For brevity the examples below pass bare string literals
 > (`Button("Save")`). With the default `i18n` feature a widget label is a `LocalizedString`
@@ -132,6 +135,12 @@ Expand {
 // ↓ Expand::new().fills_stack().child(TextWidget::new("Body"))
 ```
 
+*Standing alone* is the operative part. A lowercase identifier that continues
+into a call or a method chain is a Rust expression producing a widget and
+becomes a child instead (`section("Metadata")`, `row(1).spacing(4.0)`), so your
+own helper functions are children like any element. See
+[Real widgets](#your-own-helpers-are-children-too).
+
 ---
 
 ## Category A children
@@ -186,6 +195,356 @@ produces a targeted compile-time error pointing at the right slot name.
 
 ---
 
+## Real widgets
+
+Everything above is shown on stacks, panels and single-control widgets, which
+makes the DSL look like it only reaches static chrome. It does not. A positional argument list and a
+property value are both handed to the builder verbatim, so a delegate closure,
+a model handle and a `Signal` pass through untouched, and an accumulator
+builder (`add_column`, `line`, `item`, `dock`) is a property written more than
+once.
+
+Every block in this section was compiled and mounted in a real `WidgetTree`.
+
+### Data views take their delegate as a positional argument
+
+```rust
+teksu!(ctx =>
+    ListView(rows, |_index, item: &Row, selected| {
+        let subtitle = format!("{} words", item.count);
+        Box::new(
+            StandardListItem::new(lit!(&item.title))
+                .subtitle(lit!(subtitle))
+                .selected(selected),
+        )
+    }) {
+        item_height: 44.0
+        selection: selection
+    }
+)
+```
+
+Builder equivalent: `ListView::new(rows, delegate).item_height(44.0).selection(selection)`.
+
+Nothing inside `(...)` is parsed by the macro, so the closure body is ordinary
+Rust, multi-statement included. An explicit constructor works the same way, and
+the shape generalises to every data view:
+
+```rust
+teksu!(ctx =>
+    TreeView::new_with_context(tree, |item: &Row, entry, selected, row| {
+        Box::new(
+            StandardTreeItem::new(lit!(&item.title))
+                .from_entry(entry)
+                .selected(selected)
+                .on_toggle_rc(row.toggle_callback()),
+        )
+    }) {
+        item_height: 28.0
+        row_click_expands: true
+    }
+)
+```
+
+Builder equivalent: `TreeView::new_with_context(tree, delegate).item_height(28.0).row_click_expands(true)`.
+
+### A repeated property is how you drive an accumulator
+
+`TableView` has no children, it has columns, and `add_column` is an ordinary
+builder method, so write it once per column:
+
+```rust
+teksu!(ctx =>
+    TableView(rows) {
+        add_column: Column::new("title", lit!("Title"), |row: &Row, _cell| {
+            Box::new(TextWidget::new(lit!(&row.title)))
+        })
+        add_column: Column::new("count", lit!("Words"), |row: &Row, _cell| {
+            Box::new(TextWidget::new(lit!(row.count.to_string())))
+        })
+        row_height: 28.0
+    }
+)
+```
+
+Builder equivalent: two chained `.add_column(...)` calls, then `.row_height(28.0)`,
+in that order (non-`WidgetBuilder` properties keep their source position).
+
+`FormLayout` is the same shape with a two-argument row method. The comma
+continues the argument list, and an UpperCamel element after it stays an
+argument instead of becoming a child, which is what makes a row accumulator
+readable:
+
+```rust
+teksu!(ctx =>
+    FormLayout {
+        row_spacing: 10.0
+        label_gap: 12.0
+        line: TextWidget(lit!("Name")), TextInput(name)
+        line: TextWidget(lit!("Author")), TextInput(author)
+        full_width: Button(lit!("Save"))
+    }
+)
+```
+
+Builder equivalent: `.row_spacing(10.0).label_gap(12.0).line(label, field).line(label, field).full_width(button)`.
+
+`MenuList` mixes an accumulator with the argument-free bare-lowercase form:
+
+```rust
+teksu!(ctx =>
+    MenuList {
+        item: MenuItem::new(lit!("&Save"))
+        item: MenuItem::new(lit!("Save &As"))
+        separator
+        item: MenuItem::new(lit!("&Quit"))
+    }
+)
+```
+
+and `Toolbar` carries two accumulators side by side, `action` and `item`:
+
+```rust
+teksu!(ctx =>
+    Toolbar {
+        action: ToolbarAction::new(lit!("New"), || IconWidget::chevron_down(16.0))
+        action: ToolbarAction::new(lit!("Open"), || IconWidget::chevron_up(16.0))
+        item: ToolbarItem::separator()
+        button_size: IconButtonSize::Compact
+    }
+)
+```
+
+Builder equivalent in both cases: one chained call per line, in source order.
+
+### Tabs
+
+`tab` takes a label and a content widget, which is the "UpperCamel after a
+comma stays an argument" rule doing real work:
+
+```rust
+teksu!(ctx =>
+    TabWidget(selected) {
+        tab: lit!("Overview"), Card {
+            content: TextWidget(lit!("Summary"))
+        }
+        tab: lit!("Details"), VStack {
+            spacing: 8.0
+            TextWidget(lit!("Line one"))
+            TextWidget(lit!("Line two"))
+        }
+    }
+)
+```
+
+Builder equivalent: `.tab(lit!("Overview"), Card::new().content(..)).tab(lit!("Details"), VStack::new()..)`.
+
+The delegate-driven form is the same property with a `TabInfo` and a factory
+closure. `TabInfo { ... }` at an argument position is a teksu element, not a
+Rust struct literal, so it lowers to `TabInfo::new().title(..).closable(..)`:
+
+```rust
+teksu!(ctx =>
+    TabWidget(selected) {
+        static_tab_factory: TabInfo { title: lit!("Notes"), closable: true }, |_handle| {
+            Box::new(TextWidget::new(lit!("Notes body")))
+        }
+    }
+)
+```
+
+Builder equivalent: `.static_tab_factory(TabInfo::new().title(lit!("Notes")).closable(true), factory)`.
+
+### Switcher takes bare children, and a Signal in its constructor
+
+`Switcher` has `.child(..)`, so it is a Category A container whose selection
+arrives as a constructor argument:
+
+```rust
+teksu!(ctx =>
+    Switcher(page) {
+        TextWidget(lit!("Page 0"))
+        TextWidget(lit!("Page 1"))
+        Panel {
+            TextWidget(lit!("Page 2"))
+        }
+    }
+)
+```
+
+Builder equivalent: `Switcher::new(page).child(..).child(..).child(..)`.
+
+`page` is a `Signal<usize>`. A `Signal` or `Prop` constructor argument needs no
+special handling anywhere in a block:
+
+```rust
+teksu!(ctx =>
+    VStack {
+        spacing: 8.0
+        Toggle(on)
+        Slider(value, 0.0, 1.0)
+    }
+)
+```
+
+### DockingLayout
+
+```rust
+teksu!(ctx =>
+    DockingLayout(model) {
+        center: Panel {
+            TextWidget(lit!("Editor"))
+        }
+        dock: DockWidget::new(explorer, lit!("Explorer"), |_id| {
+            TextWidget::new(lit!("Files"))
+        })
+        dock: DockWidget::new(problems, lit!("Problems"), |_id| {
+            TextWidget::new(lit!("No problems"))
+        })
+    }
+)
+```
+
+Builder equivalent: `.center(panel).dock(..).dock(..)`. `center` is a slot and
+`dock` an accumulator; the DSL does not distinguish between them, and neither
+does the builder.
+
+### Your own helpers are children too
+
+A lowercase identifier that continues into a call or a method chain is a Rust
+expression producing a widget, and lowers to `.child(expr)`. It works at body
+position and inside a structural arm:
+
+```rust
+teksu!(ctx =>
+    VStack {
+        spacing: 8.0
+        section("Metadata")
+        section("Layout").spacing(4.0)
+        if show {
+            section("Advanced")
+        }
+        boxed_branch(5)
+    }
+)
+```
+
+given `fn section(title: &str) -> VStack` and
+`fn boxed_branch(n: i32) -> Box<dyn Widget>`. A lowercase identifier standing
+alone is still the argument-free property (`fills_stack`), so the two forms do
+not collide.
+
+### What genuinely does not work
+
+Each form below was compiled; the message is the one rustc prints.
+
+**An UpperCamel method chain as a property value.**
+
+```rust
+Panel {
+    child: Button::new(lit!("Save")).tooltip(lit!("Write to disk"))
+}
+```
+
+```text
+error: expected a property name, child element, binding, or `#{ expr }` escape
+   |
+   |             child: Button::new(lit!("Save")).tooltip(lit!("Write to disk"))
+   |                                             ^
+```
+
+The caret sits on the `.`. Write the body form instead, which compiles:
+`child: Button(lit!("Save")) { tooltip: lit!("Write to disk") }`. This is the
+UpperCamel case only: a chain rooted in a lowercase path is an expression and
+passes through, so `padding: pad.max(4.0)` is fine.
+
+**A Rust struct literal as a property value, or at body position.** Both are
+parsed as teksu elements, so the field names become builder calls and the type
+name gets a `::new`:
+
+```rust
+Panel {
+    hit_slop: HitSlop { radius: 8.0, up_to: 44.0 }
+}
+```
+
+```text
+error[E0599]: no associated function or constant named `new` found for struct `HitSlop` in the current scope
+   |
+   |             hit_slop: HitSlop { radius: 8.0, up_to: 44.0 }
+   |                       ^^^^^^^ associated function or constant not found in `HitSlop`
+```
+
+Parenthesise it: `hit_slop: (HitSlop { radius: 8.0, up_to: 44.0 })` compiles.
+Enum variants are unaffected: `Type::Variant` and `Type::Variant(inner)` are
+recognised as expressions.
+
+**A fifth `if` or `match` arm.**
+
+```text
+error: teksu! supports up to 4 if-chain arms; wrap deeper chains in `Box<dyn Widget>` or split into a helper
+error: teksu! supports up to 4 match arms; wrap deeper dispatches in `Box<dyn Widget>` or split into a helper
+```
+
+Both errors point at the `if` / `match` keyword. `Box<dyn Widget>` implements
+`Widget`, so a helper returning one is a child like any other (`boxed_branch(5)`
+above).
+
+**A parenthesised child.** Body items are separated by whitespace, and Rust
+reads `(a) (b)` as a call, so a parenthesised item would silently swallow the
+next one as its argument. The form is rejected rather than allowed to do that:
+
+```text
+error: expected a property name, child element, binding, or `#{ expr }` escape
+   |
+   |             (section("one"))
+   |             ^
+```
+
+Use the property form, where the argument list is delimited:
+
+```rust
+VStack {
+    child: (section("one"))
+    section("two")
+}
+```
+
+**A child head that Rust would read as a continuation.** Body items are
+separated by whitespace, not punctuation, so a head that can continue the
+previous expression is rejected rather than allowed to swallow its neighbour:
+`*` (`a *b` is a multiplication), `&` (`a &b` is a bitwise and, and no reference
+type implements `Widget` anyway), and `(` as above. A keyword-rooted head is
+accepted, because nothing continues into `self`, `Self`, `crate` or `super`:
+
+```rust
+VStack {
+    self.row(x)
+    crate::ui::header()
+}
+```
+
+**A Rust struct literal at body position is read as an element.** `Card { title: t }`
+is `Card::new().title(t)`, because the element form and Rust's struct literal are
+the same tokens. If the type has no such builder the compiler says so:
+
+```text
+error[E0599]: no associated function or constant named `new` found for struct `Card`
+   |
+   |             Card { title: t, root: None }
+   |             ^^^^ function or associated item not found in `Card`
+```
+
+Wrap it in the escape, which is what the escape is for:
+
+```rust
+VStack {
+    #{ Card { title: t, root: None } }
+}
+```
+
+---
+
 ## Bindings: `name = Element`
 
 A binding names the `WidgetId` of an inserted widget so you can reference
@@ -207,7 +566,7 @@ teksu!(ctx =>
     let open_btn: WidgetId = ctx.add(Button::new("Open").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Open)));
     ctx.add(
         VStack::new()
-            .add_child(open_btn)
+            .child(open_btn)
             .child(TextWidget::new("Status").linked_to(open_btn))
     )
 }
@@ -215,8 +574,8 @@ teksu!(ctx =>
 
 ### Binding at a slot position
 
-When a slot value is a binding, the macro routes to the slot's `*_id`
-twin:
+A binding works at a slot position with no special routing: a slot method
+takes `impl IntoTeksiChild`, so the same name accepts the id.
 
 ```rust
 Card {
@@ -231,7 +590,7 @@ Card {
 // {
 //     let title = ctx.add(TextWidget::new("Manuscript").style(bold));
 //     Card::new()
-//         .header_id(title)
+//         .header(title)
 //         .content(VStack::new().child(
 //             Button::new("Focus title")
 //                 .on_tap(move |_, ctx| ctx.focus(title))
@@ -246,41 +605,46 @@ including nested closures.
 
 ## Escape: `#{ expr }`
 
-Insert a pre-registered `WidgetId` (or an arbitrary WidgetId expression)
-at a body or slot position:
+Insert **any** Rust expression that produces a child at a body or slot
+position: a `WidgetId` already in the arena, or a widget value.
 
 ```rust
 let toolbar_id = ctx.add(build_toolbar());
 
 teksu!(ctx =>
     VStack {
-        #{ toolbar_id }             // → .add_child(toolbar_id)
-        Expand {
-            fills_stack
-            child_id: scroll_id     // use property form where the
-                                    // container's id method isn't
-                                    // .add_child (e.g. single-child
-                                    // wrappers use .child_id)
-        }
+        #{ toolbar_id }                        // an id already in the arena
+        #{ Card { title: t, root: None } }     // a Rust struct literal
+        #{ registry.lookup(key)? }             // any expression, really
     }
 )
 ```
 
-At a slot position, `#{ expr }` forces the `*_id` slot routing:
+Both arms go through one method. At body position the escape lowers to
+`.child(expr)`, and every container's `child` takes `impl IntoTeksiChild`,
+which is implemented for `WidgetId` (attach the existing node) and blanket for
+every `Widget` (insert a new one).
+
+The escape earns its keep on the struct literal. A bare `Card { .. }` at body
+position is an *element*, so the escape is the one thing that says "this is
+Rust, not teksu". Two containers do not take an id this way, `Cycle` and
+`RadioGroup`, because neither has anywhere to put one.
+
+A slot takes the escape the same way, under its own name:
 
 ```rust
 Card {
-    header: #{ existing_header_id }    // → .header_id(existing_header_id)
+    header: #{ existing_header_id }    // → .header(existing_header_id)
 }
 ```
 
 A binding or `#{ }` escape is only needed when the same widget ID is
 referenced from multiple places (e.g. a handler closure captures it).
 If you just want to attach a pre-existing ID once, the equivalent
-property forms — `add_child: id` for multi-child containers,
-`child_id: id` for single-child wrappers, `slot_name_id: id` for
-Category B slots — are shorter and plain Rust inside the arg
-position.
+property form — `child: id` for a body child, `slot_name: id` for a
+Category B slot — is shorter and is plain Rust inside the argument
+position. There is no `_id` variant to remember: one name per slot,
+and it takes either.
 
 ---
 
@@ -386,7 +750,7 @@ Inline an iterator of `WidgetId`s as children:
 ```rust
 VStack {
     TextWidget("Header")
-    ..plugin_widgets      // for id in plugin_widgets { __parent.add_child(id) }
+    ..plugin_widgets      // for id in plugin_widgets { __parent.child(id) }
     TextWidget("Footer")
 }
 ```
@@ -498,15 +862,16 @@ Panel {
 | `name: a, b` | `.name(a, b)` |
 | `name` (bare lowercase) | `.name()` |
 | Bare `UpperCamel(...)` at body | `.child(‹E›)` |
-| `name = ‹E›` at body | hoisted `let name = ctx.add(‹E›);` + `.add_child(name)` |
+| Bare lowercase call or method chain at body | `.child(expr)` |
+| `name = ‹E›` at body | hoisted `let name = ctx.add(‹E›);` + `.child(name)` |
 | `name = ‹E›` in slot `s` | hoisted `let` + `.s_id(name)` |
-| `#{ id_expr }` at body | `.add_child(id_expr)` |
+| `#{ expr }` at body | `.child(expr)` (an id or a widget) |
 | `#{ id_expr }` in slot `s` | `.s_id(id_expr)` |
 | `if cond { ‹E› }` | `.child_opt(if cond { Some(‹E›) } else { None })` |
 | `if cond { ‹A› } else { ‹B› }` | `.child(if cond { TeksiBranch::L(‹A›) } else { TeksiBranch::R(‹B›) })` |
 | `match x { p => ‹E›, … }` | `.child(match x { p => TeksiBranchN::…(‹E›), … })` |
 | `for p in it { ‹E› }` | `.children((it).map(\|p\| ‹E›))` |
-| `..expr` | stmt-form `for id in expr { __parent = __parent.add_child(id); }` |
+| `..expr` | stmt-form `for id in expr { __parent = __parent.child(id); }` |
 | `rust { … expr }` | `.child({ … expr })` |
 | `rust { …; }` | inline side-effect block |
 
@@ -530,6 +895,8 @@ diagnostic under the user's token, thanks to span-preserving emission.
 
 - **4-arm cap on `if`/`match`**: chains beyond four arms must be split
   into a helper returning `Box<dyn Widget>` (or refactored to `match`).
+  `Box<dyn Widget>` implements `Widget`, so the helper's result is a bare
+  child like any other.
 - **Binding hoist scope**: bindings declared inside `if`/`else`/`match`/
   `for` bodies currently hoist to the outermost `teksu!` block. The
   widget is created unconditionally; only the parent's attachment is
@@ -539,21 +906,28 @@ diagnostic under the user's token, thanks to span-preserving emission.
   `signal: Signal<bool>` does **not** auto-bind `visible_when`. Bind
   visibility through `ctx.visible_when(id, signal)` directly on a
   pre-registered child, or wrap the widget in your own helper.
-- **Struct literals as arg values need parens**: `prop: MyStruct { ... }`
-  is parsed as a teksu element (per the spec's "commit on distinctive
-  prefix" rule). To pass a Rust struct literal, wrap it: `prop: (MyStruct
-  { ... })`. Enum variants don't need this wrapping — `prop: Type::Variant`
-  and `prop: Type::Variant(inner)` are recognized as expressions because
-  of the `UpperCamel::UpperCamel` shape.
-- **No method chains on widgets at property-arg position**: write
-  `item: MenuItem::new("x").on_activate(cmd).tooltip("t")` as body
-  form — `item: MenuItem::new("x") { on_activate: cmd; tooltip: "t" }`.
-  The body-form reads uniformly with top-level elements and skips the
-  element-vs-expression ambiguity. For non-widget method chains rooted
-  in lowercase paths (`signal.map(...)`, `items.iter().collect()`),
-  no workaround is needed — lowercase paths go through the expression
-  path unconditionally. For UpperCamel-rooted chains that don't fit
-  the body form (rare), wrap in parens: `prop: (MyWrapper::from(x).finalize())`.
+- **Struct literals need parens**: `prop: MyStruct { ... }` is parsed as a
+  teksu element (per the spec's "commit on distinctive prefix" rule), at a
+  property value and at body position alike. To pass a Rust struct literal,
+  wrap it: `prop: (MyStruct { ... })`. Enum variants don't need this wrapping,
+  since `prop: Type::Variant` and `prop: Type::Variant(inner)` are recognized
+  as expressions by their `UpperCamel::UpperCamel` shape. The error when you
+  forget is in
+  [What genuinely does not work](#what-genuinely-does-not-work).
+- **No UpperCamel method chains at property-arg position**: write
+  `item: MenuItem::new("x").on_activate(cmd).tooltip("t")` as body form,
+  `item: MenuItem("x") { on_activate: cmd, tooltip: "t" }`. The body form reads
+  uniformly with top-level elements and skips the element-vs-expression
+  ambiguity. Chains rooted in a lowercase path (`signal.map(...)`,
+  `pad.max(4.0)`, `items.iter().collect()`) need no workaround: they go through
+  the expression path unconditionally. For an UpperCamel-rooted chain that
+  doesn't fit the body form (rare), wrap it in parens:
+  `prop: (MyWrapper::from(x).finalize())`.
+- **An expression child must not start with punctuation that could continue the
+  previous item.** `(`, `*` and `&` are rejected, because body items are
+  whitespace-separated and Rust reads `(a) (b)`, `a *b` and `a &b` as one
+  expression each. Write `child: (expr)`. Keyword-rooted heads (`self.row(x)`,
+  `crate::ui::header()`) are accepted; nothing continues into them.
 - **rust-analyzer**: the macro expands cleanly under rust-analyzer's
   proc-macro server; IDE features work on the expanded code. If you see
   "expected an expression" errors on non-Rust-shaped tokens (`#{ }`,
@@ -565,9 +939,9 @@ diagnostic under the user's token, thanks to span-preserving emission.
 
 ## Further reading
 
-- [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — complete
-  grammar, design principles, and worked translations of the reference
-  examples.
+- [teksu-language-spec-v3.md](teksu-language-spec-v3.md): the design
+  rationale, its worked translations, and a changelog of where the shipped
+  macro diverged from the design.
 - [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
   — trybuild fixtures exercising every supported form.
 - [crates/teksilo-macros/src/](../crates/teksilo-macros/src/) — the

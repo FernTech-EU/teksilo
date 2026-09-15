@@ -67,7 +67,7 @@ let region = DragRegion::with_child(host.clone(), TextWidget::new(lit!("My App")
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/drag_region/index.html)
 
 ## `pub struct DragRegion`
 

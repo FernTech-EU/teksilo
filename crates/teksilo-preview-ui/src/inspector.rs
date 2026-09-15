@@ -40,7 +40,7 @@ pub fn build_inspector(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
         .border_color(BorderRole::Default)
         .border_width(1.0);
     let bg_id = ctx.add(bg);
-    let stack = ZStack::new().add_child(bg_id).add_child(body_id);
+    let stack = ZStack::new().child(bg_id).child(body_id);
     ctx.add(stack)
 }
 
@@ -90,20 +90,20 @@ impl Widget for InspectorBody {
             Some(entry) => self.build_variant_section(ctx, entry),
             None => placeholder_section(ctx, "No widget selected."),
         };
-        column = column.add_child(variant_section);
+        column = column.child(variant_section);
 
         // Knobs section
         if let (Some(entry), Some(variant_name)) = (entry, variant_name) {
             let knobs_section = self.build_knobs_section(ctx, entry, variant_name);
-            column = column.add_child(knobs_section);
+            column = column.child(knobs_section);
         }
 
         // Export section
-        column = column.add_child(self.build_export_section(ctx));
+        column = column.child(self.build_export_section(ctx));
 
         // Wrap in scroll area + padding.
         let column_id = ctx.add(column);
-        let padding = ctx.add(Padding::symmetric(12.0, 12.0).child_id(column_id));
+        let padding = ctx.add(Padding::symmetric(12.0, 12.0).child(column_id));
         let scroll_id = ctx.add(ScrollArea::from_id(padding));
         self.root_id = Some(scroll_id);
         vec![scroll_id]
@@ -222,7 +222,7 @@ impl InspectorBody {
             column = column.child(row);
         }
 
-        ctx.add(VStack::new().spacing(6.0).add_child(header).child(column))
+        ctx.add(VStack::new().spacing(6.0).child(header).child(column))
     }
 
     fn build_knobs_section(
@@ -237,12 +237,7 @@ impl InspectorBody {
             let placeholder = TextWidget::new(lit!("No knobs declared for this widget."))
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary);
-            return ctx.add(
-                VStack::new()
-                    .spacing(6.0)
-                    .add_child(header)
-                    .child(placeholder),
-            );
+            return ctx.add(VStack::new().spacing(6.0).child(header).child(placeholder));
         }
         let values = self.state.knobs_for(entry.id(), variant_name);
         let form_id = build_knob_form(ctx, &spec, &values);
@@ -271,7 +266,7 @@ impl InspectorBody {
             VStack::new()
                 .spacing(6.0)
                 .child(header_block)
-                .add_child(form_id),
+                .child(form_id),
         )
     }
 
@@ -285,7 +280,7 @@ impl InspectorBody {
                     eprintln!("PNG export failed: {}", e);
                 }
             });
-        ctx.add(VStack::new().spacing(6.0).add_child(header).child(save_btn))
+        ctx.add(VStack::new().spacing(6.0).child(header).child(save_btn))
     }
 }
 

@@ -55,7 +55,7 @@ pub struct DeadZone {
 
 impl DeadZone {
     /// A new, empty dead zone. Attach content with [`child`](Self::child) or
-    /// [`child_id`](Self::child_id).
+    /// [`child`](Self::child).
     pub fn new() -> Self {
         Self {
             child: None,
@@ -64,15 +64,29 @@ impl DeadZone {
     }
 
     /// Wrap an inline widget.
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending = Some(Box::new(widget));
-        self
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => {
+                self.child = Some(id);
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                self.pending = Some(w);
+                self
+            }
+        }
     }
-
-    /// Wrap a pre-registered widget by id.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.child = Some(id);
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -160,8 +174,8 @@ mod tests {
         let c = clicked.clone();
         let button = tree
             .add(IconButton::new(IconWidget::checkmark(16.0)).on_activate_fn(move |_| c.set(true)));
-        let dead = tree.add(DeadZone::new().child_id(button));
-        let ancestor = tree.add(crate::primitives::HStack::new().add_child(dead).on_drag(
+        let dead = tree.add(DeadZone::new().child(button));
+        let ancestor = tree.add(crate::primitives::HStack::new().child(dead).on_drag(
             move |phase, _ctx| {
                 if let teksilo_core::gesture::DragPhase::Started { .. } = phase {
                     d.set(true);
@@ -222,7 +236,7 @@ mod tests {
         );
         // A rigid 100-wide sibling forces the whole deficit onto the dead zone.
         let rigid = tree.add(FixedSize::new().width(100.0).height(20.0));
-        tree.add(HStack::new().add_child(rigid).add_child(dead));
+        tree.add(HStack::new().child(rigid).child(dead));
         // 200 px natural, 120 px offered → 80 px deficit; the shrinkable dead
         // zone must absorb it (down toward its 20 px floor).
         tree.layout(SizeProposal::exact(120.0, 20.0));

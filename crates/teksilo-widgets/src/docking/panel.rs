@@ -278,7 +278,7 @@ impl DockSidePanel {
             _ => {
                 let mut row = HStack::new().spacing(2.0);
                 for id in &trailing {
-                    row = row.add_child(*id);
+                    row = row.child(*id);
                 }
                 Some(ctx.add(row))
             }
@@ -301,11 +301,11 @@ fn empty_side_drop_target(
             .style(TextStyleRole::Body)
             .color(TextRole::Secondary),
     );
-    let label = ctx.add(Center::new().child_id(text));
+    let label = ctx.add(Center::new().child(text));
     let m = model.clone();
     ctx.add(
         DropTarget::new()
-            .child_id(label)
+            .child(label)
             .accept_when(|p| dropped_dock_tab(p).is_some() || dropped_dock_widget(p).is_some())
             .on_drop(move |p, _pos, ctx| {
                 if !m.is_side_enabled(side) {
@@ -356,15 +356,15 @@ impl Widget for DockSidePanel {
             }
             let mut bar = HStack::new().spacing(2.0);
             if let Some(id) = leading {
-                bar = bar.add_child(id);
+                bar = bar.child(id);
             }
-            bar = bar.add_child(ctx.add(Spacer::new()));
+            bar = bar.child(ctx.add(Spacer::new()));
             if let Some(id) = trailing {
-                bar = bar.add_child(id);
+                bar = bar.child(id);
             }
             let bar = ctx.add(bar);
-            let body = ctx.add(Expand::new().child_id(drop));
-            let root = ctx.add(VStack::new().add_child(bar).add_child(body));
+            let body = ctx.add(Expand::new().child(drop));
+            let root = ctx.add(VStack::new().child(bar).child(body));
             self.root = Some(root);
             return vec![root];
         }
@@ -616,10 +616,10 @@ impl Widget for DockSidePanel {
         // activity is hidden and no tab can be right-clicked.
         let (leading_slot, trailing_slot) = self.compose_bar_slots(ctx, needs_hamburger);
         if let Some(id) = leading_slot {
-            tw = tw.bar_leading_slot_id(id);
+            tw = tw.bar_leading_slot(id);
         }
         if let Some(id) = trailing_slot {
-            tw = tw.bar_trailing_slot_id(id);
+            tw = tw.bar_trailing_slot(id);
         }
         let root = ctx.add(tw);
         self.root = Some(root);
@@ -774,7 +774,7 @@ impl Widget for DockTabContentWidget {
                     self.model.clone(),
                     inner,
                 ));
-                splitter = splitter.pane_id(pane_widget);
+                splitter = splitter.pane(pane_widget);
             }
             ctx.add(splitter)
         };
@@ -859,7 +859,7 @@ impl DockTabContentWidget {
         // The dock's header actions (app-supplied) + the framework `⋮` options
         // menu sit in the accordion header's trailing slot.
         if let Some(trailing) = self.dock_header_trailing(ctx, dock, multi_pane) {
-            accordion = accordion.trailing_id(trailing);
+            accordion = accordion.trailing(trailing);
         }
         // The accordion header is the dock's drag handle — only when the policy
         // allows dragging a single dock out of a split pane.
@@ -868,7 +868,7 @@ impl DockTabContentWidget {
                 ctx.start_drag(content, DragPayload::typed(DockDragData { dock_id: dock }));
             });
         }
-        ctx.add(accordion.content_id(content))
+        ctx.add(accordion.content(content))
     }
 
     /// Build the trailing cluster of a dock header — the app's inline
@@ -943,13 +943,13 @@ impl DockTabContentWidget {
                 let cluster = if vertical {
                     let mut col = VStack::new().spacing(2.0);
                     for k in &kids {
-                        col = col.add_child(*k);
+                        col = col.child(*k);
                     }
                     ctx.add(col)
                 } else {
                     let mut row = HStack::new().spacing(2.0);
                     for k in &kids {
-                        row = row.add_child(*k);
+                        row = row.child(*k);
                     }
                     ctx.add(row)
                 };
@@ -979,12 +979,9 @@ impl DockTabContentWidget {
                 .no_shrink(),
         );
         let spacer_id = ctx.add(Spacer::new());
-        let mut row = HStack::new()
-            .spacing(2.0)
-            .add_child(title_id)
-            .add_child(spacer_id);
+        let mut row = HStack::new().spacing(2.0).child(title_id).child(spacer_id);
         if let Some(trailing) = self.dock_header_trailing(ctx, dock, false) {
-            row = row.add_child(trailing);
+            row = row.child(trailing);
         }
         let row_id = ctx.add(row);
         let padded = ctx.add(
@@ -992,7 +989,7 @@ impl DockTabContentWidget {
                 2.0,
                 crate::accordion::accordion_header_padding_horizontal(&ctx.theme().input),
             )
-            .child_id(row_id),
+            .child(row_id),
         );
         // Fixed-height header bar (matching the Accordion header extent) with a
         // 1 dp divider beneath it, above the content.
@@ -1001,14 +998,14 @@ impl DockTabContentWidget {
                 0.0,
                 crate::accordion::accordion_fill_header_extent(&ctx.theme().input),
             )
-            .child_id(padded),
+            .child(padded),
         );
         let divider = ctx.add(Divider::horizontal());
         ctx.add(
             VStack::new()
-                .add_child(header)
-                .add_child(divider)
-                .child(Expand::new().flex(1.0).child_id(content)),
+                .child(header)
+                .child(divider)
+                .child(Expand::new().flex(1.0).child(content)),
         )
     }
 }
@@ -1066,7 +1063,7 @@ impl Widget for DockPanePane {
         // (NoFeedback) to this pane's own tab handler below and shows no zones.
         let split_model = self.model.clone();
         let target = DropTarget::new()
-            .child_id(self.inner)
+            .child(self.inner)
             .zone_size_factor(0.2)
             .region(DropRegion::Center, |z| z)
             .region(DropRegion::Leading, |z| z)

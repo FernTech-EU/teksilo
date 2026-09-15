@@ -256,12 +256,7 @@ impl Widget for Toggle {
                 .style(TextStyleRole::Body)
                 .a11y_hidden();
             let label_id = ctx.add(label_widget);
-            ctx.add(
-                HStack::new()
-                    .spacing(6.0)
-                    .add_child(body_id)
-                    .add_child(label_id),
-            )
+            ctx.add(HStack::new().spacing(6.0).child(body_id).child(label_id))
         } else {
             body_id
         };

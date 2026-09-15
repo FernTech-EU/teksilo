@@ -61,7 +61,7 @@ pub fn build_toolbar(ctx: &mut BuildContext, state: &AppState) -> WidgetId {
             .border_color(BorderRole::Default)
             .border_width(1.0),
     );
-    ctx.add(ZStack::new().add_child(bg).add_child(inner))
+    ctx.add(ZStack::new().child(bg).child(inner))
 }
 
 fn labelled(label: &str, control: WidgetId) -> impl teksilo_core::widget::Widget + 'static {
@@ -72,7 +72,7 @@ fn labelled(label: &str, control: WidgetId) -> impl teksilo_core::widget::Widget
     HStack::new()
         .spacing(6.0)
         .child(label_widget)
-        .add_child(control)
+        .child(control)
 }
 
 fn build_theme_picker(ctx: &mut BuildContext, state: &AppState) -> WidgetId {

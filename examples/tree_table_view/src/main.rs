@@ -199,7 +199,7 @@ fn main() {
                     tree.add(
                         VStack::new()
                             .child(dark_mode_toolbar())
-                            .child(Expand::new().child_id(table_id)),
+                            .child(Expand::new().child(table_id)),
                     )
                 }),
         )

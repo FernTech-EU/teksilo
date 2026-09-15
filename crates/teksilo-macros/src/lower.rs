@@ -142,7 +142,7 @@ fn lower_element_stmt(
             BodyItem::Spread { expr, span } => {
                 stmts.push(quote_spanned! { *span =>
                     for __spread_id in #expr {
-                        __parent = __parent.add_child(__spread_id);
+                        __parent = __parent.child(__spread_id);
                     }
                 });
             }
@@ -189,11 +189,16 @@ fn lower_body_attach(
                 let #name = #ctx_tok.add(#element_expr);
             });
             Ok(quote_spanned! { name_span =>
-                .add_child(#name)
+                .child(#name)
             })
         }
+        // `.child`, not `.add_child`: every container's `child` takes
+        // `impl IntoTeksiChild`, so one escape carries a `WidgetId` and a
+        // widget value alike. That is what makes `#{ }` the answer to a Rust
+        // struct literal at body position, which the element form would
+        // otherwise claim.
         BodyItem::Escape { expr, span } => Ok(quote_spanned! { *span =>
-            .add_child(#expr)
+            .child(#expr)
         }),
         BodyItem::Rust {
             block,
@@ -230,27 +235,19 @@ fn lower_property_call(
         });
     }
 
-    let forces_id_suffix = prop
-        .args
-        .iter()
-        .any(|a| matches!(a, PropArg::Escape(_) | PropArg::Binding { .. }));
-
+    // No `_id` suffix synthesis. A slot method takes `impl IntoTeksiChild`, so
+    // the same name accepts a widget value and a `WidgetId` alike, and the
+    // macro no longer has to know that a binding or an escape at a slot
+    // position means "call the other method". One name per slot.
     let lowered_args: Vec<TokenStream2> = prop
         .args
         .iter()
         .map(|arg| lower_prop_arg(arg, ctx_tok, hoisted))
         .collect::<Result<Vec<_>, _>>()?;
 
-    if forces_id_suffix {
-        let id_name = syn::Ident::new(&format!("{}_id", name), name.span());
-        Ok(quote_spanned! { method_span =>
-            .#id_name(#(#lowered_args),*)
-        })
-    } else {
-        Ok(quote_spanned! { method_span =>
-            .#name(#(#lowered_args),*)
-        })
-    }
+    Ok(quote_spanned! { method_span =>
+        .#name(#(#lowered_args),*)
+    })
 }
 
 fn lower_prop_arg(

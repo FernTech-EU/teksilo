@@ -58,7 +58,7 @@ pub fn build_knob_form(ctx: &mut BuildContext, spec: &KnobSpec, values: &KnobVal
             current_group = decl.group;
         }
         let row_widget = build_row(ctx, decl, values);
-        column = column.add_child(row_widget);
+        column = column.child(row_widget);
     }
     ctx.add(column)
 }
@@ -77,7 +77,7 @@ fn build_row(ctx: &mut BuildContext, decl: &KnobDecl, values: &KnobValues) -> Wi
     // `Rect::contains` is false for every point and the row is unreachable by
     // any pointer at all. Measured on the form's own slider row.
     let label_box = MaxSize::width(110.0).child(label);
-    let editor_widget = MaxSize::width(f32::INFINITY).child_id(editor);
+    let editor_widget = MaxSize::width(f32::INFINITY).child(editor);
     let row = HStack::new()
         .spacing(8.0)
         .child(label_box)

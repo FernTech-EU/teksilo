@@ -554,16 +554,16 @@ impl Widget for Calendar {
         // ── Assemble VStack ─────────────────────────────────────
         let mut col = VStack::new()
             .spacing(cal_recipe::CALENDAR_SECTION_GAP * scale)
-            .add_child(header_id)
-            .add_child(weekday_row_id)
-            .add_child(grid_id);
+            .child(header_id)
+            .child(weekday_row_id)
+            .child(grid_id);
         if let Some(footer_id) = footer_id {
             let divider_id = ctx.add(Divider::horizontal());
-            col = col.add_child(divider_id).add_child(footer_id);
+            col = col.child(divider_id).child(footer_id);
         }
         let col_id = ctx.add(col);
         let padded_id =
-            ctx.add(Padding::uniform(cal_recipe::CALENDAR_OUTER_PADDING * scale).child_id(col_id));
+            ctx.add(Padding::uniform(cal_recipe::CALENDAR_OUTER_PADDING * scale).child(col_id));
 
         // Opaque background — Calendar can be used standalone (sits
         // on whatever surface the parent provides) or as a popover
@@ -585,8 +585,8 @@ impl Widget for Calendar {
         );
         let framed_id = ctx.add(
             crate::primitives::ZStack::new()
-                .add_child(bg_id)
-                .add_child(padded_id),
+                .child(bg_id)
+                .child(padded_id),
         );
         self.root_child_id = Some(framed_id);
 
@@ -777,7 +777,7 @@ fn build_weekday_row(
                 .height(cal_recipe::CALENDAR_WEEKDAY_ROW_HEIGHT * scale)
                 .child(Spacer::new()),
         );
-        row = row.add_child(spacer);
+        row = row.child(spacer);
     }
     let first_offset = first_dow.to_monday_zero_offset();
     for i in 0..7 {
@@ -798,7 +798,7 @@ fn build_weekday_row(
             cal_recipe::CALENDAR_CELL_SIZE * scale,
             cal_recipe::CALENDAR_WEEKDAY_ROW_HEIGHT * scale,
         );
-        row = row.add_child(ctx.add(cell));
+        row = row.child(ctx.add(cell));
     }
     // AT: the row containing the column headers is itself a Row.
     // WAI-ARIA grid pattern wants Row > ColumnHeader, not Group >
@@ -874,7 +874,7 @@ fn build_footer(
             .single_line()
             .a11y_hidden();
         let spacer = ctx.add(Spacer::new());
-        row = row.add_child(spacer).child(status_label);
+        row = row.child(spacer).child(status_label);
     } else {
         row = row.child(Spacer::new());
     }
@@ -1001,12 +1001,12 @@ impl Widget for CalendarBody {
                     .single_line()
                     .a11y_hidden();
                 let week_text_id = ctx.add(week_text);
-                row = row.add_child(
+                row = row.child(
                     ctx.add(
                         FixedSize::new()
                             .width(week_number_col_width)
                             .height(cell_height)
-                            .child(Center::new().child_id(week_text_id)),
+                            .child(Center::new().child(week_text_id)),
                     ),
                 );
             }
@@ -1031,7 +1031,7 @@ impl Widget for CalendarBody {
                     self.params.on_activate.clone(),
                     self.params.range_status.clone(),
                 );
-                row = row.add_child(ctx.add(cell));
+                row = row.child(ctx.add(cell));
             }
             // AT: each week is a Role::Row; the WAI-ARIA grid pattern
             // expects Grid > Row > GridCell.
@@ -1039,7 +1039,7 @@ impl Widget for CalendarBody {
         }
         let mut col = VStack::new().spacing(gap);
         for id in &row_ids {
-            col = col.add_child(*id);
+            col = col.child(*id);
         }
         let col_id = ctx.add(col);
         *self.row_ids.borrow_mut() = vec![col_id];

@@ -52,8 +52,13 @@ impl Stack {
         }
     }
 
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.children.push(id);
+    /// The container form every catalog widget now has: it takes an id or a
+    /// widget value through `IntoTeksiChild`.
+    pub fn child(mut self, c: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(c) {
+            teksilo_core::PendingChild::Id(id) => self.children.push(id),
+            teksilo_core::PendingChild::Deferred(_) => unreachable!("Stack takes ids"),
+        }
         self
     }
 }

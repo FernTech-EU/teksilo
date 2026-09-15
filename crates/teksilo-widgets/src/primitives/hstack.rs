@@ -69,22 +69,21 @@ impl HStack {
         self
     }
 
-    /// Add a pre-registered child by ID.
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.pending.push(PendingChild::Id(id));
-        self
-    }
-
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
         for widget in iter {
-            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         }
         self
     }
@@ -92,7 +91,8 @@ impl HStack {
     /// Conditionally add a child. No-op if None.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
-            self.pending.push(PendingChild::Deferred(Box::new(w)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(w));
         }
         self
     }
@@ -283,7 +283,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(60.0, 30.0));
         let b = tree.add(FixedLeaf(40.0, 20.0));
-        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        let _stack = tree.add(HStack::new().child(a).child(b));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         assert!((tree.bounds(a).width - 60.0).abs() < 0.01);
@@ -309,7 +309,7 @@ mod tests {
             shrink: 1.0,
             height: 20.0,
         });
-        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        let _stack = tree.add(HStack::new().child(a).child(b));
         tree.layout(SizeProposal::exact(100.0, 40.0));
         assert!(
             (tree.bounds(a).width - 50.0).abs() < 0.01,
@@ -334,7 +334,7 @@ mod tests {
             height: 20.0,
         });
         let icon = tree.add(FixedLeaf(40.0, 20.0)); // rigid: shrink == 0
-        let _stack = tree.add(HStack::new().add_child(label).add_child(icon));
+        let _stack = tree.add(HStack::new().child(label).child(icon));
         tree.layout(SizeProposal::exact(100.0, 40.0)); // deficit = 120 - 100 = 20
         assert!(
             (tree.bounds(label).width - 60.0).abs() < 0.01,
@@ -358,7 +358,7 @@ mod tests {
             shrink: 1.0,
             height: 20.0,
         });
-        let _stack = tree.add(HStack::new().add_child(a));
+        let _stack = tree.add(HStack::new().child(a));
         tree.layout(SizeProposal::exact(30.0, 40.0)); // wants to shrink to 30, floored at 50
         assert!(
             (tree.bounds(a).width - 50.0).abs() < 0.01,
@@ -372,7 +372,7 @@ mod tests {
         // A rigid child still overflows (no silent shrink without opt-in).
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 20.0));
-        let _stack = tree.add(HStack::new().add_child(a));
+        let _stack = tree.add(HStack::new().child(a));
         tree.layout(SizeProposal::exact(50.0, 40.0));
         assert!(
             (tree.bounds(a).width - 80.0).abs() < 0.01,
@@ -394,7 +394,7 @@ mod tests {
             wanted_w: 200.0,
             min_w: 10.0,
         });
-        let stack = tree.add(HStack::new().add_child(leaf));
+        let stack = tree.add(HStack::new().child(leaf));
         tree.layout(SizeProposal {
             width: Some(50.0),
             height: None, // ask the stack for its intrinsic height
@@ -421,7 +421,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(50.0, 30.0));
         let b = tree.add(FixedLeaf(50.0, 30.0));
-        let _stack = tree.add(HStack::new().spacing(10.0).add_child(a).add_child(b));
+        let _stack = tree.add(HStack::new().spacing(10.0).child(a).child(b));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         assert!((tree.bounds(a).x - 0.0).abs() < 0.01);
@@ -432,7 +432,7 @@ mod tests {
     fn cross_axis_center_alignment() {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(50.0, 20.0));
-        let _stack = tree.add(HStack::new().add_child(a)); // default: VAlignment::Center
+        let _stack = tree.add(HStack::new().child(a)); // default: VAlignment::Center
         tree.layout(SizeProposal::exact(200.0, 60.0));
 
         // 20px child centered in 60px height: y = (60-20)/2 = 20
@@ -443,7 +443,7 @@ mod tests {
     fn cross_axis_top_alignment() {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(50.0, 20.0));
-        let _stack = tree.add(HStack::new().alignment(VAlignment::Top).add_child(a));
+        let _stack = tree.add(HStack::new().alignment(VAlignment::Top).child(a));
         tree.layout(SizeProposal::exact(200.0, 60.0));
 
         assert!((tree.bounds(a).y - 0.0).abs() < 0.01);
@@ -453,7 +453,7 @@ mod tests {
     fn cross_axis_bottom_alignment() {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(50.0, 20.0));
-        let _stack = tree.add(HStack::new().alignment(VAlignment::Bottom).add_child(a));
+        let _stack = tree.add(HStack::new().alignment(VAlignment::Bottom).child(a));
         tree.layout(SizeProposal::exact(200.0, 60.0));
 
         assert!((tree.bounds(a).y - 40.0).abs() < 0.01); // 60 - 20
@@ -465,12 +465,7 @@ mod tests {
         let a = tree.add(FixedLeaf(50.0, 20.0));
         let b = tree.add(FixedLeaf(50.0, 20.0));
         // Container default: Top, but b overrides to Bottom
-        let _stack = tree.add(
-            HStack::new()
-                .alignment(VAlignment::Top)
-                .add_child(a)
-                .add_child(b),
-        );
+        let _stack = tree.add(HStack::new().alignment(VAlignment::Top).child(a).child(b));
         tree.set_alignment(
             b,
             teksilo_tokens::Alignment {
@@ -513,7 +508,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(Expand::new().flex(1.0));
         let b = tree.add(Expand::new().flex(2.0));
-        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        let _stack = tree.add(HStack::new().child(a).child(b));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         assert!(
@@ -536,7 +531,7 @@ mod tests {
         let fixed = tree.add(FixedLeaf(100.0, 30.0));
         let a = tree.add(Expand::new().flex(1.0));
         let b = tree.add(Expand::new().flex(2.0));
-        let _stack = tree.add(HStack::new().add_child(fixed).add_child(a).add_child(b));
+        let _stack = tree.add(HStack::new().child(fixed).child(a).child(b));
         tree.layout(SizeProposal::exact(400.0, 50.0));
 
         assert!((tree.bounds(fixed).width - 100.0).abs() < 0.01);
@@ -552,7 +547,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(Spacer::new().min_length(20.0));
         let b = tree.add(Spacer::new().min_length(20.0));
-        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        let _stack = tree.add(HStack::new().child(a).child(b));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         assert!((tree.bounds(a).width - 50.0).abs() < 0.01);
@@ -568,7 +563,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let fixed = tree.add(FixedLeaf(80.0, 30.0));
         let expand = tree.add(Expand::new());
-        let _stack = tree.add(HStack::new().add_child(fixed).add_child(expand));
+        let _stack = tree.add(HStack::new().child(fixed).child(expand));
         tree.layout(SizeProposal::exact(200.0, 50.0));
 
         assert!((tree.bounds(fixed).width - 80.0).abs() < 0.01);
@@ -587,9 +582,9 @@ mod tests {
         use crate::primitives::expand::Expand;
         let mut tree = WidgetTree::new();
         let inner = tree.add(FixedLeaf(60.0, 20.0));
-        let expand = tree.add(Expand::new().respect_intrinsic().child_id(inner));
+        let expand = tree.add(Expand::new().respect_intrinsic().child(inner));
         let fixed = tree.add(FixedLeaf(100.0, 30.0));
-        let _stack = tree.add(HStack::new().add_child(expand).add_child(fixed));
+        let _stack = tree.add(HStack::new().child(expand).child(fixed));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         assert!((tree.bounds(expand).width - 200.0).abs() < 0.01);
@@ -602,7 +597,7 @@ mod tests {
         tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
         let a = tree.add(FixedLeaf(60.0, 30.0));
         let b = tree.add(FixedLeaf(40.0, 30.0));
-        let _stack = tree.add(HStack::new().add_child(a).add_child(b));
+        let _stack = tree.add(HStack::new().child(a).child(b));
         tree.layout(SizeProposal {
             width: None,
             height: Some(50.0),

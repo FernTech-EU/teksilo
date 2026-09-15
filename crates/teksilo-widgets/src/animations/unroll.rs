@@ -115,15 +115,21 @@ impl Unroll {
     }
 
     /// Inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// Pre-registered child by `WidgetId`.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// Set the edge that stays anchored as the child unrolls. Defaults
@@ -310,7 +316,7 @@ mod tests {
         let progress = Signal::new_animated(1.0);
         let mut t = tree();
         let child = t.add(TextWidget::new(lit!("0123456789")));
-        let id = t.add(Unroll::from_progress(progress.clone()).child_id(child));
+        let id = t.add(Unroll::from_progress(progress.clone()).child(child));
         t.layout(SizeProposal::unspecified());
         let full = t.bounds(id).width;
         assert!(full > 0.0);
@@ -332,7 +338,7 @@ mod tests {
         let id = t.add(
             Unroll::from_progress(progress)
                 .reveal_from(UnrollFrom::Trailing)
-                .child_id(child),
+                .child(child),
         );
         t.layout(SizeProposal::unspecified());
         // The child is laid out at full natural width anchored so its

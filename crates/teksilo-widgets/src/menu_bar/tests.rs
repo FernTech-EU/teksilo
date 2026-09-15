@@ -770,7 +770,7 @@ fn collapsible_hamburger_keeps_constant_width_in_wide_slot() {
             .collapse_policy(CollapsePolicy::Always),
     );
     // FixedSize fills its child to 600px wide.
-    let _slot = t.add(FixedSize::new().width(600.0_f32).child_id(mb));
+    let _slot = t.add(FixedSize::new().width(600.0_f32).child(mb));
     t.layout(SizeProposal::exact(800.0, 100.0));
     t.layout(SizeProposal::exact(800.0, 100.0));
 

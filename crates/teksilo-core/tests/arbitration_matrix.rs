@@ -346,13 +346,13 @@ fn build(scenario: Scenario) -> Fixture {
             let row = node!(
                 "row",
                 Stack::new()
-                    .add_child(leaf)
+                    .child(leaf)
                     .on_tap(move |_e, _c| t.set(t.get() + 1))
                     .on_drag(|_p, _c| {})
             );
             node!(
                 "scroller",
-                Stack::new().add_child(row).pan_claim(PanClaim::vertical())
+                Stack::new().child(row).pan_claim(PanClaim::vertical())
             );
         }
         Scenario::Slider => {
@@ -366,9 +366,7 @@ fn build(scenario: Scenario) -> Fixture {
             );
             node!(
                 "scroller",
-                Stack::new()
-                    .add_child(slider)
-                    .pan_claim(PanClaim::vertical())
+                Stack::new().child(slider).pan_claim(PanClaim::vertical())
             );
         }
         Scenario::TextSelection => {
@@ -381,7 +379,7 @@ fn build(scenario: Scenario) -> Fixture {
             node!(
                 "scroller",
                 Stack::new()
-                    .add_child(editor)
+                    .child(editor)
                     .pan_claim(PanClaim::vertical())
                     .touch_action(TouchAction::PAN_Y)
             );
@@ -392,13 +390,10 @@ fn build(scenario: Scenario) -> Fixture {
             let card = node!(
                 "card",
                 Stack::new()
-                    .add_child(leaf)
+                    .child(leaf)
                     .on_tap(move |_e, _c| t.set(t.get() + 1))
             );
-            node!(
-                "container",
-                Stack::new().add_child(card).on_drag(|_p, _c| {})
-            );
+            node!("container", Stack::new().child(card).on_drag(|_p, _c| {}));
         }
         Scenario::SceneMarqueeInScroller => {
             let leaf = node!("leaf", Leaf::new());
@@ -406,17 +401,14 @@ fn build(scenario: Scenario) -> Fixture {
             let card = node!(
                 "card",
                 Stack::new()
-                    .add_child(leaf)
+                    .child(leaf)
                     .on_tap(move |_e, _c| t.set(t.get() + 1))
             );
-            let container = node!(
-                "container",
-                Stack::new().add_child(card).on_drag(|_p, _c| {})
-            );
+            let container = node!("container", Stack::new().child(card).on_drag(|_p, _c| {}));
             node!(
                 "scroller",
                 Stack::new()
-                    .add_child(container)
+                    .child(container)
                     .pan_claim(PanClaim::vertical())
             );
         }
@@ -432,15 +424,13 @@ fn build(scenario: Scenario) -> Fixture {
             let tab = node!(
                 "tab",
                 Stack::new()
-                    .add_child(leaf)
+                    .child(leaf)
                     .on_tap(move |_e, _c| t.set(t.get() + 1))
                     .on_drag(|_p, _c| {})
             );
             node!(
                 "strip",
-                Stack::new()
-                    .add_child(tab)
-                    .pan_claim(PanClaim::horizontal())
+                Stack::new().child(tab).pan_claim(PanClaim::horizontal())
             );
         }
         Scenario::ColumnGrip | Scenario::ColumnGripNone | Scenario::ColumnGripManipulation => {
@@ -462,21 +452,16 @@ fn build(scenario: Scenario) -> Fixture {
             };
             let strip = node!(
                 "strip",
-                Stack::new()
-                    .add_child(grip)
-                    .pan_claim(PanClaim::horizontal())
+                Stack::new().child(grip).pan_claim(PanClaim::horizontal())
             );
-            node!(
-                "ancestor",
-                Stack::new().add_child(strip).on_drag(|_p, _c| {})
-            );
+            node!("ancestor", Stack::new().child(strip).on_drag(|_p, _c| {}));
         }
         Scenario::TwoAxisScroller(action) => {
             let leaf = node!("leaf", Leaf::new());
             node!(
                 "scroller",
                 Stack::new()
-                    .add_child(leaf)
+                    .child(leaf)
                     .pan_claim(PanClaim::both())
                     .touch_action(action)
             );
@@ -485,25 +470,21 @@ fn build(scenario: Scenario) -> Fixture {
             let leaf = node!("leaf", Leaf::new());
             let inner = node!(
                 "inner",
-                Stack::new()
-                    .add_child(leaf)
-                    .on_pointer_event(|event, _ctx| {
-                        if matches!(event, WidgetEvent::PointerDown { .. }) {
-                            return EventResponse::Handled;
-                        }
-                        EventResponse::Ignored
-                    })
+                Stack::new().child(leaf).on_pointer_event(|event, _ctx| {
+                    if matches!(event, WidgetEvent::PointerDown { .. }) {
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                })
             );
             node!(
                 "outer",
-                Stack::new()
-                    .add_child(inner)
-                    .on_pointer_event(|event, _ctx| {
-                        if matches!(event, WidgetEvent::PointerDown { .. }) {
-                            return EventResponse::Handled;
-                        }
-                        EventResponse::Ignored
-                    })
+                Stack::new().child(inner).on_pointer_event(|event, _ctx| {
+                    if matches!(event, WidgetEvent::PointerDown { .. }) {
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                })
             );
         }
         Scenario::Button => {
@@ -521,9 +502,7 @@ fn build(scenario: Scenario) -> Fixture {
             );
             node!(
                 "scroller",
-                Stack::new()
-                    .add_child(button)
-                    .pan_claim(PanClaim::vertical())
+                Stack::new().child(button).pan_claim(PanClaim::vertical())
             );
         }
     }
@@ -1191,7 +1170,7 @@ fn mouse_latch_is_five_in_every_configuration() {
             let leaf = tree.add(Leaf::new().on_tap(|_e, _c| {}));
             let container = tree.add(
                 Stack::new()
-                    .add_child(leaf)
+                    .child(leaf)
                     .touch_action(action)
                     .on_drag(|_p, _c| {}),
             );
@@ -1232,7 +1211,7 @@ fn mouse_latch_is_five_in_every_configuration() {
                         EventResponse::Ignored
                     }),
             );
-            let ancestor = tree.add(Stack::new().add_child(grip).on_drag(|_p, _c| {}));
+            let ancestor = tree.add(Stack::new().child(grip).on_drag(|_p, _c| {}));
             tree.layout(SizeProposal::exact(200.0, 200.0));
 
             tree.pointer_down_button(Point::new(100.0, 100.0), PointerButton::Primary);
@@ -1441,7 +1420,7 @@ fn a_holder_under_a_long_pressing_peer(
     }));
     let peer = tree.add(
         Stack::new()
-            .add_child(child)
+            .child(child)
             .on_drag(|_p, _c| {})
             .on_long_press(move |_e, _c| flag.set(true)),
     );

@@ -57,11 +57,7 @@ impl Harness {
                 .height(20.0)
                 .child(crate::primitives::RectWidget::new().focusable(true)),
         );
-        tree.add(
-            crate::primitives::VStack::new()
-                .add_child(padded)
-                .add_child(other),
-        );
+        tree.add(crate::primitives::VStack::new().child(padded).child(other));
         tree.layout(viewport());
         // The engine lays out in `paint`, so a test that never renders
         // hit-tests an empty layout and every press lands at the document end.
@@ -875,7 +871,7 @@ mod shrink {
                     .height(height.clone())
                     .child(widget),
             );
-            tree.add(crate::primitives::VStack::new().add_child(sized));
+            tree.add(crate::primitives::VStack::new().child(sized));
             tree.layout(SizeProposal::exact(480.0, 600.0));
             let _ = tree.render();
             let editor = tree

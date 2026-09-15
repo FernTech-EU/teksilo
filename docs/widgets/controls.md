@@ -33,7 +33,7 @@ hover on any platform and loses nothing by it.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/controls/index.html)
 
 ## `pub struct WindowControlsLayout`
 

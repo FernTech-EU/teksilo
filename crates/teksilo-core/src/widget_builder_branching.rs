@@ -287,7 +287,7 @@ impl IntoTeksiChild for WidgetId {
 ///   `BuildContext::visible_when`. Returns `Some(id)` unconditionally.
 ///
 /// The return type is `Option<WidgetId>` so the macro can use a single
-/// lowering shape (`if let Some(id) = ... { parent.add_child(id) }`)
+/// lowering shape (`if let Some(id) = ... { parent.child(id) }`)
 /// that works for both cases.
 pub trait IntoTeksiCondition {
     fn teksilo_into_conditional_child<W: crate::widget::Widget + 'static>(

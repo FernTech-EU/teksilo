@@ -849,7 +849,7 @@ pub fn widget_fixtures() -> Vec<TargetFixture> {
             t.add(
                 teksilo_widgets::primitives::ZStack::new()
                     .child(TextWidget::new(lit!("Page")))
-                    .add_child(host),
+                    .child(host),
             )
         }),
         TargetFixture::sized("notification_log", 420.0, 420.0, |t| {

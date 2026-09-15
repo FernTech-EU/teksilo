@@ -57,8 +57,8 @@ impl ButtonStyle for GlowButton {
                 .background(bg)
                 .corner_radius(CornerRadius::uniform(20.0)), // pill-ish
         );
-        let padded_label = ctx.add(Padding::new(8.0, 24.0, 8.0, 24.0).child_id(cfg.label));
-        ctx.add(ZStack::new().add_child(body).add_child(padded_label))
+        let padded_label = ctx.add(Padding::new(8.0, 24.0, 8.0, 24.0).child(cfg.label));
+        ctx.add(ZStack::new().child(body).child(padded_label))
     }
 }
 
@@ -84,8 +84,8 @@ impl ButtonStyle for BrutalistButton {
                 .border_width(2.0)
                 .border_color(Color::BLACK),
         );
-        let padded_label = ctx.add(Padding::new(10.0, 20.0, 10.0, 20.0).child_id(cfg.label));
-        ctx.add(ZStack::new().add_child(body).add_child(padded_label))
+        let padded_label = ctx.add(Padding::new(10.0, 20.0, 10.0, 20.0).child(cfg.label));
+        ctx.add(ZStack::new().child(body).child(padded_label))
     }
 }
 

@@ -112,7 +112,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`information`, `warning`, `critical`, `question`, `plain`, `text`, `informative_text`, `detailed_text`, `buttons`, `add_button`, `default_button`, `escape_button`, `show_again_checkbox`, `show_again_checkbox_state`, `on_result`, `present`
+`information`, `warning`, `critical`, `question`, `plain`, `text`, `informative_text`, `detailed_text`, `buttons`, `add_button`, `add_buttons`, `default_button`, `escape_button`, `show_again_checkbox`, `show_again_checkbox_state`, `on_result`, `present`
 
 ## API reference
 
@@ -323,6 +323,13 @@ escape buttons for the preset (both can be overridden via
 Append a single button. Use to augment a preset (rare) or to
 build a bespoke button row without going through
 `MessageBoxButtons::Custom`.
+
+#### `pub fn add_buttons( self, buttons: impl IntoIterator<Item = impl Into<MessageBoxButton>>, ) -> Self`
+
+Append several buttons from an iterator, in order.
+
+The loop form of `add_button`, for a bespoke button
+row built from data rather than spelled out one call at a time.
 
 #### `pub fn default_button(mut self, which: StandardButton) -> Self`
 

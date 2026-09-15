@@ -265,7 +265,7 @@ impl Widget for ShortcutSettings {
                 last_category = Some(row.category);
             }
             let row_id = self.build_row(ctx, &row, capturing, pending.as_ref());
-            column = column.add_child(row_id);
+            column = column.child(row_id);
         }
 
         let root = ctx.add(column);

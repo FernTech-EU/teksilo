@@ -384,8 +384,8 @@ impl Widget for NotificationLog {
             let archive_for_clear = archive.clone();
             let toolbar = HStack::new()
                 .spacing(8.0)
-                .add_child(ctx.add(Spacer::new()))
-                .add_child(
+                .child(ctx.add(Spacer::new()))
+                .child(
                     ctx.add(
                         Button::new(teksilo_i18n::tr_widget!(notifications_mark_all_read()))
                             .variant(ButtonVariant::Plain)
@@ -396,7 +396,7 @@ impl Widget for NotificationLog {
                             }),
                     ),
                 )
-                .add_child(
+                .child(
                     ctx.add(
                         Button::new(teksilo_i18n::tr_widget!(notifications_clear()))
                             .variant(ButtonVariant::Plain)
@@ -407,7 +407,7 @@ impl Widget for NotificationLog {
                             }),
                     ),
                 );
-            column = column.add_child(ctx.add(toolbar));
+            column = column.child(ctx.add(toolbar));
         }
 
         // Empty state or bucketed sections — against the SCOPED
@@ -427,11 +427,11 @@ impl Widget for NotificationLog {
             // `Expand::vertical` claims the slack without competing for
             // the horizontal axis; `Center` does the centring (a bare
             // `Center` reports no flex, so it would not claim anything).
-            column = column.add_child(
+            column = column.child(
                 ctx.add(
                     Expand::vertical()
                         .flex(1.0)
-                        .child(Center::new().child_id(empty)),
+                        .child(Center::new().child(empty)),
                 ),
             );
         } else {
@@ -456,12 +456,12 @@ impl Widget for NotificationLog {
                     // Indent to the rows' content inset so the header
                     // lines up with the severity glyph below it instead
                     // of hanging 8 dp further left than every row.
-                    sections = sections.add_child(ctx.add(
+                    sections = sections.child(ctx.add(
                         Padding::symmetric(0.0, si::STANDARD_ITEM_PADDING_HORIZONTAL).child(header),
                     ));
                     current_bucket = Some(bucket);
                 }
-                sections = sections.add_child(ctx.add_boxed(Self::build_row(
+                sections = sections.child(ctx.add_boxed(Self::build_row(
                     entry,
                     on_entry.as_ref(),
                     on_action.as_ref(),
@@ -491,7 +491,7 @@ impl Widget for NotificationLog {
             let scrollable = ScrollArea::new()
                 .preferred_height(self.preferred_height)
                 .child(sections);
-            column = column.add_child(
+            column = column.child(
                 ctx.add(
                     Shrinkable::new()
                         .min_height(si::STANDARD_ITEM_MIN_HEIGHT_TWO_LINE)

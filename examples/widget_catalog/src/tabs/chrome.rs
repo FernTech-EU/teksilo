@@ -130,14 +130,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(toolbar)
-            .add_child(status_bar)
-            .add_child(banners)
-            .add_child(breadcrumb)
-            .add_child(wizard)
-            .add_child(stepper),
+            .child(toolbar)
+            .child(status_bar)
+            .child(banners)
+            .child(breadcrumb)
+            .child(wizard)
+            .child(stepper),
     )
 }
 

@@ -116,7 +116,7 @@ fn main() {
 
                     tree.add(
                         VStack::new()
-                            .child(Expand::new().child(Panel::new().child_id(grid_id)))
+                            .child(Expand::new().child(Panel::new().child(grid_id)))
                             .child(
                                 Panel::new()
                                     .child(Padding::symmetric(8.0_f32, 6.0_f32).child(status_line)),

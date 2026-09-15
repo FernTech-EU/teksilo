@@ -86,7 +86,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
             }
         }
         let vstack_id = ctx.add(vstack);
-        return ctx.add(Padding::uniform(4.0).child_id(vstack_id));
+        return ctx.add(Padding::uniform(4.0).child(vstack_id));
     }
 
     build_virtualized_list(
@@ -216,13 +216,13 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     let row_id = ctx.add(
         HStack::new()
             .spacing(0.0)
-            .add_child(list_view_id)
-            .add_child(scrollbar_id),
+            .child(list_view_id)
+            .child(scrollbar_id),
     );
 
-    let padded_id = ctx.add(Padding::uniform(4.0).child_id(row_id));
+    let padded_id = ctx.add(Padding::uniform(4.0).child(row_id));
     let outer_height = viewport_height + 8.0;
-    let sized_id = ctx.add(FixedSize::new().height(outer_height).child_id(padded_id));
+    let sized_id = ctx.add(FixedSize::new().height(outer_height).child(padded_id));
 
     register_scroll_into_view(
         ctx,
@@ -441,7 +441,7 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                 }
             }
             let vstack_id = ctx.add(vstack);
-            ctx.add(Padding::uniform(4.0).child_id(vstack_id))
+            ctx.add(Padding::uniform(4.0).child(vstack_id))
         };
         self.root_child_id = Some(root_id);
         vec![root_id]
@@ -565,11 +565,11 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 .on_submit_fn(|ctx| ctx.dismiss_top_overlay());
             let search_id = ctx.add(search_input);
             self.search_input_slot.set(Some(search_id));
-            let search_wrapped = ctx.add(Padding::new(4.0, 4.0, 0.0, 4.0).child_id(search_id));
+            let search_wrapped = ctx.add(Padding::new(4.0, 4.0, 0.0, 4.0).child(search_id));
             let col = VStack::new()
                 .spacing(0.0)
-                .add_child(search_wrapped)
-                .add_child(list_id);
+                .child(search_wrapped)
+                .child(list_id);
             ctx.add(col)
         } else {
             list_id

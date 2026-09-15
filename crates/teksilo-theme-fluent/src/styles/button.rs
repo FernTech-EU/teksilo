@@ -99,10 +99,10 @@ impl ButtonStyle for FluentButtonStyle {
                 spacing(PADDING_BOTTOM, tokens),
                 spacing(PADDING_H, tokens),
             )
-            .child_id(cfg.label),
+            .child(cfg.label),
         );
-        let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
-        ctx.add(MinSize::new(0.0, dp(MIN_HEIGHT, TargetRole::Target, tokens)).child_id(stack))
+        let stack = ctx.add(ZStack::new().child(chrome).child(padded));
+        ctx.add(MinSize::new(0.0, dp(MIN_HEIGHT, TargetRole::Target, tokens)).child(stack))
     }
 
     fn label_text_role(&self, variant: ButtonVariant) -> Option<TextRole> {

@@ -179,13 +179,13 @@ impl Widget for StepButton {
         .color(icon_role);
         let icon_id = ctx.add(Center::new().child(sized_icon));
 
-        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(icon_id));
+        let zstack_id = ctx.add(ZStack::new().child(bg_id).child(icon_id));
 
         let root_id = ctx.add(
             crate::primitives::FixedSize::new()
                 .width(self.width)
                 .height(self.height)
-                .child_id(zstack_id),
+                .child(zstack_id),
         );
 
         // Hold-to-repeat plumbing: one cell of state shared between

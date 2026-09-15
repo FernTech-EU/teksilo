@@ -104,8 +104,13 @@ impl StackWidget {
         }
     }
 
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.child_ids.push(id);
+    /// The container form every catalog widget now has: it takes an id or a
+    /// widget value through `IntoTeksiChild`.
+    pub fn child(mut self, c: impl crate::IntoTeksiChild) -> Self {
+        match crate::IntoTeksiChild::into_pending(c) {
+            crate::PendingChild::Id(id) => self.child_ids.push(id),
+            crate::PendingChild::Deferred(_) => unreachable!("StackWidget takes ids"),
+        }
         self
     }
 }

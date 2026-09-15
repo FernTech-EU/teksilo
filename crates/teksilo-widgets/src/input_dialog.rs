@@ -292,7 +292,7 @@ impl Widget for InputDialogBody {
         );
         self.title_node = Some(title_id);
 
-        let mut column = VStack::new().spacing(10.0).add_child(title_id);
+        let mut column = VStack::new().spacing(10.0).child(title_id);
         if let Some(p) = &self.prompt {
             column = column.child(TextWidget::new(p.clone()).style(TextStyleRole::Body));
         }

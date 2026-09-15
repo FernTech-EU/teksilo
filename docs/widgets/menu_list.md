@@ -53,7 +53,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`type_ahead_timeout`, `attached_side`, `item`, `item_when`, `item_boxed_when`, `separator`, `header`, `max_visible_items`
+`type_ahead_timeout`, `attached_side`, `item`, `items`, `item_when`, `items_when`, `item_boxed_when`, `items_boxed_when`, `separator`, `header`, `max_visible_items`
 
 ## API reference
 
@@ -101,6 +101,13 @@ for the available edges.
 
 Add a menu item (typically a `MenuItem`).
 
+#### `pub fn items(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+
+Add several menu items from an iterator, in order.
+
+The loop form of `item`: reach for it when the rows come
+from data rather than being written out one call at a time.
+
 #### `pub fn item_when( self, widget: impl Widget + 'static, visible: impl Into<teksilo_core::signal::Prop<bool>>, ) -> Self`
 
 Add a menu item that is shown only while `visible` is `true`. When the
@@ -113,11 +120,27 @@ Because a hidden row never claims its mnemonic letter, two gated rows
 that are mutually exclusive may share one — the letter resolves to
 whichever is visible when it is pressed.
 
+#### `pub fn items_when<W, V>(self, iter: impl IntoIterator<Item = (W, V)>) -> Self where W: Widget + 'static, V: Into<teksilo_core::signal::Prop<bool>>,`
+
+Add several gated rows from an iterator of `(widget, visible)` pairs.
+
+The loop form of `item_when`, for a gated row set
+built from data. Each pair carries its own gate, so the rows appear and
+disappear independently.
+
 #### `pub fn item_boxed_when( mut self, widget: Box<dyn Widget>, visible: impl Into<teksilo_core::signal::Prop<bool>>, ) -> Self`
 
 `item_when` for an already-boxed widget — used when
 the row type is decided at runtime (e.g. a menu row that is either a
 `MenuItem` or an embedded control).
+
+#### `pub fn items_boxed_when<V>(self, iter: impl IntoIterator<Item = (Box<dyn Widget>, V)>) -> Self where V: Into<teksilo_core::signal::Prop<bool>>,`
+
+Add several gated rows from an iterator of `(widget, visible)` pairs.
+
+The loop form of `item_boxed_when`, for a gated
+row set built from data. Each pair carries its own gate, so the rows may
+appear and disappear independently.
 
 #### `pub fn separator(mut self) -> Self`
 

@@ -1457,7 +1457,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FillWidget::new());
         let b = tree.add(FillWidget::new());
-        let stack = tree.add(StackWidget::new().add_child(a).add_child(b));
+        let stack = tree.add(StackWidget::new().child(a).child(b));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         let children = tree.children(stack);
         assert_eq!(children.len(), 2);
@@ -1489,7 +1489,7 @@ mod tests {
             child: leaf,
             inset: 8.0,
         });
-        let root = tree.add(StackWidget::new().add_child(shrink));
+        let root = tree.add(StackWidget::new().child(shrink));
 
         tree.layout(SizeProposal::exact(120.0, 80.0));
 

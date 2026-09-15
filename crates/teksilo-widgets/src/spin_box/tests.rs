@@ -1492,7 +1492,7 @@ fn pan_over_a_spin_box(spin: SpinBox<i32>, up: f32) -> std::rc::Rc<std::cell::Ce
     let spin = tree.add(spin);
     let _page = tree.add(
         crate::primitives::VStack::new()
-            .add_child(spin)
+            .child(spin)
             .scroll_container(PanAxes::BOTH)
             .pan_claim(PanClaim::vertical())
             .on_scroll(move |_e, _c| {

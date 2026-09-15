@@ -70,9 +70,10 @@ any widget's API to the terminal (`python3 tools/extract_widget_api.py Button`).
 
 - [teksu-macro-reference.md](teksu-macro-reference.md) — user-facing reference
   for the `teksu!` block-DSL (parse → IR → builder calls).
-- [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — design spec with
-  full grammar, structural forms, and worked translations of catalog
-  examples.
+- [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — design rationale:
+  principles, structural forms, worked translations, and a changelog of where
+  the shipped macro diverged from the design. The reference above is normative
+  for behaviour.
 - [teksilo-fmt.md](teksilo-fmt.md) — `cargo teksilo-fmt`, the formatter for `teksu!`
   blocks (`rustfmt` skips macro bodies).
 - [teksilo-fmt-vscode.md](teksilo-fmt-vscode.md) — wiring `teksilo-fmt-lsp` into

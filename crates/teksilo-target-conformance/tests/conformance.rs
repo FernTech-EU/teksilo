@@ -1230,7 +1230,7 @@ impl teksilo_core::styles::ButtonStyle for TinyButtonStyle {
                 .child(
                     teksilo_widgets::primitives::ZStack::new()
                         .child(RectWidget::new().background(Color::from_hex("#888888")))
-                        .add_child(label),
+                        .child(label),
                 ),
         )
     }

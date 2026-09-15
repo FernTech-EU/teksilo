@@ -3591,7 +3591,7 @@ mod tests {
         let child = tree.add(FillWidget::new().on_tap(move |_pos, _ctx| {
             flag.set(true);
         }));
-        let parent = tree.add(StackWidget::new().add_child(child));
+        let parent = tree.add(StackWidget::new().child(child));
         tree.enabled_when(parent, enabled.clone());
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -3719,7 +3719,7 @@ mod tests {
         // preview pass and the child's hover never fired.
         tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .on_pointer_event(|_event, _ctx| EventResponse::Handled),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -3757,7 +3757,7 @@ mod tests {
         let child = tree.add(FillWidget::new().on_hover(move |entered, _ctx| b.set(entered)));
         tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .on_hover(move |entered, _ctx| r.set(entered)),
         );
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -3804,10 +3804,11 @@ mod tests {
             }
             EventResponse::Handled
         }));
-        let mid = tree.add(StackWidget::new().add_child(leaf));
-        let _root =
-            tree.add(StackWidget::new().add_child(mid).on_key_preview(
-                move |event, _c| match event {
+        let mid = tree.add(StackWidget::new().child(leaf));
+        let _root = tree.add(
+            StackWidget::new()
+                .child(mid)
+                .on_key_preview(move |event, _c| match event {
                     WidgetEvent::KeyDown {
                         key: Key::Enter, ..
                     } => {
@@ -3815,8 +3816,8 @@ mod tests {
                         EventResponse::Handled
                     }
                     _ => EventResponse::Ignored,
-                },
-            ));
+                }),
+        );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf);
@@ -3851,13 +3852,15 @@ mod tests {
             leaf_flag.set(true);
             EventResponse::Handled
         }));
-        let mid = tree.add(StackWidget::new().add_child(leaf));
-        let _root = tree.add(StackWidget::new().add_child(mid).on_key_preview(
-            move |_event, _c| {
-                preview_flag.set(true);
-                EventResponse::Ignored
-            },
-        ));
+        let mid = tree.add(StackWidget::new().child(leaf));
+        let _root = tree.add(
+            StackWidget::new()
+                .child(mid)
+                .on_key_preview(move |_event, _c| {
+                    preview_flag.set(true);
+                    EventResponse::Ignored
+                }),
+        );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf);
@@ -3913,22 +3916,26 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new().focusable());
-        let inner = tree.add(StackWidget::new().add_child(leaf).on_key_preview(
-            move |event, _c| {
-                if matches!(event, WidgetEvent::KeyDown { .. }) {
-                    inner_log.borrow_mut().push("inner");
-                }
-                EventResponse::Ignored
-            },
-        ));
-        let _outer = tree.add(StackWidget::new().add_child(inner).on_key_preview(
-            move |event, _c| {
-                if matches!(event, WidgetEvent::KeyDown { .. }) {
-                    outer_log.borrow_mut().push("outer");
-                }
-                EventResponse::Ignored
-            },
-        ));
+        let inner = tree.add(
+            StackWidget::new()
+                .child(leaf)
+                .on_key_preview(move |event, _c| {
+                    if matches!(event, WidgetEvent::KeyDown { .. }) {
+                        inner_log.borrow_mut().push("inner");
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        let _outer = tree.add(
+            StackWidget::new()
+                .child(inner)
+                .on_key_preview(move |event, _c| {
+                    if matches!(event, WidgetEvent::KeyDown { .. }) {
+                        outer_log.borrow_mut().push("outer");
+                    }
+                    EventResponse::Ignored
+                }),
+        );
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf);
@@ -5319,7 +5326,7 @@ mod tests {
         use crate::test_widgets::StackWidget;
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new());
-        let parent = tree.add(StackWidget::new().add_child(child));
+        let parent = tree.add(StackWidget::new().child(child));
         // Visually shift the entire subtree right by 100px.
         tree.set_transform(parent, teksilo_canvas::Transform2D::translate(100.0, 0.0));
         tree.layout(SizeProposal::exact(100.0, 50.0));
@@ -5347,7 +5354,7 @@ mod tests {
         use crate::test_widgets::StackWidget;
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new());
-        let parent = tree.add(StackWidget::new().add_child(child));
+        let parent = tree.add(StackWidget::new().child(child));
         // Halve the visual size: pre-transform bounds (0,0,100,50) →
         // visually (0,0,50,25).
         tree.set_transform(parent, teksilo_canvas::Transform2D::scale(0.5, 0.5));
@@ -5369,8 +5376,8 @@ mod tests {
         use crate::test_widgets::StackWidget;
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new());
-        let inner = tree.add(StackWidget::new().add_child(leaf));
-        let outer = tree.add(StackWidget::new().add_child(inner));
+        let inner = tree.add(StackWidget::new().child(leaf));
+        let outer = tree.add(StackWidget::new().child(inner));
         // Outer translates by (100, 0); inner additionally scales by 2.
         // Effective at leaf = scale(2,2).then(translate(100,0)) — the
         // renderer composes deepest-first (see `effective_transform`).
@@ -5413,8 +5420,8 @@ mod tests {
         use crate::test_widgets::StackWidget;
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new());
-        let inner = tree.add(StackWidget::new().add_child(leaf));
-        let outer = tree.add(StackWidget::new().add_child(inner));
+        let inner = tree.add(StackWidget::new().child(leaf));
+        let outer = tree.add(StackWidget::new().child(inner));
         tree.set_transform(outer, teksilo_canvas::Transform2D::translate(100.0, 0.0));
         tree.set_transform(inner, teksilo_canvas::Transform2D::scale(2.0, 2.0));
         tree.layout(SizeProposal::exact(50.0, 25.0));
@@ -5599,7 +5606,7 @@ mod tests {
         }));
         let container = tree.add(
             crate::test_widgets::StackWidget::new()
-                .add_child(row)
+                .child(row)
                 .context_menu(move |_pos, _ctx| {
                     container_flag.set(Some("container"));
                     Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
@@ -5695,12 +5702,14 @@ mod tests {
         let outer_flag = outer_called.clone();
         let mut tree = WidgetTree::new();
         let inner = tree.add(FillWidget::new().context_menu(|_pos, _ctx| None));
-        let _outer = tree.add(StackWidget::new().add_child(inner).context_menu(
-            move |_pos, _ctx| {
-                outer_flag.set(outer_flag.get() + 1);
-                Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
-            },
-        ));
+        let _outer = tree.add(
+            StackWidget::new()
+                .child(inner)
+                .context_menu(move |_pos, _ctx| {
+                    outer_flag.set(outer_flag.get() + 1);
+                    Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+                }),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.dispatch_event(WidgetEvent::pointer_down(
@@ -6054,7 +6063,7 @@ mod tests {
         use crate::test_widgets::StackWidget;
         tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .on_scroll(move |ev, _ctx| match ev {
                     WidgetEvent::ScrollIntoView { target_bounds, .. } => {
                         recorded.set(Some(*target_bounds));
@@ -6150,7 +6159,7 @@ mod tests {
         use crate::test_widgets::StackWidget;
         tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .on_scroll(move |ev, _ctx| match ev {
                     WidgetEvent::ScrollIntoView { align, motion, .. } => {
                         recorded.set(Some((*align, *motion)));
@@ -7257,7 +7266,7 @@ mod press_and_focus_tests {
         let (row, pressed) = tappable(&mut tree);
         let list = tree.add(
             StackWidget::new()
-                .add_child(row)
+                .child(row)
                 .pan_claim(PanClaim::vertical())
                 .on_scroll(|_e, _c| EventResponse::Handled),
         );
@@ -7472,7 +7481,7 @@ mod press_and_focus_tests {
         let (row, pressed) = tappable(&mut tree);
         let list = tree.add(
             StackWidget::new()
-                .add_child(row)
+                .child(row)
                 .pan_claim(PanClaim::vertical())
                 .on_scroll(|_e, _c| EventResponse::Handled),
         );
@@ -7506,7 +7515,7 @@ mod press_and_focus_tests {
         let (row, pressed) = tappable(&mut tree);
         let list = tree.add(
             StackWidget::new()
-                .add_child(row)
+                .child(row)
                 .pan_claim(PanClaim::vertical())
                 .on_scroll(|_e, _c| EventResponse::Handled),
         );
@@ -7547,7 +7556,7 @@ mod press_and_focus_tests {
         ));
         let list = tree.add(
             StackWidget::new()
-                .add_child(row)
+                .child(row)
                 .pan_claim(PanClaim::vertical())
                 .on_scroll(|_e, _c| EventResponse::Handled),
         );

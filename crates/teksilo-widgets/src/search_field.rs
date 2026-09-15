@@ -551,7 +551,7 @@ impl Widget for SearchField {
         // The visible subtree is just the TextInput now; the
         // suggestions panel lives as an overlay anchored to this
         // widget's own bounds via `OverlayRequest`.
-        let body_id = ctx.add(MinSize::new(0.0, 0.0).child_id(input_id));
+        let body_id = ctx.add(MinSize::new(0.0, 0.0).child(input_id));
         let style = crate::styles::recipe_search_field_style::resolve_search_field_style(
             &self.style_override,
             ctx,
@@ -887,9 +887,9 @@ impl Widget for SuggestionPanel {
                     .a11y_hidden(),
             );
             let inner_padded = ctx.add(
-                Padding::symmetric(row_padding_vertical, row_padding_horizontal).child_id(label_id),
+                Padding::symmetric(row_padding_vertical, row_padding_horizontal).child(label_id),
             );
-            let row_z = ctx.add(ZStack::new().add_child(bg).add_child(inner_padded));
+            let row_z = ctx.add(ZStack::new().child(bg).child(inner_padded));
 
             let value_for_tap = value.clone();
             let on_select_for_tap = on_select.clone();
@@ -924,7 +924,7 @@ impl Widget for SuggestionPanel {
                 .cursor(CursorIcon::Pointer),
             );
             row_ids.push(row);
-            column = column.add_child(row);
+            column = column.child(row);
         }
         // Publish the row ids for SearchField's `accessibility()` to
         // resolve `highlighted -> active_descendant`. Repopulated on
@@ -938,7 +938,7 @@ impl Widget for SuggestionPanel {
         // opens below the field (`BelowPreferred` in `SearchField`),
         // so the placement suppresses the top-side shadow.
         let listbox_inner = ctx.add(column);
-        let padded = ctx.add(Padding::uniform(sf::PANEL_PADDING).child_id(listbox_inner));
+        let padded = ctx.add(Padding::uniform(sf::PANEL_PADDING).child(listbox_inner));
         let popover_style: teksilo_core::styles::SharedPopoverStyle =
             ctx.theme().style_slots.popover.clone().unwrap_or_else(|| {
                 Rc::new(crate::styles::RecipePopoverStyle::for_tokens(

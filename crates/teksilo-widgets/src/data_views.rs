@@ -1435,7 +1435,7 @@ mod drag_surface_tests {
         );
         let slot = tree.add(DragSurface::new(inner));
         let rigid = tree.add(FixedSize::new().width(100.0).height(20.0));
-        tree.add(HStack::new().add_child(rigid).add_child(slot));
+        tree.add(HStack::new().child(rigid).child(slot));
         tree.layout(SizeProposal::exact(120.0, 20.0));
         let w = tree.bounds(slot).width;
         assert!(

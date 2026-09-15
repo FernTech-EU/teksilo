@@ -116,19 +116,19 @@ impl BannerStyle for RecipeBannerStyle {
         );
 
         // Row layout: [glyph] [content (expands to fill)].
-        let content = ctx.add(Expand::horizontal().child_id(cfg.content));
+        let content = ctx.add(Expand::horizontal().child(cfg.content));
         let row = ctx.add(
             HStack::new()
                 .spacing(self.recipe.content_gap)
                 .alignment(VAlignment::Center)
-                .add_child(cfg.leading_glyph)
-                .add_child(content),
+                .child(cfg.leading_glyph)
+                .child(content),
         );
         let padded = ctx.add(
             Padding::symmetric(self.recipe.padding_vertical, self.recipe.padding_horizontal)
-                .child_id(row),
+                .child(row),
         );
 
-        ctx.add(ZStack::new().add_child(bg).add_child(padded))
+        ctx.add(ZStack::new().child(bg).child(padded))
     }
 }
