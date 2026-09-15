@@ -318,11 +318,31 @@ impl TranslationState {
         self.contacts.len()
     }
 
+    /// The capability-matrix row this window belongs to.
+    ///
+    /// `WindowSystem::{X11, Wayland}` are only ever reported for an Xlib, Xcb
+    /// or Wayland display handle, and `active_window_system` is `Unknown` off
+    /// Unix — so a window that knows its window system also knows it is on
+    /// Unix. Deriving the row from that, rather than from
+    /// [`PlatformKind::HOST`] alone, is what keeps the matrix the *pure
+    /// function* its docs promise: the X11 row stays assertable from a Windows
+    /// or macOS host, which is what the phantom-suppression tests and the
+    /// backend-conformance vectors need. `Unknown` carries no such implication
+    /// and falls back to the compile-time host.
+    ///
+    /// In production this is a no-op: the only window system a non-Unix host
+    /// can report is `Unknown`.
+    fn platform(&self) -> PlatformKind {
+        match self.window_system {
+            WindowSystem::X11 | WindowSystem::Wayland => PlatformKind::Unix,
+            WindowSystem::Unknown => PlatformKind::HOST,
+        }
+    }
+
     /// Whether this window's platform also synthesises a mouse stream from
     /// touch, so that one of the two must be suppressed.
     fn promotes_touch_to_mouse(&self) -> bool {
-        BackendCaps::for_platform(PlatformKind::HOST, self.window_system)
-            .synthesises_mouse_from_touch
+        BackendCaps::for_platform(self.platform(), self.window_system).synthesises_mouse_from_touch
     }
 
     /// Whether a `CursorMoved` at `position` is the emulated pointer following
@@ -994,7 +1014,7 @@ impl PointerBackend for TranslationState {
     }
 
     fn capabilities(&self) -> BackendCaps {
-        let mut caps = BackendCaps::for_platform(PlatformKind::HOST, self.window_system);
+        let mut caps = BackendCaps::for_platform(self.platform(), self.window_system);
         // A pen shim adds what winit cannot report; it never takes anything
         // away. On a window with no shim this is a no-op and the row is
         // exactly the platform's.
