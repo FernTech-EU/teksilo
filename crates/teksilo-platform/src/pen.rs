@@ -75,6 +75,19 @@
 //! [`BackendCaps`]: crate::pointer_backend::BackendCaps
 //! [`PointerKind::hovers`]: teksilo_tokens::PointerKind::hovers
 
+// The support matrix above links `wayland`, which is `#[cfg]`-ed away off Unix
+// — so on Windows and macOS that link cannot resolve and a local
+// `RUSTDOCFLAGS="-D warnings"` run fails on a link that is correct by
+// construction. The docs that ship are built on Linux (both `ci.yml`'s doc gate
+// and `docs.yml` are `runs-on: ubuntu-latest`), where the module exists, the
+// link resolves, and every link in this module is still checked under
+// `-D warnings`. Scoped to the hosts that cannot have the module, so a
+// genuinely broken link here still fails the gate on the host that enforces it.
+#![cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    allow(rustdoc::broken_intra_doc_links)
+)]
+
 pub mod null;
 #[cfg(all(unix, not(target_os = "macos")))]
 pub mod wayland;

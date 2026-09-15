@@ -91,10 +91,10 @@ fn home_dir() -> Option<PathBuf> {
         return Some(PathBuf::from(home));
     }
     #[cfg(windows)]
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        if !home.is_empty() {
-            return Some(PathBuf::from(home));
-        }
+    if let Ok(home) = std::env::var("USERPROFILE")
+        && !home.is_empty()
+    {
+        return Some(PathBuf::from(home));
     }
     None
 }

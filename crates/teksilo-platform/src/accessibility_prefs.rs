@@ -192,15 +192,17 @@ mod platform {
     use super::{AccessibilityPreferences, ScreenReaderState};
 
     pub(super) fn query() -> AccessibilityPreferences {
-        let mut prefs = AccessibilityPreferences::default();
-
-        prefs.high_contrast = query_high_contrast();
+        // Ordered as the queries were written: high contrast, then the
+        // UISettings pair, then the screen reader.
+        let high_contrast = query_high_contrast();
         let (reduced_motion, text_scale) = query_ui_settings();
-        prefs.reduced_motion = reduced_motion;
-        prefs.text_scale_factor = text_scale;
-        prefs.screen_reader = query_screen_reader();
 
-        prefs
+        AccessibilityPreferences {
+            high_contrast,
+            reduced_motion,
+            text_scale_factor: text_scale,
+            screen_reader: query_screen_reader(),
+        }
     }
 
     /// `SPI_GETSCREENREADER` — the flag Narrator, NVDA and JAWS set while they
@@ -279,7 +281,7 @@ mod platform {
 
             // TextScaleFactor: 1.0 (100%) to 2.25 (225%)
             if let Ok(scale) = settings.TextScaleFactor() {
-                text_scale = scale as f64;
+                text_scale = scale;
             }
         }
 

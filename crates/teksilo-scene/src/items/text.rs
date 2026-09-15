@@ -518,7 +518,7 @@ impl SceneItem for TextItem {
                     && ctx.bounds_space == crate::a11y::A11yBoundsSpace::Screen
                     && self.rotation.abs() <= f32::EPSILON
             })
-            .and_then(|p| uniform_scale(&ctx.local_to_screen).map(|scale| (p, scale)));
+            .zip(uniform_scale(&ctx.local_to_screen));
 
         // Rects are already in window space here, and the nested builder a
         // scene item is emitted through discards local ones — a run with

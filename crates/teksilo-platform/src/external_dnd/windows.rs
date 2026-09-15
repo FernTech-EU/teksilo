@@ -153,19 +153,18 @@ fn read_payload(data: &IDataObject) -> ExternalDropData {
     if let Some(files) = read_hdrop(data) {
         out.files = files;
     }
-    if let Some(text) = read_unicode_text(data, CF_UNICODETEXT.0) {
-        if !text.is_empty() {
-            out.text = Some(text);
-        }
+    if let Some(text) = read_unicode_text(data, CF_UNICODETEXT.0)
+        && !text.is_empty()
+    {
+        out.text = Some(text);
     }
     // Internet shortcut URL (CFSTR_INETURLW = "UniformResourceLocatorW").
     let inet_url = unsafe { RegisterClipboardFormatW(w!("UniformResourceLocatorW")) } as u16;
-    if inet_url != 0 {
-        if let Some(url) = read_unicode_text(data, inet_url) {
-            if !url.is_empty() {
-                out.uris.push(url);
-            }
-        }
+    if inet_url != 0
+        && let Some(url) = read_unicode_text(data, inet_url)
+        && !url.is_empty()
+    {
+        out.uris.push(url);
     }
     out
 }
@@ -180,7 +179,7 @@ fn with_hglobal<T>(
     let fmt = FORMATETC {
         cfFormat: cf_format,
         ptd: std::ptr::null_mut(),
-        dwAspect: DVASPECT_CONTENT.0 as u32,
+        dwAspect: DVASPECT_CONTENT.0,
         lindex: -1,
         tymed: TYMED_HGLOBAL.0 as u32,
     };
@@ -335,7 +334,7 @@ pub struct WindowsExternalDndBackend;
 
 impl WindowsExternalDndBackend {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 }
 

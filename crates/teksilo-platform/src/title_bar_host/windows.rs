@@ -317,10 +317,10 @@ impl PlatformTitleBarHost for WindowsHost {
     }
 
     fn set_button_hover(&self, target: ControlTarget, entered: bool) {
-        if let Ok(map) = self.data.hover_signals.lock() {
-            if let Some(sig) = map.get(&target) {
-                sig.set(entered);
-            }
+        if let Ok(map) = self.data.hover_signals.lock()
+            && let Some(sig) = map.get(&target)
+        {
+            sig.set(entered);
         }
     }
 
@@ -677,23 +677,23 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM, data: &SubclassData) -> LRESULT 
                 return LRESULT(HTCLIENT as isize);
             }
         }
-        if let Some(r) = regions.minimize {
-            if r.contains(pt_canvas) {
-                return LRESULT(HTMINBUTTON as isize);
-            }
+        if let Some(r) = regions.minimize
+            && r.contains(pt_canvas)
+        {
+            return LRESULT(HTMINBUTTON as isize);
         }
-        if let Some(r) = regions.maximize {
-            if r.contains(pt_canvas) {
-                // `HTMAXBUTTON` is the magic that triggers the
-                // Win11 snap-layout flyout when the cursor dwells
-                // for ~50 ms. No additional API call needed.
-                return LRESULT(HTMAXBUTTON as isize);
-            }
+        if let Some(r) = regions.maximize
+            && r.contains(pt_canvas)
+        {
+            // `HTMAXBUTTON` is the magic that triggers the
+            // Win11 snap-layout flyout when the cursor dwells
+            // for ~50 ms. No additional API call needed.
+            return LRESULT(HTMAXBUTTON as isize);
         }
-        if let Some(r) = regions.close {
-            if r.contains(pt_canvas) {
-                return LRESULT(HTCLOSE as isize);
-            }
+        if let Some(r) = regions.close
+            && r.contains(pt_canvas)
+        {
+            return LRESULT(HTCLOSE as isize);
         }
         for drag in &regions.drag {
             if drag.contains(pt_canvas) {

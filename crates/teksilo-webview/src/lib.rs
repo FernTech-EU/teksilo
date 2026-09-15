@@ -1103,11 +1103,12 @@ impl Widget for WebView {
             .overlay_rects()
             .iter()
             .any(|r| intersect(*r, bounds).is_some());
+        let uncovered = !covered;
         let mut state = self.visibility.get();
-        if state.uncovered == !covered {
+        if state.uncovered == uncovered {
             return;
         }
-        state.uncovered = !covered;
+        state.uncovered = uncovered;
         self.visibility.set(state);
         apply_visibility(&self.handle, &self.visibility, &self.visible_applied);
     }
