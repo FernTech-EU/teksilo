@@ -153,11 +153,13 @@ impl Widget for MainRoot {
                 // Caret hides + selection desaturates automatically when the
                 // window is inactive — no per-widget opt-in.
                 .child(TextInput::new(field_text))
-                // Custom content opts in to dimming via the builder modifier.
+                // Custom content opts in to dimming by wrapping, the way every
+                // other wrapper widget is used.
                 .child(
-                    Button::new(lit!("This panel dims when the window is inactive"))
-                        .variant(ButtonVariant::Filled)
-                        .dim_when_inactive(0.4),
+                    DimWhenInactive::new().factor(0.4).child(
+                        Button::new(lit!("This panel dims when the window is inactive"))
+                            .variant(ButtonVariant::Filled),
+                    ),
                 )
                 .child(
                     Button::new(lit!("Open help (F1) / Toggle fullscreen (F11)"))

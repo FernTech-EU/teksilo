@@ -95,3 +95,26 @@ fn the_extracted_names_are_the_names_the_predicate_accepts() {
         );
     }
 }
+
+/// No `WidgetBuilder` method may return a widget wrapper other than
+/// `WidgetWithHandlers<Self>`.
+///
+/// The reorder rule repairs `-> WidgetWithHandlers<Self>`; it cannot repair a
+/// method returning a different wrapper, because the rest of the chain then
+/// resolves against that wrapper and usually still compiles. `dim_when_inactive`
+/// did this and silently discarded the receiver and every child but the last.
+/// See [`teksilo_teksu_guard::foreign_wrapper_returns`].
+#[test]
+fn no_widget_builder_method_returns_a_foreign_wrapper() {
+    let source = std::fs::read_to_string(teksilo_teksu_guard::widget_builder_source_path())
+        .expect("widget_builder.rs is readable");
+    let offenders = teksilo_teksu_guard::foreign_wrapper_returns(&source);
+    assert!(
+        offenders.is_empty(),
+        "these `WidgetBuilder` methods return a wrapper the DSL's reorder rule \
+         cannot repair, so a builder chain past them silently retargets and \
+         builds a different tree: {offenders:?}. Give the wrapper its own \
+         `Wrapper::new().child(w)` constructor and drop the trait method, the \
+         way `Fade`, `Blur`, `Scale` and `Collapse` already do."
+    );
+}
