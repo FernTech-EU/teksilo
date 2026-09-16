@@ -56,7 +56,7 @@ use teksilo_core::pointer::{
 use teksilo_core::trace_input;
 use teksilo_tokens::{InputTokens, PenKind, PointerKind};
 
-use crate::pen::{PenButtons, PenPacket, PenSource, back_date_into};
+use crate::pen::{PenBatching, PenButtons, PenPacket, PenSource, back_date_into};
 use crate::pointer_backend::{
     BackendCaps, BackendEvent, InputSample, PlatformKind, PointerBackend,
 };
@@ -221,8 +221,26 @@ pub struct TranslationState {
     /// Device stamps lifted out of the drained batch, so `back_date_into` can
     /// read them while `pen_scratch` is borrowed for translation.
     pen_device_times: Vec<Option<u32>>,
+    /// How a drained pen batch reaches the tree. See [`PenBatching`].
+    pen_batching: PenBatching,
 }
 
+// Every method here carries a doc comment, and that is enforced rather than
+// hoped for. A new item inserted between an existing doc comment and the item it
+// documented — which has happened in this file, to `poll_pen` — leaves the
+// displaced item undocumented, and these are the lints that see it. It is `deny`
+// rather than `warn` because neither crate sets `missing_docs` at the root (97
+// public items would have to be written up first), so a warning here would sit
+// in a build log nobody reads.
+//
+// **Two lints, because one does not cover the class.** `missing_docs` is defined
+// not to fire on a private item, and a displaced neighbour is displaced whatever
+// its visibility — so on a block holding private and `pub(crate)` methods, the
+// lint added to stop the defect stops only the half of it that happens to be
+// `pub`. Clippy's `missing_docs_in_private_items` is the other half; it is a
+// tool lint, so plain `rustc` ignores it and the workspace clippy gate
+// (`-D warnings`) is what makes it bite.
+#[deny(missing_docs, clippy::missing_docs_in_private_items)]
 impl TranslationState {
     /// A fresh per-window state: scale 1.0, no cursor, no modifiers, no
     /// contacts, default input tokens, `WindowSystem::Unknown`.
@@ -245,21 +263,29 @@ impl TranslationState {
             pen_scratch: Vec::new(),
             pen_times: Vec::new(),
             pen_device_times: Vec::new(),
+            pen_batching: PenBatching::default(),
         }
     }
 
+    /// The window's HiDPI scale, used to convert physical positions to
+    /// logical ones. Set from winit's `ScaleFactorChanged` and at creation.
     pub fn set_scale_factor(&mut self, factor: f64) {
         self.scale_factor = factor;
     }
 
+    /// The window's HiDPI scale, as last set.
     pub fn scale_factor(&self) -> f64 {
         self.scale_factor
     }
 
+    /// The last cursor position this window saw, in logical coordinates.
+    /// `None` until the pointer has been inside it.
     pub fn cursor_position(&self) -> Option<Point> {
         self.cursor_position
     }
 
+    /// Record the modifiers the OS last reported, which every sample
+    /// translated afterwards carries.
     pub fn set_modifiers(&mut self, modifiers: Modifiers) {
         self.current_modifiers = modifiers;
     }
@@ -576,6 +602,20 @@ impl TranslationState {
         self.pen_contact.is_some()
     }
 
+    /// How a drained pen batch reaches the tree. See [`PenBatching`].
+    pub fn pen_batching(&self) -> PenBatching {
+        self.pen_batching
+    }
+
+    /// Choose how a drained pen batch reaches the tree.
+    ///
+    /// Takes effect on the next [`poll_pen`](Self::poll_pen); a drain already
+    /// in flight is unaffected, because there is no such thing — a drain is one
+    /// synchronous call.
+    pub fn set_pen_batching(&mut self, mode: PenBatching) {
+        self.pen_batching = mode;
+    }
+
     /// Drain the pen shim and translate everything it buffered.
     ///
     /// Call once per event-loop turn, alongside the winit events. Cheap and
@@ -626,8 +666,37 @@ impl TranslationState {
         back_date_into(self.now, &device_times, &mut times);
 
         let mut samples = Vec::new();
+        // Indices of samples the fold must leave alone although they look like
+        // pure motion. Today that is exactly the **proximity enter**: a tool
+        // coming into range is a transition, but it is carried as a `Move` with
+        // nothing held (there is no `PointerPhase` for entering — see
+        // `translate_pen_packet`), so `coalesce_pen_moves`'s phase-and-button
+        // test cannot tell it apart and would fold it into the hover that
+        // followed it. The consequence is not
+        // a lost `PointerMove`: the tree derives the hover owner, the cursor and
+        // the tooltip dwell from a sample's `position`, never from its batched
+        // list, so a pen that came into range over one widget and hovered onto
+        // another inside one drain would never enter the first at all.
+        //
+        // Detected from the session rather than announced by a flag: a session
+        // mints a fresh `PointerId`, so the enter is the first sample carrying
+        // an id the previous packet did not have.
+        let mut pinned: Vec<usize> = Vec::new();
         for (packet, time) in packets.iter().zip(times.iter().copied()) {
+            let id_before = self.pen_contact.map(|contact| contact.id);
+            let start = samples.len();
             samples.append(&mut self.translate_pen_packet(packet, time.max(floor)));
+            if let Some(fresh) = self.pen_contact.map(|contact| contact.id)
+                && Some(fresh) != id_before
+                && let Some(offset) = samples[start..].iter().position(
+                    |sample| matches!(sample, InputSample::Pointer(p) if p.pointer.id == fresh),
+                )
+            {
+                pinned.push(start + offset);
+            }
+        }
+        if self.pen_batching == PenBatching::Coalesce {
+            coalesce_pen_moves(&mut samples, &pinned);
         }
 
         packets.clear();
@@ -1561,6 +1630,90 @@ pub fn translate_double_tap_gesture(state: &TranslationState) -> Option<WidgetEv
     Some(WidgetEvent::Gesture {
         gesture: double_tap_gesture(position, state.current_modifiers),
     })
+}
+
+/// Fold each run of consecutive pure-motion pen samples into its newest member,
+/// moving the older positions into
+/// [`PointerSample::coalesced`](teksilo_core::PointerSample::coalesced).
+///
+/// "Pure motion" is a [`PointerPhase::Move`] carrying no button change, **and
+/// not named in `pinned`**. Everything else — Down, Up, Cancel, a move that
+/// reports a button, a scroll, an OS gesture — ends the run and is emitted in
+/// place, so the *sequence* a recognizer sees is the one it saw before, minus
+/// some of the moves. A hover run and a contact run are therefore never folded
+/// together: the Down between them is not foldable.
+///
+/// # `pinned`
+///
+/// Indices into `samples` **as given**, of samples that are transitions wearing
+/// a `Move`'s clothes. A proximity enter is the one the pen path produces:
+/// [`PointerPhase`] has no *enter*, so a tool coming into range is carried as a
+/// move with nothing held, and folding it away costs a `PointerEnter` outright
+/// — the tree reads the hover owner off `position`, never off the batched list.
+/// `poll_pen` finds them; this only has to respect them. A pinned sample neither
+/// absorbs its predecessor nor is absorbed by its successor, so it keeps its
+/// own dispatch in both directions.
+///
+/// A drain holds a handful of packets, so the membership test is a linear scan
+/// of a list that is empty on all but the entering drain.
+///
+/// Each folded position keeps the time and the axes it was sampled with: a
+/// digitizer varies pressure across a batch, and collapsing that to the newest
+/// packet's reading is exactly the loss this exists to avoid.
+///
+/// A sample that already carries a coalesced list — a source that coalesced for
+/// itself — keeps it, and it stays ahead of the position it was batched with,
+/// so the whole list is still oldest-first.
+///
+/// Free function rather than a method so it can be tested on a hand-built
+/// `Vec<InputSample>`, with no shim, no window and no clock.
+fn coalesce_pen_moves(samples: &mut Vec<InputSample>, pinned: &[usize]) {
+    let foldable = |index: usize, sample: &InputSample| {
+        matches!(
+            sample,
+            InputSample::Pointer(p) if p.phase == PointerPhase::Move && p.button.is_none()
+        ) && !pinned.contains(&index)
+    };
+
+    // Nothing to do unless two foldable moves are adjacent. Worth the scan: the
+    // steady state at a 4 ms poll is a drain of one.
+    if !samples
+        .windows(2)
+        .enumerate()
+        .any(|(i, w)| foldable(i, &w[0]) && foldable(i + 1, &w[1]))
+    {
+        return;
+    }
+
+    // Each entry keeps the index it arrived at, so `pinned` — which names
+    // positions in the input — stays meaningful as the output shortens.
+    let mut out: Vec<(usize, InputSample)> = Vec::with_capacity(samples.len());
+    for (index, sample) in samples.drain(..).enumerate() {
+        if !foldable(index, &sample) {
+            out.push((index, sample));
+            continue;
+        }
+        let InputSample::Pointer(mut current) = sample else {
+            unreachable!("`foldable` matched a pointer sample")
+        };
+        if out.last().is_some_and(|(i, s)| foldable(*i, s)) {
+            let Some((_, InputSample::Pointer(previous))) = out.pop() else {
+                unreachable!("just matched")
+            };
+            // `previous` was the run's newest until now; it becomes a batched
+            // position of `current`, behind anything it was already carrying
+            // and ahead of anything `current` was.
+            let mut merged = previous.coalesced;
+            merged.push(
+                teksilo_core::CoalescedSample::new(previous.pointer.time, previous.position)
+                    .with_axes(previous.pointer.axes),
+            );
+            merged.append(&mut current.coalesced);
+            current.coalesced = merged;
+        }
+        out.push((index, InputSample::Pointer(current)));
+    }
+    *samples = out.into_iter().map(|(_, sample)| sample).collect();
 }
 
 #[cfg(test)]

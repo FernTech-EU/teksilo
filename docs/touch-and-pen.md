@@ -366,10 +366,93 @@ whatever the mouse last touched, or nowhere at all.
 ```
 
 `EventContext` exposes `pointer()`, `pointer_kind()`, `pointer_position()`,
-`scroll_phase()` and `scroll_source()`. Outside a pointer or scroll dispatch — a
-gesture timer, an assistive-technology action, a hand-built test context — they
-report the mouse at the epoch, which is the same answer such a handler got
-before pointers were distinguishable.
+`scroll_phase()`, `scroll_source()` and `coalesced()`. Outside a pointer or
+scroll dispatch — a gesture timer, an assistive-technology action, a hand-built
+test context — they report the mouse at the epoch, which is the same answer such
+a handler got before pointers were distinguishable.
+
+### 3.2.1 The positions the OS batched
+
+`ctx.coalesced()` is the positions the OS folded into the packet being
+dispatched, oldest first and **excluding** the packet's own
+(`pointer_position()`, which is the newest). Each carries its own
+`EventTime` and its own `PointerAxes`, because a digitizer varies pressure and
+tilt *within* a batch and that variation is what a stroke's width is made of.
+
+```rust
+.on_pointer_event(|event, ctx| {
+    if let WidgetEvent::PointerMove { position, .. } = event {
+        for c in ctx.coalesced() {                 // every batched position…
+            stroke.extend(c.window_position, c.axes.pressure);
+        }
+        stroke.extend(*position, ctx.pointer().axes.pressure);   // …then this one
+    }
+    EventResponse::Ignored
+})
+```
+
+**Window**-logical, like `Scroll::window_position` and for the same reason: a
+batch has no single widget to localise against, so a handler working in its own
+space converts at the use site.
+
+A surface written this way is correct whether or not the backend batches — one
+that does not returns an empty slice, which costs nothing. See §3.2.2 for who
+batches, and [Ink](ink.md) for the surface this exists for.
+
+A dispatch that is **not** a sample reports an empty list: a gesture the timer
+recognised, a drag-and-drop tick and an assistive-technology action all batched
+nothing, and handing back whichever sample arrived last would attribute its
+positions to a gesture that did not produce them.
+
+### 3.2.2 Who batches: `PenBatching`
+
+A digitizer runs at 200–360 Hz and a window's message rate does not, so one
+`poll_pen` drain routinely holds several packets. Both answers are defensible
+and the trade is real, so it is a knob:
+
+| mode | dispatches per drain | `coalesced` |
+| --- | --- | --- |
+| `PenBatching::PerPacket` (default) | one per packet | always empty |
+| `PenBatching::Coalesce` | one per drain | the intermediate positions |
+
+```rust
+TeksiloAppBuilder::new().pen_batching(PenBatching::Coalesce)
+```
+
+`PerPacket` loses nothing and spends a whole tree dispatch — hit test,
+arbitration turn, handler walk — on every packet. `Coalesce` spends one and
+hands the rest over as data.
+
+**Transitions are never folded.** Down, Up, a button change and proximity
+enter/leave each keep their own sample under either mode, so no recognizer sees
+a different *sequence* — only the number of `PointerMove`s between two
+transitions changes. That is also the caveat: a widget that integrates
+per-move deltas from a pen and does not read `coalesced()` sees one delta where
+it saw twenty, so `Coalesce` is opt-in rather than the default.
+
+Four of those five the fold can see for itself, because all it tests is the
+phase and the button: Down and Up are not `Move`, a button change reports a
+button, and proximity **leave** is a `PointerPhase::Cancel` (§6), so it breaks a
+run for free. The fifth it cannot, and that one is handled by name rather than
+by luck. Proximity **enter** has no phase of its own — `PointerPhase` has no
+*enter*, so a tool coming into range rides as a move with nothing held, which is
+the fold's own definition of pure motion — so `poll_pen` **pins** it: it
+collects the index of each sample
+that opens a session (a session mints a fresh `PointerId`, so the enter is the
+first sample carrying an id the previous packet did not have) and
+`coalesce_pen_moves` leaves those alone in both directions. What folding it
+away would cost is not a `PointerMove` but a `PointerEnter`: the tree derives
+the hover owner, the cursor and the tooltip dwell from a sample's *position*
+and never from its batched list, so a pen that entered range over one widget
+and hovered onto another inside one drain would never enter the first at all —
+a hover affordance that silently stops firing under a batching mode.
+`coalescing_keeps_the_proximity_enters_own_sample` is the gate.
+
+Mouse and touch are not folded at all. winit dispatches those per event during
+`window_event`, so folding would mean buffering across calls and releasing at
+`about_to_wait` — up to a turn of added latency on the most latency-sensitive
+path in the framework. The pen path has no such cost because it is *already*
+drained at `about_to_wait`.
 
 ### 3.3 Cancellation
 

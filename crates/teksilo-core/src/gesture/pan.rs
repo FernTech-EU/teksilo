@@ -135,11 +135,12 @@ impl PanRecognizer {
     /// movement — only the velocity estimate is better informed.
     pub fn feed_coalesced(
         &mut self,
-        history: &[(EventTime, Point)],
+        history: &[crate::pointer::CoalescedSample],
         position: Point,
         time: EventTime,
     ) -> Vec2 {
-        self.tracker.add_coalesced(history);
+        self.tracker
+            .add_coalesced(history.iter().map(|s| (s.time, s.window_position)));
         self.feed(position, time)
     }
 
@@ -367,19 +368,22 @@ mod tests {
 
         // Every position the digitiser produced: 1 dp every 2 ms = 500 dp/s,
         // all inside one 16 ms frame.
-        let all: Vec<(EventTime, Point)> = (0..=16)
+        let all: Vec<crate::pointer::CoalescedSample> = (0..=16)
             .step_by(2)
-            .map(|ms| (at(ms), Point::new(0.0, ms as f32 / 2.0)))
+            .map(|ms| {
+                crate::pointer::CoalescedSample::new(at(ms), Point::new(0.0, ms as f32 / 2.0))
+            })
             .collect();
-        let (time, position) = *all.last().expect("non-empty");
+        let last = *all.last().expect("non-empty");
+        let (time, position) = (last.time, last.window_position);
         let history = &all[1..all.len() - 1];
 
         let mut coalesced = PanRecognizer::new(claim);
-        coalesced.press(all[0].1, all[0].0);
+        coalesced.press(all[0].window_position, all[0].time);
         coalesced.feed_coalesced(history, position, time);
 
         let mut decimated = PanRecognizer::new(claim);
-        decimated.press(all[0].1, all[0].0);
+        decimated.press(all[0].window_position, all[0].time);
         decimated.feed(position, time);
 
         let full = coalesced.velocity(&profile);

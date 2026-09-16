@@ -446,6 +446,53 @@ pub fn back_date_into(now: EventTime, device_ms: &[Option<u32>], out: &mut Vec<E
 // The source
 // ---------------------------------------------------------------------------
 
+/// How a drained pen batch reaches the tree.
+///
+/// A digitizer runs at 200-360 Hz and a window's message rate does not, so one
+/// `poll_pen` drain routinely holds several packets. Both answers to "what does
+/// the tree see?" are defensible and the trade is real, which is why this is a
+/// knob rather than a decision baked in:
+///
+/// - [`PerPacket`](Self::PerPacket) spends a whole tree dispatch — hit test,
+///   arbitration turn, handler walk — on every packet. Nothing is lost and
+///   nothing is coalesced; it is what the pen path has always done.
+/// - [`Coalesce`](Self::Coalesce) spends one dispatch per drain and hands the
+///   intermediate positions over as
+///   [`PointerSample::coalesced`](teksilo_core::PointerSample::coalesced),
+///   each keeping its own time and its own axes. A surface that reads
+///   `EventContext::coalesced` sees exactly the same positions; one that does
+///   not sees fewer moves.
+///
+/// **Transitions are never folded.** Down, Up, a button change and proximity
+/// enter/leave each keep their own sample under either mode, so no recognizer
+/// sees a different *sequence* — only the number of `PointerMove`s between two
+/// transitions changes.
+///
+/// Four of those five the fold can *see* for itself, because all it tests is
+/// the phase and the button: Down and Up are not `Move`, a button change reports
+/// a button, and proximity **leave** is a
+/// [`PointerPhase::Cancel`](teksilo_core::PointerPhase::Cancel), so it breaks a
+/// run for free. The fifth it cannot, and that one is handled by name rather
+/// than by luck: proximity **enter** has no phase of its own — it is carried as
+/// a move with nothing held — so `poll_pen` pins it, because folding it away
+/// would not cost a `PointerMove` but a `PointerEnter`: the tree derives the
+/// hover owner, the cursor and the tooltip dwell from a sample's position and
+/// never from its batched list, and a tool that came into range over one widget
+/// and hovered onto another inside one drain would otherwise never enter the
+/// first.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[non_exhaustive]
+pub enum PenBatching {
+    /// One [`PointerSample`](teksilo_core::PointerSample) per packet. The
+    /// default, and what the pen path did before this existed.
+    #[default]
+    PerPacket,
+    /// One sample per *transition*; the pure-motion packets between two
+    /// transitions ride in
+    /// [`PointerSample::coalesced`](teksilo_core::PointerSample::coalesced).
+    Coalesce,
+}
+
 /// A buffered supply of [`PenPacket`]s.
 ///
 /// One instance per window. Implementations are expected to be cheap to poll

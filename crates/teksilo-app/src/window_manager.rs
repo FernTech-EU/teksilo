@@ -281,6 +281,7 @@ pub struct WindowManager {
     user_text_scale: f32,
     /// How the app resolves its theme (Manual, FollowSystem, Native).
     theme_mode: ThemeMode,
+    pen_batching: teksilo_platform::PenBatching,
     /// Per-tree app context shared with every window's WidgetTree when an
     /// event source is registered on the TeksiloAppBuilder. Each window
     /// receives a clone of this Rc so subscriptions land in a single
@@ -300,7 +301,24 @@ pub struct WindowManager {
     pending_token_callbacks: HashMap<winit::window::WindowId, Box<dyn FnOnce(Option<String>)>>,
 }
 
+// Doc comments on **every** method here are enforced, not hoped for: a new item
+// inserted between an existing doc comment and the item it documented — which
+// has happened here, to `set_theme_mode` — leaves the displaced item
+// undocumented, and these are the lints that see it. `deny` rather than `warn`
+// because this crate does not set `missing_docs` at the root, so a warning
+// would sit in a build log nobody reads.
+//
+// **Two lints, because one does not cover the class.** `missing_docs` is
+// defined not to fire on a private item, and this block is roughly half
+// `pub(crate)` — so a displaced `pub(crate)` neighbour passed it silently, which
+// is the same defect wearing a narrower visibility. Clippy's
+// `missing_docs_in_private_items` is the half `missing_docs` leaves out; it is a
+// tool lint, so plain `rustc` ignores it and the workspace clippy gate
+// (`-D warnings`) is what makes it bite. Verified by deleting the doc on
+// `take_activation_token_callback`, which `missing_docs` alone compiled clean.
+#[deny(missing_docs, clippy::missing_docs_in_private_items)]
 impl WindowManager {
+    /// An empty manager whose windows will be built against `theme`.
     pub fn new(theme: Theme) -> Self {
         let a11y_prefs = AccessibilityPreferences::query();
         Self {
@@ -316,6 +334,7 @@ impl WindowManager {
             a11y_prefs,
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
+            pen_batching: teksilo_platform::PenBatching::default(),
             app_context_template: None,
             event_proxy: None,
             pending_token_callbacks: HashMap::new(),
@@ -338,6 +357,13 @@ impl WindowManager {
         id: winit::window::WindowId,
     ) -> Option<Box<dyn FnOnce(Option<String>)>> {
         self.pending_token_callbacks.remove(&id)
+    }
+
+    /// How a drained pen batch reaches each window's tree. Applied to every
+    /// window created after this call. See
+    /// [`PenBatching`](teksilo_platform::PenBatching).
+    pub fn set_pen_batching(&mut self, mode: teksilo_platform::PenBatching) {
+        self.pen_batching = mode;
     }
 
     /// Set the theme mode (called by TeksiloAppHandler during initialization).
@@ -439,11 +465,16 @@ impl WindowManager {
         self.set_theme(theme);
     }
 
+    /// Install the shared typesetter every window's tree will shape text
+    /// through (called by `TeksiloAppHandler` during initialization).
     #[cfg(feature = "text")]
     pub fn set_typesetter(&mut self, typesetter: teksilo_text::SharedTypesetter) {
         self.typesetter = Some(typesetter);
     }
 
+    /// Mint the next [`TeksiloWindowId`]. Monotone for the life of the manager
+    /// and never reused, so a stale id names a closed window rather than a
+    /// different live one.
     fn alloc_id(&mut self) -> TeksiloWindowId {
         let id = TeksiloWindowId::new(self.next_id);
         self.next_id += 1;
@@ -725,6 +756,7 @@ impl WindowManager {
 
         let mut translation_state = TranslationState::new();
         translation_state.set_scale_factor(scale_factor);
+        translation_state.set_pen_batching(self.pen_batching);
 
         // Resolve the initial theme from ThemeMode before building the tree
         let initial_theme = match self.theme_mode {
@@ -1471,6 +1503,9 @@ impl WindowManager {
         &self.teksilo_to_winit
     }
 
+    /// The managed window behind a [`TeksiloWindowId`], mutably. `None` once
+    /// the window has closed — both lookups are fallible, so a stale id is a
+    /// miss rather than a panic.
     pub(crate) fn get_by_teksilo_mut(&mut self, id: TeksiloWindowId) -> Option<&mut ManagedWindow> {
         let winit_id = self.teksilo_to_winit.get(&id).copied()?;
         self.windows.get_mut(&winit_id)
@@ -1491,10 +1526,13 @@ impl WindowManager {
         self.modal_blocked.contains_key(&teksilo_id)
     }
 
+    /// The modal window currently blocking `teksilo_id`, if one is.
     pub fn blocking_modal_child(&self, teksilo_id: TeksiloWindowId) -> Option<TeksiloWindowId> {
         self.modal_blocked.get(&teksilo_id).copied()
     }
 
+    /// Pull focus back to the modal child of a blocked parent the user just
+    /// clicked — the "this window is waiting on that one" nudge.
     pub fn refocus_modal_child(&self, blocked_parent: TeksiloWindowId) {
         let Some(child_id) = self.blocking_modal_child(blocked_parent) else {
             return;

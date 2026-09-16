@@ -1025,11 +1025,7 @@ fn walk_element(
     // is a drawable shape at all), then emit fill and/or stroke.
     let shape: Option<Path> = match node.tag_name() {
         "path" => match node.attribute("d") {
-            Some(d) => {
-                let mut p = Path::new();
-                p.commands = path_parser::parse_svg_path_data(d)?;
-                Some(p)
-            }
+            Some(d) => Some(Path::from_commands(path_parser::parse_svg_path_data(d)?)),
             None => None,
         },
         "rect" => parse_rect_element(node),
@@ -1924,7 +1920,7 @@ mod tests {
         let icon = SvgIcon::parse(svg).unwrap();
         assert!(!icon.raw_path().is_empty());
         // rect → 5 commands (MoveTo + 3 LineTo + Close)
-        assert_eq!(icon.raw_path().commands.len(), 5);
+        assert_eq!(icon.raw_path().commands().len(), 5);
     }
 
     #[test]
@@ -1944,7 +1940,7 @@ mod tests {
             </g>
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
-        let cmds = &icon.raw_path().commands;
+        let cmds = &icon.raw_path().commands();
         assert_eq!(cmds.len(), 2);
         match cmds[0] {
             PathCommand::MoveTo(p) => {
@@ -1991,7 +1987,7 @@ mod tests {
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
         // polygon with 3 points → MoveTo + 2 LineTo + Close = 4
-        assert_eq!(icon.raw_path().commands.len(), 4);
+        assert_eq!(icon.raw_path().commands().len(), 4);
     }
 
     #[test]
@@ -2011,11 +2007,11 @@ mod tests {
         );
         assert!(
             matches!(
-                icon.strokes[0].path.commands.first(),
+                icon.strokes[0].path.commands().first(),
                 Some(PathCommand::MoveTo(_))
             ),
             "a stroked circle subpath must open with MoveTo, got {:?}",
-            icon.strokes[0].path.commands.first()
+            icon.strokes[0].path.commands().first()
         );
     }
 
@@ -2036,7 +2032,7 @@ mod tests {
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
         // Two paths merged: 2 + 2 = 4 commands
-        assert_eq!(icon.raw_path().commands.len(), 4);
+        assert_eq!(icon.raw_path().commands().len(), 4);
     }
 
     #[test]
@@ -2225,7 +2221,7 @@ mod tests {
             </g>
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
-        match icon.raw_path().commands.first() {
+        match icon.raw_path().commands().first() {
             Some(PathCommand::MoveTo(p)) => {
                 assert!((p.x - 20.0).abs() < 0.01, "x should be 20, got {}", p.x);
                 assert!((p.y - 10.0).abs() < 0.01, "y should be 10, got {}", p.y);
@@ -2245,7 +2241,7 @@ mod tests {
             </g>
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
-        match icon.raw_path().commands.first() {
+        match icon.raw_path().commands().first() {
             Some(PathCommand::MoveTo(p)) => {
                 assert!(
                     (p.x - 20.0).abs() < 0.01 && (p.y - 10.0).abs() < 0.01,
@@ -2268,7 +2264,7 @@ mod tests {
             </g>
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
-        match icon.raw_path().commands.first() {
+        match icon.raw_path().commands().first() {
             Some(PathCommand::MoveTo(p)) => {
                 assert!(
                     (p.x - 10.0).abs() < 0.01 && (p.y - 20.0).abs() < 0.01,
@@ -2300,7 +2296,7 @@ mod tests {
             !icon.raw_path().is_empty(),
             "<use> of a <symbol> must render"
         );
-        match icon.raw_path().commands.first() {
+        match icon.raw_path().commands().first() {
             Some(PathCommand::MoveTo(p)) => {
                 assert!(
                     (p.x - 20.0).abs() < 0.01 && (p.y - 5.0).abs() < 0.01,
@@ -2561,7 +2557,7 @@ mod tests {
             <rect x="0" y="0" width="20" height="10" rx="4" ry="2"/>
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
-        let cmds = &icon.raw_path().commands;
+        let cmds = &icon.raw_path().commands();
         let arcs = cmds
             .iter()
             .filter(|c| matches!(c, PathCommand::ArcTo { .. }))
@@ -2591,7 +2587,7 @@ mod tests {
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
         let path = icon.to_path_in_rect(Rect::new(0.0, 0.0, 40.0, 40.0));
-        match path.commands.first() {
+        match path.commands().first() {
             Some(PathCommand::MoveTo(p)) => {
                 assert!(
                     (p.x - 20.0).abs() < 0.01 && (p.y - 20.0).abs() < 0.01,
@@ -2612,7 +2608,7 @@ mod tests {
         </svg>"#;
         let icon = SvgIcon::parse(svg).unwrap();
         let path = icon.to_path_in_rect(Rect::new(0.0, 0.0, 40.0, 40.0));
-        match path.commands.first() {
+        match path.commands().first() {
             Some(PathCommand::MoveTo(p)) => {
                 assert!(
                     p.x.abs() < 0.01 && p.y.abs() < 0.01,

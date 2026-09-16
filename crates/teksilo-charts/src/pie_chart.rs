@@ -1543,10 +1543,10 @@ mod tests {
             tree.add(PieChart::new(three_slices_model()));
             tree.layout(SizeProposal::exact(400.0, 300.0));
             let f = tree.render();
-            f.paths[0].path.commands.len()
+            f.paths[0].path.commands().len()
         };
         assert!(
-            frame.paths[0].path.commands.len() > cmds_pie,
+            frame.paths[0].path.commands().len() > cmds_pie,
             "donut path should have more commands than pie path"
         );
     }

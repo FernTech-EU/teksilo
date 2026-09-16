@@ -3207,6 +3207,7 @@ impl AppEventPoster for AppEventProxy {
 pub struct TeksiloAppBuilder {
     theme: Theme,
     theme_mode: ThemeMode,
+    pen_batching: teksilo_platform::PenBatching,
     #[cfg(feature = "text")]
     typesetter: Option<SharedTypesetter>,
     #[cfg(feature = "text")]
@@ -3268,6 +3269,7 @@ impl TeksiloAppBuilder {
         Self {
             theme: teksilo_core::presets::intui::light(),
             theme_mode: ThemeMode::Manual,
+            pen_batching: teksilo_platform::PenBatching::default(),
             #[cfg(feature = "text")]
             typesetter: None,
             #[cfg(feature = "text")]
@@ -3620,6 +3622,27 @@ impl TeksiloAppBuilder {
     /// - `ThemeMode::Native` — read colors from OS desktop environment config.
     pub fn theme_mode(mut self, mode: ThemeMode) -> Self {
         self.theme_mode = mode;
+        self
+    }
+
+    /// Choose how a drained pen batch reaches the tree.
+    ///
+    /// A digitizer outruns the window's message rate, so one poll routinely
+    /// drains several packets.
+    /// [`PerPacket`](teksilo_platform::PenBatching::PerPacket) — the default —
+    /// spends a whole tree dispatch on each;
+    /// [`Coalesce`](teksilo_platform::PenBatching::Coalesce) spends one per
+    /// drain and hands the intermediate positions to handlers through
+    /// [`EventContext::coalesced`](teksilo_core::EventContext::coalesced),
+    /// each keeping its own time and axes.
+    ///
+    /// A drawing surface wants `Coalesce` and must read `coalesced` — see
+    /// `docs/ink.md`. Anything that only watches moves should stay on the
+    /// default, because `Coalesce` genuinely produces fewer `PointerMove`s.
+    ///
+    /// Applies to every window; set it before `run`.
+    pub fn pen_batching(mut self, mode: teksilo_platform::PenBatching) -> Self {
+        self.pen_batching = mode;
         self
     }
 
@@ -4193,6 +4216,7 @@ impl TeksiloAppBuilder {
         // moved onto the handler after construction (like `loop_tick` below)
         // rather than threaded through `TeksiloAppHandler::new`'s already long
         // parameter list.
+        app.wm.set_pen_batching(self.pen_batching);
         app.external_ctx_handler = self.external_ctx_handler;
         // Hand over any registered loop-tick hook (e.g. the `teksilo-async`
         // executor poll). Async-agnostic: just a closure + a poll flag.

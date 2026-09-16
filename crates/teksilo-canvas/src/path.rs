@@ -27,10 +27,114 @@ pub enum PathCommand {
     Close,
 }
 
+/// The seed a fresh [`Path`]'s [`stamp`](Path::stamp) starts from.
+///
+/// An arbitrary odd constant — the point is only that an empty path's stamp is
+/// not `0`, so a stamp that was never folded is distinguishable from one folded
+/// with a zero word.
+const STAMP_SEED: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// Fold one 64-bit word into a rolling content stamp.
+///
+/// SplitMix64's finalizer, applied to `state ^ (word * golden)`. Chosen over a
+/// plain FNV step because the words folded here are IEEE-754 bit patterns whose
+/// high bits barely move between neighbouring coordinates, and FNV-1a's
+/// avalanche is weakest exactly there — two points a texel apart would differ
+/// in a handful of low bits and stay correlated through the fold.
+///
+/// Order-sensitive (the state is carried), so `MoveTo(a); LineTo(b)` and
+/// `MoveTo(b); LineTo(a)` are distinct, and constant-time, which is the whole
+/// reason this exists: see [`Path::stamp`].
+#[inline]
+const fn fold(state: u64, word: u64) -> u64 {
+    let mut x = state ^ word.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
+}
+
+#[inline]
+fn fold_f32(state: u64, v: f32) -> u64 {
+    // `to_bits` rather than the value: `NaN` must fold reproducibly, and two
+    // paths differing only in the sign of a zero are not the same path to a
+    // rasterizer that winds by direction.
+    fold(state, v.to_bits() as u64)
+}
+
+#[inline]
+fn fold_point(state: u64, p: Point) -> u64 {
+    fold_f32(fold_f32(state, p.x), p.y)
+}
+
+/// Fold one command into a rolling stamp.
+fn fold_command(state: u64, cmd: &PathCommand) -> u64 {
+    match *cmd {
+        PathCommand::MoveTo(p) => fold_point(fold(state, 1), p),
+        PathCommand::LineTo(p) => fold_point(fold(state, 2), p),
+        PathCommand::QuadTo { control, to } => fold_point(fold_point(fold(state, 3), control), to),
+        PathCommand::CubicTo {
+            control1,
+            control2,
+            to,
+        } => fold_point(
+            fold_point(fold_point(fold(state, 4), control1), control2),
+            to,
+        ),
+        PathCommand::ArcTo {
+            rect,
+            start_angle,
+            sweep_angle,
+        } => {
+            let s = fold(state, 5);
+            let s = fold_f32(
+                fold_f32(fold_f32(fold_f32(s, rect.x), rect.y), rect.width),
+                rect.height,
+            );
+            fold_f32(fold_f32(s, start_angle), sweep_angle)
+        }
+        PathCommand::Close => fold(state, 6),
+    }
+}
+
 /// A path composed of drawing commands. Used for Tier 3 (CPU rasterized) shapes.
-#[derive(Debug, Clone, Default, PartialEq)]
+///
+/// # Why the command list is not a public field
+///
+/// A path carries a **content stamp** ([`stamp`](Self::stamp)) maintained
+/// incrementally as commands are appended, so a consumer that needs to know
+/// "is this the same geometry I saw last frame?" can ask in constant time
+/// instead of walking the commands. The renderer's path-mask cache is that
+/// consumer, and the difference is not a micro-optimisation: keyed by a walk,
+/// a *cache hit* on a 2 000-point stroke cost 13.7 µs — so a stroke that grows
+/// by one point per pointer sample paid O(n) to discover it had nothing to do,
+/// which is O(n²) over the stroke. See `docs/ink.md`.
+///
+/// A public `Vec` cannot be kept in step with a stamp, so the commands are
+/// reached through [`commands`](Self::commands) and appended through the
+/// builders or [`push`](Self::push).
+#[derive(Debug, Clone)]
 pub struct Path {
-    pub commands: Vec<PathCommand>,
+    commands: Vec<PathCommand>,
+    stamp: u64,
+}
+
+impl Default for Path {
+    fn default() -> Self {
+        Self {
+            commands: Vec::new(),
+            stamp: STAMP_SEED,
+        }
+    }
+}
+
+impl PartialEq for Path {
+    /// Compares the commands. The stamp is a pure function of them, so
+    /// including it would only be able to *agree*.
+    fn eq(&self, other: &Self) -> bool {
+        self.commands == other.commands
+    }
 }
 
 impl Path {
@@ -38,42 +142,80 @@ impl Path {
         Self::default()
     }
 
-    pub fn move_to(&mut self, p: Point) -> &mut Self {
-        self.commands.push(PathCommand::MoveTo(p));
+    /// Build a path from a command list, folding each into the stamp.
+    ///
+    /// The door for a producer that assembles commands elsewhere — the SVG
+    /// path-data parser is the one in-tree caller.
+    pub fn from_commands(commands: Vec<PathCommand>) -> Self {
+        let stamp = commands.iter().fold(STAMP_SEED, fold_command);
+        Self { commands, stamp }
+    }
+
+    /// The commands, in order.
+    #[inline]
+    pub fn commands(&self) -> &[PathCommand] {
+        &self.commands
+    }
+
+    /// A 64-bit stamp of this path's contents, maintained incrementally.
+    ///
+    /// Two paths with identical command sequences have identical stamps; two
+    /// with different ones differ with the collision probability of a 64-bit
+    /// hash. Reading it is O(1) — appending a command costs one fold, so
+    /// building an n-command path costs O(n) *once* rather than O(n) per
+    /// interrogation.
+    ///
+    /// Not stable across releases, and not to be persisted: it is an in-process
+    /// identity for caches, nothing more.
+    #[inline]
+    pub fn stamp(&self) -> u64 {
+        self.stamp
+    }
+
+    /// Append one command.
+    pub fn push(&mut self, cmd: PathCommand) -> &mut Self {
+        self.stamp = fold_command(self.stamp, &cmd);
+        self.commands.push(cmd);
         self
+    }
+
+    /// Drop every command, returning to the empty path.
+    pub fn clear(&mut self) -> &mut Self {
+        self.commands.clear();
+        self.stamp = STAMP_SEED;
+        self
+    }
+
+    pub fn move_to(&mut self, p: Point) -> &mut Self {
+        self.push(PathCommand::MoveTo(p))
     }
 
     pub fn line_to(&mut self, p: Point) -> &mut Self {
-        self.commands.push(PathCommand::LineTo(p));
-        self
+        self.push(PathCommand::LineTo(p))
     }
 
     pub fn quad_to(&mut self, control: Point, to: Point) -> &mut Self {
-        self.commands.push(PathCommand::QuadTo { control, to });
-        self
+        self.push(PathCommand::QuadTo { control, to })
     }
 
     pub fn cubic_to(&mut self, control1: Point, control2: Point, to: Point) -> &mut Self {
-        self.commands.push(PathCommand::CubicTo {
+        self.push(PathCommand::CubicTo {
             control1,
             control2,
             to,
-        });
-        self
+        })
     }
 
     pub fn arc_to(&mut self, rect: Rect, start_angle: f32, sweep_angle: f32) -> &mut Self {
-        self.commands.push(PathCommand::ArcTo {
+        self.push(PathCommand::ArcTo {
             rect,
             start_angle,
             sweep_angle,
-        });
-        self
+        })
     }
 
     pub fn close(&mut self) -> &mut Self {
-        self.commands.push(PathCommand::Close);
-        self
+        self.push(PathCommand::Close)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -276,7 +418,9 @@ impl Path {
 
     /// Append all commands from another path.
     pub fn append(&mut self, other: &Path) {
-        self.commands.extend_from_slice(&other.commands);
+        for cmd in &other.commands {
+            self.push(*cmd);
+        }
     }
 
     /// Create a copy of this path with all points transformed by the given

@@ -113,8 +113,9 @@ pub use pointer::clock::{InputClock, ManualClock, MonotonicClock};
 pub use pointer::hit_slop::{HitCandidate, HitContext, HitSlop};
 pub use pointer::touch_action::{Axis, PanAxes, PanClaim, TouchAction};
 pub use pointer::{
-    BackendDeviceKey, CancelReason, EventTime, PointerAxes, PointerId, PointerIdAllocator,
-    PointerInfo, PointerPhase, PointerSample, ScrollPhase, ScrollSample, ScrollSource,
+    BackendDeviceKey, CancelReason, CoalescedSample, EventTime, PointerAxes, PointerId,
+    PointerIdAllocator, PointerInfo, PointerPhase, PointerSample, ScrollPhase, ScrollSample,
+    ScrollSource,
 };
 pub use raw_handle::ParentHandle;
 pub use shortcut::{

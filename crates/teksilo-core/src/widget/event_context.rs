@@ -666,6 +666,33 @@ impl<'ops> EventContext<'ops> {
         self.input.position
     }
 
+    /// The positions the OS batched into the packet being dispatched, oldest
+    /// first and **excluding** the packet's own
+    /// ([`pointer_position`](Self::pointer_position), which is the newest).
+    ///
+    /// A backend whose device outruns the window's message rate hands over one
+    /// sample per *message* and puts the intermediate positions here, each with
+    /// the [`PointerAxes`](crate::pointer::PointerAxes) it was sampled at and
+    /// its own [`EventTime`](crate::pointer::EventTime). A surface that must
+    /// see every position a stylus produced — an ink tool is the case this
+    /// exists for — iterates these and *then* handles
+    /// [`pointer_position`](Self::pointer_position), and is correct whether or
+    /// not the backend batches, because a backend that does not returns an
+    /// empty slice.
+    ///
+    /// **Window**-logical coordinates, like
+    /// [`WidgetEvent::Scroll`](crate::event::WidgetEvent::Scroll)'s `window_position` and
+    /// for the same reason: a batch has no single widget to localise against.
+    /// A handler working in its own space converts at the use site.
+    ///
+    /// Empty on every dispatch that is not a pointer sample — a gesture the
+    /// timer recognised, a drag-and-drop tick, an assistive-technology action.
+    /// Those batched nothing, and reporting whichever sample arrived last would
+    /// attribute its positions to a gesture that did not produce them.
+    pub fn coalesced(&self) -> &[crate::pointer::CoalescedSample] {
+        &self.input.coalesced
+    }
+
     /// Where in a continuous scroll gesture the event being handled sits.
     ///
     /// [`ScrollPhase::Discrete`](crate::pointer::ScrollPhase::Discrete) — a

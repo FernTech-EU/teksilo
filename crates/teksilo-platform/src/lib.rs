@@ -39,7 +39,7 @@ pub use file_dialog::{
     EventContextFileDialogExt, FileDialogBackend, FileDialogEventPayload, FileDialogHandle,
     FileDialogRequest, FileDialogResult, FileFilter, MemoryFileDialog, RequestId,
 };
-pub use pen::{PenButtons, PenCaps, PenPacket, PenSource, create_pen_source};
+pub use pen::{PenBatching, PenButtons, PenCaps, PenPacket, PenSource, create_pen_source};
 pub use pointer_backend::{
     BackendCaps, BackendEvent, InputSample, PlatformKind, PointerBackend, SoftKeyboardSupport,
 };

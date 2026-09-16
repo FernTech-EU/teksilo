@@ -84,6 +84,21 @@ pub struct PathPlacement {
 /// so a solid fill and a gradient fill of identical geometry share one
 /// atlas entry — the color/gradient tint is applied by the GPU at draw
 /// time, not baked into the bitmap.
+///
+/// # The geometry is read as one word, not walked
+///
+/// [`Path::stamp`] is a rolling 64-bit fold of the command list, maintained
+/// as commands are appended, so building the key is O(1) in the path's
+/// length. It used to hash every `PathCommand`, which made a **cache hit**
+/// cost O(n): 1.3 µs for a 100-point path, 23.2 µs for a 2 000-point one.
+/// That is the whole of the ink cliff — a wet stroke that grows by a point
+/// per pointer sample paid a full walk every frame just to discover the
+/// bitmap it wanted was already resident, so one stroke was quadratic before
+/// the rasterizer was even reached.
+///
+/// The stamp is content-addressed exactly as the walk was: two paths with the
+/// same commands produce the same key, two with different commands collide
+/// with 64-bit probability. Nothing else about the cache's semantics moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct PathCacheKey(u64);
 
@@ -98,47 +113,8 @@ impl PathCacheKey {
         geom_scale: f32,
     ) -> Self {
         let mut hasher = std::hash::DefaultHasher::new();
-        // Hash path commands
-        for cmd in &path.commands {
-            std::mem::discriminant(cmd).hash(&mut hasher);
-            match cmd {
-                PathCommand::MoveTo(p) | PathCommand::LineTo(p) => {
-                    p.x.to_bits().hash(&mut hasher);
-                    p.y.to_bits().hash(&mut hasher);
-                }
-                PathCommand::QuadTo { control, to } => {
-                    control.x.to_bits().hash(&mut hasher);
-                    control.y.to_bits().hash(&mut hasher);
-                    to.x.to_bits().hash(&mut hasher);
-                    to.y.to_bits().hash(&mut hasher);
-                }
-                PathCommand::CubicTo {
-                    control1,
-                    control2,
-                    to,
-                } => {
-                    control1.x.to_bits().hash(&mut hasher);
-                    control1.y.to_bits().hash(&mut hasher);
-                    control2.x.to_bits().hash(&mut hasher);
-                    control2.y.to_bits().hash(&mut hasher);
-                    to.x.to_bits().hash(&mut hasher);
-                    to.y.to_bits().hash(&mut hasher);
-                }
-                PathCommand::ArcTo {
-                    rect,
-                    start_angle,
-                    sweep_angle,
-                } => {
-                    rect.x.to_bits().hash(&mut hasher);
-                    rect.y.to_bits().hash(&mut hasher);
-                    rect.width.to_bits().hash(&mut hasher);
-                    rect.height.to_bits().hash(&mut hasher);
-                    start_angle.to_bits().hash(&mut hasher);
-                    sweep_angle.to_bits().hash(&mut hasher);
-                }
-                PathCommand::Close => {}
-            }
-        }
+        // The path's geometry, as one word. See this type's doc comment.
+        path.stamp().hash(&mut hasher);
         // Hash stroke style
         style.width.to_bits().hash(&mut hasher);
         std::mem::discriminant(&style.line_cap).hash(&mut hasher);
@@ -232,6 +208,15 @@ impl PathAtlas {
     /// leaving as a hole in the frame.
     pub fn oversize_skips(&self) -> u64 {
         self.oversize_skips
+    }
+
+    /// How many distinct masks are resident.
+    ///
+    /// The observable side of the cache key: two draws that share a key share
+    /// an entry, and two that do not each get one. A test asserting that
+    /// identical geometry is not rasterized twice reads this.
+    pub fn entry_count(&self) -> usize {
+        self.cache.len()
     }
 
     /// Call at the start of each frame to advance the LRU counter.
@@ -820,7 +805,7 @@ fn build_sk_path(path: &Path, geom_scale: f32, origin: [f32; 2]) -> Option<tiny_
     let by = |y: f32| y * geom_scale - origin[1];
     let mut pb = tiny_skia::PathBuilder::new();
     let mut cursor = SubpathCursor::new();
-    for cmd in &path.commands {
+    for cmd in path.commands() {
         match *cmd {
             PathCommand::MoveTo(p) => {
                 pb.move_to(bx(p.x), by(p.y));
@@ -1044,13 +1029,11 @@ mod tests {
         let (h, pitch) = (7563.0_f32, 10.0_f32);
         let w = h + pitch;
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(pitch, 0.0)));
-        path.commands.push(PathCommand::LineTo(Point::new(w, h)));
-        path.commands.push(PathCommand::LineTo(Point::new(h, h)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(pitch, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(w, h)));
+        path.push(PathCommand::LineTo(Point::new(h, h)));
+        path.push(PathCommand::Close);
 
         let before = atlas.cache.len();
         let region = atlas.lookup_or_rasterize(
@@ -1095,15 +1078,11 @@ mod tests {
         let side = atlas.max_size as f32; // exactly at the cap
 
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(side, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(side, side)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(0.0, side)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(side, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(side, side)));
+        path.push(PathCommand::LineTo(Point::new(0.0, side)));
+        path.push(PathCommand::Close);
 
         let region = atlas.lookup_or_rasterize(
             &path,
@@ -1129,15 +1108,11 @@ mod tests {
     #[test]
     fn rasterize_simple_rect_path() {
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(0.0, 10.0)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.push(PathCommand::LineTo(Point::new(0.0, 10.0)));
+        path.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let pixels = rasterize_path(
@@ -1165,10 +1140,8 @@ mod tests {
     #[test]
     fn rasterize_stroke_path() {
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(1.0, 5.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(9.0, 5.0)));
+        path.push(PathCommand::MoveTo(Point::new(1.0, 5.0)));
+        path.push(PathCommand::LineTo(Point::new(9.0, 5.0)));
 
         let style = StrokeStyle::solid(2.0);
         let pixels = rasterize_path(
@@ -1191,12 +1164,9 @@ mod tests {
         // for the second (the bug: line_join was honored in the
         // rasterizer but absent from the key).
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 10.0)));
 
         let miter = StrokeStyle {
             line_join: LineJoin::Miter,
@@ -1218,13 +1188,10 @@ mod tests {
         // Winding vs even-odd produce different pixels for the same path, so
         // they must not share an atlas entry.
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
         assert_ne!(
             PathCacheKey::new(&path, &style, FillRule::Winding, [0.0, 0.0], 12, 12, 1.0),
@@ -1333,13 +1300,10 @@ mod tests {
         for i in 0..6 {
             let mut path = Path::new();
             let side = 10.0 + i as f32;
-            path.commands
-                .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-            path.commands
-                .push(PathCommand::LineTo(Point::new(side, 0.0)));
-            path.commands
-                .push(PathCommand::LineTo(Point::new(side, side)));
-            path.commands.push(PathCommand::Close);
+            path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+            path.push(PathCommand::LineTo(Point::new(side, 0.0)));
+            path.push(PathCommand::LineTo(Point::new(side, side)));
+            path.push(PathCommand::Close);
             let p = atlas
                 .lookup_or_rasterize(
                     &path,
@@ -1380,13 +1344,10 @@ mod tests {
         atlas.begin_frame();
 
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
@@ -1416,13 +1377,10 @@ mod tests {
         atlas.begin_frame();
 
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(10.0, 10.0)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(10.0, 10.0)));
+        path.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let bounds = [0.0, 0.0, 10.0, 10.0];
@@ -1459,13 +1417,10 @@ mod tests {
         let mut atlas = PathAtlas::new(64, 64);
 
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(8.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(8.0, 8.0)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(8.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(8.0, 8.0)));
+        path.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
         let bounds = [0.0, 0.0, 8.0, 8.0];
 
@@ -1493,18 +1448,16 @@ mod tests {
         atlas.begin_frame();
 
         let mut p1 = Path::new();
-        p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        p1.commands.push(PathCommand::LineTo(Point::new(40.0, 0.0)));
-        p1.commands
-            .push(PathCommand::LineTo(Point::new(40.0, 40.0)));
-        p1.commands.push(PathCommand::Close);
+        p1.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p1.push(PathCommand::LineTo(Point::new(40.0, 0.0)));
+        p1.push(PathCommand::LineTo(Point::new(40.0, 40.0)));
+        p1.push(PathCommand::Close);
 
         let mut p2 = Path::new();
-        p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        p2.commands.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
-        p2.commands
-            .push(PathCommand::LineTo(Point::new(50.0, 50.0)));
-        p2.commands.push(PathCommand::Close);
+        p2.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p2.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
+        p2.push(PathCommand::LineTo(Point::new(50.0, 50.0)));
+        p2.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let r1 = atlas
@@ -1570,18 +1523,16 @@ mod tests {
         atlas.begin_frame();
 
         let mut p1 = Path::new();
-        p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        p1.commands.push(PathCommand::LineTo(Point::new(60.0, 0.0)));
-        p1.commands
-            .push(PathCommand::LineTo(Point::new(60.0, 60.0)));
-        p1.commands.push(PathCommand::Close);
+        p1.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p1.push(PathCommand::LineTo(Point::new(60.0, 0.0)));
+        p1.push(PathCommand::LineTo(Point::new(60.0, 60.0)));
+        p1.push(PathCommand::Close);
 
         let mut p2 = Path::new();
-        p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        p2.commands.push(PathCommand::LineTo(Point::new(62.0, 0.0)));
-        p2.commands
-            .push(PathCommand::LineTo(Point::new(62.0, 62.0)));
-        p2.commands.push(PathCommand::Close);
+        p2.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p2.push(PathCommand::LineTo(Point::new(62.0, 0.0)));
+        p2.push(PathCommand::LineTo(Point::new(62.0, 62.0)));
+        p2.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let r1 = atlas
@@ -1636,13 +1587,10 @@ mod tests {
         atlas.begin_frame(); // frame 1
 
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(8.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(8.0, 8.0)));
-        path.commands.push(PathCommand::Close);
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(8.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(8.0, 8.0)));
+        path.push(PathCommand::Close);
         let style = StrokeStyle::solid(0.0);
         atlas
             .lookup_or_rasterize(
@@ -1691,18 +1639,16 @@ mod tests {
         atlas.begin_frame();
 
         let mut p1 = Path::new();
-        p1.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        p1.commands.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
-        p1.commands
-            .push(PathCommand::LineTo(Point::new(50.0, 50.0)));
-        p1.commands.push(PathCommand::Close);
+        p1.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p1.push(PathCommand::LineTo(Point::new(50.0, 0.0)));
+        p1.push(PathCommand::LineTo(Point::new(50.0, 50.0)));
+        p1.push(PathCommand::Close);
 
         let mut p2 = Path::new();
-        p2.commands.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        p2.commands.push(PathCommand::LineTo(Point::new(60.0, 0.0)));
-        p2.commands
-            .push(PathCommand::LineTo(Point::new(60.0, 60.0)));
-        p2.commands.push(PathCommand::Close);
+        p2.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        p2.push(PathCommand::LineTo(Point::new(60.0, 0.0)));
+        p2.push(PathCommand::LineTo(Point::new(60.0, 60.0)));
+        p2.push(PathCommand::Close);
 
         let style = StrokeStyle::solid(0.0);
         let r1 = atlas
@@ -1763,10 +1709,8 @@ mod tests {
         let mut atlas = PathAtlas::new(512, 512);
         atlas.begin_frame();
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(40.0, 0.0)));
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(40.0, 0.0)));
         let bounds = [0.0, 0.0, 40.0, 4.0];
 
         let cosmetic = StrokeStyle::hairline(2.0);
@@ -1811,10 +1755,8 @@ mod tests {
     /// `geom_scale`. Returns how many separate ink runs the middle row has.
     fn dashed_line_runs(geom_scale: f32) -> usize {
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 4.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(20.0, 4.0)));
+        path.push(PathCommand::MoveTo(Point::new(0.0, 4.0)));
+        path.push(PathCommand::LineTo(Point::new(20.0, 4.0)));
         let style = StrokeStyle::dashed(2.0, 4.0, 4.0);
 
         let w = (20.0 * geom_scale).ceil() as u32;
@@ -1874,10 +1816,8 @@ mod tests {
     #[test]
     fn cache_key_distinguishes_the_geometry_scale() {
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(0.4, 0.0)));
+        path.push(PathCommand::MoveTo(Point::new(0.0, 0.0)));
+        path.push(PathCommand::LineTo(Point::new(0.4, 0.0)));
         let style = StrokeStyle::dashed(1.0, 4.0, 4.0);
         // Same ceiled bitmap size (1x1) and same origin at both scales.
         assert_ne!(
@@ -1893,10 +1833,8 @@ mod tests {
     #[test]
     fn a_dashed_stroke_leaves_gaps_where_a_solid_one_does_not() {
         let mut path = Path::new();
-        path.commands
-            .push(PathCommand::MoveTo(Point::new(0.0, 4.0)));
-        path.commands
-            .push(PathCommand::LineTo(Point::new(20.0, 4.0)));
+        path.push(PathCommand::MoveTo(Point::new(0.0, 4.0)));
+        path.push(PathCommand::LineTo(Point::new(20.0, 4.0)));
 
         let ink = |style: &StrokeStyle| -> usize {
             let px = rasterize_path(&path, style, FillRule::Winding, [0.0, 0.0], 20, 8, 1.0, 1.0)

@@ -187,8 +187,8 @@ impl VelocityTracker {
     /// Equivalent to calling [`add`](Self::add) once per element — which is
     /// the point: a 1000 Hz pen's batch must not be reduced to its newest
     /// point before the fit sees it.
-    pub fn add_coalesced(&mut self, samples: &[(EventTime, Point)]) {
-        for &(time, position) in samples {
+    pub fn add_coalesced(&mut self, samples: impl IntoIterator<Item = (EventTime, Point)>) {
+        for (time, position) in samples {
             self.add(time, position);
         }
     }
@@ -567,7 +567,7 @@ mod tests {
         }
 
         let mut coalesced = VelocityTracker::new();
-        coalesced.add_coalesced(&batch);
+        coalesced.add_coalesced(batch.iter().copied());
 
         assert_eq!(
             coalesced.estimate(),

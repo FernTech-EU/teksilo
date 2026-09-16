@@ -1452,3 +1452,246 @@ fn a_window_with_no_pen_source_produces_no_pen_samples() {
     assert!(state.take_pen_source().is_some());
     assert!(state.poll_pen(EventTime::from_millis(2)).is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Pen batching (`PenBatching::Coalesce`). The contract an ink surface stands
+// on: whichever mode is set, the same positions reach a consumer that reads
+// both `PointerSample::position` and `PointerSample::coalesced` — with their
+// own times and their own axes.
+// ---------------------------------------------------------------------------
+
+use crate::pen::PenBatching;
+
+/// A pressure-varying contact packet at `(x, y)`.
+fn contact(x: f32, y: f32, pressure: f32, ms: u32) -> PenPacket {
+    PenPacket::hovering(PenKind::Pen, Point::new(x, y))
+        .down_at(pressure)
+        .at_device_ms(ms)
+}
+
+/// Every position a consumer would draw through, oldest first: each sample's
+/// batched positions, then its own.
+fn drawn_positions(samples: &[InputSample]) -> Vec<(Point, Option<f32>)> {
+    let mut out = Vec::new();
+    for sample in samples.iter().filter_map(InputSample::as_pointer) {
+        for c in &sample.coalesced {
+            out.push((c.window_position, c.axes.pressure));
+        }
+        out.push((sample.position, sample.pointer.axes.pressure));
+    }
+    out
+}
+
+fn stroke_packets() -> Vec<PenPacket> {
+    let mut packets = vec![hover(0.0, 0.0).at_device_ms(0)];
+    for i in 0..8u32 {
+        packets.push(contact(
+            i as f32,
+            i as f32 * 2.0,
+            0.1 + i as f32 * 0.1,
+            4 + i * 3,
+        ));
+    }
+    packets
+}
+
+#[test]
+fn coalescing_a_pen_batch_keeps_every_position_its_axes_and_its_time() {
+    let per_packet = {
+        let mut state = state_with_pen(stroke_packets());
+        state.poll_pen(EventTime::from_millis(40))
+    };
+    let mut state = state_with_pen(stroke_packets());
+    state.set_pen_batching(PenBatching::Coalesce);
+    let coalesced = state.poll_pen(EventTime::from_millis(40));
+
+    assert!(
+        coalesced.len() < per_packet.len(),
+        "Coalesce must actually fold: {} samples against {}",
+        coalesced.len(),
+        per_packet.len()
+    );
+    assert_eq!(
+        drawn_positions(&coalesced),
+        drawn_positions(&per_packet),
+        "a consumer that reads `coalesced` then `position` must see the same \
+         stroke under either mode — same points, same per-point pressure"
+    );
+
+    // And the times are per-position, not the drain's single `now`.
+    let times: Vec<_> = coalesced
+        .iter()
+        .filter_map(InputSample::as_pointer)
+        .flat_map(|s| {
+            s.coalesced
+                .iter()
+                .map(|c| c.time)
+                .chain(std::iter::once(s.pointer.time))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let distinct: std::collections::BTreeSet<_> = times.iter().collect();
+    assert!(
+        distinct.len() > 1,
+        "the batched positions must keep the device's own spacing, got {times:?}"
+    );
+    assert!(
+        times.windows(2).all(|w| w[0] <= w[1]),
+        "oldest first, and monotone: {times:?}"
+    );
+}
+
+#[test]
+fn coalescing_never_folds_a_transition() {
+    // hover, hover, down, move, move, up-by-lifting, hover
+    let packets = vec![
+        hover(0.0, 0.0).at_device_ms(0),
+        hover(1.0, 0.0).at_device_ms(3),
+        contact(2.0, 0.0, 0.4, 6).at_device_ms(6),
+        contact(3.0, 0.0, 0.5, 9),
+        contact(4.0, 0.0, 0.6, 12),
+        hover(5.0, 0.0).at_device_ms(15),
+        hover(6.0, 0.0).at_device_ms(18),
+    ];
+    let phases = |mode: PenBatching| {
+        let mut state = state_with_pen(packets.clone());
+        state.set_pen_batching(mode);
+        let samples = state.poll_pen(EventTime::from_millis(20));
+        samples
+            .iter()
+            .filter_map(InputSample::as_pointer)
+            .filter(|s| s.phase != PointerPhase::Move || s.button.is_some())
+            .map(|s| (s.phase, s.button))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        phases(PenBatching::Coalesce),
+        phases(PenBatching::PerPacket),
+        "Down / Up / button changes keep their own samples under either mode"
+    );
+    assert!(
+        !phases(PenBatching::Coalesce).is_empty(),
+        "the fixture must contain transitions, or this asserts nothing"
+    );
+}
+
+/// The proximity **enter** keeps its own sample under `Coalesce`, and that is
+/// the half of "transitions are never folded" the fold cannot see for itself:
+/// [`PointerPhase`] has no *enter*, so a tool coming into range rides as a
+/// `Move` with nothing held — which is `coalesce_pen_moves`'s own definition of
+/// foldable pure motion.
+///
+/// What would be lost is not a `PointerMove`. The tree derives the hover owner,
+/// the cursor and the tooltip dwell from a sample's `position` and never from
+/// its batched list, so a pen that came into range over one widget and hovered
+/// onto another inside one drain would never enter the first at all — a hover
+/// affordance that silently stops firing under a batching mode.
+///
+/// Stop pinning it — pass `&[]` in place of `&pinned` at `poll_pen`'s call to
+/// `coalesce_pen_moves` — and the drain's first position becomes `(30, 30)`.
+#[test]
+fn coalescing_keeps_the_proximity_enters_own_sample() {
+    let packets = || {
+        vec![
+            hover(0.0, 0.0).at_device_ms(0),
+            hover(10.0, 10.0).at_device_ms(3),
+            hover(20.0, 20.0).at_device_ms(6),
+            hover(30.0, 30.0).at_device_ms(9),
+        ]
+    };
+
+    let per_packet = {
+        let mut state = state_with_pen(packets());
+        state.poll_pen(EventTime::from_millis(12))
+    };
+    let mut state = state_with_pen(packets());
+    state.set_pen_batching(PenBatching::Coalesce);
+    let coalesced = state.poll_pen(EventTime::from_millis(12));
+
+    let folded = pointers(&coalesced);
+    assert_eq!(
+        folded[0].position,
+        Point::new(0.0, 0.0),
+        "the entering position must be dispatched on its own, not batched into \
+         the hover that followed it: got {:?}",
+        folded.iter().map(|s| s.position).collect::<Vec<_>>()
+    );
+    assert!(
+        folded[0].coalesced.is_empty(),
+        "…and it is the sample, not a passenger on one"
+    );
+    assert_eq!(
+        folded.len(),
+        2,
+        "the enter plus one folded hover run: {:?}",
+        folded.iter().map(|s| s.position).collect::<Vec<_>>()
+    );
+
+    // Still a fold, or the assertion above is satisfied by doing nothing.
+    assert!(
+        coalesced.len() < per_packet.len(),
+        "Coalesce must still fold the run behind the enter: {} samples against \
+         {}",
+        coalesced.len(),
+        per_packet.len()
+    );
+    assert_eq!(
+        drawn_positions(&coalesced),
+        drawn_positions(&per_packet),
+        "and every position still reaches a consumer that reads `coalesced` \
+         then `position`"
+    );
+}
+
+#[test]
+fn a_hover_run_and_a_contact_run_do_not_fold_together() {
+    let packets = vec![
+        hover(0.0, 0.0).at_device_ms(0),
+        hover(1.0, 0.0).at_device_ms(3),
+        contact(2.0, 0.0, 0.4, 6),
+        contact(3.0, 0.0, 0.5, 9),
+    ];
+    let mut state = state_with_pen(packets);
+    state.set_pen_batching(PenBatching::Coalesce);
+    let samples = state.poll_pen(EventTime::from_millis(12));
+
+    for sample in samples.iter().filter_map(InputSample::as_pointer) {
+        let down = !sample.pointer.buttons.is_empty();
+        for c in &sample.coalesced {
+            let batched_down = c.axes.pressure.is_some_and(|p| p > 0.0);
+            assert_eq!(
+                batched_down, down,
+                "a batched position must belong to the same contact state as \
+                 the sample carrying it"
+            );
+        }
+    }
+}
+
+#[test]
+fn per_packet_is_the_default_and_batches_nothing() {
+    let state = TranslationState::new();
+    assert_eq!(state.pen_batching(), PenBatching::PerPacket);
+
+    let mut state = state_with_pen(stroke_packets());
+    let samples = state.poll_pen(EventTime::from_millis(40));
+    assert!(
+        samples
+            .iter()
+            .filter_map(InputSample::as_pointer)
+            .all(|s| s.coalesced.is_empty()),
+        "the default must not populate `coalesced` — a consumer that reads only \
+         `position` sees every packet, which is the whole point of PerPacket"
+    );
+}
+
+#[test]
+fn a_single_packet_drain_is_unchanged_by_coalescing() {
+    let mut state = state_with_pen(vec![hover(3.0, 4.0).at_device_ms(7)]);
+    state.set_pen_batching(PenBatching::Coalesce);
+    let samples = state.poll_pen(EventTime::from_millis(9));
+    let pointers = pointers(&samples);
+    assert_eq!(pointers.len(), 1);
+    assert!(pointers[0].coalesced.is_empty());
+    assert_eq!(pointers[0].position, Point::new(3.0, 4.0));
+}

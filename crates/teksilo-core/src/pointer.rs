@@ -434,6 +434,62 @@ pub enum PointerPhase {
     Cancel,
 }
 
+/// One position the OS batched into a packet, with the axes it was sampled at
+/// and its own time.
+///
+/// A backend that reports a batch — a digitizer whose packets arrive faster
+/// than the window's message rate, a platform with an explicit coalescing API —
+/// hands over **one** [`PointerSample`] per packet with the intermediate
+/// positions in [`PointerSample::coalesced`]. The alternative, one whole tree
+/// dispatch per digitizer packet, costs a hit test, an arbitration turn and a
+/// handler walk for a position no one had a chance to draw between.
+///
+/// Consumers see these through
+/// [`EventContext::coalesced`](crate::EventContext::coalesced). A drawing
+/// surface fans out over them and then over the sample's own position; a
+/// velocity tracker integrates them; everything else ignores them, which costs
+/// nothing because the list is empty for every producer that does not batch.
+///
+/// # Coordinates
+///
+/// [`window_position`](Self::window_position) is **window**-logical, exactly
+/// like [`PointerSample::position`] and
+/// [`WidgetEvent::Scroll`](crate::event::WidgetEvent::Scroll)'s `window_position`, and is
+/// named for it. The router localises the *event's* position against the
+/// captor's current bounds; a batch has no single widget to localise against,
+/// and a handler that needs widget-local coordinates converts at the use site
+/// — a `SceneView` does it through `SceneView::view_transform_signal`.
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct CoalescedSample {
+    /// When the device produced this position, on the tree's timeline.
+    pub time: EventTime,
+    /// Where, in **window**-logical coordinates. See the type's docs.
+    pub window_position: Point,
+    /// The continuous axes as they read at this position — a digitizer varies
+    /// pressure and tilt *within* a batch, and that variation is the whole
+    /// reason to keep the intermediate samples rather than the endpoints.
+    pub axes: PointerAxes,
+}
+
+impl CoalescedSample {
+    /// One batched position. Axes default to "reported nothing"; set them with
+    /// [`with_axes`](Self::with_axes).
+    pub fn new(time: EventTime, window_position: Point) -> Self {
+        Self {
+            time,
+            window_position,
+            axes: PointerAxes::default(),
+        }
+    }
+
+    /// This position with its axes recorded.
+    pub fn with_axes(mut self, axes: PointerAxes) -> Self {
+        self.axes = axes;
+        self
+    }
+}
+
 /// One pointer sample as it enters the tree.
 ///
 /// The unit [`WidgetTree::dispatch_pointer`](crate::WidgetTree::dispatch_pointer)
@@ -460,7 +516,9 @@ pub struct PointerSample {
     /// through them; everything else ignores them. Deliberately a `Vec` and not
     /// a `SmallVec`: this costs one allocation per packet that actually
     /// coalesced, and `teksilo-core`'s dependency set is small on purpose.
-    pub coalesced: Vec<(EventTime, Point, PointerAxes)>,
+    ///
+    /// Reaches a handler as [`EventContext::coalesced`](crate::EventContext::coalesced).
+    pub coalesced: Vec<CoalescedSample>,
 }
 
 impl PointerSample {
@@ -692,11 +750,22 @@ pub(crate) struct InputSnapshot {
     /// excluding [`position`](Self::position).
     ///
     /// Carried onto the snapshot — rather than left on the
-    /// [`PointerSample`] the dispatcher discards — because the velocity fit
-    /// behind a fling has to see them: a 500 Hz digitiser decimated to frame
-    /// rate under-reads a flick by the ratio of the two rates. Empty for every
-    /// producer that does not coalesce, which costs no allocation.
-    pub(crate) coalesced: Vec<(EventTime, Point)>,
+    /// [`PointerSample`] the dispatcher discards — because two consumers need
+    /// them. The velocity fit behind a fling, first: a 500 Hz digitiser
+    /// decimated to frame rate under-reads a flick by the ratio of the two
+    /// rates. And a drawing surface, which reads them through
+    /// [`EventContext::coalesced`](crate::EventContext::coalesced) and would
+    /// otherwise draw a stroke through one position in every batch.
+    ///
+    /// The axes ride along. They used to be dropped here — the snapshot held
+    /// `(EventTime, Point)` — which left the one consumer that existed (the
+    /// velocity fit) correct and silently made the field useless for ink,
+    /// because a digitizer's pressure varies *within* a batch and it is that
+    /// variation a stroke's width is made of.
+    ///
+    /// Empty for every producer that does not coalesce, which costs no
+    /// allocation.
+    pub(crate) coalesced: Vec<CoalescedSample>,
 }
 
 impl Default for InputSnapshot {
@@ -717,11 +786,7 @@ impl InputSnapshot {
         Self {
             pointer: sample.pointer,
             position: Some(sample.position),
-            coalesced: sample
-                .coalesced
-                .iter()
-                .map(|&(time, point, _)| (time, point))
-                .collect(),
+            coalesced: sample.coalesced.clone(),
             ..Self::default()
         }
     }
@@ -739,9 +804,19 @@ impl InputSnapshot {
     /// carries its own position, in **widget-local** coordinates, on the event
     /// the handler is given; publishing a window position here as well would
     /// offer a handler two answers that do not agree.
+    ///
+    /// [`coalesced`](Self::coalesced) stays empty for the same reason, and the
+    /// emptiness is written out below rather than inherited from
+    /// [`Default`](Self::default) so that it reads as the decision it is: a
+    /// deadline coming due batched nothing, and handing back the positions of
+    /// whichever sample happened to arrive last would attribute them to a
+    /// gesture that did not produce them. A surface that wants every position
+    /// — an ink tool — reads them on the **sample** path, which is where they
+    /// are; see [`EventContext::coalesced`](crate::EventContext::coalesced).
     pub(crate) fn for_recognized_gesture(pointer: PointerInfo) -> Self {
         Self {
             pointer,
+            coalesced: Vec::new(),
             ..Self::default()
         }
     }
@@ -760,10 +835,13 @@ impl InputSnapshot {
     /// [`for_recognized_gesture`](Self::for_recognized_gesture): the drag
     /// handler is handed its position in **widget-local** coordinates, and a
     /// window position published beside it would be a second answer that
-    /// disagrees.
+    /// disagrees. [`coalesced`](Self::coalesced) is empty on the same grounds,
+    /// and written out for the same reason — a tick fired from a layout pass
+    /// batched nothing.
     pub(crate) fn for_drag_session(pointer: PointerInfo) -> Self {
         Self {
             pointer,
+            coalesced: Vec::new(),
             ..Self::default()
         }
     }

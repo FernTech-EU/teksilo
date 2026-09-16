@@ -1818,7 +1818,7 @@ mod tests {
         let mut canvas = Canvas::new();
         canvas.stroke_rect(Rect::new(0.0, 0.0, 100.0, 50.0), Color::BLACK, dashed());
         let frame = canvas.into_render_frame();
-        let cmds = &frame.paths[0].path.commands;
+        let cmds = frame.paths[0].path.commands();
         let move_tos = cmds
             .iter()
             .filter(|c| matches!(c, crate::path::PathCommand::MoveTo(_)))
