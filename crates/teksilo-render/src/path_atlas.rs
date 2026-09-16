@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use teksilo_canvas::geometry::{Point, Rect};
 use teksilo_canvas::paint::{FillRule, LineCap, LineJoin, StrokeSpace, StrokeStyle};
 use teksilo_canvas::path::{Path, PathCommand};
 
@@ -727,63 +728,7 @@ fn rasterize_path(
 
     let mut pixmap = tiny_skia::Pixmap::new(w, h)?;
 
-    // Build the tiny-skia path in bitmap space. Scale first, then subtract
-    // the device-space origin — NOT the other way round: the origin may be
-    // snapped to a pixel the path's own bounds do not sit on, so it is not a
-    // multiple of `geom_scale` and cannot be folded into the path's units.
-    let bx = |x: f32| x * geom_scale - origin[0];
-    let by = |y: f32| y * geom_scale - origin[1];
-    let mut pb = tiny_skia::PathBuilder::new();
-    for cmd in &path.commands {
-        match *cmd {
-            PathCommand::MoveTo(p) => {
-                pb.move_to(bx(p.x), by(p.y));
-            }
-            PathCommand::LineTo(p) => {
-                pb.line_to(bx(p.x), by(p.y));
-            }
-            PathCommand::QuadTo { control, to } => {
-                pb.quad_to(bx(control.x), by(control.y), bx(to.x), by(to.y));
-            }
-            PathCommand::CubicTo {
-                control1,
-                control2,
-                to,
-            } => {
-                pb.cubic_to(
-                    bx(control1.x),
-                    by(control1.y),
-                    bx(control2.x),
-                    by(control2.y),
-                    bx(to.x),
-                    by(to.y),
-                );
-            }
-            PathCommand::ArcTo {
-                rect,
-                start_angle,
-                sweep_angle,
-            } => {
-                // Approximate arc with cubic Bézier segments
-                arc_to_cubics(
-                    &mut pb,
-                    rect.x,
-                    rect.y,
-                    rect.width,
-                    rect.height,
-                    start_angle,
-                    sweep_angle,
-                    geom_scale,
-                    origin,
-                );
-            }
-            PathCommand::Close => {
-                pb.close();
-            }
-        }
-    }
-
-    let sk_path = pb.finish()?;
+    let sk_path = build_sk_path(path, geom_scale, origin)?;
 
     // Always opaque white — a pure AA coverage mask. Color/gradient tint
     // is applied by the GPU at draw time (see this function's doc comment).
@@ -858,75 +803,220 @@ fn rasterize_path(
     Some(pixmap.data().to_vec())
 }
 
-/// Approximate an elliptical arc with cubic Bézier segments.
-/// Each 90° sweep is one cubic; smaller sweeps use one cubic.
+/// Translate a [`Path`] into a tiny-skia path in bitmap space.
 ///
-/// `start_angle` and `sweep_angle` are in **degrees** (matching the
-/// public `Path::arc_to` API and existing call sites like
-/// `Path::circle` and `Path::rounded_rect`). They are converted to
-/// radians internally before being fed to `f32::cos`/`f32::sin`.
+/// Scale first, then subtract the device-space `origin` — NOT the other way
+/// round: the origin may be snapped to a pixel the path's own bounds do not
+/// sit on, so it is not a multiple of `geom_scale` and cannot be folded into
+/// the path's units.
 ///
-/// `cx` / `cy` are the arc rect's top-left in the path's own units; `origin`
-/// is the bitmap's top-left in device pixels, subtracted after scaling for
-/// the reason [`rasterize_path`] gives.
-#[allow(clippy::too_many_arguments)]
-fn arc_to_cubics(
+/// The command walk mirrors [`Path::flatten`]'s: the flattener is the oracle
+/// for where a subpath begins, because it is what the scene tier hit-tests
+/// against. A rasteriser that opened a subpath somewhere else would paint ink
+/// no click could reach — see [`emit_arc`], the one command where tiny-skia's
+/// own defaults do not already agree.
+fn build_sk_path(path: &Path, geom_scale: f32, origin: [f32; 2]) -> Option<tiny_skia::Path> {
+    let bx = |x: f32| x * geom_scale - origin[0];
+    let by = |y: f32| y * geom_scale - origin[1];
+    let mut pb = tiny_skia::PathBuilder::new();
+    let mut cursor = SubpathCursor::new();
+    for cmd in &path.commands {
+        match *cmd {
+            PathCommand::MoveTo(p) => {
+                pb.move_to(bx(p.x), by(p.y));
+                cursor.open_at(p);
+            }
+            PathCommand::LineTo(p) => {
+                open_implicit(&mut pb, &cursor, geom_scale, origin);
+                pb.line_to(bx(p.x), by(p.y));
+                cursor.extend_to(p);
+            }
+            PathCommand::QuadTo { control, to } => {
+                open_implicit(&mut pb, &cursor, geom_scale, origin);
+                pb.quad_to(bx(control.x), by(control.y), bx(to.x), by(to.y));
+                cursor.extend_to(to);
+            }
+            PathCommand::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                open_implicit(&mut pb, &cursor, geom_scale, origin);
+                pb.cubic_to(
+                    bx(control1.x),
+                    by(control1.y),
+                    bx(control2.x),
+                    by(control2.y),
+                    bx(to.x),
+                    by(to.y),
+                );
+                cursor.extend_to(to);
+            }
+            PathCommand::ArcTo {
+                rect,
+                start_angle,
+                sweep_angle,
+            } => {
+                emit_arc(
+                    &mut pb,
+                    &mut cursor,
+                    rect,
+                    start_angle,
+                    sweep_angle,
+                    geom_scale,
+                    origin,
+                );
+            }
+            PathCommand::Close => {
+                pb.close();
+                cursor.close();
+            }
+        }
+    }
+    pb.finish()
+}
+
+/// The subpath bookkeeping [`Path::flatten`] keeps as it walks a path's
+/// commands, mirrored so the rasteriser can ask the same question the
+/// flattener asks: *is a subpath open, and where is its current point?*
+///
+/// Every segment command consults it, because tiny-skia's
+/// `inject_move_to_if_needed` and `flatten` open an implicit subpath at two
+/// different points. tiny-skia opens at the last `MoveTo` **as fed to the
+/// builder**, i.e. already in bitmap space, and at bitmap `(0, 0)` for a path
+/// that has no `MoveTo` at all; `flatten` opens at the current point in the
+/// path's **own** units. After a [`PathCommand::Close`] the two agree, because
+/// the last `MoveTo` is the point `flatten` re-seeds its cursor with. For a
+/// path opening on a bare segment they agree only at `origin == [0, 0]` — and
+/// the atlas pins the origin to zero unless the path carries a negative
+/// coordinate, which is precisely when the divergence becomes reachable.
+///
+/// So the walk opens every implicit subpath explicitly, at the point `flatten`
+/// would open it, and tiny-skia's injection never fires.
+#[derive(Debug, Clone, Copy)]
+struct SubpathCursor {
+    /// Current point, in the path's own units.
+    at: Point,
+    /// First point of the subpath being built, in the path's own units.
+    start: Point,
+    /// Whether a subpath is open — `flatten`'s `!current.is_empty()`.
+    open: bool,
+}
+
+/// Open a subpath at the flattener's current point when a segment arrives with
+/// none open, so tiny-skia never injects one of its own at bitmap `(0, 0)`.
+///
+/// A no-op while a subpath is open, which is every command in a well-formed
+/// path.
+fn open_implicit(
     pb: &mut tiny_skia::PathBuilder,
-    cx: f32,
-    cy: f32,
-    w: f32,
-    h: f32,
+    cursor: &SubpathCursor,
+    geom_scale: f32,
+    origin: [f32; 2],
+) {
+    if !cursor.open {
+        pb.move_to(
+            cursor.at.x * geom_scale - origin[0],
+            cursor.at.y * geom_scale - origin[1],
+        );
+    }
+}
+
+impl SubpathCursor {
+    fn new() -> Self {
+        Self {
+            at: Point::ZERO,
+            start: Point::ZERO,
+            open: false,
+        }
+    }
+
+    /// A `MoveTo`: end any open subpath and start one at `p`.
+    fn open_at(&mut self, p: Point) {
+        self.at = p;
+        self.start = p;
+        self.open = true;
+    }
+
+    /// A segment drawn *from the current point*. When no subpath is open both
+    /// `flatten` and tiny-skia open one at that current point, so the start
+    /// is the cursor, not `to`.
+    fn extend_to(&mut self, to: Point) {
+        if !self.open {
+            self.start = self.at;
+            self.open = true;
+        }
+        self.at = to;
+    }
+
+    /// A `Close`: the current point returns to the subpath's start, and the
+    /// next segment opens a fresh subpath.
+    fn close(&mut self) {
+        if self.open {
+            self.at = self.start;
+            self.open = false;
+        }
+    }
+}
+
+/// Feed one [`PathCommand::ArcTo`] into a tiny-skia path builder, scaled into
+/// bitmap space.
+///
+/// The arc → cubic maths lives once, in [`teksilo_canvas::arc_to_cubics`] —
+/// `Path::flatten` and the scene tier's hit-testing read the same conversion,
+/// so a rendered arc and a clicked arc can never be different curves. This
+/// function's remaining jobs are the atlas's own — scale each returned point
+/// by `scale_factor`, subtract the bitmap `origin`, emit — plus the one place
+/// tiny-skia's defaults diverge from the flattener: **where the subpath
+/// starts.**
+///
+/// An arc is the only command that can begin somewhere other than the current
+/// point, so it is the only one that has to say whether it *opens* a subpath
+/// or *continues* one. `flatten` opens at the arc's own first point; tiny-skia's
+/// `line_to` would instead inject a `MoveTo` of its own — `(0, 0)` **in bitmap
+/// space** for a path that opens with a bare arc (so the phantom vertex sits
+/// at the atlas bitmap's top-left corner and moves with the scale factor), or
+/// the *previous* subpath's start after a `Close`. Either way the emitted
+/// spoke is ink `Path::contains_point` cannot see: a lone 90° arc came out as
+/// a filled triangle spanning the whole bitmap, 30× the area of the quarter-arc
+/// the shape reports. So open the subpath explicitly, and keep the straight
+/// connector only where `flatten` keeps one — when a subpath is already open
+/// and its current point is not the arc's start (a rounded rect's edge running
+/// into its corner).
+///
+/// `start_angle` and `sweep_angle` are in **degrees**, matching the public
+/// `Path::arc_to` API and its call sites (`Path::circle`,
+/// `Path::rounded_rect`). `rect` is the arc's bounding rectangle in the path's
+/// own units; `origin` is the bitmap's top-left in device pixels, subtracted
+/// after scaling for the reason [`build_sk_path`] gives.
+fn emit_arc(
+    pb: &mut tiny_skia::PathBuilder,
+    cursor: &mut SubpathCursor,
+    rect: Rect,
     start_angle: f32,
     sweep_angle: f32,
     scale_factor: f32,
     origin: [f32; 2],
 ) {
-    let rx = w * 0.5;
-    let ry = h * 0.5;
-    let center_x = (cx + rx) * scale_factor - origin[0];
-    let center_y = (cy + ry) * scale_factor - origin[1];
-    let rx_s = rx * scale_factor;
-    let ry_s = ry * scale_factor;
-
-    let mut remaining = sweep_angle.to_radians();
-    let mut angle = start_angle.to_radians();
-    let sign = if remaining >= 0.0 { 1.0 } else { -1.0 };
-
-    while remaining.abs() > 0.001 {
-        let chunk = sign * remaining.abs().min(std::f32::consts::FRAC_PI_2);
-        let half = chunk * 0.5;
-        let k = (4.0 / 3.0) * (1.0 - half.cos()) / half.sin();
-
-        let cos_a = angle.cos();
-        let sin_a = angle.sin();
-        let cos_b = (angle + chunk).cos();
-        let sin_b = (angle + chunk).sin();
-
-        let p1x = center_x + rx_s * cos_a;
-        let p1y = center_y + ry_s * sin_a;
-        let p2x = center_x + rx_s * (cos_a - k * sin_a);
-        let p2y = center_y + ry_s * (sin_a + k * cos_a);
-        let p3x = center_x + rx_s * (cos_b + k * sin_b);
-        let p3y = center_y + ry_s * (sin_b - k * cos_b);
-        let p4x = center_x + rx_s * cos_b;
-        let p4y = center_y + ry_s * sin_b;
-
-        if (remaining - sweep_angle).abs() < 0.001 && pb.is_empty() {
-            // First segment of a subpath that opens with an arc (e.g. a bare
-            // `<circle>`): move_to its start point. tiny-skia would otherwise
-            // insert an implicit move_to(0,0) before this line_to and draw a
-            // stray line from the origin to the arc.
-            pb.move_to(p1x, p1y);
-        } else {
-            // Connect to the arc's start from the current point (a shared
-            // vertex on rounded rects / continued subpaths; a zero-length
-            // no-op when a move_to already placed us there).
-            pb.line_to(p1x, p1y);
+    let map = |p: Point| {
+        (
+            p.x * scale_factor - origin[0],
+            p.y * scale_factor - origin[1],
+        )
+    };
+    for seg in teksilo_canvas::arc_to_cubics(rect, start_angle, sweep_angle) {
+        let (sx, sy) = map(seg.from);
+        if !cursor.open {
+            pb.move_to(sx, sy);
+            cursor.open_at(seg.from);
+        } else if cursor.at != seg.from {
+            pb.line_to(sx, sy);
         }
-        pb.cubic_to(p2x, p2y, p3x, p3y, p4x, p4y);
-
-        angle += chunk;
-        remaining -= chunk;
+        let (c1x, c1y) = map(seg.control1);
+        let (c2x, c2y) = map(seg.control2);
+        let (tx, ty) = map(seg.to);
+        pb.cubic_to(c1x, c1y, c2x, c2y, tx, ty);
+        cursor.extend_to(seg.to);
     }
 }
 
@@ -1825,6 +1915,314 @@ mod tests {
         assert!(
             dashed < solid,
             "dashed stroke must leave gaps (solid={solid}, dashed={dashed})"
+        );
+    }
+
+    // ── The rasterizer opens a subpath where the flattener opens one ──
+    //
+    // `Path::flatten` is the oracle for both halves of the parity the
+    // `ItemShape` work exists to guarantee: the scene tier hit-tests the
+    // polyline it produces, so ink the rasterizer lays down outside that
+    // polyline is ink no click can reach.
+
+    /// The arc that exposes the defect: a 40x40 disc centred at (200, 0), so
+    /// its own first point (220, 0) is 220 units from the origin and 220 from
+    /// any bitmap corner a spoke could be welded to.
+    fn probe_arc() -> teksilo_canvas::geometry::Rect {
+        teksilo_canvas::geometry::Rect::new(180.0, -20.0, 40.0, 40.0)
+    }
+
+    /// Paths covering every way an arc can meet a subpath, plus non-arc
+    /// shapes that must not regress.
+    fn subpath_battery() -> Vec<(&'static str, Path)> {
+        let mut bare_circle_arc = Path::new();
+        bare_circle_arc.arc_to(probe_arc(), 0.0, 360.0);
+
+        let mut bare_quarter_arc = Path::new();
+        bare_quarter_arc.arc_to(probe_arc(), 0.0, 90.0);
+
+        let mut arc_after_close = Path::new();
+        arc_after_close
+            .move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(10.0, 0.0))
+            .line_to(Point::new(10.0, 10.0));
+        arc_after_close.close();
+        arc_after_close.arc_to(probe_arc(), 0.0, 360.0);
+
+        let mut two_arcs = Path::new();
+        two_arcs.arc_to(probe_arc(), 0.0, 180.0);
+        two_arcs.close();
+        two_arcs.arc_to(
+            teksilo_canvas::geometry::Rect::new(0.0, 0.0, 30.0, 30.0),
+            90.0,
+            180.0,
+        );
+        two_arcs.close();
+
+        // A `MoveTo` that lands away from the arc's start: `flatten` keeps a
+        // straight connector here, so the rasterizer must keep one too —
+        // this is the case the fix must NOT turn into a second subpath.
+        let mut arc_from_elsewhere = Path::new();
+        arc_from_elsewhere.move_to(Point::new(0.0, 0.0));
+        arc_from_elsewhere.arc_to(probe_arc(), 0.0, 270.0);
+
+        let mut arc_after_cubic = Path::new();
+        arc_after_cubic.move_to(Point::new(0.0, 0.0)).cubic_to(
+            Point::new(20.0, 40.0),
+            Point::new(60.0, -40.0),
+            Point::new(90.0, 5.0),
+        );
+        arc_after_cubic.arc_to(probe_arc(), 90.0, 180.0);
+
+        let mut curves_and_lines = Path::new();
+        curves_and_lines
+            .move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(40.0, 0.0))
+            .quad_to(Point::new(60.0, 20.0), Point::new(40.0, 40.0))
+            .line_to(Point::new(0.0, 40.0));
+        curves_and_lines.close();
+        curves_and_lines
+            .move_to(Point::new(80.0, 10.0))
+            .line_to(Point::new(120.0, 10.0))
+            .line_to(Point::new(120.0, 30.0));
+
+        // A path that opens on a bare segment, with a negative coordinate so
+        // the atlas origin is non-zero. tiny-skia injects its own `MoveTo` at
+        // *bitmap* (0, 0) here; `flatten` opens at *path-space* (0, 0). Those
+        // agree only while the origin is zero, which is exactly what a
+        // negative coordinate stops being true.
+        let mut bare_line_negative = Path::new();
+        bare_line_negative
+            .line_to(Point::new(-30.0, -20.0))
+            .line_to(Point::new(40.0, 25.0));
+
+        let mut bare_cubic_negative = Path::new();
+        bare_cubic_negative.cubic_to(
+            Point::new(-20.0, 40.0),
+            Point::new(60.0, -40.0),
+            Point::new(-90.0, 5.0),
+        );
+
+        let mut bare_quad_negative = Path::new();
+        bare_quad_negative.quad_to(Point::new(-15.0, 30.0), Point::new(35.0, -10.0));
+
+        vec![
+            ("bare 360 arc", bare_circle_arc),
+            ("bare 90 arc", bare_quarter_arc),
+            ("bare line, negative", bare_line_negative),
+            ("bare cubic, negative", bare_cubic_negative),
+            ("bare quad, negative", bare_quad_negative),
+            ("arc after close", arc_after_close),
+            ("two arcs split by close", two_arcs),
+            ("arc reached from elsewhere", arc_from_elsewhere),
+            ("arc after a cubic", arc_after_cubic),
+            ("curves and lines", curves_and_lines),
+            ("circle", Path::circle(Point::new(50.0, 50.0), 25.0)),
+            (
+                "rounded rect",
+                Path::rounded_rect(
+                    teksilo_canvas::geometry::Rect::new(0.0, 0.0, 100.0, 60.0),
+                    teksilo_tokens::CornerRadius {
+                        top_left: 12.0,
+                        top_right: 4.0,
+                        bottom_left: 0.0,
+                        bottom_right: 20.0,
+                    },
+                ),
+            ),
+        ]
+    }
+
+    /// Where the tiny-skia path opens each of its subpaths.
+    fn sk_subpath_starts(p: &tiny_skia::Path) -> Vec<(f32, f32)> {
+        p.segments()
+            .filter_map(|seg| match seg {
+                tiny_skia::PathSegment::MoveTo(pt) => Some((pt.x, pt.y)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Where the flattener opens each of its subpaths.
+    ///
+    /// Single-vertex subpaths are dropped: a lone `MoveTo` with no segment
+    /// after it paints nothing and `contains_point` cannot see it either, but
+    /// tiny-skia coalesces consecutive `MoveTo` verbs into one while `flatten`
+    /// keeps a one-point subpath for each. That difference is inert on both
+    /// sides, and is not the parity this test is about.
+    fn flatten_subpath_starts(p: &Path) -> Vec<(f32, f32)> {
+        p.flatten(0.01)
+            .iter()
+            .filter(|sp| sp.points.len() > 1)
+            .map(|sp| (sp.points[0].x, sp.points[0].y))
+            .collect()
+    }
+
+    /// The defect, stated against the oracle: the arc emitter used to emit an
+    /// unconditional `line_to` for every arc segment, so tiny-skia injected a
+    /// `MoveTo` of its own — `(0, 0)` **in bitmap space** for a path opening
+    /// with a bare arc, or the *previous* subpath's start after a `Close` —
+    /// and welded a spoke from it to the arc. `Path::flatten`, which the scene
+    /// tier hit-tests, opens at the arc's own first point instead. That gap is
+    /// painted ink no click can reach.
+    ///
+    /// Comparing against `flatten` rather than against a recorded verb list
+    /// is what keeps this from going stale: change the arc expansion and both
+    /// sides move together, or the test reddens.
+    #[test]
+    fn the_rasterizer_starts_subpaths_where_the_flattener_does() {
+        for (name, path) in subpath_battery() {
+            let sk = build_sk_path(&path, 1.0, [0.0, 0.0]).expect("path builds");
+            let got = sk_subpath_starts(&sk);
+            let want = flatten_subpath_starts(&path);
+            assert_eq!(
+                got, want,
+                "{name}: the rasterizer must open its subpaths exactly where \
+                 Path::flatten opens its own — anywhere else is ink the scene \
+                 tier's hit-test cannot see"
+            );
+        }
+    }
+
+    /// The same claim in device space: the scale factor must not move a
+    /// subpath start relative to the geometry. The injected `MoveTo` went to
+    /// the **bitmap's** `(0, 0)`, so the phantom vertex slid with the scale
+    /// while the real geometry scaled around it.
+    #[test]
+    fn subpath_starts_track_the_geometry_through_scale_and_origin() {
+        for (name, path) in subpath_battery() {
+            let want = flatten_subpath_starts(&path);
+            for (scale, origin) in [
+                (1.0_f32, [0.0_f32, 0.0]),
+                (2.0, [7.0, -3.0]),
+                (0.5, [1.0, 1.0]),
+            ] {
+                let sk = build_sk_path(&path, scale, origin).expect("path builds");
+                let got = sk_subpath_starts(&sk);
+                let mapped: Vec<(f32, f32)> = want
+                    .iter()
+                    .map(|(x, y)| (x * scale - origin[0], y * scale - origin[1]))
+                    .collect();
+                assert_eq!(
+                    got, mapped,
+                    "{name} at scale {scale} origin {origin:?}: a subpath start \
+                     is a point of the geometry, so it must map through the same \
+                     affine transform every other point does"
+                );
+            }
+        }
+    }
+
+    /// Fill `path` at 1:1 and return the inked bounding box in the path's own
+    /// units as `(left, top, right, bottom)`, or `None` when nothing inked.
+    ///
+    /// The bitmap is the path's bounds plus a margin — which is also where a
+    /// welded spoke shows up, since the injected `MoveTo` lands on the
+    /// bitmap's own corner.
+    fn painted_fill_bounds(path: &Path) -> Option<(f32, f32, f32, f32)> {
+        const MARGIN: f32 = 2.0;
+        let b = path.bounds();
+        let (ox, oy) = (b.x - MARGIN, b.y - MARGIN);
+        let w = (b.width + 2.0 * MARGIN).ceil() as u32;
+        let h = (b.height + 2.0 * MARGIN).ceil() as u32;
+        let px = rasterize_path(
+            path,
+            &StrokeStyle::solid(0.0),
+            FillRule::Winding,
+            [ox, oy],
+            w,
+            h,
+            1.0,
+            1.0,
+        )
+        .expect("rasterizes");
+
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0u32, 0u32);
+        let mut any = false;
+        for y in 0..h {
+            for x in 0..w {
+                if px[((y * w + x) * 4 + 3) as usize] > 0 {
+                    any = true;
+                    min_x = min_x.min(x);
+                    min_y = min_y.min(y);
+                    max_x = max_x.max(x);
+                    max_y = max_y.max(y);
+                }
+            }
+        }
+        any.then_some((
+            min_x as f32 + ox,
+            min_y as f32 + oy,
+            max_x as f32 + ox + 1.0,
+            max_y as f32 + oy + 1.0,
+        ))
+    }
+
+    /// End to end, in pixels: what the rasterizer paints must sit inside what
+    /// the shape reports. A bare 90° arc was the worst case — `flatten` gives
+    /// a quarter-arc bounded by `x ∈ [200, 220]`, while the fill came out as a
+    /// solid triangle running from the bitmap's top-left corner all the way to
+    /// the arc, 2728 inked pixels against the ~86 the shape covers. Every one
+    /// of those pixels was unclickable.
+    #[test]
+    fn a_fill_paints_only_where_the_shape_says_it_is() {
+        // AA writes partial coverage into the pixel a boundary crosses, so a
+        // one-pixel ring around the exact outline is expected; a spoke is
+        // orders of magnitude more than that.
+        const SLACK: f32 = 1.5;
+        for (name, path) in subpath_battery() {
+            let want = path.exact_bounds(0.01);
+            let (l, t, r, b) = painted_fill_bounds(&path)
+                .unwrap_or_else(|| panic!("{name}: the probe must actually ink something"));
+            assert!(
+                l >= want.x - SLACK
+                    && t >= want.y - SLACK
+                    && r <= want.right() + SLACK
+                    && b <= want.bottom() + SLACK,
+                "{name}: painted ({l}, {t})-({r}, {b}) escapes the shape's own \
+                 extent ({}, {})-({}, {}) — that ink is unreachable by a click",
+                want.x,
+                want.y,
+                want.right(),
+                want.bottom()
+            );
+        }
+    }
+
+    /// The same defect where it is loudest. A fill traverses the spoke and
+    /// comes back along the closing edge, so a 360° arc's spoke cancels to a
+    /// sub-pixel needle; a *stroke* draws it outright — a 2 dp bar running the
+    /// full 220 units from the phantom vertex to the disc.
+    #[test]
+    fn a_stroked_bare_arc_draws_no_spoke_to_the_bitmap_corner() {
+        let mut path = Path::new();
+        path.arc_to(probe_arc(), 0.0, 360.0);
+
+        // A bitmap wide enough to hold the whole spoke: x from 0 to 240.
+        let (w, h) = (242u32, 44u32);
+        let px = rasterize_path(
+            &path,
+            &StrokeStyle::solid(2.0),
+            FillRule::Winding,
+            [-1.0, -22.0],
+            w,
+            h,
+            1.0,
+            1.0,
+        )
+        .expect("rasterizes");
+
+        // The disc's own left edge is x = 180, i.e. bitmap column 181; the
+        // 2 dp stroke reaches one column further left. Nothing may ink before
+        // that.
+        let leftmost = (0..w)
+            .find(|&x| (0..h).any(|y| px[((y * w + x) * 4 + 3) as usize] > 0))
+            .expect("the arc must ink");
+        assert!(
+            leftmost >= 179,
+            "a stroked bare arc inked from column {leftmost}: the subpath was \
+             opened at the bitmap's corner and a spoke stroked from there to \
+             the arc, 220 units of ink the shape does not have"
         );
     }
 }
