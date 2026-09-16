@@ -111,7 +111,7 @@ assert!(model.local_pos(item_id).is_some());
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/view/index.html)
 
 ## `pub const DEFAULT_RETENTION_MARGIN`
 
@@ -201,3 +201,31 @@ and `docs/teksilo-scene.md` for an end-to-end guide.
 ```rust
 pub struct SceneView { /* fields */ }
 ```
+
+### Methods
+
+#### `pub fn veto_snapshot_scans(&self) -> u64`  *(hidden)*
+
+How many times this view has walked its handler snapshot to answer the
+above-a-card veto, since it was created.
+
+The veto's memo is asked once per hit-tested child and answers from one
+scan; this is the number that says so. A hit test over *n* overlapping
+cards must advance it by **one**, not by *n* — the regression the
+`veto_scaling_probe` test gates, and one that is invisible to every
+other observable the crate publishes (the verdicts are identical either
+way; only the cost moves).
+
+#### `pub fn veto_key_probes(&self) -> u64`  *(hidden)*
+
+How many times the veto has looked a child's `PaintKey` up.
+
+The companion to `veto_snapshot_scans`, and
+necessary because the two halves of the veto's cost fail independently:
+a memo keyed on something that differs per child makes the *scan* count
+follow the card count, while evaluating the child's key before the
+claimant query can decline it makes *this* one follow it. Each is
+invisible to the other's test, and neither changes a verdict.
+
+A scene with no press claimant under the pointer must leave this at
+zero however many children the arena asks about.

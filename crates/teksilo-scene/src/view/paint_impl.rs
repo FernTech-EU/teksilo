@@ -9,20 +9,32 @@
 //! (guard that avoids an empty foreground pass), and `post_paint_impl` (the
 //! `Over`-band items, selection marquee, app foreground hook, magnetism
 //! feedback, and debug overlays, all rendered after heavyweight children).
-//! The shared `paint_band` helper handles z-sorting, item-coordinate GPU
-//! caching, `IGNORES_TRANSFORMATIONS` pinning, per-item opacity composition,
-//! and glyph-epoch eviction recovery.
+//!
+//! The per-item rendering those two share — z-sorting, item-coordinate GPU
+//! caching, `IGNORES_TRANSFORMATIONS` pinning, per-item opacity composition and
+//! glyph-epoch eviction recovery — lives in
+//! [`ScenePaintBridge::paint_items`](super::paint_node::ScenePaintBridge::paint_items),
+//! because the [`Interleaved`](crate::SceneLayer::Interleaved) band paints from
+//! nodes of its own and must render an item identically. `paint_band` here is
+//! the band's candidate query and nothing more.
 
 use super::*;
 
 impl SceneView {
     /// Paint one lightweight band into `canvas`, under the active view
-    /// transform. Queries the visible items, z-sorts them, keeps only those
-    /// in `band`, and paints each. Heavyweight ids are skipped (they paint
-    /// via the arena walker). Shared by [`paint`](Self::paint) (the `Under`
-    /// backdrop, before the children) and [`post_paint`](Self::post_paint)
-    /// (the `Over` foreground, after the children). Within a band, `z`
-    /// orders items among themselves.
+    /// transform. Queries the visible items, keeps only those in `band`, and
+    /// hands them to
+    /// [`ScenePaintBridge::paint_items`](super::paint_node::ScenePaintBridge::paint_items)
+    /// — the one copy of the per-item rendering, shared with the `Interleaved`
+    /// band's own paint nodes.
+    ///
+    /// Called with [`Under`](crate::SceneLayer::Under) from
+    /// [`paint_impl`](Self::paint_impl) (the backdrop, before the children) and
+    /// with [`Over`](crate::SceneLayer::Over) from
+    /// [`post_paint_impl`](Self::post_paint_impl) (the foreground, after them).
+    /// [`Interleaved`](crate::SceneLayer::Interleaved) is deliberately not
+    /// reachable from here: those items paint from their own nodes, in the
+    /// middle of the child walk, which is the entire point of the band.
     fn paint_band(
         &self,
         canvas: &mut teksilo_canvas::Canvas,
@@ -30,210 +42,26 @@ impl SceneView {
         band: crate::scene::SceneLayer,
         ctx: &PaintContext,
     ) {
-        // Glyph-epoch gate: cached item frames bake glyph atlas UVs, and
-        // this cache lives outside the widget arena, so the framework's
-        // eviction recovery (`invalidate_all_paints`) cannot reach it.
-        // Instead, every paint pass compares the backend's eviction
-        // epoch and drops all entries when it moved — the items repaint
-        // below with fresh UVs in the same pass.
-        let glyph_epoch = canvas
-            .text_backend()
-            .map(|tb| tb.borrow().glyph_epoch())
-            .unwrap_or(0);
-        self.item_cache.borrow_mut().sync_glyph_epoch(glyph_epoch);
-
-        // Ambient text raster scale, set by the paint walker for this
-        // SceneView's content-transform scope (it already includes the
-        // view's zoom). Items whose own pushed transform carries an
-        // additional scale refine it below so their text rasterizes at
-        // the full effective density.
-        let ambient_raster_scale = canvas
-            .text_backend()
-            .map(|tb| tb.borrow().raster_scale())
-            .unwrap_or(1.0);
-
+        debug_assert_ne!(
+            band,
+            crate::scene::SceneLayer::Interleaved,
+            "the Interleaved band paints from SceneBandProxy nodes, not from a band pass"
+        );
         let region = self.visible_scene_region(bounds);
-        let view_transform = self.view_transform();
-        // Built once per band; `enabled` is refreshed per item inside the loop
-        // (it is the only field that varies per item). `theme` and
-        // `window_active` come straight from the widget paint pass, so
-        // lightweight items resolve theme roles and desaturate on window blur
-        // exactly like widgets.
-        let mut item_ctx =
-            crate::item::SceneItemPaintContext::new(view_transform, Some(region), ctx.theme)
-                .with_text_scale(ctx.text_scale)
-                .with_window_active(ctx.window_active);
-        let drag_target = self.drag_target.get();
-        // Every item the in-flight drag carries — the grabbed one alone, or the
-        // whole selection when the grab landed on a selected item. Resolved
-        // once per band rather than per item, and from the same
-        // `SceneView::drag_group` the commit uses, so the live feedback and the
-        // committed move can never show different sets.
-        let drag_group: Vec<crate::item::ItemId> = drag_target
-            .map(|t| self.drag_group(t.item_id))
-            .unwrap_or_default();
-        // The selection transform's live preview, resolved once per band. The
-        // heavyweight tier reads the SAME function in `place_children` — one
-        // affine, two tiers, so a mixed selection cannot half-move mid-gesture.
-        //
-        // Composing the affine is a **visual scale** for this tier: the item is
-        // drawn through it, so a resize thickens its strokes and stretches its
-        // glyphs until the commit writes `local_bounds` and it reflows. The
-        // heavyweight half lays the card out at the previewed rectangle instead
-        // and reflows live. Both preview the same box; see the
-        // `transform_session` module header for why the interiors differ and
-        // what would close it.
-        let transform_preview = self.transform_preview();
-        let mut visible_ids = self.scene().items_in_rect(region);
-        // Paint order: bottom-most first, so a later element paints on top.
-        // The comparator is `PaintKey`, the *same* value every hit test in the
-        // crate compares — which is what makes "what the user sees on top" and
-        // "what the pointer picks" one rule instead of two. Within a band rank
-        // is constant, so this reduces to ascending z with equal-z resolved in
-        // insertion order. Heavyweight ids stay in the list but are skipped
-        // below — they paint via the arena walker, at the rank between the two
-        // lightweight bands.
-        self.scene().sort_by_paint_key(&mut visible_ids);
-        for id in visible_ids {
+        let ids = {
             let scene = self.model.0.borrow();
-            if scene.item(id).is_none() {
-                continue;
-            }
-            // Only this band; items default to Under.
-            if scene.layer(id).unwrap_or(crate::scene::SceneLayer::Under) != band {
-                continue;
-            }
-            // Skip items whose chain is invisible or which carry the
-            // HAS_NO_CONTENTS flag (logical-only).
-            if !self.scene().is_effectively_visible(id) {
-                continue;
-            }
-            let flags = self.scene().flags(id).unwrap_or_default();
-            if flags.contains(crate::flags::ItemFlags::HAS_NO_CONTENTS) {
-                continue;
-            }
-            // Per-item enabled state drives `ColorProp` disabled-role resolution.
-            // AND-combine the item's own `IS_ENABLED` flag with the widget-tree's
-            // ancestor-disabled cascade (`ctx.effective_enabled`), so a SceneView
-            // inside a disabled ancestor dims its lightweight items' role colours
-            // exactly like every other widget in that subtree.
-            item_ctx.enabled =
-                ctx.effective_enabled && flags.contains(crate::flags::ItemFlags::IS_ENABLED);
-            // Items that are the drag target or a declared descendant paint
-            // with a visual delta in scene coords — a child follows its
-            // dragged parent until the rebuild commits the new local_pos.
-            let drag_delta = drag_target
-                .filter(|_| {
-                    drag_group
-                        .iter()
-                        .any(|g| *g == id || self.scene().is_descendant_of(id, *g))
-                })
-                .map(|t| {
-                    teksilo_canvas::Transform2D::translate(
-                        t.current_scene.x - t.anchor_scene.x,
-                        t.current_scene.y - t.anchor_scene.y,
-                    )
-                });
-
-            // …and the transform controller's preview, on the roots it carries
-            // and everything hanging off them (a child follows its transformed
-            // parent, exactly as it follows a dragged one).
-            let transform_delta = transform_preview.as_ref().and_then(|(roots, xform)| {
-                roots
-                    .iter()
-                    .any(|r| *r == id || self.scene().is_descendant_of(id, *r))
-                    .then_some(*xform)
-            });
-
-            // Compose `local→scene`, optionally with a scene-coord drag
-            // offset baked in. Push beneath the view transform so the item's
-            // `paint` works in local coords. `save` / `restore` isolate
-            // neighbouring items' transforms.
-            let mut local_to_scene = self.scene().scene_transform(id);
-            if let Some(t) = drag_delta {
-                local_to_scene = local_to_scene.then(&t);
-            }
-            if let Some(t) = transform_delta {
-                local_to_scene = local_to_scene.then(&t);
-            }
-            canvas.save();
-            // IGNORES_TRANSFORMATIONS items pin at their parent-relative
-            // position but render at a fixed pixel size (Qt's
-            // `ItemIgnoresTransformations`). Project the anchor through the
-            // parent chain + view transform, then push a transform that —
-            // composed with the outer view transform on the canvas —
-            // collapses to a pure `Translate(screen_anchor)`.
-            let pushed_transform =
-                if flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS) {
-                    let scene_anchor = local_to_scene.apply_point(Point::ZERO);
-                    let screen_anchor = view_transform.apply_point(scene_anchor);
-                    let view_inv = view_transform
-                        .inverse()
-                        .unwrap_or_else(Transform2D::identity);
-                    Transform2D::translate(screen_anchor.x, screen_anchor.y).then(&view_inv)
-                } else {
-                    local_to_scene
-                };
-            canvas.apply_transform(pushed_transform);
-            // Refine the ambient raster scale by the item's own pushed
-            // transform scale: a scaled item's text needs denser bitmaps
-            // (and a pixel-pinned IGNORES_TRANSFORMATIONS item, whose
-            // pushed transform carries `1/view_scale`, falls back toward
-            // 1.0 — it never zooms on screen). `quantize_raster_scale`
-            // is idempotent, so scale-1 transforms inherit the ambient
-            // value bit-identically and the backend is left untouched.
-            let item_raster_scale = teksilo_canvas::quantize_raster_scale(
-                ambient_raster_scale * pushed_transform.geometric_scale(),
-            );
-            let raster_scale_changed = item_raster_scale != ambient_raster_scale;
-            if raster_scale_changed && let Some(tb) = canvas.text_backend() {
-                tb.borrow_mut().set_raster_scale(item_raster_scale);
-            }
-            // Effective opacity composes through the parent chain. Pushed via
-            // `set_opacity` / `restore_opacity` so the scope is balanced.
-            let alpha = self.scene().effective_opacity(id);
-            let opacity_pushed = alpha < 0.999;
-            if opacity_pushed {
-                canvas.set_opacity(alpha);
-            }
-            if let Some(item) = scene.item(id) {
-                // Item-coordinate cache: replay a cached local-coord
-                // RenderFrame instead of re-running paint when the item opted
-                // into `CacheMode::ItemCoordinate`; record on a miss. The
-                // cache keys each entry by the raster scale it was recorded
-                // at, so a zoom that crossed a raster bucket re-records the
-                // frame against fresh-density bitmaps.
-                match item.cache_mode() {
-                    crate::cache::CacheMode::ItemCoordinate => {
-                        let cached = self.item_cache.borrow().get(id, item_raster_scale).cloned();
-                        if let Some(frame) = cached {
-                            canvas.draw_render_frame(&frame, Point::ZERO);
-                        } else {
-                            let mut sub = match canvas.text_backend() {
-                                Some(tb) => teksilo_canvas::Canvas::with_text_backend(tb.clone()),
-                                None => teksilo_canvas::Canvas::new(),
-                            };
-                            item.paint(&mut sub, &item_ctx);
-                            let frame = sub.into_render_frame();
-                            canvas.draw_render_frame(&frame, Point::ZERO);
-                            self.item_cache
-                                .borrow_mut()
-                                .insert(id, frame, item_raster_scale);
-                        }
-                    }
-                    crate::cache::CacheMode::None => {
-                        item.paint(canvas, &item_ctx);
-                    }
-                }
-            }
-            if raster_scale_changed && let Some(tb) = canvas.text_backend() {
-                tb.borrow_mut().set_raster_scale(ambient_raster_scale);
-            }
-            if opacity_pushed {
-                canvas.restore_opacity();
-            }
-            canvas.restore();
-        }
+            let mut ids = scene.items_in_rect(region);
+            // Paint order: bottom-most first, so a later element paints on top.
+            // The comparator is `PaintKey`, the *same* value every hit test in
+            // the crate compares — which is what makes "what the user sees on
+            // top" and "what the pointer picks" one rule instead of two. Within
+            // a band rank is constant, so this reduces to ascending z with
+            // equal-z resolved in insertion order.
+            scene.sort_by_paint_key(&mut ids);
+            ids.retain(|id| scene.layer(*id) == Some(band));
+            ids
+        };
+        self.paint_bridge().paint_items(&ids, canvas, region, ctx);
     }
 
     pub(super) fn paint_impl(
@@ -267,6 +95,10 @@ impl SceneView {
         // children. We pass scene-coord rects directly — the renderer
         // composes pan / zoom / rotation / bounds-origin on top.
         let region = self.visible_scene_region(bounds);
+        // Republish for the child paint nodes — a `SceneBandProxy` or a
+        // `WetLayerNode` knows its own rect, not the viewport's. See
+        // `view::paint_node`.
+        self.published_visible_region.set(region);
 
         // App-supplied background closure: paints under all items in
         // scene coords, with the visible scene region passed so the

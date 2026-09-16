@@ -15,6 +15,206 @@
 //! [`SceneMinimap`](crate::minimap::SceneMinimap) or lazy-loading logic.
 
 use super::*;
+use teksilo_core::event::{ScrollAlign, ScrollMotion};
+
+/// The camera, as a bundle of shared handles that outlives the `&self` that
+/// built it.
+///
+/// [`SceneView::ensure_visible`] and friends are `&self` methods, which is
+/// enough for an app holding the view. A **handler** is not: a `HandlerSet`
+/// closure is built once and lives in the arena, long after the `&SceneView`
+/// that installed it is gone. The reveal arm on `on_scroll` has to move the
+/// camera from inside such a closure, so the camera has to be something a
+/// closure can own — the same shape [`TransformDriver`](super::transform::TransformDriver)
+/// takes, and for the same reason.
+///
+/// Every field is a handle into live state, so a `Camera` cloned at build time
+/// still honours a pan-axes policy or a pan-bounds clamp the app changed
+/// afterwards.
+#[derive(Clone)]
+pub(crate) struct Camera {
+    pub pan_x: Signal<f32>,
+    pub pan_y: Signal<f32>,
+    pub zoom: Signal<f32>,
+    pub rotation: Signal<f32>,
+    pub bounds_origin: Signal<Vec2>,
+    pub viewport: Signal<Size>,
+    pub pan_axes: Signal<crate::scene::PanAxes>,
+    pub scene_pan_bounds: Signal<Option<Rect>>,
+    pub view_pan_bounds: Signal<Option<Rect>>,
+    pub adopt_scene_size: bool,
+    pub anim_duration: Duration,
+}
+
+impl std::fmt::Debug for Camera {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Camera")
+            .field("pan", &Vec2::new(self.pan_x.get(), self.pan_y.get()))
+            .field("zoom", &self.zoom.get())
+            .field("rotation", &self.rotation.get())
+            .finish()
+    }
+}
+
+impl Camera {
+    /// The scene → screen transform, composed exactly as
+    /// [`SceneView::view_transform`] composes it.
+    fn view_transform(&self) -> Transform2D {
+        let bo = self.bounds_origin.get();
+        compose_view(
+            Vec2::new(self.pan_x.get() + bo.x, self.pan_y.get() + bo.y),
+            self.zoom.get(),
+            self.rotation.get(),
+        )
+    }
+
+    /// The same gate [`SceneView::gate_pan_target`] applies: pan-axes policy,
+    /// then the intersection of the scene's and the view's pan bounds.
+    fn gate_pan_target(&self, target: Vec2) -> Vec2 {
+        let hold = Vec2::new(self.pan_x.get(), self.pan_y.get());
+        if self.adopt_scene_size {
+            return hold;
+        }
+        let after_axes = apply_pan_axes(target, hold, self.pan_axes.get());
+        clamp_pan(
+            after_axes,
+            self.scene_pan_bounds.get(),
+            self.view_pan_bounds.get(),
+            self.viewport.get(),
+            self.zoom.get(),
+        )
+    }
+
+    /// Bring `scene_rect.expand(margin)` into view, and report the shift in
+    /// **scene** coordinates.
+    ///
+    /// # What the returned vector is, and why that space
+    ///
+    /// It is the amount the target appears to move *relative to the viewport*,
+    /// stated in the space the caller asked in. That is exactly what
+    /// [`teksilo_core::event::WidgetEvent::ScrollIntoView`]'s
+    /// `applied_scroll` back-channel is defined to carry: the reveal walk
+    /// subtracts it from the rectangle before projecting that rectangle out to
+    /// the next container, using the transform it read **before** dispatching.
+    /// Reporting a screen-space pan delta there would be wrong by a factor of
+    /// the zoom and, under rotation, by an angle.
+    ///
+    /// It is computed from the transform either side of the move rather than
+    /// derived by hand, so it stays exact if the composition ever changes:
+    /// `delta = rect.origin − T_before⁻¹(T_after(rect.origin))`, which is the
+    /// unique vector satisfying "the old transform applied to the shifted rect
+    /// is where the new transform puts the unshifted one".
+    ///
+    /// `Vec2::ZERO` when nothing moved — the target already fits, the pan-axes
+    /// policy forbids it, a clamp ate it, or the viewport has no area yet.
+    pub fn reveal(
+        &self,
+        scene_rect: Rect,
+        margin: f32,
+        align: ScrollAlign,
+        motion: ScrollMotion,
+    ) -> Vec2 {
+        let viewport = self.viewport.get();
+        if viewport.width <= 0.0 || viewport.height <= 0.0 {
+            return Vec2::ZERO;
+        }
+        let before = self.view_transform();
+        let Some(inv) = before.inverse() else {
+            return Vec2::ZERO;
+        };
+        // Visible scene region under the *current* view transform. Zoom is not
+        // touched: the correction is a translation in scene space.
+        let bo = self.bounds_origin.get();
+        let visible = inv.apply_rect(Rect::new(bo.x, bo.y, viewport.width, viewport.height));
+        let target = scene_rect.expand(margin);
+
+        // Per-axis. Horizontal is always minimal — a vertical fraction has no
+        // horizontal meaning, and yanking a horizontally-scrolled canvas
+        // sideways to honour one is the behaviour `ScrollAlign` documents
+        // avoiding.
+        let mut dx = 0.0;
+        if target.x < visible.x {
+            dx = target.x - visible.x;
+        } else if target.x + target.width > visible.x + visible.width {
+            dx = (target.x + target.width) - (visible.x + visible.width);
+        }
+        let dy = match align {
+            // Pin: put the target's top `f` of the way down the viewport,
+            // whether or not it is already visible. Unconditional by
+            // definition — a typewriter caret that only moved the camera once
+            // it fell off the edge would not be pinned to anything.
+            ScrollAlign::Fraction(f) => {
+                let f = f.clamp(0.0, 1.0);
+                let wanted = visible.y + (visible.height - target.height) * f;
+                target.y - wanted
+            }
+            ScrollAlign::Minimal => {
+                if target.y < visible.y {
+                    target.y - visible.y
+                } else if target.y + target.height > visible.y + visible.height {
+                    (target.y + target.height) - (visible.y + visible.height)
+                } else {
+                    0.0
+                }
+            }
+        };
+        if dx == 0.0 && dy == 0.0 {
+            return Vec2::ZERO;
+        }
+
+        // ∆scene > 0 means "show more of what is further along this axis",
+        // which is a *negative* screen-space pan: pan translates the scene at
+        // paint time, so revealing a region further right shifts the scene
+        // leftward.
+        let zoom = self.zoom.get();
+        let pan = Vec2::new(self.pan_x.get(), self.pan_y.get());
+        let wanted = Vec2::new(pan.x - dx * zoom, pan.y - dy * zoom);
+        let gated = self.gate_pan_target(wanted);
+        if gated == pan {
+            return Vec2::ZERO;
+        }
+        match motion {
+            ScrollMotion::Instant => {
+                self.pan_x.set(gated.x);
+                self.pan_y.set(gated.y);
+            }
+            // `try_`, and a snap when it is refused. A reveal is the one camera
+            // move an app never asked for — it arrives because a descendant
+            // moved its caret — so it must not be able to bring the app down
+            // over how the app chose to declare its own pan signals. Passing
+            // plain `Signal::new` handles to
+            // [`view_state`](SceneView::view_state) is supported and
+            // documented; before this route existed the only thing that
+            // animated them was an explicit `ensure_visible` call, which is the
+            // app's own doing.
+            ScrollMotion::Smooth => {
+                let x = self
+                    .pan_x
+                    .try_animate_to(gated.x, self.anim_duration, Easing::EaseOut);
+                let y = self
+                    .pan_y
+                    .try_animate_to(gated.y, self.anim_duration, Easing::EaseOut);
+                if x.is_err() || y.is_err() {
+                    self.pan_x.set(gated.x);
+                    self.pan_y.set(gated.y);
+                }
+            }
+        }
+
+        // Read the applied shift back out of the two transforms rather than
+        // returning the requested `(dx, dy)`: the gate above may have taken
+        // some or all of it, and an outer scroll container re-targeted by a
+        // delta that never happened scrolls to the wrong place.
+        let after = compose_view(
+            Vec2::new(gated.x + bo.x, gated.y + bo.y),
+            zoom,
+            self.rotation.get(),
+        );
+        let origin = Point::new(scene_rect.x, scene_rect.y);
+        let landed = inv.apply_point(after.apply_point(origin));
+        Vec2::new(origin.x - landed.x, origin.y - landed.y)
+    }
+}
 
 impl SceneView {
     /// Read access to the underlying scene, as a borrow guard.
@@ -225,14 +425,41 @@ impl SceneView {
         self.zoom.set(clamped);
     }
 
+    /// The camera as a cloneable handle — see [`Camera`].
+    pub(super) fn camera(&self) -> Camera {
+        Camera {
+            pan_x: self.pan_x.clone(),
+            pan_y: self.pan_y.clone(),
+            zoom: self.zoom.clone(),
+            rotation: self.rotation.clone(),
+            bounds_origin: self.bounds_origin_signal.clone(),
+            viewport: self.last_viewport.clone(),
+            pan_axes: self.scene().pan_axes_signal(),
+            scene_pan_bounds: self.scene().pan_bounds_signal(),
+            view_pan_bounds: self.pan_bounds_override.clone(),
+            adopt_scene_size: self.adopt_scene_size,
+            anim_duration: self.pan_anim_duration,
+        }
+    }
+
     /// Pan (without changing zoom) so `scene_rect.expand(margin)`
     /// fits inside the current visible scene region. If the
     /// expanded target rect already fits, this is a no-op.
     ///
-    /// Pairs with focus traversal: when an off-viewport item gains
-    /// focus, the SceneView's default focus traversal calls this
-    /// automatically. Apps wanting to scroll a specific area into
-    /// view (e.g. on search-result selection) call it directly.
+    /// Animated, over the view's pan-animation duration. For an instant jump,
+    /// or to pin the target at a fraction of the viewport rather than merely
+    /// reveal it, use
+    /// [`ensure_visible_aligned`](Self::ensure_visible_aligned).
+    ///
+    /// # Who calls this
+    ///
+    /// An app scrolling to a search hit or a newly created item calls it
+    /// directly. The framework calls it for every
+    /// [`teksilo_core::event::WidgetEvent::ScrollIntoView`]
+    /// that reaches the view — which is how a caret inside an embedded editor
+    /// moves the camera, since a `SceneView` clips its children and is
+    /// therefore on the reveal walk. (It is **not** called by focus traversal:
+    /// this doc used to claim it was, and nothing in the crate ever did.)
     ///
     /// Pan is gated by [`Scene::pan_axes`](crate::Scene::pan_axes):
     /// if a scene declares `PanAxes::None`, this is a no-op; if it
@@ -240,53 +467,40 @@ impl SceneView {
     /// scrolled into view if the policy doesn't permit panning
     /// toward them.
     pub fn ensure_visible(&self, scene_rect: Rect, margin: f32) {
-        let viewport = self.last_viewport.get();
-        if viewport.width <= 0.0 || viewport.height <= 0.0 {
-            return;
-        }
-        // Visible scene region under the *current* view transform.
-        // We don't change zoom — the per-axis correction is purely
-        // a translation in scene space, projected back through the
-        // current zoom (∆pan_screen = ∆target_scene * zoom).
-        let view_xform = self.view_transform();
-        let bo = self.bounds_origin_signal.get();
-        let viewport_screen = Rect::new(bo.x, bo.y, viewport.width, viewport.height);
-        let visible = match view_xform.inverse() {
-            Some(inv) => inv.apply_rect(viewport_screen),
-            None => return,
-        };
-        let target = scene_rect.expand(margin);
+        self.ensure_visible_aligned(
+            scene_rect,
+            margin,
+            ScrollAlign::Minimal,
+            ScrollMotion::Smooth,
+        );
+    }
 
-        // Per-axis: shift only when the target lies outside the
-        // visible region. ∆scene > 0 means "scroll the world right",
-        // which translates to ∆pan_screen = -∆scene * zoom (pan is a
-        // translation applied to *the scene* at paint time, so to
-        // reveal a region further right we shift the scene leftward).
-        let zoom = self.zoom.get();
-        let mut dx = 0.0;
-        let mut dy = 0.0;
-        if target.x < visible.x {
-            dx = target.x - visible.x;
-        } else if target.x + target.width > visible.x + visible.width {
-            dx = (target.x + target.width) - (visible.x + visible.width);
-        }
-        if target.y < visible.y {
-            dy = target.y - visible.y;
-        } else if target.y + target.height > visible.y + visible.height {
-            dy = (target.y + target.height) - (visible.y + visible.height);
-        }
-        if dx == 0.0 && dy == 0.0 {
-            return;
-        }
-        let pan = self.pan();
-        let new_pan = Vec2::new(pan.x - dx * zoom, pan.y - dy * zoom);
-        // Animate the scroll instead of snapping — matches
-        // `pan_to`, `fit_to_rect`, and the surrounding gesture-driven
-        // animations. Reduced-motion handling is a follow-up
-        // (this call goes through `Signal::animate_to`, which is
-        // unconditional; `prefers-reduced-motion` consultation
-        // lives at the higher-level `ctx.animate()` builder).
-        self.pan_to(new_pan, self.pan_anim_duration);
+    /// [`ensure_visible`](Self::ensure_visible) with an explicit alignment and
+    /// motion, reporting the shift it applied in **scene** coordinates.
+    ///
+    /// * [`ScrollAlign::Minimal`] reveals the target and does nothing when it
+    ///   is already visible; [`ScrollAlign::Fraction`] *pins* its top `f` of
+    ///   the way down the viewport whether or not it was visible.
+    /// * [`ScrollMotion::Instant`] snaps. That is what a caret chase wants:
+    ///   animating a reveal that re-fires on every keystroke is what produces
+    ///   the screen-bouncing typewriter modes are complained about for.
+    ///
+    /// The returned vector is `Vec2::ZERO` when nothing moved, and is what the
+    /// [`ScrollIntoView`](teksilo_core::event::WidgetEvent::ScrollIntoView)
+    /// `applied_scroll` back-channel carries: the shift the target appears to
+    /// make **relative to the viewport**, stated in the space the caller asked
+    /// in. The reveal walk subtracts it from the rectangle before projecting
+    /// that rectangle out to the next container, using the transform it read
+    /// *before* dispatching — so a screen-space pan delta there would be wrong
+    /// by a factor of the zoom, and under rotation by an angle.
+    pub fn ensure_visible_aligned(
+        &self,
+        scene_rect: Rect,
+        margin: f32,
+        align: ScrollAlign,
+        motion: ScrollMotion,
+    ) -> Vec2 {
+        self.camera().reveal(scene_rect, margin, align, motion)
     }
 
     /// Project `target` through the scene's pan-axes policy AND

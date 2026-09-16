@@ -63,11 +63,11 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 
 ## Builder methods at a glance
 
-`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `cascade_budget`, `set_cascade_budget`, `open_transaction_depth`, `transaction_signal`, `mutation_version`, `structural_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `set_geometry_constraint`, `clear_geometry_constraint`, `has_geometry_constraint`, `in_geometry_constraint`, `selection_roots`, `transformable_roots`, `scene_rotation`, `transform_frame`, `apply_transform_delta`, `item`, `paint_key`, `remove`, `take`, `restore`, `restore_all`, `replace_item`, `placement`, `set_placement`, `reparent_keeping_scene_pos`, `z_between`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_shape`, `item_contains`, `item_region`, `items_in_region`, `item_at`, `item_at_scaled`, `entry_at`, `items_at`, `items_at_scaled`, `item_at_in_view`, `is_hit_testable`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`, `a11y_live_of`, `a11y_landmark_of`
+`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `cascade_budget`, `set_cascade_budget`, `open_transaction_depth`, `transaction_signal`, `mutation_version`, `structural_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `size_policy`, `set_size_policy`, `set_measured_size`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `set_geometry_constraint`, `clear_geometry_constraint`, `has_geometry_constraint`, `in_geometry_constraint`, `selection_roots`, `transformable_roots`, `scene_rotation`, `transform_frame`, `apply_transform_delta`, `item`, `paint_key`, `remove`, `take`, `restore`, `restore_all`, `replace_item`, `placement`, `set_placement`, `reparent_keeping_scene_pos`, `z_between`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_shape`, `item_contains`, `item_region`, `items_in_region`, `item_at`, `item_at_scaled`, `entry_at`, `items_at`, `items_at_scaled`, `item_at_in_view`, `is_hit_testable`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`, `a11y_live_of`, `a11y_landmark_of`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/scene/index.html)
 
 ## `pub enum ItemChange`
 
@@ -110,6 +110,8 @@ pub enum ItemChange { /* variants */ }
 
 - **`LocalPosChanged`** — `set_local_pos`: position in parent coords moved.
 - **`LocalBoundsChanged`** — `set_local_bounds`: AABB in local coords changed.
+- **`MeasuredSizeChanged`** — `set_measured_size`: a **derived** geometry write — the size an entry under a non-`Fixed` `SizePolicy` measured from its widget, or one an app computed from content it already owns.  Separate from `LocalBoundsChanged` because it means something different to every consumer of the channel:  * It is **not an edit**. `is_edit` is `false` and the   change is stamped `ephemeral`, so a   history above the scene does not gain an undo step because a   paragraph re-wrapped. A reflow is a function of content the document   already holds; undoing it would mean undoing the width or the words. * It is **not structural**. It is counted out of   `Scene::structural_version`, the way   `refresh_dynamic_bounds`'s   per-frame churn is, so a line wrap does not buy an AccessKit re-walk. * The observing `SceneView` answers it with a   **relayout**, not a rebuild: the geometry moved, nothing was   materialised or reaped, and the delegate does not need re-running.  An app mirroring scene geometry into its document should match `LocalBoundsChanged` and ignore this one. An app that wants the measured height persisted anyway (so a cold start opens at the right size without waiting for a measurement) can read it and store it as a hint.
+- **`SizePolicyChanged`** — `set_size_policy`: who decides this entry's box changed.  An **edit**, unlike the `MeasuredSizeChanged` that follows it: "this note's height follows its words" is a decision someone made about the document, the way a flag change is, and a history above the scene should be able to put it back.  It carries no geometry — the policy decides how the *next* layout pass computes one. It exists at all because nothing else would tell a view that the answer to a question it asks every pass has changed: a policy written silently would take effect whenever something unrelated happened to dirty the view, which in a test is never and in an app is worse — unpredictable.
 - **`TransformChanged`** — `set_transform`: local→parent transform changed.
 - **`VisibilityChanged`** — `IS_VISIBLE` flipped, by whichever door flipped it — `set_visible`, `set_flag` or a wholesale `set_flags`.  A **derived notification**, always emitted immediately before the `FlagsChanged` that describes the same mutation. It exists so a consumer that only cares about visibility need not diff two `ItemFlags` bitsets, and it is deliberately not an edit: `is_edit` is `false` for it and it never reaches a transaction record, so one mutation is one recorded edit no matter which door made it. (It used to be emitted by `set_flag` and not by `set_flags`, which made hiding a card two recorded changes through one door and one through the other.)
 - **`FlagsChanged`** — `set_flags` / `set_flag` changed the bitset. The edit that describes a flag change, visibility included.
@@ -144,7 +146,7 @@ Whether this change is an **edit** — a mutation a transaction record
 carries — rather than a *derived notification* the scene emits beside
 one for a consumer's convenience.
 
-Two variants are not edits:
+Three variants are not edits:
 
 * `VisibilityChanged`, which always
   accompanies the `FlagsChanged` that describes
@@ -152,6 +154,8 @@ Two variants are not edits:
 * `HandlersChanged` with no
   `replaced` — the `handlers_mut`
   door, which cannot say what the handlers became.
+* `MeasuredSizeChanged`, which is a size
+  *derived* from content the document already holds, not a change to it.
 
 Filtering the change signal by this gives the same count the
 transaction record has, which is what an app showing "N changes in this
@@ -378,20 +382,61 @@ describe no cascade that happened.
 Which paint band a lightweight `SceneItem` sits in, relative to
 the heavyweight widget tier.
 
-A `SceneView` paints in three passes: lightweight `Under` items
-(its `paint`, a backdrop), then the heavyweight widget children
-(the arena child-walk), then lightweight `Over` items (its
-`post_paint`, a foreground). Within each band, `z` still orders
-items among themselves.
+The band is the leading digit of `PaintKey`, so it decides both what is
+drawn on top and what the pointer picks — one rule, not two.
 
-This is a binary band, not a continuous z across the tiers, because
-the render walker offers exactly two lightweight paint positions
-(before and after the child subtree). The heavyweight tier is one
-contiguous block in between — to interleave a lightweight item
-*between* two specific heavyweight nodes you must promote it to a
-heavyweight widget. `Under` is the default (background furniture:
-connectors, grids, decorations); `Over` is for foreground overlays
-that must sit above the cards (selection halos, highlighted edges).
+| band | rank | where it paints |
+|------|------|-----------------|
+| `Under` | `RANK_UNDER` | in `SceneView::paint`, a backdrop beneath every card |
+| `Interleaved` | `RANK_WIDGET` | among the cards, ordered against them by `z` |
+| `Over` | `RANK_OVER` | in `SceneView::post_paint`, above every card |
+
+Within a band, `set_z` orders items among themselves; in
+`Interleaved` that same `z` is compared against the **cards'** `z`.
+
+# What `Interleaved` orders against, and what it does not
+
+Cards, and only cards — the heavyweight widget children, which are what the
+arena's child walk contains. It is **not** an ordering against the other two
+bands, and in particular not against `Under`: the whole of the `Under` band
+is painted inside `SceneView::paint`, which runs before the first child, so
+every `Under` item is below every interleaved one no matter what the two
+`z`s say. Likewise every `Over` item is above every interleaved one.
+
+The consequence worth stating outright, because it surprises: in a scene
+with **no heavyweight children at all**, an interleaved item is on top of
+everything. There is nothing in the child walk for it to sit between, and
+its `z` is compared against an empty set. A lightweight-only page that wants
+ink under some of its content wants `Under` plus a `z`, or wants the content
+it is drawing on to be cards.
+
+# Why `Interleaved` is not free
+
+`Under` and `Over` cost nothing: the render walker offers a paint position
+before and after a node's child subtree, and those are the two bands. There
+is no third position *between* two children, so an interleaved item is
+painted by a node of its own that the view materialises and slots into the
+z-sorted child list.
+
+That node is **paint only**. It is
+`event_pass_through`,
+so the pointer still resolves through the lightweight hit snapshot exactly
+as it does for the other two bands, and it is left out of
+`SceneView::accessibility_children`, so the item keeps the same synthetic
+`SyntheticKind::SceneItem`
+node it had in `Under` — same off-screen culling, same reparenting, same
+rotor category. Choosing this band changes what the item is painted
+*between* and nothing else.
+
+What it does cost is one arena node per interleaved item. Ink is the case
+this exists for ("this stroke is above note A and below note B"), and a
+page of ink wants a `GroupItem` per layer rather
+than a band per stroke — see `docs/ink.md`.
+
+`#[non_exhaustive]`: this enum has now grown a variant once, and the reason
+it could is that the render walker's two paint positions were never the
+whole answer. A downstream `match` gets a `_` arm today rather than a break
+the next time.
 
 ```rust
 pub enum SceneLayer { /* variants */ }
@@ -400,7 +445,98 @@ pub enum SceneLayer { /* variants */ }
 ### Variants
 
 - **`Under`** — Painted under the heavyweight widget children (the default).
+- **`Interleaved`** — Painted **among** the heavyweight widget children, ordered against them by `z` — and against nothing else: still above every `Under` item and below every `Over` one, and on top of everything in a scene that has no heavyweight children. See the type docs for that and for what it costs.
 - **`Over`** — Painted over the heavyweight widget children.
+
+## `pub enum SizePolicy`
+
+How an entry's `local_bounds` is decided each layout pass.
+
+The default, `Fixed`, is what every scene had before this
+existed: the model owns both axes and nothing measures anything. The other
+two hand one or both axes to the widget, which is the only thing that can
+answer "how tall is this text at this width".
+
+# Heavyweight only, and why
+
+A lightweight `SceneItem` has no `layout_response` to
+ask — it publishes its own AABB, and
+`Scene::add_item_dynamic` already re-reads that
+each build. A widget's height is not a value it publishes; it is the answer
+to a question asked at a width. So the two mechanisms are not variants of
+each other, and this one is refused for a lightweight entry rather than
+silently doing nothing: `Scene::set_size_policy`
+returns `false`.
+
+# What is measured, and what is not
+
+A view measures exactly the cards it gives a **non-zero size** — the ones
+inside its viewport. Not the ones it keeps alive in the retention band, and
+not the one the user is interacting with if the camera has left it behind:
+those are laid out at `Size::ZERO`, so there is nothing a measurement could
+be for. A card the camera has never shown keeps the size `add_widget_item`
+was handed, and is corrected on the first pass that places it, in the same
+frame it appears. That is the
+contract `ListView::auto_item_height` already makes for rows: the number in
+the model is an **estimate** until the thing has been on screen, and every
+whole-scene query that reads it —
+`scene_rect_extent`, the spatial index, a marquee,
+a minimap — reads the estimate for a card that has never been realised.
+Give a plausible one; the alternative is measuring every card in the scene
+on every pass, which is the cost the viewport cull exists to avoid.
+
+# The measurement must be idempotent
+
+A measured height feeds back into the model, and the model feeds the next
+pass. A body whose `layout_response` answers differently for the same width
+— because it mutates state, or because its natural height depends on the
+height it was given — would oscillate forever. The view bounds that, and it
+is careful about *what an oscillation is*: `100 → 120 → 100` is one when the
+body is answering its own last answer, and is a user typing a character that
+wraps and then deleting it when it is not. The two are indistinguishable
+from the numbers, and freezing the second is the most ordinary editing
+action there is.
+
+What separates them is **who drove the pass**. A body's answer is a function
+of its content and of the width it is offered; at a fixed width its content
+cannot change without something dirtying the card — a `Signal` bound at
+`Relayout`, a rebuild, a fresh node — whereas the view's own write dirties
+only the view and what is above it. So on the pass a write causes, the card
+reads clean, and a clean card that answers differently is reading back what
+was written to it. The view takes the taller of the two answers, and after a
+couple of such contradictions stops taking new ones for the rest of the
+chain — which writes nothing, and a pass that writes nothing schedules no
+successor. A non-idempotent body therefore costs a bounded number of passes
+per external event rather than an unbounded number for ever, and an edited
+one is never bounded at all. See
+`teksilo_core::widget::Widget::cacheable_layout`
+for the framework's own statement of the same obligation.
+
+# A resize does not reach an axis the content owns
+
+`HeightForWidth` keeps its width, so the selection
+frame resizes it horizontally and the words decide the rest; the vertical
+half of a corner drag is neutralised in
+`Scene::apply_transform_delta`,
+because a height written there is one the next pass measures straight back
+over. `Intrinsic` owns neither axis, so
+`Scene::transformable_roots` offers it
+no resize handles at all. And a measurement taken while a gesture is
+previewing a transform is placed but never written: the preview is
+recomputed from the gesture's frozen start frame each sample, so a previewed
+width that reached the model would be scaled again on the next one.
+
+`#[non_exhaustive]`: this crate has out-of-tree consumers.
+
+```rust
+pub enum SizePolicy { /* variants */ }
+```
+
+### Variants
+
+- **`Fixed`** — The model owns both axes. Today's behaviour, and the default, so every existing scene is bit-identical.
+- **`HeightForWidth`** — The model owns the width; the height is **measured from the widget** at that width on every pass that lays it out.  The right policy for text: a note's width is authored (you drag its edge) and its height follows the words. `scene_rect(id).height` becomes advisory for such an entry — it reports the last measured height, not the one `add_widget_item` was handed.
+- **`Intrinsic`** — Both axes are measured: the entry shrink-wraps its widget.  For content that knows its own size on both axes — a pinned label, a badge, a fixed-aspect thumbnail. The rect passed to `add_widget_item` supplies only the position.
 
 ## `pub enum PanAxes`
 
@@ -714,6 +850,55 @@ the index once. An app driving this per frame — a resize handle, a
 layout pass — therefore goes quiet as soon as it stops moving, rather
 than emitting an endless series of nearly-identical changes.
 
+#### `pub fn size_policy(&self, id: ItemId) -> SizePolicy`
+
+Which axes of this entry's `local_bounds` its widget decides.
+`SizePolicy::Fixed` for an unknown id, and for every lightweight item.
+
+#### `pub fn set_size_policy(&mut self, id: ItemId, policy: SizePolicy) -> bool`
+
+Hand one or both axes of `id`'s box to its widget. See `SizePolicy`.
+
+Returns `false` — and changes nothing — for an unknown id or a
+**lightweight** entry, which has no `layout_response` to ask. That is a
+refusal rather than a silent no-op because the two tiers already have
+different answers to "who decides my box"
+(`add_item_dynamic` is the lightweight one),
+and a policy that quietly did nothing on one of them would read as a
+bug in the view rather than a misuse of the model.
+
+Emits `ItemChange::SizePolicyChanged` when the value actually changes —
+an edit, carrying no geometry. The geometry it enables arrives separately
+as `ItemChange::MeasuredSizeChanged`, which is not an edit.
+
+#### `pub fn set_measured_size(&mut self, id: ItemId, size: Size) -> bool`
+
+Write a **derived** size into the model: the same geometry update and
+index re-bucketing `set_local_bounds` does,
+reported as `ItemChange::MeasuredSizeChanged` instead — not an edit,
+not structural, answered by a relayout rather than a rebuild.
+
+Returns whether anything moved. The origin of `local_bounds` is kept;
+only the size is written, because that is the whole of what a
+measurement can know.
+
+# When this is the right door, and when it is not
+
+Use it for a size that is a **pure function of content the app already
+owns**: the height a paragraph wraps to at a given width, the bounding
+box of an ink stroke after a segment dried, the extent of a generated
+diagram. Recording such a write as an edit is what makes a text reflow
+an undo step; bumping the structural version for it is what buys an
+AccessKit re-walk for a two-pixel line-height change. This door does
+neither, and the view that observes it relayouts instead of rebuilding.
+
+Use `set_local_bounds` for anything the
+**user** did: a resize handle, an import, a paste. Those are edits, and
+a history above the scene must see them.
+
+The `SizePolicy` machinery drives this from inside the view; an app
+measuring something the framework cannot measure calls it directly.
+
 #### `pub fn transform(&self, id: ItemId) -> Option<Transform2D>`
 
 Read an item's local→parent transform (rotation/scale around
@@ -1015,16 +1200,14 @@ Read an entry's z-order.
 
 #### `pub fn set_layer(&mut self, id: ItemId, layer: SceneLayer)`
 
-Set the Under/Over paint band for a lightweight entry. `Over`
-items paint *after* the heavyweight widget children (in the
-SceneView's `post_paint`), so they sit on top of the cards;
-`Under` items (the default) paint before them. Within a band,
-`set_z` still orders items among themselves.
-No-op for unknown ids.
+Set the paint band for a lightweight entry — see `SceneLayer` for
+what each one means and what `Interleaved`
+costs. Within a band, `set_z` still orders items among
+themselves. No-op for unknown ids.
 
 #### `pub fn layer(&self, id: ItemId) -> Option<SceneLayer>`
 
-Read an entry's Under/Over paint band. `None` for unknown ids.
+Read an entry's paint band. `None` for unknown ids.
 
 #### `pub fn set_item_parent(&mut self, child: ItemId, parent: Option<ItemId>)`
 
@@ -1133,12 +1316,20 @@ here is a frozen window on a large selection rather than a slow one.
 
 The roots of `ids` that may take part in `op`.
 
-Two filters, in this order: the item must carry the operation's flag
-(`TransformOp::required_flag`), and
-— for `TransformOp::Rotate` — it must be a
+Three filters, in this order. The item must carry the operation's flag
+(`TransformOp::required_flag`).
+For `TransformOp::Rotate` it must be a
 lightweight entry, because a heavyweight card is sized from the AABB of
 its transformed bounds and a rotation there inflates its layout box
-without turning anything.
+without turning anything. For
+`TransformOp::Resize` it must own at least
+one axis of its own box: an entry on `SizePolicy::Intrinsic` has
+handed **both** to its widget, so every number a resize could write is
+one the next layout pass measures back over — a handle that produces a
+reversible step and no visible change is worse than no handle.
+`SizePolicy::HeightForWidth` still owns its width and is offered the
+full set; the height half of a corner drag is neutralised at the model
+door, in `apply_transform_delta`.
 
 The flag is checked **before** the descendant pruning, so a selected
 child of a selected-but-locked parent still takes part on its own.
@@ -1179,7 +1370,11 @@ change stream, the spatial index and every observer see nothing new:
   scale is non-uniform and the item is rotated relative to the frame,
   that is an approximation of the true (unrepresentable) result, and it
   is exact whenever the item is aligned with the frame — which includes
-  every single-item selection.
+  every single-item selection. **An axis the entry's
+  `SizePolicy` hands to its widget is not scaled**, and is not scaled
+  for the anchor either, so a card whose height its content owns neither
+  resizes nor *moves* when someone drags its top edge; see the comment at
+  the loop head.
 * **orientation** — the item's own `Transform2D` is post-rotated. Skipped
   for a heavyweight entry, whose layout box is the AABB of its
   transformed bounds: a rotation there would inflate the box and turn
@@ -1200,11 +1395,12 @@ Where `id` sits in this scene's single paint order — the value every
 picker in the crate compares. `None` for unknown ids.
 
 Defined for **both tiers**: a lightweight entry's rank is its
-`SceneLayer` band (`RANK_UNDER` /
-`RANK_OVER`), a heavyweight widget entry's is
+`SceneLayer` band, and a heavyweight widget entry's is
 `RANK_WIDGET` — which is exactly where the
-arena's child walk paints it, between the two lightweight bands. See
-`PaintKey` for the ordering and for the equal-`z` tie-break.
+arena's child walk paints it, between the `Under` and `Over` bands. An
+`Interleaved` item shares that rank, so it
+sorts against the cards by `z`. See `PaintKey` for the ordering and
+for the equal-`z` tie-break.
 
 #### `pub fn remove(&mut self, id: ItemId)`
 

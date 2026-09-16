@@ -88,6 +88,7 @@
 - [Charts](charts.md)
 - [Scene viewport](teksilo-scene.md)
 - [Scene accessibility](teksilo-scene-a11y.md)
+- [Ink](ink.md)
 
 # Visuals & resources
 
@@ -308,6 +309,7 @@
 - [ProposedChange](scene/constrain.md)
 - [RectItem](scene/rect.md)
 - [Scene](scene/scene.md)
+- [SceneCard](scene/scene_card.md)
 - [SceneListAdapter](scene/scene_list_adapter.md)
 - [SceneMinimap](scene/minimap.md)
 - [SceneModel](scene/scene_model.md)
@@ -320,4 +322,5 @@
 - [TextAlign](scene/text.md)
 - [TransformSession](scene/transform_session.md)
 - [TxnId](scene/journal.md)
+- [WetLayer](scene/paint_node.md)
 <!-- END GENERATED SCENE -->

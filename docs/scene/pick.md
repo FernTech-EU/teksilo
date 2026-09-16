@@ -83,11 +83,11 @@ disagree".
 
 ## Builder methods at a glance
 
-`rank`, `z`, `seq`, `is_above_widgets`
+`rank`, `z`, `seq`, `is_above_widgets`, `bottom`, `rank_floor`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/pick/index.html)
 
 ## `pub const RANK_UNDER`
 
@@ -183,6 +183,25 @@ guarantee this key makes.
 #### `pub const fn is_above_widgets(self) -> bool`
 
 True when this key can never lose to a heavyweight entry.
+
+#### `pub const fn bottom() -> Self`
+
+A floor below every real key — "admit everything".
+
+`z` is `-inf` rather than a finite sentinel so that a real entry sitting
+at `f32::MIN` is still admitted, and `Ord` compares `z` with
+`total_cmp`, under which `-inf` is below every finite value.
+
+#### `pub const fn rank_floor(rank: u8) -> Self`
+
+A floor admitting exactly the entries at `rank` and above.
+
+The coarse form of a floor, and the one the dispatch path uses: "a card
+won the arena's walk, so only the band that outranks *every* card may
+still take this event". The fine form — one specific entry's key — is
+what the `accepts_child_hit` veto needs, because an
+`Interleaved` entry is above some
+cards and below others.
 
 ## `pub fn claims_press(...)`
 

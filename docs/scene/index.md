@@ -26,6 +26,7 @@ Every public type in `teksilo-scene`, grouped by category. Each page links to it
 - [PaintKey](pick.md) — One paint order, read by every picker
 - [ProposedChange](constrain.md) — The **geometry constraint**: one closure that rewrites a gesture's proposed
 - [Scene](scene.md) — The `Scene` data model — the owner of all items in a pannable/zoomable
+- [SceneCard](scene_card.md) — `SceneCard` — the chrome and the gesture regime of a heavyweight scene
 - [SceneListAdapter](scene_list_adapter.md) — `SceneListAdapter` — keep lightweight scene items in sync with a
 - [SceneMinimap](minimap.md) — `SceneMinimap` — a small thumbnail of a `Scene`
 - [SceneModel](scene_model.md) — `SceneModel` — a shared, cloneable handle to a `Scene`
@@ -37,3 +38,7 @@ Every public type in `teksilo-scene`, grouped by category. Each page links to it
 - [SpatialIndex](index_.md) — Spatial index for `Scene` items
 - [TransformSession](transform_session.md) — The selection **transform controller**: group move, group resize and
 - [TxnId](journal.md) — The **reversible-mutation seam**: what the scene tells a data layer so that
+
+## View
+
+- [WetLayer](paint_node.md) — The two paint positions a `SceneView` cannot reach from its own `paint`

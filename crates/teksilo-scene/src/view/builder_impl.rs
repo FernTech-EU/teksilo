@@ -51,9 +51,11 @@ impl SceneView {
             handler_snapshot: Rc::new(RefCell::new(Vec::new())),
             over_claimants: Rc::new(Cell::new(false)),
             veto_memo: Rc::new(Cell::new(None)),
+            veto_scans: Rc::new(Cell::new(0)),
+            key_probes: Rc::new(Cell::new(0)),
             snapshot_generation: Rc::new(Cell::new(0)),
             hit_sync: Rc::new(RefCell::new(super::hit_snapshot::HitSnapshotSync::default())),
-            press_floor: Rc::new(Cell::new(crate::pick::RANK_UNDER)),
+            press_floor: Rc::new(Cell::new(crate::PaintKey::bottom())),
             hovered_item: Rc::new(Cell::new(None)),
             pending_tap: Rc::new(Cell::new(None)),
             last_viewport: Signal::new(Size::new(800.0, 600.0)),
@@ -84,6 +86,8 @@ impl SceneView {
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
             reconcile_dirty: Signal::new(0),
             appearance_dirty: Signal::new(0),
+            measure_dirty: Signal::new(0),
+            measure_state: Rc::new(RefCell::new(HashMap::new())),
             cursor_pos: Rc::new(Cell::new(None)),
             focus_order_callback: None,
             a11y_nested: false,
@@ -92,6 +96,12 @@ impl SceneView {
             background_paint: None,
             foreground_paint: None,
             item_cache: Rc::new(RefCell::new(crate::cache::ItemCoordinateCache::new())),
+            published_visible_region: Rc::new(Cell::new(Rect::ZERO)),
+            child_keys: Rc::new(RefCell::new(HashMap::new())),
+            interleaved_nodes: HashMap::new(),
+            wet_layer: None,
+            wet_node: None,
+            wet_mount: None,
             _item_cache_observer: RefCell::new(None),
             _a11y_observer: RefCell::new(None),
             last_at_version: None,
@@ -703,6 +713,34 @@ impl SceneView {
         F: Fn(&mut teksilo_canvas::Canvas, &PaintContext, Rect) + 'static,
     {
         self.foreground_paint = Some(Rc::new(paint));
+        self
+    }
+
+    /// Install a [`WetLayer`](crate::WetLayer) — a surface for content being
+    /// authored right now, which repaints without taking the scene's item
+    /// bands with it.
+    ///
+    /// Its node is always the **last** child of this view, so wet content sits
+    /// above every card and every
+    /// [`Interleaved`](crate::SceneLayer::Interleaved) item, and under the
+    /// `Over` band and the view's own chrome (marquee, magnet feedback,
+    /// transform frame, debug overlay).
+    ///
+    /// Unlike [`foreground`](Self::foreground), which runs inside the view's
+    /// own `post_paint` and therefore cannot be invalidated without repainting
+    /// the whole `Under` band with it, this is a node of its own:
+    /// [`WetLayer::request_repaint`](crate::WetLayer::request_repaint) marks it
+    /// and nothing else.
+    ///
+    /// Paint-only, hidden from assistive technology and transparent to the
+    /// pointer — see [`WetLayer`](crate::WetLayer).
+    ///
+    /// The same layer may be installed in **several** views: each mounts its
+    /// own node and paints the same painter, the way several views share one
+    /// [`SceneModel`]. Mounting it in a second view does not
+    /// unmount it from the first.
+    pub fn wet_layer(mut self, layer: crate::WetLayer) -> Self {
+        self.wet_layer = Some(layer);
         self
     }
 

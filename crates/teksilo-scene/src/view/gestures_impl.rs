@@ -13,6 +13,7 @@
 //! scene and view state through `Signal` captures; none hold `&mut` to
 //! `SceneView` at call time.
 
+use teksilo_core::event::ScrollMotion;
 use teksilo_core::pointer::ScrollPhase;
 
 use super::magnetism::{PortDragState, build_connection, handle_connect_key};
@@ -98,6 +99,7 @@ impl SceneView {
             let press_floor = self.press_floor.clone();
             let press_floor_claimants = self.over_claimants.clone();
             let press_floor_memo = self.veto_memo.clone();
+            let press_floor_scans = self.veto_scans.clone();
             let press_floor_generation = self.snapshot_generation.clone();
             let transform_for_cursor = self.transform_driver();
             handlers = handlers.on_pointer_event(move |ev, ctx| {
@@ -324,7 +326,7 @@ impl SceneView {
                             .and_then(|d| d.hover(scene_pt, slop));
                         let yielding = transform_cursor.is_none()
                             && drag_target_for_cursor.get().is_none()
-                            && floor > crate::pick::RANK_UNDER
+                            && floor > crate::PaintKey::bottom()
                             && item_cursor.is_none()
                             && !over_draggable;
                         if yielding {
@@ -360,20 +362,28 @@ impl SceneView {
                         // drag reads this rather than re-deriving it, so a grab
                         // and a tap on the same press cannot disagree about
                         // what was on top.
-                        let vetoed = super::over_press_claimant_covers(
+                        // "Is anything painted above the cards claiming this
+                        // press?" — asked at the widget rank rather than at
+                        // `Over`, so an `Interleaved` claimant is seen too. The
+                        // floor recorded is the claimant's own **rank**, not its
+                        // whole key: a rank is what the drag hit test below
+                        // takes, and both forms resolve to the same winner
+                        // because that hit returns the topmost match anyway.
+                        let veto = super::press_claimant_above(
                             super::VetoState {
                                 over_claimants: &press_floor_claimants,
                                 veto_memo: &press_floor_memo,
+                                veto_scans: &press_floor_scans,
                                 snapshot_generation: &press_floor_generation,
                                 handler_snapshot: &handler_snapshot,
                                 view_transform: &view_xform_signal,
                             },
+                            crate::PaintKey::rank_floor(crate::RANK_WIDGET),
                             scene_pt,
                         );
-                        press_floor.set(if vetoed {
-                            crate::pick::RANK_OVER
-                        } else {
-                            floor
+                        press_floor.set(match veto {
+                            Some(key) => floor.max(crate::PaintKey::rank_floor(key.rank())),
+                            None => floor,
                         });
                         let hit = hit_handler_item(*position, scene_pt, slop);
                         // Any press retracts a hover tooltip — the user has
@@ -497,7 +507,7 @@ impl SceneView {
                             ctx.cancel_delayed_overlay(tooltip_content_id);
                         }
                         // The press is over; the next one records its own.
-                        press_floor.set(crate::pick::RANK_UNDER);
+                        press_floor.set(crate::PaintKey::bottom());
                         // Tap dispatch only fires when the button that
                         // came back up matches the one we recorded on
                         // the press. Mixed-button down/up sequences
@@ -616,7 +626,7 @@ impl SceneView {
                 // A press that is taken away can never become a tap, and the
                 // hold it may have armed can never become a tooltip.
                 pending_tap.set(None);
-                press_floor_for_cancel.set(crate::pick::RANK_UNDER);
+                press_floor_for_cancel.set(crate::PaintKey::bottom());
                 hold_origin.set(None);
 
                 // The hover half: the item's owed `on_hover(false)`, both
@@ -640,15 +650,32 @@ impl SceneView {
         handlers
     }
 
-    pub(super) fn register_scroll_pinch_key_handlers(
+    /// Wheel / trackpad pan, Ctrl+wheel zoom, pinch, and the keyboard camera —
+    /// plus the one arm that is **not** camera input: a descendant's request to
+    /// be revealed.
+    ///
+    /// `interactive` gates the input arms, not the reveal. A non-interactive
+    /// view is one the *user* may not drive; a focused caret inside a card it
+    /// contains is still entitled to be on screen, and a read-only page whose
+    /// editor scrolls away from its own caret is a bug in every host that has
+    /// shipped it. So `on_scroll` is registered either way and its wheel body
+    /// returns early when the view is not interactive — which is what a view
+    /// with no handler at all did, since `try_handler_bubble`'s `None` and
+    /// `Some(Ignored)` meet at the same `unwrap_or` one line later.
+    pub(super) fn register_camera_handlers(
         &self,
         mut handlers: HandlerSet,
         line_height: f32,
         pan_dur: Duration,
         overscroll: OverscrollBehavior,
         prefers_reduced: bool,
+        interactive: bool,
     ) -> HandlerSet {
         {
+            // The camera, as something a closure can own. The reveal arm below
+            // has to move it from inside a `HandlerSet` closure, which outlives
+            // the `&self` that built it.
+            let camera = self.camera();
             let pan_x = self.pan_x.clone();
             let pan_y = self.pan_y.clone();
             let zoom = self.zoom.clone();
@@ -665,6 +692,66 @@ impl SceneView {
             let adopt_scene_size = self.adopt_scene_size;
             handlers = handlers.on_scroll(move |event, ctx| {
                 use crate::scene::PanAxes;
+                // **A descendant asked to be seen.** The framework's reveal
+                // walk (`WidgetTree::scroll_rect_into_view`) visits every
+                // `clips_children` ancestor of the widget that called
+                // `EventContext::ensure_visible`, and a `SceneView` clips — so
+                // a caret moving inside an embedded `RichTextEditor` arrives
+                // here, and arrives *first*, before the wheel arm that shares
+                // this slot.
+                //
+                // `target_bounds` is already in this view's **content** space,
+                // which for a scene is scene coordinates: the walk projects the
+                // rectangle into each ancestor's own space as it climbs, and a
+                // card's arena bounds inside a `SceneView` are its scene rect
+                // (the camera is a content transform, so a card at scene
+                // (100, 100) keeps bounds of (100, 100) however far the camera
+                // has panned). No inverse belongs here; applying one would
+                // un-camera a rectangle that was never cameraed.
+                //
+                // Reduced motion is honoured on this route and not on the
+                // public `ensure_visible`, because only this one has an
+                // `EventContext` to ask. A reveal is a jump the user did not
+                // request, which is precisely the class the preference is about.
+                if let WidgetEvent::ScrollIntoView {
+                    target_bounds,
+                    margin,
+                    align,
+                    motion,
+                    applied_scroll,
+                } = event
+                {
+                    let motion = if prefers_reduced {
+                        ScrollMotion::Instant
+                    } else {
+                        *motion
+                    };
+                    let applied = camera.reveal(*target_bounds, *margin, *align, motion);
+                    // The back-channel, in the space the event was stated in.
+                    // An outer scroll container is re-targeted by subtracting
+                    // this from `target_bounds` before the walk projects it
+                    // outward; leaving it zero costs that container nothing but
+                    // accuracy, and filling it with a *screen*-space pan delta
+                    // would cost it a factor of the zoom.
+                    if let Some(cell) = applied_scroll
+                        && let Ok(mut slot) = cell.lock()
+                    {
+                        *slot = Point::new(applied.x, applied.y);
+                    }
+                    return if applied == Vec2::ZERO {
+                        // Nothing moved: the target already fits, or a policy
+                        // or a clamp refused. Saying `Handled` here would buy a
+                        // layout pass for a decision not to move.
+                        EventResponse::Ignored
+                    } else {
+                        EventResponse::Handled
+                    };
+                }
+                // Everything below is camera *input*, which a non-interactive
+                // view does not take.
+                if !interactive {
+                    return EventResponse::Ignored;
+                }
                 let WidgetEvent::Scroll {
                     delta,
                     modifiers,
@@ -864,6 +951,14 @@ impl SceneView {
                 }
                 EventResponse::Handled
             });
+        }
+
+        // The camera *input* arms. Gated as they always were: these are
+        // the user driving the view, which is exactly what
+        // `interactive(false)` switches off. Only the reveal arm above
+        // outlives the flag.
+        if !interactive {
+            return handlers;
         }
 
         {

@@ -509,7 +509,7 @@ impl IconWidget {
         let offset_y = bounds.y;
 
         let mut scaled = Path::new();
-        for cmd in &path.commands {
+        for cmd in path.commands() {
             match *cmd {
                 PathCommand::MoveTo(p) => {
                     scaled.move_to(Point::new(

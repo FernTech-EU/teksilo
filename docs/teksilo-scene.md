@@ -1790,11 +1790,21 @@ SceneView::new(scene)
 ```
 
 Paint order, bottom to top: `background` → **Under** items → heavyweight
-children → **Over** items → marquee → `foreground` → debug overlay. The
-`background` hook runs in the SceneView's `paint` (a backdrop, before the
-heavyweight children); the `foreground` hook runs in its `post_paint` (after the
-children), so it paints over the cards. See [Z-order and paint bands](#z-order-and-paint-bands)
-for the Under/Over band and the three-pass model.
+children *interleaved with* **Interleaved** items by `z` → the
+[wet layer](#the-wet-layer) → **Over** items → marquee → `foreground` → magnet
+feedback → transform chrome → debug overlay. The `background` hook runs in the
+SceneView's `paint` (a backdrop, before the heavyweight children); the
+`foreground` hook runs in its `post_paint` (after the children), so it paints
+over the cards. See [Z-order and paint bands](#z-order-and-paint-bands) for the
+three bands and the pass model.
+
+**`foreground` is not a surface for content in flight.** The render walker
+computes **one** `needs_paint` per node and gates that node's `paint` *and* its
+`post_paint` with it, so there is no way to invalidate a `SceneView`'s
+foreground alone: asking the view to repaint re-runs the whole `Under` band with
+it. A closure whose output changes on every pointer sample — a stroke being
+drawn, a rubber-band shape, a live measurement — belongs in a
+[`WetLayer`](#the-wet-layer), which is a node of its own.
 
 ---
 
@@ -2001,6 +2011,298 @@ scene.add_item_dynamic(MyDynItem { ... }, Point::ZERO);
 
 ---
 
+## Content-driven size — `SizePolicy`
+
+A heavyweight entry's box comes from the model, and for most content that is
+right: a chart, an image, an embedded page all want the rectangle the document
+gave them. Text does not. A note's width is authored — you drag its edge — and
+its height is whatever the words come to at that width.
+
+```rust
+let note = model.add_widget_item(NoteData { .. }, Rect::new(100.0, 100.0, 240.0, 80.0));
+model.set_size_policy(note, SizePolicy::HeightForWidth);
+```
+
+| policy | width | height |
+| --- | --- | --- |
+| `Fixed` (default) | model | model |
+| `HeightForWidth` | model | **measured from the widget, at the model's width** |
+| `Intrinsic` | measured | measured — the rect supplies only the position |
+
+Refused for a lightweight [`SceneItem`](../crates/teksilo-scene/src/item.rs):
+it has no `layout_response` to ask, and it already has its own mechanism
+([`add_item_dynamic`](#dynamic-bounds-signal-driven)). `set_size_policy` returns
+`false` rather than quietly doing nothing.
+
+### What is measured, and what is not
+
+**Only the cards a pass gives a non-zero size** — the ones inside the viewport.
+Not the ones the retention band keeps alive off-screen, and not the one the user
+is interacting with if the camera has left it behind: those are laid out at
+`Size::ZERO`, so there is nothing a measurement could be for. A card the camera
+has never shown keeps the size `add_widget_item` was handed and corrects itself
+on the pass that first places it, in the same frame it appears.
+
+That is the contract `ListView::auto_item_height` already makes about a row it
+has never realised, and it is what keeps the viewport cull's promise: measuring
+every entry on every pass is exactly the cost the cull exists to remove. The
+consequence to plan for is that every **whole-scene** query —
+`scene_rect_extent`, the spatial index, a marquee, a minimap — reads the
+estimate for a card that has never been on screen. Give a plausible one.
+
+### The write-back is not an edit
+
+A measured size goes into the model, because everything above reads the model.
+It arrives as [`ItemChange::MeasuredSizeChanged`], which is deliberately none of
+the three things a geometry change usually is:
+
+* **not an edit** — `ItemChange::is_edit` is `false` and the change is stamped
+  `ephemeral`, so a history above the scene does not gain an undo step because a
+  paragraph re-wrapped. Undoing a reflow would mean undoing the width or the
+  words;
+* **not structural** — counted out of `Scene::structural_version` the way
+  `refresh_dynamic_bounds`' per-frame churn is, so a line wrap buys no
+  AccessKit re-walk;
+* **not a rebuild** — the observing `SceneView` answers it with a *relayout*.
+  Nothing was materialised or reaped and no delegate needs re-running, and a
+  note page produces one of these per line break.
+
+An app mirroring scene geometry into its document matches `LocalBoundsChanged`
+and ignores `MeasuredSizeChanged`. `Scene::set_measured_size` is public for an
+app that measures something the framework cannot — an ink stroke's bounding box
+after a segment dries, a generated diagram's extent.
+
+Changing the policy itself *is* an edit
+([`ItemChange::SizePolicyChanged`]): "this note's height follows its words" is a
+decision someone made about the document.
+
+### Two obligations
+
+**The measurement must be idempotent.** `layout_response` answered at a width
+feeds the model, and the model feeds the next pass. A body that answers
+differently for the same width would oscillate for ever. The view bounds that —
+but a body that needs the guard is a body with a bug.
+
+The bound is careful about *what an oscillation is*, because the numbers alone
+cannot say. `100 → 120 → 100` is one when the body is answering its own last
+answer, and is a user typing a character that wraps and then deleting it when it
+is not; a user who does that twice hands a value-pattern detector a sequence
+bit-identical to a flip-flop's. Freezing a card on the second case leaves it at
+a height its content abandoned — and, since a card that writes nothing is never
+asked again, leaves it there for ever. That is the most ordinary editing action
+there is, so it decides the design.
+
+What separates them is **who drove the pass**. A body's answer is a function of
+its content and of the width it is offered. The width is held fixed (a change to
+it retires the history outright), and at a fixed width the content cannot change
+without something dirtying the card: a `Signal` bound at `Relayout`, a rebuild, a
+theme swap, a fresh node. None of that fires an `ItemChange` the view could
+observe, but all of it sets `needs_layout` on the card's own node — a
+relayout-level binding marks its whole ancestor chain, so a content signal firing
+three levels down inside a text engine still reaches the node the view measures
+— and the arena clears those flags only *after* the walk, so `place_children`
+can still see them. The view's own write, by contrast, reaches nothing below it:
+`MeasuredSizeChanged` bumps a `Relayout`-bound signal on the `SceneView` node,
+whose ancestors are marked and whose descendants are not. So on the pass a write
+causes, the card reads **clean**, and a clean card that answers differently is
+reading back what was written to it. That is not a guess about a pattern; it is
+the definition of the non-idempotence.
+
+Nothing is pinned to a value. A contradiction on a clean pass resolves to the
+larger of the two answers (a box that is too big shows everything; one that is
+too small cuts content off), and is counted. After two of them the entry stops
+taking new answers and re-states the one the model already holds — which writes
+nothing, and a pass that writes nothing schedules no successor, so silence is
+what ends the chain. A genuinely non-idempotent body therefore costs a bounded
+number of passes **per external event**, not an unbounded number for ever; and an
+edited body is never bounded at all, because every one of its passes is
+externally driven and an externally driven pass always takes the answer it is
+given.
+
+The question "was anything but this view here" therefore costs one arena lookup,
+and is asked lazily — only on a pass where a card's measured size actually moved
+— so an idle page of notes never asks it at all.
+
+**A resize does not reach an axis the content owns.** On a `HeightForWidth`
+card, the height half of a corner drag does nothing at all — not "writes a value
+that is then corrected": the scale's vertical component is neutralised in
+`Scene::apply_transform_delta`, because a height written there is one the next
+pass measures straight back over, and the gesture's whole contribution would be
+a reversible step that undoes nothing (worse: a top-edge drag would *move* the
+card instead of resizing it). An `Intrinsic` card owns neither axis, so
+`Scene::transformable_roots` does not offer it resize handles at all — the same
+shape as the existing rule that a heavyweight entry is not offered rotation.
+Dragging a side or a corner of a `HeightForWidth` card still changes its width,
+and the words decide the rest. That is the intended reading of "the content
+decides", and it is why the policy is opt-in.
+
+### A measurement taken against a preview stays out of the model
+
+A card carried by a live selection transform is **placed** at the preview's
+rectangle, not the model's, and it is measured there: that is what makes a
+resize reflow the words as the handle moves. The answer must not be written
+back. The preview is recomputed from the gesture's frozen start frame on every
+sample, so a previewed width that reached the model would be scaled again on the
+next sample and again on the one after — ten samples of a 100-unit drag committed
+**759** units instead of 300, and wrote the model on most of them.
+
+A previewed pass therefore measures, places, and tells neither the model nor the
+measurement history anything. The gesture keeps the property the transform
+controller states for every other case: one write, on release, with nothing to
+roll back when it is cancelled.
+
+---
+
+## Cards — `SceneCard`
+
+[`SceneCard`](../crates/teksilo-scene/src/scene_card.rs) is the container a
+heavyweight item usually wants: a surface, a grab handle, a selection ring,
+three modes and one accessibility group — **with no opinion about what is inside
+it**. A text note, a pinned image, an embed, a chart and a group of dried ink
+are the same card with different bodies, which is why the type is not called
+`NoteContainer`.
+
+```rust
+SceneView::with_model(model.clone())
+    .selection_model(selection.clone())
+    .delegate_typed::<Note>(move |note, id| {
+        Box::new(
+            SceneCard::new(model.clone(), id)
+                .selection(selection.clone())
+                .mode(note.mode.clone())
+                .label(note.title.clone())
+                .header(TextWidget::new(note.title.clone()))
+                .header_trailing(IconButton::menu())
+                .body(RichTextEditor::editor(note.doc.clone()))
+                .height_for_width(),
+        )
+    })
+```
+
+### The gesture regime
+
+Three presses, three owners, decided **structurally** by the router's enrolment
+rules rather than by a recogniser race:
+
+| press lands on | who owns it | why |
+| --- | --- | --- |
+| the header | the header's own `on_drag` | the innermost node carrying a drag owns the sequence outright, and no ancestor is enrolled |
+| the body | whatever the body installed — a text field's selection drag | no drag on the captured node, so the walk climbs, and stops at the card root's dead zone |
+| the card background | the card's own selection | the card root **is** the dead-zone boundary, so nothing above it arms |
+
+The load-bearing line is `gesture_dead_zone(true)` on the card root. Without it
+the `SceneView`'s marquee is enrolled as an ancestor of every press inside the
+card, and dragging from the middle of a note rubber-bands the page behind it.
+The trailing header slot gets a `DeadZone` of its own — the `Accordion` header
+precedent — so a `⋮` button can be clicked with the jitter a real click carries
+without starting a move.
+
+### What moves a card
+
+The **header**, always. The selection frame the
+[transform controller](#the-geometry-constraint--deciding-before-the-change) draws moves and resizes it
+too, once the card is selected — that frame is drawn `padding` outside the
+selection precisely so it lands on pixels the card does not own. There is
+deliberately no third route: a body drag belongs to the body, which is how you
+select text in an embedded editor.
+
+Both routes end in the same model write. The header drag previews as a node
+transform, runs each sample past `SceneModel::constrain_move` — the same door
+the built-in drag uses, so a snap-to-grid rule cannot mean two things — and
+commits **once**, on release, through `SceneModel::apply_transform_delta`. One
+gesture is one reversible step, and a cancelled gesture has nothing to roll back
+because nothing was written.
+
+### Modes
+
+[`CardMode`] is `Idle` / `Selected` / `Editing`, held in a `Signal` the **app**
+owns. The card writes into it (`Editing` on double-click, `Enter` or the AT
+**Edit** action; `Selected` when focus leaves its subtree or `Esc` is pressed)
+and reads it for its chrome and its accessibility state.
+
+There is no separate `on_commit` callback: the trigger for the case that matters
+— focus leaving the subtree — is the framework's `focus_within` signal, written
+outside event dispatch, so a callback there could not be handed an
+`EventContext` and would be a worse `Signal` with a misleading shape. Observe
+the mode. `on_activate` *does* take an `EventContext`, because an activation is
+a gesture or a key and has a dispatch to belong to — and **any write it makes to
+the mode is the decision**: write `Editing` to drive your own edit flow, write
+anything else to refuse this activation, write nothing and the card flips as
+usual.
+
+### One tab stop *and* the caret — the frame that costs
+
+A card contributes exactly **one** tab stop of its own. It does not take its
+body's away, and cannot: `set_tab_stop` reaches one node, and a composite body's
+stops are its own inner nodes. An app that wants one stop per idle note puts a
+`Switcher` in the body — a read-only viewer and an editor driven by the same
+`CardMode` — because a `Switcher` parks its hidden branch dormant, which takes it
+out of focus, hit-testing *and* the accessibility tree while keeping it mounted.
+
+That shape has a consequence the card has to answer for: **the editor does not
+exist yet at the moment the user asks for it.** A double-click flips the mode
+inside one dispatch and `request_focus_into` is drained at the end of that same
+dispatch, but the `Switcher`'s branch stays parked until its `visible_when` gate
+is evaluated in the *next* layout pass. The obvious code focuses a subtree with
+nothing focusable in it, the caret never appears, and the two recommended shapes
+— one tab stop, and focus on activation — are mutually exclusive.
+
+The card closes that by asking twice: once straight away, which is what a plain
+focusable body wants, and again from `BuildContext::run_after_mount` on the far
+side of the pass that wakes the branch. The second ask is skipped when the
+card's `focus_within` already says the keyboard is inside, so a body that took
+the focus itself is never yanked back to its first field. The caret lands one
+frame after the double-click instead of zero, and it lands. The same mechanism
+is what makes the two-way `mode` contract true from **outside** the card: a
+toolbar button that writes `Editing` into the signal gets the body focused too.
+
+### Chrome
+
+The default surface is `teksilo_widgets::Card`, so a card is Tier-3 themed
+through the existing `style_slots.card` with no new style protocol. Replace it
+with `SceneCard::surface(|content_id| …)`, which is handed the id of the header
+and body already stacked and returns whatever should wrap them.
+
+---
+
+## Revealing a descendant — the caret follows the camera
+
+A `SceneView` clips its children, which puts it on the framework's **reveal
+walk**: when a widget calls `EventContext::ensure_visible`, every
+`clips_children` ancestor is offered a
+[`WidgetEvent::ScrollIntoView`](https://docs.rs/teksilo-core) and gets a chance
+to bring the target on screen. The view answers by moving its camera, so a caret
+moving inside an embedded `RichTextEditor` pans the page to follow it — with no
+app wiring at all.
+
+Three things about that are worth knowing if you write a widget that lives in a
+scene:
+
+* **`target_bounds` arrives in scene coordinates.** The walk projects the
+  rectangle into each ancestor's own space as it climbs, and a card's arena
+  bounds inside a `SceneView` *are* its scene rect — the camera is a *content*
+  transform, so a card at scene (100, 100) keeps bounds of (100, 100) however
+  far the camera has panned. Do not un-camera it; it was never cameraed.
+* **The reveal is registered even on a non-interactive view.**
+  `interactive(false)` switches off camera *input* — the wheel, the pinch, the
+  keyboard camera. A read-only page whose embedded editor scrolls away from its
+  own caret is a bug, not a policy.
+* **Reduced motion is honoured on this route**, and only on this one:
+  `SceneView::ensure_visible` has no `EventContext` to ask. A reveal is a jump
+  the user did not request, which is the class the preference is about.
+
+`SceneView::ensure_visible_aligned(rect, margin, align, motion)` is the same
+engine with an explicit alignment and motion, reporting the shift it applied in
+scene coordinates — which is what the reveal walk's `applied_scroll`
+back-channel carries, so an outer `ScrollArea` is re-targeted to where the card
+will land rather than to where it was.
+
+[`ItemChange::MeasuredSizeChanged`]: ../crates/teksilo-scene/src/scene.rs
+[`ItemChange::SizePolicyChanged`]: ../crates/teksilo-scene/src/scene.rs
+[`CardMode`]: ../crates/teksilo-scene/src/scene_card.rs
+
+---
+
 ## Selection
 
 ```rust
@@ -2022,11 +2324,13 @@ post_paint` model applied at the scene level:
 | Pass | What paints | Tier |
 | --- | --- | --- |
 | `paint` (backdrop) | lightweight **Under** items, z-sorted | lightweight |
-| arena child-walk | heavyweight widgets, z-sorted | heavyweight |
-| `post_paint` (foreground) | lightweight **Over** items, then the selection marquee / app foreground hook / debug overlays | lightweight |
+| arena child-walk | heavyweight widgets **and lightweight `Interleaved` items**, one z-sort across both | both |
+| …still the child-walk | the [wet layer](#the-wet-layer), always last | app |
+| `post_paint` (foreground) | lightweight **Over** items, then the selection marquee / app foreground hook / magnet feedback / transform chrome / debug overlays | lightweight |
 
-So the stacking order, bottom to top, is **Under items → heavyweight cards →
-Over items**.
+So the stacking order, bottom to top, is **Under items → { cards and
+Interleaved items, by z } → the wet layer → Over items → the view's own
+chrome**.
 
 ### Within a tier
 
@@ -2049,11 +2353,12 @@ the pointer picks.
 [`SceneView::scene_mut`]) so the grabbed card — and its text — render over the
 others.
 
-### Across the tiers — the Over band
+### Across the tiers — the three bands
 
 ```rust
-scene.set_layer(id, SceneLayer::Over);   // raise a lightweight item above the cards
-scene.layer(id) -> Option<SceneLayer>;   // Under (default) | Over
+scene.set_layer(id, SceneLayer::Over);          // above every card
+scene.set_layer(id, SceneLayer::Interleaved);   // among the cards, by z
+scene.layer(id) -> Option<SceneLayer>;          // Under (default) | Interleaved | Over
 ```
 
 Lightweight items default to `Under` (background furniture: connector lines,
@@ -2061,11 +2366,94 @@ grids, decorations). `Over` raises an item into the foreground pass so it paints
 *above* the heavyweight widgets — selection halos, highlighted connectors,
 annotations. Within each band `z` still orders items among themselves.
 
-This is a **binary band, not a continuous z across the tiers**, because the
-render walker offers exactly two lightweight paint positions (before and after
-the child subtree). The heavyweight tier is one contiguous block in between. To
-place a lightweight item *between* two specific cards, promote it to a
-heavyweight widget and give it a z between theirs.
+`Under` and `Over` cost nothing, because the render walker offers a paint
+position before and after a node's child subtree and those are the two bands.
+**`Interleaved` is the third**, and it is not free: there is no paint position
+*between* two children, so the view materialises one node per interleaved item
+and slots it into the z-sorted child list. That node is **paint only** —
+
+| | consequence |
+| --- | --- |
+| `event_pass_through` | the pointer still resolves through the lightweight hit snapshot: one picker, still |
+| left out of `accessibility_children` | the AT tree is **bit-identical**; the item keeps the same synthetic `SceneItem` node it had in `Under` — same off-screen culling, same reparenting, same rotor category |
+| not focusable, no handlers | `tab_stops_within` does not move |
+
+— so the choice changes what the item is painted *between* and nothing else.
+That was the deciding argument for materialising a node rather than only
+widening the rank: a richer rank alone changes the **hit** order and leaves
+paint where it was, which is exactly the paint-disagrees-with-hit defect one
+`PaintKey` exists to prevent.
+
+What it costs is one arena node per interleaved item. Ink is the case it exists
+for ("this stroke is above note A and below note B"); a page of ink wants a
+`GroupItem` per layer rather than a band per stroke. See [Ink](ink.md).
+
+**What `Interleaved` orders against: cards, and only cards.** The child walk it
+is slotted into holds the heavyweight widgets, so "above note A and below note
+B" is a statement about a scene whose notes are `add_widget` /
+`add_widget_item` cards. It is *not* an ordering against the other two bands —
+the whole `Under` band paints inside `SceneView::paint`, before the first child,
+and the whole `Over` band inside `post_paint`, after the last — so an
+interleaved item is above every `Under` item and below every `Over` item
+whatever their `z`s. The corollary worth stating outright: **in a scene with no
+heavyweight children, an interleaved item is on top of everything**, because its
+`z` is being compared against an empty set. A lightweight-only page that wants
+ink beneath some of its content wants `Under` plus a `z`.
+
+**The hit rule follows per card, not per rank.** An interleaved press claimant
+vetoes the cards it is painted over and leaves alone the ones painted over *it*
+— `SceneView::accepts_child_hit` compares whole `PaintKey`s rather than ranks.
+One deliberate looseness: an interleaved item that does **not** claim the press
+is treated, for hover and cursor, the way an `Under` item under that card is.
+It could not have won the press anyway, and narrowing further would mean
+resolving *which* card won from a `dispatch_target` that may be one of its
+descendants.
+
+---
+
+## The wet layer
+
+A surface for content being authored **right now**, which repaints without
+taking the scene's item bands with it.
+
+```rust
+let wet = WetLayer::new(move |canvas, ctx| {
+    // scene coordinates: the node is inside the view's content transform, so
+    // the stroke pans and zooms with the page for free
+    for chunk in stroke.borrow().chunks() {
+        canvas.fill_path_with_rule(chunk, ctx.theme.colors.text_primary, FillRule::Winding);
+    }
+});
+
+let view = SceneView::with_model(model).wet_layer(wet.clone());
+
+// …and from a pointer handler, after appending a point:
+wet.request_repaint(ctx);   // marks ONE node. No relayout, no rebuild, no AT walk.
+```
+
+`WetLayer` is a cloneable handle, like `SceneModel`: clone it into the handler
+that feeds it and into `SceneView::wet_layer`. Its node is always the **last**
+child, so wet content sits above every card and every interleaved item and under
+the `Over` band and the view's own chrome — a marquee, a magnet ghost and the
+debug overlay stay visible through it. It is `event_pass_through` and hidden
+from assistive technology: a gesture in flight is not an object, and the
+finished one becomes a scene item with whatever name the app gives it.
+
+The `SceneModel` comparison is meant literally: mount one layer in **several**
+views and each mounts its own node, each paints the same painter, and
+`request_repaint` repaints all of them. A second view does not displace the
+first. One qualification, and it belongs to the door rather than to the handle:
+a repaint is requested through an `EventContext`, which belongs to one window's
+tree, so `request_repaint` refreshes the mounts in the calling context's own
+window and leaves a mount in another window to that window's own frame. Sending
+that window the other tree's `WidgetId` would not reach it anyway — ids are
+per-arena slot keys and two trees mint the same ones. `WetLayer::nodes()` hands
+back every mounted node for a caller driving the repaint through some other
+door.
+
+An app whose dried ink lives in the `Over` band will see a stroke rise one step
+at the moment it dries. `Interleaved` (or `Under`) has no such step, which is
+the other reason ink belongs in a band of its own.
 
 ### One order, one value — `PaintKey`
 
@@ -2077,10 +2465,14 @@ independently-invented rule:
 ```rust
 PaintKey { rank, z, seq }
 // rank: RANK_UNDER (0) | RANK_WIDGET (1) | RANK_OVER (2)
+//       — a heavyweight card AND a lightweight `Interleaved` item both sit at
+//         RANK_WIDGET, which is what lets them order against each other by z
 // z:    the entry's z within its rank (a non-finite z normalises to 0.0)
 // seq:  the entry's ItemId — a monotone counter, so ties resolve by insertion
 
 scene.paint_key(id) -> Option<PaintKey>   // defined for BOTH tiers
+PaintKey::bottom()                        // a floor admitting everything
+PaintKey::rank_floor(RANK_OVER)           // a floor admitting one rank and above
 ```
 
 A *higher* key paints later, is therefore on top, and therefore wins the

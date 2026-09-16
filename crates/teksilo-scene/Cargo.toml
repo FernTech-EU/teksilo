@@ -36,6 +36,9 @@ proptest = { workspace = true }
 # consumer, so it — not what the scene believes it emitted — is what
 # decides whether a text item can be reviewed by character and word.
 accesskit_consumer = { workspace = true }
+# Test-only: the caret-follow tests embed a real `RichTextEditor`, whose
+# document type lives here. Nothing in the crate proper needs it.
+teksilo-text = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

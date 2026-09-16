@@ -506,6 +506,121 @@ are the scene's; it is the declaration above them that differs.
 
 ---
 
+## `SceneCard`'s shape
+
+A [`SceneCard`](../crates/teksilo-scene/src/scene_card.rs) publishes **one**
+`Role::Group`, named by `SceneCard::label`, carrying `selected` when its
+[`CardMode`] says so and one custom action — **Edit** — which is the non-pointer
+twin of the double-click that enters edit mode. It is a tab stop, so a keyboard
+user reaches every card with Tab, enters one with Enter and leaves with Esc.
+
+The action is **advertised**, not merely listed, and that distinction is the
+whole of whether it exists. An adapter reports a node's custom actions through
+`Action::CustomAction` being supported, not through the list being non-empty
+(`accesskit_ios-0.2.0/src/node.rs:109` is the one that says so in code), so a
+list published without the gate is decoration: named, announced by nothing,
+invokable by nobody. Three widgets in this repo shipped that defect, each having
+to remember a second call beside `set_custom_actions`. It is now
+`AccessNodeBuilder::set_custom_actions` that owns both halves — a non-empty list
+advertises the gate, an empty one withdraws it — so a fourth is not reachable.
+Assert the gate, never the list: `supports_action(Action::CustomAction)` is what
+`the_cards_edit_action_is_advertised_and_not_merely_listed` checks.
+
+One group, not two. The card's default surface is
+`teksilo_widgets::Card`, which announces itself as a `Role::Group`; left alone
+that is a nameless container *inside* the card's own named one, which a screen
+reader reads as a container within a container. So the card asks for
+`Role::GenericContainer` on the surface, which is the role the walker prunes,
+promoting its children in order. The net result is **node for node identical to
+the hand-rolled `Panel` a note page used before** — with the container named,
+where the panel's was not. Pinned by
+`a_card_publishes_no_more_nodes_than_the_hand_rolled_panel_it_replaces`
+(asserted through `sync_accessibility`, the cached door a platform adapter is
+handed, not the snapshot that bypasses it).
+
+Everything inside the card is walked by the framework's ordinary walker — the
+header's text, the trailing button and a body that publishes `Role::TextRun`
+children all hang off the group in the emitted tree.
+
+> ⚠ **They do not currently reach a screen reader, and the card is not what
+> stops them.** The default surface is `teksilo_widgets::Card`, whose
+> `RecipeCardStyle` body calls `AccessNodeBuilder::set_hidden()` on itself to
+> mean "presentational". `set_hidden` is `FilterResult::ExcludeSubtree` in
+> `accesskit_consumer::common_filter` — the filter every platform adapter and
+> this repo's own `accessibility::audit` read through — so it removes the
+> surface **and everything under it**. Measured through a real consumer tree:
+>
+> ```text
+> SceneCard  →  Window > Pane > Group "Note"          (title and body gone)
+> Panel      →  Window > Group                        (its children gone)
+> StatusBar  →  Window > Status "Status"              (its items gone)
+> ```
+>
+> The parity test below passes because the `Panel` baseline is broken in exactly
+> the same way. The intended "presentational" is one line away and the card
+> already uses it on the surface's *own* node: `Role::GenericContainer` with no
+> properties is `ExcludeNode` — the node goes, its children are promoted.
+> Fixing it is a sweep across every content-wrapping recipe surface
+> (`recipe_card_style.rs`, `panel.rs`'s `a11y_presentational`, `popover_surface.rs`,
+> `tool_box.rs`, `splitter.rs`, `aspect_ratio.rs`, …) rather than a change to the
+> card, so it is recorded here rather than made here.
+
+### Tab stops, and the one thing the card does not decide
+
+The card contributes exactly **one** tab stop — itself. It does not take its
+body's away while idle, and the reason is mechanical rather than a matter of
+taste: `set_tab_stop` reaches one node, and a composite body's tab stops are its
+own inner nodes. Nothing short of parking the body dormant takes a subtree out
+of the Tab ring.
+
+So a card with a focusable body is two stops, always. An app that wants one stop
+per idle note puts a `Switcher` in the body — a read-only viewer and an editor,
+driven by the same `CardMode` — because a `Switcher` parks its hidden branch
+dormant, which takes it out of focus, hit-testing *and* the accessibility tree
+while keeping it mounted, so a mode round-trip does not destroy the caret:
+
+```rust
+SceneCard::new(model.clone(), id)
+    .mode(mode.clone())
+    .body(
+        Switcher::new(mode.map(|m| usize::from(*m == CardMode::Editing)))
+            .child(RichTextEditor::read_only(doc.clone()))
+            .child(RichTextEditor::editor(doc.clone())),
+    )
+```
+
+That branch is parked until the `visible_when` gate is evaluated in the layout
+pass *after* the one that flips the mode — which is after the activating
+dispatch has already drained its focus request. So the card asks for the focus
+twice: once in the dispatch, for a plain focusable body, and again from
+`BuildContext::run_after_mount` on the far side of that pass. Without the second
+ask a double-click on a note leaves the keyboard on the card and the caret never
+appears, and the two shapes this section recommends — one idle tab stop, and
+focus on activation — would be mutually exclusive. The second ask is skipped
+when `focus_within` already says the keyboard is inside the card, so an
+`on_activate` that placed it deliberately is not overruled.
+
+### What content-driven height does *not* cost
+
+A card under `SizePolicy::HeightForWidth` is measured only when it is given a
+non-zero size, so the policy adds no AT nodes and moves none: the AT rectangles
+come from the placements, and the placements are recomputed by the relayout the
+measurement causes. The write-back is counted out of `Scene::structural_version`,
+so it triggers no re-walk of its own.
+
+The honest edge is an `A11yOffScreenMode` wide enough to publish cards outside
+the viewport. Those are laid out at `Size::ZERO` and never measured, so what a
+screen reader is told about them is the estimate `add_widget_item` was handed —
+the same number every other whole-scene query reads for an unrealised card, and
+correct the moment the camera reaches one.
+
+Changing the policy *does* re-walk, once, because it is a real decision about
+the document and the rectangles that follow from it are new.
+
+[`CardMode`]: ../crates/teksilo-scene/src/scene_card.rs
+
+---
+
 ## Worked example: story corkboard
 
 Acts contain Scene cards. Acts are virtual groups; Scene cards are

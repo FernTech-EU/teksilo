@@ -122,7 +122,7 @@ use teksilo_tokens::Easing;
 
 use crate::item::ItemId;
 use crate::magnet::{MagnetId, MagnetSnap, MagnetismConfig};
-use crate::pick::{PaintKey, RANK_OVER, RANK_UNDER};
+use crate::pick::{PaintKey, RANK_OVER};
 use crate::scene::Scene;
 use crate::scene_model::SceneModel;
 use crate::shape::{ItemSelectionMode, ItemShape, SceneRegion};
@@ -297,6 +297,147 @@ fn clamp_pan_to_bounds(pan: Vec2, bounds: Option<&Rect>, viewport: Size, zoom: f
         clamp_axis(pan.x, b.x, b.right(), viewport.width),
         clamp_axis(pan.y, b.y, b.bottom(), viewport.height),
     )
+}
+
+/// One entry's measurement history inside one view. See
+/// [`SceneView::measure_state`].
+///
+/// # What an oscillation is, and what an edit is
+///
+/// A measured size feeds back into the model and the model feeds the next
+/// pass, so a body that cannot answer the same question twice would oscillate
+/// for ever. Bounding that needs something that can tell an oscillation from
+/// an ordinary edit — and the two are **indistinguishable from the numbers**.
+/// `100 → 120 → 100` is an oscillation when the body is answering its own last
+/// answer, and is a user typing a character that wraps and then deleting it
+/// when it is not; a user who types and deletes the same character twice hands
+/// a value-pattern detector a sequence bit-identical to a flip-flop's. Freezing
+/// the second case leaves a card at a height its content abandoned, and — since
+/// a card that writes nothing is never asked again — leaves it there for ever.
+///
+/// What separates them is not the values but **what drove the pass**. A body's
+/// answer is a function of its content and of the width it is offered. The
+/// width is held fixed here (a change to it retires the history outright), and
+/// the content cannot change without something dirtying the card: a `Signal`
+/// bound at `Relayout`, a rebuild, a theme swap, a fresh node. None of that
+/// fires an [`ItemChange`](crate::ItemChange) the view could observe, but all of
+/// it sets `needs_layout` on the card's own node — a relayout-level binding
+/// marks its whole ancestor chain — and the arena clears those flags only
+/// **after** the walk, so when `place_children` asks, the answer is still
+/// there. `layout_impl::card_was_reached` is the one lookup that asks it.
+///
+/// This view's own write, by contrast, reaches nothing below it: it emits
+/// [`MeasuredSizeChanged`](crate::ItemChange::MeasuredSizeChanged), the
+/// observer bumps `measure_dirty`, and that signal is bound at `Relayout` on
+/// the `SceneView` node — whose ancestors are marked, and whose descendants are
+/// not. So on the pass a write causes, the card reads **clean**, and a clean
+/// card that answers differently is reading back what was written to it. That
+/// is not a guess about a pattern; it is the definition of the non-idempotence
+/// [`SizePolicy`](crate::SizePolicy) warns about.
+///
+/// # What is bounded, and by what
+///
+/// Nothing is pinned to a value. A contradiction on a clean pass resolves to
+/// the **larger** of the two answers (a box that is too big shows everything;
+/// one that is too small cuts content off) and is counted as a strike. At
+/// [`MAX_CONTRADICTIONS`] the entry stops taking new answers and re-states the
+/// one the model already holds — which writes nothing, and silence is what ends
+/// the chain, because a pass that writes nothing schedules no successor. So a
+/// hopeless body costs a bounded number of passes **per external event**
+/// instead of an unbounded number for ever, and an edited body is never bounded
+/// at all: every one of its passes is externally driven, and an externally
+/// driven pass always takes the answer it is given.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MeasureTrack {
+    /// The width the last measurement was taken at. A width change retires the
+    /// history — that is a different question, and its answer owes nothing to
+    /// the previous one.
+    width: f32,
+    /// The size resolved last, which is also the size the model was told.
+    last: Size,
+    /// How many times this entry has contradicted itself, on passes nothing
+    /// external drove, since the question it is being asked last changed. The
+    /// two things that change the question are the two things that reset it: a
+    /// different width, and a pass something outside this view drove.
+    strikes: u8,
+}
+
+/// How far apart two measurements have to be to count as different.
+///
+/// Half a logical pixel: below what a reader can see, above the float noise a
+/// shaper produces for the same text measured twice. Without it a body whose
+/// height differs in the last bit writes on every pass, and every write is a
+/// relayout.
+const MEASURE_EPSILON: f32 = 0.5;
+
+/// How many self-contradictions at one width an entry is allowed before this
+/// view stops taking its answers for the rest of the chain.
+///
+/// Two, because the two strikes do different jobs and both are reachable. The
+/// first resolves a flip-flop: taking the larger of the two answers lands on a
+/// size the body itself named, and for a body that alternates between two
+/// values that is already the fixed point — it agrees on the next pass and the
+/// chain ends. The second catches the body the first cannot: one whose answer
+/// *grows* with what it is given, for which "take the larger" is a ratchet, so
+/// the only way to stop is to stop asking.
+const MAX_CONTRADICTIONS: u8 = 2;
+
+impl MeasureTrack {
+    /// A fresh history whose first answer is `candidate`, taken at `width`.
+    fn new(width: f32, candidate: Size) -> Self {
+        MeasureTrack {
+            width,
+            last: candidate,
+            strikes: 0,
+        }
+    }
+
+    /// What this pass should place the card at, given a fresh measurement.
+    ///
+    /// `question_changed` answers "did anything but this view's own write reach
+    /// the card since it was last measured" — see the type's documentation for
+    /// why that is the whole discriminator. It is a closure because the two
+    /// branches that decide without it (the width changed; the answer did not)
+    /// are the ones taken on every ordinary pass, and neither should pay for an
+    /// arena lookup.
+    fn resolve(
+        &mut self,
+        width: f32,
+        candidate: Size,
+        question_changed: impl FnOnce() -> bool,
+    ) -> Size {
+        if (self.width - width).abs() > MEASURE_EPSILON {
+            *self = MeasureTrack::new(width, candidate);
+            return candidate;
+        }
+        if size_close(self.last, candidate) {
+            return self.last;
+        }
+        if question_changed() {
+            // A different question, so a different answer is not a
+            // contradiction — it is the point.
+            self.strikes = 0;
+            self.last = candidate;
+            return candidate;
+        }
+        self.strikes = self.strikes.saturating_add(1);
+        if self.strikes >= MAX_CONTRADICTIONS {
+            // Re-state what the model already holds. The caller writes nothing,
+            // nothing schedules another pass, and the chain ends here.
+            return self.last;
+        }
+        let settled = Size::new(
+            self.last.width.max(candidate.width),
+            self.last.height.max(candidate.height),
+        );
+        self.last = settled;
+        settled
+    }
+}
+
+/// Two sizes that no reader could tell apart. See [`MEASURE_EPSILON`].
+fn size_close(a: Size, b: Size) -> bool {
+    (a.width - b.width).abs() <= MEASURE_EPSILON && (a.height - b.height).abs() <= MEASURE_EPSILON
 }
 
 /// The single chokepoint for the pan-bounds clamp: take the tightening
@@ -517,22 +658,21 @@ impl std::fmt::Debug for DraggableSnapshotEntry {
 /// total miss falls through to `slop`'s miss-only pass, which is inert for a
 /// mouse.
 ///
-/// `min_rank` is the paint-order floor: entries below it are invisible to this
-/// hit test. The drag path passes [`RANK_OVER`] when an
-/// `Over`-band press claimant covers the press, so a press that only reached
-/// this view because the claimant vetoed a card cannot grab something the card
-/// was covering.
+/// `floor` is the paint-order floor: entries below it are invisible to this
+/// hit test. The drag path passes the key of whatever press claimant vetoed a
+/// card, so a press that only reached this view because of that veto cannot
+/// grab something the card was covering.
 fn hit_draggable_item(
     snap: &[DraggableSnapshotEntry],
     screen_pt: Point,
     scene_pt: Point,
     view_xform: teksilo_canvas::Transform2D,
     slop: GrabSlop,
-    min_rank: u8,
+    floor: PaintKey,
 ) -> Option<ItemId> {
     let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
     for entry in snap.iter() {
-        if entry.key.rank() < min_rank {
+        if entry.key < floor {
             continue;
         }
         if entry.ignores_xform {
@@ -565,7 +705,7 @@ fn hit_draggable_item(
             return Some(entry.id);
         }
     }
-    slop.nearest_draggable(snap, screen_pt, scene_pt, view_xform, min_rank)
+    slop.nearest_draggable(snap, screen_pt, scene_pt, view_xform, floor.rank())
 }
 
 /// The topmost item under the pointer whose **shape** contains it, out of a
@@ -578,12 +718,16 @@ fn hit_draggable_item(
 /// narrow-phased at unit scale. `snap` must be sorted by [`PaintKey`]
 /// descending, so the first containing entry is the topmost one.
 ///
-/// `min_rank` is the paint-order floor. The dispatch site passes
-/// [`RANK_OVER`] when the arena has given this pointer
-/// to a heavyweight card — only the `Over` band outranks a card, so everything
-/// below it must stay invisible and let the card have the event. It passes
-/// [`RANK_UNDER`] when the view itself is the target,
-/// which is precisely when no card won.
+/// `floor` is the paint-order floor, compared as a whole [`PaintKey`] so a
+/// caller can say "strictly above *this* entry" and not only "at least this
+/// rank". The dispatch site passes [`RANK_OVER`] (as a rank floor) when the
+/// arena has given this pointer to a heavyweight card — only the `Over` band
+/// outranks *every* card, so everything below it must stay invisible and let
+/// the card have the event — and [`RANK_UNDER`](crate::pick::RANK_UNDER) when the view itself is the
+/// target, which is precisely when no card won. The `accepts_child_hit` veto
+/// passes one specific card's key, because an
+/// [`Interleaved`](crate::SceneLayer::Interleaved) entry is above some cards
+/// and below others and a rank cannot say which.
 ///
 /// A total miss falls through to `slop`'s miss-only pass, which is inert for a
 /// mouse.
@@ -593,14 +737,14 @@ fn hit_handler_index(
     scene_pt: Point,
     view_xform: teksilo_canvas::Transform2D,
     slop: GrabSlop,
-    min_rank: u8,
+    floor: PaintKey,
 ) -> Option<usize> {
     // Logical view zoom (uniform scale of the linear part) — passed to each
     // item's shape test so a cosmetic (device-pixel) stroke's clickable band is
     // converted to scene coordinates at the current zoom.
     let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
     for (index, entry) in snap.iter().enumerate() {
-        if entry.key.rank() < min_rank {
+        if entry.key < floor {
             continue;
         }
         if entry.ignores_xform {
@@ -633,7 +777,7 @@ fn hit_handler_index(
             return Some(index);
         }
     }
-    slop.nearest_handler_index(snap, screen_pt, scene_pt, view_xform, min_rank)
+    slop.nearest_handler_index(snap, screen_pt, scene_pt, view_xform, floor.rank())
 }
 
 /// [`hit_handler_index`] resolved to an owned entry, for the dispatch path,
@@ -650,9 +794,9 @@ fn hit_handler_item(
     scene_pt: Point,
     view_xform: teksilo_canvas::Transform2D,
     slop: GrabSlop,
-    min_rank: u8,
+    floor: PaintKey,
 ) -> Option<HandlerSnapshotEntry> {
-    hit_handler_index(snap, screen_pt, scene_pt, view_xform, slop, min_rank)
+    hit_handler_index(snap, screen_pt, scene_pt, view_xform, slop, floor)
         .map(|index| snap[index].clone())
 }
 
@@ -1145,6 +1289,45 @@ pub struct SceneView {
     /// pure appearance mutation.
     appearance_dirty: Signal<u64>,
 
+    /// Bumped by the `item_change_signal` observer on an
+    /// [`ItemChange::MeasuredSizeChanged`](crate::ItemChange::MeasuredSizeChanged).
+    /// Bound at `BindingLevel::Relayout` in `build`.
+    ///
+    /// **Relayout, not rebuild**, and that is the whole point of the separate
+    /// signal. A measured size moves geometry and nothing else: nothing was
+    /// materialised, nothing reaped, no delegate needs re-running, and the
+    /// change is counted out of `structural_version` so it buys no AccessKit
+    /// re-walk either. Answering a paragraph's re-wrap with a full
+    /// `SceneView::build()` — three observers re-installed, every drain re-run,
+    /// the heavyweight list re-derived and re-sorted — is the storm this exists
+    /// to avoid, and a note page produces one per line break.
+    ///
+    /// The view that *made* the write is notified too, and that is deliberate:
+    /// it is what makes a **second** view of the same model relayout at all.
+    /// The writer's extra pass is bounded by the equality guard in
+    /// `Scene::set_measured_size` — it measures the same height, writes
+    /// nothing, and stops.
+    measure_dirty: Signal<u64>,
+
+    /// Per-item measurement history for the non-[`Fixed`](crate::SizePolicy)
+    /// size policies, and the convergence guard.
+    ///
+    /// Per **view**, not per model: the measurement comes from a widget
+    /// instance, and `delegate_typed` builds one instance per view.
+    ///
+    /// The last answer, the width it was taken at, and how often the body has
+    /// contradicted itself since anything but this view last reached it. A
+    /// body whose `layout_response` is not a function of its width alone would
+    /// otherwise write A, then B, then A forever, each write a relayout. See
+    /// [`MeasureTrack`] for how an oscillation is told apart from an edit, and
+    /// [`SizePolicy`](crate::SizePolicy) for the obligation itself.
+    ///
+    /// Behind an `Rc` because two things hold it: the (`&self`) layout pass
+    /// writes it, and the `item_change_signal` observer clears an entry's
+    /// history when its policy changes or its item is removed — a closure that
+    /// outlives the `&self` that installed it.
+    measure_state: Rc<RefCell<HashMap<ItemId, MeasureTrack>>>,
+
     /// Latest pointer position seen on the SceneView (screen-space).
     /// Updated via an on_pointer_event handler in `build`. Used by
     /// Ctrl+wheel zoom to zoom-about-pointer instead of zoom-about-
@@ -1219,6 +1402,38 @@ pub struct SceneView {
     /// outside of `Scene` mutators must call
     /// [`SceneView::invalidate_item_cache`] to evict.
     pub(crate) item_cache: Rc<RefCell<crate::cache::ItemCoordinateCache>>,
+    /// The viewport in scene coordinates, republished every `place_children`
+    /// and every `paint`, so a child paint node can read it.
+    ///
+    /// A `SceneBandProxy` or a `WetLayerNode` knows its own rect and not the
+    /// viewport's, and an item reads the region as a hint to skip geometry it
+    /// cannot show. See [`ScenePaintBridge`](paint_node::ScenePaintBridge).
+    published_visible_region: Rc<Cell<Rect>>,
+    /// Every child's [`PaintKey`], as of the last build.
+    ///
+    /// Read on the pointer's hot path by
+    /// [`accepts_child_hit`](SceneView::accepts_child_hit), which runs inside
+    /// the router where the scene's `RefCell` may already be held by an
+    /// `ItemChange` observer — so the key has to be here rather than looked up
+    /// in the model. Written from `build`, which is also where the child order
+    /// is decided from the same values, so the list the arena paints and the
+    /// keys this compares are one snapshot.
+    child_keys: Rc<RefCell<HashMap<WidgetId, PaintKey>>>,
+    /// One paint node per [`SceneLayer::Interleaved`](crate::SceneLayer) item,
+    /// keyed by item — the lightweight twin of `materialized`.
+    interleaved_nodes: HashMap<ItemId, WidgetId>,
+    /// The wet surface, if one is installed. Its node is always the last child
+    /// of this view. See [`WetLayer`](paint_node::WetLayer).
+    wet_layer: Option<paint_node::WetLayer>,
+    /// The wet surface's node, minted in `build`.
+    wet_node: Option<WidgetId>,
+    /// This view's mount of [`wet_layer`](Self::wet_layer): the node above plus
+    /// the window its tree belongs to.
+    ///
+    /// Held **strongly** here and weakly by the layer, which is what makes one
+    /// layer in several views work without a `Drop` impl on this type: a
+    /// destroyed view drops its mount and the layer's entry for it expires.
+    wet_mount: Option<Rc<paint_node::WetMount>>,
     /// RAII guard for the cache-invalidation observer wired in
     /// `build()`. Held by `Self` so the observer's lifetime tracks
     /// the SceneView's; dropping it on a fresh `build()` un-installs
@@ -1242,22 +1457,33 @@ pub struct SceneView {
     /// version-delta gate would otherwise miss while suppressing the churn.
     dynamic_churning: bool,
 
-    // --- The `Over`-band veto -----------------------------------------
-    /// Whether the scene currently holds at least one hit-testable
-    /// [`Over`](crate::SceneLayer::Over)-band entry that **claims the press**
-    /// ([`crate::pick::claims_press`]). Refreshed while the handler snapshot is
-    /// rebuilt.
+    // --- The above-a-card veto ----------------------------------------
+    /// Whether the scene currently holds at least one hit-testable entry that
+    /// **claims the press** ([`crate::pick::claims_press`]) and could be
+    /// painted above a card — the [`Over`](crate::SceneLayer::Over) band, which
+    /// is above every card, or the
+    /// [`Interleaved`](crate::SceneLayer::Interleaved) band, which shares the
+    /// cards' rank and is above the ones with a lower `z`. Refreshed while the
+    /// handler snapshot is rebuilt.
     ///
-    /// An `Under` item can never outrank a card, so an `Over` claimant is the
-    /// only reason this view would ever reject one of its own children — which
-    /// is why every scene whose foreground is decorative pays one `bool` read
-    /// per hit-tested child and nothing else.
+    /// An `Under` item can never outrank a card, so this is the only reason
+    /// this view would ever reject one of its own children — which is why every
+    /// scene whose foreground is decorative pays one `bool` read per
+    /// hit-tested child and nothing else.
     over_claimants: Rc<Cell<bool>>,
-    /// Memo for [`over_press_claimant_covers`], valid for one hit walk:
-    /// `(snapshot generation, view transform, scene point, answer)`.
+    /// Memo for [`topmost_press_claimant`], valid for one hit walk:
+    /// `(snapshot generation, view transform, scene point) -> answer`.
     ///
-    /// The arena asks once per child, so without this a 200-card scene would
-    /// rescan the snapshot 200 times per pointer sample.
+    /// The arena asks [`accepts_child_hit`](SceneView::accepts_child_hit) once
+    /// per hit-tested child, so without this a 200-card scene would rescan the
+    /// snapshot 200 times per pointer sample. **The floor is deliberately not
+    /// part of the key.** Every child asks about a different floor — its own
+    /// [`PaintKey`] — so a memo keyed by it would miss on every single child
+    /// and cost exactly the rescans it exists to prevent. What the scan answers
+    /// is floor-free ("what is the topmost press claimant at this point?"), and
+    /// the per-child floor is applied to that answer by one `PaintKey` compare
+    /// outside the memo. See [`press_claimant_above`] for why the two forms are
+    /// equivalent.
     ///
     /// The **whole** view transform is part of the key, not just the projected
     /// point. A screen-anchored (`IGNORES_TRANSFORMATIONS`) claimant is tested
@@ -1265,7 +1491,30 @@ pub struct SceneView {
     /// being asked about, so two transforms agreeing at the query point can
     /// still disagree about the claimant. Six `f32` compares are cheaper than
     /// that being true only by luck.
-    veto_memo: Rc<Cell<Option<(u64, [f32; 6], Point, bool)>>>,
+    veto_memo: Rc<Cell<Option<(u64, [f32; 6], Point, Option<PaintKey>)>>>,
+    /// How many times [`topmost_press_claimant`] has actually walked the
+    /// handler snapshot, over this view's whole life.
+    ///
+    /// A memo is only worth what it hits, and "it hits" is not something
+    /// reading the code can establish — the previous version of this memo was
+    /// keyed by a value that differed on every call and therefore never hit at
+    /// all, while looking exactly like a working memo. So the number is
+    /// published rather than inferred, and
+    /// `tests/veto_scaling_probe.rs` gates it: one hit test over *n*
+    /// overlapping cards must scan once, not *n* times.
+    veto_scans: Rc<Cell<u64>>,
+    /// Bumped every time [`SceneView::child_paint_key`] is asked, which is the
+    /// *other* half of the veto's cost and was invisible for exactly as long as
+    /// the scan count was the only number published.
+    ///
+    /// The scan count cannot see it: the two halves fail independently, so
+    /// breaking either alone leaves `veto_scaling_probe` green. This one gates
+    /// the order of the two questions — the claimant is resolved first and the
+    /// child's key looked up only against an actual answer, so a scene with no
+    /// press claimant at all pays for **no** probes however many children the
+    /// arena asks about. Evaluating the key as an argument instead reverses
+    /// that, and nothing behavioural changes.
+    key_probes: Rc<Cell<u64>>,
     /// Bumped every time either hit snapshot is written — rebuilt whole or
     /// patched per item. The first field of [`SceneView::veto_memo`]'s key, and
     /// therefore what retires that memo; a pass that leaves the snapshots alone
@@ -1281,7 +1530,7 @@ pub struct SceneView {
     hit_sync: Rc<RefCell<hit_snapshot::HitSnapshotSync>>,
     /// The paint-order floor the arena's verdict established for the press
     /// currently in flight — [`RANK_OVER`] when a heavyweight card was on top
-    /// at the press point (or an `Over` claimant vetoed one), [`RANK_UNDER`]
+    /// at the press point (or an `Over` claimant vetoed one), [`RANK_UNDER`](crate::pick::RANK_UNDER)
     /// otherwise. Written by the `PointerDown` arm, read by the drag.
     ///
     /// The drag needs it and cannot derive it. `on_pointer_event` runs with the
@@ -1300,7 +1549,7 @@ pub struct SceneView {
     /// the slot — which costs at most one drag starting with the floor the other
     /// press recorded, on a view that can only be dragging for one of them.
     /// Reset by the release and by the cancel arm.
-    press_floor: Rc<Cell<u8>>,
+    press_floor: Rc<Cell<PaintKey>>,
 
     // --- Magnetism -----------------------------------------------------
     /// Per-view magnetism config (predicate, on_connect, feedback, …).
@@ -1520,18 +1769,19 @@ impl SceneView {
 /// arena's per-child call free of refcount traffic.
 struct VetoState<'a> {
     over_claimants: &'a Cell<bool>,
-    veto_memo: &'a Cell<Option<(u64, [f32; 6], Point, bool)>>,
+    veto_memo: &'a Cell<Option<(u64, [f32; 6], Point, Option<PaintKey>)>>,
+    veto_scans: &'a Cell<u64>,
     snapshot_generation: &'a Cell<u64>,
     handler_snapshot: &'a RefCell<Vec<HandlerSnapshotEntry>>,
     view_transform: &'a Signal<Transform2D>,
 }
 
-/// Whether the topmost [`Over`](crate::SceneLayer::Over)-band entry whose shape
-/// contains `scene_pt` **claims the press**.
+/// The key of the topmost entry **above `floor`** whose shape contains
+/// `scene_pt`, if that entry **claims the press** — otherwise `None`.
 ///
 /// This is the whole occlusion rule in one query, and it is deliberately "the
-/// topmost `Over` entry, *if* it claims" rather than "the topmost `Over`
-/// claimant":
+/// topmost entry above the floor, *if* it claims" rather than "the topmost
+/// claimant above the floor":
 ///
 /// * it mirrors `hit_handler_item`, which resolves the topmost **entry** and
 ///   only then looks for handlers — so the veto can never disagree with the
@@ -1539,13 +1789,58 @@ struct VetoState<'a> {
 /// * a decorative item painted over an interactive one blocks it, exactly as it
 ///   does today, instead of being stepped over.
 ///
+/// `floor` is what makes it answerable for
+/// [`Interleaved`](crate::SceneLayer::Interleaved). The `Over` band is above
+/// *every* card, so a rank sufficed; an interleaved entry is above some cards
+/// and below others, and only a whole [`PaintKey`] can say which. The per-child
+/// caller ([`SceneView::accepts_child_hit`]) passes that child's own key, so a
+/// card painted over an interleaved claimant keeps its press and one painted
+/// under it yields — which is the same rule the eye applies.
+///
+/// # Why the floor is applied here and not inside the scan
+///
+/// The scan is [`topmost_press_claimant`], which takes no floor, and the floor
+/// is one `PaintKey` compare against its answer. The two forms are the same
+/// answer because the snapshot is sorted by key descending: the first entry the
+/// scan meets is the topmost containing one *overall*, so
+///
+/// * if that entry's key is at or above `floor`, it is also the first one a
+///   floored scan would have met — same entry, same verdict;
+/// * if it is below `floor`, then every containing entry is below `floor`
+///   (they are all below *it*), and a floored scan finds nothing — which is the
+///   `None` the compare produces.
+///
+/// The slop pass cannot break the equivalence either: it is miss-only and this
+/// call site hands it the mouse profile, whose slop radius is zero, so it never
+/// reports anything (see the `GrabSlop` construction in
+/// [`topmost_press_claimant`]).
+///
+/// This split is not a micro-optimisation. The floor **differs on every call** —
+/// it is the asking child's own key — so folding it into the memo key makes the
+/// memo miss once per child, which is exactly the rescan the memo exists to
+/// prevent. Keeping the scan floor-free is what makes one hit test cost one
+/// scan at any card count.
+fn press_claimant_above(
+    state: VetoState<'_>,
+    floor: PaintKey,
+    scene_pt: Point,
+) -> Option<PaintKey> {
+    topmost_press_claimant(state, scene_pt).filter(|top| *top >= floor)
+}
+
+/// The key of the topmost entry whose shape contains `scene_pt`, if that entry
+/// **claims the press** — otherwise `None`. Memoised for one hit walk.
+///
+/// Floor-free by design: see [`press_claimant_above`], which applies a caller's
+/// floor to this answer.
+///
 /// Reads only the per-layout `handler_snapshot` — never the
 /// [`SceneModel`]. A hit test runs inside the router, where
 /// an `ItemChange` observer may already hold the model's `RefCell`, and
 /// re-entering it there is a panic.
-fn over_press_claimant_covers(state: VetoState<'_>, scene_pt: Point) -> bool {
+fn topmost_press_claimant(state: VetoState<'_>, scene_pt: Point) -> Option<PaintKey> {
     if !state.over_claimants.get() {
-        return false;
+        return None;
     }
     let view_xform = state.view_transform.get();
     // The second space. A screen-anchored (`IGNORES_TRANSFORMATIONS`) entry —
@@ -1563,6 +1858,7 @@ fn over_press_claimant_covers(state: VetoState<'_>, scene_pt: Point) -> bool {
     {
         return answer;
     }
+    state.veto_scans.set(state.veto_scans.get().wrapping_add(1));
     let snapshot = state.handler_snapshot.borrow();
     let answer = hit_handler_index(
         &snapshot,
@@ -1579,9 +1875,12 @@ fn over_press_claimant_covers(state: VetoState<'_>, scene_pt: Point) -> bool {
             teksilo_tokens::InputTokens::default(),
             teksilo_tokens::PointerKind::Mouse,
         ),
-        RANK_OVER,
+        // "Admit everything": the answer is floor-free, and a caller's floor is
+        // applied to it afterwards.
+        PaintKey::bottom(),
     )
-    .is_some_and(|index| snapshot[index].claims_press);
+    .filter(|index| snapshot[*index].claims_press)
+    .map(|index| snapshot[index].key);
     drop(snapshot);
     state
         .veto_memo
@@ -1590,18 +1889,73 @@ fn over_press_claimant_covers(state: VetoState<'_>, scene_pt: Point) -> bool {
 }
 
 impl SceneView {
-    /// [`over_press_claimant_covers`] against this view's own state.
-    pub(super) fn over_press_claimant_covers(&self, scene_pt: Point) -> bool {
-        over_press_claimant_covers(
-            VetoState {
-                over_claimants: &self.over_claimants,
-                veto_memo: &self.veto_memo,
-                snapshot_generation: &self.snapshot_generation,
-                handler_snapshot: &self.handler_snapshot,
-                view_transform: &self.view_transform_signal,
-            },
-            scene_pt,
-        )
+    /// A child's paint key, as of the last build.
+    ///
+    /// [`PaintKey::rank_floor(RANK_WIDGET)`](PaintKey::rank_floor) — the bottom
+    /// of the card band — for a child this view did not place, and for the
+    /// window between a child being added and the next build publishing its
+    /// key. That is the permissive answer, and the same one every card got
+    /// before keys were compared per child.
+    pub(super) fn child_paint_key(&self, child: WidgetId) -> PaintKey {
+        self.key_probes.set(self.key_probes.get().wrapping_add(1));
+        self.child_keys
+            .borrow()
+            .get(&child)
+            .copied()
+            .unwrap_or_else(|| PaintKey::rank_floor(crate::pick::RANK_WIDGET))
+    }
+
+    /// [`topmost_press_claimant`] against this view's own state — the
+    /// floor-free form, for a caller that has a floor it would rather not
+    /// compute unless there is an answer to compare it with.
+    ///
+    /// [`accepts_child_hit`](SceneView::accepts_child_hit) is that caller: its
+    /// floor is a `HashMap` lookup per child, and in a scene with no press
+    /// claimant (or with the pointer nowhere near one) there is nothing for it
+    /// to be compared against.
+    pub(super) fn topmost_press_claimant(&self, scene_pt: Point) -> Option<PaintKey> {
+        topmost_press_claimant(self.veto_state(), scene_pt)
+    }
+
+    fn veto_state(&self) -> VetoState<'_> {
+        VetoState {
+            over_claimants: &self.over_claimants,
+            veto_memo: &self.veto_memo,
+            veto_scans: &self.veto_scans,
+            snapshot_generation: &self.snapshot_generation,
+            handler_snapshot: &self.handler_snapshot,
+            view_transform: &self.view_transform_signal,
+        }
+    }
+
+    /// How many times this view has walked its handler snapshot to answer the
+    /// above-a-card veto, since it was created.
+    ///
+    /// The veto's memo is asked once per hit-tested child and answers from one
+    /// scan; this is the number that says so. A hit test over *n* overlapping
+    /// cards must advance it by **one**, not by *n* — the regression the
+    /// `veto_scaling_probe` test gates, and one that is invisible to every
+    /// other observable the crate publishes (the verdicts are identical either
+    /// way; only the cost moves).
+    #[doc(hidden)]
+    pub fn veto_snapshot_scans(&self) -> u64 {
+        self.veto_scans.get()
+    }
+
+    /// How many times the veto has looked a child's [`PaintKey`] up.
+    ///
+    /// The companion to [`veto_snapshot_scans`](Self::veto_snapshot_scans), and
+    /// necessary because the two halves of the veto's cost fail independently:
+    /// a memo keyed on something that differs per child makes the *scan* count
+    /// follow the card count, while evaluating the child's key before the
+    /// claimant query can decline it makes *this* one follow it. Each is
+    /// invisible to the other's test, and neither changes a verdict.
+    ///
+    /// A scene with no press claimant under the pointer must leave this at
+    /// zero however many children the arena asks about.
+    #[doc(hidden)]
+    pub fn veto_key_probes(&self) -> u64 {
+        self.key_probes.get()
     }
 
     /// The items a pointer drag of `grabbed` carries.
@@ -1624,21 +1978,33 @@ impl SceneView {
 
     /// The paint-order floor for a dispatch that is running on this view.
     ///
-    /// [`RANK_OVER`] when the arena gave this pointer to one of our heavyweight
-    /// children (we are previewing, not targeted) — only the `Over` band
-    /// outranks a card, so everything below it must stand aside and let the
-    /// card have the event. [`RANK_UNDER`] when we are the target, which is
-    /// exactly the case where no card won: the arena has already applied
-    /// `hit_shape`, `hit_transparent` and `event_pass_through`, so this reads
-    /// its verdict instead of re-deriving one from a rectangle.
+    /// A [`RANK_OVER`] rank floor when the arena gave this pointer to one of
+    /// our heavyweight children (we are previewing, not targeted) — only the
+    /// `Over` band outranks **every** card, so everything below it must stand
+    /// aside and let the card have the event.
+    /// [`PaintKey::bottom`] when we are the target, which is exactly the case
+    /// where no card won: the arena has already applied `hit_shape`,
+    /// `hit_transparent`, `event_pass_through` **and**
+    /// [`accepts_child_hit`](SceneView::accepts_child_hit) — so an
+    /// [`Interleaved`](crate::SceneLayer::Interleaved) claimant that vetoed the
+    /// cards beneath it has already produced this branch, and reading the
+    /// verdict here is what stops the two pickers re-deriving it differently.
+    ///
+    /// The coarse `RANK_OVER` floor in the first branch is deliberate and
+    /// slightly conservative: an interleaved entry that is above the winning
+    /// card but does **not** claim the press is treated, for hover and cursor,
+    /// the way an `Under` entry under that card is. It could not have won the
+    /// press (it does not claim), and narrowing the floor to the winning card's
+    /// own key would mean resolving *which* card won from a `dispatch_target`
+    /// that may be one of its descendants.
     ///
     /// A context with no verdict at all (a gesture timer, a hand-built
     /// `EventContext` in a test) is treated as "we are the target", which is
     /// the permissive, pre-existing behaviour.
-    fn dispatch_floor(ctx: &teksilo_core::widget::EventContext, self_id: WidgetId) -> u8 {
+    fn dispatch_floor(ctx: &teksilo_core::widget::EventContext, self_id: WidgetId) -> PaintKey {
         match ctx.dispatch_target() {
-            Some(target) if target != self_id => RANK_OVER,
-            _ => RANK_UNDER,
+            Some(target) if target != self_id => PaintKey::rank_floor(RANK_OVER),
+            _ => PaintKey::bottom(),
         }
     }
 }
@@ -1652,6 +2018,7 @@ mod hit_snapshot;
 mod layout_impl;
 mod magnetism;
 mod paint_impl;
+pub(crate) mod paint_node;
 mod transform;
 mod widget_trait;
 

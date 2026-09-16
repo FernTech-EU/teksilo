@@ -11,6 +11,7 @@
 //! churn during animated pan/zoom.
 
 use super::*;
+use teksilo_core::widget_builder::WidgetBuilder as _;
 
 impl SceneView {
     pub(super) fn build_impl(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
@@ -153,6 +154,15 @@ impl SceneView {
             BindingLevel::RepaintOnly,
         );
 
+        // Bind the measured-size signal at `Relayout`: a content-driven size
+        // change re-places children (which is where the measurement itself
+        // lives) without re-running `build()`. See `SceneView::measure_dirty`.
+        self.measure_dirty.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
+
         // The transform controller's two triggers, and the reason they are two.
         //
         // `tick` is bumped on every session change and bound at **Relayout**:
@@ -258,6 +268,8 @@ impl SceneView {
             let cache = self.item_cache.clone();
             let reconcile_dirty = self.reconcile_dirty.clone();
             let appearance_dirty = self.appearance_dirty.clone();
+            let measure_dirty = self.measure_dirty.clone();
+            let measure_state = self.measure_state_handle();
             let payload_dirty = self.payload_dirty.clone();
             let hit_sync = self.hit_sync.clone();
             let handle = self
@@ -281,10 +293,23 @@ impl SceneView {
                     // pos / transform / opacity / z / layer / flags are re-applied
                     // as wrapping scopes at replay and don't bake into the cache.
                     match *change {
-                    ItemChange::Removed { id }
-                    | ItemChange::LocalBoundsChanged { id, .. }
+                    // An entry that is gone takes its measurement history with
+                    // it: the per-view map is keyed by `ItemId`, and `ItemId`s
+                    // are never reused, so a stale row is a leak rather than a
+                    // wrong answer — but a leak of one row per removed card,
+                    // which a long editing session accumulates.
+                    ItemChange::Removed { id } => {
+                        cache.borrow_mut().evict(id);
+                        measure_state.borrow_mut().remove(&id);
+                    }
+                    ItemChange::LocalBoundsChanged { id, .. }
                     // A different item box at the same id repaints from
                     // scratch: the cached frame is the *old* item's drawing.
+                    // No measurement history to retire with it —
+                    // `Scene::replace_item` refuses a heavyweight entry, and
+                    // only a heavyweight entry can carry a `SizePolicy`. The
+                    // heavyweight twin of this change is `PayloadChanged`,
+                    // which does.
                     | ItemChange::ItemReplaced { id, .. } => {
                         cache.borrow_mut().evict(id);
                     }
@@ -302,6 +327,11 @@ impl SceneView {
                     }
                     // A `Delegated` item's data changed: queue a targeted rebuild
                     // so the next build re-invokes the delegate for just that id.
+                    // The delegate hands back a **new widget** — a new arena
+                    // node, born `needs_layout` — so the pass that first measures
+                    // it is one `MeasureTrack` already reads as externally
+                    // driven, and the newcomer's answer is taken rather than
+                    // weighed against its predecessor's. Nothing to retire here.
                     ItemChange::PayloadChanged { id, .. } => {
                         payload_dirty.borrow_mut().insert(id);
                     }
@@ -311,6 +341,38 @@ impl SceneView {
                     ItemChange::AppearanceChanged { id, .. } => {
                         cache.borrow_mut().evict(id);
                         appearance_dirty.set(appearance_dirty.get().wrapping_add(1));
+                        return;
+                    }
+                    // Who decides this entry's box changed, so the question the
+                    // view asks its body changed with it — an `Intrinsic` card
+                    // is asked for both axes at no width at all, where a
+                    // `HeightForWidth` one is asked for a height at the width
+                    // the model holds. The same widget is still there, so the
+                    // pass that answers the new question can be a perfectly
+                    // clean one, and a retained history would read the new
+                    // answer as the old body contradicting itself and resolve
+                    // the two together — leaving a card that should have
+                    // shrink-wrapped at its old width for ever. The history goes
+                    // with the question. Then fall through to the ordinary
+                    // reconcile, because this one *is* a structural change and
+                    // the accessibility rectangles that follow from it have to
+                    // be re-walked.
+                    ItemChange::SizePolicyChanged { id, .. } => {
+                        measure_state.borrow_mut().remove(&id);
+                    }
+                    // A size **derived** from content: geometry moved, so the
+                    // cached local-coord frame is stale, but nothing was
+                    // materialised or reaped and no delegate needs re-running.
+                    // Relayout and return, before the `reconcile_dirty` bump
+                    // below — a full rebuild per line wrap is the storm a note
+                    // page would otherwise produce. The AT tree is not re-walked
+                    // either: `set_measured_size` counts itself out of
+                    // `structural_version`, so `structural_at_change` above
+                    // stays false, and the placement rectangles the walker
+                    // projects are recomputed by the relayout regardless.
+                    ItemChange::MeasuredSizeChanged { id, .. } => {
+                        cache.borrow_mut().evict(id);
+                        measure_dirty.set(measure_dirty.get().wrapping_add(1));
                         return;
                     }
                     _ => {}
@@ -446,33 +508,102 @@ impl SceneView {
             ctx.request_accessibility_update();
         }
 
-        // Heavyweight z-order: sort the arena children by their scene-entry
-        // z so higher-z cards paint later (on top). Equal-z keeps insertion
-        // order (stable sort). This is the heavyweight-tier analogue of the
-        // lightweight `sort_by_z` — `Scene::set_z` / `bring_to_front` on a
-        // widget entry restacks the cards here, on the next rebuild.
+        // Paint nodes for the `Interleaved` band. One per item, materialised
+        // and reaped on the same rule as the heavyweight cards above — a band
+        // change is an `ItemChange`, so this reconciles on the next build.
+        //
+        // They are children, so the arena paints them *between* the cards, at
+        // the z the sort below gives them. They are paint-only: transparent to
+        // the pointer, absent from the accessibility child list, not focusable.
+        // See `view::paint_node`.
+        let interleaved = self.model.0.borrow().interleaved_ids();
+        let live_interleaved: std::collections::HashSet<ItemId> =
+            interleaved.iter().copied().collect();
+        if self.interleaved_nodes.len() > live_interleaved.len()
+            || self
+                .interleaved_nodes
+                .keys()
+                .any(|id| !live_interleaved.contains(id))
+        {
+            let orphans: Vec<(ItemId, WidgetId)> = self
+                .interleaved_nodes
+                .iter()
+                .filter(|(item_id, _)| !live_interleaved.contains(*item_id))
+                .map(|(item_id, wid)| (*item_id, *wid))
+                .collect();
+            for (item_id, wid) in orphans {
+                ctx.destroy_subtree(wid);
+                self.interleaved_nodes.remove(&item_id);
+            }
+        }
+        for id in &interleaved {
+            if self.interleaved_nodes.contains_key(id) {
+                continue;
+            }
+            let proxy = super::paint_node::SceneBandProxy::new(self.paint_bridge(), *id);
+            let wid = ctx.add(proxy.event_pass_through(true));
+            self.interleaved_nodes.insert(*id, wid);
+        }
+        child_ids.extend(
+            interleaved
+                .iter()
+                .filter_map(|id| self.interleaved_nodes.get(id).copied()),
+        );
+
+        // Paint order for the arena's child walk. The comparator is
+        // [`PaintKey`](crate::PaintKey) — the *same* value every hit test in
+        // the crate compares — so "what the user sees on top" and "what the
+        // pointer picks" stay one rule across both tiers. It used to be a bare
+        // `z` compare over the cards alone, which was the same order for the
+        // cards and had nothing to say about an interleaved item.
+        //
         // Reordering `node.children` (rather than destroying / recreating the
         // widgets) preserves each card's focus, text-edit and animation state.
-        let zmap: HashMap<ItemId, f32> = {
+        let keymap: HashMap<WidgetId, crate::PaintKey> = {
             let scene = self.model.0.borrow();
             self.widget_to_item
-                .values()
-                .map(|id| (*id, scene.z(*id).unwrap_or(0.0)))
+                .iter()
+                .filter_map(|(wid, id)| scene.paint_key(*id).map(|k| (*wid, k)))
+                .chain(
+                    self.interleaved_nodes
+                        .iter()
+                        .filter_map(|(id, wid)| scene.paint_key(*id).map(|k| (*wid, k))),
+                )
                 .collect()
         };
-        child_ids.sort_by(|a, b| {
-            let za = self
-                .widget_to_item
-                .get(a)
-                .and_then(|id| zmap.get(id).copied())
-                .unwrap_or(0.0);
-            let zb = self
-                .widget_to_item
-                .get(b)
-                .and_then(|id| zmap.get(id).copied())
-                .unwrap_or(0.0);
-            za.partial_cmp(&zb).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // An id with no key sorts to the bottom of the widget rank rather than
+        // being dropped: a card whose entry has gone is still a live arena node
+        // this pass, and losing it here would lose its child.
+        let floor = crate::PaintKey::rank_floor(crate::RANK_WIDGET);
+        child_ids.sort_by_key(|wid| keymap.get(wid).copied().unwrap_or(floor));
+        // The same snapshot the sort above read, published for
+        // `accepts_child_hit` — which runs on the pointer's hot path and cannot
+        // re-enter the model to ask. One snapshot, so the order the arena
+        // paints in and the order the veto compares against cannot drift apart.
+        *self.child_keys.borrow_mut() = keymap;
+
+        // The wet surface, last — over every card and every interleaved item,
+        // under the `Over` band and the view's own chrome. See the
+        // `view::paint_node` module docs for the whole order.
+        if let Some(layer) = self.wet_layer.clone() {
+            let wid = match self.wet_node {
+                Some(wid) => wid,
+                None => {
+                    let node =
+                        super::paint_node::WetLayerNode::new(self.paint_bridge(), layer.clone());
+                    let wid = ctx.add(node.event_pass_through(true));
+                    self.wet_node = Some(wid);
+                    // The window, so `WetLayer::request_repaint` can tell this
+                    // mount from one the same layer has in another window —
+                    // whose `WidgetId`s are a different arena's slot keys and
+                    // would mark the wrong node here. `None` in a headless
+                    // tree; see `WetMount`.
+                    self.wet_mount = Some(layer.attach(wid, ctx.window().map(|w| w.id())));
+                    wid
+                }
+            };
+            child_ids.push(wid);
+        }
 
         // Register the four animated signals with the scheduler so
         // they participate in idle gating (paint-epoch visibility,
@@ -626,14 +757,19 @@ impl SceneView {
             input_tokens,
         );
 
+        // Registered unconditionally: the scroll slot also carries the reveal
+        // arm, which a non-interactive view still owes a focused descendant.
+        // The wheel and the keyboard camera inside it are gated on the same
+        // flag as before — see `register_camera_handlers`.
+        handlers = self.register_camera_handlers(
+            handlers,
+            line_height,
+            pan_dur,
+            overscroll,
+            prefers_reduced,
+            self.interactive,
+        );
         if self.interactive {
-            handlers = self.register_scroll_pinch_key_handlers(
-                handlers,
-                line_height,
-                pan_dur,
-                overscroll,
-                prefers_reduced,
-            );
             // The claim is what puts this node on the chain a synthesised pan
             // walks; without it the scroll handler above would answer a wheel
             // and never see a finger. Both axes are claimed unconditionally

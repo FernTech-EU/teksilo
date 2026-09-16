@@ -70,11 +70,11 @@ delegate's *handlers* may mutate later).
 
 ## Builder methods at a glance
 
-`write_guard`, `flush_changes`, `deliver_records`, `transaction`, `user_edit`, `set_edit_sink`, `clear_edit_sink`, `transaction_signal`, `open_transaction_depth`, `cascade_budget`, `set_cascade_budget`, `with_index`, `from_scene`, `handle_count`, `downgrade`, `add_widget`, `add_widget_item`, `set_payload`, `payload`, `add_item`, `add_item_dynamic`, `add_boxed_item`, `set_local_pos`, `set_local_bounds`, `set_transform`, `set_geometry_constraint`, `clear_geometry_constraint`, `has_geometry_constraint`, `constrain_frame`, `constrain_move`, `apply_transform_delta`, `selection_roots`, `transformable_roots`, `transform_frame`, `scene_rotation`, `set_flags`, `set_flag`, `set_visible`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `set_z`, `bring_to_front`, `send_to_back`, `set_layer`, `set_item_parent`, `remove`, `take`, `restore`, `restore_all`, `replace_item`, `placement`, `set_placement`, `reparent_keeping_scene_pos`, `z_between`, `orphan`, `set_item_handlers`, `with_handlers_mut`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `set_scene_rect`, `pan_axes`, `zoomable`, `set_pan_bounds`, `set_zoom_range`, `add_a11y_group`, `remove_a11y_group`, `set_a11y_parent`, `add_a11y_relation`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `structural_version`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `len`, `is_empty`, `ids`, `local_pos`, `local_bounds`, `transform`, `scene_transform`, `scene_pos`, `scene_rect`, `flags`, `is_effectively_visible`, `opacity`, `effective_opacity`, `z`, `layer`, `parent_of`, `is_descendant_of`, `scene_rect_extent`, `current_pan_axes`, `is_zoomable`, `current_pan_bounds`, `current_zoom_range`, `items_in_rect`, `items_in_region`, `item_shape`, `item_region`, `item_contains`, `paint_key`, `is_hit_testable`, `item_at`, `item_at_scaled`, `items_at`, `items_at_scaled`, `item_at_in_view`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `a11y_parent_of`, `a11y_relations`, `a11y_live_of`, `a11y_landmark_of`, `a11y_categories_of`
+`write_guard`, `flush_changes`, `deliver_records`, `transaction`, `user_edit`, `set_edit_sink`, `clear_edit_sink`, `transaction_signal`, `open_transaction_depth`, `cascade_budget`, `set_cascade_budget`, `with_index`, `from_scene`, `handle_count`, `downgrade`, `add_widget`, `add_widget_item`, `set_payload`, `payload`, `add_item`, `add_item_dynamic`, `add_boxed_item`, `set_local_pos`, `set_local_bounds`, `set_transform`, `size_policy`, `set_size_policy`, `set_measured_size`, `set_geometry_constraint`, `clear_geometry_constraint`, `has_geometry_constraint`, `constrain_frame`, `constrain_move`, `apply_transform_delta`, `selection_roots`, `transformable_roots`, `transform_frame`, `scene_rotation`, `set_flags`, `set_flag`, `set_visible`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `set_z`, `bring_to_front`, `send_to_back`, `set_layer`, `set_item_parent`, `remove`, `take`, `restore`, `restore_all`, `replace_item`, `placement`, `set_placement`, `reparent_keeping_scene_pos`, `z_between`, `orphan`, `set_item_handlers`, `with_handlers_mut`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `set_scene_rect`, `pan_axes`, `zoomable`, `set_pan_bounds`, `set_zoom_range`, `add_a11y_group`, `remove_a11y_group`, `set_a11y_parent`, `add_a11y_relation`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `structural_version`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `len`, `is_empty`, `ids`, `local_pos`, `local_bounds`, `transform`, `scene_transform`, `scene_pos`, `scene_rect`, `flags`, `is_effectively_visible`, `opacity`, `effective_opacity`, `z`, `layer`, `parent_of`, `is_descendant_of`, `scene_rect_extent`, `current_pan_axes`, `is_zoomable`, `current_pan_bounds`, `current_zoom_range`, `items_in_rect`, `items_in_region`, `item_shape`, `item_region`, `item_contains`, `paint_key`, `is_hit_testable`, `item_at`, `item_at_scaled`, `items_at`, `items_at_scaled`, `item_at_in_view`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `a11y_parent_of`, `a11y_relations`, `a11y_live_of`, `a11y_landmark_of`, `a11y_categories_of`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/scene_model/index.html)
 
 ## `pub struct SceneModel`
 
@@ -465,6 +465,22 @@ because this is the form an app drives per frame.
 #### `pub fn set_transform(&self, id: ItemId, transform: Transform2D)`
 
 Set an additional local-to-parent transform (rotation, scale) on `id`; notifies all views.
+
+#### `pub fn size_policy(&self, id: ItemId) -> SizePolicy`
+
+Which axes of `id`'s box its widget decides. See `SizePolicy`.
+
+#### `pub fn set_size_policy(&self, id: ItemId, policy: SizePolicy) -> bool`
+
+Hand one or both axes of `id`'s box to its widget, on **every** view of
+this model. See `SizePolicy` and `Scene::set_size_policy` — including
+for the note that it is refused for a lightweight entry.
+
+#### `pub fn set_measured_size(&self, id: ItemId, size: Size) -> bool`
+
+Write a size **derived** from content rather than authored by the user;
+notifies all views. See `Scene::set_measured_size` for which of the two
+geometry doors this is and when to reach for the other one.
 
 #### `pub fn set_geometry_constraint( &self, f: impl Fn(&crate::constrain::ProposedChange<'_>) -> crate::constrain::ChangeVerdict + 'static, )`
 

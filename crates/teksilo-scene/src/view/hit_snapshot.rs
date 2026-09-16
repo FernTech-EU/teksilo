@@ -105,7 +105,12 @@ pub(super) fn classify(change: &ItemChange) -> HitInvalidation {
         // own shape, which is where a `PathItem` refitted to a new box lands.
         ItemChange::LocalPosChanged { .. }
         | ItemChange::TransformChanged { .. }
-        | ItemChange::LocalBoundsChanged { .. } => HitInvalidation::Geometry,
+        | ItemChange::LocalBoundsChanged { .. }
+        // A derived size is still a size. Heavyweight entries are in neither
+        // snapshot, so the only entry this can reach is a lightweight one an
+        // app measured itself — and for that the shape moved exactly as much
+        // as a `set_local_bounds` would have moved it.
+        | ItemChange::MeasuredSizeChanged { .. } => HitInvalidation::Geometry,
         // Paint-only by name, but a stroked `PathItem` derives its hit band
         // from the stroke it draws, so the shape moves with it.
         ItemChange::AppearanceChanged { .. } => HitInvalidation::Geometry,
@@ -132,9 +137,12 @@ pub(super) fn classify(change: &ItemChange) -> HitInvalidation {
         | ItemChange::HandlersChanged { .. } => HitInvalidation::Structure,
         // Neither snapshot has an opacity field, and a widget entry is in
         // neither snapshot.
-        ItemChange::OpacityChanged { .. } | ItemChange::PayloadChanged { .. } => {
-            HitInvalidation::None
-        }
+        // Neither snapshot has an opacity field, a widget entry is in neither,
+        // and a size policy is not geometry — only the measurement it leads to
+        // is, and that arrives as its own change.
+        ItemChange::OpacityChanged { .. }
+        | ItemChange::PayloadChanged { .. }
+        | ItemChange::SizePolicyChanged { .. } => HitInvalidation::None,
     }
 }
 
@@ -437,7 +445,14 @@ impl SceneView {
             };
 
             let claims_press = crate::pick::claims_press(scene.handlers(id), flags);
-            has_over_claimant |= claims_press && key.rank() == crate::pick::RANK_OVER;
+            // Everything that can be painted **above a card**: the `Over`
+            // band, which is above every card, and the `Interleaved` band,
+            // which shares the cards' rank and is above the ones with a lower
+            // `z`. `>=` rather than `==`: the gate is a cheap "is there
+            // anything worth asking about at all" — the per-child key
+            // comparison in `press_claimant_above` decides which cards it
+            // actually vetoes.
+            has_over_claimant |= claims_press && key.rank() >= crate::pick::RANK_WIDGET;
 
             if flags.contains(crate::flags::ItemFlags::IS_DRAGGABLE) {
                 draggable.push(super::DraggableSnapshotEntry {

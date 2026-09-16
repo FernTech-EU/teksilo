@@ -36,7 +36,7 @@ let stroke_color = selected.map(move |s| {
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/selection/index.html)
 
 ## `pub enum SceneSelectionMode`
 

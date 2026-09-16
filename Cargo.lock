@@ -8294,6 +8294,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scene-ink"
+version = "0.10.0"
+dependencies = [
+ "teksilo",
+ "teksilo-platform",
+ "teksilo-scene",
+]
+
+[[package]]
 name = "scene-magnetism"
 version = "0.10.0"
 dependencies = [
@@ -11324,6 +11333,7 @@ dependencies = [
  "teksilo-core",
  "teksilo-data",
  "teksilo-i18n",
+ "teksilo-text",
  "teksilo-tokens",
  "teksilo-widgets",
  "thiserror 2.0.20",

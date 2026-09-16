@@ -70,6 +70,7 @@ pub(crate) mod minimap;
 pub(crate) mod pick;
 pub(crate) mod salvage;
 pub(crate) mod scene;
+pub(crate) mod scene_card;
 pub(crate) mod scene_list_adapter;
 pub(crate) mod scene_model;
 pub(crate) mod scroll_view;
@@ -109,8 +110,9 @@ pub use salvage::{
 pub use scene::Scene;
 pub use scene::{
     AppearanceChange, CascadeBudget, HandlerReplacement, ItemChange, ItemPayload, PanAxes,
-    Placement, SceneConstraints, SceneLayer,
+    Placement, SceneConstraints, SceneLayer, SizePolicy,
 };
+pub use scene_card::{CardMode, SceneCard};
 pub use scene_list_adapter::SceneListAdapter;
 pub use scene_model::{SceneModel, SceneTransaction, SceneWriteGuard, WeakSceneModel};
 pub use scroll_view::{SceneScrollView, ScrollBarMode, ScrollBarPolicy};
@@ -126,4 +128,5 @@ pub use transform_session::{
     TransformFrame, TransformHandle, TransformHandleSet, TransformLabels, TransformOp,
     TransformOutcome, TransformSession, TransformSource, TransformStep,
 };
+pub use view::paint_node::{WetLayer, WetNode};
 pub use view::{DEFAULT_RETENTION_MARGIN, DebugOverlay, FocusDirection, SceneView};

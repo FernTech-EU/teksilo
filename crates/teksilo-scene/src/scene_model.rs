@@ -69,7 +69,7 @@
 use std::cell::{RefCell, RefMut};
 use std::rc::{Rc, Weak};
 
-use teksilo_canvas::{Point, Rect, StrokeStyle, Transform2D};
+use teksilo_canvas::{Point, Rect, Size, StrokeStyle, Transform2D};
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::Widget;
@@ -85,7 +85,7 @@ use crate::journal::{
 };
 use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
 use crate::salvage::{RemovedItem, ReplaceRejected, RestoreError};
-use crate::scene::{CascadeBudget, PanAxes, Placement, Scene, SceneLayer};
+use crate::scene::{CascadeBudget, PanAxes, Placement, Scene, SceneLayer, SizePolicy};
 use crate::shape::{ItemSelectionMode, ItemShape, SceneRegion};
 use teksilo_canvas::Vec2;
 
@@ -865,6 +865,22 @@ impl SceneModel {
     /// Set an additional local-to-parent transform (rotation, scale) on `id`; notifies all views.
     pub fn set_transform(&self, id: ItemId, transform: Transform2D) {
         self.write(|s| s.set_transform(id, transform));
+    }
+    /// Which axes of `id`'s box its widget decides. See [`SizePolicy`].
+    pub fn size_policy(&self, id: ItemId) -> SizePolicy {
+        self.0.borrow().size_policy(id)
+    }
+    /// Hand one or both axes of `id`'s box to its widget, on **every** view of
+    /// this model. See [`SizePolicy`] and [`Scene::set_size_policy`] — including
+    /// for the note that it is refused for a lightweight entry.
+    pub fn set_size_policy(&self, id: ItemId, policy: SizePolicy) -> bool {
+        self.write(|s| s.set_size_policy(id, policy))
+    }
+    /// Write a size **derived** from content rather than authored by the user;
+    /// notifies all views. See [`Scene::set_measured_size`] for which of the two
+    /// geometry doors this is and when to reach for the other one.
+    pub fn set_measured_size(&self, id: ItemId, size: Size) -> bool {
+        self.write(|s| s.set_measured_size(id, size))
     }
 
     // -----------------------------------------------------------------

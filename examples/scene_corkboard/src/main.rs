@@ -41,10 +41,32 @@
 //! `ItemUpdated` rebuild path. Both panes show the same pins — one adapter,
 //! one shared `SceneModel`.
 //!
-//! **Snap to grid (`SceneModel::set_geometry_constraint`).** Cards are
-//! draggable — both panes install a `transform_controller`, so a card is moved
-//! by dragging its body or the selection frame drawn around it, and `Alt`+arrow
-//! nudges it from the keyboard. One geometry constraint on the *model* keeps
+//! **Notes are [`SceneCard`]s.** Each beat is a card: a title strip you drag to
+//! move it, a body that is a real `RichTextEditor` over a shared `TextDocument`,
+//! a selection ring driven by the shared `CardMode`, and one named accessibility
+//! group. Drag the **title** and the card moves; drag inside the **prose** and
+//! you select text — neither rubber-bands the page behind it, which is the card
+//! root's `gesture_dead_zone` doing its job. Because `doc` and `mode` are
+//! handles rather than copies, both panes share one document and one edit state:
+//! type into a beat in the editor pane and the overview pane shows the same
+//! words.
+//!
+//! **The camera follows the caret.** Pan a beat off the side of the editor pane
+//! and keep typing: the page comes back. The editor asks to be revealed, the
+//! framework's reveal walk projects the request into the pane's own coordinate
+//! space as it climbs, and the pane answers by moving its camera.
+//!
+//! **"Fit to text" (`SizePolicy::HeightForWidth`).** The toolbar toggle hands
+//! every beat's height to its prose, live. It is a property of the *model*, like
+//! the snap rule, so both panes obey it; the measurement is per pane and written
+//! back through the model's derived-geometry door, which is not an edit — a
+//! re-wrap never becomes an undo step. Only the beats on screen are measured, so
+//! a page of a thousand notes costs what the dozen you can see cost.
+//!
+//! **Snap to grid (`SceneModel::set_geometry_constraint`).** A card is moved by
+//! its title strip, by the selection frame both panes draw around it (each
+//! installs a `transform_controller`), or by `Alt`+arrow from the keyboard —
+//! three routes, one rule. One geometry constraint on the *model* keeps
 //! every card on the 40-unit backdrop tile and inside the board, and because it
 //! is on the model rather than on a view **both panes obey it** — a shared
 //! document has one geometry, not one per pane. The toolbar's "Snap to grid"
@@ -64,13 +86,13 @@ use teksilo::canvas::{Path, Point, Rect};
 use teksilo::core::BindingLevel;
 use teksilo::data::ListModel;
 use teksilo::prelude::*;
-use teksilo::widgets::{
-    Button, Checkbox, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack,
-};
+use teksilo::text_document::TextDocument;
+use teksilo::widgets::rich_text::RichTextEditor;
+use teksilo::widgets::{Button, Checkbox, Expand, HStack, Spacer, TextWidget, Toolbar, VStack};
 use teksilo_scene::{
-    A11yGroup, A11yGroupId, A11yNode, ChangeVerdict, ItemFlags, ItemId, PathItem, RectItem,
-    SceneItem, SceneLayer, SceneListAdapter, SceneModel, SceneSelection, SceneSelectionMode,
-    SceneView, TransformConfig, TransformHandleSet,
+    A11yGroup, A11yGroupId, A11yNode, CardMode, ChangeVerdict, ItemFlags, ItemId, PathItem,
+    RectItem, SceneCard, SceneItem, SceneLayer, SceneListAdapter, SceneModel, SceneSelection,
+    SceneSelectionMode, SceneView, SizePolicy, TransformConfig, TransformHandleSet,
 };
 
 const CARDS_PER_ROW: usize = 3;
@@ -113,37 +135,67 @@ const CARDS: [(&str, &str); 9] = [
 /// The per-card data stored in the shared [`SceneModel`]. Each pane's delegate
 /// builds its own card widget from a borrow of this — so one logical card can
 /// be rendered (independently) in any number of views.
+///
+/// `doc` and `mode` are **handles**, not copies, so the two panes share one
+/// document and one edit state: type into a beat in the main pane and the
+/// overview pane shows the same words, with the same ring around the card.
 #[derive(Clone)]
 struct CardData {
     title: String,
-    body: String,
+    doc: TextDocument,
+    mode: Signal<CardMode>,
 }
 
-/// Build a card widget for one pane from shared `CardData`. The border binds the
-/// shared selection signal (reactive — selecting in one pane repaints the border
-/// in every pane, with no rebuild), and a tap toggles the shared selection.
-fn build_card(card: &CardData, selection: SceneSelection, id: ItemId) -> Box<dyn Widget> {
-    let border = selection.selection_signal().map(move |sel| {
-        if sel.contains(&id) {
-            Color::new(0.40, 0.55, 0.85, 1.0) // selected: accent
-        } else {
-            Color::new(0.80, 0.80, 0.85, 0.4) // idle: faint
+impl CardData {
+    fn new(title: &str, body: &str) -> Self {
+        let doc = TextDocument::new();
+        doc.set_plain_text(body).expect("seed the beat's prose");
+        Self {
+            title: title.to_string(),
+            doc,
+            mode: Signal::new(CardMode::Idle),
         }
-    });
-    let tap_selection = selection.clone();
+    }
+}
+
+/// Build a card widget for one pane from shared `CardData`.
+///
+/// Everything a note container needs is [`SceneCard`]'s, and none of it is
+/// about text: the surface, the selection ring, the three modes, the
+/// accessibility group and — the part that could not be written here — the
+/// gesture regime. **Drag the title strip and the card moves; drag inside the
+/// prose and you select text**, because the card root is a gesture dead zone
+/// and the header owns its own drag. Neither one rubber-bands the page behind
+/// it.
+///
+/// The body is a real editor over the shared document. Two things fall out of
+/// that which this crate could not do before:
+///
+/// * pan a note off-screen, keep typing, and the **camera follows the caret** —
+///   the reveal walk reaches the `SceneView` and the view now answers it;
+/// * turn on "Fit to text" and a card's **height follows its words** at the
+///   width you gave it, measured only for the cards on screen.
+fn build_card(
+    card: &CardData,
+    selection: SceneSelection,
+    model: SceneModel,
+    id: ItemId,
+) -> Box<dyn Widget> {
     Box::new(
-        Panel::new()
-            .border_color(border)
-            .border_width(2.0)
-            .child(
-                VStack::new()
-                    .spacing(8.0)
-                    .child(TextWidget::new(lit!(card.title.clone())).style(TextStyleRole::BodyBold))
-                    .child(TextWidget::new(lit!(card.body.clone())).style(TextStyleRole::Body)),
-            )
-            .on_tap(move |_ev, _ctx| {
-                tap_selection.toggle(id);
-            }),
+        SceneCard::new(model, id)
+            .selection(selection)
+            .mode(card.mode.clone())
+            .label(lit!(card.title.clone()))
+            .header(TextWidget::new(lit!(card.title.clone())).style(TextStyleRole::BodyBold))
+            .body(
+                // No `min_lines` / `max_lines`: those switch the editor to
+                // intrinsic sizing, and an intrinsically-sized editor in a
+                // bounded box lays its prose out as one long line and clips it
+                // (measured — every beat showed its first 24 characters and
+                // nothing else). Greedy sizing wraps, which is what a note
+                // wants.
+                RichTextEditor::editor(card.doc.clone()).background(SurfaceRole::Main),
+            ),
     )
 }
 
@@ -307,13 +359,7 @@ fn build_initial_scene() -> (SceneModel, CorkboardModel) {
     let mut prev: Option<(ItemId, Rect)> = None;
     for (i, (title, body)) in CARDS.iter().enumerate() {
         let r = card_rect(i);
-        let card_item = model.add_widget_item(
-            CardData {
-                title: (*title).to_string(),
-                body: (*body).to_string(),
-            },
-            r,
-        );
+        let card_item = model.add_widget_item(CardData::new(title, body), r);
         model.set_flag(card_item, ItemFlags::IS_DRAGGABLE, true);
         let act_index = i / 3;
         model.set_a11y_parent(
@@ -387,10 +433,10 @@ fn add_act(model: &SceneModel, state: &mut CorkboardModel) -> (ItemId, Rect) {
     model.set_a11y_live(A11yNode::Group(group), Live::Polite);
 
     let card = model.add_widget_item(
-        CardData {
-            title: format!("Act {act_number} — new beat"),
-            body: "Added live via the shared SceneModel; both panes show it.".to_string(),
-        },
+        CardData::new(
+            &format!("Act {act_number} — new beat"),
+            "Added live via the shared SceneModel; both panes show it.",
+        ),
         r,
     );
     model.set_a11y_parent(A11yNode::Item(card), Some(A11yNode::Group(group)));
@@ -473,16 +519,53 @@ fn install_snap_to_grid(model: &SceneModel, snap: Signal<bool>) {
     });
 }
 
+/// Hand every card's **height** to its content, or take it back, from one
+/// toggle — live, with no rebuild.
+///
+/// [`SizePolicy`] is a property of the model entry rather than of a view, for
+/// the same reason the geometry constraint is: a shared document has one
+/// geometry, and two panes showing different heights for one beat would be two
+/// documents. The measurement itself is per view (each pane builds its own
+/// editor from the shared document), and each pane writes the height it
+/// measured back through the model's derived-geometry door — which is not an
+/// edit, so a reflow never becomes an undo step.
+///
+/// Only the cards on screen are ever measured. A beat the camera has never
+/// reached keeps the box `add_widget_item` gave it and corrects itself on the
+/// pass that first places it, exactly as a `ListView` row does.
+fn install_fit_to_text(model: &SceneModel, fit: Signal<bool>) {
+    let m = model.clone();
+    let apply = move |on: &bool| {
+        let policy = if *on {
+            SizePolicy::HeightForWidth
+        } else {
+            SizePolicy::Fixed
+        };
+        for id in m.ids() {
+            // Refused for the lightweight tier — the tiles, the connectors and
+            // the pins answer "how big am I" for themselves — so this is one
+            // loop over everything rather than a filtered one.
+            m.set_size_policy(id, policy);
+        }
+    };
+    apply(&fit.get());
+    // Leaked on purpose: the toggle outlives every card, and the app outlives
+    // the toggle. A corkboard that stopped honouring its own checkbox because a
+    // handle went out of scope would be a worse bug than one leaked observer.
+    std::mem::forget(fit.observe(apply));
+}
+
 /// Configure a pane over the shared model: same content, own camera + delegate,
 /// shared selection (so both panes highlight together).
 fn build_pane(model: &SceneModel, selection: &SceneSelection, camera: &Camera) -> SceneView {
     let delegate_selection = selection.clone();
+    let delegate_model = model.clone();
     let (sw, sh) = scene_size();
     SceneView::with_model(model.clone())
         .selection_mode(SceneSelectionMode::Multi)
         .selection_model(selection.clone())
         .delegate_typed::<CardData>(move |card, id| {
-            build_card(card, delegate_selection.clone(), id)
+            build_card(card, delegate_selection.clone(), delegate_model.clone(), id)
         })
         .default_size(sw, sh)
         // The route by which a heavyweight card moves at all: the frame drawn
@@ -513,6 +596,7 @@ fn build_toolbar(
     main_cam: Camera,
     overview_cam: Camera,
     snap: Signal<bool>,
+    fit: Signal<bool>,
 ) -> impl Widget + 'static {
     let pin_cork = cork.clone();
     let unpin_cork = cork.clone();
@@ -580,6 +664,7 @@ fn build_toolbar(
                 Button::new(lit!("Reset Overview")).on_activate_fn(move |_ctx| cam.reset(0.5))
             })
             .child(Checkbox::new(snap).label(lit!("Snap to grid")))
+            .child(Checkbox::new(fit).label(lit!("Fit to text")))
             .child(Spacer::new())
             .child(teksilo::widgets::ThemeSwitcher::new()),
     )
@@ -612,6 +697,14 @@ fn main() {
                     let snap = Signal::new(true);
                     install_snap_to_grid(&model, snap.clone());
 
+                    // One rule for who decides a card's height, applied to every
+                    // card at once and read live. Off by default, because this
+                    // board's connectors are drawn from the authored rectangles;
+                    // turn it on and a beat's box follows its prose at the width
+                    // it was given.
+                    let fit = Signal::new(false);
+                    install_fit_to_text(&model, fit.clone());
+
                     let main_id = tree.add(build_pane(&model, &selection, &main_cam));
                     let overview_id = tree.add(
                         build_pane(&model, &selection, &overview_cam)
@@ -619,8 +712,15 @@ fn main() {
                             .a11y_label(lit!("Overview pane")),
                     );
 
-                    let toolbar =
-                        build_toolbar(main_id, model.clone(), cork, main_cam, overview_cam, snap);
+                    let toolbar = build_toolbar(
+                        main_id,
+                        model.clone(),
+                        cork,
+                        main_cam,
+                        overview_cam,
+                        snap,
+                        fit,
+                    );
 
                     tree.add(
                         VStack::new().child(toolbar).child(
@@ -683,6 +783,16 @@ mod tests {
         );
         tree.layout(SizeProposal::exact(1200.0, 600.0));
         ((tree, model, selection, main_id, overview_id), cards)
+    }
+
+    /// A tree with a text backend installed — the beats are real editors now,
+    /// and text that measures as nothing lays out as nothing.
+    fn text_tree() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(teksilo::presets::intui::light())
+            .with_text_backend(Rc::new(RefCell::new(
+                teksilo::canvas::MockTextBackend::new(),
+            )))
     }
 
     /// Nudge the first card one step with `Alt`+arrow, through the main pane.
@@ -953,5 +1063,179 @@ mod tests {
         // by both panes' borders (verified visually; here we assert the shared
         // signal reflects it).
         assert!(selection.selection_signal().get().contains(&card_id));
+    }
+
+    /// **The page follows the caret.** Pan a beat off the side, keep typing,
+    /// and the camera brings it back.
+    ///
+    /// This is the one claim no framework test can make on its own: it needs a
+    /// real editor, inside a real card, inside a real pane with an app-owned
+    /// camera — which is exactly what this example wires. The editor asks to be
+    /// revealed, the reveal walk projects the request into the pane's own
+    /// coordinate space as it climbs, and the pane answers by moving its camera.
+    #[test]
+    fn typing_in_a_beat_the_camera_left_behind_brings_it_back() {
+        use teksilo::core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+
+        let (model, _cork) = build_initial_scene();
+        let selection = SceneSelection::new(SceneSelectionMode::Multi);
+        let cam = Camera::new(1.0);
+        let mut tree = text_tree();
+        let pane = tree.add(build_pane(&model, &selection, &cam));
+        tree.add(VStack::new().child(Expand::new().child_id(pane)));
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+        let _ = tree.render();
+
+        // Click into the first beat's prose.
+        let first = card_rect(0);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(first.x + first.width * 0.5, first.y + first.height - 30.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+        assert!(
+            tree.focused().is_some(),
+            "precondition: the click must land in the beat's editor"
+        );
+
+        // Send the page a long way to the leading side.
+        cam.pan_x.set(-4000.0);
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+
+        // Typing, not an arrow key: these beats are one short sentence each, so
+        // `ArrowDown` has nowhere to go and the editor's own "only chase a caret
+        // that actually moved" rule correctly does nothing.
+        for ch in "a longer beat, typed blind".chars() {
+            tree.dispatch_event(WidgetEvent::KeyDown {
+                key: Key::Character(ch),
+                modifiers: Modifiers::NONE,
+                text: Some(ch.to_string()),
+            });
+            tree.layout(SizeProposal::exact(1200.0, 600.0));
+        }
+
+        assert!(
+            cam.pan_x.get() > -1000.0,
+            "the camera must have followed the caret back; pan.x = {}",
+            cam.pan_x.get()
+        );
+    }
+
+    /// **"Fit to text" is live, and it only measures what is on screen.**
+    ///
+    /// The visible beats take their height from their prose on the next pass;
+    /// a beat the camera has never reached keeps the box the board gave it.
+    #[test]
+    fn fit_to_text_is_live_and_measures_only_the_beats_on_screen() {
+        let (model, _cork) = build_initial_scene();
+        let fit = Signal::new(false);
+        install_fit_to_text(&model, fit.clone());
+        let cards: Vec<ItemId> = model
+            .ids()
+            .into_iter()
+            .filter(|id| model.payload(*id).is_some())
+            .collect();
+
+        let selection = SceneSelection::new(SceneSelectionMode::Multi);
+        let cam = Camera::new(1.0);
+        let mut tree = text_tree();
+        let pane = tree.add(build_pane(&model, &selection, &cam));
+        tree.add(VStack::new().child(Expand::new().child_id(pane)));
+        // A viewport that shows the first row and nothing below it.
+        tree.layout(SizeProposal::exact(1200.0, 220.0));
+
+        let authored: Vec<Rect> = cards
+            .iter()
+            .map(|id| model.scene_rect(*id).expect("resolves"))
+            .collect();
+        assert!(authored.iter().all(|r| r.height == CARD_HEIGHT));
+
+        fit.set(true);
+        tree.layout(SizeProposal::exact(1200.0, 220.0));
+        tree.layout(SizeProposal::exact(1200.0, 220.0));
+
+        let on_screen = model.scene_rect(cards[0]).expect("resolves");
+        let last_row = model.scene_rect(cards[cards.len() - 1]).expect("resolves");
+        assert_ne!(
+            on_screen.height, CARD_HEIGHT,
+            "a beat on screen must take its height from its prose"
+        );
+        assert_eq!(
+            last_row.height, CARD_HEIGHT,
+            "a beat three rows below the viewport must keep the board's estimate"
+        );
+
+        // …and turning it back off restores the board's own geometry.
+        fit.set(false);
+        tree.layout(SizeProposal::exact(1200.0, 220.0));
+        assert_eq!(
+            model.scene_rect(cards[0]).map(|r| r.height),
+            Some(on_screen.height),
+            "a Fixed entry keeps whatever box it currently has — the policy \
+             decides who *writes* the height, and nothing rewrites it back"
+        );
+    }
+
+    /// **Drag the title strip and the beat moves; drag its prose and it does
+    /// not.** The gesture regime, through the real card.
+    #[test]
+    fn a_beat_moves_by_its_title_and_not_by_its_prose() {
+        use teksilo::core::event::{Modifiers, PointerButton, WidgetEvent};
+
+        let (model, _cork) = build_initial_scene();
+        let selection = SceneSelection::new(SceneSelectionMode::Multi);
+        let cam = Camera::new(1.0);
+        let mut tree = text_tree();
+        let pane = tree.add(build_pane(&model, &selection, &cam));
+        tree.add(VStack::new().child(Expand::new().child_id(pane)));
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+        let _ = tree.render();
+        let cards: Vec<ItemId> = model
+            .ids()
+            .into_iter()
+            .filter(|id| model.payload(*id).is_some())
+            .collect();
+        let card = cards[0];
+        let r = model.scene_rect(card).expect("resolves");
+
+        // The prose: drag, and nothing moves.
+        let prose = Point::new(r.x + r.width * 0.5, r.y + r.height - 30.0);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            prose,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.pointer_move(Point::new(prose.x + 80.0, prose.y + 80.0));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(prose.x + 80.0, prose.y + 80.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+        assert_eq!(
+            model.scene_rect(card),
+            Some(r),
+            "a drag in the prose belongs to the text, not to the board"
+        );
+
+        // The title strip: drag, and it moves — onto the grid, because the
+        // document's snap rule is installed on the model and the card's own
+        // drag asks it, exactly as the built-in one does.
+        let title = Point::new(r.x + r.width * 0.5, r.y + 22.0);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            title,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.pointer_move(Point::new(title.x + 80.0, title.y + 80.0));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(title.x + 80.0, title.y + 80.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.layout(SizeProposal::exact(1200.0, 600.0));
+        let moved = model.scene_rect(card).expect("resolves");
+        assert_ne!(moved, r, "a drag on the title strip moves the beat");
     }
 }

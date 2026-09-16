@@ -572,10 +572,32 @@ impl AccessNodeBuilder {
         self.inner.set_author_id(id.into());
     }
 
-    /// Replace the node's custom-action list with `actions`. Used by the
-    /// override layer's `access_custom_action` builder method.
+    /// Replace the node's custom-action list with `actions`, and keep the
+    /// supported-action gate in step with it.
+    ///
+    /// **The gate is the whole reachability story, not the list.** A platform
+    /// adapter reports a node's custom actions through
+    /// [`accesskit::Action::CustomAction`] being
+    /// supported, not through the list being non-empty
+    /// (`accesskit_ios-0.2.0/src/node.rs:109` is the one that says so in code),
+    /// so a list published without it is decoration: named, announced by
+    /// nothing, invokable by nobody. Three separate widgets in this repo have
+    /// shipped that exact defect, each having to remember a second call beside
+    /// this one.
+    ///
+    /// So this method owns both halves. A non-empty list advertises the gate; an
+    /// empty one withdraws it, because a gate with nothing behind it offers an
+    /// assistive-technology user a menu that is not there. Callers that also
+    /// call `add_action(Action::CustomAction)` themselves are correct and
+    /// unaffected — both operations are idempotent.
     pub fn set_custom_actions(&mut self, actions: Vec<accesskit::CustomAction>) {
+        let empty = actions.is_empty();
         self.inner.set_custom_actions(actions);
+        if empty {
+            self.remove_action(accesskit::Action::CustomAction);
+        } else {
+            self.add_action(accesskit::Action::CustomAction);
+        }
     }
 
     pub fn set_toggled(&mut self, toggled: bool) {
