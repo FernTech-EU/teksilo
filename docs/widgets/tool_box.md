@@ -91,8 +91,8 @@ pub enum ToolBoxOrientation { /* variants */ }
 ## `pub struct ToolBoxItem`
 
 One section of a `ToolBox`. Construct with `ToolBoxItem::new` and pass
-to `ToolBox::add`, or use the convenience `ToolBox::item` /
-`ToolBox::item_id` builders directly when leading / trailing slots
+to `ToolBox::add`, or use the convenience `ToolBox::item` builder
+directly (it takes a widget or a `WidgetId`) when leading / trailing slots
 and tooltip are not needed.
 
 Layout of the header row:

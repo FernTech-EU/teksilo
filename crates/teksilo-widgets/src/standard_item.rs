@@ -677,7 +677,7 @@ impl StandardListItem {
 
         if let Some(kind) = self.checkbox.take() {
             // Propagate the row's label as the checkbox's accessible
-            // name. With `labels_hidden(true)` the visual label is
+            // name. With `labelled_externally()` the visual label is
             // suppressed; without an `access_label*` override the AT
             // node would be a nameless `Role::CheckBox`. Using
             // `access_label` on the WidgetBuilder applies an override
@@ -693,7 +693,7 @@ impl StandardListItem {
                 CheckboxKind::TwoState(s) => Checkbox::new(s),
                 CheckboxKind::TriState(s) => Checkbox::tristate(s),
             }
-            .labels_hidden(true);
+            .labelled_externally();
             let cb_id = ctx.add(cb.access_label(self.label.clone()));
             row = row.child(cb_id);
         }

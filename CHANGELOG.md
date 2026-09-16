@@ -103,6 +103,9 @@ one name and that name takes a `WidgetId` or a widget.
   `with_child_id`), and `Breadcrumb::item_id`.
 - `WidgetBuilder::dim_when_inactive` and `dim_when_inactive_default`. Wrap
   instead: `DimWhenInactive::new().factor(f).child(w)`.
+- `Checkbox::labels_hidden(bool)` is now `Checkbox::labelled_externally()`, the
+  name and shape `Toggle` already used for the same thing: the control's
+  accessible name comes from an ancestor, so it renders no label of its own.
 - `FormLayout::line_ids` no longer adds one row from two ids; it takes an
   iterator of `(label_id, field_id)` pairs and adds a row per pair. The
   single-row form is gone because `line` takes `impl IntoTeksiChild` and accepts

@@ -35,7 +35,7 @@
 //! ## Accessibility
 //!
 //! Announces as `Role::CheckBox`. A label is required in debug builds
-//! unless `.labels_hidden(true)` is set (for embedding inside a composite
+//! unless `.labelled_externally()` is set (for embedding inside a composite
 //! row that owns the AT name). Keyboard: Space toggles; lone-KeyUp guard
 //! prevents spurious toggle when focus is restored after a shortcut.
 //!
@@ -155,7 +155,7 @@ pub struct Checkbox {
     /// for providing the AT name (typically via its own `set_name(...)`
     /// or an `access_label*` override). Used by `StandardListItem` /
     /// `StandardTreeItem`.
-    labels_hidden: bool,
+    labelled_externally: bool,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn teksilo_core::widget::Widget>>,
@@ -172,7 +172,7 @@ impl Checkbox {
             caption: None,
             kind: CheckKind::TwoState(checked),
             enabled: Prop::Static(true),
-            labels_hidden: false,
+            labelled_externally: false,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -195,7 +195,7 @@ impl Checkbox {
             caption: None,
             kind: CheckKind::TriState(state),
             enabled: Prop::Static(true),
-            labels_hidden: false,
+            labelled_externally: false,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -205,29 +205,31 @@ impl Checkbox {
         }
     }
 
-    /// Suppress the visual label/caption AND the debug-time
-    /// "missing accessible label" assertion. Use this **only** when
+    /// Declare that this checkbox's accessible name comes from an
+    /// ancestor, suppressing the visual label/caption AND the
+    /// debug-time "missing accessible label" assertion. Use it when
     /// the checkbox is embedded inside a composite that owns the
-    /// row's accessible name (e.g. `StandardListItem` /
-    /// `StandardTreeItem`, where the row's `accessibility(builder)`
-    /// calls `set_name(...)` with the row label).
+    /// row's name (e.g. `StandardListItem` / `StandardTreeItem`,
+    /// where the row's `accessibility(builder)` calls `set_name(...)`
+    /// with the row label).
     ///
-    /// **A11y contract:** when `labels_hidden(true)` is set, the
-    /// caller MUST guarantee that an addressable AT ancestor
-    /// provides the name — either via that ancestor's own
-    /// `accessibility()` impl or a builder-level
+    /// **A11y contract:** the caller MUST guarantee that an
+    /// addressable AT ancestor provides the name — either via that
+    /// ancestor's own `accessibility()` impl or a builder-level
     /// `.access_label*` override. Without it the AT tree exposes a
     /// `Role::CheckBox` node with no name; screen readers announce
     /// "checkbox, checked" with no context. The Outlook /
     /// Files-app row pattern (where the row label covers the
     /// embedded checkbox) is the supported use case.
-    pub fn labels_hidden(mut self, hidden: bool) -> Self {
-        self.labels_hidden = hidden;
+    ///
+    /// Spelled the same way on [`Toggle`](crate::toggle::Toggle).
+    pub fn labelled_externally(mut self) -> Self {
+        self.labelled_externally = true;
         self
     }
 
     /// Set the visible label rendered to the right of the checkbox box,
-    /// also used as the AT name. Required unless `.labels_hidden(true)` is set.
+    /// also used as the AT name. Required unless `.labelled_externally()` is set.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -389,7 +391,7 @@ impl Widget for Checkbox {
         let mut row = HStack::new()
             .spacing(cb_dims::CHECKBOX_LABEL_GAP)
             .child(body_id);
-        if !self.labels_hidden
+        if !self.labelled_externally
             && let Some(ref label) = self.label
         {
             let label_widget = TextWidget::new(label.clone())
@@ -592,11 +594,11 @@ impl Widget for Checkbox {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         debug_assert!(
-            self.label.is_some() || self.labels_hidden,
+            self.label.is_some() || self.labelled_externally,
             "Checkbox is missing an accessible label — \
              screen readers will announce \"checkbox\" with no context. \
              Call .label(...) when constructing the widget, or \
-             .labels_hidden(true) when embedded in a composite that \
+             .labelled_externally() when embedded in a composite that \
              owns the AT name."
         );
         builder.set_role(teksilo_core::accesskit::Role::CheckBox);

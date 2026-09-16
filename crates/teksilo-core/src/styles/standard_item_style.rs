@@ -21,7 +21,7 @@ pub struct StandardItemStyleConfig {
     /// responsible for the chrome (selection background, corner
     /// radius, padding) but not for row-internal layout — the
     /// per-slot composition is StandardItem-specific (subtitle has
-    /// its own sub-row, the checkbox carries `labels_hidden` AT
+    /// its own sub-row, the checkbox carries `labelled_externally` AT
     /// metadata, etc.) and would force every custom style to
     /// reimplement it.
     pub content: WidgetId,
