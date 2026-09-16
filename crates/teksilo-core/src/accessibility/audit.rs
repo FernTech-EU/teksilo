@@ -307,6 +307,73 @@ pub fn text_infos(update: &TreeUpdate) -> std::collections::HashMap<NodeId, Node
     out
 }
 
+/// Every node's rectangle, resolved the way an adapter resolves it: raw bounds
+/// composed with every transform between the node and the window — but **not**
+/// the window's own, so the answer stays in logical pixels.
+///
+/// A node's `bounds` are stated "in the coordinate space of the nearest
+/// ancestor with a non-`None` transform", so reading the raw property is
+/// reading half an answer. It is the whole answer for most of the tree, where
+/// nothing between the node and the window declares a transform — and silently
+/// the wrong rectangle inside anything that does, such as the scene subtree
+/// under a `SceneView`'s camera.
+///
+/// The root's transform is the device scale factor and is deliberately left
+/// out: AccessKit wants physical pixels and gets them from the adapter, while
+/// a caller here — an automation probe aiming a synthetic press, a diagnostic
+/// overlay — works in the logical coordinates the rest of the framework uses.
+/// A node absent from the map had no bounds to resolve.
+pub fn logical_bounds(
+    update: &TreeUpdate,
+) -> std::collections::HashMap<NodeId, teksilo_canvas::Rect> {
+    let tree = Tree::new(update.clone(), false);
+    let state = tree.state();
+    let mut out = std::collections::HashMap::new();
+    // Depth-first from the root's children, carrying the composition so far.
+    // The root itself contributes nothing, which is what drops the device
+    // scale; it also has no bounds of its own to report.
+    let root = state.root();
+    let mut stack: Vec<(_, teksilo_canvas::Transform2D)> = root
+        .children()
+        .map(|c| (c, teksilo_canvas::Transform2D::IDENTITY))
+        .collect();
+    while let Some((node, to_window)) = stack.pop() {
+        let own = match node.data().transform() {
+            Some(t) => from_affine(*t).then(&to_window),
+            None => to_window,
+        };
+        if let Some(r) = node.raw_bounds() {
+            let rect = teksilo_canvas::Rect::new(
+                r.x0 as f32,
+                r.y0 as f32,
+                (r.x1 - r.x0) as f32,
+                (r.y1 - r.y0) as f32,
+            );
+            out.insert(locate(&node), own.apply_rect(rect));
+        }
+        for child in node.children() {
+            stack.push((child, own));
+        }
+    }
+    out
+}
+
+/// The inverse of [`to_accesskit_affine`](super::to_accesskit_affine): both
+/// spell a 3×2 affine `[a, b, c, d, tx, ty]`, so this is a narrowing cast.
+fn from_affine(a: accesskit::Affine) -> teksilo_canvas::Transform2D {
+    let m = a.as_coeffs();
+    teksilo_canvas::Transform2D {
+        m: [
+            m[0] as f32,
+            m[1] as f32,
+            m[2] as f32,
+            m[3] as f32,
+            m[4] as f32,
+            m[5] as f32,
+        ],
+    }
+}
+
 /// The name each node announces, resolved the way an adapter resolves it —
 /// through `labelled_by` when the node carries no name of its own.
 ///

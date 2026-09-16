@@ -11,10 +11,78 @@
 //! framework's redirect mechanism. The DFS walker `emit_logical_node`
 //! drives the tree and also emits `SceneMagnet` nodes for the
 //! keyboard-connect roving-focus pattern.
+//!
+//! # One coordinate space for the whole scene subtree
+//!
+//! Every rectangle emitted here is in **scene coordinates**, and the view
+//! transform is declared once — as an AccessKit node transform — on each node
+//! that sits directly under the `SceneView`'s own node. AccessKit applies a
+//! node's transform "to any coordinates within this node and its descendants,
+//! including the `bounds` property of this node", and reads `bounds` "in the
+//! coordinate space of the nearest ancestor with a non-`None` transform", so
+//! one declaration at the boundary carries the camera to everything below it:
+//! an item's box, a group's children, a text run's per-character positions, a
+//! magnet's anchor.
+//!
+//! This is the same space the *heavyweight* tier is in. A card's arena bounds
+//! are scene coordinates, and the framework walker declares the identical
+//! transform on it (see `WidgetTree::build_accessibility_recursive`). So the
+//! two tiers do not merely happen to agree about where an item is on screen —
+//! they are described in one coordinate system, which is what lets a widget
+//! relocated into the logical tree by `set_a11y_parent` land in the right
+//! place whichever tier it came from.
+//!
+//! Projecting instead of declaring would be exact for a rectangle and wrong
+//! for everything else: `Rect` is axis-aligned, so a rotated camera loses the
+//! shape; per-character geometry would need scaling by hand; and
+//! `accesskit_consumer`'s hit test descends by inverting each node's transform,
+//! so a pre-projected subtree is unreachable by an explore-by-touch probe.
 
 use super::*;
 
+/// How far, in logical pixels on screen, a magnet's AT box extends from the
+/// anchor point. A pointer affordance, so it keeps its screen size as the
+/// camera zooms rather than scaling with the drawing.
+const MAGNET_AT_HALF_EXTENT: f32 = 8.0;
+
+/// The view transform's scale, for the one case that needs to undo it.
+///
+/// The geometric mean of the two singular values via `|det|.sqrt()`, so a
+/// non-uniform or rotated camera still yields one sensible number. Falls back
+/// to `1.0` for a degenerate transform rather than dividing by zero.
+fn view_scale(t: &Transform2D) -> f32 {
+    let [a, b, c, d, _, _] = t.m;
+    let det = (a * d - b * c).abs();
+    if det.is_finite() && det > f32::EPSILON {
+        det.sqrt()
+    } else {
+        1.0
+    }
+}
+
 impl SceneView {
+    /// Declare that this synthetic node — and everything under it — states its
+    /// rectangles in scene coordinates.
+    ///
+    /// Only at the boundary: `parent_id` is `None` exactly for a node the
+    /// walk is attaching to the `SceneView`'s own node, whose space is the
+    /// window's. A node deeper in the logical tree already inherits the
+    /// declaration from its parent, and re-stating it there would compose the
+    /// camera twice.
+    fn declare_scene_space(
+        child: &mut teksilo_core::accessibility::AccessNodeBuilder,
+        parent_id: Option<accesskit::NodeId>,
+        view_transform: Transform2D,
+    ) {
+        if parent_id.is_none() {
+            child
+                .inner_mut()
+                .set_transform(teksilo_core::accessibility::to_accesskit_affine(
+                    view_transform,
+                ));
+        }
+    }
+
     pub(super) fn a11y_redirect_descendant_impl(
         &self,
         _self_id: WidgetId,
@@ -144,13 +212,71 @@ impl SceneView {
         //   - StrictlyParallel: lightweight item without a parent
         //     is suppressed; heavyweight without a parent stays
         //     at SceneView root via the framework walker.
-        for entry in &self.scene().entries {
-            if !visible_item_ids.contains(&entry.id) {
-                continue;
+        // Heavyweight entries are gated by the set the layout pass just wrote,
+        // which is the cards this view *publishes*: those the mode's region
+        // reaches, plus any the user is in the middle of, intersected with
+        // those the pass kept alive. Two different things could go wrong if
+        // this were re-derived here instead of read back, and the recorded set
+        // is what rules out both — a card parked by this pass must not be
+        // grafted (the framework walker emitted nothing for it, so the graft
+        // would name a child that is not in the tree), and a card pinned by
+        // focus must be grafted wherever the camera is (its node IS in the
+        // tree, and an unnamed node is an orphan the consumer rejects just as
+        // hard). A rectangle test here would get the first right and the
+        // second wrong.
+        //
+        // `None` means the view has not been laid out yet, so nothing has been
+        // decided and every card is still live.
+        //
+        // The framework walker is gated by the same decision through
+        // `SceneView::accessibility_children`, so a card left out here is left
+        // out there too — neither named nor emitted.
+        let at_heavy = self.at_heavy.borrow();
+        let publishes_heavy =
+            |id: ItemId| -> bool { at_heavy.as_ref().is_none_or(|set| set.contains(&id)) };
+
+        // The candidates, gathered from the two sets rather than by walking
+        // `entries` and filtering — so the walk costs what it publishes and
+        // not what the model holds. Restored to **declaration order** before
+        // emitting, because that order is the order a screen reader reads the
+        // scene in and neither set carries it.
+        let candidates: Vec<(usize, ItemId, bool)> = {
+            let scene = self.scene();
+            let mut out: Vec<(usize, ItemId, bool)> = Vec::new();
+            let push = |id: ItemId, is_widget: bool, out: &mut Vec<_>| {
+                if let Some(order) = scene.entry_order(id) {
+                    out.push((order, id, is_widget));
+                }
+            };
+            for &id in &visible_item_ids {
+                // `items_in_rect` answers for both tiers; the heavyweight ones
+                // are decided by the published set instead, just below.
+                if scene.item(id).is_some() {
+                    push(id, false, &mut out);
+                }
             }
-            let node = A11yNode::Item(entry.id);
+            match at_heavy.as_ref() {
+                Some(set) => {
+                    for &id in set {
+                        push(id, true, &mut out);
+                    }
+                }
+                // Not laid out yet: every card is live.
+                None => {
+                    for entry in &scene.entries {
+                        if matches!(&entry.kind, SceneEntryKind::Widget { .. }) {
+                            push(entry.id, true, &mut out);
+                        }
+                    }
+                }
+            }
+            out.sort_unstable_by_key(|(order, _, _)| *order);
+            out
+        };
+
+        for (_, item_id, is_widget) in candidates {
+            let node = A11yNode::Item(item_id);
             let parent = self.scene().a11y_parent_of(node);
-            let is_widget = matches!(&entry.kind, SceneEntryKind::Widget { .. });
             match (parent, is_widget, self.a11y_mode) {
                 (Some(p), _, _) => {
                     logical_children.entry(Some(p)).or_default().push(node);
@@ -176,12 +302,31 @@ impl SceneView {
         // referenced via `A11yNode::Item(item_id)` are already
         // handled by the visible-entries pass.
         for (child_node, parent_node) in &self.scene().a11y_parents {
-            if matches!(child_node, A11yNode::Widget(_)) {
-                logical_children
-                    .entry(Some(*parent_node))
-                    .or_default()
-                    .push(*child_node);
+            let A11yNode::Widget(wid) = child_node else {
+                continue;
+            };
+            // A relocation naming a card root directly (rather than through
+            // its `ItemId`) is gated by the same published set as the pass
+            // above, so the two addresses for one card cannot disagree.
+            //
+            // A relocation naming a widget *inside* a card cannot be checked
+            // here — this method has no arena, and the widget's activation is
+            // its ancestor card's. It does not need to be: if that card is
+            // parked, or merely left out of `accessibility_children`, the
+            // walker never reaches the descendant, nothing is emitted for it,
+            // and
+            // `WidgetTree::sync_accessibility`'s dangling-child strip drops
+            // the reference. That strip is the general guarantee; this check
+            // is the specific one, and both are pinned by tests.
+            if let Some(item_id) = self.widget_to_item.get(wid)
+                && !publishes_heavy(*item_id)
+            {
+                continue;
             }
+            logical_children
+                .entry(Some(*parent_node))
+                .or_default()
+                .push(*child_node);
         }
 
         // Walk the logical tree DFS, depth-first, emitting synthetic
@@ -288,23 +433,11 @@ impl SceneView {
                 if let Some(item) = scene.item(item_id) {
                     let _ = item; // borrowed below for accessibility() call
                     let scene_bounds = scene.scene_rect(item_id).unwrap_or(Rect::ZERO);
-                    let screen_bounds = view_transform.apply_rect(scene_bounds);
-                    // Choose which space to advertise to AT clients
-                    // per `a11y_bounds_space`. The `SceneItemA11yContext`
-                    // always carries the screen-projected rect (so item
-                    // impls don't have to re-do the math); only the
-                    // `set_bounds` write to AccessKit varies.
-                    let advertised_bounds = match self.a11y_bounds_space {
-                        crate::a11y::A11yBoundsSpace::Screen => screen_bounds,
-                        crate::a11y::A11yBoundsSpace::Scene => scene_bounds,
-                    };
                     let ctx = crate::item::SceneItemA11yContext {
                         view_transform,
-                        screen_bounds,
+                        scene_bounds,
                         item_id,
-                        local_to_screen: scene.scene_transform(item_id).then(&view_transform),
-                        advertised_bounds,
-                        bounds_space: self.a11y_bounds_space,
+                        local_to_scene: scene.scene_transform(item_id),
                     };
                     builder.push_scene_child_under(
                         parent_id,
@@ -313,11 +446,12 @@ impl SceneView {
                         |child| {
                             item.accessibility(child, &ctx);
                             child.inner_mut().set_bounds(accesskit::Rect {
-                                x0: advertised_bounds.x as f64,
-                                y0: advertised_bounds.y as f64,
-                                x1: (advertised_bounds.x + advertised_bounds.width) as f64,
-                                y1: (advertised_bounds.y + advertised_bounds.height) as f64,
+                                x0: scene_bounds.x as f64,
+                                y0: scene_bounds.y as f64,
+                                x1: (scene_bounds.x + scene_bounds.width) as f64,
+                                y1: (scene_bounds.y + scene_bounds.height) as f64,
                             });
+                            Self::declare_scene_space(child, parent_id, view_transform);
                         },
                     )
                 } else if let Some(&widget_id) = self.materialized.get(&item_id) {
@@ -355,6 +489,12 @@ impl SceneView {
                         if let Some(label) = label {
                             child.set_name(label.resolve_now());
                         }
+                        // A group carries no box of its own, but it does carry
+                        // the space: anything grafted under it — an item, or a
+                        // widget relocated by `set_a11y_parent` — states its
+                        // rectangle in scene coordinates and inherits the
+                        // projection from here.
+                        Self::declare_scene_space(child, parent_id, view_transform);
                     },
                 )
             }
@@ -404,18 +544,18 @@ impl SceneView {
                 let Some(scene_pos) = scene.magnet_scene_pos(mid) else {
                     continue;
                 };
-                let screen = view_transform.apply_point(scene_pos);
                 let name = scene
                     .magnet_label(mid)
                     .map(|l| l.resolve_now())
                     .unwrap_or_else(|| "Connection point".to_string());
-                // A small AT box around the anchor so the node has
-                // non-zero bounds for hit-test / focus-ring chrome.
-                let (cx, cy) = match self.a11y_bounds_space {
-                    crate::a11y::A11yBoundsSpace::Screen => (screen.x, screen.y),
-                    crate::a11y::A11yBoundsSpace::Scene => (scene_pos.x, scene_pos.y),
-                };
-                let half = 8.0_f32;
+                // A small AT box around the anchor so the node has non-zero
+                // bounds for hit-test / focus-ring chrome. Scene coordinates,
+                // like every other rectangle this walk emits — and sized so
+                // that the box stays MAGNET_AT_HALF_EXTENT logical pixels on
+                // screen at any zoom, because it is a pointer affordance and
+                // not a piece of the drawing.
+                let (cx, cy) = (scene_pos.x, scene_pos.y);
+                let half = MAGNET_AT_HALF_EXTENT / view_scale(&view_transform);
                 builder.push_scene_child_under(
                     Some(synthetic_id),
                     mid.as_u64(),

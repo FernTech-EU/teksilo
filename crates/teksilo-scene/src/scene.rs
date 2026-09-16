@@ -84,7 +84,15 @@ use teksilo_core::widget_id::WidgetId;
 /// the time the observer sees the event, the Scene already reflects it, and
 /// (when the mutation came through a [`SceneModel`](crate::SceneModel)) the
 /// observer may freely read *and* write the scene back.
+///
+/// `#[non_exhaustive]`: this is the crate's outbound event vocabulary, matched
+/// by every observer, and it grows whenever the scene learns to report
+/// something new — `HandlersChanged` is the most recent. Without the
+/// attribute each such addition would stop a downstream `match` from
+/// compiling; with it, a consumer's wildcard arm keeps meaning "a change I do
+/// not act on".
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum ItemChange {
     /// `set_local_pos`: position in parent coords moved.
     LocalPosChanged { id: ItemId, old: Point, new: Point },
@@ -130,7 +138,26 @@ pub enum ItemChange {
     /// item's paint-only appearance (fill / stroke colour or style) changed.
     /// Never moves geometry, so the observing `SceneView` evicts the item's
     /// cached frame and repaints **without** relayout or rebuild.
+    ///
+    /// It *can* move the item's hit **shape**, though: a stroked
+    /// [`PathItem`](crate::PathItem) derives its hit band from the stroke it
+    /// draws, so a view caching hit geometry must re-read this item's shape
+    /// even while skipping relayout.
     AppearanceChanged { id: ItemId },
+    /// `set_item_handlers` / `handlers_mut`: the item's handler set was
+    /// replaced or handed out for mutation.
+    ///
+    /// `handlers_mut` fires it on the way *in*, before the set it returns has
+    /// been written, because a `&mut` borrow cannot report what the caller will
+    /// do with it. So this variant means "this item's handlers are no longer
+    /// what you last read", which is exactly what a consumer caching them
+    /// needs, and nothing finer.
+    ///
+    /// Without it, the two handler mutators were the only doors in the model
+    /// that changed observable state silently, and anything caching a handler
+    /// set — the `SceneView`'s dispatch snapshot — would serve the old one
+    /// indefinitely.
+    HandlersChanged { id: ItemId },
 }
 
 impl ItemChange {
@@ -156,7 +183,8 @@ impl ItemChange {
             | ItemChange::Removed { id }
             | ItemChange::Added { id }
             | ItemChange::PayloadChanged { id }
-            | ItemChange::AppearanceChanged { id } => id,
+            | ItemChange::AppearanceChanged { id }
+            | ItemChange::HandlersChanged { id } => id,
         }
     }
 }
@@ -329,7 +357,13 @@ const MIN_CASCADE_TOTAL: u64 = 1;
 /// model.set_cascade_budget(CascadeBudget::new(1_000_000));
 /// assert_eq!(model.cascade_budget().total, 1_000_000);
 /// ```
+///
+/// `#[non_exhaustive]`: a budget is built through
+/// [`CascadeBudget::new`](Self::new) or [`Default`], never by struct literal,
+/// so a second dimension (a per-subject cap, a depth limit) can be added
+/// without breaking a caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CascadeBudget {
     /// Observer-generated deliveries one drain may make before it panics.
     ///
@@ -773,6 +807,22 @@ pub(crate) struct SceneEntry {
     /// `scene_transform` is the parent's `scene_transform` composed
     /// with the child's `local_to_parent`.
     pub(crate) parent: Option<ItemId>,
+    /// Direct children, in the order they became children — the downward half
+    /// of the parent pointer above, maintained by `push_entry` / `remove` /
+    /// [`Scene::set_item_parent`] / [`Scene::orphan`], the only four doors that
+    /// can change a parent link.
+    ///
+    /// Kept rather than derived because every downward walk needs it and
+    /// deriving it means scanning the whole model: `rebucket_subtree` used to
+    /// rebuild a scene-wide `HashMap` on **each** `set_local_pos`, which made
+    /// moving one leaf cost `O(entries)` — 67 µs per call at 50 000 items,
+    /// against 80 ns for the same call through `set_z`, which re-buckets
+    /// nothing. See `crates/teksilo-scene/tests/mutation_scaling_probe.rs`.
+    ///
+    /// The invariant, asserted by `parent_and_children_agree_through_every_door`
+    /// in this module's tests: `entries[p].children.contains(&c)` **iff**
+    /// `entries[c].parent == Some(p)`, with no duplicates.
+    pub(crate) children: Vec<ItemId>,
     /// Per-item behavior flags. Read once from
     /// [`SceneItem::initial_flags`] at insert time, mutable through
     /// [`Scene::set_flags`] / [`Scene::set_flag`].
@@ -844,6 +894,23 @@ pub struct Scene {
     entry_index: HashMap<ItemId, usize>,
     index: Box<dyn SpatialIndex>,
 
+    /// Every heavyweight (`Widget`) entry, in entry order.
+    ///
+    /// Kept rather than filtered out of `entries` on demand because a
+    /// `SceneView`'s `build()` asks for it three times — the `Once` drain, the
+    /// `Delegated` payloads, and the child-ordering / orphan-reap set — and
+    /// `build()` runs on **every** model mutation, so a scene of 20 000
+    /// lightweight items paid three full scans to re-materialise nothing. The
+    /// three are now proportional to the number of cards, which is what they
+    /// were always about.
+    heavyweight: Vec<ItemId>,
+    /// Every entry added through [`add_item_dynamic`](Scene::add_item_dynamic),
+    /// in entry order — the ones
+    /// [`refresh_dynamic_bounds`](Scene::refresh_dynamic_bounds) re-reads each
+    /// build. Same reason as `heavyweight`: a scene with no dynamic items used
+    /// to pay a full scan and an allocation per build to discover that.
+    dynamic: Vec<ItemId>,
+
     /// User-declared scene extent. `None` means "auto-compute from
     /// items each query". Set via [`Scene::set_scene_rect`]. Used
     /// by [`SceneView::adopt_scene_size`](crate::SceneView::adopt_scene_size).
@@ -886,6 +953,23 @@ pub struct Scene {
     /// snapshots — which silently swallows anything an observer wrote during
     /// the refresh's fan-out.
     dynamic_seq: Cell<u64>,
+
+    /// How many [`ItemChange`]s this scene has **emitted**, ever.
+    ///
+    /// Distinct from [`mutation_version`](Scene::mutation_version), which also
+    /// counts logical-AT structure bumps: this one counts exactly the events
+    /// that travel `item_change_signal`, so a consumer that keeps a cache
+    /// invalidated *by* that signal can ask two different questions and get two
+    /// honest answers — "is my cache still current?" (compare this counter with
+    /// the one I last refreshed at) and "did I see every change in between?"
+    /// (compare it with my own delivery count). The second is what makes the
+    /// cache safe: any disagreement means an emission this consumer never saw,
+    /// and the answer is a full rebuild.
+    ///
+    /// Bumped at **emission**, not delivery, so it is correct even while the
+    /// fan-out is deferred inside an open write scope. Wraps; compare for
+    /// equality, not ordering.
+    item_change_seq: Cell<u64>,
 
     // --- deferred change fan-out -------------------------------------
     /// Number of write scopes currently open on this scene.
@@ -940,11 +1024,14 @@ impl Scene {
             entries: Vec::new(),
             entry_index: HashMap::new(),
             index,
+            heavyweight: Vec::new(),
+            dynamic: Vec::new(),
             user_scene_rect: None,
             constraints: SceneConstraints::new(),
             pending: Rc::new(ChangeQueue::new()),
             mutation_seq: Cell::new(0),
             dynamic_seq: Cell::new(0),
+            item_change_seq: Cell::new(0),
             defer_depth: Cell::new(0),
             cascade_budget: Cell::new(CascadeBudget::default()),
             a11y_groups: Vec::new(),
@@ -981,6 +1068,7 @@ impl Scene {
             z: 0.0,
             layer: SceneLayer::Under,
             parent: None,
+            children: Vec::new(),
             flags: ItemFlags::default(),
             opacity: 1.0,
             handlers: None,
@@ -1010,6 +1098,7 @@ impl Scene {
             z: 0.0,
             layer: SceneLayer::Under,
             parent: None,
+            children: Vec::new(),
             flags: ItemFlags::default(),
             opacity: 1.0,
             handlers: None,
@@ -1055,11 +1144,15 @@ impl Scene {
     /// by `SceneView::build`.
     pub(crate) fn drain_all_once(&mut self) -> Vec<(ItemId, Box<dyn Widget>)> {
         let mut out = Vec::new();
-        for entry in self.entries.iter_mut() {
-            if let SceneEntryKind::Widget(WidgetSource::Once(pending)) = &mut entry.kind
+        for i in 0..self.heavyweight.len() {
+            let id = self.heavyweight[i];
+            let Some(&pos) = self.entry_index.get(&id) else {
+                continue;
+            };
+            if let SceneEntryKind::Widget(WidgetSource::Once(pending)) = &mut self.entries[pos].kind
                 && let Some(w) = pending.take()
             {
-                out.push((entry.id, w));
+                out.push((id, w));
             }
         }
         out
@@ -1069,13 +1162,16 @@ impl Scene {
     /// The payload `Rc` is cloned so the caller can drop the model borrow before
     /// invoking its delegate (the reentrancy contract). Called by `SceneView::build`.
     pub(crate) fn delegated_payloads(&self) -> Vec<(ItemId, Rc<dyn std::any::Any>)> {
-        self.entries
+        self.heavyweight
             .iter()
-            .filter_map(|e| match &e.kind {
-                SceneEntryKind::Widget(WidgetSource::Delegated { payload }) => {
-                    Some((e.id, payload.clone()))
+            .filter_map(|id| {
+                let pos = *self.entry_index.get(id)?;
+                match &self.entries[pos].kind {
+                    SceneEntryKind::Widget(WidgetSource::Delegated { payload }) => {
+                        Some((*id, payload.clone()))
+                    }
+                    _ => None,
                 }
-                _ => None,
             })
             .collect()
     }
@@ -1084,13 +1180,7 @@ impl Scene {
     /// entry order. Used by `SceneView::build` for child ordering and the
     /// orphan-reap live-set.
     pub(crate) fn heavyweight_ids(&self) -> Vec<ItemId> {
-        self.entries
-            .iter()
-            .filter_map(|e| match &e.kind {
-                SceneEntryKind::Widget(_) => Some(e.id),
-                SceneEntryKind::Item(_) => None,
-            })
-            .collect()
+        self.heavyweight.clone()
     }
 
     /// Place a lightweight [`SceneItem`] at `local_pos`. The item's
@@ -1154,6 +1244,7 @@ impl Scene {
             z: 0.0,
             layer: SceneLayer::Under,
             parent: None,
+            children: Vec::new(),
             flags,
             opacity: 1.0,
             handlers: None,
@@ -1174,13 +1265,14 @@ impl Scene {
     /// the one moment to walk the final animated bounds into the AccessKit tree,
     /// since it otherwise suppresses per-frame AT re-walks during the animation.
     pub fn refresh_dynamic_bounds(&mut self) -> bool {
+        // Nothing declared dynamic: the common case, and it must cost nothing —
+        // this runs at the top of every `build()`, and `build()` runs on every
+        // model mutation.
+        if self.dynamic.is_empty() {
+            return false;
+        }
         // Snapshot ids first to avoid borrow conflicts.
-        let dynamic_ids: Vec<ItemId> = self
-            .entries
-            .iter()
-            .filter(|e| e.dynamic_bounds)
-            .map(|e| e.id)
-            .collect();
+        let dynamic_ids: Vec<ItemId> = self.dynamic.clone();
         let mut changed = false;
         let seq_before = self.mutation_seq.get();
         for id in dynamic_ids {
@@ -1211,9 +1303,26 @@ impl Scene {
 
     fn push_entry(&mut self, entry: SceneEntry) -> ItemId {
         let id = entry.id;
+        let parent = entry.parent;
+        let heavyweight = matches!(entry.kind, SceneEntryKind::Widget(_));
+        let dynamic = entry.dynamic_bounds;
         let pos = self.entries.len();
         self.entries.push(entry);
         self.entry_index.insert(id, pos);
+        // Entries only ever append, so both side lists stay in entry order —
+        // which `heavyweight_ids` promises and `SceneView` relies on for child
+        // ordering.
+        if heavyweight {
+            self.heavyweight.push(id);
+        }
+        if dynamic {
+            self.dynamic.push(id);
+        }
+        // Every insertion path builds a root-level entry today, but the
+        // adjacency is maintained here rather than assumed, so a future
+        // constructor that arrives parented cannot silently break the
+        // `parent` ⇄ `children` invariant.
+        self.link_child(parent, id);
         let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
         self.index.insert(id, aabb);
         self.emit_item_change(ItemChange::Added { id });
@@ -1322,7 +1431,16 @@ impl Scene {
     /// whole window in which the two are transiently out of step.
     fn emit_item_change(&self, change: ItemChange) {
         self.bump_mutation();
+        self.item_change_seq
+            .set(self.item_change_seq.get().wrapping_add(1));
         self.notify_or_queue(PendingNotification::Item(change));
+    }
+
+    /// How many [`ItemChange`]s this scene has emitted, ever — the counter a
+    /// consumer caching per-item data validates against. See the field's own
+    /// documentation for why it is not [`mutation_version`](Self::mutation_version).
+    pub(crate) fn item_change_version(&self) -> u64 {
+        self.item_change_seq.get()
     }
 
     /// Queue one notification, then deliver the queue if no write scope is
@@ -1629,26 +1747,52 @@ impl Scene {
         Some(self.scene_transform(id).apply_rect(local_bounds))
     }
 
-    fn rebucket_subtree(&mut self, root: ItemId) {
-        // Re-bucket `root` and every descendant whose scene-AABB
-        // depends on the root's frame.
-        //
-        // Build a parent→children adjacency map once (O(N)) so the walk is
-        // O(N) instead of O(N²) (the previous code rescanned every entry per
-        // node).
-        let mut children: HashMap<ItemId, Vec<ItemId>> = HashMap::new();
-        for entry in &self.entries {
-            if let Some(parent) = entry.parent {
-                children.entry(parent).or_default().push(entry.id);
-            }
+    /// Record `child` under `parent`'s `children` list. `None` parent is the
+    /// scene root, which keeps no list (nothing walks down from it).
+    fn link_child(&mut self, parent: Option<ItemId>, child: ItemId) {
+        let Some(parent) = parent else { return };
+        let Some(&pos) = self.entry_index.get(&parent) else {
+            return;
+        };
+        let kids = &mut self.entries[pos].children;
+        if !kids.contains(&child) {
+            kids.push(child);
         }
+    }
 
+    /// Drop `child` from `parent`'s `children` list. The inverse of
+    /// [`link_child`](Self::link_child); every parent-pointer write pairs the
+    /// two so the adjacency never drifts from the pointers.
+    fn unlink_child(&mut self, parent: Option<ItemId>, child: ItemId) {
+        let Some(parent) = parent else { return };
+        let Some(&pos) = self.entry_index.get(&parent) else {
+            return;
+        };
+        self.entries[pos].children.retain(|c| *c != child);
+    }
+
+    /// Push `id`'s direct children onto `out`, in the order they became
+    /// children. The one downward step every subtree walk in this file takes.
+    fn push_children(&self, id: ItemId, out: &mut Vec<ItemId>) {
+        if let Some(&pos) = self.entry_index.get(&id) {
+            out.extend_from_slice(&self.entries[pos].children);
+        }
+    }
+
+    fn rebucket_subtree(&mut self, root: ItemId) {
+        // Re-bucket `root` and every descendant whose scene-AABB depends on the
+        // root's frame. The walk reads the kept `SceneEntry::children`
+        // adjacency, so it costs the moved subtree — not the model. (It used to
+        // rebuild a scene-wide parent→children `HashMap` on every call, which
+        // put `O(entries)` on each pointer sample of a drag.)
+        //
         // Cycle guard: the parent-pointer walkers (`scene_transform` etc.)
         // bound their *upward* walk with a hop cap; this *downward* walk can
         // loop forever if the parent graph ever contains a cycle (e.g. from a
         // future de-serialization bug), so we track visited nodes. A
         // well-formed tree never revisits a node, so this is also a redundant-
-        // work guard.
+        // work guard. It is sized to the subtree, not the scene: a scene of
+        // 50 000 items moving one leaf allocates a one-element set.
         let mut visited: HashSet<ItemId> = HashSet::new();
         let mut stack: Vec<ItemId> = vec![root];
         while let Some(id) = stack.pop() {
@@ -1658,9 +1802,7 @@ impl Scene {
             if let Some(aabb) = self.compute_scene_aabb(id) {
                 self.index.insert(id, aabb);
             }
-            if let Some(kids) = children.get(&id) {
-                stack.extend(kids.iter().copied());
-            }
+            self.push_children(id, &mut stack);
         }
     }
 
@@ -1849,17 +1991,29 @@ impl Scene {
     }
 
     /// Replace an item's handler set. Pass `None` to clear.
+    ///
+    /// Fires [`ItemChange::HandlersChanged`], like every other mutator on this
+    /// type: a consumer that caches handlers has no other way to learn of it.
     pub fn set_item_handlers(&mut self, id: ItemId, handlers: Option<SceneItemHandlerSet>) {
         if let Some(&pos) = self.entry_index.get(&id) {
             self.entries[pos].handlers = handlers.map(Box::new);
+            self.emit_item_change(ItemChange::HandlersChanged { id });
         }
     }
 
     /// Mutably borrow an item's handler set, lazily creating an
     /// empty one if none exists. Returns `None` for unknown ids.
     /// Allows fluent chains: `scene.handlers_mut(id).unwrap().on_tap(…).cursor(…);`.
+    ///
+    /// Fires [`ItemChange::HandlersChanged`] *before* handing the set out —
+    /// `&mut` cannot report back what the caller does with it, so the
+    /// notification means "no longer what you last read". A caller that takes
+    /// the borrow and changes nothing therefore costs one spurious
+    /// invalidation, which is the right way round: the alternative is a
+    /// consumer serving stale handlers.
     pub fn handlers_mut(&mut self, id: ItemId) -> Option<&mut SceneItemHandlerSet> {
         let pos = *self.entry_index.get(&id)?;
+        self.emit_item_change(ItemChange::HandlersChanged { id });
         let entry = self.entries.get_mut(pos)?;
         if entry.handlers.is_none() {
             entry.handlers = Some(Box::new(SceneItemHandlerSet::new()));
@@ -2138,6 +2292,8 @@ impl Scene {
                 return;
             }
             self.entries[pos].parent = parent;
+            self.unlink_child(old, child);
+            self.link_child(parent, child);
             self.rebucket_subtree(child);
             self.emit_item_change(ItemChange::ParentChanged {
                 id: child,
@@ -2171,17 +2327,27 @@ impl Scene {
         false
     }
 
-    /// Append every direct + transitive descendant of `id` into
-    /// `out`, breadth-first across declaration order. The id
-    /// itself is **not** included.
+    /// Append every direct + transitive descendant of `id` into `out`, each
+    /// parent before its own children. The id itself is **not** included.
+    ///
+    /// Costs the subtree, not the scene: the walk steps through the kept
+    /// `SceneEntry::children` adjacency rather than rescanning every entry per
+    /// visited node. A cycle in the parent graph is bounded by the visited set
+    /// rather than looping forever.
     pub fn collect_descendants(&self, id: ItemId, out: &mut Vec<ItemId>) {
+        let mut visited: HashSet<ItemId> = HashSet::new();
+        visited.insert(id);
         let mut frontier: Vec<ItemId> = vec![id];
+        let mut kids: Vec<ItemId> = Vec::new();
         while let Some(parent) = frontier.pop() {
-            for entry in &self.entries {
-                if entry.parent == Some(parent) {
-                    out.push(entry.id);
-                    frontier.push(entry.id);
+            kids.clear();
+            self.push_children(parent, &mut kids);
+            for child in kids.iter().copied() {
+                if !visited.insert(child) {
+                    continue;
                 }
+                out.push(child);
+                frontier.push(child);
             }
         }
     }
@@ -2270,7 +2436,29 @@ impl Scene {
         to_remove.reverse();
         to_remove.push(id);
         let removal_set: HashSet<ItemId> = to_remove.iter().copied().collect();
+        // Detach the subtree from whatever survives above it, before the
+        // entries go: the `parent` ⇄ `children` invariant has to hold for the
+        // surviving parent, whose list would otherwise name a dead id and send
+        // the next `rebucket_subtree` walking into an entry that no longer
+        // exists. Descendants are removed together with their parents, so only
+        // the named root can have a surviving parent — the loop is written
+        // against every removed id anyway, so a partial removal could never
+        // leave a stale link.
+        for removed_id in &to_remove {
+            let parent = self
+                .entry_index
+                .get(removed_id)
+                .map(|&pos| self.entries[pos].parent)
+                .unwrap_or(None);
+            if let Some(parent) = parent
+                && !removal_set.contains(&parent)
+            {
+                self.unlink_child(Some(parent), *removed_id);
+            }
+        }
         self.entries.retain(|e| !removal_set.contains(&e.id));
+        self.heavyweight.retain(|id| !removal_set.contains(id));
+        self.dynamic.retain(|id| !removal_set.contains(id));
         self.entry_index.clear();
         for (pos, entry) in self.entries.iter().enumerate() {
             self.entry_index.insert(entry.id, pos);
@@ -2329,15 +2517,14 @@ impl Scene {
         if !self.entry_index.contains_key(&id) {
             return;
         }
-        let children: Vec<ItemId> = self
-            .entries
-            .iter()
-            .filter(|e| e.parent == Some(id))
-            .map(|e| e.id)
-            .collect();
+        let children: Vec<ItemId> = {
+            let pos = self.entry_index[&id];
+            self.entries[pos].children.clone()
+        };
         for child in children {
             if let Some(&pos) = self.entry_index.get(&child) {
                 self.entries[pos].parent = None;
+                self.unlink_child(Some(id), child);
                 // Re-bucket the entire detached subtree: each child's
                 // scene_transform changed (no longer composes `id`'s),
                 // so spatial-index AABBs are stale. Subtree-walk
@@ -2355,6 +2542,16 @@ impl Scene {
     // -----------------------------------------------------------------
     // Queries
     // -----------------------------------------------------------------
+
+    /// Where `id` sits in `entries`, the scene's declaration order.
+    ///
+    /// The accessibility walk publishes siblings in this order — it is the
+    /// order a screen reader reads the scene in — so a consumer that narrows
+    /// the walk to a subset (the items inside a region, say) has to restore
+    /// it, and a `HashSet` of ids does not carry it.
+    pub(crate) fn entry_order(&self, id: ItemId) -> Option<usize> {
+        self.entry_index.get(&id).copied()
+    }
 
     /// All items whose scene-AABB intersects `scene_rect`.
     ///
@@ -2528,14 +2725,14 @@ impl Scene {
             let Some(shape) = self.item_shape(id) else {
                 return false;
             };
-            let Some(inv) = self.scene_transform(id).inverse() else {
-                return false;
-            };
-            let local = region.to_local(&inv);
+            // The shape is local and the region is scene-space; which frame
+            // the two meet in is a decision, not a detail, and `ItemShape`
+            // owns it — see `ItemShape::contained_by_scene_region`.
+            let xform = self.scene_transform(id);
             if mode.requires_containment() {
-                shape.contained_by_region(&local, view_scale)
+                shape.contained_by_scene_region(region, &xform, view_scale)
             } else {
-                shape.intersects_region(&local, view_scale)
+                shape.intersects_scene_region(region, &xform, view_scale)
             }
         } else {
             let Some(rect) = self.scene_rect(id) else {
@@ -3253,7 +3450,7 @@ pub(crate) fn rects_intersect(a: Rect, b: Rect) -> bool {
 }
 
 /// AABB of the union of two rectangles.
-fn union_two_rects(a: Rect, b: Rect) -> Rect {
+pub(crate) fn union_two_rects(a: Rect, b: Rect) -> Rect {
     let x = a.x.min(b.x);
     let y = a.y.min(b.y);
     let r = a.right().max(b.right());
@@ -4166,5 +4363,209 @@ mod tests {
                 .items_in_rect(Rect::new(400.0, 400.0, 10.0, 10.0))
                 .contains(&id)
         );
+    }
+
+    // ------------------------------------------------- parent ⇄ children
+
+    /// The invariant the kept adjacency stands on. Every downward walk in this
+    /// file — the index re-bucket, `collect_descendants`, and through them
+    /// removal, drag-group moves and the view's snapshot patch — reads
+    /// `children`, so a list that drifts from the parent pointers is not a
+    /// slow scene, it is a wrong one.
+    fn assert_parent_and_children_agree(scene: &Scene, what: &str) {
+        for entry in &scene.entries {
+            let mut seen = std::collections::HashSet::new();
+            for child in &entry.children {
+                assert!(
+                    seen.insert(*child),
+                    "{what}: {:?} lists {:?} twice",
+                    entry.id,
+                    child
+                );
+                assert_eq!(
+                    scene.parent_of(*child),
+                    Some(entry.id),
+                    "{what}: {:?} lists {:?}, which does not point back",
+                    entry.id,
+                    child
+                );
+            }
+        }
+        for entry in &scene.entries {
+            let Some(parent) = entry.parent else { continue };
+            let pos = scene.entry_index[&parent];
+            assert!(
+                scene.entries[pos].children.contains(&entry.id),
+                "{what}: {:?} points at {:?}, which does not list it",
+                entry.id,
+                parent
+            );
+        }
+    }
+
+    fn unit(scene: &mut Scene, at: Point) -> ItemId {
+        scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), at)
+    }
+
+    #[test]
+    fn parent_and_children_agree_through_every_door() {
+        let mut scene = Scene::new();
+        let a = unit(&mut scene, Point::ZERO);
+        let b = unit(&mut scene, Point::new(10.0, 0.0));
+        let c = unit(&mut scene, Point::new(20.0, 0.0));
+        let d = unit(&mut scene, Point::new(30.0, 0.0));
+        assert_parent_and_children_agree(&scene, "after insert");
+
+        scene.set_item_parent(b, Some(a));
+        scene.set_item_parent(c, Some(b));
+        scene.set_item_parent(d, Some(b));
+        assert_parent_and_children_agree(&scene, "after parenting");
+
+        // Re-parent: the old list must lose it and the new one gain it.
+        scene.set_item_parent(d, Some(a));
+        assert_parent_and_children_agree(&scene, "after re-parenting");
+        assert_eq!(scene.entries[scene.entry_index[&b]].children, vec![c]);
+
+        // Rejected by the cycle guard — and must leave the adjacency alone.
+        scene.set_item_parent(a, Some(c));
+        assert_parent_and_children_agree(&scene, "after a rejected re-parent");
+        assert_eq!(scene.parent_of(a), None);
+
+        scene.orphan(a);
+        assert_parent_and_children_agree(&scene, "after orphan");
+        assert!(scene.entries[scene.entry_index[&a]].children.is_empty());
+
+        scene.set_item_parent(c, Some(b));
+        scene.remove(b);
+        assert_parent_and_children_agree(&scene, "after removing a subtree");
+        assert_eq!(scene.scene_rect(c), None, "the subtree went with it");
+    }
+
+    /// A removed child must not stay in its surviving parent's list: the next
+    /// move would walk into an entry that no longer exists.
+    #[test]
+    fn removing_a_child_unlinks_it_from_a_surviving_parent() {
+        let mut scene = Scene::new();
+        let parent = unit(&mut scene, Point::ZERO);
+        let keep = unit(&mut scene, Point::new(10.0, 0.0));
+        let drop = unit(&mut scene, Point::new(20.0, 0.0));
+        scene.set_item_parent(keep, Some(parent));
+        scene.set_item_parent(drop, Some(parent));
+
+        scene.remove(drop);
+        assert_parent_and_children_agree(&scene, "after removing one child");
+        assert_eq!(
+            scene.entries[scene.entry_index[&parent]].children,
+            vec![keep]
+        );
+
+        // The walk still reaches the survivor.
+        scene.set_local_pos(parent, Point::new(100.0, 0.0));
+        assert_eq!(scene.scene_pos(keep), Some(Point::new(110.0, 0.0)));
+        // Starts past the parent's own box (100,0)–(110,10), so only the
+        // survivor's re-bucketed rect (110,0)–(120,10) can answer.
+        assert_eq!(
+            scene.items_in_rect(Rect::new(112.0, -5.0, 20.0, 20.0)),
+            vec![keep]
+        );
+    }
+
+    /// `orphan` bypasses `set_item_parent`, so it has to maintain the adjacency
+    /// itself — and a detached child must stop following its old parent.
+    #[test]
+    fn an_orphaned_child_stops_following_its_old_parent() {
+        let mut scene = Scene::new();
+        let parent = unit(&mut scene, Point::ZERO);
+        let child = unit(&mut scene, Point::new(10.0, 0.0));
+        scene.set_item_parent(child, Some(parent));
+        scene.orphan(parent);
+
+        scene.set_local_pos(parent, Point::new(500.0, 0.0));
+        assert_eq!(
+            scene.scene_pos(child),
+            Some(Point::new(10.0, 0.0)),
+            "an orphaned child keeps its own frame",
+        );
+        assert_eq!(
+            scene.items_in_rect(Rect::new(5.0, -5.0, 20.0, 20.0)),
+            vec![child],
+            "…and the spatial index agrees",
+        );
+    }
+
+    /// The re-bucket walks down the kept adjacency, so a *re-parented*
+    /// grandchild must still follow a move of the new root. A `children` list
+    /// updated on one side only would leave the index — and therefore every
+    /// rect query and the view's cull — pointing at the old place.
+    #[test]
+    fn a_reparented_subtree_still_rebuckets_on_a_move() {
+        let mut scene = Scene::new();
+        let a = unit(&mut scene, Point::ZERO);
+        let b = unit(&mut scene, Point::new(10.0, 0.0));
+        let leaf = unit(&mut scene, Point::new(20.0, 0.0));
+        scene.set_item_parent(leaf, Some(a));
+        // …and then moved across to `b`.
+        scene.set_item_parent(leaf, Some(b));
+
+        scene.set_local_pos(b, Point::new(200.0, 0.0));
+        assert_eq!(scene.scene_pos(leaf), Some(Point::new(220.0, 0.0)));
+        assert_eq!(
+            scene.items_in_rect(Rect::new(215.0, -5.0, 20.0, 20.0)),
+            vec![leaf],
+            "the index followed the re-parented leaf",
+        );
+        // And the old parent no longer drags it.
+        scene.set_local_pos(a, Point::new(-500.0, 0.0));
+        assert_eq!(scene.scene_pos(leaf), Some(Point::new(220.0, 0.0)));
+    }
+
+    /// `collect_descendants` reports each parent before its own children, which
+    /// is what makes `remove`'s reversal a leaves-first order.
+    #[test]
+    fn collect_descendants_reports_parents_before_children() {
+        let mut scene = Scene::new();
+        let root = unit(&mut scene, Point::ZERO);
+        let mid = unit(&mut scene, Point::ZERO);
+        let leaf = unit(&mut scene, Point::ZERO);
+        let sibling = unit(&mut scene, Point::ZERO);
+        scene.set_item_parent(mid, Some(root));
+        scene.set_item_parent(leaf, Some(mid));
+        scene.set_item_parent(sibling, Some(root));
+
+        let mut out = Vec::new();
+        scene.collect_descendants(root, &mut out);
+        assert_eq!(out.len(), 3);
+        let pos = |id: ItemId| out.iter().position(|o| *o == id).expect("present");
+        assert!(
+            pos(mid) < pos(leaf),
+            "a parent is reported before its child"
+        );
+        assert!(out.contains(&sibling));
+        assert!(!out.contains(&root), "the id itself is not a descendant");
+    }
+
+    /// The side lists `SceneView::build` reads are kept, so they must survive
+    /// the mutators that change what is in them — in entry order, which the
+    /// view relies on for child ordering.
+    #[test]
+    fn the_heavyweight_and_dynamic_side_lists_track_the_entries() {
+        let mut scene = Scene::new();
+        let w1 = scene.add_widget(FillWidget::new(), Rect::ZERO);
+        let light = unit(&mut scene, Point::ZERO);
+        let w2 = scene.add_widget(FillWidget::new(), Rect::ZERO);
+        assert_eq!(scene.heavyweight_ids(), vec![w1, w2], "in entry order");
+
+        scene.remove(w1);
+        assert_eq!(scene.heavyweight_ids(), vec![w2]);
+        scene.remove(light);
+        assert_eq!(scene.heavyweight_ids(), vec![w2]);
+
+        // A dynamic item is discovered by the refresh through the same route.
+        let dynamic =
+            scene.add_item_dynamic(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+        assert_eq!(scene.dynamic, vec![dynamic]);
+        scene.remove(dynamic);
+        assert!(scene.dynamic.is_empty());
+        assert!(!scene.refresh_dynamic_bounds(), "nothing dynamic is left");
     }
 }

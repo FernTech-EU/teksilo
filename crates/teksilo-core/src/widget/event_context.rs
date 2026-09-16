@@ -211,8 +211,11 @@ pub struct EventContext<'ops> {
     /// header → into the tab panel), distinct from `focus_requests` which
     /// focuses the container itself as a last resort.
     pub(crate) focus_into_requests: Vec<crate::widget_id::WidgetId>,
-    /// Rect-based "scroll this into view" requests, in **absolute tree
-    /// (window) coordinates**. Queued by [`ensure_visible`](EventContext::ensure_visible)
+    /// Rect-based "scroll this into view" requests, stated in the **queuing
+    /// widget's own bounds space** — window coordinates everywhere except
+    /// inside a content transform (a `SceneView`'s scene coordinates), which
+    /// the ancestor walk carries outward one space at a time.
+    /// Queued by [`ensure_visible`](EventContext::ensure_visible)
     /// / [`ensure_visible_with_margin`](EventContext::ensure_visible_with_margin).
     /// Drained in `collect_from_ctx`, which walks the ancestors of the widget
     /// whose handler queued the request and dispatches

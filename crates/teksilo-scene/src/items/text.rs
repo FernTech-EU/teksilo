@@ -504,23 +504,23 @@ impl SceneItem for TextItem {
             .unwrap_or_else(|| painted.clone());
 
         let placed = self.placed.borrow();
-        // Real extents only when they describe *this* string, in the
-        // space the node's own box is advertised in, under a mapping a
-        // text run can express. A label override announces a different
-        // string from the one that was measured; scene-space bounds put
-        // the runs and their owner in different coordinate systems; the
-        // item's own rotation and any non-uniform view transform cannot
-        // be expressed at all.
+        // Real extents only when they describe *this* string, under a mapping
+        // a text run can express. A label override announces a different
+        // string from the one that was measured, and an axis-aligned run of
+        // character boxes cannot say where a rotated item's characters are.
+        //
+        // The *camera* is not part of this test. Runs are emitted in scene
+        // coordinates like every other rectangle in the scene subtree, and the
+        // view transform is declared once on the node above — so a rotated or
+        // non-uniformly zoomed camera is expressed exactly rather than ruling
+        // real geometry out. Only the item's own `scene_transform` has to be
+        // expressible here, and it almost always is: a plain placement.
         let measured = placed
             .as_ref()
-            .filter(|p| {
-                p.text == announced
-                    && ctx.bounds_space == crate::a11y::A11yBoundsSpace::Screen
-                    && self.rotation.abs() <= f32::EPSILON
-            })
-            .zip(uniform_scale(&ctx.local_to_screen));
+            .filter(|p| p.text == announced && self.rotation.abs() <= f32::EPSILON)
+            .zip(uniform_scale(&ctx.local_to_scene));
 
-        // Rects are already in window space here, and the nested builder a
+        // Rects are absolute (scene-space) here, and the nested builder a
         // scene item is emitted through discards local ones — a run with
         // no box at all would empty `bounding_boxes()` for every range
         // touching it.
@@ -531,13 +531,13 @@ impl SceneItem for TextItem {
                 TextRunSource::from_geometry(
                     &announced,
                     &scaled,
-                    ctx.local_to_screen.apply_point(p.origin),
+                    ctx.local_to_scene.apply_point(p.origin),
                     ctx.item_id.as_u64(),
                 )
                 .with_absolute_rects()
             }
             None => TextRunSource::flat(&announced, ctx.item_id.as_u64())
-                .with_fallback_rect(ctx.advertised_bounds)
+                .with_fallback_rect(ctx.scene_bounds)
                 .with_absolute_rects(),
         };
 

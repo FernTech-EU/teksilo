@@ -171,32 +171,61 @@ impl<'a> SceneItemPaintContext<'a> {
 
 /// Context handed to [`SceneItem::accessibility`].
 ///
-/// Carries the item's screen-projected bounds (so items wanting to
-/// emit AT-relative coordinates can read them) and its `ItemId` so
-/// implementations can derive synthetic AT NodeIds for sub-elements.
+/// # The space every rectangle here is in
+///
+/// **Scene coordinates, and so is everything the item emits.** An item's
+/// AccessKit node carries its scene-space rectangle, and the view transform is
+/// declared once, on the node at the top of the scene subtree, via
+/// [`to_accesskit_affine`](teksilo_core::accessibility::to_accesskit_affine).
+/// The consumer composes that chain for `bounding_box()` and inverts it per
+/// step when hit-testing, so the projection happens where AccessKit expects it
+/// — which is what makes an item's rectangle, its per-character text geometry
+/// and an explore-by-touch probe all agree at any pan, zoom or rotation.
+///
+/// It is also what keeps the two tiers in one space: a heavyweight card's
+/// arena bounds are scene coordinates too, and the framework walker declares
+/// the same transform on it. An item that projected its own geometry into
+/// window space instead would have it transformed a second time.
+///
+/// So: **never multiply an emitted rectangle by the view transform.** The same
+/// rule the framework states for the device scale factor, one level down.
+///
+/// # A box, not a silhouette
+///
+/// The box reported for an item is its `local_bounds` **rectangle**, not its
+/// [`ItemShape`](crate::ItemShape). AccessKit has no other shape to offer, so
+/// an item whose silhouette is narrower than its box — a rounded
+/// [`RectItem`](crate::RectItem), a stroke-only [`PathItem`](crate::PathItem) —
+/// advertises ground a pointer aimed there would miss. That is deliberate and
+/// it does not cost an AT client the element: a client identifies an element by
+/// node id, announces and spatially navigates by this rectangle, and an
+/// AccessKit action arrives addressed to the node rather than as a synthetic
+/// press at a coordinate. Advertising the narrower rectangle instead would be
+/// strictly worse — it would shrink what the element is *said* to cover without
+/// making any more of it reachable. The per-item magnitude is on
+/// [`RectItem::shape`](crate::RectItem).
 pub struct SceneItemA11yContext {
     /// View transform (pan/zoom/rotation) at AT-build time.
+    ///
+    /// Not for projecting geometry — see the type's own documentation. It is
+    /// here for an item whose *content* depends on the camera: how much detail
+    /// to describe at the current zoom, say.
     pub view_transform: Transform2D,
-    /// Item's bounds projected into screen space.
-    pub screen_bounds: Rect,
+    /// The item's bounds in scene coordinates — the box written onto its
+    /// AccessKit node.
+    pub scene_bounds: Rect,
     /// The id under which this item is being emitted.
     pub item_id: ItemId,
-    /// The item's own local coordinates projected all the way into
-    /// window space — its `scene_transform` composed with
-    /// `view_transform`.
+    /// The item's own local coordinates mapped into scene coordinates — its
+    /// `scene_transform`.
     ///
     /// An item emitting sub-element geometry of its own (a
-    /// [`TextItem`](crate::TextItem)'s AccessKit text runs, whose
-    /// per-character positions AT reads in window space) needs the whole
-    /// chain, not just the view half: `screen_bounds` is an axis-aligned
-    /// box and says nothing about where a point *inside* the item lands.
-    pub local_to_screen: Transform2D,
-    /// The box actually written onto the item's AccessKit node, in
-    /// whichever space [`bounds_space`](Self::bounds_space) names.
-    pub advertised_bounds: Rect,
-    /// Which space the item's bounds — and therefore any geometry it
-    /// emits itself — are advertised in.
-    pub bounds_space: crate::a11y::A11yBoundsSpace,
+    /// [`TextItem`](crate::TextItem)'s AccessKit text runs, whose per-character
+    /// positions and widths live in the same space as the node's box) needs
+    /// this rather than [`scene_bounds`](Self::scene_bounds), which is an
+    /// axis-aligned box and says nothing about where a point *inside* the item
+    /// lands.
+    pub local_to_scene: Transform2D,
 }
 
 /// A lightweight, paint-only scene-graph item.

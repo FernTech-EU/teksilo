@@ -9,10 +9,22 @@
 //! exercise it that way, through a real `SceneView` in a `WidgetTree`
 //! with a measuring text backend.
 //!
-//! The walks go through `accessibility_tree_snapshot`, which is a full
-//! walk every time. `sync_accessibility` serves a cached tree whose
-//! synthetic children are patched only when their *owner* widget moved,
-//! and panning a scene moves the content inside a stationary viewport.
+//! The walks go through `sync_accessibility`, which is the function every
+//! platform adapter is fed: it serves a *cached* tree, so a claim measured
+//! through `accessibility_tree_snapshot` — a full walk every time — cannot see
+//! a missing invalidation.
+//!
+//! # Two spaces, and which assertion belongs in which
+//!
+//! A run's rectangle and its per-character positions are written in **scene**
+//! coordinates, the same space as the item's own box, and the camera is
+//! declared once as an AccessKit node transform above them. So a raw
+//! `character_positions()` is the logical layout's own and does not move when
+//! the view zooms; what an assistive technology reads —
+//! `Range::bounding_boxes()`, which every platform's
+//! `AXBoundsForRange` / `GetBoundingRectangles` / `GetCharacterExtents` answers
+//! through — is the composed one and does. Assertions about what a magnifier
+//! goes to therefore go through the consumer.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -55,7 +67,7 @@ fn view_of(tree: &WidgetTree, view_id: WidgetId) -> &SceneView {
 fn refresh(tree: &mut WidgetTree) -> TreeUpdate {
     tree.layout(SizeProposal::exact(800.0, 600.0));
     let _ = tree.render();
-    tree.accessibility_tree_snapshot()
+    tree.sync_accessibility()
 }
 
 fn node(update: &TreeUpdate, id: NodeId) -> &Node {
@@ -83,6 +95,23 @@ fn runs(update: &TreeUpdate, view_id: WidgetId, item_id: ItemId) -> Vec<&Node> {
         .map(|cid| node(update, *cid))
         .filter(|n| n.role() == Role::TextRun)
         .collect()
+}
+
+/// The rectangle an assistive technology sees for a node: raw bounds composed
+/// with every transform above it, which is what `bounding_box()` is for.
+fn screen_box(update: &TreeUpdate, id: NodeId) -> accesskit::Rect {
+    let consumer = Tree::new(update.clone(), false);
+    let state = consumer.state();
+    find(state, id)
+        .bounding_box()
+        .expect("the node advertises a box")
+}
+
+/// The boxes a platform answers `AXBoundsForRange` with, for the whole text.
+fn range_boxes(update: &TreeUpdate, id: NodeId) -> Vec<accesskit::Rect> {
+    let consumer = Tree::new(update.clone(), false);
+    let state = consumer.state();
+    find(state, id).document_range().bounding_boxes()
 }
 
 /// Locate a node in the consumer's tree by the id it reports.
@@ -151,14 +180,19 @@ fn the_runs_are_direct_children_of_the_text_item() {
 }
 
 #[test]
-fn a_zoomed_view_scales_the_reported_character_positions() {
+fn a_zoomed_view_scales_the_extents_a_platform_answers_with() {
     // Zoom never reflows scene text — the view paints one logical layout
-    // larger — so the window-space extents AT reads are the layout's
-    // own, multiplied by the zoom.
+    // larger — so the extents AT reads are the layout's own, multiplied by the
+    // zoom. The multiplication is the camera's, declared once on the node
+    // above the runs, so it is visible in `bounding_boxes()` and deliberately
+    // not in the raw per-character offsets: those stay the exact logical
+    // layout, which is what keeps them right under a *rotated* camera too,
+    // where scaling them by hand could not be right at all.
     let (mut tree, view_id, item_id) = painted(
         TextItem::new(lit!("abcd"), Rect::new(0.0, 0.0, 100.0, 30.0)),
         Point::new(10.0, 20.0),
     );
+    let id = item_id_of(view_id, item_id);
 
     let update = refresh(&mut tree);
     let unzoomed_runs = runs(&update, view_id, item_id);
@@ -171,12 +205,11 @@ fn a_zoomed_view_scales_the_reported_character_positions() {
         unzoomed_runs[0].character_widths(),
         Some(&[CHAR_WIDTH; 4][..])
     );
-    let unzoomed = unzoomed_runs[0]
-        .bounds()
-        .expect("a measured run reports its box");
-    assert_eq!(unzoomed.x0, 10.0);
-    assert_eq!(unzoomed.x1, 10.0 + 4.0 * f64::from(CHAR_WIDTH));
-    assert_eq!(unzoomed.y1 - unzoomed.y0, f64::from(LINE_HEIGHT));
+    let unzoomed = range_boxes(&update, id);
+    assert_eq!(unzoomed.len(), 1);
+    assert_eq!(unzoomed[0].x0, 10.0);
+    assert_eq!(unzoomed[0].x1, 10.0 + 4.0 * f64::from(CHAR_WIDTH));
+    assert_eq!(unzoomed[0].y1 - unzoomed[0].y0, f64::from(LINE_HEIGHT));
 
     view_of(&tree, view_id).set_zoom(2.0);
     let update = refresh(&mut tree);
@@ -184,19 +217,15 @@ fn a_zoomed_view_scales_the_reported_character_positions() {
     assert_eq!(zoomed_runs.len(), 1);
     assert_eq!(
         zoomed_runs[0].character_positions(),
-        Some(&[0.0, 2.0 * CHAR_WIDTH, 4.0 * CHAR_WIDTH, 6.0 * CHAR_WIDTH][..]),
-        "character positions are window-space offsets, not logical ones"
+        Some(&[0.0, CHAR_WIDTH, 2.0 * CHAR_WIDTH, 3.0 * CHAR_WIDTH][..]),
+        "the per-character offsets are the logical layout's, not the camera's"
     );
-    assert_eq!(
-        zoomed_runs[0].character_widths(),
-        Some(&[2.0 * CHAR_WIDTH; 4][..])
-    );
-    let zoomed = zoomed_runs[0]
-        .bounds()
-        .expect("a measured run reports its box");
-    assert_eq!(zoomed.x0, 20.0);
-    assert_eq!(zoomed.x1, 20.0 + 8.0 * f64::from(CHAR_WIDTH));
-    assert_eq!(zoomed.y1 - zoomed.y0, 2.0 * f64::from(LINE_HEIGHT));
+
+    let zoomed = range_boxes(&update, id);
+    assert_eq!(zoomed.len(), 1);
+    assert_eq!(zoomed[0].x0, 20.0);
+    assert_eq!(zoomed[0].x1, 20.0 + 8.0 * f64::from(CHAR_WIDTH));
+    assert_eq!(zoomed[0].y1 - zoomed[0].y0, 2.0 * f64::from(LINE_HEIGHT));
 }
 
 #[test]
@@ -231,24 +260,17 @@ fn a_scrolled_view_moves_its_items_and_their_runs() {
         TextItem::new(lit!("abcd"), Rect::new(0.0, 0.0, 100.0, 30.0)),
         Point::new(10.0, 20.0),
     );
+    let id = item_id_of(view_id, item_id);
     let before = refresh(&mut tree);
-    let item_before = item_node(&before, view_id, item_id)
-        .bounds()
-        .expect("the item advertises a box");
-    let run_before = runs(&before, view_id, item_id)[0]
-        .bounds()
-        .expect("a measured run reports its box");
+    let item_before = screen_box(&before, id);
+    let run_before = range_boxes(&before, id)[0];
 
     view_of(&tree, view_id).set_pan(Vec2::new(-30.0, -45.0));
     let pan = view_of(&tree, view_id).pan();
     assert_ne!(pan.x, 0.0, "the scene must actually have panned");
     let after = refresh(&mut tree);
-    let item_after = item_node(&after, view_id, item_id)
-        .bounds()
-        .expect("the item advertises a box");
-    let run_after = runs(&after, view_id, item_id)[0]
-        .bounds()
-        .expect("a measured run reports its box");
+    let item_after = screen_box(&after, id);
+    let run_after = range_boxes(&after, id)[0];
 
     assert_eq!(item_after.x0 - item_before.x0, f64::from(pan.x));
     assert_eq!(item_after.y0 - item_before.y0, f64::from(pan.y));

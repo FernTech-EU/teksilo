@@ -9,8 +9,8 @@ reference at [`teksilo-scene.md`](teksilo-scene.md).
 
 `SceneView` ships an accessible tree out of the box: every visible
 heavyweight widget participates as a normal child, every visible
-lightweight item gets a synthetic AT node with role +
-screen-projected bounds, Tab cycles in scene-insertion order. This
+lightweight item gets a synthetic AT node with a role and a
+rectangle, Tab cycles in scene-insertion order. This
 document covers the levers that override that default when the AT
 shape needs to *diverge* from the visual layout — the typical case
 for story corkboards, node-graph editors, CAD canvases, anything
@@ -50,7 +50,68 @@ plus one viewport-width margin — giving screen-reader users a
 one-screen "lookahead" for navigation. `AllItems` always emits
 everything (good for small scenes, < ~500 items). `ViewportOnly`
 strictly limits emission to the current viewport (large scenes where
-off-screen enumeration would overwhelm AT clients).
+off-screen enumeration would overwhelm AT clients) — strictly, including
+against a generous [`retention_margin`](../crates/teksilo-scene/src/view.rs);
+see the third consequence below.
+
+### It governs both tiers
+
+It used to govern only the lightweight one. A heavyweight card — a real
+`Widget` added with `Scene::add_widget` — was handed to the framework walker no
+matter where it was, so `ViewportOnly` on a 10 000-card scene still published
+10 000 AccessKit nodes and 10 000 Tab stops, and a card 90 000 px away sat in
+the Tab ring between two visible ones. The setting silently did not do the one
+thing its documentation is for.
+
+It does now, and through the arena rather than through the walker: a card
+outside the region is **parked dormant**, which takes it out of paint, the
+layout recursion, the accessibility tree and the Tab ring in one move, and keeps
+its focus, text and animation state for when the camera brings it back. Measured
+on a scene holding 24 cards on screen (`cargo test -p teksilo-scene --test
+heavyweight_retention_probe --release -- --nocapture`):
+
+| off-screen cards | AT nodes | Tab stops | AT walk |
+| ---: | ---: | ---: | ---: |
+| 0 | 28 | 25 | 39 µs |
+| 1 000 | 28 | 25 | 50 µs |
+| 20 000 | 28 | 25 | 163 µs |
+| 50 000 | 28 | 25 | 371 µs |
+
+Before: 1 028 / 20 028 / 50 028 nodes, 1 025 / 20 025 / 50 025 stops, and
+769 µs / 18 165 µs / 45 134 µs of walk.
+
+Three consequences worth knowing:
+
+* **`AllItems` parks nothing.** Its promise — "a complete table of contents" —
+  is a promise about reachability, so the region it asks for is unbounded and
+  every card stays live. That is the opt-out for a view that wants each card
+  enumerable wherever it is.
+* **The region a card is kept in is never smaller than the region this mode
+  asks to enumerate.** The two are unioned, so the walk can never be asked to
+  describe a card the arena has parked, and the published tree can never name a
+  node that is not in it. [`SceneView::retention_margin`](../crates/teksilo-scene/src/view.rs)
+  widens it further, in screen pixels, so a card wakes shortly *before* it
+  becomes visible rather than on the frame it does.
+* **…and being kept is not the same as being listed.** That containment is
+  one-directional on purpose. Where the retention region is *strictly* wider —
+  `ViewportOnly` with a non-zero margin — the difference is a band of cards
+  that are alive and **not** enumerated: laid out, holding their state, still
+  Tab stops, and absent from the AccessKit tree. `retention_margin` is a
+  lifecycle knob and this mode is the accessibility statement; raising the
+  first must not quietly widen the second, or `ViewportOnly` would not mean
+  what it says. The suppression is done through the view's
+  `accessibility_children`, which the framework walker uses for both the child
+  push and the recursion — so an unlisted card leaves no node and nothing
+  naming one. The default mode is not in this case at all: its one-screen
+  reach dwarfs the 96 px default margin, so it lists everything it keeps.
+* **A card the user is using is pinned wherever it is** — one holding the
+  keyboard focus, a captured pointer or an in-flight drag source. Parking it
+  would clear the caret or cancel the selection because the *view* moved, which
+  is not something the user asked for. The pin covers the listing too, and has
+  to: a published tree names its focused node, so a focus the walk did not emit
+  is a broken update rather than a missing one. Focus landing on an unlisted
+  card publishes it in the same pass — moving the focus is itself a change to
+  what a culling parent was asked, so the pass runs even though nothing moved.
 
 ---
 
@@ -274,19 +335,68 @@ automatically so the focus indicator stays on screen.
 SceneView::new(scene)
     .a11y_label(tr!(graph_data_area()))
     .nested_a11y(true)              // emit Role::Region instead of Role::Pane
-    .a11y_bounds_space(A11yBoundsSpace::Scene)
-    // Screen (default, view-projected) | Scene (independent of pan / zoom)
 ```
 
 `Pane` is the right role for a top-level scene; `Region` is for an
 inner scene inside another (a chart's data area inside a chart's
 chrome). Switch via `nested_a11y(true)`.
 
-`a11y_bounds_space` controls the coordinate frame reported to AT for
-items: `Screen` (view-projected, the framework default) is right for
-most cases; `Scene` is right when AT users should be able to reason
-about "where in the design" an item sits, independent of the current
-pan / zoom (CAD canvases, blueprint editors).
+---
+
+## One coordinate space, declared once
+
+**Every rectangle in the scene subtree is published in scene coordinates, and
+the camera is declared once as an AccessKit node transform at the top of that
+subtree.** There is no knob here and nothing for an app to configure; it is
+worth knowing because it decides what the numbers mean when you read a
+published tree, and what a `SceneItem` implementation must emit.
+
+A `SceneView` is a fixed viewport over content in a coordinate system of its
+own. A heavyweight card at scene (100, 100) keeps arena bounds of (100, 100)
+however far the camera has panned — deliberately, so a card parked off-screen
+still has a canonical position to come back to — and a lightweight item's
+rectangle is stored the same way. Neither is a window-space rectangle.
+
+AccessKit has the mechanism for exactly this. A node's `transform` applies "to
+any coordinates within this node and its descendants, including the `bounds`
+property of this node", and `bounds` are read "in the coordinate space of the
+nearest ancestor with a non-`None` transform". So one declaration at the
+boundary carries the camera to everything below it, and the consumer every
+platform adapter is built on does the composing:
+
+- a **heavyweight card**, being an ordinary arena child of a content-transform
+  node, gets the declaration from the framework walker — which is a general
+  rule about `BuildContext::set_content_transform`, not a scene special case;
+- a **lightweight item** and a **logical group** get it from the scene's own
+  emitter, on the nodes it attaches directly to the `SceneView`'s node;
+- everything deeper — a label inside a card, a text run's per-character
+  positions, a magnet's anchor — inherits it and emits nothing of its own.
+
+Three things follow, and they are what the arrangement is *for*:
+
+- **The two tiers are in one space.** A card and an item at the same scene
+  position advertise the same screen rectangle because they are described
+  identically, not because two projections round the same way.
+- **A rotated camera is exact.** `Rect` is axis-aligned, so projecting by hand
+  yields a bounding box and loses the shape; declaring the transform hands
+  AccessKit the rectangle and the mapping, and lets it take the bounding box at
+  the last moment — which is what it does with the answer anyway.
+- **Explore-by-touch works.** `accesskit_consumer`'s hit test descends by
+  inverting each node's transform, so a probe aimed at the painted position
+  reaches the card. A pre-projected subtree would be unreachable.
+
+Reading it back: `Node::bounds()` is the raw half and is in **scene**
+coordinates. `NodeRef::bounding_box()` is the composed answer, in physical
+pixels (the root carries the device scale).
+`teksilo_core::accessibility::audit::logical_bounds` is the same composition
+stopping short of the root, for a caller that works in logical pixels — an
+automation probe aiming a synthetic press, a diagnostic overlay.
+
+Writing it: a `SceneItem` implementation gets
+[`SceneItemA11yContext`](../crates/teksilo-scene/src/item.rs) carrying
+`scene_bounds` and `local_to_scene`, and **must never multiply an emitted
+rectangle by the view transform** — the same rule the framework states for the
+device scale factor, one level down. Doing so applies the camera twice.
 
 ---
 
@@ -299,11 +409,21 @@ notification path when the scene changes after mount. Two channels feed the
 - `Scene::item_change_signal` — every item mutation (add / remove / move /
   transform / visibility / opacity / z / layer / reparent). The new card
   materialises, a removed one is destroyed and its AT maps cleaned, a moved one
-  gets fresh **screen-projected** AT bounds.
+  gets its fresh scene-space AT bounds.
 - `Scene::a11y_change_signal` — *pure* logical-AT mutations that change no item
   geometry (`add_a11y_group`, `set_a11y_parent`, `add_a11y_relation`,
   `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`). Without this a
   runtime group add or reparent would be invisible to assistive tech.
+
+A **camera** change is a third path, and it needs one because it changes no
+structure, no focus and no arena bounds: the view binds its own
+`view_transform_signal` at `BindingLevel::AccessibilityOnly`, which flips
+`a11y_dirty` and nothing else. Without it `sync_accessibility` — the function
+every platform adapter is fed, as opposed to `accessibility_tree_snapshot` —
+kept serving the tree from before the pan, and the published rectangles stood
+still for both tiers however far the camera had gone. One derived signal rather
+than four: it changes once per camera change however many of pan / zoom /
+rotation moved.
 
 A relayout no longer re-walks the AccessKit tree by itself (the walk is cached,
 gated on `a11y_dirty`). `SceneView::build()` calls
@@ -324,11 +444,12 @@ addition announced. Demo: the "Add Act" button in `cargo run -p scene-corkboard`
 [teksilo-scene.md](teksilo-scene.md) → *Shared model & multi-view*), each pane
 installs its **own** observers on these two channels and walks its **own**
 AccessKit subtree — the gate (`mutation_version` delta) is per-view, and each
-pane's synthetic AT nodes carry bounds projected through *that* pane's view
-transform. A mutation on the shared model therefore reaches assistive tech for
-every pane independently. A heavyweight item added via `add_widget_item` is a
-type-erased payload, so each pane's delegate builds its own widget — and the
-item's `accessibility()` runs once per pane, under that pane's projected bounds.
+pane's synthetic AT nodes declare *that* pane's view transform. A mutation on
+the shared model therefore reaches assistive tech for every pane independently.
+A heavyweight item added via `add_widget_item` is a type-erased payload, so each
+pane's delegate builds its own widget — and the item's `accessibility()` runs
+once per pane. The rectangles it emits are the same in every pane, because they
+are the scene's; it is the declaration above them that differs.
 
 ---
 
@@ -450,10 +571,15 @@ scene.set_a11y_parent(A11yNode::Item(beam), Some(A11yNode::Group(layer_frame)));
 
 let view = SceneView::new(scene)
     .a11y_mode(A11yMode::StrictlyParallel)
-    .a11y_bounds_space(A11yBoundsSpace::Scene)
     .nested_a11y(true)
     .a11y_label(tr!(design_canvas()));
 ```
+
+A CAD client that wants to reason about "where in the design" rather than
+"where on the monitor" reads each node's raw `bounds`, which are already the
+design's own coordinates, and the view transform from the node's `transform`.
+Both are published for every scene node; see *One coordinate space, declared
+once* above.
 
 ---
 

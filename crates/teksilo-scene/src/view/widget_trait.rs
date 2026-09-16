@@ -76,8 +76,46 @@ impl Widget for SceneView {
         true
     }
 
+    /// A scene holds far more than it shows, and the half it does not show
+    /// should not be *reachable*: a card 90 000 px away is a Tab stop between
+    /// two visible ones and a node assistive tech is offered. Collapsing its
+    /// size to zero answers neither — a zero-size widget is still alive.
+    ///
+    /// So `place_children` is handed every card, parked ones included, and
+    /// reads back `WidgetPlacement::dormant`. See `place_children_impl` for
+    /// the two regions that decide it, and `SceneView::retention_margin`.
+    fn culls_children(&self) -> bool {
+        true
+    }
+
     fn wants_descendant_redirects(&self) -> bool {
         true
+    }
+
+    /// The cards this view offers assistive technology — a subset of its arena
+    /// children, in the same order.
+    ///
+    /// Being alive and being enumerated are separate questions here (see
+    /// `place_children_impl`), and this is the hook that keeps the second one
+    /// answerable at all. The framework walker uses this list for BOTH the
+    /// child push and the recursion, so a card left out of it is neither named
+    /// by a parent nor emitted as a node: no orphan, no dangling child,
+    /// nothing downstream to clean up. Suppressing through the redirect hook
+    /// instead would leave the node emitted and unreferenced, which the
+    /// consumer rejects.
+    ///
+    /// `None` — the framework's "use the arena's children" — until the first
+    /// `place_children`, because before that nothing has been decided.
+    ///
+    /// A card in this state is still a Tab stop. That is the honest reading of
+    /// the two knobs it sits between: it is alive because
+    /// [`retention_margin`](SceneView::retention_margin) said to keep it warm,
+    /// and unlisted because
+    /// [`a11y_off_screen_mode`](SceneView::a11y_off_screen_mode) said not to
+    /// offer it. Landing focus on it pins it, and the pass that lands the focus
+    /// publishes it.
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        self.at_children.borrow().clone()
     }
 
     fn a11y_redirect_descendant(

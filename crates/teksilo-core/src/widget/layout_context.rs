@@ -56,6 +56,11 @@ pub struct LayoutContext<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutExtras<'a> {
     pub focused: Option<WidgetId>,
+    /// Every widget that currently owns live interaction state the framework
+    /// would destroy if its subtree were parked dormant: the focused node,
+    /// each pointer's captor, and the source of an in-flight drag. Collected
+    /// once per layout pass; empty on an idle tree.
+    pub interaction_anchors: &'a [WidgetId],
     pub shortcut_registry: Option<&'a crate::shortcut::ShortcutRegistry>,
     pub overlay_manager: Option<&'a crate::overlay::OverlayManager>,
 }
@@ -96,6 +101,40 @@ impl<'a> LayoutContext<'a> {
     /// the layout pass is unrelated to a tree (test contexts).
     pub fn focused(&self) -> Option<WidgetId> {
         self.extras.as_ref().and_then(|e| e.focused)
+    }
+
+    /// Call `f` with every widget that holds live interaction state, and with
+    /// each of its ancestors up to a root.
+    ///
+    /// "Live interaction state" is what the framework destroys when it parks a
+    /// subtree dormant: the keyboard focus (cleared by
+    /// `WidgetTree::revalidate_interaction_state`), a captured pointer and an
+    /// in-flight drag source (both cancelled with
+    /// [`CancelReason::SubtreeParked`](crate::pointer::CancelReason)). Losing any
+    /// of them is fine when the *user* navigated away and wrong when the
+    /// *container* moved.
+    ///
+    /// So a container that culls by viewport intersects this with its own
+    /// children and pins whichever of them the user is in the middle of: a
+    /// card being typed in, or drag-selected inside, stays live wherever the
+    /// camera goes.
+    ///
+    /// Reported from the anchors *upward* rather than tested per child on
+    /// purpose — that makes the pin cost proportional to the number of live
+    /// interactions (almost always zero or one, times the tree depth) instead
+    /// of to the number of children, which is the quantity a culling container
+    /// exists to stop paying. Nothing is reported outside a real layout pass.
+    pub fn for_each_interaction_ancestor(&self, mut f: impl FnMut(WidgetId)) {
+        let (Some(arena), Some(extras)) = (self.arena, self.extras.as_ref()) else {
+            return;
+        };
+        for &anchor in extras.interaction_anchors {
+            let mut cur = Some(anchor);
+            while let Some(id) = cur {
+                f(id);
+                cur = arena.parent(id);
+            }
+        }
     }
 
     /// Borrow the tree's shortcut registry. Returns `None` outside a

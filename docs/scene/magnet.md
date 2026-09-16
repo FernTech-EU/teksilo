@@ -267,6 +267,11 @@ pub enum MarkerVisibility { /* variants */ }
 
 The visual state of a magnet as the feedback renderer sees it.
 
+`#[non_exhaustive]`: the crate hands this *to* consumer code — a custom
+`MagnetFeedback` must match it — and the set grows with every interaction
+state magnetism learns. A renderer's wildcard arm then keeps meaning "draw
+it plainly" instead of failing to compile.
+
 ```rust
 pub enum MagnetVisualState { /* variants */ }
 ```

@@ -60,6 +60,7 @@ enum Note {
     /// wherever a test uses it.
     VisibilityChanged(ItemId),
     FlagsChanged(ItemId),
+    HandlersChanged(ItemId),
     Other,
     A11y,
 }
@@ -71,6 +72,7 @@ impl From<ItemChange> for Note {
             ItemChange::Removed { id } => Note::Removed(id),
             ItemChange::VisibilityChanged { id, .. } => Note::VisibilityChanged(id),
             ItemChange::FlagsChanged { id, .. } => Note::FlagsChanged(id),
+            ItemChange::HandlersChanged { id } => Note::HandlersChanged(id),
             _ => Note::Other,
         }
     }
@@ -305,9 +307,14 @@ fn a_panic_in_with_handlers_mut_releases_the_borrow() {
     model.set_local_pos(id, Point::new(3.0, 3.0));
     assert_eq!(
         *log.borrow(),
-        vec![Note::Moved(id)],
+        vec![Note::HandlersChanged(id), Note::Moved(id)],
         "a panicking handler closure stranded the scene"
     );
+    // The `HandlersChanged` above is the one `handlers_mut` emits on the way
+    // *in*, before the caller's closure ran at all: it was already queued when
+    // the panic unwound, and an abandoned batch stays deliverable. Delivering
+    // it is the conservative answer — the caller may have edited the set before
+    // exploding, and a consumer caching handlers has to assume it did.
 
     // The borrow came back *and* so did the write-scope depth: a leaked depth
     // would leave every later change queued for a drain that never comes, which
@@ -836,7 +843,12 @@ fn a_nonsensical_budget_is_clamped_where_it_is_written() {
     );
 
     let model = SceneModel::new();
-    model.set_cascade_budget(CascadeBudget { total: 0 });
+    // The bypass route as an out-of-crate caller still has it: `CascadeBudget`
+    // is `#[non_exhaustive]`, so a struct literal is out, but the field is
+    // public and writable and assigning to it skips `new`'s clamp entirely.
+    let mut unclamped = CascadeBudget::default();
+    unclamped.total = 0;
+    model.set_cascade_budget(unclamped);
     assert_eq!(
         model.cascade_budget().total,
         1,

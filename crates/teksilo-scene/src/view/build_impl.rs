@@ -135,8 +135,15 @@ impl SceneView {
             let reconcile_dirty = self.reconcile_dirty.clone();
             let appearance_dirty = self.appearance_dirty.clone();
             let payload_dirty = self.payload_dirty.clone();
+            let hit_sync = self.hit_sync.clone();
             let handle = self.model.item_change_signal().observe(move |change| {
                 use crate::scene::ItemChange;
+                // Hit-snapshot invalidation, recorded FIRST and for every
+                // variant — including the ones that return early below. It also
+                // counts the delivery, which is what proves to the next layout
+                // pass that this view saw the whole change stream and may
+                // therefore patch its snapshots instead of rebuilding them.
+                hit_sync.borrow_mut().record(change);
                 // The item cache holds *local-coordinate* paint output, so only
                 // a geometry change or a removal can invalidate a cached frame;
                 // pos / transform / opacity / z / layer / flags are re-applied
@@ -377,6 +384,34 @@ impl SceneView {
             .bind_to(self_id_for_relayout, registry, BindingLevel::Relayout);
         self.rotation
             .bind_to(self_id_for_relayout, registry, BindingLevel::Relayout);
+        // …and once more at `AccessibilityOnly`, because a relayout does not
+        // invalidate the AccessKit cache and a camera move changes nothing
+        // else that would.
+        //
+        // Every rectangle this view publishes is camera-dependent: a
+        // lightweight item's node is written in scene coordinates under the
+        // view transform, and a heavyweight card's node carries that transform
+        // itself (see the `set_transform` emission in the framework walker).
+        // `sync_accessibility` — the function every platform adapter is fed,
+        // as opposed to `accessibility_tree_snapshot` — hands back the cached
+        // tree unless something set `a11y_dirty`, so without this the tree an
+        // assistive technology holds keeps describing the camera position the
+        // last *structural* change happened at. Measured before this binding
+        // existed: pan the view 90 px and the published rectangle does not
+        // move, for either tier.
+        //
+        // One derived signal rather than four: `view_transform_signal` changes
+        // once per camera change however many of pan/zoom/rotation moved, and
+        // a signal that resolves to the same transform notifies nobody. The
+        // cost is one AT walk per frame of a drag-pan, bounded by the *live*
+        // set (an off-screen card is parked and never walked), and the walk's
+        // `TreeUpdate` comparison keeps `at_version` from bumping when the
+        // published tree is unchanged.
+        self.view_transform_signal.bind_to(
+            self_id_for_relayout,
+            registry,
+            BindingLevel::AccessibilityOnly,
+        );
 
         // The view-transform signal is constructed once in `new`
         // (so it's stable across rebuilds and exposable via

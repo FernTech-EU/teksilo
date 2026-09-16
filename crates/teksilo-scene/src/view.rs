@@ -138,6 +138,14 @@ const DEFAULT_ZOOM_DURATION: Duration = Duration::from_millis(180);
 const DEFAULT_MIN_ZOOM: f32 = 0.1;
 const DEFAULT_MAX_ZOOM: f32 = 10.0;
 
+/// Default [`SceneView::retention_margin`], in screen pixels.
+///
+/// 96 px is what a very fast fling covers in one frame at 120 Hz
+/// (11 520 px/s), which is the quantity the margin has to beat: it exists so a
+/// card is woken while it is still off screen rather than on the frame it
+/// becomes visible.
+pub const DEFAULT_RETENTION_MARGIN: f32 = 96.0;
+
 /// Maximum movement, in **view pixels**, between PointerDown and PointerUp for
 /// the gesture to count as a tap rather than a drag — the floor a precise
 /// pointer gets.
@@ -877,6 +885,45 @@ pub struct SceneView {
     /// to 5,000 cards would burn a full frame's budget on the
     /// per-child entry scan.
     widget_to_item: HashMap<WidgetId, ItemId>,
+    /// The heavyweight cards this view publishes to assistive technology, as
+    /// decided by the most recent `place_children`. `None` until the view has
+    /// been laid out once — "no decision yet", which means publish everything.
+    ///
+    /// A **subset** of the cards the same pass kept alive, and deliberately so.
+    /// Staying alive and being enumerated are two different questions with two
+    /// different answers: [`retention_margin`](SceneView::retention_margin) is
+    /// a lifecycle hint that keeps a card just off the edge warm so the camera
+    /// never reaches a hole, while
+    /// [`a11y_off_screen_mode`](SceneView::a11y_off_screen_mode) is the app's
+    /// statement about how much of an off-screen scene a screen reader should
+    /// be offered. A card in the margin band but outside the mode's region is
+    /// alive — laid out, Tab-reachable, holding its state — and absent from
+    /// the AT tree.
+    ///
+    /// The one exception is a card the user is *in the middle of*: it is
+    /// pinned into this set wherever the camera goes, because the published
+    /// tree names the focused node and a focus pointing at a node the walk did
+    /// not emit is a broken tree, not a missing one.
+    ///
+    /// Written by the layout pass and read by the accessibility walk so the
+    /// two cannot disagree about a card: the walk asks the recorded set rather
+    /// than recomputing a predicate that might round differently or miss the
+    /// pins. Paired with [`at_children`](Self::at_children), written in the
+    /// same loop from the same decision.
+    at_heavy: Rc<RefCell<Option<HashSet<ItemId>>>>,
+    /// The same decision as [`at_heavy`](Self::at_heavy), as the ordered arena
+    /// child list `Widget::accessibility_children` hands the framework walker.
+    ///
+    /// This is what actually suppresses a live-but-unenumerated card: the
+    /// walker uses this list for BOTH the child push and the recursion, so a
+    /// card left out of it is neither named by a parent nor emitted as a node
+    /// — no orphan, no dangling child, nothing for the framework's strip to
+    /// clean up after. Order is the arena's own child order (z-order), so what
+    /// a screen reader reads is unchanged apart from the omissions.
+    at_children: Rc<RefCell<Option<Vec<WidgetId>>>>,
+    /// How far past the viewport edge, in **screen** pixels, a heavyweight
+    /// card stays live. See [`SceneView::retention_margin`].
+    retention_margin: f32,
     /// Live mirror of `bounds.origin` (the SceneView's screen-space
     /// position as decided by its parent layout). Updated in
     /// `place_children` and folded into the view-transform composition
@@ -1084,13 +1131,6 @@ pub struct SceneView {
     /// data area" for an inner chart SceneView). Default `None`
     /// — the SceneView has no explicit name.
     a11y_label: Option<LocalizedString>,
-    /// Coordinate space for `SceneItem` bounds reported to AT.
-    /// Default `Screen` (view-projected). Apps with a logical
-    /// fixed coordinate system (CAD canvases, blueprint editors)
-    /// may want `Scene` so AT users can reason about "where in
-    /// the design" an item sits, independent of the current
-    /// pan/zoom.
-    a11y_bounds_space: crate::a11y::A11yBoundsSpace,
     /// Debug overlay configuration. Default: all flags `false`
     /// — no debug paint. When any flag is set, the SceneView
     /// paints visual diagnostics (item bounding boxes,
@@ -1182,9 +1222,19 @@ pub struct SceneView {
     /// still disagree about the claimant. Six `f32` compares are cheaper than
     /// that being true only by luck.
     veto_memo: Rc<Cell<Option<(u64, [f32; 6], Point, bool)>>>,
-    /// Bumped every time the handler snapshot is rebuilt; the first field of
-    /// [`SceneView::veto_memo`]'s key.
+    /// Bumped every time either hit snapshot is written — rebuilt whole or
+    /// patched per item. The first field of [`SceneView::veto_memo`]'s key, and
+    /// therefore what retires that memo; a pass that leaves the snapshots alone
+    /// (every pan sample) leaves it alone too.
     snapshot_generation: Rc<Cell<u64>>,
+    /// What has happened to the model since the two hit snapshots above were
+    /// last made current — the record that lets a layout pass patch them per
+    /// item, or skip them entirely, instead of rebuilding from `scene.ids()`.
+    ///
+    /// Written by this view's `item_change_signal` observer (installed in
+    /// `build`), read by the layout pass. See
+    /// [`hit_snapshot`] for why that is sound.
+    hit_sync: Rc<RefCell<hit_snapshot::HitSnapshotSync>>,
     /// The paint-order floor the arena's verdict established for the press
     /// currently in flight — [`RANK_OVER`] when a heavyweight card was on top
     /// at the press point (or an `Over` claimant vetoed one), [`RANK_UNDER`]
@@ -1248,7 +1298,6 @@ impl std::fmt::Debug for SceneView {
             .field("focus_order_callback", &self.focus_order_callback.is_some())
             .field("a11y_nested", &self.a11y_nested)
             .field("a11y_label", &self.a11y_label)
-            .field("a11y_bounds_space", &self.a11y_bounds_space)
             .field("debug_overlay", &self.debug_overlay)
             .finish_non_exhaustive()
     }
@@ -1538,6 +1587,7 @@ mod build_impl;
 mod builder_impl;
 mod camera_impl;
 mod gestures_impl;
+mod hit_snapshot;
 mod layout_impl;
 mod magnetism;
 mod paint_impl;

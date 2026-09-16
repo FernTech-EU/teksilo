@@ -360,6 +360,42 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Whether this widget decides, on every layout pass, which of its
+    /// children exist at all.
+    ///
+    /// Opting in changes what [`place_children`](Self::place_children)
+    /// receives and what the framework does with it:
+    ///
+    /// * the `children` slice carries **every** child, dormant ones included,
+    ///   rather than only the active ones — otherwise a container could never
+    ///   ask for a child back, having parked it;
+    /// * each [`WidgetPlacement::dormant`] arrives pre-set to that child's
+    ///   current state, and whatever the widget leaves there is applied: a
+    ///   child newly cleared is woken and laid out **in the same pass**, a
+    ///   child newly set is parked after the pass, with focus revalidated
+    ///   behind it.
+    ///
+    /// The cost of opting in is one iteration per child per pass, which is why
+    /// it is a choice rather than the rule: an ordinary container pays for its
+    /// active children only.
+    ///
+    /// This exists for containers that hold far more content than they show —
+    /// a scene viewport, a canvas, a map — where the off-screen half is not
+    /// merely invisible but should not be *reachable*: a card 90 000 px away
+    /// is a Tab stop between two visible ones and a node an assistive client
+    /// is offered. Collapsing its `size` to zero answers neither, because a
+    /// zero-size widget is still alive.
+    ///
+    /// A container that only ever hides one branch at a time wants
+    /// [`BuildContext::visible_when`](crate::build_context::BuildContext::visible_when)
+    /// instead: a gate per branch is cheaper than a pass per child, and that
+    /// is the shape of `Switcher`, a popover or a collapsed panel.
+    ///
+    /// Default: `false`.
+    fn culls_children(&self) -> bool {
+        false
+    }
+
     /// Optional redirection hook for AT-tree placement of a child.
     ///
     /// The accessibility walker consults every ancestor that opts

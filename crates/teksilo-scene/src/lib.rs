@@ -77,8 +77,8 @@ pub(crate) mod transform;
 pub(crate) mod view;
 
 pub use a11y::{
-    A11yBoundsSpace, A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yMode, A11yNode,
-    A11yOffScreenMode, A11yRelation,
+    A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yMode, A11yNode, A11yOffScreenMode,
+    A11yRelation,
 };
 pub use animation::{pulse_once, register_animated_item_signal};
 pub use cache::CacheMode;
@@ -105,4 +105,4 @@ pub use shape::{
     ShapeGeometry,
 };
 pub use state::SceneViewState;
-pub use view::{DebugOverlay, FocusDirection, SceneView};
+pub use view::{DEFAULT_RETENTION_MARGIN, DebugOverlay, FocusDirection, SceneView};

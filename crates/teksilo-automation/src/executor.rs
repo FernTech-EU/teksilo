@@ -487,7 +487,8 @@ fn execute_op(
             // → `show_context_menu_for` path a user's right-click does, so the
             // widget's `.context_menu(..)` factory opens.
             let update = tree.sync_accessibility();
-            let Some(p) = node_point(tree, &update, *node) else {
+            let resolved = teksilo_core::accessibility::audit::logical_bounds(&update);
+            let Some(p) = node_point(tree, &update, &resolved, *node) else {
                 return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
             };
             pointer_down(
@@ -566,11 +567,12 @@ fn execute_op(
             to_y,
         } => {
             let update = tree.sync_accessibility();
-            let Some(from) = node_point(tree, &update, *node) else {
+            let resolved = teksilo_core::accessibility::audit::logical_bounds(&update);
+            let Some(from) = node_point(tree, &update, &resolved, *node) else {
                 return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
             };
             let to = if let Some(tn) = to_node {
-                match node_point(tree, &update, *tn) {
+                match node_point(tree, &update, &resolved, *tn) {
                     Some(p) => p,
                     None => {
                         return AutomationReply::err(codes::NOT_FOUND, format!("no node {tn}"));
@@ -1503,14 +1505,23 @@ fn center(r: Rect) -> Point {
 /// rich-text runs) whose owning widget may span far more area than the child
 /// — and falls back to the owning widget's arena bounds. `None` only when the
 /// node is absent from the live tree.
-fn node_point(tree: &WidgetTree, update: &accesskit::TreeUpdate, node: NodeRef) -> Option<Point> {
-    if let Some((_, n)) = update.nodes.iter().find(|(id, _)| id.0 == node)
-        && let Some(r) = n.bounds()
-    {
-        return Some(Point::new(
-            ((r.x0 + r.x1) * 0.5) as f32,
-            ((r.y0 + r.y1) * 0.5) as f32,
-        ));
+///
+/// **Resolved, not raw.** A node's `bounds` are stated in the space of the
+/// nearest ancestor declaring a transform, which for anything inside a
+/// `SceneView` is the scene's, not the window's. Aiming a synthetic press at
+/// the raw rectangle put it where the *model* says the card is rather than
+/// where it is painted — correct only at pan zero. The fallback has the same
+/// problem for the same reason (arena bounds under a content transform are
+/// scene coordinates), so it goes through the resolved map too where the node
+/// is in it.
+fn node_point(
+    tree: &WidgetTree,
+    update: &accesskit::TreeUpdate,
+    resolved: &std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
+    node: NodeRef,
+) -> Option<Point> {
+    if let Some(rect) = resolved.get(&accesskit::NodeId(node)) {
+        return Some(center(*rect));
     }
     let widget = resolve_widget(tree, update, node)?;
     Some(center(tree.bounds(widget)))
@@ -1528,6 +1539,11 @@ struct SemanticContext {
         teksilo_core::accessibility::audit::NodeTextInfo,
     >,
     names: std::collections::HashMap<accesskit::NodeId, String>,
+    /// Each node's rectangle with the transforms above it composed in, in
+    /// logical pixels. The raw property is the node's box in a space the node
+    /// does not name, which is the window's for most of the tree and the
+    /// scene's inside a `SceneView`.
+    bounds: std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
 }
 
 impl SemanticContext {
@@ -1536,6 +1552,7 @@ impl SemanticContext {
         Self {
             text: audit::text_infos(update),
             names: audit::resolved_names(update),
+            bounds: audit::logical_bounds(update),
         }
     }
 }
@@ -1560,11 +1577,11 @@ fn semantic_node(
         Some(accesskit::Live::Assertive) => Some("assertive".to_string()),
         _ => None,
     };
-    let bounds = node.bounds().map(|r| NodeBounds {
-        x: r.x0,
-        y: r.y0,
-        width: r.x1 - r.x0,
-        height: r.y1 - r.y0,
+    let bounds = ctx.bounds.get(&id).map(|r| NodeBounds {
+        x: r.x as f64,
+        y: r.y as f64,
+        width: r.width as f64,
+        height: r.height as f64,
     });
     let actions = ADVERTISABLE_ACTIONS
         .iter()

@@ -124,9 +124,39 @@ Set the effective enabled state of the item being painted.
 
 Context handed to `SceneItem::accessibility`.
 
-Carries the item's screen-projected bounds (so items wanting to
-emit AT-relative coordinates can read them) and its `ItemId` so
-implementations can derive synthetic AT NodeIds for sub-elements.
+# The space every rectangle here is in
+
+**Scene coordinates, and so is everything the item emits.** An item's
+AccessKit node carries its scene-space rectangle, and the view transform is
+declared once, on the node at the top of the scene subtree, via
+`to_accesskit_affine`.
+The consumer composes that chain for `bounding_box()` and inverts it per
+step when hit-testing, so the projection happens where AccessKit expects it
+— which is what makes an item's rectangle, its per-character text geometry
+and an explore-by-touch probe all agree at any pan, zoom or rotation.
+
+It is also what keeps the two tiers in one space: a heavyweight card's
+arena bounds are scene coordinates too, and the framework walker declares
+the same transform on it. An item that projected its own geometry into
+window space instead would have it transformed a second time.
+
+So: **never multiply an emitted rectangle by the view transform.** The same
+rule the framework states for the device scale factor, one level down.
+
+# A box, not a silhouette
+
+The box reported for an item is its `local_bounds` **rectangle**, not its
+`ItemShape`. AccessKit has no other shape to offer, so
+an item whose silhouette is narrower than its box — a rounded
+`RectItem`, a stroke-only `PathItem` —
+advertises ground a pointer aimed there would miss. That is deliberate and
+it does not cost an AT client the element: a client identifies an element by
+node id, announces and spatially navigates by this rectangle, and an
+AccessKit action arrives addressed to the node rather than as a synthetic
+press at a coordinate. Advertising the narrower rectangle instead would be
+strictly worse — it would shrink what the element is *said* to cover without
+making any more of it reachable. The per-item magnitude is on
+`RectItem::shape`.
 
 ```rust
 pub struct SceneItemA11yContext { /* fields */ }

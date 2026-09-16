@@ -188,4 +188,26 @@ pub struct WidgetPlacement {
     pub id: WidgetId,
     pub origin: teksilo_canvas::Point,
     pub size: Size,
+    /// Park this child dormant for as long as the flag stays set.
+    ///
+    /// **Only read for a parent whose [`Widget::culls_children`](crate::widget::Widget::culls_children) returns
+    /// `true`**, and only such a parent is handed its dormant children here at
+    /// all — every other widget still sees its active children and nothing
+    /// else, so setting this without opting in does nothing.
+    ///
+    /// A dormant child leaves paint, the layout recursion, the accessibility
+    /// tree and the Tab ring, and keeps every piece of its state — focus,
+    /// text, animations — for when it comes back. Clearing the flag wakes it
+    /// in the same pass, so a container that culls by viewport shows no hole
+    /// on the frame a camera jumps.
+    ///
+    /// Arrives pre-set to the child's current state, so a parent that ignores
+    /// the field changes nothing.
+    ///
+    /// This is a heavier decision than collapsing `size` to zero, and the two
+    /// are worth layering rather than merging: zero size costs the child its
+    /// geometry, dormancy costs it its existence. Parking what the user is
+    /// interacting with clears focus and cancels pointers — see
+    /// [`LayoutContext::for_each_interaction_ancestor`](crate::widget::LayoutContext::for_each_interaction_ancestor).
+    pub dormant: bool,
 }

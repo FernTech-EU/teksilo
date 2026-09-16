@@ -330,6 +330,19 @@ impl WidgetTree {
     /// invisible. A data view should expose exactly one stop however many rows
     /// are realized; more than one means a control inside a row has leaked
     /// into the Tab order, where its presence would track the scroll position.
+    ///
+    /// Membership matches the real collector
+    /// ([`collect_scope_entries`](crate::widget_tree::WidgetTree)) exactly: a
+    /// dormant node and a disabled subtree are both skipped, because Tab
+    /// traversal returns at each. The two differ only in *shape* — the real
+    /// collector groups a `traversal_scope` subtree so it can order it
+    /// independently, and this returns one flat list in tree order — which is
+    /// what a membership assertion wants.
+    ///
+    /// The guards are load-bearing rather than cosmetic. Without them this
+    /// reports stops the traversal never visits, and a test asserting that a
+    /// culled or collapsed subtree left the Tab ring passes or fails for a
+    /// reason unrelated to the mechanism it is pinning.
     pub fn tab_stops_within(&self, root: WidgetId) -> Vec<WidgetId> {
         let mut out = Vec::new();
         self.collect_tab_stops_within(root, &mut out);
@@ -337,9 +350,24 @@ impl WidgetTree {
     }
 
     fn collect_tab_stops_within(&self, id: WidgetId, out: &mut Vec<WidgetId>) {
+        // Dormant: `collect_scope_entries` returns here, so the whole subtree
+        // is off the traversal graph — a `Switcher`'s hidden branch, a closed
+        // popover, a `visible_when` gate that went false.
+        if !self.arena.is_active(id) {
+            return;
+        }
         let Some(node) = self.arena.get(id) else {
             return;
         };
+        // Disabled: likewise a whole-subtree stop in the real collector.
+        if node
+            .enabled_state
+            .as_ref()
+            .map(|s| !s.get())
+            .unwrap_or(false)
+        {
+            return;
+        }
         if self.is_node_focusable(node) && self.tab_stop_effective(id) {
             out.push(id);
         }

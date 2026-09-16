@@ -542,6 +542,14 @@ caller cannot relate a pixel it can see to a point it can click, and a script
 written against one display silently mis-aims on another. Headless always
 reports `scale: 1.0`, where the two coincide.
 
+A node's `bounds` is the *resolved* rectangle, not the raw AccessKit property:
+AccessKit states a node's box "in the coordinate space of the nearest ancestor
+with a non-`None` transform", and inside a `SceneView` that space is the
+scene's, not the window's. `snapshot_tree` and the pointer tools both compose
+the chain (`teksilo_core::accessibility::audit::logical_bounds`) and stop short
+of the root's device scale, so what a snapshot reports and what `inject_pointer`
+aims at are the same logical window coordinates at any pan, zoom or rotation.
+
 - **Headless:** an offscreen `RENDER_ATTACHMENT | COPY_SRC` texture in a fixed
   `Rgba8UnormSrgb` format, rendered via the test renderer, read back,
   PNG-encoded — identical bytes on every backend.

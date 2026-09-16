@@ -173,6 +173,17 @@ pub struct WidgetTree {
     /// bounds for the focus-driven scroll-into-view — the same shape as the
     /// post-layout hover refresh next to it.
     pending_focus_restore: Option<WidgetId>,
+    /// The interaction anchors as of the last layout walk — the focused node,
+    /// each live pointer's captor, and an in-flight drag's source.
+    ///
+    /// A `culls_children` parent is told to keep what the user is in the
+    /// middle of, and it is only asked during layout. So the anchor set is an
+    /// *input* to that decision, and when it changes the decision is stale —
+    /// even though nothing moved and nothing resized, which is what the
+    /// idle-pass early-return keys off. Kept here so the pass can notice the
+    /// change and re-ask the culling parents it affects; see
+    /// `invalidate_culls_for_moved_interaction`.
+    last_interaction_anchors: Vec<WidgetId>,
     last_proposal: SizeProposal,
     pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
     pending_modal_dismissal: bool,
@@ -901,6 +912,7 @@ impl WidgetTree {
             view_focus_stack: Vec::new(),
             previous_pointer_position: None,
             pending_focus_restore: None,
+            last_interaction_anchors: Vec::new(),
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),
             pending_modal_dismissal: false,

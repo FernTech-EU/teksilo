@@ -57,12 +57,18 @@ grab band of any real stroke, but an approximation rather than exactness.
 # Spaces
 
 `ItemShape` is **local**. `SceneRegion` — the thing a marquee, a lasso or
-a collision query asks about — is **scene**-space until
-`SceneRegion::to_local` maps it into an item's frame. The two
-`…ItemBoundingRect` selection modes deliberately stay in scene space and
-compare the item's scene AABB; the two `…ItemShape` modes map the region
-into local space. For an item with a non-identity transform those are
-genuinely different tests — see `ItemSelectionMode`.
+a collision query asks about — is **scene**-space. The two
+`…ItemBoundingRect` selection modes deliberately stay there and compare the
+item's scene AABB; the two `…ItemShape` modes compare the shape itself. For
+an item with a non-identity transform those are genuinely different tests —
+see `ItemSelectionMode`.
+
+Which frame a `…ItemShape` query meets the region in is a **decision**, not
+a detail, because a stroke band is a *distance* and only a similarity
+carries one. Usually the region comes down into the item's frame via
+`SceneRegion::to_local`; when it cannot, the item goes up instead. The
+rule, and why no approximation substitutes for it, is on
+`ItemShape::contained_by_scene_region`.
 
 ## Builder methods at a glance
 
@@ -401,6 +407,60 @@ weaving between the two, inside their union but inside neither part, is
 reported as not contained. That is the one deliberately conservative
 answer here, and it is one-sided: never a false containment.
 
+#### `pub fn intersects_scene_region( &self, region: &SceneRegion, local_to_scene: &Transform2D, view_scale: f32, ) -> bool`
+
+Whether this shape, placed by `local_to_scene`, shares area with a
+**scene**-space `region` — the `Intersects…` half of
+`ItemSelectionMode`, with the frame chosen rather than assumed.
+
+This is the door a region query comes in by, and the reason it exists
+is spelled out on `ItemShape::contained_by_scene_region`.
+
+#### `pub fn contained_by_scene_region( &self, region: &SceneRegion, local_to_scene: &Transform2D, view_scale: f32, ) -> bool`
+
+Whether this shape, placed by `local_to_scene`, lies entirely inside a
+**scene**-space `region` — the `Contains…` half of
+`ItemSelectionMode`, with the frame chosen rather than assumed.
+
+# Why the frame is a decision
+
+A query has two frames to choose from and they are not
+interchangeable, because a **stroke band is a distance** and only a
+similarity — a rotation, a uniform scale, a translation, a reflection —
+carries one. Under any other affine the exact image of a round band is
+an *elliptical* one, which neither `ItemShape` nor `SceneRegion`
+can hold: both store a single width.
+
+Each side's band is round in its own frame. The region's is round in
+**scene** space. The item's is round in **local** space — that is not a
+convention but what the renderer does, since
+`PathItem` strokes its path in local coordinates and
+the item's transform is pushed on the canvas around it, so an
+anisotropically scaled wire really is painted with an elliptical pen.
+
+So: when the region carries no band, or the transform is a similarity,
+the local frame is exact and the query takes it — one map, the same
+cost it has always had. Otherwise the region cannot come down, so the
+**item goes up**: its outline is a polyline and
+`Path::transformed` is exact for every affine, so lifting it costs
+nothing in accuracy.
+
+A *mapped* band is then the only thing left, and it is dealt with by
+not mapping one: `in_scene_frame` writes the item's band
+out as an explicit outline **in local space, where it is round**, and
+lifts that. What comes back is a union of band-free parts, and a union
+is contained iff every part is.
+
+Approximating instead — scaling the band by one of the two stretches —
+cannot work here, and the reason is worth stating because it looks like
+it should. The two selection-mode families owe each other implications
+in *opposite* directions: `IntersectsItemShape` must never exceed
+`IntersectsItemBoundingRect`, which wants a band that under-reaches,
+while `ContainsItemBoundingRect` must never exceed
+`ContainsItemShape`, which wants one that over-reaches. No single
+scalar satisfies both, so the only answer that keeps both is the exact
+one.
+
 #### `pub fn to_scene_region(&self, local_to_scene: &Transform2D) -> SceneRegion`
 
 Re-publish this shape as a `SceneRegion` in another frame — its own
@@ -414,22 +474,50 @@ keeps its curves and is re-flattened at
 `SHAPE_FLATTEN_TOLERANCE` in the *target* frame rather than
 inheriting a polyline sampled in this one.
 
-A band's width scales by the transform's smallest stretch — see
-`SceneRegion::to_local`, which faces the same anisotropy.
+# A band's width is still scaled here
+
+A region query picks the frame that keeps each band round
+(`ItemShape::contained_by_scene_region`); this cannot, because it
+returns one `SceneRegion` and one region holds one band width. So
+under a transform that is not a similarity — where the exact image of a
+round band is elliptical — the width is scaled by the transform's
+**smallest** stretch: the widest uniform band that fits inside the true
+image, under-reaching along the stretched axis and never claiming
+ground the true band does not cover.
+
+Writing the band out as an outline, which is what the query path does
+and which *is* exact, does not work here: a band is a union of
+overlapping capsules and reads only under `FillRule::Winding`, while
+the interior it would have to be unioned with keeps its author's rule
+and its author's subpath orientations. The query path escapes that by
+keeping the two apart as separate parts, and a single region has
+nowhere to put a second part. The consequence is confined to
+`Scene::item_region` and the collision
+query built on it: an anisotropically scaled item carrying a stroke
+collides as though its band were the narrowest the map allows.
 
 ## `pub enum ItemSelectionMode`
 
 How a region query decides whether an item is picked — Qt's
 `Qt::ItemSelectionMode`, one variant for one.
 
-The `…ItemShape` modes consult `SceneItem::shape`
-with the region mapped into the item's **local** frame; the
-`…ItemBoundingRect` modes compare the item's **scene** AABB, in scene
-space. For an item whose transform is identity and whose shape is the
-default AABB the two coincide exactly. For an item carrying a rotation or
-a scale they do **not**: the scene AABB of a rotated box is the enlarged
+The `…ItemShape` modes consult `SceneItem::shape`,
+in whichever frame keeps both sides' bands round — usually the item's
+**local** one, with the region mapped down into it, and scene space when
+the region's band cannot make that trip
+(`ItemShape::contained_by_scene_region`). The `…ItemBoundingRect` modes
+compare the item's **scene** AABB, in scene space.
+
+For an item whose transform is identity and whose shape is the default AABB
+the two families coincide exactly. For an item carrying a rotation or a
+scale they do **not**: the scene AABB of a rotated box is the enlarged
 axis-aligned hull of it, so a bounding-rect query is strictly the looser
-test. That is a real behaviour difference, not a rounding one.
+test. That is a real behaviour difference, not a rounding one — and it is
+an *implication*, in both directions. A shape lies inside its own box, so
+a shape the region meets its box meets too, and a box the region contains
+drags its shape in with it. Both are pinned by
+`tests/prop_selection_modes.rs`, and holding them is what decides how a
+band may be mapped.
 
 ```rust
 pub enum ItemSelectionMode { /* variants */ }
@@ -550,18 +638,22 @@ the widest uniform band that fits *inside* the true image. Under
 `scale(1, 10)` the true band is between one and ten times as wide
 depending on the direction, and the mapped one claims one: it can
 under-reach along the stretched axis, and it never claims ground the
-true band does not cover.
+true band does not cover. `Transform2D::geometric_scale` — the
+geometric *mean* of the two stretches — would err in both directions at
+once, over-reaching along one axis while under-reaching along the
+other, which is why it is not used here.
 
-That direction is not a coin flip. A region query that over-reached
-could pick an item under `IntersectsItemShape` that
-`IntersectsItemBoundingRect` did not — impossible for a shape that lies
-inside its own bounding rect, and the exact incoherence between a
-marquee and a click that `ItemShape` exists to remove. Under-reaching
-only ever agrees with the cheaper mode.
-`Transform2D::geometric_scale` — the geometric *mean* of the two
-stretches — would err in both directions at once, over-reaching along
-one axis while under-reaching along the other, which is why it is not
-used here.
+**This is a one-sided approximation, and the framework's own region
+queries do not rely on it.** Under-reaching keeps
+`IntersectsItemShape` inside `IntersectsItemBoundingRect`, but it puts
+`ContainsItemShape` *outside* `ContainsItemBoundingRect` — the two
+families want opposite errors, so no scalar serves both. A query
+therefore never maps a banded region down into an anisotropic item's
+frame: it lifts the item into scene space instead, where the band is
+still round. See `ItemShape::contained_by_scene_region`, which is the
+door `Scene::items_in_region` comes in by. What is left here is the
+honest answer for a caller who has asked for a mapped region and will
+measure distances in the target frame.
 
 #### `pub fn contains_point(&self, p: Point) -> bool`
 

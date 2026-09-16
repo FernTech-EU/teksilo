@@ -20,7 +20,7 @@ impl SceneView {
     pub(super) fn layout_response_impl(
         &self,
         proposal: SizeProposal,
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) -> LayoutResponse {
         // When `adopt_scene_size` is set, the view sizes itself to
         // the scene's resolved extent so the entire scene fits
@@ -49,162 +49,69 @@ impl SceneView {
             self.last_viewport.set(size);
         }
 
-        // Refresh the lightweight-bounds snapshot used
-        // by the on_drag closure for hit-test. Done here (rather
-        // than in `place_children`) because `place_children` only
-        // runs when the SceneView has at least one heavyweight
-        // child — a scene with only lightweight items would never
-        // get its snapshot populated. `layout_response` runs every
-        // layout pass regardless.
-        {
-            // Snapshot of *draggable* lightweight items. Decorative
-            // items (background tiles, group chrome, connector paths,
-            // captions) opt into drag via `.draggable(true)` on the
-            // built-in builders or by overriding `is_draggable()` on
-            // a custom impl; everything else stays anchored, which
-            // is the default. Without this filter, every visible
-            // RectItem would respond to drags and the scene would
-            // feel unstable to the user.
-            let mut snapshot = self.lightweight_bounds_snapshot.borrow_mut();
-            snapshot.clear();
-            // Snapshot draggable lightweight items' narrow-phase hit geometry
-            // (AABB + shape predicate + transform) for the drag-start hit-test
-            // and the grab cursor. Refreshed each layout pass so a parent move
-            // between drag events doesn't leave the snapshot stale.
-            let scene = self.model.0.borrow();
-            for id in scene.ids() {
-                let Some(item) = scene.item(id) else {
-                    continue;
-                };
-                let Some(flags) = scene.flags(id) else {
-                    continue;
-                };
-                if !flags.contains(crate::flags::ItemFlags::IS_DRAGGABLE) {
-                    continue;
-                }
-                // `IS_VISIBLE` says an item is "neither painted nor
-                // hit-tested"; `IS_ENABLED` says a disabled one "passes clicks
-                // through". A grab is a click, so both apply here and in the
-                // handler snapshot below, from one predicate.
-                if !scene.is_hit_testable(id) {
-                    continue;
-                }
-                let Some(scene_rect) = scene.scene_rect(id) else {
-                    continue;
-                };
-                let Some(key) = scene.paint_key(id) else {
-                    continue;
-                };
-                let scene_xform = scene.scene_transform(id);
-                let ignores_xform =
-                    flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS);
-                let scene_anchor = if ignores_xform {
-                    scene_xform.apply_point(Point::ZERO)
-                } else {
-                    Point::ZERO
-                };
-                snapshot.push(super::DraggableSnapshotEntry {
-                    id,
-                    scene_rect,
-                    scene_transform: scene_xform,
-                    shape: item.shape(),
-                    ignores_xform,
-                    scene_anchor,
-                    local_bounds: scene.local_bounds(id).unwrap_or(Rect::ZERO),
-                    key,
-                });
-            }
-            // Topmost-first in the view's ONE paint order, so the first shape
-            // match in `hit_draggable_item` is the entry the user sees on top.
-            // A *stable descending* sort on `z` alone — which is what this used
-            // to be — leaves equal-z ties in the ascending order `scene.ids()`
-            // produced, so the first match was the oldest, i.e. the bottom-most
-            // item: paint and hit were inverted on ties. Comparing whole
-            // `PaintKey`s cannot have that failure mode.
-            snapshot.sort_by_key(|e| std::cmp::Reverse(e.key));
-        }
+        // Bring the two hit-test snapshots up to date. Done here rather than
+        // in `place_children` because `place_children` only runs when the
+        // SceneView has at least one heavyweight child — a scene of only
+        // lightweight items would never get its snapshots populated.
+        // `layout_response` runs every layout pass regardless.
+        //
+        // "Up to date" is usually nothing at all: the snapshots are functions
+        // of the model, and a pan changes no item. See
+        // [`hit_snapshot`](super::hit_snapshot).
+        self.refresh_hit_snapshots();
 
-        // Refresh the handler-dispatch snapshot used by
-        // `on_pointer_event` to route hover / tap / context-menu
-        // events to the item under the pointer. Every hit-testable item is
-        // included, not only the ones carrying handlers: a handler-less item
-        // painted on top still occludes what is beneath it inside the
-        // lightweight tier (the hit test resolves the topmost *entry* and only
-        // then looks for handlers), and an item without handlers can still
-        // carry a per-item cursor. `claims_press` — which is a different and
-        // narrower question — is recorded per entry and read by exactly one
-        // thing, the `Over`-band veto.
-        {
-            let mut snap = self.handler_snapshot.borrow_mut();
-            snap.clear();
-            let mut has_over_claimant = false;
-            let scene = self.model.0.borrow();
-            for id in scene.ids() {
-                let Some(item) = scene.item(id) else {
-                    continue;
-                };
-                // Same two flag contracts as the draggable snapshot above.
-                if !scene.is_hit_testable(id) {
-                    continue;
-                }
-                let Some(scene_rect) = scene.scene_rect(id) else {
-                    continue;
-                };
-                let Some(key) = scene.paint_key(id) else {
-                    continue;
-                };
-                let scene_xform = scene.scene_transform(id);
-                let claims_press = crate::pick::claims_press(
-                    scene.handlers(id),
-                    scene.flags(id).unwrap_or_default(),
-                );
-                has_over_claimant |= claims_press && key.rank() == crate::pick::RANK_OVER;
-                let handlers = scene.handlers(id).cloned().map(Box::new);
-                // Take the item's geometry as a value, so the snapshot can
-                // answer the narrow phase without holding a borrow on the
-                // Scene. `ItemShape` is O(1) to clone by construction — the
-                // path kind is one refcount bump on memoised geometry — which
-                // is what makes doing this every layout pass free.
-                let shape = item.shape();
-                let local_bounds = scene.local_bounds(id).unwrap_or(Rect::ZERO);
-                let flags = scene.flags(id).unwrap_or_default();
-                let ignores_xform =
-                    flags.contains(crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS);
-                // For IGNORES items the scene_anchor is fixed across
-                // pan/zoom (it lives in scene coords); the dispatch
-                // closure projects it through the live view transform
-                // at event time to obtain the current screen anchor.
-                let scene_anchor = if ignores_xform {
-                    scene_xform.apply_point(Point::ZERO)
-                } else {
-                    Point::ZERO
-                };
-                snap.push(HandlerSnapshotEntry {
-                    id,
-                    scene_rect,
-                    scene_transform: scene_xform,
-                    shape,
-                    key,
-                    claims_press,
-                    handlers,
-                    ignores_xform,
-                    scene_anchor,
-                    local_bounds,
-                });
-            }
-            // Topmost-first in the view's one paint order — see the draggable
-            // snapshot above for why sorting on `z` alone got equal-z ties
-            // exactly backwards.
-            snap.sort_by_key(|e| std::cmp::Reverse(e.key));
-            // The veto gate and its memo both key off this snapshot, so they
-            // are refreshed with it and never outlive it.
-            self.over_claimants.set(has_over_claimant);
-            self.snapshot_generation
-                .set(self.snapshot_generation.get().wrapping_add(1));
-            self.veto_memo.set(None);
-        }
-
+        let _ = ctx;
         LayoutResponse::rigid(size)
+    }
+
+    /// The scene-coord region inside which a heavyweight card stays live —
+    /// `None` meaning "everything stays live".
+    ///
+    /// Three regions are in play and they are deliberately different. Each is
+    /// contained in the next, and each answers its own question:
+    ///
+    /// * [`visible_scene_region`](Self::visible_scene_region) — the tight
+    ///   viewport, zero margin. *Who is drawn.* Decides who is laid out at
+    ///   full size and who collapses to `Size::ZERO`. Unchanged by retention.
+    /// * `A11yOffScreenMode::at_visible_region` — *who is enumerated.* The
+    ///   app's statement about how much of an off-screen scene a screen reader
+    ///   should be offered.
+    /// * this one — *who exists.* The tight viewport grown by
+    ///   [`retention_margin`](Self::retention_margin), unioned with the
+    ///   accessibility region.
+    ///
+    /// It contains the tight region by construction, so a card being laid out
+    /// is never simultaneously parked, and it contains the accessibility
+    /// region by construction, so the AT walk is never asked to describe a
+    /// card the arena has parked. That second containment is what lets
+    /// `A11yOffScreenMode::AllItems` keep its documented promise of a complete
+    /// table of contents: it returns `None` here, and nothing is ever parked.
+    ///
+    /// The containment is one-directional on purpose. Where this region is
+    /// *strictly* larger than the accessibility one — `ViewportOnly` with a
+    /// non-zero margin — the difference is a band of cards that are alive and
+    /// not enumerated. `place_children_impl` records that narrower set
+    /// separately (`SceneView::at_heavy`); growing the margin must never grow
+    /// what assistive technology is asked to walk.
+    pub(super) fn retention_scene_region(&self, bounds: Rect) -> Option<Rect> {
+        let tight = self.visible_scene_region(bounds);
+        // `AllItems` → the whole model must stay enumerable → retain all.
+        let at_region = self.a11y_off_screen_mode.at_visible_region(tight)?;
+        // Screen pixels → scene units through the current zoom, so the margin
+        // is a constant on-screen distance however far the view is zoomed in.
+        let scale = self.view_scale();
+        let m = if scale > f32::EPSILON {
+            self.retention_margin / scale
+        } else {
+            0.0
+        };
+        let grown = Rect::new(
+            tight.x - m,
+            tight.y - m,
+            tight.width + m * 2.0,
+            tight.height + m * 2.0,
+        );
+        Some(crate::scene::union_two_rects(grown, at_region))
     }
 
     pub(super) fn place_children_impl(
@@ -212,7 +119,7 @@ impl SceneView {
         bounds: Rect,
         _proposal: SizeProposal,
         children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
+        ctx: &LayoutContext,
     ) {
         // Mirror the parent's choice of `bounds.origin` into a signal
         // so the derived view-transform picks it up. The signal is
@@ -281,21 +188,134 @@ impl SceneView {
         // and skips its paint entirely. Heavyweight children stay
         // materialised — true demand-load is a follow-up once
         // the lightweight tier is in place.
-        let visible_ids = self.compute_visible_ids(bounds);
+        //
+        // The cull is asked **per child**, not by enumerating the visible set:
+        // a widget with no children still gets `place_children`, and querying
+        // the spatial index there cost one `Vec` + one `HashSet` over every
+        // item in the viewport on every pan sample — 104 µs at 540 visible
+        // items, to answer a question about zero cards. Testing each child's
+        // own `scene_rect` (already computed on the line above) against the
+        // region gives the identical answer — `items_in_rect` narrow-phases on
+        // exactly that predicate — for the price of the children this view
+        // actually has.
+        //
+        // **And the two wider decisions.** `SceneView::culls_children` is
+        // `true`, so this slice carries the parked cards too and
+        // `WidgetPlacement::dormant` is read back: a card outside the
+        // *retention* region is parked, which is the difference between a
+        // widget that is invisible and one that is not there. Zero size costs
+        // a card its geometry; dormancy costs it its existence — it leaves
+        // paint, the layout recursion, the AccessKit tree and the Tab ring,
+        // and keeps all its state for when the camera brings it back.
+        //
+        // Between the two sits the *accessibility* region, which decides what
+        // is published rather than what exists. All three are layered, never
+        // merged, each containing the one before it: a card being laid out is
+        // never also parked, and a card the walk is asked to describe is never
+        // one the arena has taken away.
+        if children.is_empty() {
+            // Recorded rather than left alone: a view whose last card was
+            // destroyed would otherwise keep publishing the previous pass's
+            // list of dead ids. The walker drops them (nothing is active at
+            // those ids), but "empty because there is nothing" and "empty
+            // because nothing has been decided" are different states and only
+            // one of them is true here.
+            *self.at_heavy.borrow_mut() = Some(HashSet::new());
+            *self.at_children.borrow_mut() = Some(Vec::new());
+            return;
+        }
+        let region = self.visible_scene_region(bounds);
+        let retention = self.retention_scene_region(bounds);
+        // The third region, and the one the app actually asked for: what
+        // `A11yOffScreenMode` says a screen reader should be offered. It is
+        // contained in `retention` by construction, and where it is *strictly*
+        // contained — `ViewportOnly` with a non-zero margin — the difference is
+        // a band of cards that are alive and not enumerated. That is the
+        // intended reading of the two knobs: the margin is a lifecycle hint,
+        // the mode is the accessibility statement, and a lifecycle hint must
+        // not widen what assistive technology is asked to walk.
+        let at_region = self.a11y_off_screen_mode.at_visible_region(region);
+        // Whatever the user is in the middle of stays live wherever the camera
+        // goes: parking it would clear focus and cancel its pointer with
+        // `CancelReason::SubtreeParked`, because the *view* moved. Read from
+        // the live interactions upward, so this costs the interactions (almost
+        // always none) and not the cards.
+        let mut pinned: Vec<WidgetId> = Vec::new();
+        ctx.for_each_interaction_ancestor(|wid| {
+            if self.widget_to_item.contains_key(&wid) {
+                pinned.push(wid);
+            }
+        });
+
+        let mut at_heavy: HashSet<ItemId> = HashSet::new();
+        let mut at_children: Vec<WidgetId> = Vec::new();
+        let scene = self.model.0.borrow();
         for placement in children.iter_mut() {
             let Some(&item_id) = self.widget_to_item.get(&placement.id) else {
+                // Not a card this view placed. The cull has no opinion about
+                // it, and `at_children` is the whole accessibility child list,
+                // so leaving it out would quietly hide it from AT rather than
+                // leave it alone.
+                at_children.push(placement.id);
                 continue;
             };
-            let Some(rect) = self.scene().scene_rect(item_id) else {
+            let Some(rect) = scene.scene_rect(item_id) else {
+                // No resolvable geometry is not a reason to take a card away —
+                // nor to hide it from assistive technology, which is the one
+                // audience that cannot see that it is nowhere.
+                placement.dormant = false;
+                at_heavy.insert(item_id);
+                at_children.push(placement.id);
                 continue;
             };
+            // Origin and size are written for a parked card too. It costs a
+            // parent-chain walk per parked card per pass, and it is not
+            // optional: the placement's origin is the canonical scene
+            // coordinate `scroll_into_view` and focus-follow read, and a card
+            // whose position changed while it was parked would otherwise come
+            // back — or be scrolled to — at a stale one.
             placement.origin = Point::new(rect.x, rect.y);
-            placement.size = if visible_ids.contains(&item_id) {
+            placement.size = if crate::scene::rects_intersect(rect, region) {
                 Size::new(rect.width, rect.height)
             } else {
                 Size::ZERO
             };
+            // Whatever the user is in the middle of survives both decisions.
+            // For retention that is about not destroying their work; for
+            // emission it is about not publishing a tree whose focus names a
+            // node the walk left out.
+            let is_pinned = pinned.contains(&placement.id);
+            let keep = match retention {
+                None => true,
+                Some(r) => crate::scene::rects_intersect(rect, r) || is_pinned,
+            };
+            placement.dormant = !keep;
+            if !keep {
+                continue;
+            }
+            let enumerate = match at_region {
+                None => true,
+                Some(r) => crate::scene::rects_intersect(rect, r) || is_pinned,
+            };
+            if enumerate {
+                at_heavy.insert(item_id);
+                at_children.push(placement.id);
+            }
         }
+        drop(scene);
+        // Handed to the accessibility walk, which must describe exactly these
+        // cards and no others — see `SceneView::at_heavy`. Both halves are
+        // written here, from the one decision above, so the set the scene's own
+        // logical graft consults and the list the framework walker is handed
+        // cannot disagree.
+        //
+        // This set can widen without any child parking or waking — a focus move
+        // pins a card into it — so the framework's park/wake invalidation does
+        // not cover every reason it changes. `WidgetTree::invalidate_culls_for_moved_interaction`
+        // dirties the accessibility cache for exactly that case, on the same
+        // signal that forces this pass to run at all.
+        *self.at_heavy.borrow_mut() = Some(at_heavy);
+        *self.at_children.borrow_mut() = Some(at_children);
     }
 
     /// The scene-coord region currently inside the viewport, given
@@ -317,10 +337,5 @@ impl SceneView {
             Some(inv) => inv.apply_rect(viewport_screen),
             None => Rect::ZERO,
         }
-    }
-
-    fn compute_visible_ids(&self, bounds: Rect) -> HashSet<ItemId> {
-        let region = self.visible_scene_region(bounds);
-        self.scene().items_in_rect(region).into_iter().collect()
     }
 }

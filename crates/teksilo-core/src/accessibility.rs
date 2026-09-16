@@ -114,6 +114,30 @@ pub struct TextRunSpec {
 /// `labelled_by` it. `AccessNodeBuilder::build` moves it there. Everything
 /// else carries its name in `label`. A test or probe that reads one property
 /// sees nothing on half the tree.
+/// A Teksilo affine as AccessKit expresses one.
+///
+/// Both store a 3×2 matrix mapping `(x, y)` to
+/// `(a·x + c·y + tx, b·x + d·y + ty)`, and both spell it `[a, b, c, d, tx, ty]`,
+/// so this is a widening cast and not a change of convention.
+///
+/// Write the result with [`accesskit::Node::set_transform`] on a node whose
+/// own bounds — and every rectangle below it — are stated in a coordinate
+/// space of its own rather than in window space. That is the one supported way
+/// to publish such a rectangle: a consumer reads `bounds` "in the coordinate
+/// space of the nearest ancestor with a non-`None` transform", composes the
+/// chain for `bounding_box()`, and inverts it per step when hit-testing, so
+/// projecting by hand instead would be exact only for the rectangle and wrong
+/// for the per-character geometry and the hit path.
+///
+/// The framework does this for the children of a content-transform node (see
+/// `WidgetTree::build_accessibility_recursive`); a widget emitting synthetic
+/// children of its own in a non-window space — a scene item, a chart mark —
+/// calls it directly.
+pub fn to_accesskit_affine(t: teksilo_canvas::Transform2D) -> accesskit::Affine {
+    let [a, b, c, d, tx, ty] = t.m;
+    accesskit::Affine::new([a as f64, b as f64, c as f64, d as f64, tx as f64, ty as f64])
+}
+
 pub fn announced_text(node: &Node) -> Option<&str> {
     if node.role() == Role::Label {
         node.value().or_else(|| node.label())

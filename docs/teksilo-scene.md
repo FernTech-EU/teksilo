@@ -559,7 +559,15 @@ let _h = model.item_change_signal().observe(move |change| {
 `ItemChange` variants: `Added`, `Removed`, `LocalPosChanged`,
 `LocalBoundsChanged`, `TransformChanged`, `VisibilityChanged`,
 `OpacityChanged`, `FlagsChanged`, `ZChanged`, `LayerChanged`, `ParentChanged`,
-`PayloadChanged`, `AppearanceChanged`.
+`PayloadChanged`, `AppearanceChanged`, `HandlersChanged`.
+
+`HandlersChanged` fires from `set_item_handlers` and from `handlers_mut`. The
+second fires on the way *in*, before your closure has touched anything: a `&mut`
+borrow cannot report back what the caller did with it, so the event means "this
+item's handlers are no longer what you last read". Taking the borrow and
+changing nothing therefore costs one spurious event, which is the right way
+round — the alternative is a consumer serving stale handlers, and the
+`SceneView` is one (see [Scaling](#scaling--what-a-pan-costs)).
 
 Logical-AT-structure mutations (groups, parents, relations, live regions,
 landmarks, rotor categories, magnets) are not item geometry, so they go through
@@ -1243,6 +1251,169 @@ for the Under/Over band and the three-pass model.
 
 ---
 
+## Scaling — what a pan costs
+
+A `SceneView` binds `pan_x` / `pan_y` / `zoom` / `rotation` at
+`BindingLevel::Relayout`, so **every pan sample runs a full layout pass** even
+though it touches no item. What that pass is allowed to cost is the difference
+between a scene that scrolls and one that stutters, so it is stated here as a
+contract rather than left as an implementation detail.
+
+**A pan costs what an empty scene costs.** Measured on a scene whose visible
+population is held at 540 items while the off-screen tail varies (release,
+`cargo test -p teksilo-scene --test pan_scaling_probe --release -- --nocapture`):
+
+| total items | pan sample | vs. an empty scene |
+| ---: | ---: | ---: |
+| 0 (empty) | 1.85 µs | 1.00× |
+| 540 | 1.84 µs | 0.99× |
+| 20 000 | 1.87 µs | 1.01× |
+| 50 000 | 1.83 µs | 0.99× |
+
+Before, with the snapshots rebuilt each pass and the cull enumerating the
+viewport, the same three populated rows read 306 µs, 6 128 µs and 16 095 µs.
+
+Two mechanisms hold that up, and both are worth knowing about when writing a
+custom item or a custom view:
+
+**The hit snapshots are cached, not rebuilt.** Pointer dispatch reads two
+per-view snapshots — every hit-testable entry, and the draggable subset — rather
+than the scene itself, because the scene's `RefCell` must not be re-entered on
+the pointer's hot path. Every field of both is a pure function of the *model*:
+`scene_transform` walks only entry data, and the narrow phase takes the view
+scale as a call-time argument. Nothing in them depends on pan, zoom or rotation.
+So they are built once and invalidated per item from the `item_change_signal`
+stream: a pan emits no change and pays one comparison, a move rewrites one row
+and its subtree, and only a change to *membership* (visibility, flags), to
+*paint order* (`z`, `layer`, `parent`) or to *handlers* rebuilds. This is why
+`handlers_mut` fires `ItemChange::HandlersChanged` — a mutator that changed the
+model silently would leave the snapshot serving a handler set nobody installed
+any more.
+
+**Moving an item costs its subtree.** `set_local_pos` / `set_transform`
+re-bucket the moved item and every descendant in the spatial index, walking the
+`parent → children` adjacency the scene keeps. Before it was kept, each call
+rebuilt a scene-wide adjacency map first, so moving one leaf cost
+`O(entries)` — 67.6 µs at 50 000 items, against 0.4 µs now, which is inside a
+factor of five of a `set_z` on the same leaf (0.08 µs; it changes no geometry
+and re-buckets nothing).
+
+Both numbers have a hard gate beside the measurement
+(`tests/pan_scaling_probe.rs`, `tests/mutation_scaling_probe.rs`), stated as a
+ratio rather than a duration; the exact, timing-free half — "a pan reuses the
+snapshots" asserted in branches taken — is in
+`view::tests::hit_snapshot_cache`.
+
+**What still follows the model.** A *mutation* re-runs `SceneView::build()`
+(every `ItemChange` drives a reconcile pass, because the separate AccessKit tree
+has to follow), and `build()` walks every lightweight entry to call
+`SceneItem::register_bindings`. One pointer sample of a drag therefore still
+costs about 5 ns per item in the scene — 100 µs at 20 000 — of which roughly
+half is that walk. Panning and zooming, the dominant gestures, do not pay it.
+
+---
+
+## Retention — which cards stay live
+
+The numbers above are the *lightweight* tier, where an off-screen item is a
+paint-only record and costs nothing once it is culled. A heavyweight card is a
+real `Widget` in the arena, so being invisible is not the same as being absent:
+it keeps a Tab stop, an AccessKit node, and a place in the layout recursion.
+
+A `SceneView` therefore makes **three** decisions per pass, and they are
+layered rather than merged. Each region contains the one above it:
+
+| Region | Decides | Default |
+| --- | --- | --- |
+| the viewport, no margin | full size versus `Size::ZERO` | the view's bounds |
+| the [`A11yOffScreenMode`](../crates/teksilo-scene/src/a11y.rs) region | published to assistive tech, or not | the viewport ⊕ one viewport on each side |
+| that region ∪ (the viewport ⊕ [`retention_margin`](../crates/teksilo-scene/src/view.rs)) | live versus **dormant** | the above, ∪ +96 screen px |
+
+Zero size costs a card its geometry; being unlisted costs it its AccessKit
+node; dormancy costs it its existence — it leaves paint, the layout recursion,
+the AccessKit tree and the Tab ring, and keeps all of its state (focus, text,
+animations) for when it comes back. The widest region contains the tight one by
+construction, so a card being laid out is never also parked, and it contains
+the accessibility region by construction, so the AT walk is never asked to
+describe a card the arena has parked.
+
+That last containment is **one-directional on purpose**. Where the retention
+region is strictly wider than the accessibility one, the difference is a band of
+cards that are alive and unlisted: still laid out, still Tab stops, still
+holding their state, and absent from the published tree. The margin is a
+lifecycle knob — it exists so the camera never reaches a hole — and the mode is
+the app's statement about how much of the scene a screen reader is offered;
+raising the first must not quietly widen the second. The default mode never hits
+this case (its one-screen reach dwarfs the 96 px margin); `ViewportOnly` with a
+non-default margin is exactly when it bites, which is what makes `ViewportOnly`
+mean what it says.
+
+```rust
+SceneView::new(scene)
+    .retention_margin(96.0)                                  // screen px, the default
+    .a11y_off_screen_mode(A11yOffScreenMode::ViewportOnly)   // what AT is offered
+```
+
+The margin is **screen** pixels, converted through the current zoom each pass,
+because it exists to cover the one frame between a card entering the region and
+the framework waking it — and a pan covers screen distance, not scene distance.
+At zoom 0.1 the default is 960 scene units.
+
+**Three things stay live wherever they are.** A card holding the keyboard focus,
+a captured pointer, or the source of an in-flight drag: parking one clears the
+caret or cancels the selection because the *view* moved, which is not something
+the user asked for. The pin reads the live interactions upward
+(`LayoutContext::for_each_interaction_ancestor`), so it costs the interactions —
+almost always none — and not the cards. A pinned card is still collapsed to zero
+size while it is off screen; retention is about existence, not geometry.
+
+The pin covers the *listing* too, and has to: a published AccessKit tree names
+its focused node, so a focus the walk did not emit is a broken tree rather than
+a merely incomplete one. Focus landing on an unlisted card therefore publishes
+it in the same pass — the anchor set is an input to the cull decision, so a pass
+runs when it changes even though nothing moved and nothing resized
+(`WidgetTree::invalidate_culls_for_moved_interaction`, scoped to
+`culls_children` ancestors so a tree without one forces no pass).
+
+**What it is worth**, on a scene holding 24 cards on screen (`cargo test -p
+teksilo-scene --test heavyweight_retention_probe --release -- --nocapture`):
+
+| off-screen cards | AT nodes | Tab stops | AT walk | before: nodes / stops / walk |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 28 | 25 | 39 µs | 28 / 25 / 47 µs |
+| 1 000 | 28 | 25 | 50 µs | 1 028 / 1 025 / 769 µs |
+| 20 000 | 28 | 25 | 163 µs | 20 028 / 20 025 / 18 165 µs |
+| 50 000 | 28 | 25 | 371 µs | 50 028 / 50 025 / 45 134 µs |
+
+The counts are the point and they are exact: an off-screen card contributes no
+AccessKit node and no Tab stop, at any scene size.
+
+**What it is not.** The cards are all still *materialised* — every one of them
+is an arena node this view built — so a pan walks them once per pass to decide
+who exists. The pan sample therefore stays linear in the number of cards
+(8 µs / 151 µs / 2.4 ms / 7.9 ms at the four rows above, against
+5 µs / 88 µs / 2.4 ms / 7.6 ms before), and that residual is the cost true
+demand-load would remove, not the cost retention removes. Retention answers
+reachability, not materialisation. If a scene holds tens of thousands of
+*heavyweight* cards, the right fix is to stop building them.
+
+**The framework mechanism** is `Widget::culls_children` plus
+`WidgetPlacement::dormant`. A widget that opts in is handed *every* child,
+parked ones included — otherwise it could never ask one back, having parked it —
+and whatever it leaves in `dormant` is applied: a child newly cleared is woken
+and laid out in the same pass, so a camera that jumps shows no hole; a child
+newly set is parked after the pass, through the tree-level door that tells any
+pointer working inside it that its interaction is over. Both directions settle
+the same two things — the AccessKit cache is invalidated and the queued
+`activation_signal` transitions are drained — because the accessibility walk
+skips dormant nodes either way and because that signal is what a native subview
+(a `WebView`) hangs its own visibility on. It is deliberately not
+`visible_when`: a gate per child is a binding-registry source per child, and
+50 000 of them cost more per pan than the whole-scene layout they were installed
+to avoid.
+
+---
+
 ## Cache modes
 
 Items override `cache_mode()` to opt into per-item paint caching:
@@ -1719,8 +1890,12 @@ accessibility:
 - **Remove** (`remove`) destroys the orphaned arena widget (no leak), drops it
   from the materialised maps, and cleans the logical-AT maps.
 - **Move / transform / reparent / visibility / opacity / z / layer** — every
-  `ItemChange` variant drives a reconcile pass, so paint *and* the
-  screen-projected AccessKit bounds follow.
+  `ItemChange` variant drives a reconcile pass, so paint *and* the AccessKit
+  bounds follow. (A camera move is not an `ItemChange` and rides its own
+  invalidation — the view binds `view_transform_signal` at
+  `BindingLevel::AccessibilityOnly`. See
+  [`teksilo-scene-a11y.md`](teksilo-scene-a11y.md) → *One coordinate space,
+  declared once*.)
 - **Pure-a11y mutations** (`add_a11y_group`, `set_a11y_parent`, relations,
   live, landmark, categories) don't change item geometry, so they ride a
   *separate* `Scene::a11y_change_signal` — the AccessKit tree still re-walks.

@@ -113,6 +113,19 @@ assert!(model.local_pos(item_id).is_some());
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
+## `pub const DEFAULT_RETENTION_MARGIN`
+
+Default `SceneView::retention_margin`, in screen pixels.
+
+96 px is what a very fast fling covers in one frame at 120 Hz
+(11 520 px/s), which is the quantity the margin has to beat: it exists so a
+card is woken while it is still off screen rather than on the frame it
+becomes visible.
+
+```rust
+pub const DEFAULT_RETENTION_MARGIN: f32 = 96.0;
+```
+
 ## `pub struct DebugOverlay`
 
 Visual debug overlays painted on top of normal scene rendering.

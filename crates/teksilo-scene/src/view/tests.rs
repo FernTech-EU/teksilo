@@ -9,12 +9,14 @@ mod a11y;
 mod audit_probes;
 mod drag_cancel;
 mod edge_cases;
+mod hit_snapshot_cache;
 mod magnetism;
 mod multi_view;
 mod nested;
 mod pick_order;
 mod pointer_leave;
 mod raster_scale_tests;
+mod retention;
 mod runtime_mutation;
 mod selection_modes;
 mod text_runs;
@@ -3810,10 +3812,17 @@ fn restore_state_clamps_zoom() {
     assert_eq!(view.zoom(), 5.0);
 }
 
-// -- a11y_bounds_space ---------------------------------------------
+// -- a11y bounds space ---------------------------------------------
 
 #[test]
-fn a11y_bounds_default_to_screen_projection() {
+fn an_item_node_carries_a_scene_rect_and_the_camera_that_places_it() {
+    // The construction the whole scene subtree rests on: the rectangle written
+    // onto a node is the item's *scene* rect, and the view transform is
+    // declared beside it as an AccessKit node transform. A consumer composes
+    // the two — `screen_rect_of` in `crates/teksilo-scene/tests/at_bounds.rs`
+    // checks the composed answer; this checks the two halves are what they are
+    // said to be, which a composed assertion alone cannot distinguish from a
+    // pre-projected rect with no transform.
     use crate::items::RectItem;
     use teksilo_core::accessibility::is_synthetic;
     use teksilo_tokens::Color;
@@ -3827,10 +3836,11 @@ fn a11y_bounds_default_to_screen_projection() {
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene));
     tree.layout(SizeProposal::exact(800.0, 600.0));
-    // Pan + zoom: screen bounds become (200 - panx, 100 - pany)
-    // at zoom 2.0 → corners (200, 100, 40, 40).
-    let view = view_handle(&tree, view_id);
-    view.set_zoom(2.0);
+    let view_transform = {
+        let view = view_handle(&tree, view_id);
+        view.set_zoom(2.0);
+        view.view_transform()
+    };
 
     let update = tree.sync_accessibility();
     let item_node = update
@@ -3840,50 +3850,22 @@ fn a11y_bounds_default_to_screen_projection() {
         .map(|(_, n)| n)
         .expect("synthetic item node");
 
-    // Default Screen mode: bounds reflect 2x scale.
     let bounds = item_node.bounds().expect("item bounds set");
-    let width = bounds.x1 - bounds.x0;
     assert!(
-        (width - 40.0).abs() < 0.5,
-        "screen width should reflect zoom"
+        (bounds.x1 - bounds.x0 - 20.0).abs() < 0.5,
+        "the raw box is the scene rect, unscaled by the camera: {bounds:?}"
     );
-}
+    assert!((bounds.x0 - 100.0).abs() < 0.5, "{bounds:?}");
+    assert!((bounds.y0 - 50.0).abs() < 0.5, "{bounds:?}");
 
-#[test]
-fn a11y_bounds_scene_mode_reports_raw_scene_coords() {
-    use crate::items::RectItem;
-    use teksilo_core::accessibility::is_synthetic;
-    use teksilo_tokens::Color;
-
-    let mut scene = Scene::new();
-    scene.add_item(
-        RectItem::new(Rect::new(100.0, 50.0, 20.0, 20.0)).fill(Color::RED),
-        Point::ZERO,
+    let transform = item_node
+        .transform()
+        .expect("the node declares the space its box is in");
+    assert_eq!(
+        *transform,
+        teksilo_core::accessibility::to_accesskit_affine(view_transform),
+        "…and that space is the view transform, exactly"
     );
-
-    let mut tree = WidgetTree::new();
-    let view_id = tree.add(SceneView::new(scene).a11y_bounds_space(crate::A11yBoundsSpace::Scene));
-    tree.layout(SizeProposal::exact(800.0, 600.0));
-    let view = view_handle(&tree, view_id);
-    view.set_zoom(2.0);
-
-    let update = tree.sync_accessibility();
-    let item_node = update
-        .nodes
-        .iter()
-        .find(|(id, _)| is_synthetic(*id))
-        .map(|(_, n)| n)
-        .expect("synthetic item node");
-
-    // Scene mode: bounds match the raw scene rect, ignoring zoom.
-    let bounds = item_node.bounds().expect("item bounds set");
-    let width = bounds.x1 - bounds.x0;
-    assert!(
-        (width - 20.0).abs() < 0.5,
-        "scene-mode width must equal raw scene width"
-    );
-    assert!((bounds.x0 - 100.0).abs() < 0.5);
-    assert!((bounds.y0 - 50.0).abs() < 0.5);
 }
 
 // -- Debug overlays ------------------------------------------------

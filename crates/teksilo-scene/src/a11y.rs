@@ -5,9 +5,12 @@
 //!
 //! Two layers cooperate. The **visual-default** path emits AT nodes
 //! for every visible heavyweight widget and every visible lightweight
-//! item with role + screen-projected bounds, gated by an
+//! item with a role and a scene-space rectangle, gated by an
 //! [`A11yOffScreenMode`] policy that decides which off-viewport items
-//! are still announced. The **logical-structural API** (groups,
+//! are still announced. (Scene-space, with the camera declared once as
+//! an AccessKit node transform above them — see
+//! `crates/teksilo-scene/src/view/a11y_impl.rs`.) The
+//! **logical-structural API** (groups,
 //! parents, relations, auto-graft, custom focus callbacks) layers
 //! over the top — see [`docs/teksilo-scene-a11y.md`](https://github.com/ferntech-eu/teksilo/blob/main/docs/teksilo-scene-a11y.md)
 //! for the full picture.
@@ -220,56 +223,6 @@ pub enum A11yMode {
     /// once is cheaper than overriding the visual default for
     /// every node.
     StrictlyParallel,
-}
-
-/// Coordinate space the AT walker reports `SceneItem` bounds in.
-///
-/// Either way the reported box is the item's `local_bounds` **rectangle**, not
-/// its [`ItemShape`](crate::ItemShape). AccessKit has no other shape to offer,
-/// so an item whose silhouette is narrower than its box — a rounded
-/// [`RectItem`](crate::RectItem), a stroke-only [`PathItem`](crate::PathItem) —
-/// advertises ground a pointer aimed there would miss. That is deliberate and
-/// it does not cost an AT client the element: a client identifies an element
-/// by node id, announces and spatially navigates by this rectangle, and an
-/// AccessKit action arrives addressed to the node rather than as a synthetic
-/// press at a coordinate. Advertising the narrower rectangle instead would be
-/// strictly worse — it would shrink what the element is *said* to cover
-/// without making any more of it reachable. The per-item magnitude is on
-/// [`RectItem::shape`](crate::RectItem).
-///
-/// The framework convention is **screen-projected** bounds — the
-/// rectangle a sighted user would see on the physical monitor, after
-/// pan/zoom/rotation has been applied. Screen readers consume this
-/// for spatial nav (Apple's "explore by touch", touch-screen navi-
-/// gation, magnifier follow-focus). 99% of apps want this default.
-///
-/// **Scene** bounds are the raw scene-coord rectangle stored on the
-/// item, with no view-transform applied. Use this only for the
-/// rare AT clients that reason about scene topology rather than
-/// viewport position — typically when a SceneView's contents have
-/// a logical, fixed coordinate system that the user thinks in (a
-/// CAD canvas where "the bracket is at (240, 180)" means a fixed
-/// physical machine position regardless of zoom level).
-///
-/// Picking the wrong one makes "go to the next item" navigation
-/// either a) ignore the user's current pan (Screen mode in a
-/// scene-coord-aware app) or b) report bounds that drift under
-/// pan/zoom (Scene mode in a viewport-aware app). Default is
-/// `Screen` — change only when you've confirmed your AT users
-/// genuinely want the alternative.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum A11yBoundsSpace {
-    /// Screen-projected bounds — `view_transform * bounds_in_scene`.
-    /// The framework default; matches the convention used by every
-    /// other widget in the framework.
-    #[default]
-    Screen,
-    /// Raw scene-coordinate bounds, with no view-transform applied.
-    /// Apps with a logical fixed coordinate system (CAD canvases,
-    /// blueprint editors) may want this so AT users can reason
-    /// about "where in the design" an item sits, independent of
-    /// the current pan/zoom.
-    Scene,
 }
 
 /// Off-screen visibility policy for the AT walker. Decides which

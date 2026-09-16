@@ -175,8 +175,7 @@ impl WidgetTree {
         // Synthetic children ride their owner. Those that declared local
         // bounds are re-derived from the owner's new origin — exact, and
         // immune to a delta that accumulated across several passes. The
-        // rest already hold window-space rects (a scene item under a view
-        // transform) and are shifted by the owner's own delta.
+        // rest hold absolute rects and are shifted by the owner's own delta.
         for (&syn_id, &owner) in &self.synthetic_parent_map {
             let Some(delta) = moved.get(&owner) else {
                 continue;
@@ -185,6 +184,16 @@ impl WidgetTree {
                 continue;
             };
             let node = &mut cached.nodes[slot].1;
+            // Unless the child names its own coordinate space. A scene item
+            // states its rectangle in scene coordinates and declares the
+            // camera beside it; the owner's window-space delta is not a
+            // quantity in that space, and adding it would slide the item by
+            // however far its *view* moved. Such a node is re-placed by a walk
+            // — the view transform folds in its own origin, so a view that
+            // moved has already dirtied the tree — and never by this patch.
+            if node.transform().is_some() {
+                continue;
+            }
             if let Some(local) = self.synthetic_local_bounds.get(&syn_id) {
                 let origin = self.arena.bounds(owner).origin();
                 node.set_bounds(to_accesskit_rect(teksilo_canvas::Rect::new(
@@ -1509,6 +1518,51 @@ mod tests {
         assert_no_dangling_relationships(&update);
     }
 
+    #[test]
+    fn focus_on_a_node_the_walk_did_not_emit_resolves_to_an_emitted_ancestor() {
+        // Alive is not the same as emitted. A focusable widget inside an
+        // `access_exclude_subtree` is active — dispatch reaches it, it takes
+        // keystrokes — and the walk emits nothing for it. Naming it as the
+        // update's focus is not a lost link but a broken tree: the consumer
+        // resolves `focus` against the nodes it was handed, and every platform
+        // adapter is built on that consumer.
+        //
+        // The same shape reaches here from `SceneView`, which publishes fewer
+        // cards than it keeps alive, so this is the general guarantee behind
+        // that specific one.
+        use crate::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(ClickableWidget);
+        let outer = tree.add(
+            Mover {
+                offset: crate::signal::Signal::new(0.0f32),
+                child: inner,
+            }
+            .access_exclude_subtree(),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(inner);
+
+        let update = tree.sync_accessibility();
+        assert!(
+            find_node(&update, inner).is_none(),
+            "precondition: the excluded descendant emits nothing"
+        );
+        let emitted: std::collections::HashSet<_> =
+            update.nodes.iter().map(|(id, _)| *id).collect();
+        assert!(
+            emitted.contains(&update.focus),
+            "the published focus must be a node in the published tree"
+        );
+        assert_eq!(
+            update.focus,
+            crate::accessibility::widget_id_to_node_id(outer),
+            "…and specifically the nearest ancestor that did emit"
+        );
+        // The check every platform adapter runs on activation.
+        accesskit_consumer::Tree::new(update, false);
+    }
+
     /// Companion to the regression above: the dormant→active path
     /// MUST still dirty the AT cache, because the accessibility walk
     /// skips dormant nodes.
@@ -2027,6 +2081,116 @@ mod tests {
         let node = find_node(&update, id).unwrap();
         let other_nid = crate::accessibility::widget_id_to_node_id(other);
         assert!(node.labelled_by().contains(&other_nid));
+    }
+
+    /// The structural twin of the relation strip above, and a harder failure:
+    /// a relation that dangles loses a link, a *child* that dangles breaks the
+    /// walk, because everything under an unresolvable child is unreachable.
+    ///
+    /// The walker cannot produce one on its own — it pushes a child only after
+    /// `arena.is_active`. `AccessNodeBuilder::attach_scene_child_under` can,
+    /// and by design: it is called from a widget's `accessibility()`, which
+    /// sees no arena, to graft another widget's node under a synthetic parent
+    /// of its own. `teksilo-scene` does exactly that for a heavyweight card
+    /// with a declared logical parent, and a card parked by a viewport cull is
+    /// absent from the update.
+    #[test]
+    fn a_child_attached_to_a_node_that_never_reached_the_tree_is_stripped() {
+        use crate::accessibility::{AccessNodeBuilder, SyntheticKind, widget_id_to_node_id};
+
+        /// Grafts its one child under a synthetic group of its own, the way a
+        /// `SceneView` grafts a card under an `A11yGroup`.
+        #[derive(Debug)]
+        struct Grafter {
+            child: std::cell::Cell<Option<WidgetId>>,
+        }
+
+        impl Widget for Grafter {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                let child = ctx.add(FillWidget::new().label("Card"));
+                self.child.set(Some(child));
+                vec![child]
+            }
+            fn layout_response(
+                &self,
+                _p: SizeProposal,
+                _c: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                teksilo_canvas::Size::new(100.0, 100.0).into()
+            }
+            fn children(&self) -> Vec<WidgetId> {
+                self.child.get().into_iter().collect()
+            }
+            fn wants_descendant_redirects(&self) -> bool {
+                true
+            }
+            fn a11y_redirect_descendant(
+                &self,
+                _self_id: WidgetId,
+                descendant: WidgetId,
+            ) -> Option<accesskit::NodeId> {
+                // Claimed unconditionally — exactly as the scene's hook does,
+                // which cannot see dormancy either.
+                (self.child.get() == Some(descendant)).then(|| widget_id_to_node_id(descendant))
+            }
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                builder.set_role(accesskit::Role::Pane);
+                let group =
+                    builder.push_scene_child_under(None, 7, SyntheticKind::SceneGroup, |c| {
+                        c.set_role(accesskit::Role::GenericContainer);
+                        c.set_name("Group".to_string());
+                    });
+                if let Some(child) = self.child.get() {
+                    builder.attach_scene_child_under(group, widget_id_to_node_id(child));
+                }
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let grafter = tree.add(Grafter {
+            child: std::cell::Cell::new(None),
+        });
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        let child = tree.children(grafter)[0];
+
+        // While the child is live the graft is a real edge.
+        let update = tree.sync_accessibility();
+        let child_nid = widget_id_to_node_id(child);
+        assert!(
+            update.nodes.iter().any(|(id, _)| *id == child_nid),
+            "precondition: the grafted child is in the tree"
+        );
+        assert!(
+            update
+                .nodes
+                .iter()
+                .any(|(_, n)| n.children().contains(&child_nid)),
+            "precondition: something names it as a child"
+        );
+        assert_a11y_tree_valid(&update);
+
+        // Park it. The widget's `accessibility()` still grafts it — it has no
+        // way to know — so the strip is the only thing between here and a
+        // published tree naming a node that is not in it.
+        tree.set_dormant(child);
+        let update = tree.sync_accessibility();
+        assert!(
+            !update.nodes.iter().any(|(id, _)| *id == child_nid),
+            "a dormant widget emits no node"
+        );
+        let emitted: std::collections::HashSet<accesskit::NodeId> =
+            update.nodes.iter().map(|(id, _)| *id).collect();
+        for (parent, node) in &update.nodes {
+            for c in node.children() {
+                assert!(
+                    emitted.contains(c),
+                    "node {parent:?} names child {c:?}, absent from the tree"
+                );
+            }
+        }
+        // And the consumer — the same validation every platform AT runs on
+        // activation — accepts it.
+        assert_a11y_tree_valid(&update);
     }
 
     #[test]

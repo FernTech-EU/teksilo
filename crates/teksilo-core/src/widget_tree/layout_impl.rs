@@ -157,6 +157,99 @@ impl WidgetTree {
         }
     }
 
+    /// Every widget holding live interaction state a park would destroy:
+    /// the focused node, each live pointer's captor, and the source of an
+    /// in-flight drag.
+    ///
+    /// Handed to the layout pass as `LayoutExtras::interaction_anchors` so a
+    /// container deciding what to keep can protect what the user is in the
+    /// middle of. Almost always empty or a single id, so the `Vec` is one
+    /// small allocation per pass on a tree that is being interacted with.
+    fn collect_interaction_anchors(&self) -> Vec<WidgetId> {
+        let mut out: Vec<WidgetId> = Vec::new();
+        let push = |id: WidgetId, out: &mut Vec<WidgetId>| {
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        };
+        if let Some(id) = self.focused {
+            push(id, &mut out);
+        }
+        for entry in self.pointers.iter() {
+            if let Some(id) = entry.captured_by {
+                push(id, &mut out);
+            }
+        }
+        if let Some(id) = self.active_drag.as_ref().and_then(|d| d.source_widget) {
+            push(id, &mut out);
+        }
+        out
+    }
+
+    /// Re-ask every `culls_children` parent whose decision the user's own
+    /// position is an input to, when that position has changed since the last
+    /// walk.
+    ///
+    /// A culling parent decides which of its children exist, and the contract
+    /// says it must keep the one the user is in the middle of — it reads the
+    /// anchors through `LayoutContext::for_each_interaction_ancestor`. But it
+    /// is asked *during layout*, and the idle early-return below skips the
+    /// walk whenever nothing needs laying out. Focus moving from one card to
+    /// another moves nothing and resizes nothing, so without this the parent
+    /// keeps answering with the anchor set from whenever the camera last
+    /// moved: it would go on pinning the card the user has left, and — worse
+    /// for anything that publishes a narrower set than it keeps alive, as
+    /// `SceneView` does — would not pin the card the user has just arrived in.
+    ///
+    /// Scoped so that a tree with no culling container pays nothing but a
+    /// parent-chain walk per changed anchor, and forces no pass at all. Anchors
+    /// are almost always empty or a single id.
+    fn invalidate_culls_for_moved_interaction(&mut self) {
+        let anchors = self.collect_interaction_anchors();
+        if anchors == self.last_interaction_anchors {
+            return;
+        }
+        // Both directions: an anchor that arrived needs its ancestors to start
+        // pinning it, one that left needs them to stop.
+        let mut moved: Vec<WidgetId> = anchors
+            .iter()
+            .filter(|id| !self.last_interaction_anchors.contains(id))
+            .copied()
+            .collect();
+        moved.extend(
+            self.last_interaction_anchors
+                .iter()
+                .filter(|id| !anchors.contains(id))
+                .copied(),
+        );
+        self.last_interaction_anchors = anchors;
+        for id in moved {
+            // From the parent up: the anchor itself culling its own children
+            // is not affected by being an anchor.
+            let mut current = self.arena.parent(id);
+            while let Some(curr) = current {
+                if self
+                    .arena
+                    .get(curr)
+                    .is_some_and(|node| node.widget.culls_children())
+                {
+                    self.arena.mark_needs_layout(curr);
+                    // A culling parent may publish a narrower accessibility
+                    // set than it keeps alive, and pinning an anchor into that
+                    // set widens it without parking or waking anything — so
+                    // the park/wake invalidation below cannot see it. Without
+                    // this, `sync_accessibility` serves a cached tree that
+                    // omits the newly-pinned node and names an ancestor as the
+                    // focus. `WidgetTree::focus` happens to set the same flag
+                    // for its own reasons, but whichever sync runs first
+                    // consumes it, and that sync precedes this pass.
+                    self.a11y_dirty = true;
+                }
+                current = self.arena.parent(curr);
+            }
+        }
+    }
+
     /// Drain any widgets flagged `needs_rebuild` that are currently
     /// active + have built children. Called from
     /// `process_state_changes` after dirty bindings have been
@@ -351,6 +444,9 @@ impl WidgetTree {
             let resolved_theme = self.arena.resolve_theme(root_id, &base_theme);
             let extras = crate::widget::LayoutExtras {
                 focused: self.focused,
+                // A measurement, not a pass: nothing is parked off the back of
+                // it, so there is nothing for an anchor to protect.
+                interaction_anchors: &[],
                 shortcut_registry: Some(&self.shortcut_registry),
                 overlay_manager: Some(&self.overlay_manager),
             };
@@ -469,6 +565,10 @@ impl WidgetTree {
 
         self.arena.refresh_roots();
 
+        // Before the idle early-return, because this is precisely the case it
+        // would swallow: the user moved and nothing else did.
+        self.invalidate_culls_for_moved_interaction();
+
         let proposal_changed = self.last_proposal != proposal;
         self.last_proposal = proposal;
 
@@ -491,12 +591,22 @@ impl WidgetTree {
         let overlay_content_ids = self.overlay_manager.active_content_ids();
         let roots: Vec<WidgetId> = self.arena.roots();
         let focused = self.focused;
+        // Everything a park would take away from the user, gathered once so a
+        // culling container can ask `LayoutContext::subtree_is_interacting`
+        // without the tree. Empty on an idle tree.
+        let interaction_anchors = self.collect_interaction_anchors();
+        // What the `culls_children` parents decided about their children
+        // during this walk — parked and woken alike. Settled after it, because
+        // parking goes through the tree-level door and both halves change the
+        // AccessKit tree.
+        let mut culled = CullTransitions::default();
         for root_id in roots {
             if overlay_content_ids.contains(&root_id) {
                 continue;
             }
             let extras = crate::widget::LayoutExtras {
                 focused,
+                interaction_anchors: &interaction_anchors,
                 shortcut_registry: Some(&self.shortcut_registry),
                 overlay_manager: Some(&self.overlay_manager),
             };
@@ -511,6 +621,7 @@ impl WidgetTree {
                 self.effective_text_scale,
                 self.text_backend.as_ref(),
                 Some(extras),
+                &mut culled,
             );
         }
 
@@ -536,6 +647,7 @@ impl WidgetTree {
                 let resolved_theme = self.arena.resolve_theme(*content_id, &base_theme);
                 let extras = crate::widget::LayoutExtras {
                     focused: self.focused,
+                    interaction_anchors: &interaction_anchors,
                     shortcut_registry: Some(&self.shortcut_registry),
                     overlay_manager: Some(&self.overlay_manager),
                 };
@@ -595,6 +707,7 @@ impl WidgetTree {
             let content_proposal = SizeProposal::exact(overlay_bounds.width, overlay_bounds.height);
             let extras = crate::widget::LayoutExtras {
                 focused: self.focused,
+                interaction_anchors: &interaction_anchors,
                 shortcut_registry: Some(&self.shortcut_registry),
                 overlay_manager: Some(&self.overlay_manager),
             };
@@ -609,7 +722,51 @@ impl WidgetTree {
                 self.effective_text_scale,
                 self.text_backend.as_ref(),
                 Some(extras),
+                &mut culled,
             );
+        }
+
+        // ── Settle what a culling parent decided ──────────────────────
+        // A widget that culls its children decides during layout which of them
+        // exist, and it can only decide once it knows its own bounds and — for
+        // a scene — the camera it is looking through. Waking has already
+        // happened inline, so a child brought back was laid out this pass;
+        // parking is here because it has to go through the tree-level door,
+        // which tells any pointer working inside the subtree that its
+        // interaction is over rather than leaving it holding a widget the
+        // dispatcher will no longer reach.
+        //
+        // Both halves land here, and neither is the special case. The
+        // accessibility walk skips dormant nodes, so an active↔dormant
+        // transition in EITHER direction changes the AT tree's shape; and
+        // `activation_signal` is the hook a native subview (a `WebView`'s
+        // `set_visible` bridge) hangs its own visibility on, so a queued
+        // `true` that nothing drains is a subview that never comes back. This
+        // is the same rule the `visible_when` sweep at the top of
+        // `process_state_changes` applies to `to_dormant` / `to_activate`;
+        // writing it for parking alone made waking a silent no-op that the
+        // usual probe cannot see, because a card waking *into* the viewport
+        // resizes from `Size::ZERO` and a resize dirties the tree on its own.
+        // A card that wakes and stays zero-sized — which is every card in the
+        // band `A11yOffScreenMode::ViewportPlusN` promises to enumerate — does
+        // not.
+        if !culled.is_empty() {
+            self.a11y_dirty = true;
+            // `revalidate_interaction_state` follows the parks immediately:
+            // focus must never survive a pass pointing at a node this just
+            // parked, because dispatch rejects inactive targets and a
+            // keystroke into the void is worse than a focus loss the user can
+            // see. A culling parent is expected to pin what the user is using
+            // (see `LayoutContext::for_each_interaction_ancestor`), so this is
+            // the backstop, not the plan.
+            let parked = !culled.park.is_empty();
+            for id in std::mem::take(&mut culled.park) {
+                self.park_subtree_with_ops(id, &mut *ops);
+            }
+            self.flush_activation_signals();
+            if parked {
+                self.revalidate_interaction_state(&mut *ops);
+            }
         }
 
         // Clear `needs_layout` for every active widget — layout just
@@ -699,6 +856,31 @@ impl WidgetTree {
     }
 }
 
+/// What the `culls_children` parents in one layout walk decided about their
+/// children, collected here because settling either half needs `WidgetTree`,
+/// which the free function below does not have.
+///
+/// Both halves are recorded, not just the parks. A wake is applied inline —
+/// the child has to be laid out in the same pass or a camera that jumps shows
+/// a hole — but it still owes the tree the two things a park owes it: an
+/// invalidated AccessKit cache and a drained `activation_signal` queue.
+#[derive(Default)]
+pub(super) struct CullTransitions {
+    /// Children to park, applied once the walk is over so parking can go
+    /// through `WidgetTree::park_subtree_with_ops`.
+    park: Vec<WidgetId>,
+    /// Children already woken during the walk, kept so the settle step can
+    /// tell "nothing happened" from "something came back".
+    woke: Vec<WidgetId>,
+}
+
+impl CullTransitions {
+    /// Whether this walk changed any child's activation, either way.
+    fn is_empty(&self) -> bool {
+        self.park.is_empty() && self.woke.is_empty()
+    }
+}
+
 /// Recursive layout pass operating on the arena directly (avoids borrow conflicts).
 #[allow(clippy::too_many_arguments)]
 fn layout_widget_recursive(
@@ -712,6 +894,9 @@ fn layout_widget_recursive(
     text_scale: f32,
     text_backend: Option<&std::rc::Rc<std::cell::RefCell<dyn teksilo_canvas::TextBackend>>>,
     extras: Option<crate::widget::LayoutExtras<'_>>,
+    // Every activation change a culling parent asked for during this walk.
+    // Settled by the caller once the walk is over.
+    culled: &mut CullTransitions,
 ) {
     if !arena.is_active(id) {
         return;
@@ -756,18 +941,23 @@ fn layout_widget_recursive(
     }
 
     let child_ids: Vec<WidgetId> = arena.children(id).to_vec();
-    let active_child_ids: Vec<WidgetId> = child_ids
+    // A widget that culls its children is handed the dormant ones too — it is
+    // the only way it can ask for one back, having parked it. Every other
+    // widget sees its active children and nothing else, exactly as before.
+    let culls_children = arena
+        .get(id)
+        .is_some_and(|node| node.widget.culls_children());
+    let mut placements: Vec<WidgetPlacement> = child_ids
         .iter()
         .copied()
-        .filter(|&child_id| arena.is_active(child_id))
-        .collect();
-
-    let mut placements: Vec<WidgetPlacement> = active_child_ids
-        .iter()
-        .map(|&child_id| WidgetPlacement {
-            id: child_id,
-            origin: bounds.origin(),
-            size: bounds.size(),
+        .filter_map(|child_id| {
+            let active = arena.is_active(child_id);
+            (active || culls_children).then_some(WidgetPlacement {
+                id: child_id,
+                origin: bounds.origin(),
+                size: bounds.size(),
+                dormant: !active,
+            })
         })
         .collect();
 
@@ -795,6 +985,29 @@ fn layout_widget_recursive(
     }
 
     for placement in &placements {
+        if culls_children {
+            // Apply the parent's decision before anything reads the child's
+            // state. Waking is immediate — the child is laid out below, this
+            // pass, so a camera that jumps shows no hole. Parking is recorded
+            // and applied once the walk is over, because it has to go through
+            // the tree-level door (`WidgetTree::park_subtree_with_ops`) to
+            // tell any pointer working inside that its interaction is over.
+            // Either way the child's bounds are written first, so a parked
+            // card keeps the coordinate that `scroll_into_view` and
+            // focus-follow read.
+            let active = arena.is_active(placement.id);
+            if !placement.dormant && !active {
+                arena.activate(placement.id);
+                // `activate` only *queues* the `(id, true)` transition; the
+                // caller's settle step drains it. Recorded so that step can
+                // run at all — a pass that woke a child and parked none used
+                // to leave the queue and the AT cache untouched.
+                culled.woke.push(placement.id);
+            } else if placement.dormant && active {
+                culled.park.push(placement.id);
+            }
+        }
+
         let child_bounds = Rect::from_origin_size(placement.origin, placement.size);
         let previous = arena.get_mut(placement.id).and_then(|child_node| {
             let previous = child_node.bounds;
@@ -807,6 +1020,16 @@ fn layout_widget_recursive(
         });
         if let Some(previous) = previous {
             arena.note_bounds_change(placement.id, previous, child_bounds);
+        }
+
+        // Gated on `culls_children`, because that is the contract: for every
+        // other widget `dormant` arrives `false` and is not read back, and a
+        // widget that set it anyway must not be able to take a child out of
+        // the pass by writing a field it was told does nothing.
+        if culls_children && placement.dormant {
+            // Nothing below a parked child is laid out, painted, walked for
+            // accessibility or reachable by Tab. That is the whole point.
+            continue;
         }
 
         let child_proposal = SizeProposal::exact(placement.size.width, placement.size.height);
@@ -823,6 +1046,7 @@ fn layout_widget_recursive(
                 text_scale,
                 text_backend,
                 extras,
+                culled,
             );
         } else {
             // A childless child is never visited by the recursion above, so
@@ -1532,5 +1756,427 @@ mod tests {
         visible.set(false);
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert!(tree.needs_paint());
+    }
+
+    /// `culls_children` as a framework primitive, without a scene.
+    ///
+    /// The mechanism is one field and two rules: a widget that opts in is
+    /// handed every child, parked ones included, and whatever it leaves in
+    /// `WidgetPlacement::dormant` is applied — cleared wakes in the same pass,
+    /// set parks after it.
+    mod culling_containers {
+        use super::*;
+        use crate::signal::Signal;
+        use crate::widget::{LayoutResponse, WidgetPlacement};
+        use crate::widget_builder::WidgetBuilder;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        /// Parks every child whose index is set in the `park` bitmask, and
+        /// reports how many children its `place_children` was handed.
+        ///
+        /// `park` is a `Signal` bound at `BindingLevel::Relayout` — the same
+        /// level a `SceneView` binds its camera at — because that is what makes
+        /// changing it run a pass at all: `layout_with_ops` returns early when
+        /// the proposal is unchanged and nothing needs layout.
+        #[derive(Debug)]
+        struct Culler {
+            kids: Vec<WidgetId>,
+            park: Signal<u64>,
+            seen: Rc<Cell<usize>>,
+            opts_in: bool,
+            /// Stop writing `dormant` at all, so what the framework pre-set
+            /// there is what gets applied.
+            ignore_dormant: Rc<Cell<bool>>,
+            /// One per child, so "was this subtree recursed into" is
+            /// observable and not merely inferred from the child's activation.
+            grandkids: Rc<std::cell::RefCell<Vec<WidgetId>>>,
+            /// How many times the culler has been asked to decide. The
+            /// question "was the decision re-taken?" has no other witness — a
+            /// re-run that reaches the same answer changes nothing else.
+            passes: Rc<Cell<usize>>,
+        }
+
+        impl Culler {
+            fn new(park: Signal<u64>, seen: Rc<Cell<usize>>, opts_in: bool) -> Self {
+                Self {
+                    kids: Vec::new(),
+                    park,
+                    seen,
+                    opts_in,
+                    ignore_dormant: Rc::new(Cell::new(false)),
+                    grandkids: Rc::new(std::cell::RefCell::new(Vec::new())),
+                    passes: Rc::new(Cell::new(0)),
+                }
+            }
+        }
+
+        impl Widget for Culler {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                self.park.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    crate::binding::BindingLevel::Relayout,
+                );
+                // Each child has a child of its own, so "was this subtree
+                // recursed into" is observable from the grandchild's bounds
+                // and not only from the child's activation.
+                self.kids = (0..3)
+                    .map(|i| {
+                        let grandkid = ctx.add(FillWidget::new().label(format!("grandkid{i}")));
+                        self.grandkids.borrow_mut().push(grandkid);
+                        ctx.add(StackWidget::new().add_child(grandkid).focusable(true))
+                    })
+                    .collect();
+                self.kids.clone()
+            }
+            fn layout_response(
+                &self,
+                _p: SizeProposal,
+                _c: &crate::widget::LayoutContext,
+            ) -> LayoutResponse {
+                teksilo_canvas::Size::new(100.0, 100.0).into()
+            }
+            fn children(&self) -> Vec<WidgetId> {
+                self.kids.clone()
+            }
+            fn culls_children(&self) -> bool {
+                self.opts_in
+            }
+            fn place_children(
+                &self,
+                bounds: Rect,
+                _proposal: SizeProposal,
+                children: &mut [WidgetPlacement],
+                _ctx: &crate::widget::LayoutContext,
+            ) {
+                self.seen.set(children.len());
+                self.passes.set(self.passes.get() + 1);
+                let mask = self.park.get();
+                for placement in children.iter_mut() {
+                    let Some(i) = self.kids.iter().position(|&k| k == placement.id) else {
+                        continue;
+                    };
+                    placement.origin = teksilo_canvas::Point::new(0.0, i as f32 * 20.0);
+                    // Width follows the proposal so a *grandchild*'s size says
+                    // whether the recursion reached it — a child's own size is
+                    // written here, before any cull decision, and so proves
+                    // nothing.
+                    placement.size = teksilo_canvas::Size::new(bounds.width, 20.0);
+                    if !self.ignore_dormant.get() {
+                        placement.dormant = mask & (1 << i) != 0;
+                    }
+                }
+            }
+        }
+
+        struct Rig {
+            tree: WidgetTree,
+            id: WidgetId,
+            park: Signal<u64>,
+            seen: Rc<Cell<usize>>,
+            ignore_dormant: Rc<Cell<bool>>,
+            grandkids: Rc<std::cell::RefCell<Vec<WidgetId>>>,
+            passes: Rc<Cell<usize>>,
+        }
+
+        fn tree_with(opts_in: bool) -> Rig {
+            let park = Signal::new(0u64);
+            let seen = Rc::new(Cell::new(0usize));
+            let culler = Culler::new(park.clone(), seen.clone(), opts_in);
+            let ignore_dormant = culler.ignore_dormant.clone();
+            let grandkids = culler.grandkids.clone();
+            let passes = culler.passes.clone();
+            let mut tree = WidgetTree::new();
+            let id = tree.add(culler);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            Rig {
+                tree,
+                id,
+                park,
+                seen,
+                ignore_dormant,
+                grandkids,
+                passes,
+            }
+        }
+
+        #[test]
+        fn focus_moving_re_asks_the_culling_parent_that_owns_it() {
+            // A culling parent is told to keep what the user is in the middle
+            // of, and it is only asked during layout — but focus moving from
+            // one child to another moves nothing and resizes nothing, so the
+            // idle early-return would skip the pass and leave the parent
+            // answering with a stale anchor set. It would go on pinning the
+            // child the user has left, and never pin the one they arrived in.
+            //
+            // Harmless while pinning only keeps a child *alive* — a newly
+            // focused child is active by definition. Not harmless for a parent
+            // that publishes a narrower set than it keeps alive, as
+            // `SceneView` does: the published tree names its focused node, and
+            // a focus the walk did not emit is a broken update.
+            let Rig {
+                mut tree,
+                id,
+                passes,
+                ..
+            } = tree_with(true);
+            let kids = tree.children(id).to_vec();
+
+            let before = passes.get();
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert_eq!(
+                passes.get(),
+                before,
+                "precondition: a settled tree skips the pass entirely"
+            );
+
+            tree.focus(kids[0]);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert_eq!(
+                passes.get(),
+                before + 1,
+                "focus arriving is a change to the culler's inputs"
+            );
+
+            tree.focus(kids[2]);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert_eq!(
+                passes.get(),
+                before + 2,
+                "…and so is focus moving between two of its children"
+            );
+
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert_eq!(
+                passes.get(),
+                before + 2,
+                "…while a pass with the same anchors is still skipped"
+            );
+        }
+
+        #[test]
+        fn focus_moving_forces_no_pass_where_nothing_culls() {
+            // The scoping half. The invalidation walks up from the moved
+            // anchor and marks only `culls_children` ancestors, so a tree
+            // without one pays a parent-chain walk and forces no layout — the
+            // cost lands on the trees that asked for the mechanism.
+            let Rig {
+                mut tree,
+                id,
+                passes,
+                ..
+            } = tree_with(false);
+            let kids = tree.children(id).to_vec();
+            let before = passes.get();
+
+            tree.focus(kids[0]);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            tree.focus(kids[2]);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+
+            assert_eq!(
+                passes.get(),
+                before,
+                "no culling ancestor, no reason to re-run layout"
+            );
+        }
+
+        #[test]
+        fn a_parked_child_leaves_the_tab_ring_and_the_at_tree_in_the_same_pass() {
+            let Rig {
+                mut tree, id, park, ..
+            } = tree_with(true);
+            let kids = tree.children(id).to_vec();
+            assert_eq!(tree.tab_stops_within(id).len(), 3);
+            let before = tree.accessibility_tree_snapshot().nodes.len();
+
+            park.set(0b010);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+
+            assert!(!tree.is_active(kids[1]), "parked in the pass that asked");
+            assert!(tree.is_active(kids[0]) && tree.is_active(kids[2]));
+            let stops = tree.tab_stops_within(id);
+            assert_eq!(stops.len(), 2, "stops = {stops:?}");
+            assert!(!stops.contains(&kids[1]));
+            assert_eq!(
+                tree.accessibility_tree_snapshot().nodes.len(),
+                before - 2,
+                "the parked child AND its own child leave the AccessKit tree — \
+                 parking is a subtree operation"
+            );
+        }
+
+        #[test]
+        fn a_parked_child_takes_its_subtree_out_of_the_layout_recursion() {
+            // The activation flag alone does not prove this: a child could be
+            // dormant and still have been recursed into. Watch the grandchild's
+            // bounds, which only the recursion writes.
+            let Rig {
+                mut tree,
+                park,
+                grandkids,
+                ..
+            } = tree_with(true);
+            let grandkid = grandkids.borrow()[1];
+            assert_eq!(tree.bounds(grandkid).size(), Size::new(100.0, 20.0));
+
+            park.set(0b010);
+            tree.layout(SizeProposal::exact(100.0, 300.0));
+            let parked_bounds = tree.bounds(grandkid);
+
+            // Change the geometry the recursion would have written, and check
+            // it does not reach the parked subtree.
+            park.set(0b010);
+            tree.layout(SizeProposal::exact(100.0, 300.0));
+            assert_eq!(
+                tree.bounds(grandkid),
+                parked_bounds,
+                "nothing below a parked child is laid out"
+            );
+
+            park.set(0);
+            tree.layout(SizeProposal::exact(100.0, 300.0));
+            assert_eq!(
+                tree.bounds(grandkid).size(),
+                Size::new(100.0, 20.0),
+                "…and the recursion resumes when it wakes"
+            );
+        }
+
+        #[test]
+        fn a_parent_that_leaves_dormant_alone_changes_nothing() {
+            // `dormant` arrives pre-set to the child's current state, so a
+            // culling parent that does not write it keeps whatever it decided
+            // last time. Without that, every pass in which the parent declines
+            // to answer would silently wake everything it had parked.
+            let Rig {
+                mut tree,
+                park,
+                ignore_dormant,
+                id,
+                ..
+            } = tree_with(true);
+            let kids = tree.children(id).to_vec();
+
+            park.set(0b101);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert!(!tree.is_active(kids[0]) && !tree.is_active(kids[2]));
+
+            ignore_dormant.set(true);
+            park.set(0);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert!(
+                !tree.is_active(kids[0]) && !tree.is_active(kids[2]),
+                "a parent that ignores the field must not resurrect anything"
+            );
+            assert!(tree.is_active(kids[1]), "…nor park anything");
+        }
+
+        #[test]
+        fn a_woken_child_is_laid_out_in_the_same_pass() {
+            // The half a signal-based gate cannot do: a gate written during
+            // layout is not read until the next pass, so the woken child would
+            // paint at a stale rectangle for a frame.
+            let Rig {
+                mut tree, id, park, ..
+            } = tree_with(true);
+            let kids = tree.children(id).to_vec();
+
+            park.set(0b100);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert!(!tree.is_active(kids[2]));
+
+            park.set(0);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert!(tree.is_active(kids[2]), "woken");
+            assert_eq!(
+                tree.bounds(kids[2]),
+                Rect::new(0.0, 40.0, 100.0, 20.0),
+                "…and laid out this pass, not the next"
+            );
+        }
+
+        #[test]
+        fn a_culling_parent_is_handed_its_parked_children() {
+            // Otherwise it could never ask one back, having parked it.
+            let Rig {
+                mut tree,
+                park,
+                seen,
+                ..
+            } = tree_with(true);
+            assert_eq!(seen.get(), 3);
+            park.set(0b111);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            park.set(0b111);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert_eq!(
+                seen.get(),
+                3,
+                "all three are parked, and all three are still offered"
+            );
+        }
+
+        #[test]
+        fn a_widget_that_did_not_opt_in_cannot_park_anything() {
+            // `dormant` is documented as read only for a `culls_children`
+            // parent. A widget that writes it anyway must change nothing —
+            // otherwise the field is a trapdoor on every container in the
+            // framework.
+            let Rig {
+                mut tree,
+                id,
+                park,
+                seen,
+                grandkids,
+                ..
+            } = tree_with(false);
+            let kids = tree.children(id).to_vec();
+            park.set(0b111);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+            assert_eq!(seen.get(), 3, "active children only, which is all of them");
+            for kid in &kids {
+                assert!(tree.is_active(*kid), "{kid:?} must stay active");
+            }
+            assert_eq!(tree.tab_stops_within(id).len(), 3);
+            // Widen the view so a subtree that was recursed into changes size.
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            for grandkid in grandkids.borrow().iter() {
+                assert_eq!(
+                    tree.bounds(*grandkid).size(),
+                    Size::new(200.0, 20.0),
+                    "…and its subtree must still be laid out: reading `dormant` \
+                     from a widget that did not opt in would take the subtree \
+                     out of the recursion",
+                );
+            }
+        }
+
+        #[test]
+        fn parking_the_focused_child_does_not_leave_focus_on_a_dormant_node() {
+            // The backstop behind the pin. A culling parent is expected to keep
+            // what the user is using, but if it parks it anyway, focus must not
+            // survive the pass pointing at a node dispatch will refuse — a
+            // keystroke into the void is worse than a focus loss the user can
+            // see.
+            let Rig {
+                mut tree, id, park, ..
+            } = tree_with(true);
+            let kids = tree.children(id).to_vec();
+            tree.focus(kids[0]);
+            assert_eq!(tree.focused(), Some(kids[0]));
+
+            park.set(0b001);
+            tree.layout(SizeProposal::exact(100.0, 100.0));
+
+            assert!(!tree.is_active(kids[0]));
+            assert_eq!(
+                tree.focused(),
+                None,
+                "focus must not point into a subtree this pass parked"
+            );
+            let _ = id;
+        }
     }
 }

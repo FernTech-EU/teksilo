@@ -145,7 +145,9 @@ impl WidgetTree {
         );
     }
 
-    /// Reveal `rect` (in **absolute tree coordinates**) inside every
+    /// Reveal `rect` — stated in `from`'s own bounds space, which is window
+    /// coordinates everywhere except inside a content transform, where it is
+    /// that node's content space — inside every
     /// `clips_children` scroll container above `from`, walking strictly
     /// outward (`from` itself is excluded). For each such container whose
     /// viewport does not already contain the margin-expanded rect, dispatch
@@ -172,6 +174,17 @@ impl WidgetTree {
     /// that doesn't report a delta (leaves the cell zero) simply gets no
     /// re-targeting, which is exact for the common single-enclosing-scroller
     /// case.
+    ///
+    /// **Coordinate spaces.** The walk carries `rect` from one ancestor's
+    /// space into the next as it climbs, so each container is asked in the
+    /// space it can act in and compared against its viewport in the space that
+    /// viewport is stated in. Those two differ for a *content* transform (a
+    /// fixed window onto moving content, whose own bounds stay in its parent's
+    /// space) and coincide for a *self* transform and for the identity case
+    /// that is the rest of the tree. Without that bookkeeping a focused card
+    /// inside a panned `SceneView` tested as already visible however far the
+    /// camera had gone, and anything further out received a rectangle from a
+    /// coordinate system it had never heard of.
     ///
     /// **Alignment applies to the innermost clipping ancestor only.** A
     /// [`ScrollAlign::Fraction`] request names a height in *one* viewport; the
@@ -205,25 +218,78 @@ impl WidgetTree {
         // reveals minimally.
         let mut pending_align = align;
         while let Some(ancestor_id) = current {
+            // The transform between this ancestor's children and its parent.
+            // Identity for the overwhelming majority of the tree; a `SceneView`
+            // (content) or a `Scale` / `Rotate` (self) makes it real.
+            //
+            // `rect` arrives in `ancestor_id`'s **content** space — the space
+            // its children's bounds are stated in — because that is the space
+            // the widget below it was measured in and every step of this walk
+            // restores the invariant on its way out. Without that bookkeeping a
+            // focused card inside a panned `SceneView` was compared, scene
+            // coordinates against window coordinates, with the view's own
+            // viewport: a card at scene (100, 100) under a −90 px pan tested as
+            // "already visible" and the reveal never fired, and any outer
+            // scroller then received a rectangle from a coordinate system it
+            // had never heard of.
+            let to_parent = self
+                .arena
+                .get(ancestor_id)
+                .and_then(|n| n.transform_prop.as_ref())
+                .map(|t| t.get())
+                .filter(|t| !t.is_identity());
+            let content_transform = self
+                .arena
+                .get(ancestor_id)
+                .is_some_and(|n| n.content_transform);
+
             if let Some(node) = self.arena.get(ancestor_id)
                 && node.clips_children
             {
                 let viewport = node.bounds;
+                // Which space the viewport is stated in decides which rectangle
+                // it is comparable with. A **content** transform is a fixed
+                // window onto moving content, so its own bounds stay in its
+                // parent's space and the target has to be projected to meet
+                // them. A **self** transform moves with its own bounds, so both
+                // are already in the same space.
+                let against = match (content_transform, to_parent.as_ref()) {
+                    (true, Some(t)) => t.apply_rect(rect),
+                    _ => rect,
+                };
                 let align =
                     std::mem::replace(&mut pending_align, crate::event::ScrollAlign::Minimal);
                 // A pin must re-assert itself every time, so it never consults
                 // whether the target already happens to be on screen.
                 let needs_scroll = matches!(align, crate::event::ScrollAlign::Fraction(_))
-                    || rect.y - margin < viewport.y
-                    || rect.bottom() + margin > viewport.bottom()
-                    || rect.x - margin < viewport.x
-                    || rect.right() + margin > viewport.right();
+                    || against.y - margin < viewport.y
+                    || against.bottom() + margin > viewport.bottom()
+                    || against.x - margin < viewport.x
+                    || against.right() + margin > viewport.right();
 
                 if needs_scroll {
                     *applied.lock().unwrap() = Point::ZERO;
-                    self.dispatch_to_widget(
+                    // Addressed, not bubbled. `dispatch_to_widget` previews the
+                    // event through the target's own ancestors first, which
+                    // hands every outer container the *inner* one's reveal —
+                    // out of order, before the inner has scrolled, and (now
+                    // that a content transform is in the picture) in a
+                    // coordinate system that is not the outer container's. This
+                    // walk already visits each clipping ancestor in turn, in
+                    // its own space and after re-targeting by what the one
+                    // inside it actually scrolled, so the preview pass was a
+                    // second, worse copy of the same job. `ScrollArea` is the
+                    // only widget in the framework that handles
+                    // `WidgetEvent::ScrollIntoView`, and it clips, so it is
+                    // reached by the walk itself either way.
+                    self.dispatch_to_widget_direct(
                         ancestor_id,
                         &WidgetEvent::ScrollIntoView {
+                            // The handler's own content space, which is the
+                            // only one it can act in: a `ScrollArea` subtracts
+                            // its viewport origin from this, and a `SceneView`
+                            // hands it to `ensure_visible`, which is scene
+                            // coordinates by signature.
                             target_bounds: rect,
                             margin,
                             align,
@@ -233,13 +299,22 @@ impl WidgetTree {
                         &mut *ops,
                     );
                     // The container scrolled its content by `+delta`, moving the
-                    // target `-delta` in window space; carry that to the outer.
+                    // target `-delta` — in the same space the event was stated
+                    // in, since that is the space the handler worked in.
                     let delta = *applied.lock().unwrap();
                     if delta != Point::ZERO {
                         rect =
                             Rect::new(rect.x - delta.x, rect.y - delta.y, rect.width, rect.height);
                     }
                 }
+            }
+            // Leaving this ancestor: restore the invariant for the next one up.
+            // Both kinds of transform map this node's content into its parent's
+            // space — they differ only in whether the node's *own* bounds went
+            // with it, which is what the comparison above had to know and this
+            // does not.
+            if let Some(t) = to_parent {
+                rect = t.apply_rect(rect);
             }
             current = self.arena.parent(ancestor_id);
         }
@@ -997,6 +1072,132 @@ mod tests {
             1,
             "walking from the rect's owner reaches the viewport enclosing it"
         );
+    }
+
+    /// A `clips_children` container around `child`, recording every reveal it
+    /// is asked for and the rectangle it was asked with.
+    fn recorder(
+        tree: &mut WidgetTree,
+        child: WidgetId,
+        seen: std::rc::Rc<std::cell::RefCell<Vec<Rect>>>,
+    ) -> WidgetId {
+        use crate::event::EventResponse;
+        use crate::test_widgets::StackWidget;
+        tree.add(
+            StackWidget::new()
+                .add_child(child)
+                .on_scroll(move |event, _ctx| {
+                    if let WidgetEvent::ScrollIntoView { target_bounds, .. } = event {
+                        seen.borrow_mut().push(*target_bounds);
+                    }
+                    EventResponse::Ignored
+                })
+                .clips_children(true),
+        )
+    }
+
+    /// **The reveal walk crosses a content transform.**
+    ///
+    /// A `SceneView` is a fixed viewport over content in a coordinate system of
+    /// its own: a card at scene (100, 100) keeps arena bounds of (100, 100)
+    /// however far the camera has panned. The walk used to compare that
+    /// rectangle directly against the view's *window* viewport and conclude
+    /// there was nothing to reveal — which is why focus-follow inside an
+    /// embedded editor never fired at a non-zero pan, and why anything further
+    /// out then received a rectangle from a coordinate system it had never
+    /// heard of.
+    #[test]
+    fn a_reveal_projects_the_rect_as_it_climbs_out_of_a_content_transform() {
+        use crate::event::{ScrollAlign, ScrollMotion};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use teksilo_canvas::Transform2D;
+
+        let outer_seen: Rc<RefCell<Vec<Rect>>> = Rc::new(RefCell::new(Vec::new()));
+        let view_seen: Rc<RefCell<Vec<Rect>>> = Rc::new(RefCell::new(Vec::new()));
+
+        let mut tree = WidgetTree::new();
+        let card = tree.add(FillWidget::new());
+        let view = recorder(&mut tree, card, view_seen.clone());
+        let _outer = recorder(&mut tree, view, outer_seen.clone());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        // The camera: panned 90 px left, so scene x = 100 paints at window
+        // x = 10 — inside the viewport, and not where the arena says it is.
+        tree.set_content_transform(view, Transform2D::translate(-90.0, 0.0));
+
+        let card_rect = Rect::new(100.0, 100.0, 50.0, 50.0);
+        let mut ops = crate::window::NoopWindowOps;
+        tree.scroll_rect_into_view(
+            card,
+            card_rect,
+            0.0,
+            ScrollAlign::Minimal,
+            ScrollMotion::Instant,
+            &mut ops,
+        );
+
+        assert!(
+            view_seen.borrow().is_empty(),
+            "the card paints at window x = 10, inside the 400×300 viewport — \
+             comparing its scene rect against the viewport is what used to \
+             produce a spurious verdict here, in either direction"
+        );
+        assert!(
+            outer_seen.borrow().is_empty(),
+            "and nothing outside it has a reason to scroll either"
+        );
+
+        // Now pan so the card is genuinely off-screen to the left. Its arena
+        // bounds have not moved — only the camera has — so a walk that ignores
+        // the transform still sees a card at (100, 100) and does nothing.
+        tree.set_content_transform(view, Transform2D::translate(-600.0, 0.0));
+        tree.scroll_rect_into_view(
+            card,
+            card_rect,
+            0.0,
+            ScrollAlign::Minimal,
+            ScrollMotion::Instant,
+            &mut ops,
+        );
+        assert_eq!(
+            view_seen.borrow().as_slice(),
+            &[card_rect],
+            "the view is asked to reveal the card, in the view's own content \
+             space — the space `SceneView::ensure_visible` takes by signature"
+        );
+        assert_eq!(
+            outer_seen.borrow().as_slice(),
+            &[Rect::new(-500.0, 100.0, 50.0, 50.0)],
+            "and everything further out is asked in window space, which is the \
+             only space it can compare against its own viewport"
+        );
+    }
+
+    /// The control for the test above: with no transform in the chain the walk
+    /// is unchanged, which is the case the whole rest of the framework is.
+    #[test]
+    fn a_reveal_with_no_transform_in_the_chain_passes_the_rect_through() {
+        use crate::event::{ScrollAlign, ScrollMotion};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let seen: Rc<RefCell<Vec<Rect>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut tree = WidgetTree::new();
+        let inside = tree.add(FillWidget::new());
+        let _viewport = recorder(&mut tree, inside, seen.clone());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let target = Rect::new(0.0, 5_000.0, 10.0, 10.0);
+        let mut ops = crate::window::NoopWindowOps;
+        tree.scroll_rect_into_view(
+            inside,
+            target,
+            0.0,
+            ScrollAlign::Minimal,
+            ScrollMotion::Instant,
+            &mut ops,
+        );
+        assert_eq!(seen.borrow().as_slice(), &[target]);
     }
 
     #[test]

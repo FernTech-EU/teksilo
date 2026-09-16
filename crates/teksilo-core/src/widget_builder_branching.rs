@@ -103,6 +103,10 @@ macro_rules! impl_widget_for_branch {
                 match self { $($branch::$arm(w) => w.accessibility(builder)),+ }
             }
 
+            fn culls_children(&self) -> bool {
+                match self { $($branch::$arm(w) => w.culls_children()),+ }
+            }
+
             fn wants_descendant_redirects(&self) -> bool {
                 match self { $($branch::$arm(w) => w.wants_descendant_redirects()),+ }
             }

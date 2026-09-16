@@ -8,7 +8,7 @@
 use super::*;
 
 use super::accessibility_impl::to_accesskit_rect;
-use crate::accessibility::AccessNodeBuilder;
+use crate::accessibility::{AccessNodeBuilder, to_accesskit_affine};
 
 impl WidgetTree {
     #[allow(clippy::type_complexity)]
@@ -89,6 +89,7 @@ impl WidgetTree {
         for &root_id in &roots {
             self.build_accessibility_recursive(
                 root_id,
+                teksilo_canvas::Transform2D::IDENTITY,
                 &mut nodes,
                 &mut synthetic_parents,
                 &mut local_bounds,
@@ -97,10 +98,36 @@ impl WidgetTree {
             );
         }
 
+        // The focused node, resolved to something this walk actually emitted.
+        //
+        // Active is necessary and not sufficient. A widget can be alive and
+        // still absent from the tree — inside an `access_exclude_subtree`, or
+        // left out of an ancestor's `accessibility_children` (which is how
+        // `SceneView` publishes fewer cards than it keeps warm). Naming it as
+        // the focus is not a missing link but a broken update: the consumer
+        // every platform adapter is built on resolves `focus` against the
+        // nodes it was handed and rejects a tree where it cannot.
+        //
+        // So walk up to the nearest ancestor that did emit, which is the node
+        // a screen reader would have put the user in anyway, and fall back to
+        // the window root only if nothing on the chain emitted. The set costs
+        // one pass over the nodes already built.
+        let emitted: std::collections::HashSet<accesskit::NodeId> =
+            nodes.iter().map(|(id, _)| *id).collect();
         let focus = self
             .focused
             .filter(|id| self.arena.is_active(*id))
-            .map(widget_id_to_node_id)
+            .and_then(|id| {
+                let mut current = Some(id);
+                while let Some(curr) = current {
+                    let nid = widget_id_to_node_id(curr);
+                    if emitted.contains(&nid) {
+                        return Some(nid);
+                    }
+                    current = self.arena.parent(curr);
+                }
+                None
+            })
             .unwrap_or_else(root_node_id);
 
         // ── Name-from-content for row nodes ───────────────────────────
@@ -249,6 +276,44 @@ impl WidgetTree {
             }
         }
 
+        // ── Strip dangling children ───────────────────────────────────
+        // A node's children list may name a NodeId that never reached this
+        // update. The walker's own pushes cannot do that (it pushes a child
+        // only after `arena.is_active`), but `attach_scene_child_under` can:
+        // it is called from a widget's `accessibility()` — which has no arena
+        // — to graft a *sibling* widget's node under a synthetic parent, and
+        // that widget may have gone dormant, in which case the walker emitted
+        // nothing for it.
+        //
+        // A dangling child is not a lost link, it is a broken tree: the
+        // consumer walks children to build the filtered tree every platform
+        // adapter reads, and a child it cannot resolve is an unreachable
+        // parent for everything below it. This is the structural twin of the
+        // relation strip immediately below, and it is enforced HERE rather
+        // than at each caller because a caller that could check would not
+        // need to ask: `Widget::accessibility` sees no arena by design, and
+        // a visibility gate written during layout settles after the widget
+        // that wrote it has already been asked for its node.
+        //
+        // Runs before the relation strip so a child removed here cannot be
+        // resurrected as a relation target by a later pass.
+        {
+            let emitted: std::collections::HashSet<accesskit::NodeId> =
+                nodes.iter().map(|(id, _)| *id).collect();
+            for (_, node) in &mut nodes {
+                if node.children().iter().all(|c| emitted.contains(c)) {
+                    continue;
+                }
+                let kept: Vec<_> = node
+                    .children()
+                    .iter()
+                    .filter(|c| emitted.contains(*c))
+                    .copied()
+                    .collect();
+                node.set_children(kept);
+            }
+        }
+
         // Strip relationship targets (controls, described_by, labelled_by) that
         // reference NodeIds absent from the emitted tree. Dormant widgets (e.g.
         // inactive tab panels) are excluded from the TreeUpdate; if a node still
@@ -308,6 +373,11 @@ impl WidgetTree {
     pub(super) fn build_accessibility_recursive(
         &self,
         id: WidgetId,
+        // The transform carrying this node's bounds space into the space its
+        // AccessKit parent is described in. Identity for all but the direct
+        // children of a content-transform node; see the `set_transform` call
+        // below for why it is emitted there and nowhere else.
+        content_to_parent: teksilo_canvas::Transform2D,
         nodes: &mut Vec<(accesskit::NodeId, accesskit::Node)>,
         synthetic_parents: &mut std::collections::HashMap<accesskit::NodeId, WidgetId>,
         local_bounds: &mut std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
@@ -428,6 +498,40 @@ impl WidgetTree {
 
         let bounds = self.arena.bounds(id);
         builder.inner_mut().set_bounds(to_accesskit_rect(bounds));
+        // …and, where those bounds are not already in window space, the
+        // transform that puts them there.
+        //
+        // A **content** transform node — `SceneView` is the only one today —
+        // declares that its children are laid out in a coordinate system of
+        // its own: a card at scene (100, 100) has arena bounds of (100, 100)
+        // whatever the camera is doing. Writing that rectangle out untouched
+        // told assistive technology the card was at window (100, 100), which
+        // is where it is only at pan zero: an explore-by-touch probe, a
+        // braille routing key and a magnifier following focus all resolved
+        // against a rectangle the card is not in.
+        //
+        // The fix is the mechanism AccessKit already has for exactly this.
+        // `Node::transform` applies "to any coordinates within this node and
+        // its descendants, including the `bounds` property of this node", and
+        // `bounds` are read "in the coordinate space of the nearest ancestor
+        // with a non-`None` transform". So the whole scene subtree needs ONE
+        // declaration, on each child at the boundary: every rectangle below it
+        // — a card, a label inside the card, a text run's per-character boxes
+        // — stays in scene coordinates and is projected by the consumer, which
+        // is also what makes `node_at_point` descend correctly (it feeds each
+        // child `inv(child.direct_transform()) * point`).
+        //
+        // Emitted at the boundary and only there: a grandchild that re-emitted
+        // it would compose it twice. And emitted for *content* transforms only
+        // — a `Scale` or `Rotate` scope is a visual effect applied to a widget
+        // whose bounds are already in window space, so its subtree's
+        // coordinates are unchanged and a screen reader is not asked to chase
+        // a 200 ms tween.
+        if !content_to_parent.is_identity() {
+            builder
+                .inner_mut()
+                .set_transform(to_accesskit_affine(content_to_parent));
+        }
 
         // Framework-driven disabled gate. Respects an
         // `access_disabled(false)` override that wants to clear
@@ -504,9 +608,22 @@ impl WidgetTree {
         // Recurse only for `Inherit` — `Exclude` and `Merge` prune
         // descendants from the AT tree.
         if matches!(subtree_mode, AccessSubtreeMode::Inherit) {
+            // What space this node hands its children. A content transform is
+            // the one kind that changes it; everything else — including a
+            // `Scale` / `Rotate` self transform — leaves its children in the
+            // space it was itself described in.
+            let child_space = if node.content_transform {
+                node.transform_prop
+                    .as_ref()
+                    .map(|p| p.get())
+                    .unwrap_or(teksilo_canvas::Transform2D::IDENTITY)
+            } else {
+                teksilo_canvas::Transform2D::IDENTITY
+            };
             for &child_id in children {
                 self.build_accessibility_recursive(
                     child_id,
+                    child_space,
                     nodes,
                     synthetic_parents,
                     local_bounds,

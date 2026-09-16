@@ -76,6 +76,13 @@ the time the observer sees the event, the Scene already reflects it, and
 (when the mutation came through a `SceneModel`) the
 observer may freely read *and* write the scene back.
 
+`#[non_exhaustive]`: this is the crate's outbound event vocabulary, matched
+by every observer, and it grows whenever the scene learns to report
+something new — `HandlersChanged` is the most recent. Without the
+attribute each such addition would stop a downstream `match` from
+compiling; with it, a consumer's wildcard arm keeps meaning "a change I do
+not act on".
+
 ```rust
 pub enum ItemChange { /* variants */ }
 ```
@@ -94,7 +101,8 @@ pub enum ItemChange { /* variants */ }
 - **`Removed`** — `remove`: item is gone.
 - **`Added`** — `add_item` / `add_widget`: item was inserted.
 - **`PayloadChanged`** — `set_payload`: the type-erased payload of a `Delegated` heavyweight entry was replaced. A `SceneView` rebuilds that entry's widget (re-invokes its delegate) on the next build. Routed through `emit_item_change`, so `mutation_seq` advances and the AT-walk gate notices.
-- **`AppearanceChanged`** — `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight item's paint-only appearance (fill / stroke colour or style) changed. Never moves geometry, so the observing `SceneView` evicts the item's cached frame and repaints **without** relayout or rebuild.
+- **`AppearanceChanged`** — `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight item's paint-only appearance (fill / stroke colour or style) changed. Never moves geometry, so the observing `SceneView` evicts the item's cached frame and repaints **without** relayout or rebuild.  It *can* move the item's hit **shape**, though: a stroked `PathItem` derives its hit band from the stroke it draws, so a view caching hit geometry must re-read this item's shape even while skipping relayout.
+- **`HandlersChanged`** — `set_item_handlers` / `handlers_mut`: the item's handler set was replaced or handed out for mutation.  `handlers_mut` fires it on the way *in*, before the set it returns has been written, because a `&mut` borrow cannot report what the caller will do with it. So this variant means "this item's handlers are no longer what you last read", which is exactly what a consumer caching them needs, and nothing finer.  Without it, the two handler mutators were the only doors in the model that changed observable state silently, and anything caching a handler set — the `SceneView`'s dispatch snapshot — would serve the old one indefinitely.
 
 ### Methods
 
@@ -200,6 +208,11 @@ let model = SceneModel::new();
 model.set_cascade_budget(CascadeBudget::new(1_000_000));
 assert_eq!(model.cascade_budget().total, 1_000_000);
 ```
+
+`#[non_exhaustive]`: a budget is built through
+`CascadeBudget::new` or `Default`, never by struct literal,
+so a second dimension (a per-subject cap, a depth limit) can be added
+without breaking a caller.
 
 ```rust
 pub struct CascadeBudget { /* fields */ }
@@ -664,11 +677,21 @@ id. The boxed-`dyn` counterpart of `add_item` — used by
 
 Replace an item's handler set. Pass `None` to clear.
 
+Fires `ItemChange::HandlersChanged`, like every other mutator on this
+type: a consumer that caches handlers has no other way to learn of it.
+
 #### `pub fn handlers_mut(&mut self, id: ItemId) -> Option<&mut SceneItemHandlerSet>`
 
 Mutably borrow an item's handler set, lazily creating an
 empty one if none exists. Returns `None` for unknown ids.
 Allows fluent chains: `scene.handlers_mut(id).unwrap().on_tap(…).cursor(…);`.
+
+Fires `ItemChange::HandlersChanged` *before* handing the set out —
+`&mut` cannot report back what the caller does with it, so the
+notification means "no longer what you last read". A caller that takes
+the borrow and changes nothing therefore costs one spurious
+invalidation, which is the right way round: the alternative is a
+consumer serving stale handlers.
 
 #### `pub fn handlers(&self, id: ItemId) -> Option<&SceneItemHandlerSet>`
 
@@ -835,9 +858,13 @@ Whether `id`'s ancestor chain contains `ancestor`.
 
 #### `pub fn collect_descendants(&self, id: ItemId, out: &mut Vec<ItemId>)`
 
-Append every direct + transitive descendant of `id` into
-`out`, breadth-first across declaration order. The id
-itself is **not** included.
+Append every direct + transitive descendant of `id` into `out`, each
+parent before its own children. The id itself is **not** included.
+
+Costs the subtree, not the scene: the walk steps through the kept
+`SceneEntry::children` adjacency rather than rescanning every entry per
+visited node. A cycle in the parent graph is bounded by the visited set
+rather than looping forever.
 
 #### `pub fn item(&self, id: ItemId) -> Option<&dyn SceneItem>`
 

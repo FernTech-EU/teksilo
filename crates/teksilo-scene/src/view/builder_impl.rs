@@ -7,7 +7,7 @@
 //! camera seeding (`initial_pan` / `initial_zoom` / `view_state`),
 //! zoom/pan-bound overrides, drag mode, background/foreground paint hooks,
 //! magnetism, debug overlays, accessibility tuning (`a11y_mode`,
-//! `a11y_off_screen_mode`, `a11y_bounds_space`, `nested_a11y`), focus-order
+//! `a11y_off_screen_mode`, `nested_a11y`), focus-order
 //! callbacks, reactive signal accessors, and the `with_scroll_bars` adaptor.
 
 use super::*;
@@ -42,6 +42,9 @@ impl SceneView {
             payload_dirty: Rc::new(RefCell::new(HashSet::new())),
             materialized: HashMap::new(),
             widget_to_item: HashMap::new(),
+            at_heavy: Rc::new(RefCell::new(None)),
+            at_children: Rc::new(RefCell::new(None)),
+            retention_margin: DEFAULT_RETENTION_MARGIN,
             default_size: Size::new(800.0, 600.0),
             adopt_scene_size: false,
             drag_mode: Signal::new(crate::item_handlers::DragMode::RubberBand),
@@ -49,6 +52,7 @@ impl SceneView {
             over_claimants: Rc::new(Cell::new(false)),
             veto_memo: Rc::new(Cell::new(None)),
             snapshot_generation: Rc::new(Cell::new(0)),
+            hit_sync: Rc::new(RefCell::new(super::hit_snapshot::HitSnapshotSync::default())),
             press_floor: Rc::new(Cell::new(crate::pick::RANK_UNDER)),
             hovered_item: Rc::new(Cell::new(None)),
             pending_tap: Rc::new(Cell::new(None)),
@@ -84,7 +88,6 @@ impl SceneView {
             focus_order_callback: None,
             a11y_nested: false,
             a11y_label: None,
-            a11y_bounds_space: crate::a11y::A11yBoundsSpace::default(),
             debug_overlay: DebugOverlay::default(),
             background_paint: None,
             foreground_paint: None,
@@ -295,23 +298,6 @@ impl SceneView {
         self.a11y_nested
     }
 
-    /// Coordinate space for `SceneItem` bounds reported to AT.
-    /// Default [`A11yBoundsSpace::Screen`](crate::A11yBoundsSpace::Screen)
-    /// (view-projected, matches the framework's standard widget
-    /// behavior). Switch to
-    /// [`A11yBoundsSpace::Scene`](crate::A11yBoundsSpace::Scene) for
-    /// apps where AT users reason about scene topology rather than
-    /// viewport position (CAD canvases, blueprint editors).
-    pub fn a11y_bounds_space(mut self, space: crate::a11y::A11yBoundsSpace) -> Self {
-        self.a11y_bounds_space = space;
-        self
-    }
-
-    /// Read-only accessor for the configured a11y bounds space.
-    pub fn current_a11y_bounds_space(&self) -> crate::a11y::A11yBoundsSpace {
-        self.a11y_bounds_space
-    }
-
     /// Configure visual debug overlays. Default: all flags off.
     /// Pass [`DebugOverlay::ALL`] to enable every overlay or
     /// construct a custom config:
@@ -470,12 +456,66 @@ impl SceneView {
         self
     }
 
-    /// Override the off-screen visibility policy for the AT walker.
-    /// Default: `ViewportPlusN { n: 1 }` — items inside the
-    /// viewport plus a one-screen margin appear in the AT tree.
-    /// `AllItems` for small scenes where AT users want a complete
-    /// table of contents; `ViewportOnly` for very large scenes where
-    /// listing off-screen content would overwhelm AT clients.
+    /// How far past the viewport edge, in **screen** pixels, a heavyweight
+    /// card stays live. Default [`DEFAULT_RETENTION_MARGIN`] (96).
+    ///
+    /// A card outside the *retention region* — the viewport grown by this
+    /// margin, unioned with whatever
+    /// [`a11y_off_screen_mode`](Self::a11y_off_screen_mode) asks to be
+    /// listed — is parked dormant. It leaves paint, the layout recursion, the
+    /// AccessKit tree and the Tab ring, and keeps its focus, text and
+    /// animation state for when the camera brings it back.
+    ///
+    /// **It is a lifecycle knob, not an accessibility one.** Raising it does
+    /// not offer assistive technology more of the scene: how much of it a
+    /// screen reader is enumerated is decided by
+    /// [`a11y_off_screen_mode`](Self::a11y_off_screen_mode) alone. A card in
+    /// the margin band but outside that mode's region is alive and unlisted —
+    /// laid out, Tab-reachable, holding its state, absent from the AccessKit
+    /// tree. Landing focus on it publishes it, in the same pass.
+    ///
+    /// **Screen pixels, not scene units**, converted through the current zoom
+    /// each pass, so the margin is a constant on-screen distance at every zoom
+    /// level. That is what it has to be: a pan covers screen distance, not
+    /// scene distance, and the margin's job is to have woken a card before the
+    /// camera reaches it. At zoom 0.1 the default is 960 scene units.
+    ///
+    /// Three regions, not one, and they are layered: the *tight* viewport
+    /// decides who is laid out at full size versus collapsed to zero
+    /// (unchanged, zero margin), the accessibility region decides who is
+    /// enumerated, and this widest one decides who is dormant. Each contains
+    /// the one before it by construction — so a card being laid out is never
+    /// also parked, and the AT walk is never asked to describe a card the
+    /// arena has parked.
+    ///
+    /// Raising this keeps more cards live — more Tab stops, more layout
+    /// recursion, more state held; lowering it parks closer to the edge. Zero
+    /// is legal and means "park at the viewport edge"; a card entering is
+    /// still woken and laid out in the same pass, so nothing is ever a frame
+    /// late, but every crossing then pays a wake.
+    pub fn retention_margin(mut self, screen_px: f32) -> Self {
+        self.retention_margin = screen_px.max(0.0);
+        self
+    }
+
+    /// The current retention margin in screen pixels.
+    pub fn current_retention_margin(&self) -> f32 {
+        self.retention_margin
+    }
+
+    /// Override the off-screen visibility policy for the AT walker — how much
+    /// of a scene that runs past the viewport a screen reader is offered.
+    ///
+    /// Default: `ViewportPlusN { n: 1 }` — everything inside the viewport plus
+    /// a one-screen margin on each side. `AllItems` for small scenes where AT
+    /// users want a complete table of contents (nothing is ever parked in that
+    /// mode, so it costs what it promises); `ViewportOnly` for very large
+    /// scenes, where listing off-screen content would bury an AT client.
+    ///
+    /// This governs **both** tiers — lightweight items and heavyweight cards —
+    /// and it is the only thing that does.
+    /// [`retention_margin`](Self::retention_margin) can keep a card alive past
+    /// this region, for the camera's sake, without adding it here.
     pub fn a11y_off_screen_mode(mut self, mode: crate::a11y::A11yOffScreenMode) -> Self {
         self.a11y_off_screen_mode = mode;
         self
