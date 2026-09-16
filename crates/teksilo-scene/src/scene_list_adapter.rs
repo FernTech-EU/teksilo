@@ -38,41 +38,62 @@
 //! `(&T, index) -> item` projection; drive data changes from outside it. (This
 //! is the same contract `ListView`'s delegate has, for the same reason.)
 //!
-//! ## Reconciliation policy
+//! ## Reconciliation policy — slot identity is preserved
 //!
-//! A lightweight item has no inherent identity beyond the id the Scene
-//! mints for it — there is nothing to "patch" in place, only remove-and-add.
-//! `SceneListAdapter` picks the simplest policy that is always correct:
+//! An adapter row's identity is its **slot**: data index *i* owns one
+//! [`ItemId`], and that id survives a change to the row's content and a change
+//! to the rows around it. It is retired only when the row itself goes away.
 //!
-//! - **Structural changes** (insert / remove / move / reset — and a windowed
-//!   source's `WindowLoaded`, see below) rebuild **every** item: every
-//!   adapter-owned id is removed from the scene, then the current source
-//!   is re-read start to finish and one item is built per row. This is
-//!   O(n) but never leaks an item and never desyncs data-index → item
-//!   mapping, even when the delegate's output depends on `index` (which
-//!   shifts on insert/remove/move). Incremental insert/remove that spares
-//!   unaffected rows is a possible future optimisation, not implemented here.
+//! That matters because the id is what everything else keys on —
+//! [`SceneSelection`](crate::SceneSelection), magnets, logical-AT parenting,
+//! and any side map the app keeps (a [`SceneItem`] has no downcast, so a side
+//! map is the *only* way to reach item-specific state). An adapter that retired
+//! and re-minted ids on every source change would take all of it with them; a
+//! one-row edit would silently deselect the list.
+//!
+//! So every reconciliation goes through [`Scene::replace_item`](crate::Scene::replace_item), which swaps
+//! the item box **inside** the existing entry — keeping the id, the z, the
+//! layer, the parent, the flags, the handlers, the magnets and the AT
+//! decorations — and emits one
+//! [`ItemChange::ItemReplaced`](crate::ItemChange::ItemReplaced) rather than a
+//! removal and an insertion:
+//!
 //! - **`ItemUpdated { index }`** (single-row content change, no structural
-//!   shift) rebuilds only that one row: the old scene item is removed and a
-//!   fresh one built from the current data at `index` replaces it.
-//! - **`WindowLoaded { range }`** is treated as a structural change (full
-//!   rebuild), not a per-row patch. A row for which
-//!   [`ListDataSource::with_item`] returns `None` (not yet loaded) has *no*
-//!   scene item at all — there is no adapter-agnostic placeholder item to
-//!   substitute — so a partially-loaded window can only be positionally
-//!   correct if data-index → adapter-slot alignment is rederived from
-//!   scratch. Since `WindowLoaded` fires rarely (after a batch fetch, not
-//!   per frame), the O(n) cost is a non-issue; internally the id table
-//!   tracks unloaded rows as `None` slots so a later full rebuild always
-//!   lands loaded rows back at their correct index.
+//!   shift) replaces that one row's item in place. No other row is touched.
+//! - **Structural changes** (insert / remove / move / reset, and a windowed
+//!   source's `WindowLoaded`) re-read the source start to finish and reconcile
+//!   slot by slot: slot *i* keeps its id and takes the new content, a slot past
+//!   the old length gets a fresh item, a slot past the new length is removed.
+//!   The re-read is still O(n) — the delegate takes an `index`, and an insert
+//!   at the front changes what every later row renders — but the **ids** are
+//!   stable for every slot that still exists.
+//!
+//!   Slot-positional rather than domain-keyed, because this adapter has no
+//!   domain key to work from: its delegate is `Fn(&T, usize)` and `T` need not
+//!   be identifiable. An adapter over a source with stable keys should follow
+//!   `TreeDataSlice`'s pattern and key on the domain id.
+//!
+//! - **`WindowLoaded { range }`** is a structural change for the same reason a
+//!   reset is: a row for which [`ListDataSource::with_item`] returns `None`
+//!   (not yet loaded) has *no* scene item at all — there is no
+//!   adapter-agnostic placeholder to substitute — so a partially-loaded window
+//!   can only be positionally correct if the whole data-index → slot alignment
+//!   is rederived. The id table tracks unloaded rows as `None` slots, so a row
+//!   that loads later lands at its correct index with a fresh id.
+//!
+//! Every reconciliation runs inside one
+//! [`SceneTransaction`](crate::SceneTransaction), stamped
+//! [`ChangeSource::Programmatic`](crate::ChangeSource) — a data-model refresh is
+//! not a user edit — so a data layer watching the scene sees one grouped change
+//! per source change rather than N unrelated ones.
 //!
 //! ## Borrow discipline
 //!
 //! Every reconciliation reads the source data (via the erased
 //! `with_item_fn`, which takes its own short-lived borrow per row) and
 //! builds every `Box<dyn SceneItem>` into a local `Vec` **first**, then
-//! mutates the [`SceneModel`] (`remove` / `add_boxed_item`) only after all
-//! reads are done. `SceneModel`'s mutators internally `borrow_mut` the
+//! mutates the [`SceneModel`] (`replace_item` / `add_boxed_item` / `remove`)
+//! only after all reads are done. `SceneModel`'s mutators internally `borrow_mut` the
 //! shared `RefCell<Scene>`; interleaving a read and a scene mutation inside
 //! the same borrow would panic (or, worse, silently reenter) if the reader
 //! and the mutator ever aliased the same `RefCell`. Mirrors `ListView`'s
@@ -115,6 +136,7 @@ use teksilo_core::signal::ObserverHandle;
 use teksilo_data::{DataChange, ListDataSource, ListModel};
 
 use crate::item::{ItemId, SceneItem};
+use crate::journal::{ChangeSource, HistoryMode};
 use crate::scene_model::SceneModel;
 
 /// Erased `Fn(&T, usize) -> Box<dyn SceneItem>` delegate, shared between the
@@ -217,7 +239,7 @@ impl<T: 'static> SceneListAdapter<T> {
         let ids: IdSlots = Rc::new(RefCell::new(Vec::new()));
 
         // Materialise all current rows, as if a `Reset` had just fired.
-        Self::rebuild_all(&scene, &ids, &len_fn, &with_item_fn, &delegate);
+        Self::reconcile_all(&scene, &ids, &len_fn, &with_item_fn, &delegate);
 
         let obs_scene = scene.clone();
         let obs_ids = ids.clone();
@@ -227,9 +249,9 @@ impl<T: 'static> SceneListAdapter<T> {
 
         let handle = observe_register(Box::new(move |change| match change {
             // A single row's content changed in place — no structural shift,
-            // so only that row needs a fresh item.
+            // so only that row's item is swapped, keeping its id.
             DataChange::ItemUpdated { index } => {
-                Self::rebuild_one(
+                Self::reconcile_one(
                     &obs_scene,
                     &obs_ids,
                     *index,
@@ -238,16 +260,17 @@ impl<T: 'static> SceneListAdapter<T> {
                 );
             }
             // Every other variant either shifts indices (Inserted / Removed /
-            // Moved), discards all state (Reset), or can only be applied
-            // correctly by rederiving the whole data-index -> id mapping from
-            // scratch (WindowLoaded — see the module docs). Rebuild-all is
-            // always correct for all of these.
+            // Moved), discards all content (Reset), or can only be applied
+            // correctly by rederiving the whole data-index -> slot alignment
+            // (WindowLoaded — see the module docs). A full slot-by-slot
+            // reconcile is always correct for all of these, and keeps the id of
+            // every slot that still has a row.
             DataChange::ItemsInserted { .. }
             | DataChange::ItemsRemoved { .. }
             | DataChange::ItemsMoved { .. }
             | DataChange::WindowLoaded { .. }
             | DataChange::Reset => {
-                Self::rebuild_all(
+                Self::reconcile_all(
                     &obs_scene,
                     &obs_ids,
                     &obs_len_fn,
@@ -265,12 +288,18 @@ impl<T: 'static> SceneListAdapter<T> {
         }
     }
 
-    /// Rebuild every adapter-owned scene item from the current source
-    /// contents. Reads every resident row and builds its item *before*
-    /// touching the scene (see the module docs' borrow-discipline section),
-    /// then removes every previously-owned id and adds the freshly built
-    /// ones in data order.
-    fn rebuild_all(
+    /// Reconcile every slot against the current source contents, **keeping
+    /// each surviving slot's [`ItemId`]**.
+    ///
+    /// Reads every resident row and builds its item *before* touching the
+    /// scene (see the module docs' borrow-discipline section), then walks the
+    /// slots: a slot that had an item and still has one is
+    /// [`replace_item`](SceneModel::replace_item)d, a slot that gained one is
+    /// added, a slot that lost one (or ran off the end) is removed.
+    ///
+    /// The whole walk is one `Programmatic` transaction, so a consumer sees one
+    /// grouped change per source change.
+    fn reconcile_all(
         scene: &SceneModel,
         ids: &IdSlots,
         len_fn: &LenFn,
@@ -287,26 +316,28 @@ impl<T: 'static> SceneListAdapter<T> {
             built.push(out);
         }
 
-        // Drop every id this adapter currently owns before re-adding — the
-        // borrow ends with `drain`/`collect`, well before any scene mutation.
-        let old_ids: Vec<Option<ItemId>> = ids.borrow_mut().drain(..).collect();
-        for id in old_ids.into_iter().flatten() {
+        // The borrow ends here, well before any scene mutation.
+        let old_ids: Vec<Option<ItemId>> = ids.borrow().clone();
+
+        let _txn = scene.transaction(ChangeSource::Programmatic, HistoryMode::Record);
+        let mut new_ids: Vec<Option<ItemId>> = Vec::with_capacity(len);
+        for (index, item) in built.into_iter().enumerate() {
+            let existing = old_ids.get(index).copied().flatten();
+            new_ids.push(Self::place(scene, existing, item));
+        }
+        // Slots the source no longer has.
+        for id in old_ids.into_iter().skip(len).flatten() {
             scene.remove(id);
         }
-
-        let new_ids: Vec<Option<ItemId>> = built
-            .into_iter()
-            .map(|item| item.map(|item| scene.add_boxed_item(item, Point::ZERO)))
-            .collect();
         *ids.borrow_mut() = new_ids;
     }
 
-    /// Rebuild the single scene item at data `index`: remove the old one (if
-    /// any) and, if the row is currently resident, add a fresh one built
-    /// from the current data. No-op if `index` is outside the currently
-    /// tracked slot count (defensive — a well-behaved source only emits
-    /// `ItemUpdated`/`WindowLoaded` for in-range indices).
-    fn rebuild_one(
+    /// Reconcile the single slot at data `index`, keeping its [`ItemId`].
+    ///
+    /// No-op if `index` is outside the currently tracked slot count
+    /// (defensive — a well-behaved source only emits `ItemUpdated` /
+    /// `WindowLoaded` for in-range indices).
+    fn reconcile_one(
         scene: &SceneModel,
         ids: &IdSlots,
         index: usize,
@@ -326,11 +357,44 @@ impl<T: 'static> SceneListAdapter<T> {
             built = Some((delegate)(item, index));
         });
 
-        if let Some(old_id) = old_id {
-            scene.remove(old_id);
-        }
-        let new_id = built.map(|item| scene.add_boxed_item(item, Point::ZERO));
+        let _txn = scene.transaction(ChangeSource::Programmatic, HistoryMode::Record);
+        let new_id = Self::place(scene, old_id, built);
         ids.borrow_mut()[index] = new_id;
+    }
+
+    /// Put `item` in the slot currently holding `existing`, and say which id
+    /// the slot holds afterwards.
+    ///
+    /// The one place this adapter decides between replace, add and remove, so
+    /// the identity rule — a slot keeps its id for as long as it has an item —
+    /// is stated once.
+    ///
+    /// A `replace_item` that fails is not reachable from here — the id came out
+    /// of this adapter's own table and names a lightweight item — but the
+    /// fallback keeps the row rather than losing it: the refusal hands the item
+    /// back, so the slot takes a fresh id instead of going empty. Losing the
+    /// row would be the quiet kind of failure, visible only as a marker that
+    /// stopped being drawn.
+    fn place(
+        scene: &SceneModel,
+        existing: Option<ItemId>,
+        item: Option<Box<dyn SceneItem>>,
+    ) -> Option<ItemId> {
+        match (existing, item) {
+            (Some(id), Some(item)) => match scene.replace_item(id, item) {
+                Ok(_previous) => Some(id),
+                Err(rejected) => {
+                    scene.remove(id);
+                    Some(scene.add_boxed_item(rejected.item, Point::ZERO))
+                }
+            },
+            (Some(id), None) => {
+                scene.remove(id);
+                None
+            }
+            (None, Some(item)) => Some(scene.add_boxed_item(item, Point::ZERO)),
+            (None, None) => None,
+        }
     }
 
     /// The scene item id materialised for data row `index`, or `None` if
@@ -366,6 +430,9 @@ impl<T: 'static> SceneListAdapter<T> {
     /// source change re-materialises rows as usual.
     pub fn clear(&self) {
         let old_ids: Vec<Option<ItemId>> = self.ids.borrow_mut().drain(..).collect();
+        let _txn = self
+            .model
+            .transaction(ChangeSource::Programmatic, HistoryMode::Record);
         for id in old_ids.into_iter().flatten() {
             self.model.remove(id);
         }
@@ -422,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn replace_all_rebuilds_with_fresh_ids() {
+    fn replace_all_keeps_the_id_of_every_surviving_slot() {
         let model = ListModel::from_vec(vec![row(1), row(2)]);
         let scene = SceneModel::new();
         let adapter = SceneListAdapter::from_model(&model, scene.clone(), delegate);
@@ -434,14 +501,35 @@ mod tests {
         assert_eq!(scene.len(), 3);
         let after = adapter.ids();
         assert_eq!(after.len(), 3);
-        // Every id is fresh — none of the old ones survive a Reset rebuild.
-        for id in &after {
-            assert!(!before.contains(id));
-        }
+        // Slots 0 and 1 existed before and keep their ids, so anything keyed on
+        // them — selection, magnets, AT parenting, an app side map — survives a
+        // wholesale content replacement. Slot 2 is new.
+        assert_eq!(after[0], before[0]);
+        assert_eq!(after[1], before[1]);
+        assert!(!before.contains(&after[2]));
+        // And the content really did change: slot 0's item now draws row 10.
+        assert_eq!(scene.local_bounds(after[0]).unwrap().x, 10.0);
     }
 
     #[test]
-    fn set_rebuilds_only_the_updated_row() {
+    fn shrinking_the_source_retires_only_the_slots_that_went_away() {
+        let model = ListModel::from_vec(vec![row(1), row(2), row(3)]);
+        let scene = SceneModel::new();
+        let adapter = SceneListAdapter::from_model(&model, scene.clone(), delegate);
+        let before = adapter.ids();
+
+        model.replace_all(vec![row(7)]);
+
+        assert_eq!(adapter.len(), 1);
+        assert_eq!(scene.len(), 1);
+        assert_eq!(adapter.ids(), vec![before[0]]);
+        // The two dropped slots are gone from the scene, not merely forgotten.
+        assert!(scene.local_bounds(before[1]).is_none());
+        assert!(scene.local_bounds(before[2]).is_none());
+    }
+
+    #[test]
+    fn set_replaces_only_the_updated_row_and_keeps_its_id() {
         let model = ListModel::from_vec(vec![row(1), row(2), row(3)]);
         let scene = SceneModel::new();
         let adapter = SceneListAdapter::from_model(&model, scene.clone(), delegate);
@@ -455,8 +543,93 @@ mod tests {
         assert_eq!(adapter.len(), 3);
         assert_eq!(scene.len(), 3);
         assert_eq!(adapter.item_id_at(0).unwrap(), id0_before);
-        assert_ne!(adapter.item_id_at(1).unwrap(), id1_before);
+        // The updated row keeps its id — this is the §1.10 fix: a one-row edit
+        // used to retire the id and take the row's selection membership,
+        // magnets and AT parenting with it.
+        assert_eq!(adapter.item_id_at(1).unwrap(), id1_before);
         assert_eq!(adapter.item_id_at(2).unwrap(), id2_before);
+        // …and the item really was swapped, not left stale.
+        assert_eq!(scene.local_bounds(id1_before).unwrap().x, 99.0);
+    }
+
+    #[test]
+    fn inserting_a_row_does_not_churn_the_ids_of_the_rows_it_shifts() {
+        let model = ListModel::from_vec(vec![row(1), row(2), row(3)]);
+        let scene = SceneModel::new();
+        let adapter = SceneListAdapter::from_model(&model, scene.clone(), delegate);
+        let before = adapter.ids();
+
+        model.insert(0, row(0));
+
+        assert_eq!(adapter.len(), 4);
+        // Slots 0..2 keep their ids even though every one of them now renders a
+        // different row: the slot is the identity, and an insert at the front
+        // must not deselect the whole list.
+        let after = adapter.ids();
+        assert_eq!(after[0], before[0]);
+        assert_eq!(after[1], before[1]);
+        assert_eq!(after[2], before[2]);
+        assert!(!before.contains(&after[3]));
+        // Slot 0 now draws the inserted row.
+        assert_eq!(scene.local_bounds(after[0]).unwrap().x, 0.0);
+        assert_eq!(scene.local_bounds(after[1]).unwrap().x, 1.0);
+    }
+
+    #[test]
+    fn a_source_change_is_one_transaction() {
+        use crate::journal::{ChangeSource, SceneEdit, SceneTransactionRecord};
+        use std::cell::RefCell;
+
+        let model = ListModel::from_vec(vec![row(1), row(2)]);
+        let scene = SceneModel::new();
+        let records: Rc<RefCell<Vec<SceneTransactionRecord>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = records.clone();
+        scene.set_edit_sink(move |record| sink.borrow_mut().push(record));
+
+        let _adapter = SceneListAdapter::from_model(&model, scene.clone(), delegate);
+        records.borrow_mut().clear();
+
+        model.set(0, row(42));
+        model.push(row(3));
+
+        let seen = records.borrow();
+        assert_eq!(seen.len(), 2, "one transaction per source change");
+        for record in seen.iter() {
+            assert_eq!(
+                record.source,
+                ChangeSource::Programmatic,
+                "a data-model refresh is not a user edit"
+            );
+        }
+        // The one-row update is one replacement, not a removal plus an add.
+        assert_eq!(seen[0].edits.len(), 1);
+        assert!(matches!(
+            seen[0].edits[0],
+            SceneEdit::Change(crate::scene::ItemChange::ItemReplaced { .. })
+        ));
+    }
+
+    #[test]
+    fn a_refused_replacement_keeps_the_row_rather_than_losing_it() {
+        // Not reachable through the observer — the ids in the table are this
+        // adapter's own lightweight items — but it is the one branch where a
+        // row could disappear silently, so the rule is pinned rather than
+        // argued. The refusal hands the item back, so the slot takes a fresh
+        // id instead of going empty.
+        let scene = SceneModel::new();
+        let stale = {
+            let id = scene.add_boxed_item(Box::new(RectItem::new(Rect::ZERO)), Point::ZERO);
+            scene.remove(id);
+            id
+        };
+        let placed = SceneListAdapter::<Row>::place(
+            &scene,
+            Some(stale),
+            Some(Box::new(RectItem::new(Rect::new(5.0, 0.0, 10.0, 10.0)))),
+        );
+        let placed = placed.expect("the row must survive a refused replacement");
+        assert_ne!(placed, stale);
+        assert_eq!(scene.local_bounds(placed).unwrap().x, 5.0);
     }
 
     #[test]

@@ -40,41 +40,62 @@ the source's row-read (`ListModel::with_item`, which holds the model's
 `(&T, index) -> item` projection; drive data changes from outside it. (This
 is the same contract `ListView`'s delegate has, for the same reason.)
 
-## Reconciliation policy
+## Reconciliation policy — slot identity is preserved
 
-A lightweight item has no inherent identity beyond the id the Scene
-mints for it — there is nothing to "patch" in place, only remove-and-add.
-`SceneListAdapter` picks the simplest policy that is always correct:
+An adapter row's identity is its **slot**: data index *i* owns one
+`ItemId`, and that id survives a change to the row's content and a change
+to the rows around it. It is retired only when the row itself goes away.
 
-- **Structural changes** (insert / remove / move / reset — and a windowed
-  source's `WindowLoaded`, see below) rebuild **every** item: every
-  adapter-owned id is removed from the scene, then the current source
-  is re-read start to finish and one item is built per row. This is
-  O(n) but never leaks an item and never desyncs data-index → item
-  mapping, even when the delegate's output depends on `index` (which
-  shifts on insert/remove/move). Incremental insert/remove that spares
-  unaffected rows is a possible future optimisation, not implemented here.
+That matters because the id is what everything else keys on —
+`SceneSelection`, magnets, logical-AT parenting,
+and any side map the app keeps (a `SceneItem` has no downcast, so a side
+map is the *only* way to reach item-specific state). An adapter that retired
+and re-minted ids on every source change would take all of it with them; a
+one-row edit would silently deselect the list.
+
+So every reconciliation goes through `Scene::replace_item`, which swaps
+the item box **inside** the existing entry — keeping the id, the z, the
+layer, the parent, the flags, the handlers, the magnets and the AT
+decorations — and emits one
+`ItemChange::ItemReplaced` rather than a
+removal and an insertion:
+
 - **`ItemUpdated { index }`** (single-row content change, no structural
-  shift) rebuilds only that one row: the old scene item is removed and a
-  fresh one built from the current data at `index` replaces it.
-- **`WindowLoaded { range }`** is treated as a structural change (full
-  rebuild), not a per-row patch. A row for which
-  `ListDataSource::with_item` returns `None` (not yet loaded) has *no*
-  scene item at all — there is no adapter-agnostic placeholder item to
-  substitute — so a partially-loaded window can only be positionally
-  correct if data-index → adapter-slot alignment is rederived from
-  scratch. Since `WindowLoaded` fires rarely (after a batch fetch, not
-  per frame), the O(n) cost is a non-issue; internally the id table
-  tracks unloaded rows as `None` slots so a later full rebuild always
-  lands loaded rows back at their correct index.
+  shift) replaces that one row's item in place. No other row is touched.
+- **Structural changes** (insert / remove / move / reset, and a windowed
+  source's `WindowLoaded`) re-read the source start to finish and reconcile
+  slot by slot: slot *i* keeps its id and takes the new content, a slot past
+  the old length gets a fresh item, a slot past the new length is removed.
+  The re-read is still O(n) — the delegate takes an `index`, and an insert
+  at the front changes what every later row renders — but the **ids** are
+  stable for every slot that still exists.
+
+  Slot-positional rather than domain-keyed, because this adapter has no
+  domain key to work from: its delegate is `Fn(&T, usize)` and `T` need not
+  be identifiable. An adapter over a source with stable keys should follow
+  `TreeDataSlice`'s pattern and key on the domain id.
+
+- **`WindowLoaded { range }`** is a structural change for the same reason a
+  reset is: a row for which `ListDataSource::with_item` returns `None`
+  (not yet loaded) has *no* scene item at all — there is no
+  adapter-agnostic placeholder to substitute — so a partially-loaded window
+  can only be positionally correct if the whole data-index → slot alignment
+  is rederived. The id table tracks unloaded rows as `None` slots, so a row
+  that loads later lands at its correct index with a fresh id.
+
+Every reconciliation runs inside one
+`SceneTransaction`, stamped
+`ChangeSource::Programmatic` — a data-model refresh is
+not a user edit — so a data layer watching the scene sees one grouped change
+per source change rather than N unrelated ones.
 
 ## Borrow discipline
 
 Every reconciliation reads the source data (via the erased
 `with_item_fn`, which takes its own short-lived borrow per row) and
 builds every `Box<dyn SceneItem>` into a local `Vec` **first**, then
-mutates the `SceneModel` (`remove` / `add_boxed_item`) only after all
-reads are done. `SceneModel`'s mutators internally `borrow_mut` the
+mutates the `SceneModel` (`replace_item` / `add_boxed_item` / `remove`)
+only after all reads are done. `SceneModel`'s mutators internally `borrow_mut` the
 shared `RefCell<Scene>`; interleaving a read and a scene mutation inside
 the same borrow would panic (or, worse, silently reenter) if the reader
 and the mutator ever aliased the same `RefCell`. Mirrors `ListView`'s
