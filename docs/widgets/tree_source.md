@@ -51,4 +51,4 @@ pub struct TreeRow { /* fields */ }
 #### `pub fn toggle_callback(&self) -> Rc<dyn Fn(&mut EventContext)>`
 
 Toggle callback for this row's chevron. Wires in one line:
-`.on_toggle_rc(row.toggle_callback())`.
+`.on_chevron_toggle_rc(row.toggle_callback())`.

@@ -4459,7 +4459,11 @@ impl WidgetTree {
     /// Publish what a data view's `Space` should do when the row containing
     /// `id` holds the keyboard cursor. See
     /// [`WidgetNode::keyboard_toggle`](crate::arena::WidgetNode).
-    pub fn set_keyboard_toggle(&mut self, id: WidgetId, f: std::rc::Rc<dyn Fn()>) {
+    pub fn set_keyboard_toggle(
+        &mut self,
+        id: WidgetId,
+        f: std::rc::Rc<dyn Fn(&mut crate::widget::EventContext)>,
+    ) {
         if let Some(node) = self.arena.get_mut(id) {
             node.keyboard_toggle = Some(f);
         }
@@ -4471,7 +4475,10 @@ impl WidgetTree {
     /// Searched per keypress rather than cached: a data view rebuilds its rows
     /// as they realize, so an id recorded at build time would outlive the
     /// widget it named.
-    pub fn keyboard_toggle_in(&self, root: WidgetId) -> Option<std::rc::Rc<dyn Fn()>> {
+    pub fn keyboard_toggle_in(
+        &self,
+        root: WidgetId,
+    ) -> Option<std::rc::Rc<dyn Fn(&mut crate::widget::EventContext)>> {
         if let Some(f) = self.arena.get(root).and_then(|n| n.keyboard_toggle.clone()) {
             return Some(f);
         }

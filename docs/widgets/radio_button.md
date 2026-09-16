@@ -50,7 +50,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`on_change`, `label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -66,9 +66,21 @@ pub struct RadioButton { /* fields */ }
 
 ### Methods
 
-#### `pub fn new(value: usize, selected: Signal<usize>) -> Self`
+#### `pub fn on_change(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self`
 
 Create a radio button with the given `value` and shared selection signal.
+Run `f` when the **user** selects this button and it was not already
+selected, with this button's value and an `EventContext`, so it can do
+what a bare `Signal` write cannot (`ctx.send_intent(...)`,
+`ctx.set_locale(...)`, opening a window). Fires for the pointer, for
+`Space`, and for an assistive-technology `Click`.
+
+Re-activating the selected button writes the signal, as every path
+does, but reports nothing: that is not a change. Programmatic writes to
+the bound signal report nothing either — there is no event in flight to
+carry. Observe the signal for those.
+
+#### `pub fn new(value: usize, selected: Signal<usize>) -> Self`
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 

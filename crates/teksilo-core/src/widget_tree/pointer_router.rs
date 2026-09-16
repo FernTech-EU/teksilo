@@ -2769,7 +2769,8 @@ impl WidgetTree {
         for preserve_content in ctx.dismiss_descendant_overlays {
             self.dismiss_child_overlays_for_source(source_widget, preserve_content, &mut *ops);
         }
-        self.apply_tree_mutations(std::mem::take(&mut ctx.tree_mutations));
+        let deferred_row_activations =
+            self.apply_tree_mutations(std::mem::take(&mut ctx.tree_mutations));
         if ctx.request_a11y_update {
             self.a11y_dirty = true;
         }
@@ -3128,9 +3129,32 @@ impl WidgetTree {
             // grow only the originating window.
             self.pending_text_scale_request = Some(scale);
         }
+        // Last, and with a context of their own: `Space` on a data view's
+        // focused row runs the row's published toggle, and a checkbox's toggle
+        // fires the app's `on_change`, which may send an intent or open a
+        // window. Running them here rather than inside the mutation drain is
+        // what gives them an `EventContext`; the drain resolved which action to
+        // run against the live tree and handed it back.
+        if !deferred_row_activations.is_empty() {
+            self.run_with_event_context(&mut *ops, move |ctx| {
+                for action in deferred_row_activations {
+                    action(ctx);
+                }
+            });
+        }
     }
 
-    fn apply_tree_mutations(&mut self, mutations: Vec<crate::widget::TreeMutation>) {
+    /// Returns the row activations it resolved but could not run: they need an
+    /// [`EventContext`], and this method has no `ops` to build one from. The
+    /// caller runs them once the drain is finished, the way
+    /// [`WidgetTree::run_mount_actions`](crate::WidgetTree::run_mount_actions)
+    /// does.
+    #[must_use]
+    fn apply_tree_mutations(
+        &mut self,
+        mutations: Vec<crate::widget::TreeMutation>,
+    ) -> Vec<std::rc::Rc<dyn Fn(&mut crate::widget::EventContext)>> {
+        let mut deferred_row_activations = Vec::new();
         use crate::binding::BindingLevel;
         use crate::widget::TreeMutation;
 
@@ -3170,11 +3194,13 @@ impl WidgetTree {
                     // Resolve against the *live* tree: a data view rebuilds its
                     // rows as they realize, so the row that was focused when
                     // the key arrived may have been rebuilt since.
-                    // Both the toggle and the fallback are signal writes,
-                    // so neither needs a context — which is why the published
-                    // action is a bare `Fn()`. Anything a row wants to do that
-                    // *does* need one belongs on its own handlers.
-                    self.keyboard_toggle_in(row).unwrap_or(fallback)();
+                    //
+                    // Resolve here, run later. The action carries an
+                    // `EventContext` so a row's checkbox fires its `on_change`
+                    // on this path exactly as it does under the pointer; this
+                    // method has no `ops` to build one from, so the caller runs
+                    // it after the drain.
+                    deferred_row_activations.push(self.keyboard_toggle_in(row).unwrap_or(fallback));
                 }
                 TreeMutation::WithWidgetMut { id, dirty, apply } => {
                     // Run the typed mutation while `&mut arena` is live, then
@@ -3207,6 +3233,7 @@ impl WidgetTree {
                 }
             }
         }
+        deferred_row_activations
     }
 
     /// Hit-test at a point for the **mouse, exactly** — the meaning this door

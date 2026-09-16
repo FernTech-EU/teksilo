@@ -100,11 +100,15 @@ impl CheckKind {
         }
     }
 
-    fn toggle(&self) {
+    /// Flip, and report the checked-ness the activation produced. Activation
+    /// never yields `Indeterminate` (see below), so a `bool` is lossless for
+    /// both kinds and `Checkbox::on_change` can take one.
+    fn toggle(&self) -> bool {
         match self {
             CheckKind::TwoState(s) => {
                 let current = s.get();
                 s.set(!current);
+                !current
             }
             CheckKind::TriState(s) => {
                 // User clicks toggle Checked ↔ Unchecked. The
@@ -121,6 +125,7 @@ impl CheckKind {
                     CheckState::Checked
                 };
                 s.set(next);
+                matches!(next, CheckState::Checked)
             }
         }
     }
@@ -161,6 +166,7 @@ pub struct Checkbox {
     composite_tooltip_content: Option<Box<dyn teksilo_core::widget::Widget>>,
     variant: CheckboxVariant,
     style_override: Option<SharedCheckboxStyle>,
+    on_change: Option<Rc<dyn Fn(bool, &mut EventContext)>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -178,6 +184,7 @@ impl Checkbox {
             composite_tooltip_content: None,
             variant: CheckboxVariant::default(),
             style_override: None,
+            on_change: None,
             root_child_id: None,
         }
     }
@@ -201,8 +208,28 @@ impl Checkbox {
             composite_tooltip_content: None,
             variant: CheckboxVariant::default(),
             style_override: None,
+            on_change: None,
             root_child_id: None,
         }
+    }
+
+    /// Run `f` when the **user** checks or unchecks this box, with the
+    /// checked-ness the activation produced and an `EventContext`, so it can do
+    /// what a bare `Signal` write cannot (`ctx.send_intent(...)`,
+    /// `ctx.set_theme(...)`, opening a window). Fires for the pointer, for
+    /// `Space`, for an assistive-technology `Click`, and for `Space` on a data
+    /// view's focused row.
+    ///
+    /// Does **not** fire for programmatic writes to the bound signal — there is
+    /// no event in flight to carry. Observe the signal for that. The signal
+    /// stays the source of truth either way: it is written first, and `f` sees
+    /// the value it now holds.
+    ///
+    /// A tristate checkbox reports a `bool` too: activation cycles
+    /// `Checked` ↔ `Unchecked` only, and `Indeterminate` is external-source-only.
+    pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self {
+        self.on_change = Some(Rc::new(f));
+        self
     }
 
     /// Declare that this checkbox's accessible name comes from an
@@ -443,6 +470,9 @@ impl Widget for Checkbox {
         let kind_tap = self.kind.clone();
         let kind_key = self.kind.clone();
         let kind_access = self.kind.clone();
+        let changed_tap = self.on_change.clone();
+        let changed_key = self.on_change.clone();
+        let changed_access = self.on_change.clone();
         let int_tap = interaction.clone();
         let int_hover = interaction.clone();
         let int_key = interaction.clone();
@@ -466,7 +496,10 @@ impl Widget for Checkbox {
             .on_tap({
                 let hovering = pointer_over.clone();
                 move |_pos, ctx: &mut EventContext| {
-                    kind_tap.toggle();
+                    let now = kind_tap.toggle();
+                    if let Some(ref f) = changed_tap {
+                        f(now, ctx);
+                    }
                     // A mouse or a pen is still over the control after the
                     // release; a finger is gone and sends no hover-leave to
                     // correct a `Hovered` state with.
@@ -490,7 +523,7 @@ impl Widget for Checkbox {
                 }
             })
             .on_key({
-                move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space, ..
@@ -508,7 +541,10 @@ impl Widget for Checkbox {
                             if int_key.get() != InteractionState::Pressed {
                                 return EventResponse::Ignored;
                             }
-                            kind_key.toggle();
+                            let now = kind_key.toggle();
+                            if let Some(ref f) = changed_key {
+                                f(now, ctx);
+                            }
                             int_key.set(InteractionState::Focused);
                             EventResponse::Handled
                         }
@@ -529,10 +565,13 @@ impl Widget for Checkbox {
             })
             .on_access_action({
                 move |action: teksilo_core::accesskit::Action,
-                      _ctx: &mut EventContext|
+                      ctx: &mut EventContext|
                       -> EventResponse {
                     if action == teksilo_core::accesskit::Action::Click {
-                        kind_access.toggle();
+                        let now = kind_access.toggle();
+                        if let Some(ref f) = changed_access {
+                            f(now, ctx);
+                        }
                         EventResponse::Handled
                     } else {
                         EventResponse::Ignored
@@ -560,7 +599,16 @@ impl Widget for Checkbox {
         // Space/Enter handling above.
         {
             let kind_space = self.kind.clone();
-            ctx.set_keyboard_toggle(ctx.self_id(), std::rc::Rc::new(move || kind_space.toggle()));
+            let changed_space = self.on_change.clone();
+            ctx.set_keyboard_toggle(
+                ctx.self_id(),
+                std::rc::Rc::new(move |ctx: &mut EventContext| {
+                    let now = kind_space.toggle();
+                    if let Some(ref f) = changed_space {
+                        f(now, ctx);
+                    }
+                }),
+            );
         }
 
         vec![root_id]
@@ -699,6 +747,84 @@ mod tests {
         assert!(checked.get());
         tree.press_key(Key::Space, Modifiers::NONE);
         assert!(!checked.get());
+    }
+
+    #[test]
+    fn on_change_fires_for_every_user_path_and_reports_the_new_value() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let checked = Signal::new(false);
+        let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let cb = tree.add(
+            Checkbox::new(checked.clone())
+                .label(lit!("Accept"))
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.click(cb);
+        tree.focus(cb);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(cb),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+
+        // Pointer, keyboard, assistive technology — and each reports the value
+        // the activation produced, not the one before it.
+        assert_eq!(*seen.borrow(), vec![true, false, true]);
+        assert!(checked.get());
+    }
+
+    #[test]
+    fn on_change_is_silent_for_a_programmatic_write() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let checked = Signal::new(false);
+        let fired = Rc::new(Cell::new(false));
+        let sink = fired.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let _cb = tree.add(
+            Checkbox::new(checked.clone())
+                .label(lit!("Accept"))
+                .on_change(move |_now, _ctx| sink.set(true)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        // No event in flight to carry, so nothing to report. Observe the
+        // signal for this direction.
+        checked.set(true);
+        assert!(!fired.get());
+    }
+
+    #[test]
+    fn on_change_reports_a_bool_from_a_tristate() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let state = Signal::new(CheckState::Indeterminate);
+        let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let cb = tree.add(
+            Checkbox::tristate(state.clone())
+                .label(lit!("All"))
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        // Activation from Indeterminate checks the whole, then unchecks; it
+        // never produces Indeterminate, which is why a bool is lossless here.
+        tree.click(cb);
+        tree.click(cb);
+        assert_eq!(*seen.borrow(), vec![true, false]);
+        assert_eq!(state.get(), CheckState::Unchecked);
     }
 
     #[test]

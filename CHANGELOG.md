@@ -33,6 +33,25 @@ one name and that name takes a `WidgetId` or a widget.
 
 #### Widgets
 
+- `on_change` on `Checkbox`, `Toggle`, `RadioButton` and `Slider`, taking the
+  value the activation produced and an `EventContext`, so flipping one can send an intent, set the
+  theme or open a window — things a bare `Signal` write cannot do, because an
+  observer receives only `&T`. They fire for the pointer, for `Space`, for an
+  assistive-technology `Click`, and, for a checkbox inside a data-view row, for
+  `Space` on that row. They do **not** fire for programmatic writes to the bound
+  signal: there is no event in flight to carry, and the signal remains the
+  source of truth. A tristate checkbox reports a `bool` too, since activation
+  cycles `Checked` ↔ `Unchecked` only. `RadioButton` reports only a real change,
+  so re-activating the selected button is silent. `Slider` reports every value a
+  drag produces, but not a write that changes nothing (a drag past the end, a
+  snap onto the grid point already held); it has no commit-on-release callback,
+  so once-per-interaction work still belongs on the signal.
+- `StandardListItem::on_checkbox_toggle` and the `StandardTreeItem` forwarder,
+  which make the embedded checkbox's `on_change` reachable — the canonical row
+  builds its own checkbox, so it was the one place the callback could not be
+  installed. To *read* check state, `CheckedModel` remains the answer: it is the
+  source of truth and it survives row recycling, which a per-row callback does
+  not.
 - `child_opt` on every container that has `child`, 38 of them, up from 7. A
   bare `teksu!` `if` now works inside a single-child wrapper, not only inside a
   stack.
@@ -42,6 +61,12 @@ one name and that name takes a `WidgetId` or a widget.
 
 #### Core
 
+- **Behaviour change.** The row-activation marker a widget publishes with
+  `BuildContext::set_keyboard_toggle`, and the fallback passed to
+  `EventContext::row_space_activate`, are now `Rc<dyn Fn(&mut EventContext)>`
+  rather than `Rc<dyn Fn()>`. `Space` on a data view's focused row therefore
+  runs with a context, which is what lets a row checkbox fire `on_change` on
+  that path instead of only under the pointer.
 - `Box<W>` implements `Widget` for any `W: Widget + ?Sized`, so a boxed widget
   goes wherever a widget goes and adds no arena node.
 - `HandlerSet::merge_under` composes two handler sets, the later declaration
@@ -93,6 +118,11 @@ one name and that name takes a `WidgetId` or a widget.
 ### Removed
 
 **Behaviour change, breaking.**
+
+- `StandardTreeItem::on_toggle` / `on_toggle_rc` are renamed
+  `on_chevron_toggle` / `on_chevron_toggle_rc`. They are the expand / collapse
+  control, and the name became ambiguous the moment a row gained
+  `on_checkbox_toggle`.
 
 - `add_child`, `child_id`, `child_boxed` and every `*_id` slot twin, 80 methods.
   Call the slot by its own name instead: `.child(id)`, `.content(id)`,

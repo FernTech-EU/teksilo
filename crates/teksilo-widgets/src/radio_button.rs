@@ -68,6 +68,7 @@ pub struct RadioButton {
     composite_tooltip_content: Option<Box<dyn teksilo_core::widget::Widget>>,
     variant: RadioVariant,
     style_override: Option<SharedRadioStyle>,
+    on_change: Option<Rc<dyn Fn(usize, &mut EventContext)>>,
     root_child_id: Option<WidgetId>,
     /// Shared radio-group sibling id buffer populated by an enclosing
     /// `RadioGroup`. When set, `accessibility()` emits
@@ -80,6 +81,21 @@ pub struct RadioButton {
 
 impl RadioButton {
     /// Create a radio button with the given `value` and shared selection signal.
+    /// Run `f` when the **user** selects this button and it was not already
+    /// selected, with this button's value and an `EventContext`, so it can do
+    /// what a bare `Signal` write cannot (`ctx.send_intent(...)`,
+    /// `ctx.set_locale(...)`, opening a window). Fires for the pointer, for
+    /// `Space`, and for an assistive-technology `Click`.
+    ///
+    /// Re-activating the selected button writes the signal, as every path
+    /// does, but reports nothing: that is not a change. Programmatic writes to
+    /// the bound signal report nothing either — there is no event in flight to
+    /// carry. Observe the signal for those.
+    pub fn on_change(mut self, f: impl Fn(usize, &mut EventContext) + 'static) -> Self {
+        self.on_change = Some(Rc::new(f));
+        self
+    }
+
     pub fn new(value: usize, selected: Signal<usize>) -> Self {
         Self {
             label: None,
@@ -92,6 +108,7 @@ impl RadioButton {
             composite_tooltip_content: None,
             variant: RadioVariant::default(),
             style_override: None,
+            on_change: None,
             root_child_id: None,
             group_ids: None,
         }
@@ -291,9 +308,26 @@ impl Widget for RadioButton {
         self.root_child_id = Some(root_id);
 
         // --- V2 attached handlers ---
-        let sel_tap = self.selected.clone();
-        let sel_key = self.selected.clone();
-        let sel_access = self.selected.clone();
+        let select = {
+            let selected = self.selected.clone();
+            let on_change = self.on_change.clone();
+            let value = self.value;
+            move |ctx: &mut EventContext| {
+                // Re-activating the button that is already selected is not a
+                // change, and `on_change` says change. The write still happens
+                // so every path stays idempotent.
+                let was = selected.get();
+                selected.set(value);
+                if was != value
+                    && let Some(ref f) = on_change
+                {
+                    f(value, ctx);
+                }
+            }
+        };
+        let select_tap = select.clone();
+        let select_key = select.clone();
+        let select_access = select;
         let int_tap = interaction.clone();
         let int_hover = interaction.clone();
         let int_key = interaction.clone();
@@ -315,7 +349,7 @@ impl Widget for RadioButton {
             .on_tap({
                 let hovering = pointer_over.clone();
                 move |_pos, ctx: &mut EventContext| {
-                    sel_tap.set(value);
+                    select_tap(ctx);
                     int_tap.set(if ctx.pointer_kind().hovers() {
                         hovering.set(true);
                         InteractionState::Hovered
@@ -336,7 +370,7 @@ impl Widget for RadioButton {
                 }
             })
             .on_key({
-                move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space, ..
@@ -354,7 +388,7 @@ impl Widget for RadioButton {
                             if int_key.get() != InteractionState::Pressed {
                                 return EventResponse::Ignored;
                             }
-                            sel_key.set(value);
+                            select_key(ctx);
                             int_key.set(InteractionState::Focused);
                             EventResponse::Handled
                         }
@@ -375,10 +409,10 @@ impl Widget for RadioButton {
             })
             .on_access_action({
                 move |action: teksilo_core::accesskit::Action,
-                      _ctx: &mut EventContext|
+                      ctx: &mut EventContext|
                       -> EventResponse {
                     if action == teksilo_core::accesskit::Action::Click {
-                        sel_access.set(value);
+                        select_access(ctx);
                         EventResponse::Handled
                     } else {
                         EventResponse::Ignored
@@ -506,6 +540,63 @@ mod tests {
         assert_eq!(selected.get(), 2);
         tree.click(r0);
         assert_eq!(selected.get(), 0);
+    }
+
+    #[test]
+    fn on_change_reports_a_real_change_only() {
+        use crate::primitives::VStack;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let selected = Signal::new(0_usize);
+        let seen: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
+        let mk = |v: usize, seen: &Rc<RefCell<Vec<usize>>>, sel: &Signal<usize>| {
+            let sink = seen.clone();
+            RadioButton::new(v, sel.clone())
+                .label(lit!("Option"))
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now))
+        };
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let r0 = tree.add(mk(0, &seen, &selected));
+        let r1 = tree.add(mk(1, &seen, &selected));
+        let _root = tree.add(VStack::new().child(r0).child(r1));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+
+        tree.click(r1);
+        // Already selected: the write still lands, but nothing changed, so
+        // nothing is reported.
+        tree.click(r1);
+        tree.focus(r0);
+        tree.press_key(teksilo_core::event::Key::Space, Modifiers::NONE);
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(r1),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+
+        assert_eq!(*seen.borrow(), vec![1, 0, 1]);
+        assert_eq!(selected.get(), 1);
+    }
+
+    #[test]
+    fn on_change_is_silent_for_a_programmatic_write() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let selected = Signal::new(0_usize);
+        let fired = Rc::new(Cell::new(false));
+        let sink = fired.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let _r = tree.add(
+            RadioButton::new(1, selected.clone())
+                .label(lit!("B"))
+                .on_change(move |_now, _ctx| sink.set(true)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        selected.set(1);
+        assert!(!fired.get());
     }
 
     #[test]

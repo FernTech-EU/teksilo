@@ -41,7 +41,7 @@ impl<T: 'static> TreeView<T> {
     ///         StandardTreeItem::new(lit!(&item.title))
     ///             .from_entry(entry)
     ///             .selected(selected)
-    ///             .on_toggle_rc(ctx.toggle_callback())
+    ///             .on_chevron_toggle_rc(ctx.toggle_callback())
     ///     )
     /// });
     /// ```

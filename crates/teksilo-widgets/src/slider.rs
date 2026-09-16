@@ -119,6 +119,7 @@ pub struct Slider {
     variant: SliderVariant,
     tick_count: Option<u32>,
     style_override: Option<SharedSliderStyle>,
+    on_change: Option<Rc<dyn Fn(f32, &mut teksilo_core::widget::EventContext)>>,
     hovered: Signal<bool>,
     dragging: Signal<bool>,
     /// Raw keyboard/pointer focus (any modality). The keyboard-only focus
@@ -162,6 +163,7 @@ impl Slider {
             tick_count: None,
             style_override: None,
             hovered: Signal::new(false),
+            on_change: None,
             dragging: Signal::new(false),
             focused: Signal::new(false),
             cached_bounds: Rc::new(Cell::new(Rect::ZERO)),
@@ -177,6 +179,29 @@ impl Slider {
     /// Set the discrete step size for keyboard arrows and accessibility
     /// Increment/Decrement actions. When unset, defaults to 1 % of the
     /// range.
+    /// Run `f` for every value this control produces under the **user's**
+    /// hand, with an `EventContext`, so it can do what a bare `Signal` write
+    /// cannot (`ctx.send_intent(...)`, opening a window). Fires for a track
+    /// click, for each step of a drag, for the arrows, and for an assistive
+    /// technology's `Increment` / `Decrement` / `SetValue`.
+    ///
+    /// **A drag fires this repeatedly** — once per value it actually produces,
+    /// not once per pointer sample, since a write that changes nothing reports
+    /// nothing. It is still the wrong place for work that should happen once
+    /// per interaction: persisting to disk, a network call, an undo entry.
+    /// There is no commit-on-release callback yet; observe the signal and do
+    /// that work when the value settles.
+    ///
+    /// Does **not** fire for programmatic writes to the bound signal — there is
+    /// no event in flight to carry. Observe the signal for that.
+    pub fn on_change(
+        mut self,
+        f: impl Fn(f32, &mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_change = Some(Rc::new(f));
+        self
+    }
+
     pub fn step(mut self, step: f32) -> Self {
         self.step = Some(step);
         self
@@ -398,6 +423,24 @@ impl Widget for Slider {
         let focused = self.focused.clone();
         let cached_bounds = self.cached_bounds.clone();
 
+        // One reporter for every user-driven write. It compares against the
+        // value before the write, so a write that changes nothing — a drag
+        // past the end, a snap landing on the grid point it was already on —
+        // reports nothing, and a drag reports once per value it actually
+        // produces rather than once per pointer sample.
+        let report = {
+            let value = value.clone();
+            let on_change = self.on_change.clone();
+            move |before: f32, ctx: &mut teksilo_core::widget::EventContext| {
+                let now = value.get();
+                if now != before
+                    && let Some(ref f) = on_change
+                {
+                    f(now, ctx);
+                }
+            }
+        };
+
         let adjust_by_step = {
             let value = value.clone();
             move |positive: bool, page: bool| {
@@ -494,6 +537,8 @@ impl Widget for Slider {
         {
             let dragging = dragging.clone();
             let set_value = set_value_from_position.clone();
+            let value_before = value.clone();
+            let report = report.clone();
             handlers = handlers.on_drag(move |phase, ctx| match phase {
                 DragPhase::Started {
                     position,
@@ -501,10 +546,14 @@ impl Widget for Slider {
                     ..
                 } => {
                     dragging.set(true);
+                    let before = value_before.get();
                     set_value(position.x, position.y, ctx.is_rtl());
+                    report(before, ctx);
                 }
                 DragPhase::Moved { position, .. } if dragging.get() => {
+                    let before = value_before.get();
                     set_value(position.x, position.y, ctx.is_rtl());
+                    report(before, ctx);
                 }
                 DragPhase::Ended { .. } => {
                     dragging.set(false);
@@ -516,8 +565,12 @@ impl Widget for Slider {
         // Track click — jump the value to the click position.
         {
             let set_value = set_value_from_position.clone();
+            let value_before = value.clone();
+            let report = report.clone();
             handlers = handlers.on_tap(move |event, ctx| {
+                let before = value_before.get();
                 set_value(event.position.x, event.position.y, ctx.is_rtl());
+                report(before, ctx);
             });
         }
 
@@ -534,6 +587,7 @@ impl Widget for Slider {
         {
             let adjust = adjust_by_step.clone();
             let value = value.clone();
+            let report = report.clone();
             handlers = handlers.on_key(move |event, ctx| {
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
                     return EventResponse::Ignored;
@@ -552,12 +606,14 @@ impl Widget for Slider {
                 ) else {
                     return EventResponse::Ignored;
                 };
+                let before = value.get();
                 match mv {
                     RangeMove::Step { increase } => adjust(increase, false),
                     RangeMove::Page { increase } => adjust(increase, true),
                     RangeMove::ToMin => value.set(min),
                     RangeMove::ToMax => value.set(max),
                 }
+                report(before, ctx);
                 EventResponse::Handled
             });
         }
@@ -587,9 +643,12 @@ impl Widget for Slider {
         {
             let adjust = adjust_by_step.clone();
             let set_snapped = set_value_snapped.clone();
-            handlers = handlers.on_access_action_request(move |action, _node, data, _ctx| {
+            let value_before = value.clone();
+            let report = report.clone();
+            handlers = handlers.on_access_action_request(move |action, _node, data, ctx| {
                 use teksilo_core::accesskit::{Action, ActionData};
-                match (action, data) {
+                let before = value_before.get();
+                let outcome = match (action, data) {
                     (Action::Increment, _) => {
                         adjust(true, false);
                         EventResponse::Handled
@@ -618,7 +677,11 @@ impl Widget for Slider {
                         }
                     }
                     _ => EventResponse::Ignored,
+                };
+                if outcome == EventResponse::Handled {
+                    report(before, ctx);
                 }
+                outcome
             });
         }
 
@@ -806,6 +869,53 @@ mod tests {
 
         tree.press_key(Key::ArrowLeft, Modifiers::NONE);
         assert!((value.get() - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn on_change_reports_each_value_the_user_produces_and_nothing_else() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let value = Signal::new(50.0_f32);
+        let seen: Rc<RefCell<Vec<f32>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let mut tree = WidgetTree::new();
+        let s = tree.add(
+            Slider::new(value.clone(), 0.0, 100.0)
+                .step(10.0)
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        tree.focus(s);
+
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        tree.press_key(Key::End, Modifiers::NONE);
+        // Already at the maximum: the write clamps to the value it already
+        // holds, which is not a change and is not reported.
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+
+        assert_eq!(*seen.borrow(), vec![60.0, 50.0, 100.0]);
+    }
+
+    #[test]
+    fn on_change_is_silent_for_a_programmatic_write() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let value = Signal::new(50.0_f32);
+        let fired = Rc::new(Cell::new(false));
+        let sink = fired.clone();
+        let mut tree = WidgetTree::new();
+        let _s = tree.add(
+            Slider::new(value.clone(), 0.0, 100.0)
+                .step(10.0)
+                .on_change(move |_now, _ctx| sink.set(true)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        value.set(70.0);
+        assert!(!fired.get());
     }
 
     #[test]

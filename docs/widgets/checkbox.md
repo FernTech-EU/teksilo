@@ -62,7 +62,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`tristate`, `labelled_externally`, `label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`tristate`, `on_change`, `labelled_externally`, `label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -91,6 +91,23 @@ checks the whole). The `Indeterminate` state is reserved for external
 sources — `TreeCheckedModel` aggregation when descendants are mixed,
 "select all" indicators, etc. Matches the Outlook / Files-app
 folder-checkbox semantic. Useful for parent checkboxes in tree views.
+
+#### `pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self`
+
+Run `f` when the **user** checks or unchecks this box, with the
+checked-ness the activation produced and an `EventContext`, so it can do
+what a bare `Signal` write cannot (`ctx.send_intent(...)`,
+`ctx.set_theme(...)`, opening a window). Fires for the pointer, for
+`Space`, for an assistive-technology `Click`, and for `Space` on a data
+view's focused row.
+
+Does **not** fire for programmatic writes to the bound signal — there is
+no event in flight to carry. Observe the signal for that. The signal
+stays the source of truth either way: it is written first, and `f` sees
+the value it now holds.
+
+A tristate checkbox reports a `bool` too: activation cycles
+`Checked` ↔ `Unchecked` only, and `Indeterminate` is external-source-only.
 
 #### `pub fn labelled_externally(mut self) -> Self`
 

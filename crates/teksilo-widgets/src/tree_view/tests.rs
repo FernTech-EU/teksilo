@@ -794,7 +794,7 @@ fn make_standard_tree_view() -> (WidgetTree, WidgetId, teksilo_data::SelectionMo
                 crate::StandardTreeItem::new(lit!((*item).to_string()))
                     .from_entry(entry)
                     .selected(selected)
-                    .on_toggle_rc(ctx.toggle_callback()),
+                    .on_chevron_toggle_rc(ctx.toggle_callback()),
             ) as Box<dyn Widget>
         })
         .item_height(28.0)
@@ -880,7 +880,7 @@ fn make_reorderable_standard_tree_view() -> (WidgetTree, WidgetId) {
                 crate::StandardTreeItem::new(lit!((*item).to_string()))
                     .from_entry(entry)
                     .selected(selected)
-                    .on_toggle_rc(ctx.toggle_callback()),
+                    .on_chevron_toggle_rc(ctx.toggle_callback()),
             ) as Box<dyn Widget>
         })
         .item_height(28.0)
@@ -2917,7 +2917,7 @@ fn collapsing_a_branch_above_keeps_the_cursor_on_the_same_logical_row() {
                 crate::StandardTreeItem::new(lit!((*item).to_string()))
                     .from_entry(entry)
                     .selected(selected)
-                    .on_toggle_rc(ctx.toggle_callback()),
+                    .on_chevron_toggle_rc(ctx.toggle_callback()),
             ) as Box<dyn Widget>
         })
         .item_height(28.0)

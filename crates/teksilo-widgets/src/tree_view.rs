@@ -122,7 +122,7 @@ pub struct TreeRowContext<'a, T: 'static> {
 
 impl<'a, T: 'static> TreeRowContext<'a, T> {
     /// Toggle callback for this row's chevron. Wires in one line:
-    /// `.on_toggle_rc(ctx.toggle_callback())`.
+    /// `.on_chevron_toggle_rc(ctx.toggle_callback())`.
     pub fn toggle_callback(&self) -> std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)> {
         let slice = self.slice.clone();
         let node = self.node_id;

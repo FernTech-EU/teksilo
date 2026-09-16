@@ -237,7 +237,7 @@ teksu!(ctx =>
             StandardTreeItem::new(lit!(&item.title))
                 .from_entry(entry)
                 .selected(selected)
-                .on_toggle_rc(row.toggle_callback()),
+                .on_chevron_toggle_rc(row.toggle_callback()),
         )
     }) {
         item_height: 28.0

@@ -723,7 +723,11 @@ impl<'a> BuildContext<'a> {
     /// `StandardListItem` / `StandardTreeItem` publish one for the checkbox
     /// they embed; a hand-written row delegate calls this to get the same
     /// behaviour. Without it `Space` keeps meaning "toggle the selection".
-    pub fn set_keyboard_toggle(&mut self, id: WidgetId, f: std::rc::Rc<dyn Fn()>) {
+    pub fn set_keyboard_toggle(
+        &mut self,
+        id: WidgetId,
+        f: std::rc::Rc<dyn Fn(&mut crate::widget::EventContext)>,
+    ) {
         self.tree.set_keyboard_toggle(id, f);
     }
 

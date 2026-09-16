@@ -431,7 +431,7 @@ pub(crate) enum TreeMutation {
     /// something the key handler can know.
     RowSpaceActivate {
         row: WidgetId,
-        fallback: std::rc::Rc<dyn Fn()>,
+        fallback: std::rc::Rc<dyn Fn(&mut EventContext)>,
     },
 }
 
@@ -1267,7 +1267,11 @@ impl<'ops> EventContext<'ops> {
     /// A row's controls are out of the Tab order, so this is the only keyboard
     /// route to them; `fallback` is what `Space` means on a row without one,
     /// which for the data views is "toggle the selection".
-    pub fn row_space_activate(&mut self, row: WidgetId, fallback: std::rc::Rc<dyn Fn()>) {
+    pub fn row_space_activate(
+        &mut self,
+        row: WidgetId,
+        fallback: std::rc::Rc<dyn Fn(&mut EventContext)>,
+    ) {
         self.tree_mutations
             .push(TreeMutation::RowSpaceActivate { row, fallback });
     }

@@ -118,7 +118,7 @@ let list = ListView::from_source(source, |index, item: &Row, selected| {
 let tree = TreeView::from_source(source, |item: &Node, row, selected| {
     Box::new(StandardTreeItem::new(item.name.clone())
         .from_entry(row)
-        .on_toggle_rc(row.toggle_callback()))
+        .on_chevron_toggle_rc(row.toggle_callback()))
 });
 ```
 

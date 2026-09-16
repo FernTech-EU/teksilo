@@ -426,7 +426,7 @@ doc_snippet!(
                     crate::StandardTreeItem::new(lit!(item.clone()))
                         .from_entry(entry)
                         .selected(selected)
-                        .on_toggle_rc(ctx.toggle_callback()),
+                        .on_chevron_toggle_rc(ctx.toggle_callback()),
                 )
             });
         // The slice starts collapsed; a picture of one closed root says nothing.

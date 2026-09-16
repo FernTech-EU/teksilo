@@ -399,7 +399,7 @@ impl Root {
                             StandardTreeItem::new(lit!(name.clone()))
                                 .from_entry(entry)
                                 .selected(selected)
-                                .on_toggle_rc(ctx.toggle_callback()),
+                                .on_chevron_toggle_rc(ctx.toggle_callback()),
                         )
                     })
                     .item_height(28.0)

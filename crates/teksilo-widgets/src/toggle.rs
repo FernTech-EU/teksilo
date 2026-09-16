@@ -44,7 +44,9 @@ use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{SharedToggleStyle, ToggleStyle, ToggleStyleConfig};
-use teksilo_core::widget::{CursorIcon, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
+use teksilo_core::widget::{
+    CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
+};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 
@@ -57,6 +59,7 @@ use teksilo_i18n::LocalizedString;
 /// An animated toggle switch bound to a `Signal<bool>`.
 pub struct Toggle {
     on: Signal<bool>,
+    on_change: Option<Rc<dyn Fn(bool, &mut EventContext)>>,
     label: Option<LocalizedString>,
     /// Enabled state, static or reactive; forwarded to the arena at build
     /// time.
@@ -84,9 +87,13 @@ pub struct Toggle {
 impl Toggle {
     /// Create a toggle bound to `on`. The signal is both read (to paint the
     /// current state) and written (flipped on each activation).
+    ///
+    /// See [`on_change`](Self::on_change) when flipping it has to reach the
+    /// ambient context rather than only app state.
     pub fn new(on: Signal<bool>) -> Self {
         Self {
             on,
+            on_change: None,
             label: None,
             enabled: Prop::Static(true),
             variant: ToggleVariant::default(),
@@ -119,6 +126,23 @@ impl Toggle {
     /// `accessibility()` cannot see it and every form-hosted toggle looks
     /// nameless. Setting `.label(..)` instead would satisfy the assert but
     /// render the text a second time, beside a label column that already has it.
+    /// Run `f` when the **user** flips this switch, with the value the
+    /// activation produced and an `EventContext`, so it can do what a bare
+    /// `Signal` write cannot (`ctx.send_intent(...)`, `ctx.set_theme(...)`,
+    /// opening a window). Fires for the pointer, for `Space`, and for an
+    /// assistive-technology `Click`.
+    ///
+    /// Does **not** fire for programmatic writes to the bound signal — there is
+    /// no event in flight to carry. Observe the signal for that. The signal
+    /// stays the source of truth either way: it is written first, and `f` sees
+    /// the value it now holds.
+    ///
+    /// Spelled the same way on [`Checkbox`](crate::checkbox::Checkbox).
+    pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self {
+        self.on_change = Some(Rc::new(f));
+        self
+    }
+
     pub fn labelled_externally(mut self) -> Self {
         self.labelled_externally = true;
         self
@@ -284,8 +308,13 @@ impl Widget for Toggle {
 
         let toggle = {
             let on = on.clone();
-            move || {
-                on.set(!on.get());
+            let on_change = self.on_change.clone();
+            move |ctx: &mut EventContext| {
+                let now = !on.get();
+                on.set(now);
+                if let Some(ref f) = on_change {
+                    f(now, ctx);
+                }
             }
         };
 
@@ -298,8 +327,8 @@ impl Widget for Toggle {
 
         {
             let toggle = toggle.clone();
-            handlers = handlers.on_tap(move |_pos, _ctx| {
-                toggle();
+            handlers = handlers.on_tap(move |_pos, ctx| {
+                toggle(ctx);
             });
         }
         {
@@ -321,7 +350,7 @@ impl Widget for Toggle {
             // a stray KeyUp (e.g. a shortcut consumed the KeyDown and focus
             // returned here) does NOT toggle.
             let key_pressed = std::cell::Cell::new(false);
-            handlers = handlers.on_key(move |event, _ctx| match event {
+            handlers = handlers.on_key(move |event, ctx| match event {
                 WidgetEvent::KeyDown {
                     key: Key::Space, ..
                 } => {
@@ -334,7 +363,7 @@ impl Widget for Toggle {
                     if !key_pressed.replace(false) {
                         return EventResponse::Ignored;
                     }
-                    toggle();
+                    toggle(ctx);
                     EventResponse::Handled
                 }
                 _ => EventResponse::Ignored,
@@ -359,9 +388,9 @@ impl Widget for Toggle {
         }
         {
             let toggle = toggle.clone();
-            handlers = handlers.on_access_action(move |action, _ctx| {
+            handlers = handlers.on_access_action(move |action, ctx| {
                 if action == teksilo_core::accesskit::Action::Click {
-                    toggle();
+                    toggle(ctx);
                     EventResponse::Handled
                 } else {
                     EventResponse::Ignored
@@ -659,6 +688,57 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn on_change_fires_for_every_user_path_and_reports_the_new_value() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let on = Signal::new(false);
+        let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let t = tree.add(
+            Toggle::new(on.clone())
+                .label(lit!("Dark mode"))
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        tree.click(t);
+        tree.focus(t);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(t),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+
+        assert_eq!(*seen.borrow(), vec![true, false, true]);
+        assert!(on.get());
+    }
+
+    #[test]
+    fn on_change_is_silent_for_a_programmatic_write() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let on = Signal::new(false);
+        let fired = Rc::new(Cell::new(false));
+        let sink = fired.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let _t = tree.add(
+            Toggle::new(on.clone())
+                .label(lit!("Dark mode"))
+                .on_change(move |_now, _ctx| sink.set(true)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+
+        // No event in flight to carry. Observe the signal for this direction.
+        on.set(true);
+        assert!(!fired.get());
     }
 
     #[test]

@@ -422,7 +422,7 @@ impl Root {
                     let mut row = StandardTreeItem::new(lit!(item.clone()))
                         .from_entry(entry)
                         .selected(selected)
-                        .on_toggle_rc(ctx.toggle_callback());
+                        .on_chevron_toggle_rc(ctx.toggle_callback());
                     if entry.has_children {
                         // Branches: tristate so `Indeterminate` is
                         // visible when descendants are mixed — plus a

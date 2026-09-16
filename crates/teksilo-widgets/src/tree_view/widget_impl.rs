@@ -792,16 +792,19 @@ impl<T: 'static> Widget for TreeView<T> {
                                     let sel_fallback = sel_for_key.clone();
                                     ctx.row_space_activate(
                                         row_id,
-                                        std::rc::Rc::new(move || {
-                                            if let Some(ref sel) = sel_fallback {
-                                                if sel.mode() == teksilo_data::SelectionMode::Multi
-                                                {
-                                                    sel.toggle(current);
-                                                } else {
-                                                    sel.select(current);
+                                        std::rc::Rc::new(
+                                            move |_ctx: &mut teksilo_core::widget::EventContext| {
+                                                if let Some(ref sel) = sel_fallback {
+                                                    if sel.mode()
+                                                        == teksilo_data::SelectionMode::Multi
+                                                    {
+                                                        sel.toggle(current);
+                                                    } else {
+                                                        sel.select(current);
+                                                    }
                                                 }
-                                            }
-                                        }),
+                                            },
+                                        ),
                                     );
                                     set_focus(current);
                                     return teksilo_core::event::EventResponse::Handled;
