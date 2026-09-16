@@ -83,6 +83,8 @@ one name and that name takes a `WidgetId` or a widget.
 ### Changed
 
 - CI runs `cargo teksilo-fmt --check` over `crates` and `examples`.
+- `FormLayout::lines` takes `impl IntoTeksiChild` in both columns; the field
+  column used to require `impl Widget`, so a loop holding ids could not use it.
 - `teksu-language-spec-v3.md` is the design rationale and names
   `teksu-macro-reference.md` normative for behaviour; fourteen divergences from
   the implementation are corrected, and appendices A.2, A.3, A.4 and A.6 are
@@ -101,8 +103,10 @@ one name and that name takes a `WidgetId` or a widget.
   `with_child_id`), and `Breadcrumb::item_id`.
 - `WidgetBuilder::dim_when_inactive` and `dim_when_inactive_default`. Wrap
   instead: `DimWhenInactive::new().factor(f).child(w)`.
-- `FormLayout::line_ids` is renamed `line_id`; `line_ids` is now the plural over
-  `(WidgetId, WidgetId)` pairs.
+- `FormLayout::line_ids` no longer adds one row from two ids; it takes an
+  iterator of `(label_id, field_id)` pairs and adds a row per pair. The
+  single-row form is gone because `line` takes `impl IntoTeksiChild` and accepts
+  a `WidgetId` directly.
 
 ### Fixed
 

@@ -142,7 +142,7 @@ impl FormLayout {
     pub fn lines<L, F>(self, rows: impl IntoIterator<Item = (L, F)>) -> Self
     where
         L: teksilo_core::IntoTeksiChild,
-        F: Widget + 'static,
+        F: teksilo_core::IntoTeksiChild,
     {
         rows.into_iter()
             .fold(self, |form, (label, field)| form.line(label, field))
@@ -151,8 +151,10 @@ impl FormLayout {
     /// Add several label/field pair rows from an iterator of
     /// `(label_id, field_id)` pairs, in order.
     ///
-    /// The id-carrying twin of [`lines`](Self::lines). Reach for it when a loop
-    /// has already registered both columns and holds the `WidgetId`s.
+    /// [`lines`](Self::lines) accepts ids in both columns too, so this is the
+    /// spelling that states the id types outright rather than a capability the
+    /// other method lacks. Reach for it when a loop has already registered both
+    /// columns and naming the type reads better than inferring it.
     pub fn line_ids(self, rows: impl IntoIterator<Item = (WidgetId, WidgetId)>) -> Self {
         rows.into_iter()
             .fold(self, |form, (label, field)| form.line(label, field))

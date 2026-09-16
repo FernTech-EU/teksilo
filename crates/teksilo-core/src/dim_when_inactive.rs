@@ -18,10 +18,7 @@
 //! any ancestor opacity scope.
 //!
 //! ```ignore
-//! use teksilo_core::widget_builder::WidgetBuilder;
 //! // Fade a custom panel to 40 % when the window is inactive:
-//! ctx.add(my_panel.dim_when_inactive(0.4));
-//! // Or directly:
 //! ctx.add(DimWhenInactive::new().child(my_panel).factor(0.4));
 //! ```
 //!

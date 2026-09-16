@@ -616,6 +616,24 @@ fn form_layout_lines() {
     );
 }
 
+/// The field column of `lines` takes `impl IntoTeksiChild`, not `impl Widget`,
+/// so a loop holding ids can use the plural without falling back to `line_ids`.
+#[test]
+fn form_layout_lines_accepts_ids_in_both_columns() {
+    same_tree(
+        |t| {
+            let (l1, f1) = (t.add(leaf(10.0)), t.add(leaf(40.0)));
+            let (l2, f2) = (t.add(leaf(20.0)), t.add(leaf(50.0)));
+            t.add(FormLayout::new().line(l1, f1).line(l2, f2))
+        },
+        |t| {
+            let (l1, f1) = (t.add(leaf(10.0)), t.add(leaf(40.0)));
+            let (l2, f2) = (t.add(leaf(20.0)), t.add(leaf(50.0)));
+            t.add(FormLayout::new().lines([(l1, f1), (l2, f2)]))
+        },
+    );
+}
+
 #[test]
 fn form_layout_line_ids() {
     same_tree(
