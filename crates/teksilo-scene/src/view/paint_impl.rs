@@ -64,11 +64,24 @@ impl SceneView {
                 .with_text_scale(ctx.text_scale)
                 .with_window_active(ctx.window_active);
         let drag_target = self.drag_target.get();
+        // Every item the in-flight drag carries — the grabbed one alone, or the
+        // whole selection when the grab landed on a selected item. Resolved
+        // once per band rather than per item, and from the same
+        // `SceneView::drag_group` the commit uses, so the live feedback and the
+        // committed move can never show different sets.
+        let drag_group: Vec<crate::item::ItemId> = drag_target
+            .map(|t| self.drag_group(t.item_id))
+            .unwrap_or_default();
         let mut visible_ids = self.scene().items_in_rect(region);
-        // Z-order within the band: higher z paints last (on top); equal-z
-        // preserves insertion order (stable sort). Heavyweight ids stay in the
-        // list but are skipped below — they paint via the arena walker.
-        self.scene().sort_by_z(&mut visible_ids);
+        // Paint order: bottom-most first, so a later element paints on top.
+        // The comparator is `PaintKey`, the *same* value every hit test in the
+        // crate compares — which is what makes "what the user sees on top" and
+        // "what the pointer picks" one rule instead of two. Within a band rank
+        // is constant, so this reduces to ascending z with equal-z resolved in
+        // insertion order. Heavyweight ids stay in the list but are skipped
+        // below — they paint via the arena walker, at the rank between the two
+        // lightweight bands.
+        self.scene().sort_by_paint_key(&mut visible_ids);
         for id in visible_ids {
             let scene = self.model.0.borrow();
             if scene.item(id).is_none() {
@@ -98,7 +111,11 @@ impl SceneView {
             // with a visual delta in scene coords — a child follows its
             // dragged parent until the rebuild commits the new local_pos.
             let drag_delta = drag_target
-                .filter(|t| t.item_id == id || self.scene().is_descendant_of(id, t.item_id))
+                .filter(|_| {
+                    drag_group
+                        .iter()
+                        .any(|g| *g == id || self.scene().is_descendant_of(id, *g))
+                })
                 .map(|t| {
                     teksilo_canvas::Transform2D::translate(
                         t.current_scene.x - t.anchor_scene.x,

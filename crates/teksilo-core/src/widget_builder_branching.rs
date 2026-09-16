@@ -161,6 +161,10 @@ macro_rules! impl_widget_for_branch {
                 match self { $($branch::$arm(w) => w.hit_shape(local_point, bounds)),+ }
             }
 
+            fn accepts_child_hit(&self, child: WidgetId, point: Point) -> bool {
+                match self { $($branch::$arm(w) => w.accepts_child_hit(child, point)),+ }
+            }
+
             fn hit_outset(
                 &self,
                 kind: teksilo_tokens::PointerKind,

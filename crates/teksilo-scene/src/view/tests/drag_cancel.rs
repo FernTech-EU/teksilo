@@ -1,8 +1,23 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! AUDIT PROBE — not a shipped test. Proves whether a revoked drag leaves the
-//! view's visual drag state behind.
+//! What a revoked drag leaves behind.
+//!
+//! A `PointerCancel` is terminal: no `PointerUp` follows and nothing may
+//! activate, so every widget has to unwind the state it opened for that
+//! pointer. These two measure the scene's half of that, at the model and at the
+//! renderer.
+//!
+//! **The gesture shape is load-bearing.** A `SceneView` with selection on
+//! declares a `PanClaim` *and* carries `on_drag` on the same node, so its own
+//! drag is deferred behind a hold (`PointerSequence::defer_own_drag`) and a
+//! finger that simply presses and moves pans the camera instead of grabbing
+//! anything — which is the behaviour `view::tests::touch_camera` pins. Both
+//! tests therefore press, hold past the profile's `long_press`, and only then
+//! travel, exactly as `touch_grabs::finger_drag` does. Measured with the
+//! press-and-move shape these tests used to have, neither one can reach the
+//! drag path at all: the first fails on its own precondition and the second
+//! fails on a camera pan that a cancel has no business reverting.
 
 use super::*;
 use crate::items::RectItem;
@@ -33,6 +48,43 @@ fn contact(id: PointerId, phase: PointerPhase, at: Point, ms: u64) -> PointerSam
     }
 }
 
+/// The hold a scene grab is armed by, in milliseconds, plus a margin. See the
+/// module doc, and `touch_grabs::hold_ms`.
+fn hold_ms() -> u64 {
+    teksilo_core::gesture::default_profile(teksilo_tokens::PointerKind::Touch)
+        .long_press
+        .as_millis() as u64
+        + 50
+}
+
+/// Press at `from`, hold, arm the drag at `via`, then carry the item to `to` —
+/// leaving the contact *live*, so the caller can revoke it.
+///
+/// Three samples after the press, and each one earns its place:
+///
+/// * one **at the press point** when the hold deadline arrives. The deferral is
+///   a hold, so a press that has already travelled past `long_press_slop` by
+///   then is withdrawn rather than armed.
+/// * one at `via`, which is the sample the drag *starts* on — so `via` becomes
+///   the drag's anchor.
+/// * one at `to`, the first sample that actually carries the item, by
+///   `to - via`. Without it the anchor and the current position coincide and
+///   the in-flight offset is zero, which is a grab but not yet a move.
+fn finger_grab_and_carry(
+    tree: &mut WidgetTree,
+    from: Point,
+    via: Point,
+    to: Point,
+) -> (PointerId, u64) {
+    let id = finger();
+    let held = hold_ms();
+    tree.dispatch_pointer(contact(id, PointerPhase::Down, from, 0));
+    tree.dispatch_pointer(contact(id, PointerPhase::Move, from, held));
+    tree.dispatch_pointer(contact(id, PointerPhase::Move, via, held + 16));
+    tree.dispatch_pointer(contact(id, PointerPhase::Move, to, held + 32));
+    (id, held + 32)
+}
+
 fn draggable_scene() -> (Scene, crate::item::ItemId) {
     let mut scene = Scene::new();
     let id = scene.add_item(
@@ -55,19 +107,12 @@ fn a_revoked_item_drag_leaves_the_item_where_it_was() {
         tree.add(SceneView::new(scene).selection_mode(crate::selection::SceneSelectionMode::Multi));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
-    let id = finger();
-    let from = Point::new(100.0, 90.0);
-    tree.dispatch_pointer(contact(id, PointerPhase::Down, from, 0));
-    // Several move samples: the first crosses the slop and *starts* the drag
-    // (anchor == that position), the rest carry the item away from it.
-    for (n, y) in [(1u64, 140.0f32), (2, 180.0), (3, 240.0)] {
-        tree.dispatch_pointer(contact(
-            id,
-            PointerPhase::Move,
-            Point::new(100.0, y),
-            n * 16,
-        ));
-    }
+    let (id, t) = finger_grab_and_carry(
+        &mut tree,
+        Point::new(100.0, 90.0),
+        Point::new(100.0, 165.0),
+        Point::new(100.0, 240.0),
+    );
 
     {
         let view = view_handle(&tree, view_id);
@@ -82,7 +127,7 @@ fn a_revoked_item_drag_leaves_the_item_where_it_was() {
         id,
         PointerPhase::Cancel,
         Point::new(100.0, 240.0),
-        64,
+        t + 16,
     ));
     // Let every deferred rebuild / relayout the cancel scheduled run.
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -136,21 +181,24 @@ fn a_revoked_item_drag_paints_the_item_back_at_its_model_position() {
     let before = transform_commands(&tree.render());
     println!("before transforms = {before:?}");
 
-    let id = finger();
-    tree.dispatch_pointer(contact(id, PointerPhase::Down, Point::new(100.0, 90.0), 0));
-    for (n, y) in [(1u64, 140.0f32), (2, 180.0), (3, 240.0)] {
-        tree.dispatch_pointer(contact(
-            id,
-            PointerPhase::Move,
-            Point::new(100.0, y),
-            n * 16,
-        ));
-    }
+    let (id, t) = finger_grab_and_carry(
+        &mut tree,
+        Point::new(100.0, 90.0),
+        Point::new(100.0, 165.0),
+        Point::new(100.0, 240.0),
+    );
+    // The offset is on screen right now — this is what the cancel has to undo.
+    let during = transform_commands(&tree.render());
+    println!("during transforms = {during:?}");
+    assert_ne!(
+        during, before,
+        "precondition: the in-flight drag is actually painting an offset",
+    );
     tree.dispatch_pointer(contact(
         id,
         PointerPhase::Cancel,
         Point::new(100.0, 240.0),
-        64,
+        t + 16,
     ));
     tree.layout(SizeProposal::exact(400.0, 300.0));
 

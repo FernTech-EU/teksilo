@@ -95,6 +95,10 @@ impl SceneView {
             let tooltip_shown = tooltip_shown.clone();
             let tooltip_anchor_id = self_id;
             let hold_origin = hold_origin.clone();
+            let press_floor = self.press_floor.clone();
+            let press_floor_claimants = self.over_claimants.clone();
+            let press_floor_memo = self.veto_memo.clone();
+            let press_floor_generation = self.snapshot_generation.clone();
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use teksilo_core::event::PointerButton;
                 use teksilo_core::event::WidgetEvent as Ev;
@@ -118,6 +122,18 @@ impl SceneView {
                         .unwrap_or(Point::ZERO)
                 };
 
+                // The paint-order floor for THIS dispatch. `on_pointer_event`
+                // fires on every strict ancestor during the preview pass and on
+                // the target itself during the bubble, so this handler running
+                // at all means one of exactly two things: a heavyweight child
+                // won the arena's walk (we are previewing it), or nothing did
+                // and we are the target. Reading the router's verdict is what
+                // lets the lightweight tier yield to a card **without** guessing
+                // the card's own hit-test from a rectangle — a guess that would
+                // be wrong for every node that overrides `Widget::hit_shape`,
+                // which `docs/teksilo-scene.md` tells app authors to do.
+                let floor = SceneView::dispatch_floor(ctx, self_id);
+
                 // Hit-test the handler snapshot for the topmost item under
                 // the pointer. Shared with the long-press handler below, so
                 // both routes agree on what "the item under the finger" means.
@@ -129,6 +145,7 @@ impl SceneView {
                             scene_pt,
                             view_xform_signal.get(),
                             slop,
+                            floor,
                         )
                     };
 
@@ -251,19 +268,69 @@ impl SceneView {
                                 scene_pt,
                                 view_xform_signal.get(),
                                 slop,
+                                floor,
                             )
                             .is_some()
                         };
-                        let cursor = if drag_target_for_cursor.get().is_some() {
-                            CursorIcon::Grabbing
-                        } else if let Some(c) = item_cursor {
-                            c
-                        } else if over_draggable {
-                            CursorIcon::Grab
+                        // The cursor rule. When this view is yielding — a card
+                        // took the pointer and nothing of ours has a cursor to
+                        // offer on top of it — the card's own node cursor is
+                        // the right answer, so a yield must not be a reset to
+                        // `Default`, which the preview pass would write *over*
+                        // the card's declaration.
+                        //
+                        // Nor can it be silence. The cursor moves only when
+                        // something writes to it, and the card's declaration is
+                        // written on `PointerEnter`/`PointerLeave` alone — so
+                        // going quiet after this view has already spoken for
+                        // the same hover episode leaves *our* last word
+                        // standing. Slide off an `Over` hint onto the note
+                        // under it and the note keeps the hint's cursor for as
+                        // long as the pointer stays on the note, because no
+                        // hover transition ever fires in between. A yield is
+                        // therefore a **hand-back**: `release_cursor` withdraws
+                        // whatever we said and lets the card's declaration
+                        // apply again. It is a no-op when we never spoke.
+                        //
+                        // The test is `item_cursor.is_none()`, NOT
+                        // `new_hit.is_none()`. The snapshot deliberately holds
+                        // every hit-testable entry, so a purely **decorative**
+                        // `Over` rect — the exact case a yield exists to
+                        // protect — is still a `new_hit`, and keying off that
+                        // stops the yield and stomps the card's cursor with
+                        // `Default`. What decides is whether this view actually
+                        // has an answer: a cursor the item declared, or the
+                        // `Grab` it owes a draggable one.
+                        //
+                        // This is also where an `Over` item's `cursor` is
+                        // arbitrated rather than vetoed: it wins here, over the
+                        // card, without taking the card's press away (see
+                        // `crate::pick::claims_press`).
+                        //
+                        // A drag in flight is never a yield: the pointer is
+                        // captured by this view, so the `Grabbing` cursor is
+                        // ours to set wherever the hand has got to. (The captor
+                        // path already reports this view as the target, so the
+                        // `floor` test alone would do it — this says so rather
+                        // than relying on it.)
+                        let yielding = drag_target_for_cursor.get().is_none()
+                            && floor > crate::pick::RANK_UNDER
+                            && item_cursor.is_none()
+                            && !over_draggable;
+                        if yielding {
+                            ctx.release_cursor();
                         } else {
-                            CursorIcon::Default
-                        };
-                        ctx.set_cursor(cursor);
+                            let cursor = if drag_target_for_cursor.get().is_some() {
+                                CursorIcon::Grabbing
+                            } else if let Some(c) = item_cursor {
+                                c
+                            } else if over_draggable {
+                                CursorIcon::Grab
+                            } else {
+                                CursorIcon::Default
+                            };
+                            ctx.set_cursor(cursor);
+                        }
                     }
                     Ev::PointerDown {
                         position,
@@ -273,6 +340,29 @@ impl SceneView {
                     } => {
                         cursor_pos.set(Some(*position));
                         let scene_pt = to_scene(*position);
+                        // The floor for the whole press, recorded here because
+                        // this is the one dispatch that carries the router's
+                        // verdict. `floor` already says "a card won the arena's
+                        // walk"; the `Over`-claimant test adds the other way a
+                        // press can reach this view over a card -- the veto. The
+                        // drag reads this rather than re-deriving it, so a grab
+                        // and a tap on the same press cannot disagree about
+                        // what was on top.
+                        let vetoed = super::over_press_claimant_covers(
+                            super::VetoState {
+                                over_claimants: &press_floor_claimants,
+                                veto_memo: &press_floor_memo,
+                                snapshot_generation: &press_floor_generation,
+                                handler_snapshot: &handler_snapshot,
+                                view_transform: &view_xform_signal,
+                            },
+                            scene_pt,
+                        );
+                        press_floor.set(if vetoed {
+                            crate::pick::RANK_OVER
+                        } else {
+                            floor
+                        });
                         let hit = hit_handler_item(*position, scene_pt, slop);
                         // Any press retracts a hover tooltip — the user has
                         // committed to an action. The shown one always goes; the
@@ -394,6 +484,8 @@ impl SceneView {
                         if hold_origin.take().is_some() {
                             ctx.cancel_delayed_overlay(tooltip_content_id);
                         }
+                        // The press is over; the next one records its own.
+                        press_floor.set(crate::pick::RANK_UNDER);
                         // Tap dispatch only fires when the button that
                         // came back up matches the one we recorded on
                         // the press. Mixed-button down/up sequences
@@ -422,27 +514,114 @@ impl SceneView {
                             }
                         }
                     }
-                    Ev::PointerLeave { .. } => {
-                        cursor_pos.set(None);
-                        // Pointer left the view entirely — retract the
-                        // tooltip (shown or pending).
-                        ctx.cancel_delayed_overlay(tooltip_content_id);
-                        ctx.dismiss_overlay_by_content(tooltip_content_id);
-                        // Clear any pending hover.
-                        if let Some(prev) = hovered_item.take()
-                            && let Some(prev_entry) =
-                                handler_snapshot.borrow().iter().find(|e| e.id == prev)
-                            && let Some(h) = prev_entry.handlers.as_deref()
-                            && let Some(cb) = h.on_hover.as_ref()
-                        {
-                            cb(false, ctx);
-                        }
-                        pending_tap.set(None);
-                        ctx.set_cursor(CursorIcon::Default);
-                    }
                     _ => {}
                 }
                 EventResponse::Ignored
+            });
+        }
+
+        // --- The departure ---------------------------------------------
+        //
+        // The hover episode's other end, and it has to be registered *here*
+        // rather than as a `PointerLeave` arm of the `on_pointer_event` closure
+        // above — which is where it used to live, unreachable on both passes.
+        // `PointerEnter` / `PointerLeave` are hover transitions the router
+        // synthesizes rather than raw pointer samples, and it routes them
+        // accordingly: `try_handler_preview` returns `None` for both outright
+        // (so an ancestor's drag guard can never swallow a descendant's hover),
+        // and the bubble matches its own dedicated `on_hover` arms well before
+        // it reaches the `on_pointer_event` catch-all. Nothing in the router
+        // delivers Enter or Leave to `on_pointer_event` at all, so the arm ran
+        // exactly never — and the cursor the view had raised over a draggable
+        // item stayed raised over whatever the pointer went on to, forever,
+        // while the item it had left went on believing it was hovered and its
+        // tooltip went on counting down.
+        //
+        // `on_hover` is the route the router actually delivers on, and it is
+        // the same one every other widget in the workspace receives a leave
+        // through. It fires on the view's own node whenever the pointer crosses
+        // into or out of it *or any of its descendants*, so a heavyweight card
+        // inside the scene is covered by the same registration as the window
+        // boundary.
+        //
+        // The `true` half is deliberately empty: the `PointerMove` that caused
+        // the transition is dispatched right after the enter and re-decides the
+        // whole seam from the pointer's actual position, which is a better
+        // answer than anything an enter carrying no position could give.
+        {
+            let unwind = self.hover_unwind(tooltip_content_id);
+            handlers = handlers.on_hover(move |entered, ctx| {
+                if entered {
+                    return;
+                }
+                // Only the hover episode. A press is **not** a hover, so
+                // `pending_tap`, the hold and the press floor are left exactly
+                // where they are — the desktop convention is that a click whose
+                // pointer wanders off the control and comes back still
+                // activates, and a press that is genuinely taken away arrives
+                // as the `PointerCancel` below, which owns that half.
+                unwind.clear(ctx);
+            });
+        }
+
+        // --- The terminal cancel -------------------------------------
+        //
+        // `PointerCancel` is terminal: no `PointerUp` follows, nothing may
+        // activate, and every widget is expected to unwind the state it opened
+        // for that pointer itself. The scene had no arm for it at all, so a
+        // revoked contact left behind whatever the interaction had reached —
+        // a translated item, a lasso, a half-drawn wire, a pending tap that the
+        // *next* release would then fire, a tooltip nobody could dismiss.
+        //
+        // Registered here rather than in `register_drag_handlers` because the
+        // hover / tooltip / pending-tap half of the state lives here and is
+        // installed unconditionally, while the drag handlers are only installed
+        // when selection or magnetism is on. `HandlerSet::on_pointer_cancel` is
+        // a single slot, so there is one arm and it owns the whole unwind.
+        //
+        // A revocation is a departure **plus** the press. The hover half is the
+        // same `HoverUnwind` the leave arm above runs, shared rather than
+        // restated so the two cannot drift; what a cancel adds is everything a
+        // press had in flight — the drag visual, the pending tap, the hold, the
+        // press floor — which a mere departure must *not* touch, because a
+        // pointer that wanders out of a control and back is still entitled to
+        // its click.
+        {
+            let pending_tap = self.pending_tap.clone();
+            let hold_origin = hold_origin.clone();
+            let unwind = self.drag_unwind();
+            let hover_unwind = self.hover_unwind(tooltip_content_id);
+            let press_floor_for_cancel = self.press_floor.clone();
+            let reconcile_dirty = self.reconcile_dirty.clone();
+            handlers = handlers.on_pointer_cancel(move |_pointer, _reason, ctx| {
+                // Everything the contact had in flight — see `DragUnwind`,
+                // which the drag's own `Cancelled` arm hands to as well. The
+                // keyboard connect flow's half-made connection is deliberately
+                // NOT in it: that is armed by a key, not by this pointer, and a
+                // revoked contact is no reason to drop it.
+                let had_visual = unwind.clear();
+
+                // A press that is taken away can never become a tap, and the
+                // hold it may have armed can never become a tooltip.
+                pending_tap.set(None);
+                press_floor_for_cancel.set(crate::pick::RANK_UNDER);
+                hold_origin.set(None);
+
+                // The hover half: the item's owed `on_hover(false)`, both
+                // tooltip retraction paths, and the cursor. Hover is owned by a
+                // pointer that hovers, so a cancelled contact usually has none
+                // — but a pen or a mouse can be revoked too, and the tooltip
+                // calls are needed either way (a *held* tip was armed by a
+                // contact that never hovered at all).
+                hover_unwind.clear(ctx);
+
+                if had_visual {
+                    // Drive the rebuild that re-places the item at its model
+                    // position; without it the frame that painted the drag
+                    // offset is the last one drawn until something else
+                    // dirties the view.
+                    reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
+                }
             });
         }
 
@@ -948,6 +1127,7 @@ impl SceneView {
     ) -> HandlerSet {
         let marquee = self.marquee.clone();
         let pending_marquee_commit = self.pending_marquee_commit.clone();
+        let marquee_mode = self.marquee_mode;
         let drag_target = self.drag_target.clone();
         let pending_item_move = self.pending_item_move.clone();
         let reconcile_dirty = self.reconcile_dirty.clone();
@@ -971,6 +1151,8 @@ impl SceneView {
         let magnetism_for_drag = self.magnetism.clone();
         let port_drag = self.port_drag.clone();
         let item_snap = self.item_snap.clone();
+        let drag_unwind = self.drag_unwind();
+        let press_floor_for_drag = self.press_floor.clone();
         handlers = handlers.on_drag(move |phase, ctx| {
             // Per-event grab tolerance: see the twin in
             // `register_pointer_handlers`. Zero for a mouse by arithmetic, so
@@ -1063,9 +1245,19 @@ impl SceneView {
                     // press, so a thin draggable item (e.g. a connector path)
                     // is grabbed only on its stroke. The snapshot is z-sorted
                     // and refreshed each layout pass — see `place_children`.
+                    // The floor the press recorded -- see
+                    // `SceneView::press_floor`. A `SceneView` sees the press
+                    // even when a card is the arena's target (press-release is
+                    // a descendant tap, press-then-move is an ancestor drag:
+                    // click a card to select it, pull away from it to marquee),
+                    // so "the drag is running, therefore no card was hit" is
+                    // simply false. Without this floor a pull starting on a
+                    // card would grab whatever lightweight item the card was
+                    // covering.
+                    let floor = press_floor_for_drag.get();
                     let hit = {
                         let snap = bounds_snapshot.borrow();
-                        super::hit_draggable_item(&snap, position, scene_press, xform, slop)
+                        super::hit_draggable_item(&snap, position, scene_press, xform, slop, floor)
                     };
                     if let Some(item_id) = hit {
                         // Drag-to-move: enter that mode,
@@ -1266,18 +1458,37 @@ impl SceneView {
                     state.current = position;
                     let screen_rect = state.rect();
                     let xform = view_xform_signal.get();
-                    let scene_rect = match xform.inverse() {
-                        Some(inv) => inv.apply_rect(screen_rect),
-                        None => Rect::ZERO,
+                    // Under a rotated view the band's scene-space form is a
+                    // quadrilateral, not a box. Taking its AABB — which is
+                    // what `inv.apply_rect` gives — over-selects everything in
+                    // the enlarged hull, so `SceneRegion` keeps the exact
+                    // corners whenever the transform does not preserve axes.
+                    let region = match xform.inverse() {
+                        Some(inv) => SceneRegion::from_screen_rect(screen_rect, &inv),
+                        None => SceneRegion::empty(),
                     };
-                    pending_marquee_commit.set(Some((scene_rect, state.additive)));
+                    pending_marquee_commit.replace(Some((region, marquee_mode, state.additive)));
                     reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                 }
-                // A revoked drag commits nothing: the lasso and any port-drag
-                // wire disappear and the scene is left as it was.
+                // A revoked drag commits nothing AND leaves nothing behind.
+                //
+                // This used to drop only the lasso and the port-drag wire, and
+                // leave `drag_target` / `item_snap` set — so a revoked drag
+                // painted the item at the dragged position for ever while the
+                // model went on saying it had never moved. The whole list now
+                // lives in `DragUnwind`, which the node's `on_pointer_cancel`
+                // arm hands to as well; clearing twice is a no-op, and having
+                // one list is what stops the two arms drifting apart.
+                //
+                // Both arms exist on purpose. This one is the drag recognizer's
+                // own contract ("a handler that committed as it went unwinds
+                // here"); the `on_pointer_cancel` arm is installed
+                // unconditionally, whereas these drag handlers are only
+                // registered when selection or magnetism is on, and it also
+                // unwinds the hover / pending-tap / hold state that lives over
+                // there.
                 DragPhase::Cancelled { .. } => {
-                    port_drag.replace(None);
-                    marquee.set(None);
+                    drag_unwind.clear();
                     reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                 }
                 _ => {}

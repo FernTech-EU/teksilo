@@ -224,6 +224,19 @@ pub enum A11yMode {
 
 /// Coordinate space the AT walker reports `SceneItem` bounds in.
 ///
+/// Either way the reported box is the item's `local_bounds` **rectangle**, not
+/// its [`ItemShape`](crate::ItemShape). AccessKit has no other shape to offer,
+/// so an item whose silhouette is narrower than its box — a rounded
+/// [`RectItem`](crate::RectItem), a stroke-only [`PathItem`](crate::PathItem) —
+/// advertises ground a pointer aimed there would miss. That is deliberate and
+/// it does not cost an AT client the element: a client identifies an element
+/// by node id, announces and spatially navigates by this rectangle, and an
+/// AccessKit action arrives addressed to the node rather than as a synthetic
+/// press at a coordinate. Advertising the narrower rectangle instead would be
+/// strictly worse — it would shrink what the element is *said* to cover
+/// without making any more of it reachable. The per-item magnitude is on
+/// [`RectItem::shape`](crate::RectItem).
+///
 /// The framework convention is **screen-projected** bounds — the
 /// rectangle a sighted user would see on the physical monitor, after
 /// pan/zoom/rotation has been applied. Screen readers consume this

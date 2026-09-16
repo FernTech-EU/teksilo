@@ -207,6 +207,46 @@ impl SceneItem for RectItem {
         }
     }
 
+    /// The rectangle — as a **rounded** rectangle when
+    /// [`corner_radius`](RectItem::corner_radius) is set, because that is what
+    /// it paints and the corners it leaves are genuinely transparent. Closed
+    /// form: no flattening, one comparison more than a plain box.
+    ///
+    /// A click in the transparent corner of a rounded card therefore misses
+    /// it, which is a real (if small) change from the pre-`ItemShape`
+    /// behaviour: `(1 - pi/4) r^2` of area per corner, reaching at most
+    /// `r * (sqrt(2) - 1)` from the corner point — 8 dp in from the corner of a
+    /// 20 dp radius.
+    ///
+    /// # What that means for accessibility
+    ///
+    /// The item's AccessKit node keeps advertising the **whole rectangle**:
+    /// AccessKit bounds are an AABB by construction, so every non-rectangular
+    /// element in every tier advertises a little more than it fills (a rounded
+    /// `Button` in the widget tier does the same). What changed here is only
+    /// what a *pointer* aimed at a transparent corner does, and it now matches
+    /// the pixels.
+    ///
+    /// The divergence does not cost an AT client the element, because nothing
+    /// on the AT path re-enters this shape: a client identifies an element by
+    /// node id, announces and spatially navigates by the advertised rectangle,
+    /// and an AccessKit action arrives addressed to the node rather than as a
+    /// synthetic press at a coordinate. Note also what does **not** help: the
+    /// view's miss-only slop pass widens an item's box for a coarse pointer,
+    /// but it offers nothing to an item already at or above the density's
+    /// target size on its short axis — which is every card big enough for a
+    /// large radius to matter (`a_large_item_earns_no_grab_slop_even_for_a_finger`
+    /// pins exactly that). An app that needs corner-inclusive pointer
+    /// targeting sets `corner_radius(0.0)` or overrides
+    /// [`SceneItem::shape`].
+    fn shape(&self) -> crate::shape::ItemShape {
+        if self.corner_radius > 0.0 {
+            crate::shape::ItemShape::rounded_rect(self.local_bounds, self.corner_radius)
+        } else {
+            crate::shape::ItemShape::bounds(self.local_bounds)
+        }
+    }
+
     fn thumbnail_color(&self) -> teksilo_tokens::Color {
         // Fill dominates; fall through to stroke; fall through to the default
         // grey if the rect has no visible chrome or its colour is role-based
@@ -255,10 +295,28 @@ mod tests {
     }
 
     #[test]
-    fn rect_item_default_shape_contains() {
+    fn rect_item_default_shape_is_its_box() {
         let item = RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0));
-        assert!(item.shape_contains(Point::new(20.0, 20.0)));
-        assert!(!item.shape_contains(Point::new(-5.0, 20.0)));
+        let shape = item.shape();
+        assert!(shape.contains(Point::new(20.0, 20.0), 1.0));
+        assert!(!shape.contains(Point::new(-5.0, 20.0), 1.0));
+        // The extreme corner of a square tile is still the tile.
+        assert!(shape.contains(Point::new(0.0, 0.0), 1.0));
+        assert_eq!(shape.bounding_rect(), Rect::new(0.0, 0.0, 50.0, 50.0));
+    }
+
+    #[test]
+    fn rect_item_corner_radius_carves_its_corners_out_of_the_shape() {
+        let item = RectItem::new(Rect::new(0.0, 0.0, 50.0, 50.0)).corner_radius(10.0);
+        let shape = item.shape();
+        // The very corner is transparent, so it is not the item.
+        assert!(!shape.contains(Point::new(0.5, 0.5), 1.0));
+        // A point on the corner arc, and the body, still are.
+        assert!(shape.contains(Point::new(10.0, 3.0), 1.0));
+        assert!(shape.contains(Point::new(25.0, 25.0), 1.0));
+        assert!(shape.contains(Point::new(0.0, 25.0), 1.0), "mid-edge");
+        // The box it advertises is unchanged - only the silhouette narrows.
+        assert_eq!(shape.bounding_rect(), Rect::new(0.0, 0.0, 50.0, 50.0));
     }
 
     #[test]

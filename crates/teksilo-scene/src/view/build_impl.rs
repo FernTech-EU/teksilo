@@ -25,9 +25,13 @@ impl SceneView {
         // the move actually lands; otherwise the item would visibly
         // "snap back" between drag-end and the rebuild.
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            if let Some(local_pos) = self.model.local_pos(target_id) {
-                let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
-                self.model.set_local_pos(target_id, new_local_pos);
+            // The whole selection when the grab was on a selected item — see
+            // `SceneView::drag_group`, which the paint feedback reads too.
+            for id in self.drag_group(target_id) {
+                if let Some(local_pos) = self.model.local_pos(id) {
+                    let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
+                    self.model.set_local_pos(id, new_local_pos);
+                }
             }
             self.drag_target.set(None);
         }
@@ -37,10 +41,17 @@ impl SceneView {
         // marquee Cell so paint stops overlaying the rect. Without
         // this the lasso would linger on screen until something
         // else triggered a layout pass (next user drag, etc.).
-        if let Some((rect, additive)) = self.pending_marquee_commit.take() {
+        let pending_marquee = self.pending_marquee_commit.borrow_mut().take();
+        if let Some((region, mode, additive)) = pending_marquee {
             {
                 let scene = self.model.0.borrow();
-                self.selection.commit_marquee(&scene, rect, additive);
+                self.selection.commit_marquee_region(
+                    &scene,
+                    &region,
+                    mode,
+                    self.view_scale(),
+                    additive,
+                );
             }
             self.marquee.set(None);
         }

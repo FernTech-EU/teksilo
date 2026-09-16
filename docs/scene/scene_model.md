@@ -70,7 +70,7 @@ delegate's *handlers* may mutate later).
 
 ## Builder methods at a glance
 
-`write_guard`, `flush_changes`, `cascade_budget`, `set_cascade_budget`, `with_index`, `from_scene`, `handle_count`, `add_widget`, `add_widget_item`, `set_payload`, `payload`, `add_item`, `add_item_dynamic`, `add_boxed_item`, `set_local_pos`, `set_local_bounds`, `set_transform`, `set_flags`, `set_flag`, `set_visible`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `set_z`, `bring_to_front`, `send_to_back`, `set_layer`, `set_item_parent`, `remove`, `orphan`, `set_item_handlers`, `with_handlers_mut`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `set_scene_rect`, `pan_axes`, `zoomable`, `set_pan_bounds`, `set_zoom_range`, `add_a11y_group`, `remove_a11y_group`, `set_a11y_parent`, `add_a11y_relation`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `structural_version`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `len`, `is_empty`, `ids`, `local_pos`, `local_bounds`, `transform`, `scene_transform`, `scene_pos`, `scene_rect`, `flags`, `is_effectively_visible`, `opacity`, `effective_opacity`, `z`, `layer`, `parent_of`, `is_descendant_of`, `scene_rect_extent`, `current_pan_axes`, `is_zoomable`, `current_pan_bounds`, `current_zoom_range`, `items_in_rect`, `item_at`, `items_at`, `colliding_items`, `a11y_parent_of`
+`write_guard`, `flush_changes`, `cascade_budget`, `set_cascade_budget`, `with_index`, `from_scene`, `handle_count`, `add_widget`, `add_widget_item`, `set_payload`, `payload`, `add_item`, `add_item_dynamic`, `add_boxed_item`, `set_local_pos`, `set_local_bounds`, `set_transform`, `set_flags`, `set_flag`, `set_visible`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `set_z`, `bring_to_front`, `send_to_back`, `set_layer`, `set_item_parent`, `remove`, `orphan`, `set_item_handlers`, `with_handlers_mut`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `set_scene_rect`, `pan_axes`, `zoomable`, `set_pan_bounds`, `set_zoom_range`, `add_a11y_group`, `remove_a11y_group`, `set_a11y_parent`, `add_a11y_relation`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `mutation_version`, `structural_version`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `len`, `is_empty`, `ids`, `local_pos`, `local_bounds`, `transform`, `scene_transform`, `scene_pos`, `scene_rect`, `flags`, `is_effectively_visible`, `opacity`, `effective_opacity`, `z`, `layer`, `parent_of`, `is_descendant_of`, `scene_rect_extent`, `current_pan_axes`, `is_zoomable`, `current_pan_bounds`, `current_zoom_range`, `items_in_rect`, `items_in_region`, `item_shape`, `item_region`, `item_contains`, `paint_key`, `is_hit_testable`, `item_at`, `item_at_scaled`, `items_at`, `items_at_scaled`, `item_at_in_view`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `a11y_parent_of`
 
 ## API reference
 
@@ -308,6 +308,11 @@ Move `id` to `local_pos` in its parent's coordinate space; notifies all views.
 #### `pub fn set_local_bounds(&self, id: ItemId, local_bounds: Rect)`
 
 Replace the local bounding rect of `id`; notifies all views.
+
+Idempotent, and an item whose box is derived from its geometry fits
+itself to the rectangle rather than adopting it — see
+`Scene::set_local_bounds` for both contracts, which matter here
+because this is the form an app drives per frame.
 
 #### `pub fn set_transform(&self, id: ItemId, transform: Transform2D)`
 
@@ -618,17 +623,95 @@ Current zoom-factor clamp range without subscribing to its signal.
 
 All items whose bounding rects overlap `scene_rect` (spatial-index query).
 
+#### `pub fn items_in_region( &self, region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32, ) -> Vec<ItemId>`
+
+Items matching `region` under `mode`; see `Scene::items_in_region`.
+
+Screen-anchored
+(`IGNORES_TRANSFORMATIONS`)
+items are skipped, for the same reason `SceneModel::item_at` skips
+them: a scene-space region cannot place them.
+
+#### `pub fn item_shape(&self, id: ItemId) -> Option<ItemShape>`
+
+An entry's geometry in local coordinates; see `Scene::item_shape`.
+
+#### `pub fn item_region(&self, id: ItemId) -> Option<SceneRegion>`
+
+An entry's own shape as a scene-space region; see `Scene::item_region`.
+
+#### `pub fn item_contains(&self, id: ItemId, scene_pt: Point, view_scale: f32) -> bool`
+
+Whether `id`'s shape contains `scene_pt`; see `Scene::item_contains`.
+
+#### `pub fn paint_key(&self, id: ItemId) -> Option<crate::pick::PaintKey>`
+
+Where `id` sits in this scene's single paint order; see
+`Scene::paint_key`.
+
+Defined for **both tiers**, so it is the value to compare when an app
+needs to ask "which of these two is on top?" without re-deriving the
+band/z/insertion rule.
+
+#### `pub fn is_hit_testable(&self, id: ItemId) -> bool`
+
+Whether `id` takes part in pointer hit-testing — visible along its whole
+ancestor chain AND enabled; see `Scene::is_hit_testable`.
+
+The public form of the filter every picker here applies, so an app can
+ask why one of its items is not answering.
+
 #### `pub fn item_at(&self, scene_pt: Point) -> Option<ItemId>`
 
-The topmost item under `scene_pt` using exact-shape hit-testing; `None` if no item is hit.
+The topmost **lightweight** item whose shape contains `scene_pt`, at
+unit view scale; see `Scene::item_at` for the full contract.
+
+"Topmost" is `Scene::paint_key` order, so an
+`Over`-band item beats a higher-`z`
+`Under` one and an equal-`z` tie goes to the
+later-inserted entry. Hidden and disabled entries are excluded, and
+heavyweight widget entries and screen-anchored
+(`IGNORES_TRANSFORMATIONS`)
+items are skipped — see `SceneModel::item_at_in_view` for the query
+that places the latter.
+
+#### `pub fn item_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId>`
+
+`Scene::item_at` at an explicit view zoom. The zoom reaches exactly
+one thing: a cosmetic stroke band's width in scene units.
 
 #### `pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId>`
 
-All items under `scene_pt` (exact-shape hit-test), ordered front-to-back.
+All lightweight items whose shape contains `scene_pt`, topmost-first in
+`Scene::paint_key` order. Same tier, flag and
+`IGNORES_TRANSFORMATIONS` rules as `SceneModel::item_at`.
+
+#### `pub fn items_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Vec<ItemId>`
+
+`Scene::items_at` at an explicit view zoom.
+
+#### `pub fn item_at_in_view(&self, screen_pt: Point, view_transform: Transform2D) -> Option<ItemId>`
+
+The topmost item under a **screen** point, resolving both hit spaces;
+see `Scene::item_at_in_view`.
 
 #### `pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId>`
 
-All items whose bounding rects intersect `id`'s bounding rect.
+Items overlapping `id`'s shape, excluding `id`; see
+`Scene::colliding_items`.
+
+#### `pub fn colliding_items_with(&self, id: ItemId, mode: ItemSelectionMode) -> Vec<ItemId>`
+
+`Scene::colliding_items` under an explicit mode.
+
+#### `pub fn items_along_path(&self, path: &teksilo_canvas::Path) -> Vec<ItemId>`
+
+Items lying along `path`; see `Scene::items_along_path`. (This was
+unreachable from a `SceneModel` before — the facade never forwarded it.)
+
+#### `pub fn items_along_path_with( &self, path: &teksilo_canvas::Path, stroke_width: f32, mode: ItemSelectionMode, ) -> Vec<ItemId>`
+
+`Scene::items_along_path` with an explicit stroke width and mode.
 
 #### `pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode>`
 

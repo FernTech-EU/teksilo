@@ -82,7 +82,17 @@ impl SceneView {
                 if !flags.contains(crate::flags::ItemFlags::IS_DRAGGABLE) {
                     continue;
                 }
+                // `IS_VISIBLE` says an item is "neither painted nor
+                // hit-tested"; `IS_ENABLED` says a disabled one "passes clicks
+                // through". A grab is a click, so both apply here and in the
+                // handler snapshot below, from one predicate.
+                if !scene.is_hit_testable(id) {
+                    continue;
+                }
                 let Some(scene_rect) = scene.scene_rect(id) else {
+                    continue;
+                };
+                let Some(key) = scene.paint_key(id) else {
                     continue;
                 };
                 let scene_xform = scene.scene_transform(id);
@@ -97,46 +107,65 @@ impl SceneView {
                     id,
                     scene_rect,
                     scene_transform: scene_xform,
-                    shape_contains: item.clone_shape_test().into(),
+                    shape: item.shape(),
                     ignores_xform,
                     scene_anchor,
                     local_bounds: scene.local_bounds(id).unwrap_or(Rect::ZERO),
-                    z: scene.z(id).unwrap_or(0.0),
+                    key,
                 });
             }
-            // Topmost-first so the first shape match in `hit_draggable_item`
-            // wins, matching the handler-snapshot hit-test ordering.
-            snapshot.sort_by(|a, b| b.z.partial_cmp(&a.z).unwrap_or(std::cmp::Ordering::Equal));
+            // Topmost-first in the view's ONE paint order, so the first shape
+            // match in `hit_draggable_item` is the entry the user sees on top.
+            // A *stable descending* sort on `z` alone — which is what this used
+            // to be — leaves equal-z ties in the ascending order `scene.ids()`
+            // produced, so the first match was the oldest, i.e. the bottom-most
+            // item: paint and hit were inverted on ties. Comparing whole
+            // `PaintKey`s cannot have that failure mode.
+            snapshot.sort_by_key(|e| std::cmp::Reverse(e.key));
         }
 
         // Refresh the handler-dispatch snapshot used by
         // `on_pointer_event` to route hover / tap / context-menu
-        // events to the item under the pointer. Only items with a
-        // handler set installed need to be considered for routing,
-        // but we include every item so cursor-over-item-without-
-        // handler can still consult the per-item cursor field.
+        // events to the item under the pointer. Every hit-testable item is
+        // included, not only the ones carrying handlers: a handler-less item
+        // painted on top still occludes what is beneath it inside the
+        // lightweight tier (the hit test resolves the topmost *entry* and only
+        // then looks for handlers), and an item without handlers can still
+        // carry a per-item cursor. `claims_press` — which is a different and
+        // narrower question — is recorded per entry and read by exactly one
+        // thing, the `Over`-band veto.
         {
             let mut snap = self.handler_snapshot.borrow_mut();
             snap.clear();
+            let mut has_over_claimant = false;
             let scene = self.model.0.borrow();
             for id in scene.ids() {
                 let Some(item) = scene.item(id) else {
                     continue;
                 };
+                // Same two flag contracts as the draggable snapshot above.
+                if !scene.is_hit_testable(id) {
+                    continue;
+                }
                 let Some(scene_rect) = scene.scene_rect(id) else {
                     continue;
                 };
+                let Some(key) = scene.paint_key(id) else {
+                    continue;
+                };
                 let scene_xform = scene.scene_transform(id);
-                let z = scene.z(id).unwrap_or(0.0);
+                let claims_press = crate::pick::claims_press(
+                    scene.handlers(id),
+                    scene.flags(id).unwrap_or_default(),
+                );
+                has_over_claimant |= claims_press && key.rank() == crate::pick::RANK_OVER;
                 let handlers = scene.handlers(id).cloned().map(Box::new);
-                // Capture the item's shape-test as a stand-alone
-                // closure so the snapshot can answer narrow-phase
-                // hit-test without holding a borrow on the Scene.
-                // Items with non-AABB geometry (PathItem stroke-only,
-                // GroupItem logical-only) override `clone_shape_test`
-                // to capture the data they need; default impl returns
-                // an AABB predicate over `local_bounds`.
-                let shape_contains: Rc<dyn Fn(Point, f32) -> bool> = item.clone_shape_test().into();
+                // Take the item's geometry as a value, so the snapshot can
+                // answer the narrow phase without holding a borrow on the
+                // Scene. `ItemShape` is O(1) to clone by construction — the
+                // path kind is one refcount bump on memoised geometry — which
+                // is what makes doing this every layout pass free.
+                let shape = item.shape();
                 let local_bounds = scene.local_bounds(id).unwrap_or(Rect::ZERO);
                 let flags = scene.flags(id).unwrap_or_default();
                 let ignores_xform =
@@ -154,16 +183,25 @@ impl SceneView {
                     id,
                     scene_rect,
                     scene_transform: scene_xform,
-                    shape_contains,
-                    z,
+                    shape,
+                    key,
+                    claims_press,
                     handlers,
                     ignores_xform,
                     scene_anchor,
                     local_bounds,
                 });
             }
-            // Sort by z descending so hit-test picks topmost first.
-            snap.sort_by(|a, b| b.z.partial_cmp(&a.z).unwrap_or(std::cmp::Ordering::Equal));
+            // Topmost-first in the view's one paint order — see the draggable
+            // snapshot above for why sorting on `z` alone got equal-z ties
+            // exactly backwards.
+            snap.sort_by_key(|e| std::cmp::Reverse(e.key));
+            // The veto gate and its memo both key off this snapshot, so they
+            // are refreshed with it and never outlive it.
+            self.over_claimants.set(has_over_claimant);
+            self.snapshot_generation
+                .set(self.snapshot_generation.get().wrapping_add(1));
+            self.veto_memo.set(None);
         }
 
         LayoutResponse::rigid(size)
@@ -193,9 +231,17 @@ impl SceneView {
         // — keeping `Scene` plain instead of `Rc<RefCell<Scene>>`.
         // After commit, clear the in-flight marquee so paint stops
         // overlaying the rect.
-        if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection
-                .commit_marquee(&self.model.0.borrow(), rect, additive);
+        // Take first: holding the `RefMut` across the commit would make any
+        // future re-entrant post from an observer a panic rather than a queue.
+        let pending = self.pending_marquee_commit.borrow_mut().take();
+        if let Some((region, mode, additive)) = pending {
+            self.selection.commit_marquee_region(
+                &self.model.0.borrow(),
+                &region,
+                mode,
+                self.view_scale(),
+                additive,
+            );
             self.marquee.set(None);
         }
 

@@ -81,6 +81,7 @@ use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
 use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
 use crate::scene::{CascadeBudget, ItemChange, PanAxes, Scene, SceneLayer};
+use crate::shape::{ItemSelectionMode, ItemShape, SceneRegion};
 use teksilo_canvas::Vec2;
 
 /// A shared, cloneable handle to a [`Scene`].
@@ -478,6 +479,11 @@ impl SceneModel {
         self.write(|s| s.set_local_pos(id, local_pos));
     }
     /// Replace the local bounding rect of `id`; notifies all views.
+    ///
+    /// Idempotent, and an item whose box is derived from its geometry fits
+    /// itself to the rectangle rather than adopting it — see
+    /// [`Scene::set_local_bounds`] for both contracts, which matter here
+    /// because this is the form an app drives per frame.
     pub fn set_local_bounds(&self, id: ItemId, local_bounds: Rect) {
         self.write(|s| s.set_local_bounds(id, local_bounds));
     }
@@ -865,17 +871,107 @@ impl SceneModel {
     pub fn items_in_rect(&self, scene_rect: Rect) -> Vec<ItemId> {
         self.0.borrow().items_in_rect(scene_rect)
     }
-    /// The topmost item under `scene_pt` using exact-shape hit-testing; `None` if no item is hit.
+    /// Items matching `region` under `mode`; see [`Scene::items_in_region`].
+    ///
+    /// Screen-anchored
+    /// ([`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS))
+    /// items are skipped, for the same reason [`SceneModel::item_at`] skips
+    /// them: a scene-space region cannot place them.
+    pub fn items_in_region(
+        &self,
+        region: &SceneRegion,
+        mode: ItemSelectionMode,
+        view_scale: f32,
+    ) -> Vec<ItemId> {
+        self.0.borrow().items_in_region(region, mode, view_scale)
+    }
+    /// An entry's geometry in local coordinates; see [`Scene::item_shape`].
+    pub fn item_shape(&self, id: ItemId) -> Option<ItemShape> {
+        self.0.borrow().item_shape(id)
+    }
+    /// An entry's own shape as a scene-space region; see [`Scene::item_region`].
+    pub fn item_region(&self, id: ItemId) -> Option<SceneRegion> {
+        self.0.borrow().item_region(id)
+    }
+    /// Whether `id`'s shape contains `scene_pt`; see [`Scene::item_contains`].
+    pub fn item_contains(&self, id: ItemId, scene_pt: Point, view_scale: f32) -> bool {
+        self.0.borrow().item_contains(id, scene_pt, view_scale)
+    }
+    /// Where `id` sits in this scene's single paint order; see
+    /// [`Scene::paint_key`].
+    ///
+    /// Defined for **both tiers**, so it is the value to compare when an app
+    /// needs to ask "which of these two is on top?" without re-deriving the
+    /// band/z/insertion rule.
+    pub fn paint_key(&self, id: ItemId) -> Option<crate::pick::PaintKey> {
+        self.0.borrow().paint_key(id)
+    }
+    /// Whether `id` takes part in pointer hit-testing — visible along its whole
+    /// ancestor chain AND enabled; see [`Scene::is_hit_testable`].
+    ///
+    /// The public form of the filter every picker here applies, so an app can
+    /// ask why one of its items is not answering.
+    pub fn is_hit_testable(&self, id: ItemId) -> bool {
+        self.0.borrow().is_hit_testable(id)
+    }
+    /// The topmost **lightweight** item whose shape contains `scene_pt`, at
+    /// unit view scale; see [`Scene::item_at`] for the full contract.
+    ///
+    /// "Topmost" is [`Scene::paint_key`] order, so an
+    /// [`Over`](crate::SceneLayer::Over)-band item beats a higher-`z`
+    /// [`Under`](crate::SceneLayer::Under) one and an equal-`z` tie goes to the
+    /// later-inserted entry. Hidden and disabled entries are excluded, and
+    /// heavyweight widget entries and screen-anchored
+    /// ([`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS))
+    /// items are skipped — see [`SceneModel::item_at_in_view`] for the query
+    /// that places the latter.
     pub fn item_at(&self, scene_pt: Point) -> Option<ItemId> {
         self.0.borrow().item_at(scene_pt)
     }
-    /// All items under `scene_pt` (exact-shape hit-test), ordered front-to-back.
+    /// [`Scene::item_at`] at an explicit view zoom. The zoom reaches exactly
+    /// one thing: a cosmetic stroke band's width in scene units.
+    pub fn item_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId> {
+        self.0.borrow().item_at_scaled(scene_pt, view_scale)
+    }
+    /// All lightweight items whose shape contains `scene_pt`, topmost-first in
+    /// [`Scene::paint_key`] order. Same tier, flag and
+    /// `IGNORES_TRANSFORMATIONS` rules as [`SceneModel::item_at`].
     pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId> {
         self.0.borrow().items_at(scene_pt)
     }
-    /// All items whose bounding rects intersect `id`'s bounding rect.
+    /// [`Scene::items_at`] at an explicit view zoom.
+    pub fn items_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Vec<ItemId> {
+        self.0.borrow().items_at_scaled(scene_pt, view_scale)
+    }
+    /// The topmost item under a **screen** point, resolving both hit spaces;
+    /// see [`Scene::item_at_in_view`].
+    pub fn item_at_in_view(&self, screen_pt: Point, view_transform: Transform2D) -> Option<ItemId> {
+        self.0.borrow().item_at_in_view(screen_pt, view_transform)
+    }
+    /// Items overlapping `id`'s shape, excluding `id`; see
+    /// [`Scene::colliding_items`].
     pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId> {
         self.0.borrow().colliding_items(id)
+    }
+    /// [`Scene::colliding_items`] under an explicit mode.
+    pub fn colliding_items_with(&self, id: ItemId, mode: ItemSelectionMode) -> Vec<ItemId> {
+        self.0.borrow().colliding_items_with(id, mode)
+    }
+    /// Items lying along `path`; see [`Scene::items_along_path`]. (This was
+    /// unreachable from a `SceneModel` before — the facade never forwarded it.)
+    pub fn items_along_path(&self, path: &teksilo_canvas::Path) -> Vec<ItemId> {
+        self.0.borrow().items_along_path(path)
+    }
+    /// [`Scene::items_along_path`] with an explicit stroke width and mode.
+    pub fn items_along_path_with(
+        &self,
+        path: &teksilo_canvas::Path,
+        stroke_width: f32,
+        mode: ItemSelectionMode,
+    ) -> Vec<ItemId> {
+        self.0
+            .borrow()
+            .items_along_path_with(path, stroke_width, mode)
     }
     /// The AT-tree parent of `child` as set by [`set_a11y_parent`](Self::set_a11y_parent); `None` = visual default.
     pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode> {
@@ -1000,5 +1096,34 @@ mod tests {
             &m1.item_change_signal(),
             &m2.item_change_signal()
         ));
+    }
+
+    /// The two queries that name the picker's own rules are reachable from the
+    /// handle apps actually hold.
+    ///
+    /// `Scene` is behind a `pub(crate)` field, so a `pub fn` on it that the
+    /// facade does not forward is reachable only from inside this crate — and
+    /// these two are documented as "the value every picker compares" and "the
+    /// public form" of the hit filter, which is a promise to a caller who has a
+    /// `SceneModel` and nothing else.
+    #[test]
+    fn the_facade_forwards_the_two_picker_queries() {
+        let m = SceneModel::new();
+        let under = m.add_item(RectItem::new(rect()), Point::ZERO);
+        let over = m.add_item(RectItem::new(rect()), Point::ZERO);
+        m.set_layer(over, crate::scene::SceneLayer::Over);
+
+        let (ku, ko) = (m.paint_key(under), m.paint_key(over));
+        assert!(ku.is_some() && ko.is_some());
+        assert!(ku < ko, "the Over band outranks the Under band");
+        assert_eq!(m.paint_key(ItemId::next()), None, "unknown id");
+
+        assert!(m.is_hit_testable(under));
+        m.set_flag(under, crate::flags::ItemFlags::IS_ENABLED, false);
+        assert!(
+            !m.is_hit_testable(under),
+            "a disabled item passes clicks through",
+        );
+        assert!(!m.is_hit_testable(ItemId::next()), "unknown id");
     }
 }

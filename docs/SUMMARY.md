@@ -302,6 +302,7 @@
 - [ItemFlags](scene/flags.md)
 - [ItemId](scene/item.md)
 - [Magnet](scene/magnet.md)
+- [PaintKey](scene/pick.md)
 - [PathItem](scene/path.md)
 - [RectItem](scene/rect.md)
 - [Scene](scene/scene.md)
@@ -312,6 +313,7 @@
 - [SceneSelectionMode](scene/selection.md)
 - [SceneTapEvent](scene/item_handlers.md)
 - [SceneViewState](scene/state.md)
+- [ShapeGeometry](scene/shape.md)
 - [SpatialIndex](scene/index_.md)
 - [TextAlign](scene/text.md)
 <!-- END GENERATED SCENE -->

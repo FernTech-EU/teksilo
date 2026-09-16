@@ -1887,6 +1887,10 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.hit_shape(local_point, bounds)
     }
 
+    fn accepts_child_hit(&self, child: WidgetId, point: teksilo_canvas::Point) -> bool {
+        self.widget.accepts_child_hit(child, point)
+    }
+
     fn hit_outset(
         &self,
         kind: teksilo_tokens::PointerKind,

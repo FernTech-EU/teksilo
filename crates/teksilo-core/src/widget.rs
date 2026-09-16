@@ -13,7 +13,7 @@ mod paint_context;
 
 pub use cursor::CursorIcon;
 pub use event_context::EventContext;
-pub(crate) use event_context::GestureAct;
+pub(crate) use event_context::{CursorRequest, GestureAct};
 pub use layout_context::{LayoutContext, StackAxis};
 pub use paint_context::{PaintContext, WidgetPlacement, WidgetTreeView};
 
@@ -556,8 +556,57 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// irregular shapes — an ellipse / cloud scene node, a circular
     /// handle — so a click lands on the shape you see, not its bounding
     /// box, and clicks in the transparent corners reach the node beneath.
-    /// This mirrors the lightweight tier's `SceneItem::shape_contains`.
+    /// The lightweight tier answers the same question from a *value* —
+    /// `SceneItem::shape` returns an `ItemShape` that every query in
+    /// `teksilo-scene` derives from — rather than from a predicate. The two
+    /// are deliberately not the same shape of API and deliberately not the
+    /// same name: a widget is hit-tested by the arena, one point at a time,
+    /// with its bounds already in hand.
     fn hit_shape(&self, _local_point: Point, _bounds: Rect) -> bool {
+        true
+    }
+
+    /// Veto a hit on one of this widget's **direct children**, per point.
+    ///
+    /// Called during the arena's reverse-sibling walk, once per child, before
+    /// the recursion descends into it. Returning `false` makes the walk fall
+    /// through to the next sibling exactly as a [`hit_shape`](Self::hit_shape)
+    /// rejection on that child would, so the point can land on a lower sibling
+    /// or, finally, on this widget itself.
+    ///
+    /// `point` is in the space this widget's
+    /// [`place_children`](Self::place_children) writes — for an ordinary node
+    /// that is the same absolute space its own bounds are in; for a
+    /// content-transform node (a `SceneView`) it is content coordinates, the
+    /// point already mapped through the inverse of the content transform.
+    ///
+    /// # What this is for
+    ///
+    /// A widget that owns a **second picking system over the same area** — a
+    /// `SceneView`'s lightweight items, a chart's overlay marks, a terminal's
+    /// link layer. Without it the two systems answer independently: the widget
+    /// can paper over the disagreement inside one handler, but press feedback,
+    /// focus-on-release, the touch hold route, the cursor and drag all resolve
+    /// from the arena's answer, so five of the six stay wrong.
+    ///
+    /// It is **not** a replacement for
+    /// [`hit_transparent`](crate::widget_builder::HandlerSet::hit_transparent),
+    /// which is the right tool for a decorative overlay: that is a per-*node*
+    /// declaration ("I never absorb a press"), set from the outside by whoever
+    /// builds the node, and it cannot express "reject this child here and
+    /// accept it one pixel over". This is the per-*point* question, answered by
+    /// the parent that knows why.
+    ///
+    /// # Contract
+    ///
+    /// Must be **pure and cheap**: it runs once per child per hit test, and a
+    /// hit test runs on every pointer sample. It must not mutate anything the
+    /// walk can observe, and — because it runs inside the router — it must not
+    /// re-enter any `RefCell` a handler might already hold. A widget that
+    /// answers from a per-layout snapshot should memoise per walk; the default
+    /// returns `true`, so a widget that does not override it pays one
+    /// devirtualizable call per child.
+    fn accepts_child_hit(&self, _child: WidgetId, _point: Point) -> bool {
         true
     }
 

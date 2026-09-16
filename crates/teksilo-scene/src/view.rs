@@ -122,8 +122,10 @@ use teksilo_tokens::Easing;
 
 use crate::item::ItemId;
 use crate::magnet::{MagnetId, MagnetSnap, MagnetismConfig};
+use crate::pick::{PaintKey, RANK_OVER, RANK_UNDER};
 use crate::scene::Scene;
 use crate::scene_model::SceneModel;
+use crate::shape::{ItemSelectionMode, ItemShape, SceneRegion};
 use crate::transform::{anchor_pan_for_pinch, compose_view};
 use teksilo_i18n::LocalizedString;
 
@@ -337,7 +339,7 @@ fn apply_pan_axes(candidate: Vec2, hold: Vec2, axes: crate::scene::PanAxes) -> V
 /// and scrolls while dragging) doesn't break the rectangle's
 /// alignment with scene contents.
 #[derive(Debug, Clone, Copy)]
-struct MarqueeState {
+pub(super) struct MarqueeState {
     origin: Point,
     current: Point,
     /// Whether the marquee is additive (Ctrl/Shift held at start).
@@ -361,7 +363,7 @@ impl MarqueeState {
 /// the target item *and* every declared descendant via
 /// `Scene::collect_descendants`.
 #[derive(Debug, Clone, Copy)]
-struct DragTarget {
+pub(super) struct DragTarget {
     item_id: ItemId,
     /// Scene-coord position where the drag started.
     anchor_scene: Point,
@@ -380,18 +382,23 @@ struct HandlerSnapshotEntry {
     /// Scene-coord AABB used for broad-phase hit-test (normal items).
     scene_rect: Rect,
     /// Local→scene transform — used to inverse-project the
-    /// scene-coord pointer into local coords for shape_contains
-    /// narrow-phase. Stored so the dispatch path doesn't have to
-    /// re-walk the parent chain (which would need `&Scene`).
+    /// scene-coord pointer into local coords for the narrow phase.
+    /// Stored so the dispatch path doesn't have to re-walk the parent
+    /// chain (which would need `&Scene`).
     scene_transform: teksilo_canvas::Transform2D,
-    /// Item-local hit-test predicate, cloned from the trait via a
-    /// small wrapper. Returns `true` when a local point is inside
-    /// the item's exact shape; the second argument is the live view
-    /// scale (zoom) so cosmetic-stroke hit bands convert to scene
-    /// coordinates.
-    shape_contains: Rc<dyn Fn(Point, f32) -> bool>,
-    /// z-order (used to pick topmost on overlap).
-    z: f32,
+    /// The item's geometry in local coordinates, cloned straight from
+    /// [`SceneItem::shape`](crate::SceneItem::shape). One value, shared
+    /// with every other query in the crate — the dispatch path and the
+    /// eager `Scene::item_at` path cannot disagree about what an item is.
+    shape: ItemShape,
+    /// Where the entry sits in the view's single paint order. The snapshot is
+    /// sorted by this descending, so the first shape match is the entry the
+    /// user sees on top — band first, then z, then insertion.
+    key: PaintKey,
+    /// Whether this entry would *act* on a press ([`crate::pick::claims_press`]).
+    /// Read only by the `Over`-band veto; the hit test itself still resolves
+    /// the topmost **entry** and consults its handlers afterwards.
+    claims_press: bool,
     /// Item-level handler closures, cloned at snapshot time. `None`
     /// when the item has no handler set installed.
     handlers: Option<Box<crate::item_handlers::SceneItemHandlerSet>>,
@@ -415,9 +422,9 @@ struct HandlerSnapshotEntry {
 
 /// Hit-test geometry for one **draggable** lightweight item, snapshotted each
 /// layout pass for the `on_drag` drag-start hit-test and the grab-cursor hover
-/// check. Carries the narrow-phase `shape_contains` predicate + transform (the
-/// same data `HandlerSnapshotEntry` holds for tap/hover) so a press targets the
-/// item on the item's **actual shape**, not merely its AABB — important for thin
+/// check. Carries the item's [`ItemShape`] + transform (the same data
+/// `HandlerSnapshotEntry` holds for tap/hover) so a press targets the item on
+/// the item's **actual shape**, not merely its AABB — important for thin
 /// draggable items (e.g. a connector path) whose bounding box is much larger than
 /// the drawn stroke. z-sorted descending so the first shape match is the topmost.
 ///
@@ -430,12 +437,13 @@ struct DraggableSnapshotEntry {
     id: ItemId,
     scene_rect: Rect,
     scene_transform: teksilo_canvas::Transform2D,
-    shape_contains: Rc<dyn Fn(Point, f32) -> bool>,
+    shape: ItemShape,
     ignores_xform: bool,
     scene_anchor: Point,
     local_bounds: Rect,
-    /// z-order (used to pick topmost on overlap).
-    z: f32,
+    /// Where the entry sits in the view's single paint order; the snapshot is
+    /// sorted by this descending. See [`PaintKey`].
+    key: PaintKey,
 }
 
 impl std::fmt::Debug for DraggableSnapshotEntry {
@@ -451,19 +459,30 @@ impl std::fmt::Debug for DraggableSnapshotEntry {
 /// phase), or the nearest one this pointer's slop reaches, or `None`.
 ///
 /// Mirrors the `hit_handler_item` logic used for tap/hover dispatch: AABB
-/// broad-phase, then inverse-project to local and consult `shape_contains`, with
-/// a screen-space branch for `IGNORES_TRANSFORMATIONS` items. `snap` must be
-/// z-sorted descending (topmost first). A total miss falls through to `slop`'s
-/// miss-only pass, which is inert for a mouse.
+/// broad-phase, then inverse-project to local and consult the item's
+/// [`ItemShape`], with a screen-space branch for `IGNORES_TRANSFORMATIONS`
+/// items. `snap` must be sorted by [`PaintKey`] descending (topmost first). A
+/// total miss falls through to `slop`'s miss-only pass, which is inert for a
+/// mouse.
+///
+/// `min_rank` is the paint-order floor: entries below it are invisible to this
+/// hit test. The drag path passes [`RANK_OVER`] when an
+/// `Over`-band press claimant covers the press, so a press that only reached
+/// this view because the claimant vetoed a card cannot grab something the card
+/// was covering.
 fn hit_draggable_item(
     snap: &[DraggableSnapshotEntry],
     screen_pt: Point,
     scene_pt: Point,
     view_xform: teksilo_canvas::Transform2D,
     slop: GrabSlop,
+    min_rank: u8,
 ) -> Option<ItemId> {
     let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
     for entry in snap.iter() {
+        if entry.key.rank() < min_rank {
+            continue;
+        }
         if entry.ignores_xform {
             let screen_anchor = view_xform.apply_point(entry.scene_anchor);
             let screen_rect = Rect::new(
@@ -477,7 +496,7 @@ fn hit_draggable_item(
             }
             let local_pt = Point::new(screen_pt.x - screen_anchor.x, screen_pt.y - screen_anchor.y);
             // Screen-anchored items ignore the view transform → unit scale.
-            if (entry.shape_contains)(local_pt, 1.0) {
+            if entry.shape.contains(local_pt, 1.0) {
                 return Some(entry.id);
             }
             continue;
@@ -490,11 +509,11 @@ fn hit_draggable_item(
             .inverse()
             .map(|inv| inv.apply_point(scene_pt))
             .unwrap_or(Point::ZERO);
-        if (entry.shape_contains)(local_pt, view_scale) {
+        if entry.shape.contains(local_pt, view_scale) {
             return Some(entry.id);
         }
     }
-    slop.nearest_draggable(snap, screen_pt, scene_pt, view_xform)
+    slop.nearest_draggable(snap, screen_pt, scene_pt, view_xform, min_rank)
 }
 
 /// The topmost item under the pointer whose **shape** contains it, out of a
@@ -504,23 +523,34 @@ fn hit_draggable_item(
 /// scene-coord AABB and narrow-phased by inverse-projecting the pointer into
 /// item-local coordinates; an `IGNORES_TRANSFORMATIONS` item is pinned at a
 /// screen position, so it is broad-phased against its projected screen rect and
-/// narrow-phased at unit scale. `snap` must be z-sorted descending, so the first
-/// containing entry is the topmost one.
+/// narrow-phased at unit scale. `snap` must be sorted by [`PaintKey`]
+/// descending, so the first containing entry is the topmost one.
+///
+/// `min_rank` is the paint-order floor. The dispatch site passes
+/// [`RANK_OVER`] when the arena has given this pointer
+/// to a heavyweight card — only the `Over` band outranks a card, so everything
+/// below it must stay invisible and let the card have the event. It passes
+/// [`RANK_UNDER`] when the view itself is the target,
+/// which is precisely when no card won.
 ///
 /// A total miss falls through to `slop`'s miss-only pass, which is inert for a
 /// mouse.
-fn hit_handler_item(
+fn hit_handler_index(
     snap: &[HandlerSnapshotEntry],
     screen_pt: Point,
     scene_pt: Point,
     view_xform: teksilo_canvas::Transform2D,
     slop: GrabSlop,
-) -> Option<HandlerSnapshotEntry> {
+    min_rank: u8,
+) -> Option<usize> {
     // Logical view zoom (uniform scale of the linear part) — passed to each
     // item's shape test so a cosmetic (device-pixel) stroke's clickable band is
     // converted to scene coordinates at the current zoom.
     let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
-    for entry in snap.iter() {
+    for (index, entry) in snap.iter().enumerate() {
+        if entry.key.rank() < min_rank {
+            continue;
+        }
         if entry.ignores_xform {
             let screen_anchor = view_xform.apply_point(entry.scene_anchor);
             let screen_rect = Rect::new(
@@ -533,8 +563,9 @@ fn hit_handler_item(
                 continue;
             }
             let local_pt = Point::new(screen_pt.x - screen_anchor.x, screen_pt.y - screen_anchor.y);
-            if (entry.shape_contains)(local_pt, 1.0) {
-                return Some(entry.clone());
+            // Screen-anchored items ignore the view transform → unit scale.
+            if entry.shape.contains(local_pt, 1.0) {
+                return Some(index);
             }
             continue;
         }
@@ -546,11 +577,31 @@ fn hit_handler_item(
             .inverse()
             .map(|inv| inv.apply_point(scene_pt))
             .unwrap_or(Point::ZERO);
-        if (entry.shape_contains)(local_pt, view_scale) {
-            return Some(entry.clone());
+        if entry.shape.contains(local_pt, view_scale) {
+            return Some(index);
         }
     }
-    slop.nearest_handler_item(snap, screen_pt, scene_pt, view_xform)
+    slop.nearest_handler_index(snap, screen_pt, scene_pt, view_xform, min_rank)
+}
+
+/// [`hit_handler_index`] resolved to an owned entry, for the dispatch path,
+/// which needs the handler closures and cannot hold the snapshot borrow across
+/// a callback.
+///
+/// The index form is the one the `Over`-band veto uses: it asks only whether
+/// the winner claims the press, and cloning an entry to answer that would put a
+/// heap allocation (the boxed handler set) on every pointer sample — on a path
+/// whose whole reason for existing is that it allocates nothing.
+fn hit_handler_item(
+    snap: &[HandlerSnapshotEntry],
+    screen_pt: Point,
+    scene_pt: Point,
+    view_xform: teksilo_canvas::Transform2D,
+    slop: GrabSlop,
+    min_rank: u8,
+) -> Option<HandlerSnapshotEntry> {
+    hit_handler_index(snap, screen_pt, scene_pt, view_xform, slop, min_rank)
+        .map(|index| snap[index].clone())
 }
 
 /// The pointer-kind half of the grab hit test: a build-time
@@ -597,6 +648,7 @@ impl GrabSlop {
         screen_pt: Point,
         scene_pt: Point,
         view_xform: teksilo_canvas::Transform2D,
+        min_rank: u8,
     ) -> Option<ItemId> {
         if self.offers_nothing() {
             return None;
@@ -604,6 +656,9 @@ impl GrabSlop {
         let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
         let mut best: Option<(f32, ItemId)> = None;
         for entry in snap.iter() {
+            if entry.key.rank() < min_rank {
+                continue;
+            }
             let Some(distance) = self.miss_distance(
                 entry.ignores_xform,
                 entry.scene_rect,
@@ -669,22 +724,26 @@ impl GrabSlop {
     }
 
     /// The nearest item whose *inflated* bounds contain the press, out of a
-    /// handler snapshot. The tap/hover twin of
+    /// handler snapshot, as a position in it. The tap/hover twin of
     /// [`nearest_draggable`](Self::nearest_draggable), with the same miss-only
     /// and inflated-box rules.
-    fn nearest_handler_item(
+    fn nearest_handler_index(
         &self,
         snap: &[HandlerSnapshotEntry],
         screen_pt: Point,
         scene_pt: Point,
         view_xform: teksilo_canvas::Transform2D,
-    ) -> Option<HandlerSnapshotEntry> {
+        min_rank: u8,
+    ) -> Option<usize> {
         if self.offers_nothing() {
             return None;
         }
         let view_scale = view_xform.m[0].hypot(view_xform.m[1]);
-        let mut best: Option<(f32, &HandlerSnapshotEntry)> = None;
-        for entry in snap.iter() {
+        let mut best: Option<(f32, usize)> = None;
+        for (index, entry) in snap.iter().enumerate() {
+            if entry.key.rank() < min_rank {
+                continue;
+            }
             let Some(distance) = self.miss_distance(
                 entry.ignores_xform,
                 entry.scene_rect,
@@ -698,10 +757,10 @@ impl GrabSlop {
                 continue;
             };
             if best.is_none_or(|(best_d, _)| distance < best_d) {
-                best = Some((distance, entry));
+                best = Some((distance, index));
             }
         }
-        best.map(|(_, entry)| entry.clone())
+        best.map(|(_, index)| index)
     }
 
     /// The scene-unit radius within which a magnet handle may be grabbed.
@@ -952,7 +1011,11 @@ pub struct SceneView {
     /// `place_children` (which has direct `&self.scene` access
     /// via `self`). This indirection avoids forcing `Scene` into
     /// an `Rc<RefCell>`.
-    pending_marquee_commit: Rc<Cell<Option<(Rect, bool)>>>,
+    pending_marquee_commit: Rc<RefCell<Option<(SceneRegion, ItemSelectionMode, bool)>>>,
+    /// Which rule the rubber band picks items by. Default
+    /// [`ItemSelectionMode::IntersectsItemShape`] — see
+    /// [`SceneView::marquee_selection_mode`].
+    marquee_mode: ItemSelectionMode,
     /// In-flight drag-to-move state: which item is being dragged
     /// and the scene-coord anchor where the drag started. The
     /// total scene-coord delta is computed at `Ended` from
@@ -1095,6 +1158,56 @@ pub struct SceneView {
     /// version-delta gate would otherwise miss while suppressing the churn.
     dynamic_churning: bool,
 
+    // --- The `Over`-band veto -----------------------------------------
+    /// Whether the scene currently holds at least one hit-testable
+    /// [`Over`](crate::SceneLayer::Over)-band entry that **claims the press**
+    /// ([`crate::pick::claims_press`]). Refreshed while the handler snapshot is
+    /// rebuilt.
+    ///
+    /// An `Under` item can never outrank a card, so an `Over` claimant is the
+    /// only reason this view would ever reject one of its own children — which
+    /// is why every scene whose foreground is decorative pays one `bool` read
+    /// per hit-tested child and nothing else.
+    over_claimants: Rc<Cell<bool>>,
+    /// Memo for [`over_press_claimant_covers`], valid for one hit walk:
+    /// `(snapshot generation, view transform, scene point, answer)`.
+    ///
+    /// The arena asks once per child, so without this a 200-card scene would
+    /// rescan the snapshot 200 times per pointer sample.
+    ///
+    /// The **whole** view transform is part of the key, not just the projected
+    /// point. A screen-anchored (`IGNORES_TRANSFORMATIONS`) claimant is tested
+    /// against its own projected anchor, which is a different point from the one
+    /// being asked about, so two transforms agreeing at the query point can
+    /// still disagree about the claimant. Six `f32` compares are cheaper than
+    /// that being true only by luck.
+    veto_memo: Rc<Cell<Option<(u64, [f32; 6], Point, bool)>>>,
+    /// Bumped every time the handler snapshot is rebuilt; the first field of
+    /// [`SceneView::veto_memo`]'s key.
+    snapshot_generation: Rc<Cell<u64>>,
+    /// The paint-order floor the arena's verdict established for the press
+    /// currently in flight — [`RANK_OVER`] when a heavyweight card was on top
+    /// at the press point (or an `Over` claimant vetoed one), [`RANK_UNDER`]
+    /// otherwise. Written by the `PointerDown` arm, read by the drag.
+    ///
+    /// The drag needs it and cannot derive it. `on_pointer_event` runs with the
+    /// router's `dispatch_target` in hand; a recognized gesture does not always
+    /// (two of its dispatch paths build a context with no target at all), and
+    /// the press that armed the drag is anyway the event whose verdict the grab
+    /// should follow. Recording it is what makes the drag and the tap answer
+    /// from **one** paint order rather than two — and it is the reason a press
+    /// on a card no longer grabs a connector the card was covering.
+    ///
+    /// One slot, and one press is what a `SceneView` arbitrates: the node-level
+    /// `MultiContact` default is `First`, which refuses a second contact's
+    /// gesture arena while the first is live, so only one press can be driving
+    /// a drag here. Two pointers of different kinds can still *deliver* presses
+    /// to this handler (a mouse and a pen), and the later one would overwrite
+    /// the slot — which costs at most one drag starting with the floor the other
+    /// press recorded, on a view that can only be dragging for one of them.
+    /// Reset by the release and by the cancel arm.
+    press_floor: Rc<Cell<u8>>,
+
     // --- Magnetism -----------------------------------------------------
     /// Per-view magnetism config (predicate, on_connect, feedback, …).
     /// `None` = magnetism off for this view: no snap, no feedback, no
@@ -1138,6 +1251,285 @@ impl std::fmt::Debug for SceneView {
             .field("a11y_bounds_space", &self.a11y_bounds_space)
             .field("debug_overlay", &self.debug_overlay)
             .finish_non_exhaustive()
+    }
+}
+
+// --------------------------------------------------------------------------
+// The `Over`-band veto — one order, two pickers, one answer
+// --------------------------------------------------------------------------
+
+/// Every piece of in-flight pointer-interaction state a revoked contact must
+/// give back, in one place.
+///
+/// A [`PointerCancel`](teksilo_core::event::WidgetEvent::PointerCancel) is
+/// terminal — no `PointerUp` follows and nothing may activate — and it reaches
+/// a `SceneView` twice: once as `DragPhase::Cancelled` (the recognizer's own
+/// unwind, emitted only for a raw pointer cancel, since arbitration loss resets
+/// an arena silently) and once as the node's `on_pointer_cancel`. Both hand
+/// over to this, so there is one list of what a cancel drops rather than two
+/// lookalike ones that can drift.
+///
+/// Clearing twice is a no-op, which is what makes the double delivery safe.
+#[derive(Clone)]
+pub(super) struct DragUnwind {
+    pub(super) drag_target: Rc<Cell<Option<DragTarget>>>,
+    pub(super) pending_item_move: Rc<Cell<Option<(ItemId, Vec2)>>>,
+    pub(super) marquee: Rc<Cell<Option<MarqueeState>>>,
+    pub(super) pending_marquee_commit: Rc<RefCell<Option<(SceneRegion, ItemSelectionMode, bool)>>>,
+    pub(super) port_drag: Rc<RefCell<Option<magnetism::PortDragState>>>,
+    pub(super) item_snap: Rc<RefCell<Option<MagnetSnap>>>,
+}
+
+impl DragUnwind {
+    /// Drop everything, reporting whether anything was actually there.
+    ///
+    /// `drag_target` is the one that used to survive a cancel and matters most:
+    /// `paint` translates the grabbed item — and its whole drag group — by
+    /// `current - anchor` on every frame for as long as it is set, so leaving it
+    /// behind drew the item at the dragged position *permanently*, while the
+    /// model went on saying it had never moved. `pending_item_move` is the
+    /// commit that would otherwise have landed on the next rebuild; a cancel is
+    /// terminal, so no `Ended` can have queued it and it belongs to the gesture
+    /// that was just taken away.
+    pub(super) fn clear(&self) -> bool {
+        // Bitwise OR, not `||`: every one of these has to run.
+        self.drag_target.take().is_some()
+            | self.pending_item_move.take().is_some()
+            | self.marquee.take().is_some()
+            | self.pending_marquee_commit.replace(None).is_some()
+            | self.port_drag.replace(None).is_some()
+            | self.item_snap.replace(None).is_some()
+    }
+}
+
+/// Everything the **hover episode** opened, and the one place it is closed.
+///
+/// The view raises three things while a hovering pointer is inside it, and each
+/// one outlives the dispatch that raised it: an item's `on_hover(true)`, the
+/// cursor (a `set_cursor` override, which by contract stands until the same
+/// handler takes it back), and the item tooltip — on either of its two paths,
+/// armed-and-counting-down or already shown. Every one of them is re-decided
+/// only by another hovering move *inside* the view, so a pointer that goes away
+/// takes the deciding move with it.
+///
+/// It is shared rather than written twice because two different events end an
+/// episode and they must not drift: the pointer leaving (`on_hover(false)` on
+/// the view's own node) and the pointer being revoked (`on_pointer_cancel`).
+/// The cancel arm unwinds this **and** [`DragUnwind`]; a departure deliberately
+/// does not, which is the one place the two legitimately differ — see the call
+/// sites.
+pub(super) struct HoverUnwind {
+    // Private to `view`, which is enough: the only consumer is
+    // `view::gestures_impl`, a child module, and `HandlerSnapshotEntry` is
+    // itself module-private — re-exporting the field at `pub(super)` would
+    // leak a name the rest of the crate cannot spell.
+    hovered_item: Rc<Cell<Option<crate::item::ItemId>>>,
+    handler_snapshot: Rc<RefCell<Vec<HandlerSnapshotEntry>>>,
+    cursor_pos: Rc<Cell<Option<Point>>>,
+    /// The view's tooltip body, the key both retraction calls are made on.
+    tooltip_content_id: WidgetId,
+}
+
+impl HoverUnwind {
+    /// Close the episode: unhover the item, retract the tooltip on both paths,
+    /// put the cursor down, forget where the pointer was.
+    ///
+    /// The two tooltip calls are both unconditional and neither substitutes for
+    /// the other: `cancel_delayed_overlay` drops a show that is still queued on
+    /// the tree (which would otherwise surface *after* the pointer had gone,
+    /// anchored to a view it is no longer over), and `dismiss_overlay_by_content`
+    /// takes down one already on the stack. A hover tip and a held tip each
+    /// reach exactly one of them.
+    ///
+    /// The cursor is set to [`CursorIcon::Default`](teksilo_core::widget::CursorIcon::Default)
+    /// rather than released. A
+    /// release restores what the *current* hover chain declared, and at this
+    /// moment that chain is the one being torn down — the destination's own
+    /// `PointerEnter` has not run yet. Writing `Default` is the same answer the
+    /// framework's own leave arm gives a node that declared a cursor, and the
+    /// destination's declaration lands after ours and wins.
+    pub(super) fn clear(&self, ctx: &mut teksilo_core::widget::EventContext) {
+        if let Some(prev) = self.hovered_item.take()
+            && let Some(entry) = self.handler_snapshot.borrow().iter().find(|e| e.id == prev)
+            && let Some(h) = entry.handlers.as_deref()
+            && let Some(cb) = h.on_hover.as_ref()
+        {
+            cb(false, ctx);
+        }
+        ctx.cancel_delayed_overlay(self.tooltip_content_id);
+        ctx.dismiss_overlay_by_content(self.tooltip_content_id);
+        self.cursor_pos.set(None);
+        ctx.set_cursor(teksilo_core::widget::CursorIcon::Default);
+    }
+}
+
+impl SceneView {
+    /// This view's [`DragUnwind`] handles, cloned for a handler closure.
+    pub(super) fn drag_unwind(&self) -> DragUnwind {
+        DragUnwind {
+            drag_target: self.drag_target.clone(),
+            pending_item_move: self.pending_item_move.clone(),
+            marquee: self.marquee.clone(),
+            pending_marquee_commit: self.pending_marquee_commit.clone(),
+            port_drag: self.port_drag.clone(),
+            item_snap: self.item_snap.clone(),
+        }
+    }
+
+    /// This view's [`HoverUnwind`] handles, cloned for a handler closure.
+    pub(super) fn hover_unwind(&self, tooltip_content_id: WidgetId) -> HoverUnwind {
+        HoverUnwind {
+            hovered_item: self.hovered_item.clone(),
+            handler_snapshot: self.handler_snapshot.clone(),
+            cursor_pos: self.cursor_pos.clone(),
+            tooltip_content_id,
+        }
+    }
+}
+
+/// The state the `Over`-band veto reads, borrowed rather than cloned.
+///
+/// Both callers hold these already: the `Widget` impl has `&self`, and the drag
+/// closure captured its own clones at build time. Passing borrows keeps the
+/// arena's per-child call free of refcount traffic.
+struct VetoState<'a> {
+    over_claimants: &'a Cell<bool>,
+    veto_memo: &'a Cell<Option<(u64, [f32; 6], Point, bool)>>,
+    snapshot_generation: &'a Cell<u64>,
+    handler_snapshot: &'a RefCell<Vec<HandlerSnapshotEntry>>,
+    view_transform: &'a Signal<Transform2D>,
+}
+
+/// Whether the topmost [`Over`](crate::SceneLayer::Over)-band entry whose shape
+/// contains `scene_pt` **claims the press**.
+///
+/// This is the whole occlusion rule in one query, and it is deliberately "the
+/// topmost `Over` entry, *if* it claims" rather than "the topmost `Over`
+/// claimant":
+///
+/// * it mirrors `hit_handler_item`, which resolves the topmost **entry** and
+///   only then looks for handlers — so the veto can never disagree with the
+///   dispatch that follows it;
+/// * a decorative item painted over an interactive one blocks it, exactly as it
+///   does today, instead of being stepped over.
+///
+/// Reads only the per-layout `handler_snapshot` — never the
+/// [`SceneModel`]. A hit test runs inside the router, where
+/// an `ItemChange` observer may already hold the model's `RefCell`, and
+/// re-entering it there is a panic.
+fn over_press_claimant_covers(state: VetoState<'_>, scene_pt: Point) -> bool {
+    if !state.over_claimants.get() {
+        return false;
+    }
+    let view_xform = state.view_transform.get();
+    // The second space. A screen-anchored (`IGNORES_TRANSFORMATIONS`) entry —
+    // the flag whose own doc names "annotation pins … fixed-pixel-size badges
+    // over moving content", i.e. the most likely real `Over` claimant after a
+    // halo — hit-tests where it is *drawn*, not where its scene anchor is. The
+    // view owns the transform, so both spaces are recoverable from the one
+    // point the arena hands over.
+    let screen_pt = view_xform.apply_point(scene_pt);
+    let generation = state.snapshot_generation.get();
+    if let Some((memo_gen, memo_xform, memo_pt, answer)) = state.veto_memo.get()
+        && memo_gen == generation
+        && memo_xform == view_xform.m
+        && memo_pt == scene_pt
+    {
+        return answer;
+    }
+    let snapshot = state.handler_snapshot.borrow();
+    let answer = hit_handler_index(
+        &snapshot,
+        screen_pt,
+        scene_pt,
+        view_xform,
+        // The veto is a question about what is painted where, not about what a
+        // finger can *reach*: widening it would let an `Over` claimant punch a
+        // hole in a card several device pixels away from anything the user can
+        // see. The slop pass is unreachable from here anyway — the view's own
+        // bounds always accept, so a hit test inside it is never the miss that
+        // pass exists to re-attribute.
+        GrabSlop::new(
+            teksilo_tokens::InputTokens::default(),
+            teksilo_tokens::PointerKind::Mouse,
+        ),
+        RANK_OVER,
+    )
+    .is_some_and(|index| snapshot[index].claims_press);
+    drop(snapshot);
+    state
+        .veto_memo
+        .set(Some((generation, view_xform.m, scene_pt, answer)));
+    answer
+}
+
+impl SceneView {
+    /// [`over_press_claimant_covers`] against this view's own state.
+    pub(super) fn over_press_claimant_covers(&self, scene_pt: Point) -> bool {
+        over_press_claimant_covers(
+            VetoState {
+                over_claimants: &self.over_claimants,
+                veto_memo: &self.veto_memo,
+                snapshot_generation: &self.snapshot_generation,
+                handler_snapshot: &self.handler_snapshot,
+                view_transform: &self.view_transform_signal,
+            },
+            scene_pt,
+        )
+    }
+
+    /// The items a pointer drag of `grabbed` carries.
+    ///
+    /// A drag of an item that is part of a multi-selection moves the **whole
+    /// selection**, the same contract `Alt+Arrow` keeps — a corkboard user who
+    /// rubber-bands five cards and then drags one expects five to move, and the
+    /// keyboard alternative has to agree with the pointer or WCAG 2.5.7's
+    /// "dragging movements" equivalence is a fiction.
+    ///
+    /// A selected item that is a **descendant** of another selected item is
+    /// dropped: its `local_pos` is relative to that ancestor, so moving both
+    /// would translate it twice.
+    ///
+    /// Derived rather than snapshotted at grab time, so the live paint feedback
+    /// and the commit cannot disagree about which items are moving.
+    pub(super) fn drag_group(&self, grabbed: ItemId) -> Vec<ItemId> {
+        if !self.selection.is_selected(grabbed) {
+            return vec![grabbed];
+        }
+        let selected = self.selection.selected();
+        if selected.len() < 2 {
+            return vec![grabbed];
+        }
+        let scene = self.model.0.borrow();
+        selected
+            .iter()
+            .copied()
+            .filter(|id| {
+                !selected
+                    .iter()
+                    .any(|other| other != id && scene.is_descendant_of(*id, *other))
+            })
+            .collect()
+    }
+
+    /// The paint-order floor for a dispatch that is running on this view.
+    ///
+    /// [`RANK_OVER`] when the arena gave this pointer to one of our heavyweight
+    /// children (we are previewing, not targeted) — only the `Over` band
+    /// outranks a card, so everything below it must stand aside and let the
+    /// card have the event. [`RANK_UNDER`] when we are the target, which is
+    /// exactly the case where no card won: the arena has already applied
+    /// `hit_shape`, `hit_transparent` and `event_pass_through`, so this reads
+    /// its verdict instead of re-deriving one from a rectangle.
+    ///
+    /// A context with no verdict at all (a gesture timer, a hand-built
+    /// `EventContext` in a test) is treated as "we are the target", which is
+    /// the permissive, pre-existing behaviour.
+    fn dispatch_floor(ctx: &teksilo_core::widget::EventContext, self_id: WidgetId) -> u8 {
+        match ctx.dispatch_target() {
+            Some(target) if target != self_id => RANK_OVER,
+            _ => RANK_UNDER,
+        }
     }
 }
 

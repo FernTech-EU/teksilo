@@ -256,7 +256,7 @@ fn a_finger_does_not_get_a_thin_items_whole_bounding_box() {
 
     let mut scene = Scene::new();
     scene.add_item(
-        PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0))
+        PathItem::new(path)
             .stroke(teksilo_tokens::Color::RED, 2.0)
             .draggable(true),
         Point::new(50.0, 50.0),
@@ -275,7 +275,7 @@ fn a_finger_does_not_get_a_thin_items_whole_bounding_box() {
         "a press 35 px from the stroke is not a near miss and must not grab",
     );
     assert!(
-        view.marquee.get().is_some() || view.pending_marquee_commit.get().is_some(),
+        view.marquee.get().is_some() || view.pending_marquee_commit.borrow().is_some(),
         "it must fall through to the marquee, like a mouse there does",
     );
 }
@@ -311,7 +311,7 @@ fn a_large_item_earns_no_grab_slop_even_for_a_finger() {
         "a card that is already bigger than the target size earns no widening",
     );
     assert!(
-        view.marquee.get().is_some() || view.pending_marquee_commit.get().is_some(),
+        view.marquee.get().is_some() || view.pending_marquee_commit.borrow().is_some(),
         "and the press that missed it swept the background instead — without \
          this the assertion above would pass on a press that grabbed nothing \
          because nothing could be grabbed at all",

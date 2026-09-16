@@ -22,6 +22,7 @@ Every public type in `teksilo-scene`, grouped by category. Each page links to it
 - [ItemFlags](flags.md) — Per-item behavior flags
 - [ItemId](item.md) — The `SceneItem` trait and its supporting context types
 - [Magnet](magnet.md) — Magnetism: typed snap-and-connect between anchor points on scene items
+- [PaintKey](pick.md) — One paint order, read by every picker
 - [Scene](scene.md) — The `Scene` data model — the owner of all items in a pannable/zoomable
 - [SceneListAdapter](scene_list_adapter.md) — `SceneListAdapter` — keep lightweight scene items in sync with a
 - [SceneMinimap](minimap.md) — `SceneMinimap` — a small thumbnail of a `Scene`
@@ -30,4 +31,5 @@ Every public type in `teksilo-scene`, grouped by category. Each page links to it
 - [SceneSelectionMode](selection.md) — Selection model for `Scene` items
 - [SceneTapEvent](item_handlers.md) — Per-item event handlers, cursor and tooltip overrides
 - [SceneViewState](state.md) — `SceneViewState` — a snapshot of a `SceneView`'s
+- [ShapeGeometry](shape.md) — `ItemShape` — the one geometry source of truth for the lightweight tier
 - [SpatialIndex](index_.md) — Spatial index for `Scene` items

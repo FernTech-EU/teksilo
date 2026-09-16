@@ -86,7 +86,8 @@ The framework decides what "target" means per event type:
 - **Pointer events** (`PointerDown`, `PointerMove`, `PointerUp`, `PointerEnter`,
   `PointerLeave`, `PointerCancel`) — hit-tested, deepest hit first. "Hit-tested"
   is more than a rectangle check: first the exact pass, which consults
-  `Widget::hit_shape` and, for a child declaring one, `Widget::hit_outset`; then
+  `Widget::hit_shape`, a parent's `Widget::accepts_child_hit`, and, for a child
+  declaring one, `Widget::hit_outset`; then
   — only when the exact pass found nothing eligible, and only for a coarse
   pointer — the miss-only slop pass, which re-attributes the press to the nearest
   node still inside its earned outset. See
@@ -112,6 +113,41 @@ The framework decides what "target" means per event type:
   handler runs on the target only, then bubbles.
 
 There is no "capture phase" distinct from preview, no event replay, no explicit listener list. The tree structure is the listener list.
+
+### An ancestor that owns a second picking system
+
+A widget that picks its own content over the same area — a `SceneView`'s
+lightweight items, a chart's overlay marks, a terminal's link layer — has two
+questions the ordinary preview/bubble split does not answer on its own.
+
+**"Did a descendant win the walk?"** `on_pointer_event` fires on every strict
+ancestor during preview and on the target during the bubble, so an ancestor
+handler cannot otherwise tell the two apart.
+[`EventContext::dispatch_target`](../crates/teksilo-core/src/widget/event_context.rs)
+is the router's own verdict — the innermost node the arena accepted, with
+`hit_transparent`, `hit_shape`, `accepts_child_hit` and `event_pass_through`
+already applied. Comparing it against the handler's own id is how such a widget
+decides whether to yield. Re-deriving the answer from a rectangle instead is the
+trap: it disagrees with the arena for exactly the nodes that override
+`hit_shape`, and both halves then stand aside on the same point and the press is
+dropped.
+
+**"Can I take this point from my own child?"**
+[`Widget::accepts_child_hit`](../crates/teksilo-core/src/widget.rs) is a
+defaulted per-point veto, consulted once per child in the reverse-sibling walk
+and in the outset pre-pass. Returning `false` makes the walk fall through to the
+next sibling exactly as a `hit_shape` rejection on that child would. It exists
+because the *tap* is one of six things that resolve from the hit target — press
+feedback, focus-on-release, the touch hold route, the cursor and drag are the
+others — so a widget that can only answer in its own handler fixes one symptom
+and leaves five. It is not a replacement for
+`HandlerSet::hit_transparent`, which is the per-*node* declaration ("I never
+absorb a press") and cannot say "reject this child here and accept it one pixel
+over". Must be pure and cheap: it runs on every pointer sample.
+
+The shipped consumer is `teksilo-scene` — see
+[Cross-tier hit-testing](teksilo-scene.md#cross-tier-hit-testing) for the
+occlusion rule it chose and why.
 
 ## 3. Attached handlers
 
@@ -236,6 +272,32 @@ Plus a handful of flag-like attachments that don't take event-data closures:
 | `.cursor(CursorIcon::Pointer)` | Cursor when pointer is over the widget |
 | `.clips_children(true)` | Scissor clipping to bounds (ScrollArea, MaxSize) |
 | `.context_menu(factory)` | Right-click overlay factory — see §3.1.4 |
+
+`.cursor(..)` is a **declaration**, and the tree applies it on the
+`PointerEnter` / `PointerLeave` pair alone — never on the moves in between. The
+window's cursor otherwise moves only when a handler writes to it with
+`ctx.set_cursor(..)`, which is an **override**: it outranks the declaration of
+the node under the pointer, and it outlives its own dispatch. So a handler that
+sets a cursor while the pointer is inside a node owns the cursor until the
+pointer leaves that node.
+
+That is the right default for a handler that decides once, and a trap for one
+that re-decides on every move — a scene arbitrating a lightweight item's cursor
+against the card underneath it, a chart's overlay marks, a terminal's link
+layer. Such a handler reaches points where it has **no answer** while the
+pointer is still inside the same node: no hover transition fires there, so
+nothing re-applies the node's declaration, and going quiet leaves the handler's
+last word standing. Saying `CursorIcon::Default` instead is worse — it silently
+overwrites the node's declaration with a wrong answer, and from the preview pass
+it does so *before* the node has even spoken.
+
+`ctx.release_cursor()` is the third answer, and the one those handlers want: it
+withdraws the override so the node's declaration applies again — the cursor
+counterpart of returning `EventResponse::Ignored`. It restores exactly what the
+`PointerEnter` walk resolved for the current hover chain (`Default` if that
+chain declared none), so it cannot disagree with the mechanism it defers to, and
+it is a no-op for a handler that never spoke. Call it unconditionally rather
+than tracking whether you once set a cursor.
 
 ### 3.1.4 Context-menu factory — `Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>`
 
@@ -922,8 +984,10 @@ pub struct EventContext {
     theme_request: Option<Theme>,
     locale_request: Option<String>,
     close_window_requested: bool,
-    // cursor
-    cursor_request: Option<CursorIcon>,
+    // cursor — Set(icon) or Release (hand it back to the hovered node's
+    // own `.cursor(..)` declaration); see §3.1.3
+    cursor_request: Option<CursorRequest>,
+    declared_cursor_request: Option<CursorIcon>,
     // frame loop
     frame_requested: bool,
     // ...
@@ -947,6 +1011,7 @@ Via `EventContext`, any handler can:
 - `ctx.send_intent(AppIntent::X)` — fire a typed intent; framework walks source → root invoking any matching `Action`. See [shortcut-intent-action.md](shortcut-intent-action.md).
 - `ctx.request_frame()` — ask the event loop to pump one more frame (caret blink restart, drag auto-scroll, pending document events).
 - `ctx.app_state::<T>()` — look up an app-scoped value registered on `TeksiloAppBuilder` by `TypeId`.
+- `ctx.set_cursor(icon)` / `ctx.release_cursor()` — override the cursor, or hand it back to the hovered node's own declaration (§3.1.3).
 
 And, for the pointer being dispatched:
 

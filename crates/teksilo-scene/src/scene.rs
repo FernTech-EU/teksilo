@@ -68,6 +68,8 @@ use crate::index::{GridHashIndex, SpatialIndex};
 use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
 use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
+use crate::pick::PaintKey;
+use crate::shape::{ItemSelectionMode, ItemShape, SceneRegion};
 use crate::transform::local_to_parent;
 use teksilo_canvas::{Path, Point, Rect, StrokeStyle, Transform2D, Vec2};
 use teksilo_core::color_prop::ColorProp;
@@ -1488,15 +1490,45 @@ impl Scene {
     /// next `paint` reflects the new geometry. The spatial index is
     /// re-bucketed; only this item moves (descendants' local frames
     /// are unchanged). No-op if the id is unknown.
+    ///
+    /// # The item has the last word, and says it once
+    ///
+    /// An item whose box is **derived** from its own geometry — a
+    /// [`PathItem`](crate::PathItem) — treats this as *"fit yourself to this
+    /// rectangle"* rather than *"adopt this rectangle"*, and the box stored
+    /// here is what it settled on, read back from the item. It lands on the
+    /// request on every axis the geometry has extent on; on an axis it has
+    /// none (a perfectly horizontal stroke has no height) the box stays the
+    /// stroke's own thickness, because there is nothing to stretch.
+    ///
+    /// Either way the call is **idempotent**: asking twice for the same
+    /// rectangle emits one [`ItemChange::LocalBoundsChanged`] and re-buckets
+    /// the index once. An app driving this per frame — a resize handle, a
+    /// layout pass — therefore goes quiet as soon as it stops moving, rather
+    /// than emitting an endless series of nearly-identical changes.
     pub fn set_local_bounds(&mut self, id: ItemId, local_bounds: Rect) {
         if let Some(&pos) = self.entry_index.get(&id) {
             let old = self.entries[pos].local_bounds;
             if old == local_bounds {
                 return;
             }
-            self.entries[pos].local_bounds = local_bounds;
-            if let SceneEntryKind::Item(item) = &mut self.entries[pos].kind {
-                item.set_local_bounds(local_bounds);
+            // The entry mirrors whatever the item settled on, not what the
+            // caller asked for. A geometry-bearing item may honour the request
+            // only up to its own extent (a `PathItem` fits its path to the box
+            // and then re-derives it from the moved geometry, band included),
+            // and the entry's rectangle is what the spatial index buckets on —
+            // so reading it back here is what makes "the item's box" and "the
+            // index's box" one value rather than two that can drift.
+            let effective = match &mut self.entries[pos].kind {
+                SceneEntryKind::Item(item) => {
+                    item.set_local_bounds(local_bounds);
+                    item.local_bounds()
+                }
+                SceneEntryKind::Widget(_) => local_bounds,
+            };
+            self.entries[pos].local_bounds = effective;
+            if old == effective {
+                return;
             }
             // Bounds are local — only this entry's scene-AABB shifts;
             // descendants' local frames are unchanged.
@@ -1505,7 +1537,7 @@ impl Scene {
             self.emit_item_change(ItemChange::LocalBoundsChanged {
                 id,
                 old,
-                new: local_bounds,
+                new: effective,
             });
         }
     }
@@ -2168,14 +2200,46 @@ impl Scene {
         }
     }
 
-    /// Sort `ids` by z-order ascending, stable for equal values.
-    /// Crate-private helper for `SceneView::paint`.
-    pub(crate) fn sort_by_z(&self, ids: &mut [ItemId]) {
-        ids.sort_by(|a, b| {
-            let za = self.z(*a).unwrap_or(0.0);
-            let zb = self.z(*b).unwrap_or(0.0);
-            za.partial_cmp(&zb).unwrap_or(std::cmp::Ordering::Equal)
+    /// Where `id` sits in this scene's single paint order — the value every
+    /// picker in the crate compares. `None` for unknown ids.
+    ///
+    /// Defined for **both tiers**: a lightweight entry's rank is its
+    /// [`SceneLayer`] band ([`RANK_UNDER`](crate::pick::RANK_UNDER) /
+    /// [`RANK_OVER`](crate::pick::RANK_OVER)), a heavyweight widget entry's is
+    /// [`RANK_WIDGET`](crate::pick::RANK_WIDGET) — which is exactly where the
+    /// arena's child walk paints it, between the two lightweight bands. See
+    /// [`PaintKey`] for the ordering and for the equal-`z` tie-break.
+    pub fn paint_key(&self, id: ItemId) -> Option<PaintKey> {
+        let pos = *self.entry_index.get(&id)?;
+        let entry = &self.entries[pos];
+        let rank = match entry.kind {
+            SceneEntryKind::Widget(_) => crate::pick::RANK_WIDGET,
+            SceneEntryKind::Item(_) => match entry.layer {
+                SceneLayer::Under => crate::pick::RANK_UNDER,
+                SceneLayer::Over => crate::pick::RANK_OVER,
+            },
+        };
+        Some(PaintKey::new(rank, entry.z, id.as_u64()))
+    }
+
+    /// Sort `ids` into paint order — bottom-most first, so a later element
+    /// paints on top. Stable and total (see [`PaintKey`]).
+    ///
+    /// Crate-private helper for `SceneView::paint_band`. An unknown id sorts
+    /// with the lowest possible key rather than being dropped, so a sort can
+    /// never lose an entry.
+    pub(crate) fn sort_by_paint_key(&self, ids: &mut [ItemId]) {
+        ids.sort_by_key(|id| {
+            self.paint_key(*id)
+                .unwrap_or_else(|| PaintKey::new(crate::pick::RANK_UNDER, 0.0, id.as_u64()))
         });
+    }
+
+    /// [`Scene::sort_by_paint_key`] reversed — **topmost first**, the order
+    /// every hit test walks.
+    pub(crate) fn sort_by_paint_key_desc(&self, ids: &mut [ItemId]) {
+        self.sort_by_paint_key(ids);
+        ids.reverse();
     }
 
     // -----------------------------------------------------------------
@@ -2346,92 +2410,342 @@ impl Scene {
         out
     }
 
-    /// Topmost lightweight item whose `shape_contains` fires for
-    /// `scene_pt`. Iterates `items_in_rect` for a tiny rect around
-    /// the point, sorts by z descending, and returns the first hit.
-    /// Heavyweight widget entries are skipped (their hit-testing is
-    /// handled by the arena event dispatch).
+    /// The shape of any entry, in its **local** coordinates.
     ///
-    /// **Limitation:** items flagged
+    /// For a lightweight item this is [`SceneItem::shape`]. A **heavyweight**
+    /// widget entry has no `SceneItem` at all — [`Scene::item`] returns `None`
+    /// for it — so its shape is defined to be
+    /// [`ItemShape::bounds`] of its `local_bounds`. That is not a placeholder:
+    /// a widget's silhouette is its layout box, the arena hit-tests it as one,
+    /// and the marquee has always selected heavyweight entries through the
+    /// same index query as lightweight ones. Stating it here is what keeps a
+    /// `…ItemShape` selection mode meaningful for a scene whose primary
+    /// objects are cards.
+    ///
+    /// `None` for an unknown id.
+    pub fn item_shape(&self, id: ItemId) -> Option<ItemShape> {
+        let pos = *self.entry_index.get(&id)?;
+        Some(match &self.entries[pos].kind {
+            SceneEntryKind::Item(item) => item.shape(),
+            SceneEntryKind::Widget(_) => ItemShape::bounds(self.entries[pos].local_bounds),
+        })
+    }
+
+    /// Whether `id`'s shape contains `scene_pt`.
+    ///
+    /// Works for both tiers (see [`Scene::item_shape`]). `view_scale` is the
+    /// live view zoom, consulted only by a cosmetic stroke band; pass `1.0`
+    /// when there is no view.
+    pub fn item_contains(&self, id: ItemId, scene_pt: Point, view_scale: f32) -> bool {
+        let Some(shape) = self.item_shape(id) else {
+            return false;
+        };
+        let Some(local_pt) = self.map_from_scene(id, scene_pt) else {
+            return false;
+        };
+        shape.contains(local_pt, view_scale)
+    }
+
+    /// The item's own shape re-published as a **scene**-space region — what a
+    /// collision query asks the rest of the scene about. `None` for an unknown
+    /// id, a shape of [`ItemShape::none`], or a screen-anchored
+    /// ([`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS))
+    /// item, whose silhouette is not in scene space at all.
+    pub fn item_region(&self, id: ItemId) -> Option<SceneRegion> {
+        // A screen-anchored item has no scene-space silhouette to publish:
+        // its `local_bounds` is in screen coordinates and its scene transform
+        // places only its anchor. Same reason `items_in_region` skips them.
+        if self.is_screen_anchored(id) {
+            return None;
+        }
+        let shape = self.item_shape(id)?;
+        if shape.is_none() {
+            return None;
+        }
+        let xform = self.scene_transform(id);
+        Some(shape.to_scene_region(&xform))
+    }
+
+    /// Items matching `region` under `mode` — **both tiers**, exactly like
+    /// [`Scene::items_in_rect`], which this generalises.
+    ///
+    /// Broad-phased by the spatial index on `region.bounding_rect()`, then
+    /// narrow-phased per `mode`: the `…ItemBoundingRect` modes compare the
+    /// item's **scene** AABB against the region in scene space; the
+    /// `…ItemShape` modes map the region into the item's **local** frame and
+    /// compare it against [`Scene::item_shape`]. For an item with a
+    /// non-identity transform those are different tests — see
+    /// [`ItemSelectionMode`].
+    ///
+    /// `view_scale` is the live view zoom, consulted only by a cosmetic stroke
+    /// band; pass `1.0` when there is no view. Visibility and selectability
+    /// are **not** filtered here — this is a pure geometry query, and the
+    /// caller (e.g. [`SceneSelection::commit_marquee`](crate::SceneSelection::commit_marquee))
+    /// applies its own flag policy.
+    ///
+    /// Items flagged
     /// [`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS)
-    /// hit-test in screen space, not scene space — so this scene-only
-    /// query may incorrectly hit them or miss them depending on the
-    /// current view transform. Apps that route pointer events through
-    /// `SceneView`'s dispatch get screen-space hit-test for IGNORES
-    /// items automatically; only use `item_at` directly for normal
-    /// items, or pair with the view transform to filter.
+    /// **are skipped**, for the reason [`Scene::item_at`] skips them: they are
+    /// anchored in screen space, so their `local_bounds` is a screen rectangle
+    /// and the scene AABB the index holds for them is a fiction. Comparing a
+    /// scene-space region against that fiction is a guess, and the two query
+    /// families used to disagree about whether to make it — the point queries
+    /// declined and the marquee did not. Reaching screen-pinned chrome needs a
+    /// region that arrives in *screen* space, which is what
+    /// [`Scene::item_at_in_view`] does for a point; there is no region twin of
+    /// it yet, so a marquee cannot select pinned chrome at all.
+    pub fn items_in_region(
+        &self,
+        region: &SceneRegion,
+        mode: ItemSelectionMode,
+        view_scale: f32,
+    ) -> Vec<ItemId> {
+        self.index
+            .query(region.bounding_rect())
+            .into_iter()
+            .filter(|id| !self.is_screen_anchored(*id))
+            .filter(|id| self.region_match(*id, region, mode, view_scale))
+            .collect()
+    }
+
+    /// Whether `id` is pinned in screen space
+    /// ([`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS)),
+    /// and so cannot be placed by a scene-space query at all. `false` for an
+    /// unknown id.
+    fn is_screen_anchored(&self, id: ItemId) -> bool {
+        self.flags(id)
+            .is_some_and(|f| f.contains(ItemFlags::IGNORES_TRANSFORMATIONS))
+    }
+
+    fn region_match(
+        &self,
+        id: ItemId,
+        region: &SceneRegion,
+        mode: ItemSelectionMode,
+        view_scale: f32,
+    ) -> bool {
+        if mode.uses_shape() {
+            let Some(shape) = self.item_shape(id) else {
+                return false;
+            };
+            let Some(inv) = self.scene_transform(id).inverse() else {
+                return false;
+            };
+            let local = region.to_local(&inv);
+            if mode.requires_containment() {
+                shape.contained_by_region(&local, view_scale)
+            } else {
+                shape.intersects_region(&local, view_scale)
+            }
+        } else {
+            let Some(rect) = self.scene_rect(id) else {
+                return false;
+            };
+            let shape = ItemShape::bounds(rect);
+            if mode.requires_containment() {
+                shape.contained_by_region(region, 1.0)
+            } else {
+                shape.intersects_region(region, 1.0)
+            }
+        }
+    }
+
+    /// Topmost **lightweight** item whose shape contains `scene_pt`, at unit
+    /// view scale. See [`Scene::item_at_scaled`] for the zoom-aware form and
+    /// [`Scene::item_at_in_view`] for the one that also places screen-anchored
+    /// items.
+    ///
+    /// Heavyweight widget entries are skipped: their hit-testing is the
+    /// arena's job, and a scene-space answer would contradict it.
+    ///
+    /// Items flagged
+    /// [`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS)
+    /// are **also skipped**, deterministically. They are anchored in screen
+    /// space, so a scene-space point cannot place them at all; answering with
+    /// a coin-flip (which is what comparing them against a scene AABB amounts
+    /// to) is worse than not answering. Use [`Scene::item_at_in_view`], or
+    /// `SceneView` dispatch, when the query needs them.
+    ///
+    /// "Topmost" is [`Scene::paint_key`] order, so an
+    /// [`Over`](SceneLayer::Over)-band item beats a higher-`z`
+    /// [`Under`](SceneLayer::Under) one, and two equal-`z` items resolve to the
+    /// later-inserted one — the same answer `SceneView` dispatch gives.
+    ///
+    /// Hidden and disabled entries are excluded: this is a *hit* test, and
+    /// [`ItemFlags::IS_VISIBLE`] and [`ItemFlags::IS_ENABLED`] both say so. See
+    /// [`Scene::is_hit_testable`]. For a pure geometry query that ignores flags,
+    /// use [`Scene::items_in_region`] or [`Scene::item_contains`].
     pub fn item_at(&self, scene_pt: Point) -> Option<ItemId> {
-        let probe = Rect::new(scene_pt.x, scene_pt.y, 0.0, 0.0);
-        let mut candidates = self.items_in_rect(probe);
-        candidates.sort_by(|a, b| {
-            let za = self.z(*a).unwrap_or(0.0);
-            let zb = self.z(*b).unwrap_or(0.0);
-            zb.partial_cmp(&za).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        for id in candidates {
-            let Some(item) = self.item(id) else {
+        self.item_at_scaled(scene_pt, 1.0)
+    }
+
+    /// [`Scene::item_at`] at an explicit view zoom.
+    ///
+    /// The zoom reaches exactly one thing: a **cosmetic** stroke band, whose
+    /// width is in device pixels and therefore covers fewer scene units the
+    /// further you zoom in. Passing the live scale is what makes this agree
+    /// with `SceneView`'s own dispatch, which has always had it.
+    pub fn item_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId> {
+        self.hit_candidates(scene_pt)
+            .into_iter()
+            .find(|id| self.lightweight_scene_hit(*id, scene_pt, view_scale))
+    }
+
+    /// All lightweight items whose shape contains `scene_pt`, topmost-first by
+    /// z. Same tier and `IGNORES_TRANSFORMATIONS` rules as [`Scene::item_at`].
+    pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId> {
+        self.items_at_scaled(scene_pt, 1.0)
+    }
+
+    /// [`Scene::items_at`] at an explicit view zoom.
+    pub fn items_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Vec<ItemId> {
+        self.hit_candidates(scene_pt)
+            .into_iter()
+            .filter(|id| self.lightweight_scene_hit(*id, scene_pt, view_scale))
+            .collect()
+    }
+
+    /// Topmost lightweight item under a **screen** point, resolving *both*
+    /// hit spaces the way `SceneView` dispatch does.
+    ///
+    /// A normal item is tested in scene space, at the view transform's zoom; a
+    /// screen-anchored
+    /// ([`IGNORES_TRANSFORMATIONS`](crate::flags::ItemFlags::IGNORES_TRANSFORMATIONS))
+    /// item is tested against its `local_bounds` rooted at its projected
+    /// anchor, at unit scale — its local coordinates *are* screen
+    /// coordinates, so it has no zoom to convert. This is the query to use
+    /// when a scene may contain screen-pinned chrome; [`Scene::item_at`]
+    /// deliberately declines to guess.
+    pub fn item_at_in_view(&self, screen_pt: Point, view_transform: Transform2D) -> Option<ItemId> {
+        let view_scale = view_transform.geometric_scale();
+        let scene_pt = view_transform.inverse()?.apply_point(screen_pt);
+        // Screen-anchored items live outside the spatial index's scene-space
+        // buckets, so they are scanned separately and tested first: they are
+        // chrome pinned over the content.
+        let mut pinned: Vec<ItemId> = self
+            .entries
+            .iter()
+            .filter(|e| {
+                matches!(e.kind, SceneEntryKind::Item(_))
+                    && e.flags.contains(ItemFlags::IGNORES_TRANSFORMATIONS)
+            })
+            .map(|e| e.id)
+            .filter(|id| self.is_hit_testable(*id))
+            .collect();
+        self.sort_by_paint_key_desc(&mut pinned);
+        for id in pinned {
+            let anchor =
+                view_transform.apply_point(self.scene_transform(id).apply_point(Point::ZERO));
+            let local_pt = Point::new(screen_pt.x - anchor.x, screen_pt.y - anchor.y);
+            let Some(shape) = self.item_shape(id) else {
                 continue;
             };
-            let Some(local_pt) = self.map_from_scene(id, scene_pt) else {
-                continue;
-            };
-            if item.shape_contains(local_pt) {
+            if shape.contains(local_pt, 1.0) {
                 return Some(id);
             }
         }
-        None
+        self.item_at_scaled(scene_pt, view_scale)
     }
 
-    /// Items whose scene-AABB intersects the AABB of `id`. Excludes
-    /// `id` itself. Apps use this for "which other items overlap
-    /// this card?" queries — graph editors checking node-on-node
-    /// overlap, CAD canvases finding adjacent geometry. Backed by
-    /// the spatial index, so the cost is `O(visible)` not `O(N)`.
+    /// Topmost-first candidate ids for a point query, screen-anchored items
+    /// excluded (see [`Scene::item_at`]) and non-hit-testable entries dropped
+    /// (see [`crate::pick::hit_testable`]).
+    fn hit_candidates(&self, scene_pt: Point) -> Vec<ItemId> {
+        let probe = Rect::new(scene_pt.x, scene_pt.y, 0.0, 0.0);
+        let mut candidates: Vec<ItemId> = self
+            .items_in_rect(probe)
+            .into_iter()
+            .filter(|id| self.is_hit_testable(*id))
+            .filter(|id| !self.is_screen_anchored(*id))
+            .collect();
+        self.sort_by_paint_key_desc(&mut candidates);
+        candidates
+    }
+
+    /// Whether `id` takes part in pointer hit-testing — visible along its whole
+    /// ancestor chain AND enabled.
+    ///
+    /// This is [`crate::pick::hit_testable`] resolved against the scene, and it
+    /// is the one place the two flag contracts in [`ItemFlags`] are honoured:
+    /// [`IS_VISIBLE`](ItemFlags::IS_VISIBLE) ("neither painted nor hit-tested")
+    /// and [`IS_ENABLED`](ItemFlags::IS_ENABLED) ("pass clicks through to items
+    /// beneath"). `false` for unknown ids.
+    pub fn is_hit_testable(&self, id: ItemId) -> bool {
+        let Some(flags) = self.flags(id) else {
+            return false;
+        };
+        crate::pick::hit_testable(self.is_effectively_visible(id), flags)
+    }
+
+    fn lightweight_scene_hit(&self, id: ItemId, scene_pt: Point, view_scale: f32) -> bool {
+        let Some(item) = self.item(id) else {
+            return false;
+        };
+        let Some(local_pt) = self.map_from_scene(id, scene_pt) else {
+            return false;
+        };
+        item.shape().contains(local_pt, view_scale)
+    }
+
+    /// Items overlapping `id`'s **shape**, excluding `id` itself.
+    ///
+    /// Apps use this for "which other items overlap this card?" — graph
+    /// editors checking node-on-node overlap, CAD canvases finding adjacent
+    /// geometry. Backed by the spatial index, so the cost is `O(visible)` not
+    /// `O(N)`.
+    ///
+    /// Defaults to [`ItemSelectionMode::IntersectsItemShape`], so a
+    /// stroke-only connector collides along its line rather than across its
+    /// bounding box. Pass
+    /// [`IntersectsItemBoundingRect`](ItemSelectionMode::IntersectsItemBoundingRect)
+    /// to [`Scene::colliding_items_with`] for the cheaper box test.
+    ///
+    /// Screen-anchored items neither collide nor are collided with — see
+    /// [`Scene::items_in_region`], which this is built on, and
+    /// [`Scene::item_region`], which declines to publish one for them.
     pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId> {
-        let Some(rect) = self.scene_rect(id) else {
+        self.colliding_items_with(id, ItemSelectionMode::default())
+    }
+
+    /// [`Scene::colliding_items`] under an explicit [`ItemSelectionMode`].
+    pub fn colliding_items_with(&self, id: ItemId, mode: ItemSelectionMode) -> Vec<ItemId> {
+        let Some(region) = self.item_region(id) else {
             return Vec::new();
         };
-        self.items_in_rect(rect)
+        self.items_in_region(&region, mode, 1.0)
             .into_iter()
             .filter(|other| *other != id)
             .collect()
     }
 
-    /// Items whose scene-AABB intersects `path`'s bounding rect.
-    /// Apps use this for "which items lie under this connector?"
-    /// queries — graph editors highlighting hovered connectors,
-    /// CAD canvases doing point-in-polygon style picking. The
-    /// narrow phase is AABB-vs-AABB; per-segment-distance precision
-    /// is left to the app.
+    /// Items lying along `path` — a real region query, not the AABB-of-the-path
+    /// approximation this used to be.
+    ///
+    /// The path is treated as a zero-width closed region: an item is picked
+    /// when the path crosses it or encloses it. For a *connector* — a line
+    /// with a width — pass that width to [`Scene::items_along_path_with`], so
+    /// the query asks about the band the user can see.
     pub fn items_along_path(&self, path: &Path) -> Vec<ItemId> {
-        let Some(rect) = path_aabb(path) else {
-            return Vec::new();
-        };
-        self.items_in_rect(rect)
+        self.items_along_path_with(path, 0.0, ItemSelectionMode::default())
     }
 
-    /// All lightweight items whose `shape_contains` fires for
-    /// `scene_pt`, sorted topmost-first by z.
-    pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId> {
-        let probe = Rect::new(scene_pt.x, scene_pt.y, 0.0, 0.0);
-        let mut candidates = self.items_in_rect(probe);
-        candidates.sort_by(|a, b| {
-            let za = self.z(*a).unwrap_or(0.0);
-            let zb = self.z(*b).unwrap_or(0.0);
-            zb.partial_cmp(&za).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        candidates
-            .into_iter()
-            .filter(|id| {
-                let Some(item) = self.item(*id) else {
-                    return false;
-                };
-                let Some(local_pt) = self.map_from_scene(*id, scene_pt) else {
-                    return false;
-                };
-                item.shape_contains(local_pt)
-            })
-            .collect()
+    /// [`Scene::items_along_path`] with an explicit stroke width and
+    /// [`ItemSelectionMode`].
+    ///
+    /// `stroke_width` greater than zero makes the region the path's **band**
+    /// rather than its interior: "what does this 4 dp connector touch?".
+    pub fn items_along_path_with(
+        &self,
+        path: &Path,
+        stroke_width: f32,
+        mode: ItemSelectionMode,
+    ) -> Vec<ItemId> {
+        let region = if stroke_width > 0.0 {
+            SceneRegion::stroke(path.clone(), stroke_width)
+        } else {
+            SceneRegion::lasso(path.clone())
+        };
+        self.items_in_region(&region, mode, 1.0)
     }
 
     // -----------------------------------------------------------------
@@ -2947,52 +3261,6 @@ fn union_two_rects(a: Rect, b: Rect) -> Rect {
     Rect::new(x, y, r - x, bot - y)
 }
 
-/// AABB enclosing every point in a path. Returns `None` for an
-/// empty path. Curves contribute their control / end points only —
-/// callers needing tight bounds for cubics should pre-compute and
-/// pass the AABB directly via `Scene::items_in_rect`.
-fn path_aabb(path: &Path) -> Option<Rect> {
-    let mut min_x = f32::INFINITY;
-    let mut min_y = f32::INFINITY;
-    let mut max_x = f32::NEG_INFINITY;
-    let mut max_y = f32::NEG_INFINITY;
-    let mut include = |p: Point| {
-        min_x = min_x.min(p.x);
-        min_y = min_y.min(p.y);
-        max_x = max_x.max(p.x);
-        max_y = max_y.max(p.y);
-    };
-    for cmd in &path.commands {
-        match cmd {
-            teksilo_canvas::PathCommand::MoveTo(p) | teksilo_canvas::PathCommand::LineTo(p) => {
-                include(*p)
-            }
-            teksilo_canvas::PathCommand::QuadTo { control, to } => {
-                include(*control);
-                include(*to);
-            }
-            teksilo_canvas::PathCommand::CubicTo {
-                control1,
-                control2,
-                to,
-            } => {
-                include(*control1);
-                include(*control2);
-                include(*to);
-            }
-            teksilo_canvas::PathCommand::ArcTo { rect, .. } => {
-                include(Point::new(rect.x, rect.y));
-                include(Point::new(rect.right(), rect.bottom()));
-            }
-            teksilo_canvas::PathCommand::Close => {}
-        }
-    }
-    if !min_x.is_finite() {
-        return None;
-    }
-    Some(Rect::new(min_x, min_y, max_x - min_x, max_y - min_y))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3361,7 +3629,7 @@ mod tests {
     }
 
     #[test]
-    fn items_along_path_finds_items_under_path_aabb() {
+    fn items_along_path_finds_items_the_path_actually_crosses() {
         let mut scene = Scene::new();
         let a = scene.add_item(
             RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
@@ -3377,6 +3645,363 @@ mod tests {
         let hits = scene.items_along_path(&path);
         assert!(hits.contains(&a));
         assert!(!hits.contains(&b));
+    }
+
+    #[test]
+    fn items_along_path_no_longer_picks_up_the_paths_whole_bounding_box() {
+        // This is the row the old AABB-vs-AABB narrow phase got wrong: the
+        // corner item sits inside the diagonal's bounding box and nowhere near
+        // the diagonal itself.
+        let mut scene = Scene::new();
+        let off_the_line = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(2.0, 85.0),
+        );
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        path.line_to(Point::new(100.0, 100.0));
+        assert!(!scene.items_along_path(&path).contains(&off_the_line));
+        // A wide enough connector does reach it.
+        assert!(
+            scene
+                .items_along_path_with(&path, 200.0, ItemSelectionMode::IntersectsItemShape)
+                .contains(&off_the_line)
+        );
+    }
+
+    #[test]
+    fn colliding_items_uses_the_shape_not_the_box() {
+        // A stroke-only diagonal connector crosses `crossed` and merely
+        // overlaps `beside` in the bounding-box sense.
+        let mut scene = Scene::new();
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        path.line_to(Point::new(100.0, 100.0));
+        let wire = scene.add_item(
+            crate::items::PathItem::new(path).stroke(teksilo_tokens::Color::BLACK, 2.0),
+            Point::ZERO,
+        );
+        let crossed = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(45.0, 45.0),
+        );
+        let beside = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
+            Point::new(2.0, 85.0),
+        );
+        let hits = scene.colliding_items(wire);
+        assert!(hits.contains(&crossed));
+        assert!(
+            !hits.contains(&beside),
+            "the empty corner of its box is not it"
+        );
+
+        // The mode is applied to the *other* item, exactly as Qt's
+        // `collidesWithItem` applies it: asking what collides with `beside`,
+        // the wire's own shape misses and the wire's bounding rect hits.
+        assert!(
+            !scene
+                .colliding_items_with(beside, ItemSelectionMode::IntersectsItemShape)
+                .contains(&wire),
+            "the wire's stroke does not reach it"
+        );
+        assert!(
+            scene
+                .colliding_items_with(beside, ItemSelectionMode::IntersectsItemBoundingRect)
+                .contains(&wire),
+            "but the wire's bounding rect does — the cheap mode, by name"
+        );
+    }
+
+    #[test]
+    fn an_entry_box_always_mirrors_the_items_own_box() {
+        // M2 / study 1.9: the rectangle the spatial index buckets on is the
+        // entry's `local_bounds`, and it is read back from the item after
+        // every write. A `PathItem` fits its geometry to the request and
+        // re-derives its box from the result, so the index can never bucket a
+        // rectangle the geometry has not occupied.
+        let mut scene = Scene::new();
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        path.line_to(Point::new(100.0, 0.0));
+        let id = scene.add_item(
+            crate::items::PathItem::new(path).stroke(teksilo_tokens::Color::BLACK, 4.0),
+            Point::ZERO,
+        );
+        for request in [
+            Rect::new(0.0, 0.0, 200.0, 20.0),
+            Rect::new(-50.0, -50.0, 10.0, 10.0),
+            Rect::new(0.0, 0.0, 0.0, 0.0),
+        ] {
+            scene.set_local_bounds(id, request);
+            let entry_box = scene.local_bounds(id).expect("known id");
+            let item_box = scene.item(id).expect("lightweight").local_bounds();
+            assert_eq!(entry_box, item_box, "after requesting {request:?}");
+            let shape_box = scene.item_shape(id).expect("has a shape").bounding_rect();
+            assert!(
+                entry_box.x <= shape_box.x + 1e-3
+                    && entry_box.y <= shape_box.y + 1e-3
+                    && entry_box.right() >= shape_box.right() - 1e-3
+                    && entry_box.bottom() >= shape_box.bottom() - 1e-3,
+                "the index box {entry_box:?} must enclose the shape {shape_box:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_derived_box_lands_on_the_request_and_stays_there() {
+        // The setter used to aim the *box* at the request and then re-add the
+        // band, overshooting by the band every time: three identical calls
+        // gave three different boxes, none of them the one asked for, and each
+        // emitted a change and re-bucketed the index. It aims at the geometry
+        // now, so one call lands it and the next two are no-ops.
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let mut scene = Scene::new();
+        let mut path = Path::new();
+        path.move_to(Point::ZERO).line_to(Point::new(100.0, 0.0));
+        let id = scene.add_item(
+            crate::items::PathItem::new(path).stroke(teksilo_tokens::Color::BLACK, 4.0),
+            Point::ZERO,
+        );
+        assert_eq!(
+            scene.local_bounds(id),
+            Some(Rect::new(-4.0, -4.0, 108.0, 8.0))
+        );
+
+        let seen: Rc<RefCell<Vec<Rect>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let _h = scene.item_change_signal().observe(move |c| {
+            if let ItemChange::LocalBoundsChanged { new, .. } = c {
+                sink.borrow_mut().push(*new);
+            }
+        });
+
+        let request = Rect::new(0.0, 0.0, 200.0, 20.0);
+        for attempt in 0..3 {
+            scene.set_local_bounds(id, request);
+            let got = scene.local_bounds(id).expect("known id");
+            assert!(
+                (got.x - request.x).abs() < 1e-3 && (got.width - request.width).abs() < 1e-3,
+                "attempt {attempt}: x/width must be the request, got {got:?}"
+            );
+            // The path is perfectly horizontal, so its height is the band's
+            // and no request can stretch it. Honest, and stated on the setter.
+            assert!(
+                (got.height - 8.0).abs() < 1e-3,
+                "attempt {attempt}: {got:?}"
+            );
+        }
+        assert_eq!(
+            seen.borrow().len(),
+            1,
+            "three identical requests, one change: {:?}",
+            seen.borrow()
+        );
+    }
+
+    #[test]
+    fn a_derived_box_honours_both_axes_when_the_geometry_has_both() {
+        let mut scene = Scene::new();
+        let mut path = Path::new();
+        path.move_to(Point::ZERO)
+            .line_to(Point::new(100.0, 40.0))
+            .line_to(Point::new(0.0, 40.0))
+            .close();
+        let id = scene.add_item(
+            crate::items::PathItem::new(path).stroke(teksilo_tokens::Color::BLACK, 6.0),
+            Point::ZERO,
+        );
+        let request = Rect::new(-20.0, 5.0, 300.0, 120.0);
+        scene.set_local_bounds(id, request);
+        let got = scene.local_bounds(id).expect("known id");
+        assert!(
+            (got.x - request.x).abs() < 1e-2
+                && (got.y - request.y).abs() < 1e-2
+                && (got.width - request.width).abs() < 1e-2
+                && (got.height - request.height).abs() < 1e-2,
+            "asked {request:?}, settled on {got:?}"
+        );
+        // And it is a fixed point.
+        scene.set_local_bounds(id, request);
+        assert_eq!(scene.local_bounds(id), Some(got));
+    }
+
+    #[test]
+    fn region_queries_decline_a_screen_anchored_item_exactly_as_point_queries_do() {
+        // D5: the "declines to guess" rule applied to one query family only
+        // was the inconsistency. A screen-pinned item's `local_bounds` is a
+        // screen rectangle, so the scene AABB the index holds for it is a
+        // fiction, and a scene-space band comparing itself against that
+        // fiction is guessing exactly as `item_at` refused to.
+        let mut scene = Scene::new();
+        let pinned = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            Point::new(50.0, 50.0),
+        );
+        let normal = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            Point::new(50.0, 50.0),
+        );
+        let everything = SceneRegion::rect(Rect::new(-1000.0, -1000.0, 2000.0, 2000.0));
+        assert!(
+            scene
+                .items_in_region(&everything, ItemSelectionMode::default(), 1.0)
+                .contains(&pinned),
+            "selectable while it is an ordinary item"
+        );
+        scene.set_flag(pinned, ItemFlags::IGNORES_TRANSFORMATIONS, true);
+        for mode in [
+            ItemSelectionMode::IntersectsItemShape,
+            ItemSelectionMode::ContainsItemShape,
+            ItemSelectionMode::IntersectsItemBoundingRect,
+            ItemSelectionMode::ContainsItemBoundingRect,
+        ] {
+            let hits = scene.items_in_region(&everything, mode, 1.0);
+            assert!(!hits.contains(&pinned), "{mode:?} guessed at a pinned item");
+            assert!(hits.contains(&normal), "{mode:?} lost an ordinary one");
+        }
+        assert_eq!(scene.item_at(Point::new(55.0, 55.0)), Some(normal));
+        // The collision family is built on the same query, from both ends.
+        assert!(scene.item_region(pinned).is_none());
+        assert!(scene.colliding_items(pinned).is_empty());
+        assert!(!scene.colliding_items(normal).contains(&pinned));
+    }
+
+    #[test]
+    fn a_plain_items_box_is_still_exactly_what_was_asked_for() {
+        // The read-back must not change anything for an item that stores its
+        // bounds verbatim, which is every built-in but `PathItem`.
+        let mut scene = Scene::new();
+        let id = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+        scene.set_local_bounds(id, Rect::new(3.0, 4.0, 50.0, 60.0));
+        assert_eq!(
+            scene.local_bounds(id),
+            Some(Rect::new(3.0, 4.0, 50.0, 60.0))
+        );
+    }
+
+    #[test]
+    fn a_heavyweight_entry_has_a_defined_shape() {
+        // `Scene::item` returns None for a widget entry, so every shape-mode
+        // query would silently drop the tier the flagship corkboard's cards
+        // live in unless the shape is defined for it. It is: its box.
+        let mut scene = Scene::new();
+        let card = scene.add_widget(FillWidget::new(), Rect::new(10.0, 10.0, 100.0, 60.0));
+        assert!(scene.item(card).is_none());
+        let shape = scene.item_shape(card).expect("a widget entry has a shape");
+        assert_eq!(shape.bounding_rect(), Rect::new(0.0, 0.0, 100.0, 60.0));
+        assert!(scene.item_contains(card, Point::new(50.0, 40.0), 1.0));
+        assert!(!scene.item_contains(card, Point::new(500.0, 40.0), 1.0));
+    }
+
+    #[test]
+    fn a_rotated_heavyweight_card_selects_the_same_in_both_shape_and_box_modes() {
+        // B1 + C1: the corkboard's primary objects are heavyweight, and this
+        // pins that rotating one does not quietly change what a marquee
+        // enclosing it picks up. (The two modes disagree only at the margin —
+        // see `the_two_spaces_differ_for_a_rotated_item`.)
+        let mut scene = Scene::new();
+        let card = scene.add_widget(FillWidget::new(), Rect::new(100.0, 100.0, 80.0, 40.0));
+        let region = SceneRegion::rect(Rect::new(0.0, 0.0, 400.0, 400.0));
+        for mode in [
+            ItemSelectionMode::IntersectsItemShape,
+            ItemSelectionMode::IntersectsItemBoundingRect,
+            ItemSelectionMode::ContainsItemShape,
+            ItemSelectionMode::ContainsItemBoundingRect,
+        ] {
+            assert!(
+                scene.items_in_region(&region, mode, 1.0).contains(&card),
+                "before rotation, {mode:?}"
+            );
+        }
+        scene.set_transform(card, Transform2D::rotate(0.4));
+        for mode in [
+            ItemSelectionMode::IntersectsItemShape,
+            ItemSelectionMode::IntersectsItemBoundingRect,
+            ItemSelectionMode::ContainsItemShape,
+            ItemSelectionMode::ContainsItemBoundingRect,
+        ] {
+            assert!(
+                scene.items_in_region(&region, mode, 1.0).contains(&card),
+                "after rotation, {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_spaces_differ_for_a_rotated_item() {
+        // C1, stated as a test rather than as a claim: a shape query maps the
+        // region into the item's own frame, a bounding-rect query compares the
+        // enlarged axis-aligned hull in scene space. A band that clips only
+        // the hull's corner therefore picks the item in box mode and not in
+        // shape mode.
+        let mut scene = Scene::new();
+        let id = scene.add_item(
+            RectItem::new(Rect::new(-50.0, -10.0, 100.0, 20.0)),
+            Point::new(100.0, 100.0),
+        );
+        scene.set_transform(id, Transform2D::rotate(std::f32::consts::FRAC_PI_4));
+        let hull = scene.scene_rect(id).expect("has a scene rect");
+        // A 4x4 band on the hull's top-left corner: inside the hull, outside
+        // the rotated bar.
+        let corner = SceneRegion::rect(Rect::new(hull.x, hull.y, 4.0, 4.0));
+        assert!(
+            scene
+                .items_in_region(&corner, ItemSelectionMode::IntersectsItemBoundingRect, 1.0)
+                .contains(&id),
+            "the hull's corner is in the hull"
+        );
+        assert!(
+            !scene
+                .items_in_region(&corner, ItemSelectionMode::IntersectsItemShape, 1.0)
+                .contains(&id),
+            "but it is not on the bar"
+        );
+    }
+
+    #[test]
+    fn item_at_declines_to_place_a_screen_anchored_item() {
+        // Its local coordinates are screen coordinates, so a scene-space point
+        // cannot place it. `item_at_in_view` can, and does.
+        let mut scene = Scene::new();
+        let pinned = scene.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            Point::new(50.0, 50.0),
+        );
+        scene.set_flag(pinned, ItemFlags::IGNORES_TRANSFORMATIONS, true);
+        assert_eq!(scene.item_at(Point::new(55.0, 55.0)), None);
+        // Under an identity view its anchor is (50, 50), so a screen point
+        // 5 px in lands on it.
+        assert_eq!(
+            scene.item_at_in_view(Point::new(55.0, 55.0), Transform2D::identity()),
+            Some(pinned)
+        );
+        // Pan the view: the pinned item follows its anchor's projection.
+        let panned = Transform2D::translate(200.0, 0.0);
+        assert_eq!(
+            scene.item_at_in_view(Point::new(255.0, 55.0), panned),
+            Some(pinned)
+        );
+    }
+
+    #[test]
+    fn item_at_scaled_agrees_with_dispatch_about_a_cosmetic_stroke() {
+        // The mismatch nobody had written down: `item_at` passed no view
+        // scale while `SceneView` dispatch passed the live one, so the two
+        // disagreed about a cosmetic band at any zoom but 1.
+        let mut scene = Scene::new();
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        path.line_to(Point::new(100.0, 0.0));
+        let wire = scene.add_item(
+            crate::items::PathItem::new(path).stroke_cosmetic(teksilo_tokens::Color::BLACK, 4.0),
+            Point::ZERO,
+        );
+        let p = Point::new(50.0, 3.0);
+        assert_eq!(scene.item_at_scaled(p, 1.0), Some(wire));
+        assert_eq!(scene.item_at_scaled(p, 4.0), None);
+        assert_eq!(scene.item_at(p), scene.item_at_scaled(p, 1.0));
     }
 
     // -----------------------------------------------------------------

@@ -410,7 +410,7 @@ let node_b = scene.add_widget(node_widget("B"), Rect::new(300.0, 0.0, 120.0, 80.
 
 // Connector lines are lightweight PathItems.
 let edge = scene.add_item(
-    PathItem::new(connector_path(), edge_aabb()).stroke(Color::BLACK, 2.0),
+    PathItem::new(connector_path()).stroke(Color::BLACK, 2.0),
     Point::ZERO,
 );
 scene.set_a11y_categories(A11yNode::Item(edge),  &[A11yCategory::new("connector")]);
@@ -526,6 +526,127 @@ there.
 
 ---
 
+## What an overlay may take
+
+Everything positional in the framework resolves from the **arena's** hit
+target, not from whichever handler happened to answer: press feedback,
+focus-on-release, the touch hold route that opens a tooltip or a context menu,
+the cursor, and a drag. So a scene that wins a tap in a handler while the arena
+hands the same point to something else does not merely get the tap wrong — it
+splits the tap off from the press, the focus and the hold.
+
+That is fixed by making the two agree (see
+[Cross-tier hit-testing](teksilo-scene.md#cross-tier-hit-testing)), and the rule
+that decides *which* answer they agree on is:
+
+> **A lightweight entry takes a press away from a heavyweight card only if it
+> would act on that press** — a tap, a double tap, a context menu, or
+> `IS_DRAGGABLE`.
+
+The case that forces it is the one this crate exists to serve. An embedded
+`TextInput` note with a **selection halo drawn `Over` it**: the halo is
+decoration, it claims nothing, so it never takes the point. Clicking it leaves
+the note pressed and focused. Had the rule been "whatever is painted on top
+occludes", every existing scene with a decorative foreground would have started
+answering the viewport instead of its content.
+
+A **hover** affordance — `on_hover`, `cursor`, `tooltip` — is deliberately not
+on that list, and the reason is an accessibility one as much as a correctness
+one. Counting one as a claim reads as conservative and is the opposite: the veto
+takes the card out of the arena's walk, the view becomes the target, and the tap
+then resolves to an item that has no `on_tap`, so the press reaches *nobody* —
+the note under a `.tooltip("drop here")` hint region becomes un-clickable,
+un-focusable and un-editable, with no error and no handler firing. The
+affordances themselves lose nothing: the view's hover seam runs in the preview
+pass, on every strict ancestor of the target, so it reaches the item whether a
+card won the walk or not, and the cursor is arbitrated on the cursor channel
+alone (an `Over` item's declared cursor wins over the card's, and costs the card
+no press).
+
+The converse holds too, and is equally deliberate: an `Over` item that *is*
+interactive takes the press, the focus and the hold as well as the tap, because
+it is what the user aimed at.
+
+**The veto moves no node.** It refuses a *point*; it does not remove anything.
+The AccessKit tree, its bounds, and the Tab order are byte-identical with and
+without it — a card under an interactive overlay is still keyboard-reachable,
+still announced, still has its full advertised bounds. Pinned by
+`view::tests::pick_order::the_veto_changes_neither_the_at_tree_nor_the_tab_stops`,
+which measures the AT node count and the tab stops as a **delta** between a
+decorative overlay and a claiming one over the same card, and by
+`a_decorative_over_item_leaves_the_card_its_press_and_its_focus`, which asserts
+the arena's own hit target as well as where focus landed.
+
+## Where the pointer and the AT probe still disagree
+
+The rule above governs the **pointer**. It does not reach explore by touch, and
+it is worth being exact about that, because the opposite is easy to assume.
+
+A platform explore-by-touch probe resolves through the **AccessKit tree**:
+`accesskit_consumer::node_at_point` descends from the root, walking each node's
+children **in reverse** and taking the first whose bounds contain the point. The
+press-claiming rule changes no node, no bound and no child list, so it cannot
+move that answer — and the scene's AT child list is in **emission** order, not
+paint order:
+
+```
+SceneView (Role::Pane)
+  ├── groups                     (structure first)
+  ├── lightweight item nodes     ← both bands, in insertion order
+  └── heavyweight widget nodes   ← appended by the framework walker, last
+```
+
+Reverse walk therefore reaches the heavyweight tier **first, always**, whatever
+band the lightweight entry is in. Measured on a note with a 100×100 overlay
+exactly on top of it:
+
+| overlay | tap | arena hit + focus | AT probe |
+|---------|-----|-------------------|----------|
+| decorative halo | the note | the note | the note |
+| claiming badge  | the badge | the `SceneView` | the note |
+
+The decorative row — the corkboard case, and the one the rule was chosen for —
+agrees on all three. The claiming row does not: the sighted user activates the
+badge, the press and focus go to the viewport, and the probe announces the note
+underneath. (That the item's own node *is* reachable is not in doubt: probing a
+point the overlay covers and the card does not returns the overlay's
+`Role::GraphicsObject`. The card wins purely by being emitted later.)
+
+Two separate things are wrong there, and only one of them is a scene defect.
+
+**The viewport is unnamed.** A `SceneView` announces as a bare `Role::Pane`
+unless the app calls [`SceneView::a11y_label`]. Name it. A view that owns
+interactive `Over` chrome should always be named, because the veto makes it the
+focus target for those points by design.
+
+**The AT child order is not the paint order.** This is the real gap, and it is
+the AT tier's version of exactly the bug the pointer tier just fixed: two
+pickers over one area, ordered by two different rules. The fix is to emit the
+`Over` band *after* the heavyweight children, which the scene cannot do today —
+`accessibility()` runs before the framework walker descends, so everything the
+scene pushes necessarily lands before every card. Closing it needs one of:
+
+- an AT-walker slot in `teksilo-core` that emits a widget's own nodes **after**
+  its children — the accessibility analogue of `Widget::post_paint`, which the
+  render walker already has and which is what lets the `Over` band paint last in
+  the first place; or
+- the scene taking over emission of its heavyweight entries into its own logical
+  tree (the machinery exists — it is what the auto-graft path already does for
+  an entry with a declared logical parent) and ordering every entry by
+  `PaintKey`.
+
+It is not done here because it is not a hit-test change: an AccessKit child list
+is also the **reading order**, so either route reorders how a screen reader walks
+the scene — today structure, then items, then cards; afterwards, interleaved by
+z. That is an architecture decision about the AT tree's shape, with an existing
+app-facing surface to reconcile (`A11yMode`, `SceneView::focus_order_callback`),
+and it belongs with whoever owns that surface rather than inside a picker fix.
+The table above is pinned by
+`view::tests::pick_order::what_the_press_claiming_rule_does_and_does_not_reconcile`,
+so the day it changes, it changes deliberately.
+
+---
+
 ## Reference
 
 - Implementation: [`crates/teksilo-scene/src/a11y.rs`](../crates/teksilo-scene/src/a11y.rs),
@@ -535,3 +656,4 @@ there.
 - Widget-tier override surface: [`docs/accessibility-overrides.md`](accessibility-overrides.md).
 - Agent/CI automation over this AT surface: [`docs/automation-mcp.md`](automation-mcp.md).
 - AccessKit reference: <https://accesskit.dev>.
+- `SceneView::a11y_label`: [`crates/teksilo-scene/src/view/builder_impl.rs`](../crates/teksilo-scene/src/view/builder_impl.rs).

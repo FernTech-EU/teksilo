@@ -8,7 +8,8 @@
 //! entries. Click-to-select, Ctrl+click toggle, Shift+click range,
 //! and marquee box-select all flow through this single model;
 //! `SceneView` paints a marquee overlay during the drag and
-//! commits the result via `Scene::items_in_rect`.
+//! commits the result via [`Scene::items_in_region`](crate::Scene::items_in_region),
+//! so a rubber band picks items by the same geometry a click does.
 //!
 //! The selection set is exposed as a `Signal<BTreeSet<ItemId>>`
 //! so `SceneItem` paint code can render selected items differently
@@ -36,6 +37,7 @@ use teksilo_core::signal::Signal;
 
 use crate::item::ItemId;
 use crate::scene::Scene;
+use crate::shape::{ItemSelectionMode, SceneRegion};
 
 /// Selection-mode discriminator. Mirrors `teksilo_data::SelectionMode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,11 +193,50 @@ impl SceneSelection {
     }
 
     /// Marquee commit helper: replace (or extend, if `additive`)
-    /// the selection with every scene item whose AABB intersects
-    /// `marquee_rect_in_scene`. Lightweight items and heavyweight
-    /// widget entries are both candidates — the spatial index
-    /// returns ids regardless of kind.
+    /// the selection with every selectable scene item the rectangle picks up.
+    ///
+    /// Sugar for [`commit_marquee_region`](Self::commit_marquee_region) with a
+    /// rectangular region, [`ItemSelectionMode::IntersectsItemShape`] and unit
+    /// view scale.
+    ///
+    /// # Behaviour change
+    ///
+    /// This used to be a pure AABB query. It now consults each item's
+    /// [`shape`](crate::SceneItem::shape), so a band that merely grazes a
+    /// connector's bounding box no longer selects the connector — it has to
+    /// cross the stroke. For an item with an identity transform and the
+    /// default box shape the result is unchanged; for a **rotated** or scaled
+    /// item it is tighter, because the shape test happens in the item's own
+    /// frame rather than against its enlarged scene-space hull. Pass
+    /// [`ItemSelectionMode::IntersectsItemBoundingRect`] to
+    /// `commit_marquee_region` to get the old rule back.
     pub fn commit_marquee(&self, scene: &Scene, marquee_rect: Rect, additive: bool) {
+        self.commit_marquee_region(
+            scene,
+            &SceneRegion::rect(marquee_rect),
+            ItemSelectionMode::default(),
+            1.0,
+            additive,
+        );
+    }
+
+    /// Marquee commit over an arbitrary [`SceneRegion`] and
+    /// [`ItemSelectionMode`] — the rotated-view rubber band (an exact
+    /// quadrilateral) and the freehand lasso both arrive here.
+    ///
+    /// Lightweight items and heavyweight widget entries are both candidates —
+    /// the spatial index returns ids regardless of kind, and a widget entry's
+    /// shape is its box (see
+    /// [`Scene::item_shape`](crate::Scene::item_shape)). `view_scale` is the
+    /// live zoom, consulted only by a cosmetic stroke band.
+    pub fn commit_marquee_region(
+        &self,
+        scene: &Scene,
+        region: &SceneRegion,
+        mode: ItemSelectionMode,
+        view_scale: f32,
+        additive: bool,
+    ) {
         // Filter to items carrying `IS_SELECTABLE`. The spatial
         // index returns every entry whose AABB intersects — both
         // selectable and non-selectable (locked layers, decoration-
@@ -204,7 +245,7 @@ impl SceneSelection {
         // what can be selected. (Unit 9: was previously unfiltered;
         // see edge_cases::marquee_commit_respects_is_selectable_flag.)
         let hits: Vec<crate::item::ItemId> = scene
-            .items_in_rect(marquee_rect)
+            .items_in_region(region, mode, view_scale)
             .into_iter()
             .filter(|id| {
                 scene

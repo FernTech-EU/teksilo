@@ -65,11 +65,13 @@ pub(crate) mod item_handlers;
 pub(crate) mod items;
 pub(crate) mod magnet;
 pub(crate) mod minimap;
+pub(crate) mod pick;
 pub(crate) mod scene;
 pub(crate) mod scene_list_adapter;
 pub(crate) mod scene_model;
 pub(crate) mod scroll_view;
 pub(crate) mod selection;
+pub(crate) mod shape;
 pub(crate) mod state;
 pub(crate) mod transform;
 pub(crate) mod view;
@@ -91,11 +93,16 @@ pub use magnet::{
     MagnetSnap, MagnetVerdict, MagnetVisualState, MagnetismConfig, MarkerVisibility,
 };
 pub use minimap::{MinimapReadout, SceneMinimap};
+pub use pick::{PaintKey, RANK_OVER, RANK_UNDER, RANK_WIDGET, claims_press, hit_testable};
 pub use scene::Scene;
 pub use scene::{CascadeBudget, ItemChange, PanAxes, SceneConstraints, SceneLayer};
 pub use scene_list_adapter::SceneListAdapter;
 pub use scene_model::{SceneModel, SceneWriteGuard};
 pub use scroll_view::{SceneScrollView, ScrollBarMode, ScrollBarPolicy};
 pub use selection::{SceneSelection, SceneSelectionMode};
+pub use shape::{
+    HIT_BAND_SLACK, ItemSelectionMode, ItemShape, SHAPE_FLATTEN_TOLERANCE, SceneRegion,
+    ShapeGeometry,
+};
 pub use state::SceneViewState;
 pub use view::{DebugOverlay, FocusDirection, SceneView};

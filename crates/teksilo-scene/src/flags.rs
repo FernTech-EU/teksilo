@@ -73,10 +73,24 @@ impl ItemFlags {
     /// grouping or hit-test routing) set this. Default off.
     pub const HAS_NO_CONTENTS: Self = Self(1 << 9);
 
-    /// Children with `z < 0` paint **behind** this item rather
-    /// than in front. Mirrors Qt's `ItemNegativeZStacksBehindParent`.
-    /// Default off.
-    pub const NEGATIVE_Z_BEHIND_PARENT: Self = Self(1 << 10);
+    // Bit 10 was `NEGATIVE_Z_BEHIND_PARENT` (Qt's
+    // `ItemNegativeZStacksBehindParent`): "children with `z < 0` paint behind
+    // this item rather than in front". It was declared, documented and read by
+    // nothing, in either tier, for the flag's whole life.
+    //
+    // It is **deleted** rather than implemented, and the reason is this file's
+    // neighbour, `pick.rs`. The scene's paint order is now one flat, total
+    // `PaintKey`, and that is what both paint and every hit test compare —
+    // which is the whole point of it. Parent-relative z cannot be expressed in
+    // a flat key: honouring this flag would mean a hierarchical order (sort
+    // within each parent, then recurse, Qt's actual algorithm), and that is a
+    // different ordering model for every parented scene, not a bit to switch
+    // on. Leaving a declared-but-dead flag standing in the one place whose job
+    // is "one order, no silent disagreements" would be exactly the kind of lie
+    // this module exists to remove.
+    //
+    // Nothing else moved: the remaining bits keep their values, so a
+    // `from_bits` round-trip of any previously-valid bitset is unchanged.
 
     /// Whether the bitset contains every flag in `other`.
     pub const fn contains(&self, other: Self) -> bool {

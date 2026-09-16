@@ -12,8 +12,11 @@ mod edge_cases;
 mod magnetism;
 mod multi_view;
 mod nested;
+mod pick_order;
+mod pointer_leave;
 mod raster_scale_tests;
 mod runtime_mutation;
+mod selection_modes;
 mod text_runs;
 mod touch_camera;
 mod touch_grabs;
@@ -2592,8 +2595,13 @@ fn marquee_drag_ends_with_pending_commit() {
     ));
 
     let view = view_handle(&tree, view_id);
-    let pending = view.pending_marquee_commit.get();
-    let (rect, _) = pending.expect("drag Ended must post pending_marquee_commit");
+    let pending = view.pending_marquee_commit.borrow();
+    let (region, _, _) = pending
+        .as_ref()
+        .expect("drag Ended must post pending_marquee_commit");
+    let rect = region
+        .as_rect()
+        .expect("an identity view transform keeps the band a rectangle");
     // The rect should enclose (50, 50, 20, 20) — origin (40,40)
     // to current (80,80), screen-coords. Identity view-transform
     // → scene_rect = (40, 40, 40, 40).
@@ -2784,7 +2792,7 @@ fn drag_to_move_translates_lightweight_item() {
         let drag = view.drag_target.get();
         let marq = view.marquee.get();
         let pending_move = view.pending_item_move.get();
-        let pending_marq = view.pending_marquee_commit.get();
+        let pending_marq = view.pending_marquee_commit.borrow();
         assert!(
             drag.is_some() || pending_move.is_some(),
             "expected drag_target or pending_move set; \
@@ -2839,7 +2847,7 @@ fn drag_start_uses_narrow_phase_for_thin_draggable_items() {
         // Heavyweight child so the snapshot-populating layout path runs.
         scene.add_widget(FillWidget::new(), Rect::new(300.0, 300.0, 10.0, 10.0));
         scene.add_item(
-            PathItem::new(path, Rect::new(50.0, 50.0, 100.0, 100.0))
+            PathItem::new(path)
                 .stroke_cosmetic(teksilo_tokens::Color::RED, 2.0)
                 .draggable(true),
             Point::ZERO,
@@ -5523,8 +5531,7 @@ fn path_item_stroke_only_dispatch_uses_segment_distance_not_aabb() {
     path.move_to(Point::new(10.0, 10.0));
     path.line_to(Point::new(10.0, 90.0));
     path.line_to(Point::new(90.0, 90.0));
-    let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0))
-        .stroke(teksilo_tokens::Color::RED, 2.0);
+    let item = PathItem::new(path).stroke(teksilo_tokens::Color::RED, 2.0);
 
     let mut scene = Scene::new();
     let id = scene.add_item(item, Point::ZERO);
@@ -5696,17 +5703,17 @@ fn group_item_visual_dispatch_uses_aabb_as_before() {
 }
 
 #[test]
-fn rect_item_default_clone_shape_test_aabb_hits_as_before() {
-    // Surface check: items that don't override clone_shape_test
-    // get the default AABB closure, which matches their
-    // shape_contains exactly (since RectItem IS its AABB).
+fn rect_item_default_hit_shape_is_its_aabb() {
+    // Surface check: an item that doesn't override `shape()` gets the default
+    // AABB shape, and the *same* value now answers both the snapshot's
+    // narrow phase and the eager `Scene::item_at` path — there is no second
+    // predicate left to drift from this one.
     use crate::item::SceneItem;
     use crate::items::RectItem;
-    let item = RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0));
-    let test = item.clone_shape_test();
-    assert!(test(Point::new(20.0, 20.0), 1.0));
-    assert!(!test(Point::new(5.0, 5.0), 1.0));
-    assert!(!test(Point::new(45.0, 45.0), 1.0));
+    let shape = RectItem::new(Rect::new(10.0, 10.0, 30.0, 30.0)).shape();
+    assert!(shape.contains(Point::new(20.0, 20.0), 1.0));
+    assert!(!shape.contains(Point::new(5.0, 5.0), 1.0));
+    assert!(!shape.contains(Point::new(45.0, 45.0), 1.0));
 }
 
 // -----------------------------------------------------------------

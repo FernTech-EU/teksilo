@@ -107,6 +107,19 @@ impl SceneView {
         )
     }
 
+    /// The view's uniform zoom — the scale of the view transform's linear
+    /// part, the same number pointer dispatch passes to
+    /// [`ItemShape::contains`](crate::ItemShape::contains).
+    ///
+    /// It reaches exactly one thing: a **cosmetic** (device-pixel) stroke
+    /// band, whose width in scene coordinates shrinks as the view zooms in.
+    /// Computed as the hypotenuse of the transform's first column so a pure
+    /// rotation reports `1.0`.
+    pub fn view_scale(&self) -> f32 {
+        let m = self.view_transform().m;
+        m[0].hypot(m[1])
+    }
+
     /// Project a point in **view space** (screen-pixel coords —
     /// the same frame pointer events arrive in) into scene
     /// coordinates. Inverse of [`map_from_scene`](Self::map_from_scene).

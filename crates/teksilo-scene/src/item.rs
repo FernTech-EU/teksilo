@@ -17,8 +17,8 @@
 //! (rotation/scale, applied around the local origin). The Scene
 //! composes those per-item transforms up the parent chain to produce
 //! a `scene_transform` (local→scene). Hit-test inverse-transforms a
-//! scene-coord point into local coords before calling
-//! [`SceneItem::shape_contains`]; paint pushes the scene transform
+//! scene-coord point into local coords before testing the item's
+//! [`SceneItem::shape`]; paint pushes the scene transform
 //! onto the canvas before calling [`SceneItem::paint`].
 //!
 //! ## When to use
@@ -49,7 +49,7 @@
 //! ```
 
 use accesskit::Role;
-use teksilo_canvas::{Canvas, Point, Rect, StrokeStyle, Transform2D};
+use teksilo_canvas::{Canvas, Rect, StrokeStyle, Transform2D};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
@@ -217,8 +217,9 @@ pub struct SceneItemA11yContext {
 ///
 /// # Optional methods
 ///
-/// * [`SceneItem::shape_contains`] — exact-shape hit-test in local
-///   coords. Default is AABB containment.
+/// * [`SceneItem::shape`] — the item's geometry in local coords, used
+///   for hit-test, marquee, collision and path queries alike. Default
+///   is the local AABB.
 /// * [`SceneItem::label`] — human-readable label for AT and debug.
 /// * [`SceneItem::register_bindings`] — bind reactive signals to the
 ///   SceneView's repaint machinery.
@@ -234,6 +235,21 @@ pub trait SceneItem: std::fmt::Debug + 'static {
     /// when the bounds change. Implementations update their stored
     /// bounds field; geometry-bearing items (e.g. [`crate::PathItem`])
     /// must keep their geometry consistent with the new bounds.
+    ///
+    /// Two obligations, because the Scene reads
+    /// [`local_bounds`](SceneItem::local_bounds) back afterwards and stores
+    /// *that* as the rectangle the spatial index buckets on:
+    ///
+    /// * **Be idempotent.** Calling twice with the same rectangle must leave
+    ///   the item where the first call left it. An item that only ever
+    ///   converges towards the request turns a setter driven per frame into
+    ///   an endless stream of `ItemChange::LocalBoundsChanged`.
+    /// * **Be honest about what you cannot do.** An item that fits geometry
+    ///   to the box rather than adopting the box may be unable to honour an
+    ///   axis (a perfectly horizontal stroke has no height to stretch). Leave
+    ///   `local_bounds` reporting what you settled on rather than what was
+    ///   asked for, and say so in your own documentation — the Scene stores
+    ///   the answer, so a lie here is a lie in the index.
     fn set_local_bounds(&mut self, bounds: Rect);
 
     /// Paint the item into the canvas. The canvas already has this
@@ -270,42 +286,53 @@ pub trait SceneItem: std::fmt::Debug + 'static {
         false
     }
 
-    /// Exact-shape hit-test in **local** coordinates. Default: AABB
-    /// containment via [`SceneItem::local_bounds`]. Path-based items
-    /// override this to do per-segment distance checks so users can
-    /// click along a stroke even when the AABB is huge.
-    fn shape_contains(&self, local_pt: Point) -> bool {
-        self.local_bounds().contains(local_pt)
-    }
-
-    /// Produce a stand-alone `Fn(Point, f32) -> bool` that closes over
-    /// whatever state this item needs to answer `shape_contains`
-    /// without retaining a borrow on `self`. The
-    /// [`SceneView`](crate::SceneView) snapshots one of these for
-    /// every item at layout time and consults it on every pointer
-    /// event — direct calls to `shape_contains(&self, ...)` can't
-    /// be cached because `&dyn SceneItem` is not `Clone`.
+    /// This item's geometry in **local** coordinates — the single source of
+    /// truth for hit-test, marquee selection, collision and path queries.
     ///
-    /// The closure's second argument is the **view scale** (zoom)
-    /// active when the pointer event arrives — passed at call time
-    /// (not baked at snapshot time) because zoom changes without
-    /// rebuilding the snapshot. Most items ignore it; stroke-distance
-    /// hit-testing ([`PathItem`](crate::items::PathItem)) uses it so a
-    /// **cosmetic** stroke (constant device-pixel width) keeps a
-    /// proportionate hit band in scene coordinates at any zoom.
+    /// Default: [`ItemShape::bounds`](crate::ItemShape::bounds) of
+    /// [`SceneItem::local_bounds`], which
+    /// allocates nothing and is exact for a rectangle. Override it when the
+    /// item's silhouette is not its box: a stroke-only connector whose
+    /// bounding box is mostly empty ([`PathItem`](crate::PathItem)), a rounded
+    /// card whose corners are transparent ([`RectItem`](crate::RectItem)), a
+    /// logical-only container that must let clicks fall through
+    /// ([`GroupItem`](crate::GroupItem) returns
+    /// [`ItemShape::none`](crate::ItemShape::none)).
     ///
-    /// Default: AABB containment of `local_bounds()`. Items with a
-    /// non-AABB shape (notably [`crate::items::PathItem`] for
-    /// stroke-only paths and [`crate::items::GroupItem`] for the
-    /// logical-only / pass-through case) override this so dispatch
-    /// hits along the actual painted geometry. Returning the
-    /// default for an item with a custom `shape_contains` is a
-    /// silent dispatch bug — the eager `Scene::item_at` path still
-    /// calls `shape_contains` correctly, but pointer-event routing
-    /// goes through the snapshot.
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
-        let bounds = self.local_bounds();
-        Box::new(move |p, _view_scale| bounds.contains(p))
+    /// # Stay inside your own bounds
+    ///
+    /// The shape must lie within [`local_bounds`](SceneItem::local_bounds) —
+    /// that rectangle is what the spatial index buckets on and what every
+    /// query broad-phases against, so a silhouette poking out of it is a
+    /// silhouette that is sometimes never asked. It is also what makes the
+    /// four [`ItemSelectionMode`](crate::ItemSelectionMode)s consistent:
+    /// because the shape is inside the box, anything an `…ItemShape` query
+    /// picks an `…ItemBoundingRect` query picks too. Both built-ins that
+    /// narrow their shape stay inside by construction (a rounded rect is
+    /// inside its rect; a `PathItem` *derives* its bounds from its geometry),
+    /// and an item that widens its clickable area should widen its bounds to
+    /// match — as `PathItem::hit_stroke_width` does.
+    ///
+    /// # Called once per layout pass
+    ///
+    /// The [`SceneView`](crate::SceneView) refreshes a dispatch snapshot from
+    /// this on every layout pass, so **return a cheap clone of state you
+    /// already own** — an `Rc<ShapeGeometry>` built in your constructor —
+    /// rather than building geometry here. Every `ItemShape` is O(1) to clone
+    /// by construction; the only way to make this expensive is to flatten a
+    /// path inside it.
+    ///
+    /// # One value, not two predicates
+    ///
+    /// This returns a *value*, not a closure, and that is the point. Because
+    /// the value is `Clone + 'static` and carries everything a test needs —
+    /// outline, fill rule, stroke band and its
+    /// [`StrokeSpace`](teksilo_canvas::StrokeSpace) — the view's
+    /// snapshot stores the shape itself and every query reads the same one.
+    /// The pair this replaced (a `&self` predicate for the eager path, a
+    /// boxed closure for the snapshot) had to be kept in agreement by hand.
+    fn shape(&self) -> crate::shape::ItemShape {
+        crate::shape::ItemShape::bounds(self.local_bounds())
     }
 
     /// Dominant color to draw as the item's representation in

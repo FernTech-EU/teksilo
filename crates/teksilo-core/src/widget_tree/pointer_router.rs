@@ -1972,7 +1972,10 @@ impl WidgetTree {
         };
 
         for &id in &ancestors {
-            let mut ctx = self.make_event_context(&mut *ops).with_dispatch_node(id);
+            let mut ctx = self
+                .make_event_context(&mut *ops)
+                .with_dispatch_node(id)
+                .with_dispatch_target(target);
             ctx.press_claimed_by_interactive_child =
                 tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
@@ -2008,7 +2011,10 @@ impl WidgetTree {
         let mut current = Some(target);
         let mut is_target = true;
         while let Some(id) = current {
-            let mut ctx = self.make_event_context(&mut *ops).with_dispatch_node(id);
+            let mut ctx = self
+                .make_event_context(&mut *ops)
+                .with_dispatch_node(id)
+                .with_dispatch_target(target);
             ctx.press_claimed_by_interactive_child =
                 tap_owner.is_some_and(|owner| owner != id && self.is_descendant_of(owner, id));
             // Convert any pointer position into this node's widget-local
@@ -2106,7 +2112,8 @@ impl WidgetTree {
 
         let mut ctx = self
             .make_event_context(&mut *ops)
-            .with_dispatch_node(target);
+            .with_dispatch_node(target)
+            .with_dispatch_target(target);
         let gesture_cx = self.recognizer_context(target);
         let arena_blocked = self.sequence_blocks_arena(target);
         let WidgetTree {
@@ -2245,7 +2252,11 @@ impl WidgetTree {
         match event {
             WidgetEvent::PointerEnter { .. } => {
                 if let Some(cursor) = node.node_cursor {
-                    ctx.set_cursor(cursor);
+                    // The declared channel, not `set_cursor`: a handler
+                    // overriding the cursor in the same dispatch must not
+                    // erase the tree's record of what the node asked for —
+                    // that record is what `release_cursor` hands back to.
+                    ctx.declared_cursor_request = Some(cursor);
                 }
                 let mut fired = false;
                 if let Some(h) = node.external_handlers.on_hover.as_mut() {
@@ -2264,7 +2275,7 @@ impl WidgetTree {
             }
             WidgetEvent::PointerLeave { .. } => {
                 if node.node_cursor.is_some() {
-                    ctx.set_cursor(crate::widget::CursorIcon::Default);
+                    ctx.declared_cursor_request = Some(crate::widget::CursorIcon::Default);
                 }
                 let mut fired = false;
                 if let Some(h) = node.external_handlers.on_hover.as_mut() {
@@ -2654,8 +2665,24 @@ impl WidgetTree {
         if ctx.frame_requested {
             self.request_frame();
         }
-        if let Some(cursor) = ctx.cursor_request {
-            self.current_cursor = cursor;
+        // Declared first, handler second — the order the two used to occur in
+        // when both wrote the same slot, so a handler that speaks during an
+        // enter still outranks the node it entered.
+        if let Some(declared) = ctx.declared_cursor_request {
+            self.node_declared_cursor = declared;
+            self.current_cursor = declared;
+        }
+        match ctx.cursor_request {
+            Some(crate::widget::CursorRequest::Set(cursor)) => {
+                self.current_cursor = cursor;
+            }
+            // A withdrawal restores the node-declared cursor rather than
+            // resetting to `Default`: the handler is stepping back, not
+            // claiming the cursor is nothing.
+            Some(crate::widget::CursorRequest::Release) => {
+                self.current_cursor = self.node_declared_cursor;
+            }
+            None => {}
         }
         // Intents queued through `ctx.send_intent` are anchored at
         // the originating widget. Programmatic sends default to
@@ -3399,6 +3426,151 @@ mod tests {
 
         tree.pointer_move(Point::new(200.0, 200.0));
         assert_eq!(tree.current_cursor(), CursorIcon::Default);
+    }
+
+    /// A handler's `set_cursor` outlives its dispatch, so a handler that
+    /// re-decides the cursor on every move needs a way to stop deciding.
+    ///
+    /// Going quiet does not do it: the cursor moves only when something writes
+    /// to it, and the node-declared cursor is written on `PointerEnter` /
+    /// `PointerLeave` alone — so while the pointer stays inside one node there
+    /// is no second writer, and the handler's last word simply stands. That is
+    /// what `release_cursor` withdraws, and it withdraws *to the node's own
+    /// declaration*, not to `Default`.
+    #[test]
+    fn release_cursor_hands_the_cursor_back_to_the_node_that_declared_it() {
+        // Overrides itself to `Crosshair` on the left third of the widget and
+        // withdraws everywhere else — the shape of any handler that arbitrates
+        // its own affordance against the node it sits on.
+        let mut tree = WidgetTree::new();
+        tree.add(
+            FillWidget::new()
+                .cursor(CursorIcon::ColResize)
+                .on_pointer_event(|event, ctx| {
+                    if let WidgetEvent::PointerMove { position, .. } = event {
+                        if position.x < 30.0 {
+                            ctx.set_cursor(CursorIcon::Crosshair);
+                        } else {
+                            ctx.release_cursor();
+                        }
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(10.0, 25.0));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::Crosshair,
+            "the handler outranks the node it is attached to",
+        );
+        tree.pointer_move(Point::new(60.0, 25.0));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::ColResize,
+            "and hands it back to the node, not to Default — no enter/leave \
+             fires on a move within one node, so nothing else could",
+        );
+        tree.pointer_move(Point::new(10.0, 25.0));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::Crosshair,
+            "and can take it again"
+        );
+        tree.pointer_move(Point::new(200.0, 200.0));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::Default,
+            "leaving the node clears both the override and the declaration",
+        );
+    }
+
+    /// The withdrawal is a no-op for a handler that never spoke, and resolves
+    /// to `Default` when the chain declares nothing — so a handler may call it
+    /// unconditionally without having to remember whether it once set a cursor.
+    #[test]
+    fn release_cursor_is_a_no_op_with_nothing_to_undo() {
+        let mut tree = WidgetTree::new();
+        tree.add(
+            FillWidget::new()
+                .cursor(CursorIcon::ColResize)
+                .on_pointer_event(|event, ctx| {
+                    if matches!(event, WidgetEvent::PointerMove { .. }) {
+                        ctx.release_cursor();
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.pointer_move(Point::new(50.0, 25.0));
+        assert_eq!(tree.current_cursor(), CursorIcon::ColResize);
+
+        // Same handler over a node that declares nothing.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_pointer_event(|event, ctx| {
+            if let WidgetEvent::PointerMove { position, .. } = event {
+                if position.x < 30.0 {
+                    ctx.set_cursor(CursorIcon::Crosshair);
+                } else {
+                    ctx.release_cursor();
+                }
+            }
+            EventResponse::Ignored
+        }));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        tree.pointer_move(Point::new(10.0, 25.0));
+        assert_eq!(tree.current_cursor(), CursorIcon::Crosshair);
+        tree.pointer_move(Point::new(60.0, 25.0));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::Default,
+            "nothing declared a cursor for this chain, so the hand-back \
+             resolves to Default",
+        );
+    }
+
+    /// A handler that speaks during the `PointerEnter` itself still outranks
+    /// the node it entered — and the node's declaration is remembered anyway,
+    /// so the hand-back has somewhere to go.
+    ///
+    /// The two used to share one slot, where the handler's later write erased
+    /// the declaration outright; they are separate channels now precisely so
+    /// this case keeps both.
+    #[test]
+    fn an_on_hover_override_does_not_erase_the_declaration_it_outranks() {
+        let mut tree = WidgetTree::new();
+        tree.add(
+            FillWidget::new()
+                .cursor(CursorIcon::ColResize)
+                .on_hover(|entered, ctx| {
+                    if entered {
+                        ctx.set_cursor(CursorIcon::Crosshair);
+                    }
+                })
+                .on_pointer_event(|event, ctx| {
+                    if let WidgetEvent::PointerMove { position, .. } = event
+                        && position.x >= 30.0
+                    {
+                        ctx.release_cursor();
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.pointer_move(Point::new(10.0, 25.0));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::Crosshair,
+            "on_hover runs after the node cursor is applied, so it wins",
+        );
+        tree.pointer_move(Point::new(60.0, 25.0));
+        assert_eq!(
+            tree.current_cursor(),
+            CursorIcon::ColResize,
+            "and the node's declaration survived being overridden",
+        );
     }
 
     // A leaf that opts into typed introspection, so `with_widget_mut` /

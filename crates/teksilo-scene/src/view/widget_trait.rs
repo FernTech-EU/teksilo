@@ -49,6 +49,29 @@ impl Widget for SceneView {
         true
     }
 
+    /// Reject a heavyweight child for a point an `Over`-band press claimant
+    /// covers, so the arena's verdict matches the one this view's own dispatch
+    /// gives.
+    ///
+    /// `point` is in scene coordinates: the view is a `content_transform` node,
+    /// so the arena has already mapped the pointer through the inverse view
+    /// transform before offering it to children.
+    ///
+    /// Without this, the two pickers answer independently and only the *tap*
+    /// can be papered over: press feedback, focus-on-release, the touch hold
+    /// route (hence touch tooltips and context menus), the cursor and the
+    /// view's own drag recognizer all resolve from the arena's target, so five
+    /// of the six would stay on the card while the sixth went to the item.
+    ///
+    /// The rule is [`claims_press`](crate::claims_press), not "is painted": a
+    /// decorative halo drawn over an embedded note never vetoes, so clicking it
+    /// leaves focus in the note and leaves explore-by-touch announcing the
+    /// note — which is the behaviour the crate's per-item AT tree exists to
+    /// protect.
+    fn accepts_child_hit(&self, _child: WidgetId, point: teksilo_canvas::Point) -> bool {
+        !self.over_press_claimant_covers(point)
+    }
+
     fn preserves_children_on_rebuild(&self) -> bool {
         true
     }

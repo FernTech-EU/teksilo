@@ -225,14 +225,36 @@ impl Widget for Cell {
 #[derive(Debug)]
 struct Board {
     placed: Vec<(WidgetId, Rect)>,
+    /// Per-point child vetoes — `Widget::accepts_child_hit` made testable: the
+    /// named child is refused for any point inside the rectangle, in absolute
+    /// coordinates (this board is not a content-transform node, so the point
+    /// the arena offers is the absolute one).
+    vetoed: Vec<(WidgetId, Rect)>,
+    /// How many times the arena asked. The veto is a real per-point query on
+    /// the pointer's hot path, so *how often* it is asked is part of its
+    /// contract, not only what it answers.
+    asked: Rc<StdCell<u32>>,
 }
 
 impl Board {
     fn new() -> Self {
-        Self { placed: Vec::new() }
+        Self {
+            placed: Vec::new(),
+            vetoed: Vec::new(),
+            asked: Rc::new(StdCell::new(0)),
+        }
     }
     fn at(mut self, id: WidgetId, rect: Rect) -> Self {
         self.placed.push((id, rect));
+        self
+    }
+    fn veto(mut self, id: WidgetId, rect: Rect) -> Self {
+        self.vetoed.push((id, rect));
+        self
+    }
+    /// Share the `accepts_child_hit` call counter with the test.
+    fn counting(mut self, counter: Rc<StdCell<u32>>) -> Self {
+        self.asked = counter;
         self
     }
 }
@@ -257,6 +279,14 @@ impl Widget for Board {
 
     fn children(&self) -> Vec<WidgetId> {
         self.placed.iter().map(|(id, _)| *id).collect()
+    }
+
+    fn accepts_child_hit(&self, child: WidgetId, point: Point) -> bool {
+        self.asked.set(self.asked.get() + 1);
+        !self
+            .vetoed
+            .iter()
+            .any(|(id, rect)| *id == child && rect.contains(point))
     }
 }
 
@@ -1093,4 +1123,140 @@ fn compact_layout_is_unchanged_by_either_declaration() {
         TargetDensity::Compact,
         "the default ladder must stay Compact for this to mean anything"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Mechanism 4 — `Widget::accepts_child_hit`, the parent's per-point veto
+// ---------------------------------------------------------------------------
+//
+// The hook exists for a widget that owns a **second** picking system over the
+// same area — a `SceneView`'s lightweight items are the shipped case. Its
+// contract is deliberately the same one a `hit_shape` rejection has: the walk
+// falls through, it does not stop.
+
+/// Two overlapping tappable children, the later one on top. A veto of the top
+/// child for one region hands that region to the one beneath, and leaves the
+/// rest of the top child alone — the veto is per point, not per child.
+#[test]
+fn a_vetoed_child_falls_through_to_the_sibling_beneath_it() {
+    let mut tree = WidgetTree::new();
+    let under = tree.add(Cell::new().tappable());
+    let over = tree.add(Cell::new().tappable());
+    let _board = tree.add(
+        Board::new()
+            .at(under, Rect::new(0.0, 0.0, 300.0, 200.0))
+            .at(over, Rect::new(0.0, 0.0, 300.0, 200.0))
+            // The left half of `over` is refused.
+            .veto(over, Rect::new(0.0, 0.0, 150.0, 200.0)),
+    );
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    let mouse = mouse_pointer();
+
+    assert_eq!(
+        tree.hit_test_for(at(50.0, 100.0), &mouse),
+        Some(under),
+        "inside the vetoed region the point must fall through to the sibling \
+         beneath, exactly as a `hit_shape` rejection does",
+    );
+    assert_eq!(
+        tree.hit_test_for(at(250.0, 100.0), &mouse),
+        Some(over),
+        "one region is refused, not the child — outside it the top child still \
+         wins",
+    );
+}
+
+/// With nothing beneath, a vetoed child hands the point to the parent, which is
+/// what makes the `SceneView` become the target for a point one of its own
+/// lightweight items owns.
+#[test]
+fn a_vetoed_child_falls_through_to_the_parent_when_nothing_is_beneath() {
+    let mut tree = WidgetTree::new();
+    let card = tree.add(Cell::new().tappable());
+    let board = tree.add(
+        Board::new()
+            .at(card, Rect::new(50.0, 50.0, 100.0, 100.0))
+            .veto(card, Rect::new(0.0, 0.0, 300.0, 200.0)),
+    );
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    let mouse = mouse_pointer();
+    assert_eq!(tree.hit_test_for(at(100.0, 100.0), &mouse), Some(board));
+}
+
+/// The outset pre-pass asks the veto only about children that actually declare
+/// an outset.
+///
+/// `accepts_child_hit` is a real per-point query — the shipped implementation
+/// scans a snapshot — and a hit test runs on every pointer sample, so its cost
+/// is paid at the worst possible moment. Asking it *before* the zero-outset
+/// `continue` made the pre-pass ask about **every** child, including the ones
+/// it was about to skip, on trees where nothing declares an outset at all: the
+/// cost grew with the sibling count and bought nothing.
+///
+/// The counts below are the whole claim: with no outset anywhere the arena asks
+/// exactly once — the one question the ordinary walk needs to resolve its first
+/// candidate — however many siblings there are. Move the check back above the
+/// zero-outset test and these read `n + 1`.
+///
+/// That the veto is still honoured *inside* the pre-pass is pinned separately,
+/// by `an_outset_grip_does_not_win_a_point_its_parent_vetoed`.
+#[test]
+fn the_outset_pre_pass_does_not_ask_the_veto_about_children_without_one() {
+    let build = |siblings: usize| {
+        let mut tree = WidgetTree::new();
+        let mut board = Board::new();
+        let asked = Rc::new(StdCell::new(0));
+        board = board.counting(asked.clone());
+        for _ in 0..siblings {
+            let child = tree.add(Cell::new().tappable());
+            board = board.at(child, Rect::new(0.0, 0.0, 300.0, 200.0));
+        }
+        let top = tree.add(Cell::new().tappable());
+        board = board.at(top, Rect::new(0.0, 0.0, 300.0, 200.0));
+        let _board = tree.add(board);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        asked.set(0);
+        let hit = tree.hit_test_for(at(150.0, 100.0), &touch_pointer());
+        assert_eq!(hit, Some(top), "precondition: the topmost child wins");
+        asked.get()
+    };
+
+    assert_eq!(build(1), 1, "two children");
+    assert_eq!(
+        build(5),
+        1,
+        "six children, and still one question: the pre-pass asks nobody when \
+         nobody declares an outset",
+    );
+}
+
+/// The outset pre-pass runs **before** the reverse-sibling walk, so a grip is
+/// offered the point first. It must honour the veto too, or a thin grip would
+/// be the one way to win a point its parent has already refused.
+#[test]
+fn an_outset_grip_does_not_win_a_point_its_parent_vetoed() {
+    let build = |vetoed: bool| {
+        let mut tree = WidgetTree::new();
+        let grip = tree.add(Cell::new().tappable().outset(8.0));
+        let row = tree.add(Cell::new().tappable());
+        let mut board = Board::new()
+            .at(grip, Rect::new(100.0, 0.0, 6.0, 200.0))
+            .at(row, Rect::new(0.0, 0.0, 300.0, 200.0));
+        if vetoed {
+            board = board.veto(grip, Rect::new(0.0, 0.0, 300.0, 200.0));
+        }
+        let _board = tree.add(board);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        let finger = touch_pointer();
+        (tree.hit_test_for(at(112.0, 100.0), &finger), grip, row)
+    };
+    let (unvetoed, grip, _) = build(false);
+    assert_eq!(
+        unvetoed,
+        Some(grip),
+        "precondition: without the veto the grip wins its ring",
+    );
+    let (vetoed, grip, row) = build(true);
+    assert_ne!(vetoed, Some(grip));
+    assert_eq!(vetoed, Some(row), "the ring falls through like the body");
 }

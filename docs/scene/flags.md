@@ -16,7 +16,7 @@ defaults; setters layer additional flags on top.
 
 ## Builder methods at a glance
 
-`NONE`, `IS_VISIBLE`, `IS_ENABLED`, `IS_DRAGGABLE`, `IS_SELECTABLE`, `IS_FOCUSABLE`, `ACCEPTS_HOVER`, `CLIPS_TO_SHAPE`, `CLIPS_CHILDREN_TO_SHAPE`, `IGNORES_TRANSFORMATIONS`, `HAS_NO_CONTENTS`, `NEGATIVE_Z_BEHIND_PARENT`, `contains`, `intersects`, `set`, `with`, `without`, `bits`, `from_bits`
+`NONE`, `IS_VISIBLE`, `IS_ENABLED`, `IS_DRAGGABLE`, `IS_SELECTABLE`, `IS_FOCUSABLE`, `ACCEPTS_HOVER`, `CLIPS_TO_SHAPE`, `CLIPS_CHILDREN_TO_SHAPE`, `IGNORES_TRANSFORMATIONS`, `HAS_NO_CONTENTS`, `contains`, `intersects`, `set`, `with`, `without`, `bits`, `from_bits`
 
 ## API reference
 
@@ -98,12 +98,6 @@ over moving content, chart axis labels. Default off.
 Item has nothing to paint — the paint walk skips it
 entirely. Pure logical-only containers (used for AT
 grouping or hit-test routing) set this. Default off.
-
-#### `pub const NEGATIVE_Z_BEHIND_PARENT: Self = Self(1 << 10);`
-
-Children with `z < 0` paint **behind** this item rather
-than in front. Mirrors Qt's `ItemNegativeZStacksBehindParent`.
-Default off.
 
 #### `pub const fn contains(&self, other: Self) -> bool`
 

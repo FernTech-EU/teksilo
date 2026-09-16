@@ -69,7 +69,7 @@ fn build_scene_view() -> SceneView {
     zigzag.line_to(Point::new(130.0, 134.0));
     zigzag.line_to(Point::new(175.0, 158.0));
     scene.add_item(
-        PathItem::new(zigzag, Rect::new(38.0, 132.0, 140.0, 28.0))
+        PathItem::new(zigzag)
             .stroke_cosmetic(Color::new(0.80, 0.60, 0.90, 1.0), 3.0)
             .access_label(lit!("decorative zigzag")),
         Point::ZERO,

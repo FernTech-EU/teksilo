@@ -93,15 +93,8 @@ fn add_suggested_link(model: &SceneModel, from: Point, to: Point) {
     let mut path = Path::new();
     path.move_to(from).line_to(to);
     let stroke_w = 2.0_f32;
-    let pad = stroke_w * 0.5 + 2.0;
-    let bounds = Rect::new(
-        from.x.min(to.x) - pad,
-        from.y.min(to.y) - pad,
-        (to.x - from.x).abs() + 2.0 * pad,
-        (to.y - from.y).abs() + 2.0 * pad,
-    );
     let id = model.add_item(
-        PathItem::new(path, bounds)
+        PathItem::new(path)
             .stroke_styled(
                 Color::new(0.45, 0.45, 0.50, 0.75),
                 StrokeStyle::dashed(stroke_w, 6.0, 4.0),
@@ -145,14 +138,8 @@ fn add_wire(model: &SceneModel, conn: &MagnetConnection) {
         Point::new(end.x - dx, end.y),
         end,
     );
-    let bounds = Rect::new(
-        start.x.min(end.x),
-        start.y.min(end.y) - 4.0,
-        (end.x - start.x).abs(),
-        (end.y - start.y).abs() + 8.0,
-    );
     let wire = model.add_item(
-        PathItem::new(path, bounds)
+        PathItem::new(path)
             .stroke_cosmetic(Color::new(0.20, 0.65, 0.45, 0.95), 2.5)
             .access_label(lit!("connection")),
         Point::ZERO,

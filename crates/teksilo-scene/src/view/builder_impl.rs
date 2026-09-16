@@ -46,6 +46,10 @@ impl SceneView {
             adopt_scene_size: false,
             drag_mode: Signal::new(crate::item_handlers::DragMode::RubberBand),
             handler_snapshot: Rc::new(RefCell::new(Vec::new())),
+            over_claimants: Rc::new(Cell::new(false)),
+            veto_memo: Rc::new(Cell::new(None)),
+            snapshot_generation: Rc::new(Cell::new(0)),
+            press_floor: Rc::new(Cell::new(crate::pick::RANK_UNDER)),
             hovered_item: Rc::new(Cell::new(None)),
             pending_tap: Rc::new(Cell::new(None)),
             last_viewport: Signal::new(Size::new(800.0, 600.0)),
@@ -69,7 +73,8 @@ impl SceneView {
                 crate::selection::SceneSelectionMode::None,
             ),
             marquee: Rc::new(Cell::new(None)),
-            pending_marquee_commit: Rc::new(Cell::new(None)),
+            pending_marquee_commit: Rc::new(RefCell::new(None)),
+            marquee_mode: crate::shape::ItemSelectionMode::default(),
             drag_target: Rc::new(Cell::new(None)),
             pending_item_move: Rc::new(Cell::new(None)),
             lightweight_bounds_snapshot: Rc::new(RefCell::new(Vec::new())),
@@ -105,6 +110,21 @@ impl SceneView {
     /// and Ctrl+drag additive marquee.
     pub fn selection_mode(mut self, mode: crate::selection::SceneSelectionMode) -> Self {
         self.selection = crate::selection::SceneSelection::new(mode);
+        self
+    }
+
+    /// Which rule the rubber band picks items by.
+    ///
+    /// Default [`ItemSelectionMode::IntersectsItemShape`] —
+    /// Qt's default, and the one that makes a rubber band agree with a click
+    /// about what an item is: a band that merely grazes a connector's bounding
+    /// box no longer selects the connector, it has to actually cross the
+    /// stroke. Pass
+    /// [`IntersectsItemBoundingRect`](crate::ItemSelectionMode::IntersectsItemBoundingRect)
+    /// for the looser box test, which is what the marquee did before
+    /// `ItemShape` existed.
+    pub fn marquee_selection_mode(mut self, mode: crate::shape::ItemSelectionMode) -> Self {
+        self.marquee_mode = mode;
         self
     }
 
@@ -180,9 +200,15 @@ impl SceneView {
     /// that drive on_drag without a follow-up layout call this to
     /// materialise the box-select result.
     pub fn flush_marquee_commit(&self) -> bool {
-        if let Some((rect, additive)) = self.pending_marquee_commit.take() {
-            self.selection
-                .commit_marquee(&self.model.0.borrow(), rect, additive);
+        let pending = self.pending_marquee_commit.borrow_mut().take();
+        if let Some((region, mode, additive)) = pending {
+            self.selection.commit_marquee_region(
+                &self.model.0.borrow(),
+                &region,
+                mode,
+                self.view_scale(),
+                additive,
+            );
             self.marquee.set(None);
             true
         } else {
@@ -196,9 +222,13 @@ impl SceneView {
     /// their `scene_pos` derives from the parent's chain.
     pub fn flush_pending_item_move(&mut self) -> bool {
         if let Some((target_id, delta)) = self.pending_item_move.take() {
-            if let Some(local_pos) = self.model.local_pos(target_id) {
-                let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
-                self.model.set_local_pos(target_id, new_local_pos);
+            // The whole selection when the grab was on a selected item — see
+            // `SceneView::drag_group`, which the paint feedback reads too.
+            for id in self.drag_group(target_id) {
+                if let Some(local_pos) = self.model.local_pos(id) {
+                    let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
+                    self.model.set_local_pos(id, new_local_pos);
+                }
             }
             self.drag_target.set(None);
             true

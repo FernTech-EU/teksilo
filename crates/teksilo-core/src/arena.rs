@@ -1010,8 +1010,10 @@ impl WidgetArena {
         let roots = self.roots();
         // Roots take the outset pre-pass too, so a grip that happens to be a
         // top-level node behaves like one nested anywhere else. The window is
-        // its "parent", and the window does not clip.
-        if let Some(grip) = self.outset_hit(&roots, point, exclude, hit) {
+        // its "parent", and the window does not clip — and, having no widget,
+        // it vetoes nothing.
+        let no_veto = |_: WidgetId| false;
+        if let Some(grip) = self.outset_hit(&roots, point, exclude, hit, &no_veto) {
             return Some(grip);
         }
         for &root in roots.iter().rev() {
@@ -1152,10 +1154,21 @@ impl WidgetArena {
         // normal walk below, which resolves descendants and honours
         // `hit_shape`, so declaring an outset never changes where an in-bounds
         // press lands.
-        if let Some(grip) = self.outset_hit(&children, child_point, exclude, hit) {
+        // A parent that owns a second picking system over the same area gets
+        // to veto a child for this point — see `Widget::accepts_child_hit`.
+        // Resolved once here and threaded into `outset_hit`, so a grip cannot
+        // sneak past a veto the ordinary walk would have honoured.
+        let parent = self.get(id);
+        let vetoes = |child: WidgetId| {
+            parent.is_some_and(|node| !node.widget.accepts_child_hit(child, child_point))
+        };
+        if let Some(grip) = self.outset_hit(&children, child_point, exclude, hit, &vetoes) {
             return Some(grip);
         }
         for &child in children.iter().rev() {
+            if vetoes(child) {
+                continue;
+            }
             if let Some(found) = self.hit_test_recursive(child, child_point, exclude, hit) {
                 return Some(found);
             }
@@ -1184,12 +1197,18 @@ impl WidgetArena {
     /// only a point genuinely in the ring — outside the child's real bounds —
     /// resolves to the child itself. A candidate that resolves to nothing hands
     /// over to the next-nearest, and finally to the normal walk.
+    ///
+    /// `vetoes` is the parent's own per-point rejection
+    /// ([`Widget::accepts_child_hit`]),
+    /// applied here as well as in the ordinary walk — a grip must not win a
+    /// point the parent has already refused for it.
     fn outset_hit(
         &self,
         children: &[WidgetId],
         point: teksilo_canvas::Point,
         exclude: Option<WidgetId>,
         hit: &HitContext<'_>,
+        vetoes: &dyn Fn(WidgetId) -> bool,
     ) -> Option<WidgetId> {
         // Almost every parent has no outset-declaring child at all, so the
         // common case allocates nothing and returns on the first loop.
@@ -1214,6 +1233,20 @@ impl WidgetArena {
             let (top, bottom) = (finite(outset.top), finite(outset.bottom));
             let (leading, trailing) = (finite(outset.leading), finite(outset.trailing));
             if top <= 0.0 && bottom <= 0.0 && leading <= 0.0 && trailing <= 0.0 {
+                continue;
+            }
+            // The parent's per-point veto applies here too: a grip that the
+            // ordinary walk would refuse must not win by being offered first.
+            //
+            // Asked **after** the zero-outset test, not before. Almost no child
+            // declares an outset, and this predicate is a real per-point query
+            // (the `SceneView`'s is a snapshot scan), so asking it first made
+            // every hit test on a vetoing parent pay it twice per child — once
+            // here for children that were about to be skipped anyway, and once
+            // in the ordinary walk. The order does not change the answer: a
+            // child that survives to `candidates` is exactly one this used to
+            // reach.
+            if vetoes(child) {
                 continue;
             }
             let Some(space) = self.hit_space(child, point) else {

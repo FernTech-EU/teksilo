@@ -36,7 +36,7 @@
 //! ```
 
 use accesskit::Role;
-use teksilo_canvas::{Canvas, Point, Rect, StrokeStyle};
+use teksilo_canvas::{Canvas, Rect, StrokeStyle};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
@@ -251,26 +251,17 @@ impl SceneItem for GroupItem {
         }
     }
 
-    /// Non-visual GroupItems pass clicks through to items beneath.
-    /// Visual groups (with fill / stroke / inline label) AABB-hit-test
-    /// so apps can wire group-level click handlers.
-    fn shape_contains(&self, local_pt: Point) -> bool {
+    /// A visual group (fill / stroke / inline label) is its box, so apps can
+    /// wire group-level click handlers. A **logical-only** group is
+    /// [`ItemShape::none`](crate::ItemShape::none): it must let clicks fall
+    /// through to the items it contains, or it would capture every event over
+    /// its rectangle and block everything inside it.
+    fn shape(&self) -> crate::shape::ItemShape {
         if self.is_visual() {
-            self.local_bounds.contains(local_pt)
+            crate::shape::ItemShape::bounds(self.local_bounds)
         } else {
-            false
+            crate::shape::ItemShape::none()
         }
-    }
-
-    /// Override the default AABB-only snapshot: logical-only groups
-    /// (no fill, no stroke, no inline label) must MISS for dispatch
-    /// so clicks fall through to items beneath. Without this
-    /// override the snapshot would AABB-hit and capture every event
-    /// over the group's rect, blocking the items it contains.
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
-        let is_visual = self.is_visual();
-        let bounds = self.local_bounds;
-        Box::new(move |p, _view_scale| is_visual && bounds.contains(p))
     }
 
     fn thumbnail_color(&self) -> Color {
@@ -307,13 +298,13 @@ impl SceneItem for GroupItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use teksilo_canvas::Transform2D;
+    use teksilo_canvas::{Point, Transform2D};
     use teksilo_i18n::lit;
 
     #[test]
     fn group_item_does_not_hit_test_through_aabb() {
         let g = GroupItem::new(Rect::new(0.0, 0.0, 1000.0, 1000.0));
-        assert!(!g.shape_contains(Point::new(500.0, 500.0)));
+        assert!(!g.shape().contains(Point::new(500.0, 500.0), 1.0));
     }
 
     #[test]
@@ -326,22 +317,22 @@ mod tests {
     fn group_item_with_fill_is_visual_and_hit_tests() {
         let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).fill(Color::RED);
         assert!(g.is_visual());
-        assert!(g.shape_contains(Point::new(50.0, 50.0)));
-        assert!(!g.shape_contains(Point::new(150.0, 50.0)));
+        assert!(g.shape().contains(Point::new(50.0, 50.0), 1.0));
+        assert!(!g.shape().contains(Point::new(150.0, 50.0), 1.0));
     }
 
     #[test]
     fn group_item_with_stroke_only_is_visual() {
         let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 1.0);
         assert!(g.is_visual());
-        assert!(g.shape_contains(Point::new(50.0, 50.0)));
+        assert!(g.shape().contains(Point::new(50.0, 50.0), 1.0));
     }
 
     #[test]
     fn group_item_with_label_only_is_not_visual() {
         let g = GroupItem::new(Rect::new(0.0, 0.0, 100.0, 100.0)).label(lit!("Act 1"));
         assert!(!g.is_visual());
-        assert!(!g.shape_contains(Point::new(50.0, 50.0)));
+        assert!(!g.shape().contains(Point::new(50.0, 50.0), 1.0));
     }
 
     #[test]
@@ -350,7 +341,7 @@ mod tests {
             .label(lit!("Act 1"))
             .show_label(true);
         assert!(g.is_visual());
-        assert!(g.shape_contains(Point::new(50.0, 50.0)));
+        assert!(g.shape().contains(Point::new(50.0, 50.0), 1.0));
     }
 
     #[test]

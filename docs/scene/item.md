@@ -19,8 +19,8 @@ An item is positioned in its parent's coordinate space by a
 (rotation/scale, applied around the local origin). The Scene
 composes those per-item transforms up the parent chain to produce
 a `scene_transform` (local→scene). Hit-test inverse-transforms a
-scene-coord point into local coords before calling
-`SceneItem::shape_contains`; paint pushes the scene transform
+scene-coord point into local coords before testing the item's
+`SceneItem::shape`; paint pushes the scene transform
 onto the canvas before calling `SceneItem::paint`.
 
 ## When to use

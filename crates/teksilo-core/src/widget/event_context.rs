@@ -57,9 +57,31 @@ pub(crate) struct ScrollRevealRequest {
     pub(crate) from: Option<crate::widget_id::WidgetId>,
 }
 
+/// What a handler said about the cursor during one dispatch.
+///
+/// A handler either names a cursor or withdraws, and the two are distinct
+/// answers: withdrawing is not "show `Default`", it is "the node's own
+/// declaration applies again". One slot, so the last call in a dispatch wins,
+/// the way it did when this was a bare `Option<CursorIcon>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CursorRequest {
+    /// Override the cursor with this icon.
+    Set(CursorIcon),
+    /// Give the cursor back to whatever the hovered node declared.
+    Release,
+}
+
 /// Context available during event handling.
 pub struct EventContext<'ops> {
-    pub(crate) cursor_request: Option<CursorIcon>,
+    /// A handler's word on the cursor for this dispatch, if it said one.
+    pub(crate) cursor_request: Option<CursorRequest>,
+    /// The cursor the **node** declared, written only by the router's
+    /// `PointerEnter` / `PointerLeave` arms. Kept apart from
+    /// [`cursor_request`](Self::cursor_request) so that a handler which also
+    /// speaks during the same dispatch overrides the declared cursor without
+    /// erasing the tree's memory of what it was — which is the value
+    /// [`release_cursor`](Self::release_cursor) hands back to.
+    pub(crate) declared_cursor_request: Option<CursorIcon>,
     pub(crate) tree_mutations: Vec<TreeMutation>,
     pub(crate) idle_callbacks: Vec<crate::idle::IdleCallback>,
     pub(crate) modal_requests: Vec<crate::modal::ModalRequest>,
@@ -142,6 +164,10 @@ pub struct EventContext<'ops> {
     /// `None` for a context made outside per-node dispatch (a gesture timer, a
     /// key-capture callback, an async completion).
     pub(crate) dispatch_node: Option<WidgetId>,
+    /// The node the router resolved as this dispatch's **target** — the
+    /// innermost node the arena's hit walk accepted. Read by
+    /// [`dispatch_target`](EventContext::dispatch_target).
+    pub(crate) dispatch_target: Option<WidgetId>,
     /// Delayed overlay requests (request, delay, optional focus target,
     /// whether to dismiss sibling overlays when it finally shows).
     pub(crate) delayed_overlay_requests: Vec<(
@@ -466,6 +492,7 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn new() -> Self {
         Self {
             cursor_request: None,
+            declared_cursor_request: None,
             tree_mutations: Vec::new(),
             idle_callbacks: Vec::new(),
             modal_requests: Vec::new(),
@@ -480,6 +507,7 @@ impl<'ops> EventContext<'ops> {
             pointer_capture: None,
             pointer_captor: None,
             dispatch_node: None,
+            dispatch_target: None,
             delayed_overlay_requests: Vec::new(),
             timed_overlay_requests: Vec::new(),
             reveal_overlay_requests: Vec::new(),
@@ -587,6 +615,11 @@ impl<'ops> EventContext<'ops> {
     }
 
     /// Record which node's handler is about to run.
+    pub(crate) fn with_dispatch_target(mut self, target: WidgetId) -> Self {
+        self.dispatch_target = Some(target);
+        self
+    }
+
     pub(crate) fn with_dispatch_node(mut self, node: WidgetId) -> Self {
         self.dispatch_node = Some(node);
         self
@@ -1005,6 +1038,29 @@ impl<'ops> EventContext<'ops> {
         self.press_claimed_by_interactive_child
     }
 
+    /// The node this dispatch is **addressed to** — the innermost node the
+    /// arena's hit walk accepted for this pointer sample, with
+    /// [`hit_transparent`](crate::widget_builder::HandlerSet::hit_transparent),
+    /// [`Widget::hit_shape`](crate::widget::Widget::hit_shape),
+    /// [`Widget::accepts_child_hit`](crate::widget::Widget::accepts_child_hit)
+    /// and `event_pass_through` all already applied.
+    ///
+    /// The point of it is the **preview** pass. `on_pointer_event` fires on
+    /// every strict ancestor of the target during preview and on the target
+    /// itself during the bubble, so an ancestor handler cannot otherwise tell
+    /// "a descendant won the walk" from "I am the one that was hit". A widget
+    /// that owns a second picking system over the same area needs exactly that
+    /// distinction, to know whether to yield: comparing this against its own id
+    /// reads the arena's verdict instead of re-deriving it from a rectangle,
+    /// which is what keeps the two pickers from answering in different orders.
+    ///
+    /// `None` for a context made outside pointer dispatch (a gesture timer, a
+    /// key-capture callback, an async completion). Treat `None` as "no verdict
+    /// available", not as "not the target".
+    pub fn dispatch_target(&self) -> Option<WidgetId> {
+        self.dispatch_target
+    }
+
     /// Look up the bounds rect of an open overlay by its root content
     /// widget id. Returns `None` when no such overlay is currently
     /// active. The snapshot is taken once per dispatch; mid-handler
@@ -1177,8 +1233,45 @@ impl<'ops> EventContext<'ops> {
     }
 
     /// Request a cursor icon change.
+    ///
+    /// This is an **override**: it outranks the cursor the hovered node
+    /// declared with [`WidgetBuilder::cursor`], and it outlives the dispatch
+    /// that set it. The tree's cursor moves only when something writes to it,
+    /// and the node-declared cursor is written on `PointerEnter` /
+    /// `PointerLeave` alone — so a handler that sets a cursor while the
+    /// pointer is inside a node owns the cursor until the pointer leaves that
+    /// node, or until the handler gives it back with
+    /// [`release_cursor`](Self::release_cursor).
+    ///
+    /// [`WidgetBuilder::cursor`]: crate::widget_builder::WidgetBuilder::cursor
     pub fn set_cursor(&mut self, cursor: CursorIcon) {
-        self.cursor_request = Some(cursor);
+        self.cursor_request = Some(CursorRequest::Set(cursor));
+    }
+
+    /// Withdraw this handler's cursor override, so the cursor the hovered
+    /// node declared applies again.
+    ///
+    /// The cursor counterpart of returning [`EventResponse::Ignored`]: it says
+    /// "I have nothing to say about the cursor", which is *not* the same as
+    /// saying [`CursorIcon::Default`] and not the same as staying silent.
+    ///
+    /// Silence is only safe for a handler that has never spoken. A handler
+    /// which re-decides the cursor on every move — a scene arbitrating a
+    /// lightweight item's cursor against the card underneath it, a chart's
+    /// overlay marks, a terminal's link layer — reaches points where it has no
+    /// answer while the pointer is still inside the same node. No hover
+    /// transition fires there, so nothing re-applies the node's declared
+    /// cursor, and going quiet leaves the handler's *last* word standing. This
+    /// is how it takes that word back.
+    ///
+    /// Restores exactly what the `PointerEnter` walk resolved for the current
+    /// hover chain (or [`CursorIcon::Default`] if that chain declared none),
+    /// so it can never disagree with the declared-cursor mechanism it defers
+    /// to. Calling it when nothing was overridden is a no-op.
+    ///
+    /// [`EventResponse::Ignored`]: crate::event::EventResponse::Ignored
+    pub fn release_cursor(&mut self) {
+        self.cursor_request = Some(CursorRequest::Release);
     }
 
     /// Set a widget subtree as dormant (preserves state, releases rendering).

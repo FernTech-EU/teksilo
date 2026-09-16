@@ -60,7 +60,7 @@ assert_eq!(scene.scene_pos(id), Some(Point::new(100.0, 100.0)));
 
 ## Builder methods at a glance
 
-`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `cascade_budget`, `set_cascade_budget`, `mutation_version`, `structural_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `item`, `remove`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_at`, `colliding_items`, `items_along_path`, `items_at`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`
+`with_index`, `add_widget`, `add_item`, `add_item_dynamic`, `refresh_dynamic_bounds`, `item_change_signal`, `a11y_change_signal`, `cascade_budget`, `set_cascade_budget`, `mutation_version`, `structural_version`, `local_pos`, `set_local_pos`, `local_bounds`, `set_local_bounds`, `transform`, `set_transform`, `scene_transform`, `scene_pos`, `scene_rect`, `map_to_scene`, `map_from_scene`, `flags`, `set_flags`, `set_flag`, `set_visible`, `is_effectively_visible`, `opacity`, `set_opacity`, `set_item_fill`, `clear_item_fill`, `set_item_stroke`, `clear_item_stroke`, `add_boxed_item`, `set_item_handlers`, `handlers_mut`, `handlers`, `effective_opacity`, `set_scene_rect`, `scene_rect_extent`, `pan_axes`, `current_pan_axes`, `zoomable`, `is_zoomable`, `set_pan_bounds`, `current_pan_bounds`, `set_zoom_range`, `current_zoom_range`, `pan_axes_signal`, `pan_bounds_signal`, `zoom_range_signal`, `zoomable_signal`, `constraints`, `set_z`, `bring_to_front`, `send_to_back`, `z`, `set_layer`, `layer`, `set_item_parent`, `parent_of`, `is_descendant_of`, `collect_descendants`, `item`, `paint_key`, `remove`, `orphan`, `items_in_rect`, `item_thumbnails`, `item_shape`, `item_contains`, `item_region`, `items_in_region`, `item_at`, `item_at_scaled`, `items_at`, `items_at_scaled`, `item_at_in_view`, `is_hit_testable`, `colliding_items`, `colliding_items_with`, `items_along_path`, `items_along_path_with`, `len`, `is_empty`, `ids`, `index`, `add_magnet`, `remove_magnet`, `clear_magnets`, `set_magnet_local_pos`, `set_magnet_enabled`, `magnet_ids_of`, `magnet_owner`, `magnet_enabled`, `magnet_scene_pos`, `magnet`, `compute_item_snap`, `compute_port_snap`, `nearest_magnet`, `add_a11y_group`, `remove_a11y_group`, `a11y_group`, `set_a11y_parent`, `a11y_parent_of`, `add_a11y_relation`, `a11y_relations`, `set_a11y_live`, `set_a11y_landmark`, `set_a11y_categories`, `a11y_categories_of`
 
 ## API reference
 
@@ -526,6 +526,22 @@ next `paint` reflects the new geometry. The spatial index is
 re-bucketed; only this item moves (descendants' local frames
 are unchanged). No-op if the id is unknown.
 
+# The item has the last word, and says it once
+
+An item whose box is **derived** from its own geometry — a
+`PathItem` — treats this as *"fit yourself to this
+rectangle"* rather than *"adopt this rectangle"*, and the box stored
+here is what it settled on, read back from the item. It lands on the
+request on every axis the geometry has extent on; on an axis it has
+none (a perfectly horizontal stroke has no height) the box stays the
+stroke's own thickness, because there is nothing to stretch.
+
+Either way the call is **idempotent**: asking twice for the same
+rectangle emits one `ItemChange::LocalBoundsChanged` and re-buckets
+the index once. An app driving this per frame — a resize handle, a
+layout pass — therefore goes quiet as soon as it stops moving, rather
+than emitting an endless series of nearly-identical changes.
+
 #### `pub fn transform(&self, id: ItemId) -> Option<Transform2D>`
 
 Read an item's local→parent transform (rotation/scale around
@@ -828,6 +844,18 @@ itself is **not** included.
 Borrow a lightweight `SceneItem` by id. `None` for unknown
 ids and for heavyweight widget entries.
 
+#### `pub fn paint_key(&self, id: ItemId) -> Option<PaintKey>`
+
+Where `id` sits in this scene's single paint order — the value every
+picker in the crate compares. `None` for unknown ids.
+
+Defined for **both tiers**: a lightweight entry's rank is its
+`SceneLayer` band (`RANK_UNDER` /
+`RANK_OVER`), a heavyweight widget entry's is
+`RANK_WIDGET` — which is exactly where the
+arena's child walk paints it, between the two lightweight bands. See
+`PaintKey` for the ordering and for the equal-`z` tie-break.
+
 #### `pub fn remove(&mut self, id: ItemId)`
 
 Remove an item by id, recursively dropping every descendant.
@@ -885,44 +913,180 @@ a heavyweight widget entry has no `SceneItem`, so it's shown in a neutral
 tint — a minimap that omitted the heavyweight tier would misrepresent a
 widget-heavy scene (cards, nodes), so both tiers are included.
 
+#### `pub fn item_shape(&self, id: ItemId) -> Option<ItemShape>`
+
+The shape of any entry, in its **local** coordinates.
+
+For a lightweight item this is `SceneItem::shape`. A **heavyweight**
+widget entry has no `SceneItem` at all — `Scene::item` returns `None`
+for it — so its shape is defined to be
+`ItemShape::bounds` of its `local_bounds`. That is not a placeholder:
+a widget's silhouette is its layout box, the arena hit-tests it as one,
+and the marquee has always selected heavyweight entries through the
+same index query as lightweight ones. Stating it here is what keeps a
+`…ItemShape` selection mode meaningful for a scene whose primary
+objects are cards.
+
+`None` for an unknown id.
+
+#### `pub fn item_contains(&self, id: ItemId, scene_pt: Point, view_scale: f32) -> bool`
+
+Whether `id`'s shape contains `scene_pt`.
+
+Works for both tiers (see `Scene::item_shape`). `view_scale` is the
+live view zoom, consulted only by a cosmetic stroke band; pass `1.0`
+when there is no view.
+
+#### `pub fn item_region(&self, id: ItemId) -> Option<SceneRegion>`
+
+The item's own shape re-published as a **scene**-space region — what a
+collision query asks the rest of the scene about. `None` for an unknown
+id, a shape of `ItemShape::none`, or a screen-anchored
+(`IGNORES_TRANSFORMATIONS`)
+item, whose silhouette is not in scene space at all.
+
+#### `pub fn items_in_region( &self, region: &SceneRegion, mode: ItemSelectionMode, view_scale: f32, ) -> Vec<ItemId>`
+
+Items matching `region` under `mode` — **both tiers**, exactly like
+`Scene::items_in_rect`, which this generalises.
+
+Broad-phased by the spatial index on `region.bounding_rect()`, then
+narrow-phased per `mode`: the `…ItemBoundingRect` modes compare the
+item's **scene** AABB against the region in scene space; the
+`…ItemShape` modes map the region into the item's **local** frame and
+compare it against `Scene::item_shape`. For an item with a
+non-identity transform those are different tests — see
+`ItemSelectionMode`.
+
+`view_scale` is the live view zoom, consulted only by a cosmetic stroke
+band; pass `1.0` when there is no view. Visibility and selectability
+are **not** filtered here — this is a pure geometry query, and the
+caller (e.g. `SceneSelection::commit_marquee`)
+applies its own flag policy.
+
+Items flagged
+`IGNORES_TRANSFORMATIONS`
+**are skipped**, for the reason `Scene::item_at` skips them: they are
+anchored in screen space, so their `local_bounds` is a screen rectangle
+and the scene AABB the index holds for them is a fiction. Comparing a
+scene-space region against that fiction is a guess, and the two query
+families used to disagree about whether to make it — the point queries
+declined and the marquee did not. Reaching screen-pinned chrome needs a
+region that arrives in *screen* space, which is what
+`Scene::item_at_in_view` does for a point; there is no region twin of
+it yet, so a marquee cannot select pinned chrome at all.
+
 #### `pub fn item_at(&self, scene_pt: Point) -> Option<ItemId>`
 
-Topmost lightweight item whose `shape_contains` fires for
-`scene_pt`. Iterates `items_in_rect` for a tiny rect around
-the point, sorts by z descending, and returns the first hit.
-Heavyweight widget entries are skipped (their hit-testing is
-handled by the arena event dispatch).
+Topmost **lightweight** item whose shape contains `scene_pt`, at unit
+view scale. See `Scene::item_at_scaled` for the zoom-aware form and
+`Scene::item_at_in_view` for the one that also places screen-anchored
+items.
 
-**Limitation:** items flagged
+Heavyweight widget entries are skipped: their hit-testing is the
+arena's job, and a scene-space answer would contradict it.
+
+Items flagged
 `IGNORES_TRANSFORMATIONS`
-hit-test in screen space, not scene space — so this scene-only
-query may incorrectly hit them or miss them depending on the
-current view transform. Apps that route pointer events through
-`SceneView`'s dispatch get screen-space hit-test for IGNORES
-items automatically; only use `item_at` directly for normal
-items, or pair with the view transform to filter.
+are **also skipped**, deterministically. They are anchored in screen
+space, so a scene-space point cannot place them at all; answering with
+a coin-flip (which is what comparing them against a scene AABB amounts
+to) is worse than not answering. Use `Scene::item_at_in_view`, or
+`SceneView` dispatch, when the query needs them.
 
-#### `pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId>`
+"Topmost" is `Scene::paint_key` order, so an
+`Over`-band item beats a higher-`z`
+`Under` one, and two equal-`z` items resolve to the
+later-inserted one — the same answer `SceneView` dispatch gives.
 
-Items whose scene-AABB intersects the AABB of `id`. Excludes
-`id` itself. Apps use this for "which other items overlap
-this card?" queries — graph editors checking node-on-node
-overlap, CAD canvases finding adjacent geometry. Backed by
-the spatial index, so the cost is `O(visible)` not `O(N)`.
+Hidden and disabled entries are excluded: this is a *hit* test, and
+`ItemFlags::IS_VISIBLE` and `ItemFlags::IS_ENABLED` both say so. See
+`Scene::is_hit_testable`. For a pure geometry query that ignores flags,
+use `Scene::items_in_region` or `Scene::item_contains`.
 
-#### `pub fn items_along_path(&self, path: &Path) -> Vec<ItemId>`
+#### `pub fn item_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId>`
 
-Items whose scene-AABB intersects `path`'s bounding rect.
-Apps use this for "which items lie under this connector?"
-queries — graph editors highlighting hovered connectors,
-CAD canvases doing point-in-polygon style picking. The
-narrow phase is AABB-vs-AABB; per-segment-distance precision
-is left to the app.
+`Scene::item_at` at an explicit view zoom.
+
+The zoom reaches exactly one thing: a **cosmetic** stroke band, whose
+width is in device pixels and therefore covers fewer scene units the
+further you zoom in. Passing the live scale is what makes this agree
+with `SceneView`'s own dispatch, which has always had it.
 
 #### `pub fn items_at(&self, scene_pt: Point) -> Vec<ItemId>`
 
-All lightweight items whose `shape_contains` fires for
-`scene_pt`, sorted topmost-first by z.
+All lightweight items whose shape contains `scene_pt`, topmost-first by
+z. Same tier and `IGNORES_TRANSFORMATIONS` rules as `Scene::item_at`.
+
+#### `pub fn items_at_scaled(&self, scene_pt: Point, view_scale: f32) -> Vec<ItemId>`
+
+`Scene::items_at` at an explicit view zoom.
+
+#### `pub fn item_at_in_view(&self, screen_pt: Point, view_transform: Transform2D) -> Option<ItemId>`
+
+Topmost lightweight item under a **screen** point, resolving *both*
+hit spaces the way `SceneView` dispatch does.
+
+A normal item is tested in scene space, at the view transform's zoom; a
+screen-anchored
+(`IGNORES_TRANSFORMATIONS`)
+item is tested against its `local_bounds` rooted at its projected
+anchor, at unit scale — its local coordinates *are* screen
+coordinates, so it has no zoom to convert. This is the query to use
+when a scene may contain screen-pinned chrome; `Scene::item_at`
+deliberately declines to guess.
+
+#### `pub fn is_hit_testable(&self, id: ItemId) -> bool`
+
+Whether `id` takes part in pointer hit-testing — visible along its whole
+ancestor chain AND enabled.
+
+This is `crate::pick::hit_testable` resolved against the scene, and it
+is the one place the two flag contracts in `ItemFlags` are honoured:
+`IS_VISIBLE` ("neither painted nor hit-tested")
+and `IS_ENABLED` ("pass clicks through to items
+beneath"). `false` for unknown ids.
+
+#### `pub fn colliding_items(&self, id: ItemId) -> Vec<ItemId>`
+
+Items overlapping `id`'s **shape**, excluding `id` itself.
+
+Apps use this for "which other items overlap this card?" — graph
+editors checking node-on-node overlap, CAD canvases finding adjacent
+geometry. Backed by the spatial index, so the cost is `O(visible)` not
+`O(N)`.
+
+Defaults to `ItemSelectionMode::IntersectsItemShape`, so a
+stroke-only connector collides along its line rather than across its
+bounding box. Pass
+`IntersectsItemBoundingRect`
+to `Scene::colliding_items_with` for the cheaper box test.
+
+Screen-anchored items neither collide nor are collided with — see
+`Scene::items_in_region`, which this is built on, and
+`Scene::item_region`, which declines to publish one for them.
+
+#### `pub fn colliding_items_with(&self, id: ItemId, mode: ItemSelectionMode) -> Vec<ItemId>`
+
+`Scene::colliding_items` under an explicit `ItemSelectionMode`.
+
+#### `pub fn items_along_path(&self, path: &Path) -> Vec<ItemId>`
+
+Items lying along `path` — a real region query, not the AABB-of-the-path
+approximation this used to be.
+
+The path is treated as a zero-width closed region: an item is picked
+when the path crosses it or encloses it. For a *connector* — a line
+with a width — pass that width to `Scene::items_along_path_with`, so
+the query asks about the band the user can see.
+
+#### `pub fn items_along_path_with( &self, path: &Path, stroke_width: f32, mode: ItemSelectionMode, ) -> Vec<ItemId>`
+
+`Scene::items_along_path` with an explicit stroke width and
+`ItemSelectionMode`.
+
+`stroke_width` greater than zero makes the region the path's **band**
+rather than its interior: "what does this 4 dp connector touch?".
 
 #### `pub fn len(&self) -> usize`
 

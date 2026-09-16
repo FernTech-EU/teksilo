@@ -460,6 +460,20 @@ pub struct WidgetTree {
     cancelled_pointers: Vec<crate::pointer::PointerId>,
     /// Current cursor selected by hover/interaction routing.
     current_cursor: crate::widget::CursorIcon,
+    /// What the **node-declared** cursor mechanism last resolved for the
+    /// hovered chain — the value `PointerEnter` wrote, or `Default` after the
+    /// `PointerLeave` that undid it.
+    ///
+    /// Kept so a handler can hand the cursor back
+    /// ([`EventContext::release_cursor`]) after having overridden it, without
+    /// having to re-derive the chain's declaration and risk disagreeing with
+    /// the walk that produced it. It is exactly as fresh as `current_cursor`:
+    /// both move only when the enter/leave pair fires, so a node whose
+    /// `.cursor(..)` changes under a stationary pointer is stale in the same
+    /// way, and by the same mechanism.
+    ///
+    /// [`EventContext::release_cursor`]: crate::widget::EventContext::release_cursor
+    node_declared_cursor: crate::widget::CursorIcon,
     /// Delayed overlay requests (e.g., submenu hover-open delay).
     pending_delayed_overlays: Vec<PendingDelayedOverlay>,
     /// Reusable scratch buffer for active-id snapshots taken on hot
@@ -929,6 +943,7 @@ impl WidgetTree {
             cancelled_pointers: Vec::new(),
             dispatch_depth: 0,
             current_cursor: crate::widget::CursorIcon::Default,
+            node_declared_cursor: crate::widget::CursorIcon::Default,
             pending_delayed_overlays: Vec::new(),
             active_ids_scratch: Vec::new(),
             gesture_owners: std::collections::HashSet::new(),

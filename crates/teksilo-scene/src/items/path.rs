@@ -4,16 +4,31 @@
 //! [`PathItem`] — vector path with optional fill and stroke.
 //!
 //! `PathItem` renders an arbitrary vector path in local item coordinates.
-//! The path can be filled, stroked, or both. Stroke-only paths use a
-//! per-segment distance hit-test so users can click precisely along the
-//! stroke even when the axis-aligned bounding box is huge — making this
-//! the natural workhorse for connector lines between cards in a node graph
-//! or story corkboard.
+//! The path can be filled, stroked, or both, and it hit-tests as exactly that
+//! union: a stroke-only path is clickable along its drawn line and nowhere
+//! else, so a connector whose bounding box is mostly empty does not swallow
+//! clicks aimed past it — making this the natural workhorse for connector
+//! lines between cards in a node graph or story corkboard.
 //!
 //! Strokes come in two flavours: a **logical** stroke (`.stroke`) scales
 //! with the view zoom, making thick scene-space edges; a **cosmetic** stroke
 //! (`.stroke_cosmetic`) holds a constant device-pixel width at any zoom,
-//! ideal for hairline connector wires that should stay crisp and thin.
+//! ideal for hairline connector wires that should stay crisp and thin. A
+//! cosmetic stroke's *clickable band* follows the rendered line at any zoom,
+//! because the width is converted from device pixels at test time.
+//!
+//! ## Bounds are derived, not declared
+//!
+//! A `PathItem` computes its own `local_bounds` from its geometry (plus the
+//! stroke's half-width and the grab slack). There is no caller-supplied AABB
+//! to get wrong, which is what makes the rectangle the spatial index buckets
+//! on and the shape the narrow phase tests provably the same geometry.
+//! [`Scene::set_local_bounds`](crate::Scene::set_local_bounds) therefore
+//! **moves and scales the path** to fit the rectangle you give it, and the
+//! item re-derives its bounds from the result — landing on the rectangle you
+//! asked for on every axis the path has extent on, and staying there if you
+//! ask again. On an axis it has none — a perfectly horizontal stroke has no
+//! height — the box is the band's own thickness and no request can widen it.
 //!
 //! ## When to use
 //!
@@ -25,7 +40,7 @@
 //!
 //! ```ignore
 //! use teksilo_scene::{SceneModel, PathItem};
-//! use teksilo_canvas::{Path, Point, Rect};
+//! use teksilo_canvas::{Path, Point};
 //! use teksilo_tokens::Color;
 //!
 //! let model = SceneModel::new();
@@ -35,14 +50,17 @@
 //!     .line_to(Point::new(200.0, 0.0))
 //!     .line_to(Point::new(200.0, 100.0));
 //!
-//! let item = PathItem::new(path, Rect::new(0.0, 0.0, 200.0, 100.0))
-//!     .stroke_cosmetic(Color::new(0.3, 0.3, 0.3, 1.0), 1.5);
+//! let item = PathItem::new(path)
+//!     .stroke_cosmetic(Color::new(0.3, 0.3, 0.3, 1.0), 1.5)
+//!     .hit_stroke_width(12.0);
 //!
 //! model.add_item(item, Point::new(50.0, 50.0));
 //! ```
 
+use std::rc::Rc;
+
 use accesskit::Role;
-use teksilo_canvas::{Canvas, Path, Point, Rect, StrokeSpace, StrokeStyle};
+use teksilo_canvas::{Canvas, FillRule, Path, Rect, StrokeStyle, Transform2D};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
@@ -53,6 +71,7 @@ use teksilo_tokens::Color;
 use crate::flags::ItemFlags;
 use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
+use crate::shape::{HIT_BAND_SLACK, ItemShape, ShapeGeometry};
 use teksilo_i18n::LocalizedString;
 
 /// An arbitrary vector path with optional fill and stroke, in local
@@ -61,34 +80,47 @@ use teksilo_i18n::LocalizedString;
 /// The path's commands are evaluated in local space. A logical stroke scales
 /// with the view zoom; a [`stroke_cosmetic`](Self::stroke_cosmetic) stroke
 /// holds a constant device-pixel width at any zoom (crisp connectors). The
-/// caller-provided `local_bounds` AABB is what the spatial index buckets on;
-/// it must enclose the path's strokes (including stroke half-width on each
-/// side).
+/// item's `local_bounds` — the rectangle the spatial index buckets on — is
+/// **derived** from the geometry and the stroke, so it always encloses what
+/// the item can be clicked on.
 #[derive(Debug)]
 pub struct PathItem {
-    path: Path,
+    /// The path plus its memoised flattening. Shared by handle so publishing
+    /// the item's [`SceneItem::shape`] every layout pass costs a refcount
+    /// bump, not a copy of the command list.
+    geometry: Rc<ShapeGeometry>,
     local_bounds: Rect,
     fill: Option<ColorProp>,
+    /// The rule used to fill **and** to hit-test the interior. One field, so a
+    /// ring painted with a hole is a ring you can click through.
+    fill_rule: FillRule,
     stroke: Option<(ColorProp, StrokeStyle)>,
+    /// Hit-only band width, independent of the painted stroke.
+    hit_stroke_width: Option<f32>,
     label: Option<String>,
     flags: ItemFlags,
     a11y: ItemA11yOverrides,
 }
 
 impl PathItem {
-    /// A path with a caller-provided AABB in local coordinates. The
-    /// path's points are interpreted as local — `(0, 0)` is the
-    /// item's anchor.
-    pub fn new(path: Path, local_bounds: Rect) -> Self {
-        Self {
-            path,
-            local_bounds,
+    /// A path in local coordinates — `(0, 0)` is the item's anchor.
+    ///
+    /// `local_bounds` is derived from the path (and re-derived whenever the
+    /// stroke or hit band changes), so it always encloses the clickable area.
+    pub fn new(path: Path) -> Self {
+        let mut item = Self {
+            geometry: ShapeGeometry::shared(path),
+            local_bounds: Rect::ZERO,
             fill: None,
+            fill_rule: FillRule::Winding,
             stroke: None,
+            hit_stroke_width: None,
             label: None,
             flags: ItemFlags::default(),
             a11y: ItemA11yOverrides::default(),
-        }
+        };
+        item.recompute_bounds();
+        item
     }
 
     /// Fill colour. Accepts a plain [`Color`], a theme role, a
@@ -99,10 +131,24 @@ impl PathItem {
         self
     }
 
+    /// The [`FillRule`] used for **both** painting the fill and hit-testing
+    /// the interior.
+    ///
+    /// [`FillRule::EvenOdd`] gives a ring authored as two subpaths a real
+    /// hole — one that is transparent *and* clicks through. There is
+    /// deliberately no hit-only fill rule: a shape that paints as a disc and
+    /// hit-tests as a ring is the two-sources-of-truth bug this whole type
+    /// exists to prevent.
+    pub fn fill_rule(mut self, rule: FillRule) -> Self {
+        self.fill_rule = rule;
+        self
+    }
+
     /// Stroke colour and width in **scene-coordinate** pixels — the stroke
     /// scales with the view zoom.
     pub fn stroke(mut self, color: impl Into<ColorProp>, width: f32) -> Self {
         self.stroke = Some((color.into(), StrokeStyle::solid(width.max(0.0))));
+        self.recompute_bounds();
         self
     }
 
@@ -111,6 +157,7 @@ impl PathItem {
     /// path body sharp at the current zoom, so joins/caps stay correct.
     pub fn stroke_cosmetic(mut self, color: impl Into<ColorProp>, width: f32) -> Self {
         self.stroke = Some((color.into(), StrokeStyle::hairline(width.max(0.0))));
+        self.recompute_bounds();
         self
     }
 
@@ -120,6 +167,17 @@ impl PathItem {
     /// is stored verbatim (dash pattern/offset, `Logical` vs `Device` space).
     pub fn stroke_styled(mut self, color: impl Into<ColorProp>, style: StrokeStyle) -> Self {
         self.stroke = Some((color.into(), style));
+        self.recompute_bounds();
+        self
+    }
+
+    /// Widen the clickable band without widening the drawn line (Konva's
+    /// `hitStrokeWidth`): a 1 dp wire, 12 dp grabbable. In local units, so it
+    /// is a target size rather than a rendered thickness. Also widens the
+    /// derived `local_bounds`, so the broad phase keeps up with it.
+    pub fn hit_stroke_width(mut self, width: f32) -> Self {
+        self.hit_stroke_width = Some(width.max(0.0));
+        self.recompute_bounds();
         self
     }
 
@@ -136,7 +194,36 @@ impl PathItem {
         self
     }
 
+    /// The path's commands, in local coordinates.
+    pub fn path(&self) -> &Path {
+        self.geometry.path()
+    }
+
     crate::items::item_a11y_builders!();
+
+    /// The hit band's width, hit-only override first. `None` when the item
+    /// has no band at all.
+    fn band_width(&self) -> Option<f32> {
+        self.hit_stroke_width
+            .or(self.stroke.as_ref().map(|(_, s)| s.width))
+    }
+
+    /// How far the band inflates the geometry's own box on every side. The
+    /// one number `local_bounds` and `set_local_bounds` both go through, so
+    /// the box the setter lands on is the box the setter aimed at.
+    fn band_inflate(&self) -> f32 {
+        self.band_width()
+            .map(|w| w.max(0.0) * 0.5 + HIT_BAND_SLACK)
+            .unwrap_or(0.0)
+    }
+
+    /// Rebuild the derived AABB from the current geometry + band. Called by
+    /// every builder that can change either. Reads the geometry directly
+    /// rather than going through `shape()`, which would be circular: the
+    /// no-fill-no-band shape *is* `local_bounds`.
+    fn recompute_bounds(&mut self) {
+        self.local_bounds = self.geometry.bounds().expand(self.band_inflate());
+    }
 }
 
 impl SceneItem for PathItem {
@@ -144,21 +231,80 @@ impl SceneItem for PathItem {
         self.local_bounds
     }
 
+    /// Fit the path to `bounds` — a translate and a scale — and re-derive the
+    /// box from the moved geometry.
+    ///
+    /// # It aims at the geometry, not at the box
+    ///
+    /// The requested rectangle is the *whole* clickable box, band included, so
+    /// the fit targets `bounds` **deflated by the band's half-width** and the
+    /// re-derived box then lands back on `bounds` exactly. Mapping the old box
+    /// onto the new one instead would re-add the band to a rectangle that
+    /// already contained it, overshooting by the band on every call: asking
+    /// three times for the same rectangle used to give three different
+    /// answers, each closer than the last and none of them the one asked for,
+    /// and each one re-bucketed the spatial index and emitted an
+    /// `ItemChange::LocalBoundsChanged` with a new value. Idempotent now: the
+    /// second identical call finds the fit is the identity and returns without
+    /// touching the geometry — which also keeps the memoised flattening that
+    /// [`ShapeGeometry`] exists for, instead of throwing it away per call.
+    ///
+    /// # What it cannot honour
+    ///
+    /// An axis the path has no extent on — a perfectly horizontal stroke, a
+    /// single point — cannot be stretched to fill one, so the box stays the
+    /// band's own thickness there however tall a rectangle is asked for. That
+    /// is reported rather than hidden: [`Scene::set_local_bounds`](crate::Scene::set_local_bounds)
+    /// reads the item's box back and stores what the item settled on.
     fn set_local_bounds(&mut self, bounds: Rect) {
-        // The path's geometry is in local coords and stays fixed; only
-        // the AABB tracks. Apps that want to *move* a path move the
-        // item via `Scene::set_local_pos`. Apps that want to *resize*
-        // a path rebuild the item from scratch.
-        self.local_bounds = bounds;
+        let inflate = self.band_inflate();
+        // The geometry's share of the requested box. A request narrower than
+        // the band itself asks for a negative extent; clamp rather than
+        // mirror the path.
+        let target = Rect::new(
+            bounds.x + inflate,
+            bounds.y + inflate,
+            (bounds.width - 2.0 * inflate).max(0.0),
+            (bounds.height - 2.0 * inflate).max(0.0),
+        );
+        let src = self.geometry.bounds();
+        let sx = if src.width.abs() > 1e-6 {
+            target.width / src.width
+        } else {
+            1.0
+        };
+        let sy = if src.height.abs() > 1e-6 {
+            target.height / src.height
+        } else {
+            1.0
+        };
+        // Within a float epsilon of the identity: the box is already where it
+        // was asked to be, and rebuilding the geometry would only churn.
+        if (sx - 1.0).abs() < 1e-5
+            && (sy - 1.0).abs() < 1e-5
+            && (src.x - target.x).abs() < 1e-4
+            && (src.y - target.y).abs() < 1e-4
+        {
+            return;
+        }
+        let fit = Transform2D::translate(-src.x, -src.y)
+            .then(&Transform2D::scale(sx, sy))
+            .then(&Transform2D::translate(target.x, target.y));
+        self.geometry = ShapeGeometry::shared(self.geometry.path().transformed(&fit));
+        self.recompute_bounds();
     }
 
     fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>) {
         if let Some(prop) = &self.fill {
-            canvas.fill_path(&self.path, prop.resolve(ctx.theme, ctx.enabled));
+            canvas.fill_path_with_rule(
+                self.geometry.path(),
+                prop.resolve(ctx.theme, ctx.enabled),
+                self.fill_rule,
+            );
         }
         if let Some((prop, style)) = &self.stroke {
             canvas.stroke_path(
-                &self.path,
+                self.geometry.path(),
                 prop.resolve(ctx.theme, ctx.enabled),
                 style.clone(),
             );
@@ -172,6 +318,7 @@ impl SceneItem for PathItem {
 
     fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>) -> bool {
         self.stroke = stroke;
+        self.recompute_bounds();
         true
     }
 
@@ -185,44 +332,34 @@ impl SceneItem for PathItem {
         }
     }
 
-    fn shape_contains(&self, local_pt: Point) -> bool {
-        path_shape_contains(
-            &self.path,
-            self.local_bounds,
-            self.fill.is_some(),
-            self.stroke.as_ref().map(|(_, s)| s.width),
-            local_pt,
-        )
-    }
-
-    fn clone_shape_test(&self) -> Box<dyn Fn(Point, f32) -> bool + 'static> {
-        // Capture the data needed for hit-test without holding a
-        // borrow on `self`. The `SceneView` snapshot stores the
-        // returned closure and consults it on every pointer event,
-        // so we have to be cloneable and `'static`. `Path` is
-        // `Clone`; the rest of the captured state is `Copy`.
-        let path = self.path.clone();
-        let local_bounds = self.local_bounds;
-        let has_fill = self.fill.is_some();
-        // (stroke width, is-cosmetic). A cosmetic stroke's width is in DEVICE
-        // pixels, so its visual half-width in scene coordinates shrinks as the
-        // view zooms in (and grows as it zooms out). Convert per-event using
-        // the live view scale so the clickable band tracks the rendered line
-        // at any zoom; a logical stroke's width is already in scene units.
-        let stroke = self
-            .stroke
-            .as_ref()
-            .map(|(_, s)| (s.width, s.space == StrokeSpace::Device));
-        Box::new(move |local_pt, view_scale| {
-            let scene_width = stroke.map(|(w, cosmetic)| {
-                if cosmetic && view_scale > 1e-3 {
-                    w / view_scale
-                } else {
-                    w
-                }
-            });
-            path_shape_contains(&path, local_bounds, has_fill, scene_width, local_pt)
-        })
+    /// The union of whatever the item actually draws: its filled interior
+    /// under [`PathItem::fill_rule`] when it has a fill, and a stroke band
+    /// when it has a stroke (or an explicit
+    /// [`hit_stroke_width`](PathItem::hit_stroke_width)).
+    ///
+    /// A path with **neither** falls back to its local AABB. It draws nothing,
+    /// so there is no silhouette to derive one from, and an invisible
+    /// rectangle that still catches clicks is a legitimate use — an enlarged
+    /// grab area parked behind a thin connector. An item that wants clicks to
+    /// fall *through* says so with [`ItemShape::none`], which is what a
+    /// logical-only [`GroupItem`](crate::GroupItem) returns.
+    fn shape(&self) -> ItemShape {
+        if self.fill.is_none() && self.band_width().is_none() {
+            return ItemShape::bounds(self.local_bounds);
+        }
+        let mut shape = ItemShape::path(self.geometry.clone());
+        shape = if self.fill.is_some() {
+            shape.filled(self.fill_rule)
+        } else {
+            shape.unfilled()
+        };
+        match self.hit_stroke_width {
+            Some(w) => shape.hit_stroke_width(w),
+            None => match self.stroke.as_ref() {
+                Some((_, s)) => shape.stroked(s.width, s.space),
+                None => shape,
+            },
+        }
     }
 
     fn thumbnail_color(&self) -> Color {
@@ -254,112 +391,125 @@ impl SceneItem for PathItem {
     }
 }
 
-/// Hit-test logic shared between [`PathItem::shape_contains`] and
-/// the snapshotted closure returned by
-/// [`PathItem::clone_shape_test`]. Stroke-only paths walk each
-/// segment and test point-to-segment distance against
-/// `stroke_width/2 + 2px` tolerance; filled or mixed-fill paths
-/// fall through to AABB; non-line segments (quad / cubic / arc)
-/// fall through to AABB.
-fn path_shape_contains(
-    path: &Path,
-    local_bounds: Rect,
-    has_fill: bool,
-    stroke_width: Option<f32>,
-    local_pt: Point,
-) -> bool {
-    let stroke_width = match stroke_width {
-        Some(w) => w,
-        None => return local_bounds.contains(local_pt),
-    };
-    if has_fill {
-        return local_bounds.contains(local_pt);
-    }
-    let tolerance = stroke_width.max(0.0) * 0.5 + 2.0;
-    let mut current = Point::ZERO;
-    let mut start = Point::ZERO;
-    for cmd in &path.commands {
-        match cmd {
-            teksilo_canvas::PathCommand::MoveTo(p) => {
-                current = *p;
-                start = *p;
-            }
-            teksilo_canvas::PathCommand::LineTo(p) => {
-                if point_to_segment_distance(local_pt, current, *p) <= tolerance {
-                    return true;
-                }
-                current = *p;
-            }
-            teksilo_canvas::PathCommand::Close => {
-                if point_to_segment_distance(local_pt, current, start) <= tolerance {
-                    return true;
-                }
-                current = start;
-            }
-            _ => return local_bounds.contains(local_pt),
-        }
-    }
-    false
-}
-
-/// Shortest distance from a point to a line segment.
-fn point_to_segment_distance(p: Point, a: Point, b: Point) -> f32 {
-    let abx = b.x - a.x;
-    let aby = b.y - a.y;
-    let len2 = abx * abx + aby * aby;
-    if len2 < 1e-6 {
-        let dx = p.x - a.x;
-        let dy = p.y - a.y;
-        return (dx * dx + dy * dy).sqrt();
-    }
-    let apx = p.x - a.x;
-    let apy = p.y - a.y;
-    let t = ((apx * abx + apy * aby) / len2).clamp(0.0, 1.0);
-    let cx = a.x + t * abx;
-    let cy = a.y + t * aby;
-    let dx = p.x - cx;
-    let dy = p.y - cy;
-    (dx * dx + dy * dy).sqrt()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use teksilo_canvas::Point;
 
     #[test]
-    fn path_item_holds_path_and_local_bounds() {
+    fn path_item_derives_local_bounds_from_geometry() {
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 0.0))
             .line_to(Point::new(100.0, 50.0));
-        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 50.0)).stroke(Color::BLACK, 1.5);
-        assert_eq!(item.local_bounds(), Rect::new(0.0, 0.0, 100.0, 50.0));
+        let item = PathItem::new(path).stroke(Color::BLACK, 2.0);
+        // Geometry box (0,0,100,50) inflated by half the stroke plus the grab
+        // slack: 1 + 2 = 3.
+        assert_eq!(item.local_bounds(), Rect::new(-3.0, -3.0, 106.0, 56.0));
     }
 
     #[test]
-    fn path_item_per_segment_shape_contains_stroke_only() {
+    fn path_item_local_bounds_always_enclose_its_shape() {
+        // The one invariant that makes a broad phase on `local_bounds` and a
+        // narrow phase on `shape()` provably the same geometry. Delete
+        // `recompute_bounds` from `stroke()` and this reddens.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .quad_to(Point::new(50.0, 100.0), Point::new(100.0, 0.0));
+        for item in [
+            PathItem::new(path.clone()),
+            PathItem::new(path.clone()).stroke(Color::BLACK, 6.0),
+            PathItem::new(path.clone()).stroke_cosmetic(Color::BLACK, 1.0),
+            PathItem::new(path.clone()).fill(Color::RED),
+            PathItem::new(path.clone())
+                .stroke(Color::BLACK, 1.0)
+                .hit_stroke_width(20.0),
+        ] {
+            let lb = item.local_bounds();
+            let sb = item.shape().bounding_rect();
+            assert!(
+                lb.x <= sb.x + 1e-3
+                    && lb.y <= sb.y + 1e-3
+                    && lb.right() >= sb.right() - 1e-3
+                    && lb.bottom() >= sb.bottom() - 1e-3,
+                "local_bounds {lb:?} must enclose shape bounds {sb:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn path_item_hit_tests_per_segment_when_stroke_only() {
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 100.0));
-        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
+        let item = PathItem::new(path).stroke(Color::BLACK, 2.0);
+        let shape = item.shape();
 
-        assert!(item.shape_contains(Point::new(50.0, 50.0)));
-        assert!(item.shape_contains(Point::new(52.0, 50.0)));
-        assert!(!item.shape_contains(Point::new(80.0, 20.0)));
-        assert!(!item.shape_contains(Point::new(200.0, 200.0)));
+        assert!(shape.contains(Point::new(50.0, 50.0), 1.0));
+        assert!(shape.contains(Point::new(52.0, 50.0), 1.0));
+        assert!(!shape.contains(Point::new(80.0, 20.0), 1.0));
+        assert!(!shape.contains(Point::new(200.0, 200.0), 1.0));
     }
 
     #[test]
-    fn path_item_filled_uses_aabb_shape_contains() {
+    fn path_item_filled_hit_tests_its_interior_not_its_box() {
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0))
+            .line_to(Point::new(0.0, 100.0))
+            .close();
+        let item = PathItem::new(path).fill(Color::RED);
+        let shape = item.shape();
+        assert!(
+            shape.contains(Point::new(20.0, 20.0), 1.0),
+            "inside triangle"
+        );
+        // Inside the AABB, outside the triangle — this used to hit.
+        assert!(
+            !shape.contains(Point::new(90.0, 90.0), 1.0),
+            "the empty corner of a triangle's box is not the triangle"
+        );
+        assert!(!shape.contains(Point::new(200.0, 50.0), 1.0));
+    }
+
+    #[test]
+    fn path_item_fill_rule_drives_paint_and_hit_together() {
+        // Two concentric squares. EvenOdd punches a hole; the hole must be
+        // both un-painted and un-clickable, from the same one field.
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 0.0))
             .line_to(Point::new(100.0, 100.0))
             .line_to(Point::new(0.0, 100.0))
             .close();
-        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).fill(Color::RED);
-        assert!(item.shape_contains(Point::new(50.0, 50.0)));
-        assert!(!item.shape_contains(Point::new(200.0, 50.0)));
+        path.move_to(Point::new(25.0, 25.0))
+            .line_to(Point::new(75.0, 25.0))
+            .line_to(Point::new(75.0, 75.0))
+            .line_to(Point::new(25.0, 75.0))
+            .close();
+
+        let solid = PathItem::new(path.clone()).fill(Color::RED);
+        assert!(solid.shape().contains(Point::new(50.0, 50.0), 1.0));
+
+        let ring = PathItem::new(path)
+            .fill(Color::RED)
+            .fill_rule(FillRule::EvenOdd);
+        assert!(
+            !ring.shape().contains(Point::new(50.0, 50.0), 1.0),
+            "the hole must not be clickable"
+        );
+        assert!(
+            ring.shape().contains(Point::new(10.0, 50.0), 1.0),
+            "the band is"
+        );
+
+        // ... and the SAME rule reaches the painted fill.
+        let theme = teksilo_core::presets::intui::light();
+        let mut canvas = Canvas::new();
+        let ctx = SceneItemPaintContext::new(Transform2D::identity(), None, &theme);
+        ring.paint(&mut canvas, &ctx);
+        let frame = canvas.into_render_frame();
+        assert_eq!(frame.paths[0].fill_rule, FillRule::EvenOdd);
     }
 
     #[test]
@@ -369,17 +519,46 @@ mod tests {
             .line_to(Point::new(100.0, 0.0))
             .line_to(Point::new(50.0, 100.0))
             .close();
-        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
-        assert!(item.shape_contains(Point::new(25.0, 50.0)));
+        let item = PathItem::new(path).stroke(Color::BLACK, 2.0);
+        assert!(item.shape().contains(Point::new(25.0, 50.0), 1.0));
     }
 
     #[test]
-    fn path_item_curve_falls_back_to_aabb() {
+    fn path_item_curve_hit_tests_exactly() {
+        // This is the inversion of the old `path_item_curve_falls_back_to_aabb`.
+        // A quadratic with control (50,100) reaches y = 50 at its apex, so a
+        // point at y = 99 is 49 units off the stroke and must MISS — the old
+        // per-segment walk bailed to the AABB on the first curve command and
+        // reported a hit there.
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .quad_to(Point::new(50.0, 100.0), Point::new(100.0, 0.0));
-        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 100.0)).stroke(Color::BLACK, 2.0);
-        assert!(item.shape_contains(Point::new(50.0, 99.0)));
+        let item = PathItem::new(path).stroke(Color::BLACK, 2.0);
+        let shape = item.shape();
+        assert!(!shape.contains(Point::new(50.0, 99.0), 1.0));
+        assert!(shape.contains(Point::new(50.0, 50.0), 1.0), "the apex hits");
+    }
+
+    #[test]
+    fn path_item_with_neither_fill_nor_stroke_keeps_its_box() {
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 100.0));
+        let item = PathItem::new(path);
+        assert!(item.shape().contains(Point::new(90.0, 10.0), 1.0));
+    }
+
+    #[test]
+    fn path_item_hit_stroke_width_widens_the_grab_band() {
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0));
+        let thin = PathItem::new(path.clone()).stroke(Color::BLACK, 1.0);
+        assert!(!thin.shape().contains(Point::new(50.0, 5.0), 1.0));
+        let fat = PathItem::new(path)
+            .stroke(Color::BLACK, 1.0)
+            .hit_stroke_width(12.0);
+        assert!(fat.shape().contains(Point::new(50.0, 5.0), 1.0));
     }
 
     #[test]
@@ -388,8 +567,8 @@ mod tests {
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 0.0));
-        let item = PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 4.0))
-            .stroke_styled(Color::BLACK, StrokeStyle::dashed(2.0, 6.0, 4.0));
+        let item =
+            PathItem::new(path).stroke_styled(Color::BLACK, StrokeStyle::dashed(2.0, 6.0, 4.0));
         let (_, style) = item.stroke.as_ref().expect("stroke set");
         assert!(style.dash_pattern.is_some(), "dashed stroke keeps pattern");
     }
@@ -401,9 +580,9 @@ mod tests {
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(50.0, 50.0));
-        let item = PathItem::new(path, Rect::new(0.0, 0.0, 50.0, 50.0)).stroke(Color::RED, 2.0);
-        let mut canvas = teksilo_canvas::Canvas::new();
-        let ctx = SceneItemPaintContext::new(teksilo_canvas::Transform2D::identity(), None, &theme);
+        let item = PathItem::new(path).stroke(Color::RED, 2.0);
+        let mut canvas = Canvas::new();
+        let ctx = SceneItemPaintContext::new(Transform2D::identity(), None, &theme);
         item.paint(&mut canvas, &ctx);
         assert!(!canvas.into_render_frame().draw_order.is_empty());
     }
@@ -416,16 +595,15 @@ mod tests {
         let mut path = Path::new();
         path.move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 0.0));
-        let item =
-            PathItem::new(path, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke_cosmetic(Color::BLACK, 4.0);
-        let test = item.clone_shape_test();
+        let item = PathItem::new(path).stroke_cosmetic(Color::BLACK, 4.0);
+        let shape = item.shape();
         let p = Point::new(50.0, 3.0);
         assert!(
-            test(p, 1.0),
+            shape.contains(p, 1.0),
             "cosmetic band at 1x: width 4 → tolerance 4 → hit"
         );
         assert!(
-            !test(p, 4.0),
+            !shape.contains(p, 4.0),
             "cosmetic band shrinks at 4x: width 1 → tolerance 2.5 → miss"
         );
 
@@ -435,10 +613,80 @@ mod tests {
         path2
             .move_to(Point::new(0.0, 0.0))
             .line_to(Point::new(100.0, 0.0));
-        let logical =
-            PathItem::new(path2, Rect::new(0.0, 0.0, 100.0, 8.0)).stroke(Color::BLACK, 4.0);
-        let test_l = logical.clone_shape_test();
-        assert!(test_l(p, 1.0), "logical band hit at 1x");
-        assert!(test_l(p, 4.0), "logical band unchanged by zoom");
+        let logical = PathItem::new(path2).stroke(Color::BLACK, 4.0);
+        assert!(logical.shape().contains(p, 1.0), "logical band hit at 1x");
+        assert!(
+            logical.shape().contains(p, 4.0),
+            "logical band unchanged by zoom"
+        );
+    }
+
+    #[test]
+    fn set_local_bounds_moves_and_scales_the_geometry() {
+        // Study §1.9: the old impl updated the AABB and left the path where it
+        // was, so the index bucketed a rectangle the geometry had never
+        // occupied. The geometry follows now.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0))
+            .line_to(Point::new(100.0, 0.0));
+        let mut item = PathItem::new(path).stroke(Color::BLACK, 0.0);
+        let before = item.local_bounds();
+        // Slide it 200 to the right, same size.
+        item.set_local_bounds(Rect::new(
+            before.x + 200.0,
+            before.y,
+            before.width,
+            before.height,
+        ));
+        let shape = item.shape();
+        assert!(
+            shape.contains(Point::new(250.0, 0.0), 1.0),
+            "moved with its box"
+        );
+        assert!(
+            !shape.contains(Point::new(50.0, 0.0), 1.0),
+            "left the old place"
+        );
+        let lb = item.local_bounds();
+        let sb = shape.bounding_rect();
+        assert!((lb.x - sb.x).abs() < 1e-3 && (lb.width - sb.width).abs() < 1e-3);
+    }
+
+    #[test]
+    fn set_local_bounds_on_a_degenerate_box_translates_without_dividing_by_zero() {
+        // A single-point path has a zero-size box on both axes; the fit
+        // transform must degrade to a pure translate rather than divide by it.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        let mut item = PathItem::new(path);
+        assert_eq!(item.local_bounds(), Rect::new(0.0, 0.0, 0.0, 0.0));
+        item.set_local_bounds(Rect::new(10.0, 20.0, 0.0, 0.0));
+        let lb = item.local_bounds();
+        assert!(lb.width.is_finite() && lb.height.is_finite());
+        assert!((lb.x - 10.0).abs() < 1e-3 && (lb.y - 20.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_long_ink_stroke_hit_tests_exactly() {
+        // Flattening removed the old "bail to the AABB on the first curve"
+        // guard, so a 500-segment ink stroke would otherwise walk every
+        // segment per pointer sample to conclude a miss. Two levels of
+        // rejection stand in front of that walk now (the shape's own box, then
+        // a box per run of segments); what this asserts is that neither of
+        // them changes an answer — their arithmetic is pinned in `shape/tests`.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 0.0));
+        for i in 1..=500 {
+            let x = i as f32;
+            path.line_to(Point::new(x, (x * 0.2).sin() * 40.0));
+        }
+        let item = PathItem::new(path).stroke(Color::BLACK, 1.0);
+        let shape = item.shape();
+        // Far outside the box.
+        assert!(!shape.contains(Point::new(250.0, 400.0), 1.0));
+        // Inside the box, between two arcs of the wave.
+        assert!(!shape.contains(Point::new(250.0, 20.0), 1.0));
+        // On the stroke.
+        assert!(shape.contains(Point::new(250.0, (250.0f32 * 0.2).sin() * 40.0), 1.0));
     }
 }

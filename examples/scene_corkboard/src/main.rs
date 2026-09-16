@@ -162,18 +162,12 @@ fn add_connector(model: &SceneModel, from_rect: Rect, to_rect: Rect, beat: usize
         .line_to(Point::new(mid_x, from.y))
         .line_to(Point::new(mid_x, to.y))
         .line_to(to);
-    // AABB enclosing the connector, padded by stroke half-width so partial
-    // intersections aren't dropped at the viewport edge.
+    // `PathItem` derives its own AABB from the geometry plus the stroke, so
+    // there is no bounding box to hand it (and none to get wrong).
     let stroke_w = 2.0_f32;
-    let pad = stroke_w * 0.5;
-    let min_x = from.x.min(to.x).min(mid_x) - pad;
-    let max_x = from.x.max(to.x).max(mid_x) + pad;
-    let min_y = from.y.min(to.y) - pad;
-    let max_y = from.y.max(to.y) + pad;
-    let bounds = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
     let connector_color = Color::new(0.40, 0.55, 0.85, 0.9);
     model.add_item(
-        PathItem::new(path, bounds)
+        PathItem::new(path)
             // Cosmetic stroke: constant device-pixel width at any zoom.
             .stroke_cosmetic(connector_color, stroke_w)
             .access_label(lit!(format!("connector to beat {beat}"))),
