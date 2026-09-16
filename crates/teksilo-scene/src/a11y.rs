@@ -248,7 +248,10 @@ pub enum A11yOffScreenMode {
     /// the default — gives screen-reader users a one-screen
     /// "lookahead" to navigate without `ensure_visible` round-tripping
     /// through pan animation.
-    ViewportPlusN { n: u32 },
+    ViewportPlusN {
+        /// How many viewports of margin to grow the window by.
+        n: u32,
+    },
 
     /// Strict: only items intersecting the current viewport. Pairs
     /// with apps that have very large scenes where listing

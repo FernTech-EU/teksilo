@@ -378,7 +378,51 @@ pub(super) struct DragTarget {
     /// Current scene-coord position (updated on each Moved /
     /// Ended). Allows paint to render the in-flight offset for
     /// live visual feedback.
+    ///
+    /// **A pointer position, not an item position.** Both anchors are the press
+    /// point, and the pair is only ever read as a difference — the grab offset
+    /// between the cursor and the item's own corner lives in neither of them.
+    /// That is exactly why the geometry constraint is stated over
+    /// [`start_frame`](Self::start_frame) instead: snapping a cursor to a grid
+    /// leaves the item off-grid by the grab offset, for ever.
     current_scene: Point,
+    /// The scene-space box the dragged group occupied when the drag started —
+    /// [`Scene::transform_frame`](crate::Scene::transform_frame) over the whole
+    /// `drag_group`, captured once at the press and fixed for the gesture.
+    ///
+    /// The `start` a geometry constraint measures against, and the quantity
+    /// that makes a grid snap land the *item* on the grid.
+    ///
+    /// `None` when the scene declares **no** geometry constraint — capturing it
+    /// costs a full prune of the selection and nothing else reads it, so a
+    /// scene with no rule pays nothing for the mechanism, at the press as well
+    /// as on every sample — or when the group resolved to no geometry at all,
+    /// which, since the hit test had just found the grabbed item, means it was
+    /// removed between the two. Either way no constraint runs for this drag.
+    start_frame: Option<crate::transform_session::TransformFrame>,
+}
+
+/// The items a pointer drag of `grabbed` carries — see
+/// [`SceneView::drag_group`], which is this function with the view's own
+/// handles.
+///
+/// A free function because the drag closure owns clones rather than a `&self`,
+/// and the closure's answer must be the *same* answer the commit and the paint
+/// feedback get: a second implementation there would be a second definition of
+/// "what is moving".
+pub(super) fn drag_group_of(
+    model: &SceneModel,
+    selection: &crate::selection::SceneSelection,
+    grabbed: ItemId,
+) -> Vec<ItemId> {
+    if !selection.is_selected(grabbed) {
+        return vec![grabbed];
+    }
+    let selected = selection.selected();
+    if selected.len() < 2 {
+        return vec![grabbed];
+    }
+    model.selection_roots(&selected)
 }
 
 /// Snapshot of one item's hit-test geometry + handler closures used
@@ -1279,6 +1323,16 @@ pub struct SceneView {
     magnet_focus: Rc<Cell<Option<MagnetId>>>,
     /// The keyboard-activated source magnet awaiting a target.
     magnet_pending: Rc<Cell<Option<MagnetId>>>,
+
+    // --- Selection transform controller --------------------------------
+    /// Per-view transform-controller config (handles, constraints, hooks).
+    /// `None` = no controller: no frame, no handles, no group move, no
+    /// accessibility nodes, and every pointer rule is exactly what it was.
+    transform: Option<Rc<crate::transform_session::TransformConfig>>,
+    /// The controller's live state — the in-flight session, the keyboard mode,
+    /// the two tick signals and the published session signal. Shared `Rc` so
+    /// the drag / key / paint closures hold a clone.
+    transform_rt: Rc<crate::transform_session::TransformRuntime>,
 }
 
 impl std::fmt::Debug for SceneView {
@@ -1298,6 +1352,7 @@ impl std::fmt::Debug for SceneView {
             .field("focus_order_callback", &self.focus_order_callback.is_some())
             .field("a11y_nested", &self.a11y_nested)
             .field("a11y_label", &self.a11y_label)
+            .field("transform_controller", &self.transform.is_some())
             .field("debug_overlay", &self.debug_overlay)
             .finish_non_exhaustive()
     }
@@ -1327,6 +1382,23 @@ pub(super) struct DragUnwind {
     pub(super) pending_marquee_commit: Rc<RefCell<Option<(SceneRegion, ItemSelectionMode, bool)>>>,
     pub(super) port_drag: Rc<RefCell<Option<magnetism::PortDragState>>>,
     pub(super) item_snap: Rc<RefCell<Option<MagnetSnap>>>,
+    /// The transform controller, when one is installed. A revoked contact drops
+    /// its live session the same way it drops a drag target, and for the same
+    /// reason: the preview is re-derived from it on every paint and every
+    /// relayout, so a session left standing would draw the selection at the
+    /// transformed position for ever while the model went on saying nothing had
+    /// happened.
+    ///
+    /// The whole **driver** and not just its
+    /// [`TransformRuntime`](crate::transform_session::TransformRuntime),
+    /// because dropping the session is only a third of what ending a gesture
+    /// means. `TransformRuntime::abort` did that third; the edge auto-pan went
+    /// on tweening (for up to thirty seconds, with no input and with
+    /// `edge_panning` still `true`), and `on_end` — documented as "fired once
+    /// when a gesture finishes, committed **or cancelled**" — never fired, so
+    /// an app that opens an overlay on `on_start` leaked it every time the OS
+    /// revoked the contact. One cancel path, reached from here too.
+    transform: Option<super::view::transform::TransformDriver>,
 }
 
 impl DragUnwind {
@@ -1340,7 +1412,7 @@ impl DragUnwind {
     /// commit that would otherwise have landed on the next rebuild; a cancel is
     /// terminal, so no `Ended` can have queued it and it belongs to the gesture
     /// that was just taken away.
-    pub(super) fn clear(&self) -> bool {
+    pub(super) fn clear(&self, ctx: &mut teksilo_core::widget::EventContext) -> bool {
         // Bitwise OR, not `||`: every one of these has to run.
         self.drag_target.take().is_some()
             | self.pending_item_move.take().is_some()
@@ -1348,6 +1420,10 @@ impl DragUnwind {
             | self.pending_marquee_commit.replace(None).is_some()
             | self.port_drag.replace(None).is_some()
             | self.item_snap.replace(None).is_some()
+            | self
+                .transform
+                .as_ref()
+                .is_some_and(|driver| driver.cancel(ctx))
     }
 }
 
@@ -1422,6 +1498,7 @@ impl SceneView {
             pending_marquee_commit: self.pending_marquee_commit.clone(),
             port_drag: self.port_drag.clone(),
             item_snap: self.item_snap.clone(),
+            transform: self.transform_driver(),
         }
     }
 
@@ -1542,23 +1619,7 @@ impl SceneView {
     /// Derived rather than snapshotted at grab time, so the live paint feedback
     /// and the commit cannot disagree about which items are moving.
     pub(super) fn drag_group(&self, grabbed: ItemId) -> Vec<ItemId> {
-        if !self.selection.is_selected(grabbed) {
-            return vec![grabbed];
-        }
-        let selected = self.selection.selected();
-        if selected.len() < 2 {
-            return vec![grabbed];
-        }
-        let scene = self.model.0.borrow();
-        selected
-            .iter()
-            .copied()
-            .filter(|id| {
-                !selected
-                    .iter()
-                    .any(|other| other != id && scene.is_descendant_of(*id, *other))
-            })
-            .collect()
+        drag_group_of(&self.model, &self.selection, grabbed)
     }
 
     /// The paint-order floor for a dispatch that is running on this view.
@@ -1591,6 +1652,7 @@ mod hit_snapshot;
 mod layout_impl;
 mod magnetism;
 mod paint_impl;
+mod transform;
 mod widget_trait;
 
 /// Union an iterator of axis-aligned rectangles into a single

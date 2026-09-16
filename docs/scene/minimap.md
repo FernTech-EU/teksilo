@@ -386,6 +386,19 @@ app can phrase and translate the announcement itself. Everything here is
 derived from the same `effective_extent` the picture is projected through,
 so a readout can never describe a frame other than the one on screen.
 
+`#[non_exhaustive]`: the crate hands this *to* consumer code — it is the
+argument of an `access_readout` closure — and a readout may learn to carry
+another number. Build one with `new`.
+
 ```rust
 pub struct MinimapReadout { /* fields */ }
 ```
+
+### Methods
+
+#### `pub fn new(extent: Rect, viewport: Rect, position: Point, coverage: Size) -> Self`
+
+A readout stated field by field — the constructor
+[`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+The minimap derives its own; this is for a consumer testing its own
+phrasing closure.

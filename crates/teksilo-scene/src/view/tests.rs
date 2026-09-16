@@ -7,12 +7,14 @@
 // is a follow-up.
 mod a11y;
 mod audit_probes;
+mod constrain;
 mod drag_cancel;
 mod edge_cases;
 mod hit_snapshot_cache;
 mod magnetism;
 mod multi_view;
 mod nested;
+mod perf_probes;
 mod pick_order;
 mod pointer_leave;
 mod raster_scale_tests;
@@ -22,6 +24,8 @@ mod selection_modes;
 mod text_runs;
 mod touch_camera;
 mod touch_grabs;
+mod transform_controller;
+mod transform_unwind;
 
 use super::*;
 use teksilo_core::widget_tree::WidgetTree;
@@ -4587,11 +4591,13 @@ fn cache_evicts_on_item_change_signal() {
     // about the source.
     view.scene()
         .item_change_signal()
-        .set(crate::scene::ItemChange::LocalBoundsChanged {
-            id,
-            old: Rect::ZERO,
-            new: Rect::new(0.0, 0.0, 1.0, 1.0),
-        });
+        .set(crate::journal::SceneChange::for_test(
+            crate::scene::ItemChange::LocalBoundsChanged {
+                id,
+                old: Rect::ZERO,
+                new: Rect::new(0.0, 0.0, 1.0, 1.0),
+            },
+        ));
     assert!(
         !view.item_cache.borrow().contains(id),
         "LocalBoundsChanged via item_change_signal must evict cache entry"

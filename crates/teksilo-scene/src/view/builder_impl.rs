@@ -102,6 +102,8 @@ impl SceneView {
             magnet_connect_mode: Rc::new(Cell::new(false)),
             magnet_focus: Rc::new(Cell::new(None)),
             magnet_pending: Rc::new(Cell::new(None)),
+            transform: None,
+            transform_rt: Rc::new(crate::transform_session::TransformRuntime::default()),
         }
     }
 
@@ -237,6 +239,24 @@ impl SceneView {
             true
         } else {
             false
+        }
+    }
+
+    /// Drain a committed transform, applying its delta through one
+    /// [`Scene::apply_transform_delta`](crate::Scene::apply_transform_delta).
+    ///
+    /// The same drain `build()` runs; the public form exists for the headless
+    /// driver, exactly like [`flush_pending_item_move`](Self::flush_pending_item_move)
+    /// and [`flush_marquee_commit`](Self::flush_marquee_commit). Returns whether
+    /// anything was pending.
+    pub fn flush_pending_transform(&mut self) -> bool {
+        let pending = self.transform_rt.pending_commit.borrow_mut().take();
+        match pending {
+            Some((roots, delta)) => {
+                self.model.apply_transform_delta(&roots, &delta);
+                true
+            }
+            None => false,
         }
     }
 
@@ -699,6 +719,112 @@ impl SceneView {
     pub fn magnetism(mut self, config: crate::magnet::MagnetismConfig) -> Self {
         self.magnetism = Some(Rc::new(config));
         self
+    }
+
+    /// Install the **selection transform controller** on this view: a frame
+    /// with resize and rotate handles drawn around the selection, a group move,
+    /// a keyboard route, and accessibility nodes for all of it.
+    ///
+    /// Nothing about the view changes until this is called — with no controller
+    /// the pointer rules are exactly what they were.
+    ///
+    /// **Where the gesture may land** is not this controller's business: it is
+    /// the scene's, through
+    /// [`SceneModel::set_geometry_constraint`](crate::SceneModel::set_geometry_constraint),
+    /// which every gesture here consults on every sample. Snap-to-grid, axis
+    /// lock and page clamping live there, once for the document, rather than
+    /// once per view.
+    ///
+    /// # What a gesture writes, and when
+    ///
+    /// Nothing, until the release. The session is per-view and model-free: it
+    /// reads [`SceneSelection`](crate::SceneSelection), paints a preview, and
+    /// then writes the scene **once**, through a single
+    /// [`Scene::apply_transform_delta`](crate::Scene::apply_transform_delta).
+    /// So Esc is "drop the session" with no rollback to get wrong, a ten-item
+    /// selection emits no `ItemChange` at all until it lands, and an app that
+    /// wants the edit to be reversible has exactly one call to record — from
+    /// [`TransformConfig::on_end`](crate::TransformConfig::on_end). The history itself is the data layer's, not
+    /// this crate's.
+    ///
+    /// # Which handles appear
+    ///
+    /// Exactly the operations that will be honoured, never more:
+    ///
+    /// | Operation | Flag | Offered when |
+    /// | --- | --- | --- |
+    /// | Move | `IS_DRAGGABLE` | **any** selection root carries it (the others stay put) |
+    /// | Resize | `IS_RESIZABLE` | **every** selection root carries it |
+    /// | Rotate | `IS_ROTATABLE` | **every** selection root carries it *and* is lightweight |
+    ///
+    /// Resize and rotate demand unanimity because a partial one would tear the
+    /// selection apart — the locked members would stand still while the rest
+    /// scaled, and the frame would stop describing what it is drawn around. A
+    /// move can be partial because that is what every editor does with a locked
+    /// object.
+    ///
+    /// The flags are **honoured, not bypassed**: a default `ItemFlags` carries
+    /// `IS_SELECTABLE` and not `IS_DRAGGABLE`, so selecting a decorative item
+    /// does not quietly make it draggable.
+    ///
+    /// # Reaching the chrome over a heavyweight card
+    ///
+    /// The frame is drawn [`padding`](crate::TransformConfig::padding) **outside** the
+    /// selection, so the band and every handle sit on pixels no card owns. That
+    /// matters because a card that claims its own press — one calling
+    /// `capture_pointer`, or carrying its own `on_drag`, which is every
+    /// `Splitter` handle, `SpinBox` step button and `TextInput` selection drag —
+    /// wins that press by design, and this view never sees the gesture. So
+    /// **body drag over a card is best-effort and the frame band is the route
+    /// that always works.** Over the lightweight tier, and over a card that
+    /// claims nothing, both work.
+    ///
+    /// # Keyboard and assistive technology
+    ///
+    /// `t` (see [`TransformConfig::transform_key`](crate::TransformConfig::transform_key)) enters a handle-roving
+    /// mode: `Tab` / `Shift+Tab` move between the handles the frame is
+    /// offering, arrows drive the roved one (`Shift` ×10), `Enter` commits,
+    /// `Esc` cancels, `t` leaves. The frame and each handle are published as
+    /// accessibility nodes with `Increment` / `Decrement`, and both routes go
+    /// through the same session and the same commit — so the non-drag
+    /// alternative makes the same model change the drag makes, structurally.
+    ///
+    /// ```
+    /// # use teksilo_scene::{Scene, SceneView, SceneSelectionMode, TransformConfig};
+    /// let view = SceneView::new(Scene::new())
+    ///     .selection_mode(SceneSelectionMode::Multi)
+    ///     .transform_controller(TransformConfig::new().keep_ratio(true));
+    /// ```
+    pub fn transform_controller(
+        mut self,
+        config: crate::transform_session::TransformConfig,
+    ) -> Self {
+        self.transform = Some(Rc::new(config));
+        self
+    }
+
+    /// The live transform session, for an app-owned inspector, status bar or
+    /// size readout. `None` between gestures. Bind at
+    /// [`BindingLevel::RepaintOnly`].
+    ///
+    /// Republished on every **input** sample — each pointer move, each keyboard
+    /// step, and at the start and end of a gesture. It is deliberately *not*
+    /// republished per frame: during an edge auto-pan the pointer is standing
+    /// still while the view slides under it, so the frame keeps changing with
+    /// no sample to hang a republish on, and a readout bound here shows the
+    /// last sampled numbers until the pointer moves again. What is committed is
+    /// always the live resolution, so this lags the frame rather than
+    /// disagreeing with the result.
+    pub fn transform_session_signal(
+        &self,
+    ) -> Signal<Option<crate::transform_session::TransformSession>> {
+        self.transform_rt.published.clone()
+    }
+
+    /// The reactive enabled signal of the installed transform controller, if
+    /// any — for a toolbar to read or bind a "transform tools" toggle.
+    pub fn transform_enabled_signal(&self) -> Option<Signal<bool>> {
+        self.transform.as_ref().map(|c| c.enabled_signal())
     }
 
     /// The reactive enabled signal of the installed magnetism config, if

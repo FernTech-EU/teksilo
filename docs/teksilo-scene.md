@@ -533,41 +533,88 @@ Two consequences worth knowing:
 
 ## Reactive observers — `item_change_signal`
 
-Every Scene mutation fires an [`ItemChange`](../crates/teksilo-scene/src/scene.rs)
-event through `Scene::item_change_signal()`. Apps observe to wire validation,
-persistence, telemetry, or mirroring into a data layer:
+Every Scene mutation fires a [`SceneChange`](../crates/teksilo-scene/src/journal.rs)
+through `Scene::item_change_signal()`: the [`ItemChange`](../crates/teksilo-scene/src/scene.rs)
+itself, plus an envelope saying **which transaction** it belongs to, **whose**
+change it was, **whether it counts as history**, and **whether it is a per-frame
+artefact**. Apps observe to wire validation, persistence, telemetry, or
+mirroring into a data layer:
 
 ```rust
 // `model` is a SceneModel; `writer` is a clone of it.
 let writer = model.clone();
-let _h = model.item_change_signal().observe(move |change| {
-    if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+let _h = model.item_change_signal().observe(move |notification| {
+    // notification.txn / .source / .history / .ephemeral — see
+    // "The reversible-mutation seam" below.
+    if let ItemChange::LocalPosChanged { id, new, .. } = notification.change {
         // Reading the scene from an observer is allowed …
         if let Some(r) = writer.scene_rect(id) {
-            audit_log(id, r);
+            persist_card_position(id, r);
         }
         // … and so is writing it back. Guard the write, or you have a cycle.
-        let snapped = Point::new((new.x / 25.0).round() * 25.0,
-                                 (new.y / 25.0).round() * 25.0);
-        if snapped != new {
-            writer.set_local_pos(id, snapped);
+        // This one repairs a *programmatic* write — a document load, a
+        // `SceneListAdapter` rebuild — that put a card outside the board.
+        let clamped = Point::new(new.x.max(0.0), new.y.max(0.0));
+        if clamped != new {
+            writer.set_local_pos(id, clamped);
         }
     }
 });
 ```
 
+**Do not snap a gesture from here.** An observer runs *after* the write, so it
+produces a second `LocalPosChanged` for one drag, corrects the position a frame
+late, and never sees the dragged ghost at all — the one part of snapping a user
+actually notices. That is what
+[the geometry constraint](#the-geometry-constraint--deciding-before-the-change)
+is for, and it is the documented answer. This channel's own uses are the ones
+above: persistence, validation, audit, and mirroring into a data layer.
+
 `ItemChange` variants: `Added`, `Removed`, `LocalPosChanged`,
 `LocalBoundsChanged`, `TransformChanged`, `VisibilityChanged`,
 `OpacityChanged`, `FlagsChanged`, `ZChanged`, `LayerChanged`, `ParentChanged`,
-`PayloadChanged`, `AppearanceChanged`, `HandlersChanged`.
+`PlacementChanged`, `PayloadChanged`, `AppearanceChanged`, `ItemReplaced`,
+`HandlersChanged`. It is `#[non_exhaustive]`, so a wildcard arm keeps meaning
+"a change I do not act on".
 
-`HandlersChanged` fires from `set_item_handlers` and from `handlers_mut`. The
-second fires on the way *in*, before your closure has touched anything: a `&mut`
-borrow cannot report back what the caller did with it, so the event means "this
-item's handlers are no longer what you last read". Taking the borrow and
-changing nothing therefore costs one spurious event, which is the right way
-round — the alternative is a consumer serving stale handlers, and the
-`SceneView` is one (see [Scaling](#scaling--what-a-pan-costs)).
+**Every variant that replaces a value carries both sides of it**, so an edit is
+reversible from the event alone. `AppearanceChanged` carries an
+[`AppearanceChange`](../crates/teksilo-scene/src/scene.rs) naming the slot —
+`Fill { old, new }` or `Stroke { old, new }` — rather than a struct with a
+field for the slot that was not touched; `PayloadChanged` carries both payloads
+as `ItemPayload` refcounts. `Removed` is the exception, because its contents
+cannot ride a `Signal` at all: see the seam section below.
+
+### Edits and derived notifications
+
+Two of the variants are not *edits* at all. They are notifications the scene
+emits **beside** the edit that describes the same mutation, for consumers that
+would otherwise have to diff for it, and `ItemChange::is_edit()` is the test
+that tells them apart. Neither reaches a `SceneTransactionRecord`, so the
+record keeps the property above without exception:
+
+| variant | emitted by | why it is not an edit |
+| --- | --- | --- |
+| `VisibilityChanged { id, visible }` | every door that flips `IS_VISIBLE` — `set_visible`, `set_flag`, `set_flags` | the `FlagsChanged` that follows it carries both bitsets and describes the mutation. Recording both would make hiding a card two edits. |
+| `HandlersChanged { id, replaced: None }` | `handlers_mut` | it describes nothing — see below |
+
+`VisibilityChanged` used to come from `set_flag` and **not** from a wholesale
+`set_flags` flipping the same bit, so one mutation had two different shapes
+depending on the door, and an app counting the changes in an edit reported 2 for
+hiding a card and 1 for the same hide through `set_flags`. Both doors now
+announce the same pair and record the same single edit.
+
+`HandlersChanged` fires from `set_item_handlers` and from `handlers_mut`, and
+only the first can describe what happened. `set_item_handlers` is handed the new
+set and clones the old one out, so it carries a `HandlerReplacement { old, new }`
+and is a reversible edit like every other mutator. `handlers_mut` fires on the
+way *in*, before your closure has touched anything: a `&mut` borrow cannot
+report back what the caller did with it, so the event means "this item's
+handlers are no longer what you last read" and carries `replaced: None`. Taking
+the borrow and changing nothing therefore costs one spurious event, which is the
+right way round — the alternative is a consumer serving stale handlers, and the
+`SceneView` is one (see [Scaling](#scaling--what-a-pan-costs)). Make a handler
+change your history should be able to reverse through `set_item_handlers`.
 
 Logical-AT-structure mutations (groups, parents, relations, live regions,
 landmarks, rotor categories, magnets) are not item geometry, so they go through
@@ -757,11 +804,505 @@ a magnetism predicate: an observer is invited to write, and a write needs the
 cell exclusively, so draining under a read-only closure would hand out that
 invitation and then panic on it.
 
-Constraining a move *before* it is applied — snap-to-grid on the drag ghost,
-axis lock, bounds clamping — is a different problem, and an observer is the
-wrong tool for it even now: it runs after the write, so it produces a second
-`LocalPosChanged` for one gesture and cannot touch the mid-drag ghost at all.
-That needs a pre-mutation hook and does not exist yet.
+---
+
+## The geometry constraint — deciding before the change
+
+Snap-to-grid, axis lock, page-bounds clamping and "this card may not leave its
+lane" are one closure, installed on the **model**:
+
+```rust
+use teksilo_scene::ChangeVerdict;
+
+// `model` is a SceneModel.
+let grid = 25.0;
+let page = Rect::new(0.0, 0.0, 1000.0, 700.0);
+model.set_geometry_constraint(move |c| {
+    // An explicit magnet outranks the standing rule.
+    if c.magnet_snapped {
+        return ChangeVerdict::Accept;
+    }
+    let mut f = c.proposed;
+    f.rect.x = (f.rect.x / grid).round() * grid;
+    f.rect.y = (f.rect.y / grid).round() * grid;
+    f.rect.x = f.rect.x.clamp(page.x, page.right()  - f.rect.width);
+    f.rect.y = f.rect.y.clamp(page.y, page.bottom() - f.rect.height);
+    ChangeVerdict::Adjust(f)
+});
+```
+
+It is Qt's `QGraphicsItem::itemChange(ItemPositionChange, value) -> value` in the
+shape Rust's borrow rules allow: the scene is lent **read-only** and the decision
+is *returned* rather than written. Qt's literal shape — a virtual on the item —
+does not port, because a `SceneItem` lives inside the `Scene` it would need to
+read.
+
+### The quantity is a frame
+
+`c.start` and `c.proposed` are `TransformFrame`s: the scene-space box the
+gesture's items occupy, before and after. Not a pointer position, and not a
+`local_pos`, and the difference is the whole reason the example above is
+*correct*:
+
+| quantity | what snapping it does |
+| --- | --- |
+| pointer position | snaps the **cursor**. An item grabbed 37 dp from its corner lands 37 dp off-grid, every drag, for ever. |
+| `local_pos` | is stated in the item's **parent's** frame, so one rule silently means two things across a parented scene. |
+| **frame** | snaps the box the user can see, for one item or a whole selection. |
+
+For a group the frame is the union of the selection's roots, so a snapped
+multi-selection keeps its internal arrangement: the frame moves, and every root
+moves with it.
+
+`rect` is stated in the frame's **own** basis. For a single rotated item that is
+the item's basis, so a grid snap written against `rect.x` snaps along the item's
+axes; a multi-item frame is axis-aligned, so the same rule snaps along the
+scene's.
+
+`c.translation()` and `c.translated(v)` convert between the frame pair and a
+scene-space vector, which is what an axis lock wants:
+
+```rust
+model.set_geometry_constraint(|c| {
+    let t = c.translation();
+    ChangeVerdict::Adjust(c.translated(Vec2::new(t.x, 0.0)))   // horizontal only
+});
+```
+
+### Where it is consulted
+
+| route | constrained | notes |
+| --- | --- | --- |
+| the selection transform controller | yes | move, resize and rotate; pointer, keyboard and AT. The route a **heavyweight card** moves by. |
+| the lightweight item drag | yes | ghost *and* commit. |
+| the `Alt`+arrow keyboard nudge | yes | the same geometry the pointer gets, which is what WCAG 2.5.7's equivalence needs. |
+| an app's own drag (a card's `on_drag`) | opt-in | call `SceneModel::constrain_move` — see below. |
+| a programmatic mutator | **never** | `set_local_pos` and friends land exactly where they say. |
+
+That last row is the footgun the placement exists to avoid, and it is avoided by
+*who consults* the closure rather than by where it is stored: the gesture paths
+do, the mutators do not. Snapping a document load or a data-layer replay is Qt's
+own best-known trap with `itemChange`.
+
+The constraint is on the **model**, not the view, for two reasons. A heavyweight
+card's widget is built by a per-view delegate and holds a `SceneModel` clone,
+never a `&SceneView`, so a view-installed closure would be unreachable from the
+tier the motivating use cases live in. And geometry policy is a property of the
+*document* — "this corkboard is on a 25 dp grid" — so two panes onto one scene
+that snapped differently would be a bug. Contrast `SceneView::focus_order`,
+`drag_mode` and `magnetism`, which are per-view because they say what *this pane*
+lets you do.
+
+An app driving its own gesture uses the same closure through the model:
+
+```rust
+// At the press — the frame the gesture starts from, fixed for its life.
+let start = model.transform_frame(&[card]).expect("card resolves");
+// On each sample.
+let applied = model.constrain_move(&[card], start, raw_travel, TransformSource::Pointer);
+let p = model.local_pos(card).unwrap();
+model.set_local_pos(card, Point::new(p.x + applied.x, p.y + applied.y));
+```
+
+`constrain_frame` is the general form, for a gesture that also changes extent or
+orientation.
+
+### Preview and commit cannot disagree
+
+There is deliberately **no phase parameter**. The constraint is a pure function
+of the proposal and is re-run from scratch on every sample including the release
+one, so the frame the last preview drew *is* the frame the commit writes. A hook
+that could snap loosely while dragging and hard on release would be a hook that
+guarantees a jump at the release.
+
+The transform controller's whole gesture is still **one** model write, at the
+end: the constraint rewrites the frame, the delta is re-derived from it
+(`TransformDelta::between`), and a single `Scene::apply_transform_delta` applies
+it. So one constrained gesture is still one reversible step for an app-level
+history — which lives in the data layer, never here.
+
+### `Reject`
+
+`ChangeVerdict::Reject` means "this sample leaves the items where the gesture
+found them", and is exactly `Adjust(c.start)`. A "freeze at the last accepted
+sample" rejection would need history, and the next accepted sample would jump by
+everything the frozen ones travelled; stateless refusal means the gesture simply
+shows nothing happening and resumes when the proposal becomes acceptable. A
+gesture that *ends* rejected commits nothing and reports
+`TransformOutcome::Cancelled`.
+
+### Composing with magnetism
+
+[Magnetism](#magnetism) runs first, on the lightweight item drag; the constraint
+sees the magnetised proposal and `c.magnet_snapped` tells it so. Two policies:
+
+- `Accept` when `magnet_snapped` — an explicit magnet the user aimed at outranks
+  a standing rule (the example at the top of this section).
+- Rewrite it anyway — and then the magnet's **connection does not fire** and its
+  marker drops, because a magnet whose alignment was overruled connected
+  nothing. Two snapping systems that disagree is worse than one, so the
+  constraint's verdict decides the geometry, the feedback *and* the
+  connection.
+
+The other three routes do not run magnetism, so `magnet_snapped` is `false`
+there.
+
+### What it may touch, and what it costs
+
+It may **read** the scene through the `&Scene` it is handed — a shared borrow is
+already open. It may not **write**: that is enforced, not documented.
+`SceneModel::write_guard` checks the constraint flag and panics naming this hook
+and what to do instead, so the mistake reads as itself rather than as `RefCell
+already borrowed`. Asking the same scene for *another* constraint from inside
+one — calling `constrain_move` on the model it was handed — panics for the same
+reason: the constraint is the answer, and the nested call would recurse until
+the stack ran out. (Calling `constrain_move` / `constrain_frame` while a
+`SceneWriteGuard` is open panics too, and says so: the constraint decides what
+to write, so it cannot run in the middle of writing it. Constrain first, then
+open the write scope.)
+
+#### Do not capture a `SceneModel` in the closure
+
+`c.scene` is the *whole* read surface — every query `SceneModel` offers is a
+shared borrow delegating to the same `Scene` — so a captured handle buys a
+constraint nothing it is allowed to do, and it costs the scene.
+
+The scene **owns** the closure, so a closure that owns a `SceneModel` back
+closes the ring `SceneModel → Scene → constraint → SceneModel` and nothing in it
+is ever dropped: every item, every heavyweight payload, the journal, the spatial
+index, for the life of the process. It is the ordinary `Rc` cycle and it is
+invisible — the scene goes on working perfectly.
+
+```rust
+// Good: read what you were handed.
+model.set_geometry_constraint(move |c| match c.scene.scene_rect(lane) {
+    Some(r) if r.contains(Point::new(c.proposed.rect.x, c.proposed.rect.y)) =>
+        ChangeVerdict::Accept,
+    _ => ChangeVerdict::Reject,
+});
+
+// Also good, when a policy object genuinely holds a model for its other work:
+let weak = model.downgrade();            // -> WeakSceneModel
+model.set_geometry_constraint(move |c| match weak.upgrade() {
+    Some(m) if m.len() > 1 => ChangeVerdict::Accept,
+    _ => ChangeVerdict::Adjust(c.start),
+});
+
+// Leaks the whole scene:
+let captured = model.clone();
+model.set_geometry_constraint(move |c| {
+    let _ = captured.local_pos(c.items[0]);
+    ChangeVerdict::Accept
+});
+```
+
+`clear_geometry_constraint()` releases the closure and whatever it captured, so
+an app that got it wrong has a way out. `tests/constraint_lifetime.rs` pins all
+three shapes with a `Drop` sentinel.
+
+#### What it may hand back
+
+An **applicable** frame: every field finite, neither extent negative (zero is
+fine — a resize clamps at `min_size` rather than mirroring). That is not a
+formality. One character in the snap closure — `let grid = 0.0;` — makes
+`(x / grid).round() * grid` a `NaN`, and a `NaN` frame applied verbatim gives
+the item a `NaN` position, a `(inf, inf, -inf, -inf)` scene rect, and a
+permanent absence from hit-testing, from the marquee and from every spatial
+query, with nothing raised to say so.
+
+So an `Adjust` whose frame cannot be applied is **refused**: the sample behaves
+as `Reject` and the items stay where the gesture found them, and a debug build
+panics naming the frame and the usual cause. `Accept` and `Reject` are not
+checked — both hand back a frame the framework built.
+
+To unit-test a policy closure without a widget tree, drive it through
+`SceneModel::constrain_move` / `constrain_frame` on a bare `SceneModel`; that is
+the same door the app-owned drag uses, so the test exercises the real path.
+
+A scene with no constraint pays one `Option` test per sample and never builds a
+call; measured on a 20 000-item scene the difference between the mechanism
+present and absent is below the noise of the measurement. A scene *with* one
+pays for the closure once per **query**, not once per gesture: a sample that also
+lays out, paints and re-walks AT asks it about six times. That count is bounded
+and independent of both the scene's size and the selection's — pinned by a test —
+but it is not one, so an expensive spatial query belongs behind a memo in the
+closure's own capture.
+
+---
+
+## The reversible-mutation seam
+
+**Undo belongs to the data layer.** This crate ships no stack, no history and no
+`undo()`, and it will not grow one — applying an inverse is the first 80 % of an
+undo stack, and deciding what counts as one step is a document question, not a
+view question. What the scene owes a data layer is a record complete enough to
+reverse: grouped, tagged, and carrying the values the edit destroyed.
+
+Two channels carry it, and the split is forced by the types rather than chosen.
+`Signal<T>` snapshots its value before fanning out, so `T: Clone`; a removed
+entry holds a `Box<dyn SceneItem>` or a `Box<dyn Widget>`, and neither can be
+cloned. So the removal's *contents* cannot travel the notification channel and
+must be **moved**:
+
+| channel | carries | shape |
+| --- | --- | --- |
+| `item_change_signal` | a `SceneChange` — the change plus its transaction envelope | cheap, `Clone`, one per change; the view reconciles from it |
+| the **edit sink** | a `SceneTransactionRecord` — the whole transaction, owning what it destroyed | one per committed transaction, delivered with the scene unborrowed |
+
+### A transaction is a scope, and the scope is already there
+
+Every `SceneModel` mutator runs inside a write scope (that is how the change
+fan-out escapes the `RefCell` borrow), and `SceneWriteGuard` opens one around a
+block. A transaction is the *same* boundary. So without anything being wrapped
+by hand:
+
+- one mutator call is one transaction;
+- a subtree `remove` is one transaction with N edits — undoing a three-item
+  deletion is one step, not three;
+- a `write_guard` block is one transaction.
+
+`SceneModel::transaction(source, history)` holds the scope open across several
+calls and stamps them:
+
+```rust
+{
+    let _txn = model.transaction(ChangeSource::User, HistoryMode::Record);
+    for id in selection {
+        model.set_local_pos(id, nudged(id));
+    }
+} // one TxnId, one record, one undo step
+```
+
+Nesting **joins**: an inner `transaction` adds no boundary and the outer stamp
+wins, so an observer opening its own transaction inside a framework gesture
+cannot split that gesture in two. A transaction is a **synchronous** scope —
+holding one across a frame means its record never reaches the sink, and
+`SceneView::build` asserts in debug that none is open.
+
+### The stamps
+
+`ChangeSource` is `User` / `Programmatic` (the default) / `Remote`. The
+framework opens `User` transactions around the three places it writes the model
+on the user's behalf — the item-drag commit, the selection-transform commit and
+the `Alt`+arrow nudge. Without that an app could not tell a finished drag from a
+programmatic move: both arrive as a bare `LocalPosChanged`.
+
+`HistoryMode` is `Record` / `RecordPreserveRedo` / `Ignore` — the three-valued
+shape the editors that have solved this converged on. **The framework never
+interprets it.** It carries it, and the consumer decides.
+
+`ephemeral` marks a change that must be *rendered* and must not be *recorded*.
+The scene's own `refresh_dynamic_bounds` sets it, because an animating
+`add_item_dynamic` item re-reads its signal-driven AABB every build and so emits
+a `LocalBoundsChanged` per frame. An app driving its own per-frame stream — an
+item whose `transform` follows a rotation signal — says the same thing with
+`model.user_edit().ephemeral()`, so the knob is not one-sided across the seam.
+
+### The owning salvage
+
+```rust
+let salvage: Vec<RemovedItem> = scene.take(id);   // remove, and keep what it held
+scene.restore_all(salvage)?;                      // put it back, at the same ids
+```
+
+`Scene::remove` is `take` with the salvage routed to the edit sink instead of to
+the caller — one implementation, so `remove` cannot forget a side map that
+`take` remembers. With no sink installed the salvage is dropped, which is what a
+removal has always done, at what it has always cost.
+
+A [`RemovedItem`](../crates/teksilo-scene/src/salvage.rs) carries the entry
+whole — item or widget box, geometry, transform, z, layer, parent link, flags,
+opacity, handlers — plus its magnets (ids included) and its slice of the
+**logical accessibility tree**. That last part is the strongest reason this door
+exists: a removal drops the item's AT parent, its relations, its live-region
+status, its landmark role and its rotor categories *before* it announces
+`Removed`, so an app reconstructing the item from the event alone would restore
+the pixels and silently lose every one of them.
+
+**Both directions of every edge.** A removal cuts an item's own AT parent *and*
+every surviving node that was AT-parented under it (re-rooting those survivors
+at the view root), and it drops relations on either endpoint. The salvage
+records all of it, and a restore re-adopts the survivors and re-attaches every
+edge whose far end is still alive. Edges are attached after the whole batch is
+in, so an edge between two items of one removed subtree survives whatever order
+the ends land in.
+
+**Identity is the point.** `restore` re-inserts at the **original `ItemId`**,
+because `SceneSelection` is keyed by it, `MagnetId → ItemId` is keyed by it, the
+whole logical AT tree is keyed by `A11yNode::Item(ItemId)`, and — since a
+`SceneItem` has no downcast — an app's side map is the *only* way to reach
+item-specific state, so it is keyed by it too. This is the one door that puts a
+retired id back; ids are still never *reused*, and a fresh insert while a
+salvage is held can never collide with it.
+
+The entry also returns to its recorded place in **declaration order**, which is
+the order the accessibility walk publishes siblings in; appending it would move
+the item to the end of the reading order. The index is clamped, so a salvage
+held while the scene shrank past that position appends rather than failing.
+
+What identity buys is that every id-keyed lookup **resolves again** — not that
+the scene reaches into state it does not own. A `SceneSelection` is per view and
+lives outside the `Scene`, so a removal does not clear it and a restore does not
+re-add to it; an app that prunes its own selection on `Removed` (which it
+should) re-adds on the restore. Magnets and the logical AT tree *are* the
+scene's, and those the salvage carries.
+
+`restore_all` orders a whole `take` result for you (roots first). By hand, a
+child restored before its parent fails with `RestoreError::MissingParent`. The
+salvage is consumed by a refused call, so check the `Result` — it is the only
+copy of the item.
+
+**Restoring into a *different* scene is supported**, and is the
+move-between-documents door: `take` from one board, `restore` into another, and
+the item arrives whole at the same id. `ItemId` comes from a process-global
+counter, so an id from elsewhere cannot collide, and the salvage carries its
+entry rather than an index into the scene it came from. Three consequences,
+each of them a rule that already applies within one scene:
+
+- a **parented** salvage is refused — the parent it names is still in the other
+  scene — so move the parent first, or call `RemovedItem::detach()` to bring the
+  item over as a root;
+- logical-AT edges whose far end is not in the target are dropped, by the same
+  test that drops an edge to a since-removed node;
+- the recorded declaration index is the *source* scene's, and is clamped.
+
+**Heavyweight caveat.** A single-view `Scene::add_widget` entry stores one
+`Box<dyn Widget>` that the first view to build takes. A take and a restore
+inside one build cycle keep the arena instance (the view's orphan reap never
+runs, because the restore has already put the id back into the live heavyweight
+set); once the reap *has* run there is nothing left to materialise, and the
+entry comes back as a slot no view can fill. `restore` accepts either way —
+refusing would refuse the restores that work, and would refuse the whole entry,
+geometry and accessibility included, over a widget instance —
+and `RemovedItem::widget_instance_present()` is how an app sees it coming.
+Content that must survive an undo goes in through
+`SceneModel::add_widget_item`, whose payload every view rebuilds from.
+
+### The edit sink
+
+```rust
+model.set_edit_sink(move |record: SceneTransactionRecord| {
+    // record.txn / .source / .history / .outcome / .ephemeral
+    // record.edits: Vec<SceneEdit>, in application order.
+    // Invert by walking in reverse and applying each `old`;
+    // a SceneEdit::Removed inverts to Scene::restore.
+});
+```
+
+Exactly one sink: a scene's edit history has one owner, and the sink is handed
+the removed items *themselves*, which two owners of one `Box` cannot be. A
+second consumer composes inside the first.
+
+The sink runs with **no borrow on the scene**, so it may read the scene and
+write it back — validation, clamping and mirroring all do. Its own writes are
+ordinary transactions: they produce their own records and are delivered to it on
+a later round of the same loop. That is load-bearing rather than tidy. A sink
+that corrects a value and whose correction went unjournaled would leave the
+record the app is holding saying `old → new` while the scene sat at something
+else, and a redo would replay the wrong value.
+
+A transaction that changed nothing is never delivered, so a sink that writes
+only when it has something to correct settles on its own. One that does not is
+stopped by the same flat `CascadeBudget` the change fan-out uses, and for the
+same reason: an iterative loop with no bound is a frozen UI thread with no
+diagnostic.
+
+`transaction_signal()` fires once per committed transaction, after the sink,
+still unborrowed. That is where a document-dirty flag, a debounced save or a
+per-gesture validation pass belongs — once when the user lets go, not six times
+while the item is moving.
+
+**This is not where snap-to-grid goes.** The sink runs *after* the write.
+Snapping a gesture belongs in
+[the geometry constraint](#the-geometry-constraint--deciding-before-the-change),
+which runs *before* it and is consulted by every gesture route, so the frame the
+last preview drew is the frame the commit writes.
+
+### `abandon` — a cancelled interaction
+
+`SceneTransaction::abandon()` tags the record `TxnOutcome::Abandoned` and
+commits. **The scene is not rolled back**; the consumer reverts from the `old`
+values it was handed, without pushing anything a redo could replay. Applying the
+inverse is the consumer's side of the seam, by doctrine.
+
+### `squash` — endpoints instead of the path
+
+Off by default. `model.user_edit().squash()` folds a transaction's repeated
+writes to one continuous quantity (position, bounds, transform, opacity, z,
+placement) into a single edit keeping the **first** `old` and the **last** `new`.
+Discrete edits — adds, removals, replacements, flags, parent changes — are never
+coalesced and keep their order.
+
+Off by default because squashing throws the intermediate path away, which a
+replay, a presence indicator or a collaboration relay needs, and losing it
+silently would be exactly the quiet data loss this seam exists to prevent. The
+built-in item drag already commits one `set_local_pos` per gesture, so the
+default costs nothing in the common case.
+
+### `replace_item` — new content, same identity
+
+```rust
+let previous: Box<dyn SceneItem> = scene.replace_item(id, Box::new(new_item))?;
+```
+
+Swaps the item box **inside** the entry, keeping the id and everything hanging
+off it, and emits one `ItemChange::ItemReplaced` rather than a removal and an
+insertion. The new item's `local_bounds` is read and the subtree re-bucketed —
+the AABB the spatial index buckets on is derived from the item, so skipping that
+would quietly break `items_in_rect`, `item_at`, the cull path and every cached
+hit snapshot.
+
+The **entry's** flags are kept; the replacement's `initial_flags` are not
+consulted. They are *initial* flags — they apply where an item is inserted — and
+a content refresh must not silently undo an app's `set_visible(false)`. Call
+`set_flags` afterwards to adopt the new item's instead.
+
+### Atomic placement, and a fractional `z`
+
+`Placement { parent, z, local_pos, transform }` is where an item sits, as one
+property. `set_item_parent` deliberately does not rebase `local_pos` — a child's
+position is stated in its parent's frame — so a visually-stable reparent used to
+be three mutators, three events, three things for a history to undo separately,
+and two intermediate states in which the item was visibly somewhere it never
+was.
+
+```rust
+model.set_placement(id, Placement { parent: Some(group), z, local_pos, transform });
+model.reparent_keeping_scene_pos(id, Some(group));   // "drag into group", correctly
+```
+
+`reparent_keeping_scene_pos` derives the local frame that leaves the item's
+scene transform where it is and applies parent and frame as one write. A cycle
+is refused **whole** rather than half-applied.
+
+The O(1)-reorder half of Figma's "parent + fractional index as one property" was
+already here — `z` is an `f32` and `set_z` writes one field, so
+`set_z(id, (za + zb) / 2.0)` is a fractional insert with no sibling rewrite.
+What was missing is knowing when it runs out:
+
+```rust
+match scene.z_between(below, above) {
+    Some(z) => scene.set_z(id, z),
+    None    => renormalise_the_band(),   // f32 precision exhausted at this locus
+}
+```
+
+An `f32` carries ~24 mantissa bits, so about two dozen bisections at one point
+in the order exhaust it — reachable in any card-shuffling UI. Asking first is
+what makes that visible: a caller that computed an exhausted midpoint itself
+gets `mid == lo`, and `set_z` ignores a write of the value the entry already
+holds — a **silent no-op**, the card simply not moving, with no error and no
+event.
+
+The two agree on one metric, which is what makes that promise hold: `set_z`
+ignores a write only when the stored value is already *exactly* that float, so
+**every `Some` that `z_between` hands out is a value `set_z` will apply**. It
+used to guard on an absolute `|old - z| < f32::EPSILON`, which is the spacing of
+the representable numbers at 1.0 and therefore far too coarse near zero: with
+`lo = 0.0` and `hi = 1.25e-7`, `z_between` answered `Some(6.25e-8)` and the
+write was thrown away — no change, no `ZChanged`, ordering broken, and the
+documented remedy (renumber on `None`) never triggered because the answer was
+`Some`.
 
 ---
 
@@ -1203,15 +1744,21 @@ consumes the event once as a reparent and shows containment by nesting.
 
 ### Lightweight vs heavyweight
 
-The built-in mouse integration rides the SceneView's lightweight drag /
-pointer path (the `RectItem::draggable(true)` substrate), because that is
-the only tier the SceneView drags. The keyboard connect flow works for
-magnets on any item (it never touches pointer routing). For heavyweight
-items (which the SceneView does not drag), originate the drag inside the
-item's own widget and call the reusable snap helpers directly:
+The built-in mouse integration rides the SceneView's **lightweight** drag /
+pointer path (the `RectItem::draggable(true)` substrate) and only that one. The
+keyboard connect flow works for magnets on any item (it never touches pointer
+routing).
+
+A heavyweight card *is* moved by a `SceneView` — through the selection transform
+controller, not this path — so magnetism does not apply to it automatically, and
+neither does the scene's geometry constraint's `magnet_snapped` flag (it is
+`false` on every route but this one). For a card, either drive the snap from the
+item's own widget with the reusable helpers,
 `SceneModel::compute_item_snap(dragged, drag_delta, capture_radius, &predicate)`
-and `compute_port_snap(source, cursor, capture_radius, &predicate)` — the
-same mechanism, reachable from any drag origin.
+and `compute_port_snap(source, cursor, capture_radius, &predicate)` — the same
+mechanism, reachable from any drag origin — or express the alignment as a
+[geometry constraint](#the-geometry-constraint--deciding-before-the-change),
+which every route consults on both tiers.
 
 Demo: `cargo run -p scene-magnetism`. Accessibility shaping for magnets
 (synthetic nodes + `active_descendant`) is covered in
@@ -1286,9 +1833,10 @@ So they are built once and invalidated per item from the `item_change_signal`
 stream: a pan emits no change and pays one comparison, a move rewrites one row
 and its subtree, and only a change to *membership* (visibility, flags), to
 *paint order* (`z`, `layer`, `parent`) or to *handlers* rebuilds. This is why
-`handlers_mut` fires `ItemChange::HandlersChanged` — a mutator that changed the
-model silently would leave the snapshot serving a handler set nobody installed
-any more.
+`handlers_mut` fires `ItemChange::HandlersChanged` even though it cannot say
+what the handlers became — a mutator that changed the model silently would leave
+the snapshot serving a handler set nobody installed any more. Telling and
+describing are different jobs, and that event does only the first.
 
 **Moving an item costs its subtree.** `set_local_pos` / `set_transform`
 re-bucket the moved item and every descendant in the spatial index, walking the
@@ -1753,6 +2301,12 @@ relations, live, landmarks, categories — and re-roots any still-alive node
 that was AT-parented under a removed item, so the separate AccessKit tree
 never carries a dangling reference. See *Runtime mutation* below.
 
+To remove an item and **keep** what it held — so a data layer can put it back at
+the same `ItemId`, with its magnets and its whole slice of the accessibility
+tree — use `scene.take(id)` and `scene.restore_all(salvage)`. `remove` is the
+same call with the salvage routed to the edit sink instead of to you; see
+[The reversible-mutation seam](#the-reversible-mutation-seam).
+
 ---
 
 ## Shared model & multi-view
@@ -1843,14 +2397,27 @@ scene origin through
 boxed-`dyn` counterpart of `add_item`, needed because a trait-object item
 can't go through the generic `add_item<I: SceneItem>`). On construction the
 adapter materialises every current row; afterwards it reconciles from the
-model's `DataChange` stream: a structural change (insert / remove / move /
-reset) rebuilds every adapter-owned item (simple and always correct), an
-`ItemUpdated` rebuilds just that one row's item in place, and a lazy-loading
-source's `WindowLoaded` rebuilds only the newly-loaded range. `item_id_at`,
-`ids`, `len`, `is_empty` read the current index → `ItemId` mapping; `clear`
-removes every adapter-owned item from the scene. Dropping the adapter stops
-observing the model but does **not** remove its items — call `clear()` first
-if you want them gone.
+model's `DataChange` stream. `item_id_at`, `ids`, `len`, `is_empty` read the
+current index → `ItemId` mapping; `clear` removes every adapter-owned item from
+the scene. Dropping the adapter stops observing the model but does **not**
+remove its items — call `clear()` first if you want them gone.
+
+**Slot identity is preserved.** Data index *i* owns one `ItemId`, and that id
+survives a change to the row's content *and* a change to the rows around it; it
+is retired only when the row itself goes away. Reconciliation goes through
+[`Scene::replace_item`](#replace_item--new-content-same-identity), which swaps
+the item box inside the existing entry, so an `ItemUpdated` no longer takes the
+row's selection membership, magnets and AT parenting with it, and an insert at
+the front does not deselect the whole list. A structural change still re-reads
+every row — the delegate takes an `index`, so shifting one row changes what
+every later row renders — but only the *content* is rebuilt, not the ids. Each
+reconciliation is one `ChangeSource::Programmatic` transaction, so a data layer
+watching the scene sees one grouped change per source change.
+
+The identity is the **slot**, not a domain key, because this adapter has none to
+work from: its delegate is `Fn(&T, usize)` and `T` need not be identifiable. An
+adapter over a source with stable keys should follow `TreeDataSlice`'s pattern
+and key on the domain id.
 
 Use `SceneListAdapter::from_source` instead of `from_model` to drive the
 same reconciliation off a custom `ListDataSource<Item = T>` (the escape
@@ -2190,6 +2757,13 @@ any observer installed, take `model.write_guard()` instead — it derefs to
 `&mut Scene`, so every line above reads identically, and it batches. See
 *Deferred fan-out* above.
 
+The runnable `scene-corkboard` example goes one step further: its cards are
+draggable, both panes install a `transform_controller`, and one
+`set_geometry_constraint` on the shared model keeps every card on the backdrop's
+40-unit tile and inside the board — from the pointer, from `Alt`+arrow, and from
+either pane. Its "Snap to grid" checkbox is a `Signal<bool>` the constraint reads
+live.
+
 ---
 
 ## Worked example: simple node-graph editor
@@ -2216,7 +2790,7 @@ model.set_item_parent(label, Some(node));
 // item slides freely and lands on the grid when released.
 let writer = model.clone();
 let _h = model.item_change_signal().observe(move |c| {
-    if let ItemChange::LocalPosChanged { id, new, .. } = *c {
+    if let ItemChange::LocalPosChanged { id, new, .. } = c.change {
         let snapped = Point::new((new.x / 20.0).round() * 20.0,
                                  (new.y / 20.0).round() * 20.0);
         if snapped != new {

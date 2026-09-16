@@ -11326,6 +11326,7 @@ dependencies = [
  "teksilo-i18n",
  "teksilo-tokens",
  "teksilo-widgets",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

@@ -44,7 +44,7 @@ use teksilo_core::color_prop::ColorProp;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::Color;
 
-use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
+use crate::item::{AppearanceWrite, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 use teksilo_i18n::LocalizedString;
 
@@ -228,14 +228,19 @@ impl SceneItem for GroupItem {
         }
     }
 
-    fn set_fill(&mut self, fill: Option<ColorProp>) -> bool {
-        self.fill = fill;
-        true
+    fn set_fill(&mut self, fill: Option<ColorProp>) -> AppearanceWrite<ColorProp> {
+        AppearanceWrite::Accepted {
+            was: std::mem::replace(&mut self.fill, fill),
+        }
     }
 
-    fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>) -> bool {
-        self.stroke = stroke;
-        true
+    fn set_stroke(
+        &mut self,
+        stroke: Option<(ColorProp, StrokeStyle)>,
+    ) -> AppearanceWrite<(ColorProp, StrokeStyle)> {
+        AppearanceWrite::Accepted {
+            was: std::mem::replace(&mut self.stroke, stroke),
+        }
     }
 
     fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {

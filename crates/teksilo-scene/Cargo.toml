@@ -26,6 +26,7 @@ teksilo-i18n = { workspace = true }
 # teksilo-widgets does not depend on teksilo-scene, so this is acyclic.
 teksilo-widgets = { workspace = true }
 accesskit = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # Test-only: property-based testing (see the `proptest` entry in the

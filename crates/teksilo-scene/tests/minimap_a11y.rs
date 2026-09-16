@@ -539,7 +539,8 @@ fn a_tap_moves_the_view_and_says_nothing() {
         let said = f.tree.announcements_since(since);
         assert!(
             said.is_empty(),
-            "{kind:?}: the pointer route must not push a live-region utterance,              got {said:?}"
+            "{kind:?}: the pointer route must not push a live-region utterance, \
+             got {said:?}"
         );
     }
 }
@@ -581,7 +582,8 @@ fn what_the_tap_did_is_still_readable_on_the_node() {
     let after = f.value();
     assert_ne!(
         before, after,
-        "a tap that moved the view must leave the node announcing the new          position when it is asked — being quiet is not being stale"
+        "a tap that moved the view must leave the node announcing the new \
+         position when it is asked — being quiet is not being stale"
     );
     assert_eq!(
         after,
@@ -651,7 +653,8 @@ fn a_read_only_minimap_can_still_be_put_in_the_tab_order_by_the_app() {
     assert_eq!(
         tree.tab_stops_within(root),
         vec![minimap],
-        "`.focusable(true)` from the WidgetBuilder chain must reach this widget          like any other — the default is the framework's opinion, not a refusal"
+        "`.focusable(true)` from the WidgetBuilder chain must reach this widget \
+         like any other — the default is the framework's opinion, not a refusal"
     );
 }
 

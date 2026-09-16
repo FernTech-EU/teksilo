@@ -69,7 +69,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::Color;
 
 use crate::flags::ItemFlags;
-use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
+use crate::item::{AppearanceWrite, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 use crate::shape::{HIT_BAND_SLACK, ItemShape, ShapeGeometry};
 use teksilo_i18n::LocalizedString;
@@ -311,15 +311,19 @@ impl SceneItem for PathItem {
         }
     }
 
-    fn set_fill(&mut self, fill: Option<ColorProp>) -> bool {
-        self.fill = fill;
-        true
+    fn set_fill(&mut self, fill: Option<ColorProp>) -> AppearanceWrite<ColorProp> {
+        AppearanceWrite::Accepted {
+            was: std::mem::replace(&mut self.fill, fill),
+        }
     }
 
-    fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>) -> bool {
-        self.stroke = stroke;
+    fn set_stroke(
+        &mut self,
+        stroke: Option<(ColorProp, StrokeStyle)>,
+    ) -> AppearanceWrite<(ColorProp, StrokeStyle)> {
+        let was = std::mem::replace(&mut self.stroke, stroke);
         self.recompute_bounds();
-        true
+        AppearanceWrite::Accepted { was }
     }
 
     fn register_bindings(&self, ctx: &mut BuildContext, view_id: WidgetId) {

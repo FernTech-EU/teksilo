@@ -55,12 +55,17 @@ enum Note {
     Moved(ItemId),
     MovedTo(ItemId, i32, i32),
     Removed(ItemId),
-    /// `Scene::set_visible` emits this **and then** `FlagsChanged`, so one
-    /// mutator call is two notifications — a free second data point for FIFO
-    /// wherever a test uses it.
+    /// Every door that flips `IS_VISIBLE` emits this **and then**
+    /// `FlagsChanged`, so one mutator call is two notifications — a free second
+    /// data point for FIFO wherever a test uses it. Only the second is an edit;
+    /// see `ItemChange::is_edit`.
     VisibilityChanged(ItemId),
     FlagsChanged(ItemId),
-    HandlersChanged(ItemId),
+    /// `set_item_handlers`: carries both sides, so it is a reversible edit.
+    HandlersReplaced(ItemId),
+    /// `handlers_mut`: fires on the way in and describes nothing, so it is an
+    /// invalidation notice and not an edit.
+    HandlersInvalidated(ItemId),
     Other,
     A11y,
 }
@@ -72,7 +77,11 @@ impl From<ItemChange> for Note {
             ItemChange::Removed { id } => Note::Removed(id),
             ItemChange::VisibilityChanged { id, .. } => Note::VisibilityChanged(id),
             ItemChange::FlagsChanged { id, .. } => Note::FlagsChanged(id),
-            ItemChange::HandlersChanged { id } => Note::HandlersChanged(id),
+            ItemChange::HandlersChanged {
+                id,
+                replaced: Some(_),
+            } => Note::HandlersReplaced(id),
+            ItemChange::HandlersChanged { id, replaced: None } => Note::HandlersInvalidated(id),
             _ => Note::Other,
         }
     }
@@ -99,7 +108,7 @@ fn record(model: &SceneModel) -> (Log, [ObserverHandle; 2]) {
     let a11y = log.clone();
     let h_item = model
         .item_change_signal()
-        .observe(move |c| items.borrow_mut().push(Note::from(*c)));
+        .observe(move |c| items.borrow_mut().push(Note::from(c.change.clone())));
     let h_a11y = model
         .a11y_change_signal()
         .observe(move |_| a11y.borrow_mut().push(Note::A11y));
@@ -307,7 +316,7 @@ fn a_panic_in_with_handlers_mut_releases_the_borrow() {
     model.set_local_pos(id, Point::new(3.0, 3.0));
     assert_eq!(
         *log.borrow(),
-        vec![Note::HandlersChanged(id), Note::Moved(id)],
+        vec![Note::HandlersInvalidated(id), Note::Moved(id)],
         "a panicking handler closure stranded the scene"
     );
     // The `HandlersChanged` above is the one `handlers_mut` emits on the way
@@ -369,7 +378,7 @@ fn a_runaway_observer_trips_the_cap_and_names_the_item() {
 
     let writer = model.clone();
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
             // No equality guard, and a value that never repeats: each round
             // produces exactly one more, always about the same item.
             writer.set_local_pos(id, Point::new(new.x + 1.0, new.y));
@@ -453,7 +462,7 @@ fn a_deep_guarded_cascade_settles_at_any_depth() {
     let writer = model.clone();
     let links = Rc::new(ids.clone());
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
             counted.set(counted.get() + 1);
             let Some(&at) = index.get(&id) else {
                 return;
@@ -546,7 +555,7 @@ fn a_guarded_cascade_that_maintains_at_structure_per_node_settles() {
     let links = Rc::new(ids.clone());
     let counted = at_bumps.clone();
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
             let Some(&at) = index.get(&id) else {
                 return;
             };
@@ -640,7 +649,7 @@ fn a_guarded_relaxation_with_a_wide_fan_in_settles() {
     let skipped = suppressed.clone();
     let writer = model.clone();
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
             if id == hub {
                 return; // the hub's own move is not an incident edge
             }
@@ -763,7 +772,7 @@ fn the_cascade_budget_is_a_knob_in_both_directions() {
         let writer = model.clone();
         let links = Rc::new(ids.clone());
         let handle = model.item_change_signal().observe(move |change| {
-            if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+            if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
                 let Some(at) = links.iter().position(|c| *c == id) else {
                     return;
                 };
@@ -864,7 +873,7 @@ fn a_nonsensical_budget_is_clamped_where_it_is_written() {
     let writer = model.clone();
     let links = Rc::new(ids.clone());
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
             let Some(at) = links.iter().position(|c| *c == id) else {
                 return;
             };
@@ -907,7 +916,7 @@ fn a_runaway_that_never_repeats_an_item_still_terminates() {
     let writer = model.clone();
     let _h = model
         .item_change_signal()
-        .observe(move |change| match *change {
+        .observe(move |change| match change.change {
             // Each reaction is about a brand-new item, so every key is fresh.
             ItemChange::Added { id } => {
                 writer.remove(id);
@@ -1055,7 +1064,7 @@ fn flush_changes_under_a_shared_borrow_is_a_no_op_not_a_panic() {
     // not good enough to drain under.
     let writer = model.clone();
     let _reactor = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change
             && new.x < 9.0
         {
             writer.set_local_pos(id, Point::new(9.0, 9.0));
@@ -1101,7 +1110,7 @@ fn flush_changes_from_inside_an_observer_is_a_no_op() {
     let (log, _handles) = record(&model);
     let writer = model.clone();
     let _reactor = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, .. } = *change
+        if let ItemChange::LocalPosChanged { id, .. } = change.change
             && id == a
         {
             writer.set_local_pos(c, Point::new(99.0, 99.0));
@@ -1176,7 +1185,7 @@ fn a_synchronous_emit_never_overtakes_an_abandoned_batch() {
     let sink = log.clone();
     let _h = model
         .item_change_signal()
-        .observe(move |c| sink.borrow_mut().push(note_with_target(*c)));
+        .observe(move |c| sink.borrow_mut().push(note_with_target(c.change.clone())));
 
     // Abandon a batch: (1,1) is emitted but never delivered.
     let editing = model.clone();
@@ -1225,7 +1234,7 @@ fn a_recursive_remove_keeps_its_leaves_then_root_order() {
     let sizes: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
     let seen_sizes = sizes.clone();
     let _watcher = model.item_change_signal().observe(move |c| {
-        if matches!(*c, ItemChange::Removed { .. }) {
+        if matches!(c.change, ItemChange::Removed { .. }) {
             seen_sizes.borrow_mut().push(reader.len());
         }
     });
@@ -1269,7 +1278,7 @@ fn an_observer_write_lands_after_the_changes_already_queued() {
     let (log, _handles) = record(&model);
     let writer = model.clone();
     let _reactor = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, .. } = *change
+        if let ItemChange::LocalPosChanged { id, .. } = change.change
             && id == a
         {
             writer.set_local_pos(c, Point::new(99.0, 99.0));
@@ -1330,7 +1339,7 @@ fn repeated_moves_of_one_item_are_not_coalesced() {
     let sink = log.clone();
     let _h = model
         .item_change_signal()
-        .observe(move |c| sink.borrow_mut().push(note_with_target(*c)));
+        .observe(move |c| sink.borrow_mut().push(note_with_target(c.change.clone())));
 
     {
         let mut scene = model.write_guard();
@@ -1367,7 +1376,7 @@ fn a_bare_scene_still_notifies_synchronously() {
     let sink = log.clone();
     let _h = scene
         .item_change_signal()
-        .observe(move |c| sink.borrow_mut().push(Note::from(*c)));
+        .observe(move |c| sink.borrow_mut().push(Note::from(c.change.clone())));
 
     scene.set_local_pos(id, Point::new(4.0, 4.0));
     assert_eq!(*log.borrow(), vec![Note::Moved(id)]);
@@ -1469,7 +1478,7 @@ fn structural_version_excludes_dynamic_churn_but_not_an_observers_write() {
     // refresh's fan-out. It must move `structural_version`.
     let writer = model.clone();
     let _reactor = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalBoundsChanged { id, .. } = *change
+        if let ItemChange::LocalBoundsChanged { id, .. } = change.change
             && id == dynamic
         {
             writer.set_a11y_landmark(A11yNode::Item(other), Role::Region);

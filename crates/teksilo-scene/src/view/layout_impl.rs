@@ -249,6 +249,25 @@ impl SceneView {
 
         let mut at_heavy: HashSet<ItemId> = HashSet::new();
         let mut at_children: Vec<WidgetId> = Vec::new();
+        // The selection transform's live preview. This is the heavyweight half
+        // of the controller's one preview affine — the lightweight tier
+        // composes the SAME value into each item's `local → scene` in
+        // `paint_band`. Two expressions of one function, so a mixed selection
+        // cannot half-move mid-gesture.
+        //
+        // Applying it to the placement rectangle means a resize previews as a
+        // real **relayout** here: the card is laid out at the new size and its
+        // text re-wraps as the handle moves. The lightweight tier composes the
+        // same affine as a visual scale instead, so the two agree on the box and
+        // not on the interior until the commit — see the `transform_session`
+        // module header.
+        //
+        // It reaches here at all because the controller's tick is a `Signal`
+        // bound at `BindingLevel::Relayout`, not a plain `Cell`: `place_children`
+        // re-runs on a relayout and on nothing weaker, so a repaint-only trigger
+        // would have previewed the frame and the lightweight items while the
+        // cards sat still until the commit.
+        let transform_preview = self.transform_preview();
         let scene = self.model.0.borrow();
         for placement in children.iter_mut() {
             let Some(&item_id) = self.widget_to_item.get(&placement.id) else {
@@ -274,6 +293,20 @@ impl SceneView {
             // coordinate `scroll_into_view` and focus-follow read, and a card
             // whose position changed while it was parked would otherwise come
             // back — or be scrolled to — at a stale one.
+            // …through the transform preview, when this card is one the live
+            // gesture carries. Everything downstream — the cull, the retention
+            // decision, the accessibility rectangle — then reads the position
+            // the user can see rather than the one the model still holds.
+            let rect = match &transform_preview {
+                Some((roots, xform))
+                    if roots
+                        .iter()
+                        .any(|r| *r == item_id || scene.is_descendant_of(item_id, *r)) =>
+                {
+                    xform.apply_rect(rect)
+                }
+                _ => rect,
+            };
             placement.origin = Point::new(rect.x, rect.y);
             placement.size = if crate::scene::rects_intersect(rect, region) {
                 Size::new(rect.width, rect.height)

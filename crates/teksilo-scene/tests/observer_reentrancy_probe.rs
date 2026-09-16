@@ -34,7 +34,7 @@ fn observer_may_write_the_scene_back() {
 
     let writer = model.clone();
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
             let snapped = Point::new((new.x / 25.0).round() * 25.0, (new.y / 25.0).round() * 25.0);
             if snapped != new {
                 writer.set_local_pos(id, snapped);
@@ -61,7 +61,7 @@ fn observer_may_read_the_scene() {
     let seen: Rc<RefCell<Option<Rect>>> = Rc::new(RefCell::new(None));
     let sink = seen.clone();
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, .. } = change.change {
             // A validator asking "where did it land in scene space?"
             *sink.borrow_mut() = reader.scene_rect(id);
         }
@@ -87,7 +87,7 @@ fn observer_may_defer_the_write_to_after_the_mutation() {
         Rc::new(RefCell::new(Vec::new()));
     let queue = pending.clone();
     let _h = model.item_change_signal().observe(move |change| {
-        if let ItemChange::LocalPosChanged { id, new, .. } = *change {
+        if let ItemChange::LocalPosChanged { id, new, .. } = change.change {
             let snapped = Point::new((new.x / 25.0).round() * 25.0, (new.y / 25.0).round() * 25.0);
             if snapped != new {
                 queue.borrow_mut().push((id, snapped));

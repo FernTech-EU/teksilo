@@ -109,6 +109,10 @@ pub(super) fn classify(change: &ItemChange) -> HitInvalidation {
         // Paint-only by name, but a stroked `PathItem` derives its hit band
         // from the stroke it draws, so the shape moves with it.
         ItemChange::AppearanceChanged { .. } => HitInvalidation::Geometry,
+        // A different item box at the same id: new `local_bounds`, new shape.
+        // Geometry rather than Structure because membership is unchanged — the
+        // row is still there, its silhouette is not.
+        ItemChange::ItemReplaced { .. } => HitInvalidation::Geometry,
         // Membership: `is_hit_testable` chains visibility up the parent chain,
         // so a flag flip anywhere can add or drop a whole subtree.
         ItemChange::VisibilityChanged { .. }
@@ -118,6 +122,9 @@ pub(super) fn classify(change: &ItemChange) -> HitInvalidation {
         | ItemChange::LayerChanged { .. }
         // Both at once — the subtree's geometry and its inherited visibility.
         | ItemChange::ParentChanged { .. }
+        // Parent, z, position and transform at once: membership *and*
+        // geometry, so the wider verdict is the only correct one.
+        | ItemChange::PlacementChanged { .. }
         | ItemChange::Added { .. }
         | ItemChange::Removed { .. }
         // A snapshot row carries a clone of the handler set and the

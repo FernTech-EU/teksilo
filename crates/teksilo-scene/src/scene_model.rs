@@ -67,7 +67,7 @@
 //! delegate's *handlers* may mutate later).
 
 use std::cell::{RefCell, RefMut};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use teksilo_canvas::{Point, Rect, StrokeStyle, Transform2D};
 use teksilo_core::color_prop::ColorProp;
@@ -79,8 +79,13 @@ use crate::flags::ItemFlags;
 use crate::index::SpatialIndex;
 use crate::item::{ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
+use crate::journal::{
+    ChangeSource, EditJournal, EphemeralScope, HistoryMode, SceneChange, SceneTransactionRecord,
+    TxnId, TxnOutcome,
+};
 use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
-use crate::scene::{CascadeBudget, ItemChange, PanAxes, Scene, SceneLayer};
+use crate::salvage::{RemovedItem, ReplaceRejected, RestoreError};
+use crate::scene::{CascadeBudget, PanAxes, Placement, Scene, SceneLayer};
 use crate::shape::{ItemSelectionMode, ItemShape, SceneRegion};
 use teksilo_canvas::Vec2;
 
@@ -114,6 +119,50 @@ impl std::fmt::Debug for SceneModel {
                 .field("len", &"<borrowed>")
                 .finish(),
         }
+    }
+}
+
+/// A non-owning handle to a [`Scene`] — [`SceneModel`] without the ownership.
+///
+/// Produced by [`SceneModel::downgrade`] and turned back into a `SceneModel`,
+/// for as long as one still exists, by [`upgrade`](Self::upgrade). Holding one
+/// keeps nothing alive.
+///
+/// Its reason to exist is the closure the scene owns: a geometry constraint
+/// that captures a `SceneModel` closes the ring
+/// `SceneModel → Scene → constraint → SceneModel`, and nothing in it is ever
+/// dropped. Capturing this instead breaks the ring. See
+/// [`SceneModel::set_geometry_constraint`] and
+/// [`ProposedChange`](crate::ProposedChange) for the rule and the safe forms.
+pub struct WeakSceneModel(Weak<RefCell<Scene>>);
+
+impl Clone for WeakSceneModel {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl std::fmt::Debug for WeakSceneModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WeakSceneModel")
+            .field("alive", &self.is_alive())
+            .finish()
+    }
+}
+
+impl WeakSceneModel {
+    /// An owning handle to the scene, if any still exists.
+    ///
+    /// `None` once the last [`SceneModel`] has been dropped — which is the
+    /// point: a constraint outliving its scene does nothing instead of keeping
+    /// it alive.
+    pub fn upgrade(&self) -> Option<SceneModel> {
+        self.0.upgrade().map(SceneModel)
+    }
+
+    /// Whether the scene is still alive, without building a handle.
+    pub fn is_alive(&self) -> bool {
+        self.0.strong_count() > 0
     }
 }
 
@@ -186,6 +235,106 @@ impl Drop for SceneWriteGuard<'_> {
     }
 }
 
+/// An open transaction over a [`SceneModel`]: every edit until it drops is one
+/// logical change.
+///
+/// Opened by [`SceneModel::transaction`] / [`SceneModel::user_edit`]. On drop it
+/// closes the scope and — with an edit sink installed — delivers one
+/// [`SceneTransactionRecord`] with the scene unborrowed.
+///
+/// Nesting **joins**: a guard opened while another is live adds no boundary, and
+/// the outer stamp wins. Everything a guard says (`squash`, `ephemeral`,
+/// `abandon`) therefore applies to the transaction it is *part of*, not to a
+/// private one of its own.
+#[must_use = "a SceneTransaction commits when it drops; binding it to `_` commits \
+              immediately and groups nothing — bind it to a named `_txn`"]
+pub struct SceneTransaction<'a> {
+    model: &'a SceneModel,
+    journal: Rc<EditJournal>,
+    /// `Some` while [`ephemeral`](SceneTransaction::ephemeral) is in effect;
+    /// dropped before the scope closes so the depth cannot outlive the guard.
+    ephemeral: Option<EphemeralScope>,
+}
+
+impl std::fmt::Debug for SceneTransaction<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SceneTransaction")
+            .field("journal", &self.journal)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SceneTransaction<'_> {
+    /// Coalesce this transaction's repeated writes to one continuous quantity
+    /// — position, bounds, transform, opacity, z, placement — into a single
+    /// edit keeping the **first** `old` and the **last** `new`.
+    ///
+    /// **Off by default**, and deliberately: squashing throws the intermediate
+    /// path away, which a replay, a presence indicator or a collaboration relay
+    /// needs, and losing it silently by default is exactly the quiet data loss
+    /// this seam exists to prevent. The built-in item drag already commits one
+    /// `set_local_pos` per gesture, so the default costs nothing in the common
+    /// case; a caller that writes per sample and wants endpoints asks for it.
+    ///
+    /// Discrete edits — adds, removals, replacements, flags, parent changes —
+    /// are never coalesced and keep their order.
+    pub fn squash(self) -> Self {
+        self.journal.request_squash();
+        self
+    }
+
+    /// Mark this transaction's changes as per-frame artefacts: they must be
+    /// **rendered** and must not be **recorded**.
+    ///
+    /// The app-side half of the knob the scene's own dynamic-bounds refresh
+    /// uses. An item whose `transform` follows a rotation `Signal` writes the
+    /// model every frame; without this, an app watching the change stream
+    /// cannot tell that churn from an edit. `ephemeral` rides every
+    /// [`SceneChange`] and the record, and the framework does nothing else with
+    /// it — what counts as history is the consumer's call.
+    pub fn ephemeral(mut self) -> Self {
+        if self.ephemeral.is_none() {
+            self.ephemeral = Some(EphemeralScope::new(&self.journal));
+        }
+        self
+    }
+
+    /// Mark the interaction cancelled, then commit.
+    ///
+    /// The scene is **not** rolled back: applying an inverse is the first 80 %
+    /// of an undo stack, and undo lives on the other side of this seam. The
+    /// record arrives with [`TxnOutcome::Abandoned`] so the consumer can revert
+    /// from the `old` values it was handed without pushing anything a redo
+    /// could replay — tldraw's `bail`, with the stack where it belongs.
+    ///
+    /// On a nested guard this abandons the transaction it joined, because that
+    /// is the transaction it is part of.
+    pub fn abandon(self) {
+        self.journal.set_outcome(TxnOutcome::Abandoned);
+    }
+}
+
+impl Drop for SceneTransaction<'_> {
+    fn drop(&mut self) {
+        // Ephemeral depth first: it must not outlive the scope it was raised
+        // for, and `exit_transaction` is what reads the accumulated flag.
+        self.ephemeral = None;
+        // Closed through the journal handle the guard already holds, **not**
+        // through the scene: a `Drop` that needed the `RefCell` would leave the
+        // scope permanently open whenever it could not get it — silently, in
+        // release — and a scene whose transaction never closes never delivers
+        // another record.
+        self.journal.exit_scope();
+        if std::thread::panicking() {
+            // Same rule as SceneWriteGuard: running an app callback from a Drop
+            // during an unwind aborts the process the moment it panics. The
+            // record survives in the queue for the next delivery.
+            return;
+        }
+        self.model.deliver_records();
+    }
+}
+
 impl SceneModel {
     // -----------------------------------------------------------------
     // Write scope / deferred fan-out
@@ -196,7 +345,33 @@ impl SceneModel {
     /// The one door for a *block* of edits that must fan out together, and the
     /// door a `&mut Scene` escape hatch should be built on.
     pub fn write_guard(&self) -> SceneWriteGuard<'_> {
-        let scene = self.0.borrow_mut();
+        let scene = match self.0.try_borrow_mut() {
+            Ok(scene) => scene,
+            // The happy path never reaches here, so the two diagnostics below
+            // cost nothing. They exist because `RefCell already borrowed` names
+            // neither the rule that was broken nor the thing to do instead, and
+            // both of these are rules this crate advertises.
+            Err(_) => {
+                if self
+                    .0
+                    .try_borrow()
+                    .is_ok_and(|scene| scene.in_geometry_constraint())
+                {
+                    panic!(
+                        "a geometry constraint tried to write the scene. A constraint is \
+                         handed the scene read-only and decides by *returning* a \
+                         ChangeVerdict — return ChangeVerdict::Adjust(frame) (or \
+                         ChangeVerdict::Reject) instead of mutating. Reads are fine."
+                    );
+                }
+                panic!(
+                    "SceneModel::write_guard while the scene is already borrowed. A \
+                     read-only policy closure (SceneView::focus_order, a magnetism \
+                     predicate, a geometry constraint) may read the scene but not write \
+                     it; a write scope already open must be closed first."
+                );
+            }
+        };
         scene.enter_write_scope();
         SceneWriteGuard {
             scene: Some(scene),
@@ -263,8 +438,9 @@ impl SceneModel {
     /// The drain keeps going until the queue is empty, so an observer's own
     /// writes are always delivered rather than silently dropped. Most cycles
     /// terminate on their own — `Scene::set_local_pos` and friends early-return
-    /// when the value is unchanged, so the snap-to-grid shape settles in two
-    /// rounds.
+    /// when the value is unchanged, so a clamp-it-back-into-bounds observer
+    /// settles in two rounds. (Snapping a *gesture* is not this channel's job at
+    /// all; see [`set_geometry_constraint`](Self::set_geometry_constraint).)
     ///
     /// An observer that writes on **every** change with no equality guard never
     /// settles, and is stopped by a budget that panics with a diagnostic naming
@@ -349,6 +525,182 @@ impl SceneModel {
         // The borrow above is gone: the observers below run with the scene
         // free, and may read it or write it back.
         queue.drain(budget);
+        // Then the owning channel, in the same free window. Records after
+        // changes, deliberately: by the time the edit sink sees a transaction,
+        // every view has already reconciled from it, so a sink that reads the
+        // scene sees a settled one.
+        self.deliver_records();
+    }
+
+    /// Hand every committed transaction to the edit sink, with the scene
+    /// unborrowed.
+    ///
+    /// Called automatically wherever a transaction closes — the end of a write
+    /// scope, the drop of a [`SceneTransaction`]. Apps rarely need it; the
+    /// exception is the same as [`flush_changes`](Self::flush_changes)', a
+    /// `catch_unwind` recovery path.
+    ///
+    /// A no-op when nothing is queued, when the scene is borrowed at all (the
+    /// sink is allowed to write, and a write needs the cell exclusively), when
+    /// a delivery is already running, and while the **change** fan-out is
+    /// mid-drain.
+    ///
+    /// That last one is the ordering this seam promises: an observer that
+    /// writes the scene commits its own transaction from inside the drain, and
+    /// delivering from there would hand the edit sink a transaction some views
+    /// had not reconciled from yet. The records wait, and the drain's own
+    /// caller delivers them when it settles.
+    pub fn deliver_records(&self) {
+        let (journal, budget) = {
+            let Ok(scene) = self.0.try_borrow_mut() else {
+                return;
+            };
+            if !scene.has_pending_records() || scene.changes_are_draining() {
+                return;
+            }
+            (scene.journal(), scene.cascade_budget())
+        };
+        journal.deliver(budget);
+    }
+
+    // -----------------------------------------------------------------
+    // Transactions and the edit sink
+    // -----------------------------------------------------------------
+
+    /// Group every edit until the returned guard drops into **one**
+    /// transaction, stamped with a [`ChangeSource`] and a [`HistoryMode`].
+    ///
+    /// Each [`SceneChange`] emitted inside it carries the same [`TxnId`] and
+    /// the same stamp, and — when an edit sink is installed — the whole group
+    /// arrives as one [`SceneTransactionRecord`] once the guard drops.
+    ///
+    /// # Nesting joins
+    ///
+    /// An inner `transaction` adds no boundary: it joins the open one and its
+    /// stamp is ignored, so an observer opening its own transaction inside a
+    /// framework-opened gesture cannot split that gesture into two undo steps.
+    ///
+    /// # Why the guard is safe to hold
+    ///
+    /// Every mutator on this type borrows the scene for the length of one call
+    /// and releases it at the semicolon. The guard is held by the *caller*,
+    /// outside any borrow, so its `Drop` runs with the `RefCell` free — which is
+    /// what lets the edit sink read the scene and write it back.
+    ///
+    /// A transaction is a **synchronous scope**. Holding one across a frame
+    /// means its edits are never delivered and its salvage accumulates; a debug
+    /// assertion in [`SceneView`](crate::SceneView)'s build catches the common
+    /// case.
+    ///
+    /// ```
+    /// # use teksilo_canvas::{Point, Rect};
+    /// # use teksilo_scene::{ChangeSource, HistoryMode, RectItem, SceneModel};
+    /// let model = SceneModel::new();
+    /// let a = model.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+    /// let b = model.add_item(RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)), Point::ZERO);
+    /// {
+    ///     let _txn = model.transaction(ChangeSource::User, HistoryMode::Record);
+    ///     model.set_local_pos(a, Point::new(10.0, 0.0));
+    ///     model.set_local_pos(b, Point::new(20.0, 0.0));
+    /// } // one transaction, two edits
+    /// ```
+    pub fn transaction(&self, source: ChangeSource, history: HistoryMode) -> SceneTransaction<'_> {
+        let journal = {
+            // A shared borrow only, and only to reach the journal handle beside
+            // the scene. It fails when a write scope is already open, and
+            // `RefCell already mutably borrowed` would name neither the rule
+            // nor the fix.
+            let Ok(scene) = self.0.try_borrow() else {
+                panic!(
+                    "SceneModel::transaction while the scene is already borrowed. A \
+                     SceneWriteGuard is already a transaction boundary — open the \
+                     transaction *around* the guard, not inside it — and a read-only \
+                     policy closure (a geometry constraint, a magnetism predicate) may \
+                     not open one at all."
+                );
+            };
+            scene.journal()
+        };
+        journal.enter_scope(source, history);
+        SceneTransaction {
+            model: self,
+            journal,
+            ephemeral: None,
+        }
+    }
+
+    /// [`transaction`](Self::transaction)`(ChangeSource::User,
+    /// HistoryMode::Record)` — one user-visible edit.
+    pub fn user_edit(&self) -> SceneTransaction<'_> {
+        self.transaction(ChangeSource::User, HistoryMode::Record)
+    }
+
+    /// Install the edit sink, returning whatever was there.
+    ///
+    /// Invoked once per committed transaction that changed anything, with the
+    /// scene **unborrowed** — so the sink may read the scene and write it back.
+    /// Its own writes are ordinary transactions: they produce their own records
+    /// and are delivered to it on a later round of the same loop, which is what
+    /// keeps the history it is feeding in agreement with the scene.
+    ///
+    /// **Exactly one.** A scene's edit history has one owner; a second consumer
+    /// composes inside the first. Owning is why: the sink is handed the removed
+    /// items themselves, and two owners of one `Box` is not a thing.
+    ///
+    /// With no sink installed, nothing is recorded and a removal drops its
+    /// salvage — today's behaviour at today's cost, for an app that wants no
+    /// history.
+    ///
+    /// # This is not where snap-to-grid goes
+    ///
+    /// The sink runs *after* the write. Snapping a gesture belongs in
+    /// [`set_geometry_constraint`](Self::set_geometry_constraint), which runs
+    /// *before* it and is consulted by every gesture route — so the frame the
+    /// last preview drew is the frame the commit writes. Use the sink for what
+    /// happens once an edit is real: recording it, persisting it, marking the
+    /// document dirty, mirroring it to a peer.
+    ///
+    /// # Panics
+    ///
+    /// If called from inside the sink itself.
+    pub fn set_edit_sink(
+        &self,
+        sink: impl FnMut(SceneTransactionRecord) + 'static,
+    ) -> Option<Box<dyn FnMut(SceneTransactionRecord)>> {
+        let journal = self.0.borrow().journal();
+        journal.set_sink(Some(Box::new(sink)))
+    }
+
+    /// Remove the edit sink, returning it. The scene stops recording.
+    pub fn clear_edit_sink(&self) -> Option<Box<dyn FnMut(SceneTransactionRecord)>> {
+        let journal = self.0.borrow().journal();
+        journal.set_sink(None)
+    }
+
+    /// Fires once per committed transaction, **after** the edit sink, with the
+    /// scene still unborrowed.
+    ///
+    /// The per-gesture counterpart of
+    /// [`item_change_signal`](Self::item_change_signal): one notification for a
+    /// whole logical edit rather than one per intermediate write. This is where
+    /// a document-dirty flag, a debounced save or a validation pass belongs —
+    /// they want to run once when the user lets go, not six times while the
+    /// item is moving.
+    pub fn transaction_signal(&self) -> Signal<TxnId> {
+        self.0.borrow().transaction_signal()
+    }
+
+    /// How many transaction scopes are currently open on this scene — zero
+    /// between mutations.
+    ///
+    /// A transaction is a **synchronous** scope: holding one across a frame
+    /// means its edits never reach the sink and its salvage accumulates. There
+    /// is no way to enforce that at the type level (nothing stops a guard being
+    /// stashed in a struct field), so this is the door an assertion knocks on.
+    /// [`SceneView`](crate::SceneView) asserts it is zero at the top of every
+    /// build in debug, which catches the common case.
+    pub fn open_transaction_depth(&self) -> u32 {
+        self.0.borrow().open_transaction_depth()
     }
 
     /// The runaway-detection budget for this scene's change fan-out — how much
@@ -414,6 +766,29 @@ impl SceneModel {
     /// Number of distinct handles to this scene (1 = unshared).
     pub fn handle_count(&self) -> usize {
         Rc::strong_count(&self.0)
+    }
+
+    /// A **non-owning** handle to the same scene.
+    ///
+    /// For a closure the scene itself owns. The geometry constraint is the one
+    /// in this crate: the scene holds it, so a closure holding a `SceneModel`
+    /// back closes a reference cycle and the whole scene — items, heavyweight
+    /// payloads, journal, spatial index — is never dropped. A constraint
+    /// normally needs no handle at all (it is handed
+    /// [`ProposedChange::scene`](crate::ProposedChange::scene), which is the
+    /// whole read surface); this is for the case where a policy object holds a
+    /// model for its *other* work and is also installed as the closure.
+    ///
+    /// ```
+    /// # use teksilo_scene::SceneModel;
+    /// let model = SceneModel::new();
+    /// let weak = model.downgrade();
+    /// assert!(weak.upgrade().is_some());
+    /// drop(model);
+    /// assert!(weak.upgrade().is_none());
+    /// ```
+    pub fn downgrade(&self) -> WeakSceneModel {
+        WeakSceneModel(Rc::downgrade(&self.0))
     }
 
     // -----------------------------------------------------------------
@@ -490,6 +865,229 @@ impl SceneModel {
     /// Set an additional local-to-parent transform (rotation, scale) on `id`; notifies all views.
     pub fn set_transform(&self, id: ItemId, transform: Transform2D) {
         self.write(|s| s.set_transform(id, transform));
+    }
+
+    // -----------------------------------------------------------------
+    // Geometry constraint
+    // -----------------------------------------------------------------
+
+    /// Install the document's standing geometry rule — snap-to-grid, axis lock,
+    /// page-bounds clamp — consulted before every **user-driven** gesture
+    /// applies anything, on every view attached to this model.
+    ///
+    /// One per scene. Programmatic mutators
+    /// ([`set_local_pos`](Self::set_local_pos) and friends) are **never**
+    /// constrained: a document load must land where it says.
+    ///
+    /// The closure is handed a [`ProposedChange`](crate::ProposedChange) —
+    /// the scene read-only, the roots the gesture moves, and the gesture's
+    /// start and proposed *frames* in scene coordinates — and returns a
+    /// [`ChangeVerdict`](crate::ChangeVerdict). It may read the scene and may
+    /// not write it; a write panics naming this hook.
+    ///
+    /// ```
+    /// use teksilo_canvas::{Point, Rect};
+    /// use teksilo_scene::{ChangeVerdict, RectItem, SceneModel};
+    ///
+    /// let model = SceneModel::new();
+    /// let card = model.add_item(
+    ///     RectItem::new(Rect::new(0.0, 0.0, 80.0, 50.0)),
+    ///     Point::new(4.0, 4.0),
+    /// );
+    ///
+    /// let grid = 25.0;
+    /// let page = Rect::new(0.0, 0.0, 1000.0, 700.0);
+    /// model.set_geometry_constraint(move |c| {
+    ///     // An explicit magnet outranks the standing rule.
+    ///     if c.magnet_snapped {
+    ///         return ChangeVerdict::Accept;
+    ///     }
+    ///     let mut f = c.proposed;
+    ///     // The frame is the item's own box in scene coordinates, so this
+    ///     // snaps what the user can see — no grab offset to carry.
+    ///     f.rect.x = (f.rect.x / grid).round() * grid;
+    ///     f.rect.y = (f.rect.y / grid).round() * grid;
+    ///     f.rect.x = f.rect.x.clamp(page.x, page.right() - f.rect.width);
+    ///     f.rect.y = f.rect.y.clamp(page.y, page.bottom() - f.rect.height);
+    ///     ChangeVerdict::Adjust(f)
+    /// });
+    ///
+    /// // Programmatic writes are exact — the constraint does not see them.
+    /// model.set_local_pos(card, Point::new(7.0, 9.0));
+    /// assert_eq!(model.local_pos(card), Some(Point::new(7.0, 9.0)));
+    /// ```
+    pub fn set_geometry_constraint(
+        &self,
+        f: impl Fn(&crate::constrain::ProposedChange<'_>) -> crate::constrain::ChangeVerdict + 'static,
+    ) {
+        self.write(|s| s.set_geometry_constraint(f));
+    }
+
+    /// Remove the geometry constraint. See [`Scene::clear_geometry_constraint`].
+    pub fn clear_geometry_constraint(&self) {
+        self.write(|s| s.clear_geometry_constraint());
+    }
+
+    /// Whether a geometry constraint is installed.
+    pub fn has_geometry_constraint(&self) -> bool {
+        self.0.borrow().has_geometry_constraint()
+    }
+
+    /// Run the installed constraint over a proposed **frame** and return the
+    /// frame to apply. Returns `proposed` unchanged when none is installed.
+    ///
+    /// The general door for an app that drives its own gesture — a heavyweight
+    /// card's `on_drag`, a custom resize grip, a layout command. The
+    /// [`SceneView`](crate::SceneView)'s own routes call exactly this, so an
+    /// app-driven gesture and a framework-driven one obey the same rule.
+    ///
+    /// `start` is the frame the gesture began from
+    /// ([`transform_frame`](Self::transform_frame) at press time), and it must
+    /// stay fixed for the gesture's life — that is what lets a constraint
+    /// measure total travel, and what keeps the preview and the commit in
+    /// agreement.
+    ///
+    /// # Panics
+    ///
+    /// Twice, each naming what to do instead:
+    ///
+    /// * From inside a constraint that is already running on this scene — the
+    ///   constraint *is* the answer, and asking for another one would recurse
+    ///   without end.
+    /// * While a **write scope** is open on this model — a
+    ///   [`SceneWriteGuard`], any mutator, or an observer running inside one.
+    ///   Asking the constraint reads the scene, and an open write scope holds
+    ///   it exclusively. Another *shared* borrow is fine: two reads coexist,
+    ///   which is what lets a constraint read the scene it is deciding about.
+    pub fn constrain_frame(
+        &self,
+        items: &[ItemId],
+        op: crate::transform_session::TransformOp,
+        start: crate::transform_session::TransformFrame,
+        proposed: crate::transform_session::TransformFrame,
+        source: crate::transform_session::TransformSource,
+    ) -> crate::transform_session::TransformFrame {
+        let scene = self.read_for_constraint("constrain_frame");
+        match crate::constrain::ConstraintCall::new(&scene) {
+            Some(call) => call.frame(op, items, &start, proposed, source, false),
+            None => proposed,
+        }
+    }
+
+    /// The shared borrow the two `constrain_*` doors read the scene through.
+    ///
+    /// Separate from a bare `borrow()` for one reason: these two are the doors
+    /// an app-driven drag calls, and the natural place to call them from is a
+    /// batched commit — inside an open [`SceneWriteGuard`], which is exactly
+    /// where a bare `borrow()` reports `RefCell already mutably borrowed` and
+    /// names neither the rule nor the fix. Every other named panic on this type
+    /// exists for the same reason.
+    fn read_for_constraint(&self, door: &str) -> std::cell::Ref<'_, Scene> {
+        match self.0.try_borrow() {
+            Ok(scene) => scene,
+            Err(_) => panic!(
+                "SceneModel::{door} while a write scope is open on this scene. \
+                 Asking the geometry constraint reads the scene, and a \
+                 SceneWriteGuard (or any mutator, or an observer running inside \
+                 one) holds it exclusively. Constrain FIRST, then open the write \
+                 scope and apply the answer: the constraint decides what to \
+                 write, so it cannot run in the middle of writing it."
+            ),
+        }
+    }
+
+    /// Run the installed constraint over a proposed **move** and return the
+    /// scene-space translation to apply. Returns `translation` unchanged when
+    /// none is installed.
+    ///
+    /// The door a heavyweight card's own drag handler uses, and the reason the
+    /// constraint lives on the model rather than on a view — a card built by a
+    /// per-view delegate holds a `SceneModel` clone and never a `&SceneView`:
+    ///
+    /// ```
+    /// # use teksilo_canvas::{Point, Rect, Vec2};
+    /// # use teksilo_scene::{ChangeVerdict, SceneModel, TransformSource};
+    /// # let model = SceneModel::new();
+    /// # let card = model.add_widget_item((), Rect::new(0.0, 0.0, 80.0, 50.0));
+    /// # model.set_geometry_constraint(|c| {
+    /// #     let mut f = c.proposed;
+    /// #     f.rect.x = (f.rect.x / 25.0).round() * 25.0;
+    /// #     f.rect.y = (f.rect.y / 25.0).round() * 25.0;
+    /// #     ChangeVerdict::Adjust(f)
+    /// # });
+    /// // At the press: the frame the gesture starts from.
+    /// let start = model.transform_frame(&[card]).expect("card resolves");
+    /// // On each sample: the raw travel, constrained.
+    /// let travel = Vec2::new(31.0, 12.0);
+    /// let applied = model.constrain_move(&[card], start, travel, TransformSource::Pointer);
+    /// assert_eq!(applied, Vec2::new(25.0, 0.0));
+    /// ```
+    ///
+    /// Only the frame's **origin** is read back, because a translation is all a
+    /// move can express: a constraint that also resizes or rotates the frame
+    /// here has that part of its answer ignored. Use
+    /// [`constrain_frame`](Self::constrain_frame) plus
+    /// [`apply_transform_delta`](Self::apply_transform_delta) for a gesture
+    /// that changes extent or orientation.
+    ///
+    /// # Panics
+    ///
+    /// The same two as [`constrain_frame`](Self::constrain_frame): from inside
+    /// a running constraint, and while a write scope is open on this model.
+    pub fn constrain_move(
+        &self,
+        items: &[ItemId],
+        start: crate::transform_session::TransformFrame,
+        translation: Vec2,
+        source: crate::transform_session::TransformSource,
+    ) -> Vec2 {
+        let scene = self.read_for_constraint("constrain_move");
+        let Some(call) = crate::constrain::ConstraintCall::new(&scene) else {
+            return translation;
+        };
+        crate::constrain::constrained_translation(&call, items, &start, translation, source, false)
+    }
+
+    // -----------------------------------------------------------------
+    // Selection transforms
+    // -----------------------------------------------------------------
+
+    /// Apply one transform delta to `roots` as a single operation; notifies all
+    /// views. See [`Scene::apply_transform_delta`].
+    pub fn apply_transform_delta(
+        &self,
+        roots: &[ItemId],
+        delta: &crate::transform_session::TransformDelta,
+    ) -> usize {
+        self.write(|s| s.apply_transform_delta(roots, delta))
+    }
+
+    /// `ids` pruned to its roots. See [`Scene::selection_roots`].
+    pub fn selection_roots(&self, ids: &[ItemId]) -> Vec<ItemId> {
+        self.0.borrow().selection_roots(ids)
+    }
+
+    /// The roots of `ids` eligible for `op`. See [`Scene::transformable_roots`].
+    pub fn transformable_roots(
+        &self,
+        ids: &[ItemId],
+        op: crate::transform_session::TransformOp,
+    ) -> Vec<ItemId> {
+        self.0.borrow().transformable_roots(ids, op)
+    }
+
+    /// The selection frame enclosing `roots`. See [`Scene::transform_frame`].
+    pub fn transform_frame(
+        &self,
+        roots: &[ItemId],
+    ) -> Option<crate::transform_session::TransformFrame> {
+        self.0.borrow().transform_frame(roots)
+    }
+
+    /// The item's own rotation in scene space, in radians. See
+    /// [`Scene::scene_rotation`].
+    pub fn scene_rotation(&self, id: ItemId) -> Option<f32> {
+        self.0.borrow().scene_rotation(id)
     }
 
     // -----------------------------------------------------------------
@@ -571,6 +1169,52 @@ impl SceneModel {
     /// and cleans the item's a11y mappings; alive logical children re-root.
     pub fn remove(&self, id: ItemId) {
         self.write(|s| s.remove(id));
+    }
+    /// Remove `id` and its descendants, **handing the salvage back** — item
+    /// box, handlers, magnets, logical-AT decorations, each at its original
+    /// [`ItemId`]. See [`Scene::take`].
+    #[must_use = "the salvage is the only copy of the removed items; dropping it \
+                  makes the removal irreversible — call SceneModel::remove if \
+                  that is what you meant"]
+    pub fn take(&self, id: ItemId) -> Vec<RemovedItem> {
+        self.write(|s| s.take(id))
+    }
+    /// Put one salvaged item back at its original id. See [`Scene::restore`].
+    pub fn restore(&self, salvage: RemovedItem) -> Result<ItemId, RestoreError> {
+        self.write(|s| s.restore(salvage))
+    }
+    /// Put a whole [`take`](Self::take) result back, roots first. See
+    /// [`Scene::restore_all`].
+    pub fn restore_all(&self, salvage: Vec<RemovedItem>) -> Result<Vec<ItemId>, RestoreError> {
+        self.write(|s| s.restore_all(salvage))
+    }
+    /// Swap the lightweight item box at `id`, keeping the entry and the id.
+    /// Returns the box that was there. See [`Scene::replace_item`].
+    pub fn replace_item(
+        &self,
+        id: ItemId,
+        item: Box<dyn SceneItem>,
+    ) -> Result<Box<dyn SceneItem>, ReplaceRejected> {
+        self.write(|s| s.replace_item(id, item))
+    }
+    /// Where `id` sits, as one value: parent, z, position, transform.
+    pub fn placement(&self, id: ItemId) -> Option<Placement> {
+        self.0.borrow().placement(id)
+    }
+    /// Write parent, z, position and transform together, as one change. See
+    /// [`Scene::set_placement`].
+    pub fn set_placement(&self, id: ItemId, placement: Placement) {
+        self.write(|s| s.set_placement(id, placement));
+    }
+    /// Reparent `id` while holding it visually still. See
+    /// [`Scene::reparent_keeping_scene_pos`].
+    pub fn reparent_keeping_scene_pos(&self, id: ItemId, parent: Option<ItemId>) {
+        self.write(|s| s.reparent_keeping_scene_pos(id, parent));
+    }
+    /// A `z` strictly between two items', or `None` when there is no room left
+    /// at that locus. See [`Scene::z_between`].
+    pub fn z_between(&self, below: ItemId, above: ItemId) -> Option<f32> {
+        self.0.borrow().z_between(below, above)
     }
     /// Promote an item's children to the scene root.
     pub fn orphan(&self, id: ItemId) {
@@ -740,7 +1384,7 @@ impl SceneModel {
     // -----------------------------------------------------------------
 
     /// Reactive signal fired on every structural scene change; all views observe this to reconcile.
-    pub fn item_change_signal(&self) -> Signal<ItemChange> {
+    pub fn item_change_signal(&self) -> Signal<SceneChange> {
         self.0.borrow().item_change_signal()
     }
     /// Reactive monotonic counter bumped on every AT-structure change; views re-walk accessibility on any increment.
@@ -977,6 +1621,26 @@ impl SceneModel {
     pub fn a11y_parent_of(&self, child: A11yNode) -> Option<A11yNode> {
         self.0.borrow().a11y_parent_of(child)
     }
+    /// Every declared AT relation, in declaration order.
+    pub fn a11y_relations(&self) -> Vec<(A11yNode, A11yRelation, A11yNode)> {
+        self.0.borrow().a11y_relations().to_vec()
+    }
+    /// A node's declared live-region politeness; `None` when it is not one.
+    pub fn a11y_live_of(&self, node: A11yNode) -> Option<accesskit::Live> {
+        self.0.borrow().a11y_live_of(node)
+    }
+    /// A node's declared landmark role; `None` when it is not a landmark.
+    pub fn a11y_landmark_of(&self, node: A11yNode) -> Option<accesskit::Role> {
+        self.0.borrow().a11y_landmark_of(node)
+    }
+    /// A node's declared rotor / quick-nav categories.
+    pub fn a11y_categories_of(&self, node: A11yNode) -> Vec<A11yCategory> {
+        self.0
+            .borrow()
+            .a11y_categories_of(node)
+            .map(|c| c.to_vec())
+            .unwrap_or_default()
+    }
 
     // -----------------------------------------------------------------
     // Build-support (consumed by SceneView::build)
@@ -1025,7 +1689,7 @@ mod tests {
         let fired = Rc::new(std::cell::Cell::new(false));
         let f = fired.clone();
         let _h = m1.item_change_signal().observe(move |c| {
-            if matches!(c, ItemChange::PayloadChanged { .. }) {
+            if matches!(c.change, crate::scene::ItemChange::PayloadChanged { .. }) {
                 f.set(true);
             }
         });

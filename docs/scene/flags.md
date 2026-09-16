@@ -16,7 +16,7 @@ defaults; setters layer additional flags on top.
 
 ## Builder methods at a glance
 
-`NONE`, `IS_VISIBLE`, `IS_ENABLED`, `IS_DRAGGABLE`, `IS_SELECTABLE`, `IS_FOCUSABLE`, `ACCEPTS_HOVER`, `CLIPS_TO_SHAPE`, `CLIPS_CHILDREN_TO_SHAPE`, `IGNORES_TRANSFORMATIONS`, `HAS_NO_CONTENTS`, `contains`, `intersects`, `set`, `with`, `without`, `bits`, `from_bits`
+`NONE`, `IS_VISIBLE`, `IS_ENABLED`, `IS_DRAGGABLE`, `IS_SELECTABLE`, `IS_FOCUSABLE`, `ACCEPTS_HOVER`, `CLIPS_TO_SHAPE`, `CLIPS_CHILDREN_TO_SHAPE`, `IGNORES_TRANSFORMATIONS`, `HAS_NO_CONTENTS`, `IS_RESIZABLE`, `IS_ROTATABLE`, `ASPECT_LOCKED`, `contains`, `intersects`, `set`, `with`, `without`, `bits`, `from_bits`
 
 ## API reference
 
@@ -98,6 +98,31 @@ over moving content, chart axis labels. Default off.
 Item has nothing to paint — the paint walk skips it
 entirely. Pure logical-only containers (used for AT
 grouping or hit-test routing) set this. Default off.
+
+#### `pub const IS_RESIZABLE: Self = Self(1 << 11);`
+
+Item offers **resize** handles to a selection transform controller.
+Default off, like `IS_DRAGGABLE`.
+
+A resize writes the item's `local_bounds`, so the item reflows into the
+new box — a heavyweight card relayouts, a `RectItem` redraws at the new
+size, a `PathItem` fits its geometry to it. Nothing is scaled visually
+and then baked.
+
+#### `pub const IS_ROTATABLE: Self = Self(1 << 12);`
+
+Item offers a **rotate** handle to a selection transform controller.
+Default off.
+
+Honoured for the lightweight tier only. A heavyweight entry carrying it
+is refused, because `place_children` sizes a card from the AABB of its
+transformed bounds: a rotation there inflates the layout box and rotates
+nothing. See `SceneView::transform_controller`.
+
+#### `pub const ASPECT_LOCKED: Self = Self(1 << 13);`
+
+A resize of this item keeps its aspect ratio whatever the controller's
+`keep_ratio` setting says. Default off.
 
 #### `pub const fn contains(&self, other: Self) -> bool`
 

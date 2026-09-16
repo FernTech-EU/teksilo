@@ -58,14 +58,17 @@
 pub(crate) mod a11y;
 pub(crate) mod animation;
 pub(crate) mod cache;
+pub(crate) mod constrain;
 pub(crate) mod flags;
 pub(crate) mod index;
 pub(crate) mod item;
 pub(crate) mod item_handlers;
 pub(crate) mod items;
+pub(crate) mod journal;
 pub(crate) mod magnet;
 pub(crate) mod minimap;
 pub(crate) mod pick;
+pub(crate) mod salvage;
 pub(crate) mod scene;
 pub(crate) mod scene_list_adapter;
 pub(crate) mod scene_model;
@@ -74,6 +77,7 @@ pub(crate) mod selection;
 pub(crate) mod shape;
 pub(crate) mod state;
 pub(crate) mod transform;
+pub(crate) mod transform_session;
 pub(crate) mod view;
 
 pub use a11y::{
@@ -82,22 +86,33 @@ pub use a11y::{
 };
 pub use animation::{pulse_once, register_animated_item_signal};
 pub use cache::CacheMode;
+pub use constrain::{ChangeVerdict, ProposedChange};
 pub use flags::ItemFlags;
 pub use index::{GridHashIndex, SpatialIndex};
-pub use item::{ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
+pub use item::{AppearanceWrite, ItemId, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 pub use item_handlers::{DragMode, SceneItemHandlerSet, SceneTapEvent};
 pub use items::AccessSubtreeMode;
 pub use items::{GroupItem, ImageItem, PathItem, RectItem, TextAlign, TextItem};
+pub use journal::{
+    ChangeSource, HistoryMode, Salvage, SceneChange, SceneEdit, SceneTransactionRecord, TxnId,
+    TxnOutcome,
+};
 pub use magnet::{
     Magnet, MagnetConnection, MagnetFeedback, MagnetId, MagnetMarker, MagnetRef, MagnetRole,
     MagnetSnap, MagnetVerdict, MagnetVisualState, MagnetismConfig, MarkerVisibility,
 };
 pub use minimap::{MinimapReadout, SceneMinimap};
 pub use pick::{PaintKey, RANK_OVER, RANK_UNDER, RANK_WIDGET, claims_press, hit_testable};
+pub use salvage::{
+    ItemA11yDecorations, RemovedItem, ReplaceItemError, ReplaceRejected, RestoreError,
+};
 pub use scene::Scene;
-pub use scene::{CascadeBudget, ItemChange, PanAxes, SceneConstraints, SceneLayer};
+pub use scene::{
+    AppearanceChange, CascadeBudget, HandlerReplacement, ItemChange, ItemPayload, PanAxes,
+    Placement, SceneConstraints, SceneLayer,
+};
 pub use scene_list_adapter::SceneListAdapter;
-pub use scene_model::{SceneModel, SceneWriteGuard};
+pub use scene_model::{SceneModel, SceneTransaction, SceneWriteGuard, WeakSceneModel};
 pub use scroll_view::{SceneScrollView, ScrollBarMode, ScrollBarPolicy};
 pub use selection::{SceneSelection, SceneSelectionMode};
 pub use shape::{
@@ -105,4 +120,10 @@ pub use shape::{
     ShapeGeometry,
 };
 pub use state::SceneViewState;
+pub use transform_session::{
+    DEFAULT_EDGE_PAN_PX, DEFAULT_EDGE_PAN_SPEED, DEFAULT_HANDLE_PX, DEFAULT_PADDING_PX,
+    LivePreview, ROTATE_OFFSET_PX, TransformChrome, TransformConfig, TransformDelta,
+    TransformFrame, TransformHandle, TransformHandleSet, TransformLabels, TransformOp,
+    TransformOutcome, TransformSession, TransformSource, TransformStep,
+};
 pub use view::{DEFAULT_RETENTION_MARGIN, DebugOverlay, FocusDirection, SceneView};

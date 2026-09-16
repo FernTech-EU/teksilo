@@ -580,44 +580,97 @@ mod tests {
         assert!(g.cell_size() >= 1.0);
     }
 
+    /// Per-operation cost of the grid, stated as a **ratio** rather than a
+    /// clock.
+    ///
+    /// The claim [`GridHashIndex`] exists to make is that a query costs the
+    /// *bucket*, not the scene: at constant density, ten times the items must
+    /// not cost anything like ten times as much to answer a fixed-size query
+    /// with. That is what a brute-force scan would do and what this replaces.
+    ///
+    /// It used to be a wall-clock bound — `insert_ms < 200`, asserted in a
+    /// **debug** build — which states the machine rather than the algorithm and
+    /// failed a loaded CI host at 437 ms. Its own sibling probes say why:
+    /// "a threshold in wall-clock nanoseconds would be a flake generator; a
+    /// ratio between two measurements taken on the same host in the same run is
+    /// not." See `view::tests::perf_probes`.
+    ///
+    /// ```text
+    /// cargo test --release -p teksilo-scene --lib -- --ignored --nocapture perf_probes
+    /// ```
     #[test]
-    fn perf_microbench_insert_query() {
-        // Not a strict bound — just a smoke test that 1000 inserts
-        // followed by 1000 queries run in sub-millisecond time on
-        // any reasonable hardware. If this regresses to seconds,
-        // something has gone catastrophically wrong with the
-        // bucketing math.
+    #[ignore = "timing probe; run in --release"]
+    fn perf_probes_query_cost_follows_the_bucket_not_the_scene() {
         use std::time::Instant;
-        let mut g = GridHashIndex::default();
-        let start = Instant::now();
-        for n in 0..1000u64 {
-            let x = ((n * 37) % 5000) as f32;
-            let y = ((n * 53) % 5000) as f32;
-            g.insert(ItemId(n + 1), Rect::new(x, y, 40.0, 40.0));
+
+        /// `n` 10x10 items on a 20-unit square lattice — the item count grows,
+        /// the density does not. Returns nanoseconds per insert and per query
+        /// of a fixed 100x100 window.
+        fn measure(n: u64) -> (f64, f64, usize) {
+            let side = (n as f64).sqrt().ceil() as u64;
+            // Two lattice steps to a cell, so a 100x100 window spans a handful
+            // of buckets at either scale. The 256-unit default would put the
+            // whole small lattice in nine cells and measure nothing.
+            let mut g = GridHashIndex::new(40.0);
+            let start = Instant::now();
+            for i in 0..n {
+                let x = ((i % side) * 20) as f32;
+                let y = ((i / side) * 20) as f32;
+                g.insert(id(i + 1), Rect::new(x, y, 10.0, 10.0));
+            }
+            let insert_ns = start.elapsed().as_nanos() as f64 / n as f64;
+
+            // Query the lattice's **interior** only. A window straddling the
+            // edge sees fewer items, and the small scene has proportionally
+            // more edge — which would make the two scales measure different
+            // neighbourhoods and the ratio meaningless.
+            let reps = 2_000u64;
+            let margin = 200u64;
+            let span = (side * 20).saturating_sub(2 * margin).max(1);
+            let start = Instant::now();
+            let mut hits = 0usize;
+            for r in 0..reps {
+                let x = (margin + (r * 37) % span) as f32;
+                let y = (margin + (r * 53) % span) as f32;
+                hits += g.query(Rect::new(x, y, 100.0, 100.0)).len();
+            }
+            let query_ns = start.elapsed().as_nanos() as f64 / reps as f64;
+            (insert_ns, query_ns, hits / reps as usize)
         }
-        let insert_ms = start.elapsed().as_millis();
-        let start = Instant::now();
-        let mut total = 0;
-        for n in 0..1000u64 {
-            let x = ((n * 7) % 5000) as f32;
-            let y = ((n * 11) % 5000) as f32;
-            total += g.query(Rect::new(x, y, 100.0, 100.0)).len();
-        }
-        let query_ms = start.elapsed().as_millis();
-        // Loose bound (debug builds): both should easily finish
-        // under 100 ms each on any developer laptop.
+
+        let (small_insert, small_query, small_hits) = measure(10_000);
+        let (large_insert, large_query, large_hits) = measure(100_000);
+        println!(
+            "insert  10000 : {small_insert:>10.1} ns/item | 100000: {large_insert:>10.1} ns/item"
+        );
+        println!(
+            "query   10000 : {small_query:>10.1} ns/call | 100000: {large_query:>10.1} ns/call"
+        );
+        println!("hits per query: {small_hits} @10000 | {large_hits} @100000");
+
+        // The window is the same size at both scales, so it covers the same
+        // patch of lattice and returns the same handful of items. If that
+        // stopped being true the ratio below would be measuring the wrong
+        // thing.
         assert!(
-            insert_ms < 200,
-            "1000 inserts took {} ms — perf regression?",
-            insert_ms
+            large_hits.abs_diff(small_hits) <= 2,
+            "the probe must query the same-sized neighbourhood at both scales \
+             ({small_hits} vs {large_hits} hits)"
+        );
+
+        let query_growth = large_query / small_query.max(1.0);
+        let insert_growth = large_insert / small_insert.max(1.0);
+        println!("growth 10x items: query {query_growth:>6.2}x | insert {insert_growth:>6.2}x");
+        assert!(
+            query_growth < 3.0,
+            "10x the items must not cost 10x the query — the bucketing is gone \
+             (grew {query_growth:.2}x)"
         );
         assert!(
-            query_ms < 200,
-            "1000 queries took {} ms — perf regression?",
-            query_ms
+            insert_growth < 3.0,
+            "an insert touches the cells one rect covers, so its cost must not \
+             follow the scene either (grew {insert_growth:.2}x)"
         );
-        // Sanity: queries actually returned something.
-        assert!(total > 0);
     }
 
     fn rects_intersect(a: Rect, b: Rect) -> bool {

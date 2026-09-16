@@ -231,6 +231,15 @@ pub enum SyntheticKind {
     /// and not derivable from anything — "a comment from Marie at 62 percent" is
     /// not in the paragraph, so there is no node to delegate to.
     LaneMark = 10,
+    /// The selection transform frame and its handles, emitted by
+    /// `teksilo_scene::SceneView` when a transform controller is installed.
+    ///
+    /// One frame node per *view* plus at most nine handle nodes hang off it —
+    /// not one per item — because the frame belongs to the selection rather
+    /// than to any item, and a multi-item selection has no owner. The handles
+    /// are a paint pass, never scene items, so they add nothing to the item
+    /// walk, to `items_in_rect`, or to a marquee's result.
+    SceneHandle = 11,
 }
 
 /// A captured live-region announcement — the text a screen reader would
@@ -1174,7 +1183,8 @@ impl AccessNodeBuilder {
     /// `kind` must be one of the synthetic kinds this path
     /// allocates: [`SyntheticKind::SceneItem`],
     /// [`SyntheticKind::SceneGroup`], [`SyntheticKind::SceneMagnet`],
-    /// [`SyntheticKind::ChartMark`] or [`SyntheticKind::LaneMark`];
+    /// [`SyntheticKind::SceneHandle`], [`SyntheticKind::ChartMark`] or
+    /// [`SyntheticKind::LaneMark`];
     /// passing any other variant panics in debug. The last two are
     /// how a chart or a margin lane emits one node per datum from
     /// its own `accessibility()`.
@@ -1197,10 +1207,11 @@ impl AccessNodeBuilder {
                 SyntheticKind::SceneItem
                     | SyntheticKind::SceneGroup
                     | SyntheticKind::SceneMagnet
+                    | SyntheticKind::SceneHandle
                     | SyntheticKind::ChartMark
                     | SyntheticKind::LaneMark
             ),
-            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::ChartMark, or ::LaneMark"
+            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, or ::LaneMark"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -1278,10 +1289,11 @@ impl AccessNodeBuilder {
                 SyntheticKind::SceneItem
                     | SyntheticKind::SceneGroup
                     | SyntheticKind::SceneMagnet
+                    | SyntheticKind::SceneHandle
                     | SyntheticKind::ChartMark
                     | SyntheticKind::LaneMark
             ),
-            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::ChartMark, or ::LaneMark"
+            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, or ::LaneMark"
         );
         let Some(owner) = self.owner else {
             debug_assert!(

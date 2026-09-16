@@ -41,6 +41,19 @@
 //! `ItemUpdated` rebuild path. Both panes show the same pins — one adapter,
 //! one shared `SceneModel`.
 //!
+//! **Snap to grid (`SceneModel::set_geometry_constraint`).** Cards are
+//! draggable — both panes install a `transform_controller`, so a card is moved
+//! by dragging its body or the selection frame drawn around it, and `Alt`+arrow
+//! nudges it from the keyboard. One geometry constraint on the *model* keeps
+//! every card on the 40-unit backdrop tile and inside the board, and because it
+//! is on the model rather than on a view **both panes obey it** — a shared
+//! document has one geometry, not one per pane. The toolbar's "Snap to grid"
+//! toggle is a `Signal<bool>` the constraint reads live: switching it off leaves
+//! the clamp in force and drops the snap, with no rebuild. Watch the card under
+//! the pointer jump onto the grid as you drag, not at the release — the
+//! constraint is consulted *before* the change is applied, which is the whole
+//! point of it.
+//!
 //! Run with: `cargo run -p scene_corkboard`
 
 use std::cell::RefCell;
@@ -51,10 +64,13 @@ use teksilo::canvas::{Path, Point, Rect};
 use teksilo::core::BindingLevel;
 use teksilo::data::ListModel;
 use teksilo::prelude::*;
-use teksilo::widgets::{Button, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack};
+use teksilo::widgets::{
+    Button, Checkbox, Expand, HStack, Panel, Spacer, TextWidget, Toolbar, VStack,
+};
 use teksilo_scene::{
-    A11yGroup, A11yGroupId, A11yNode, ItemFlags, ItemId, PathItem, RectItem, SceneItem, SceneLayer,
-    SceneListAdapter, SceneModel, SceneSelection, SceneSelectionMode, SceneView,
+    A11yGroup, A11yGroupId, A11yNode, ChangeVerdict, ItemFlags, ItemId, PathItem, RectItem,
+    SceneItem, SceneLayer, SceneListAdapter, SceneModel, SceneSelection, SceneSelectionMode,
+    SceneView, TransformConfig, TransformHandleSet,
 };
 
 const CARDS_PER_ROW: usize = 3;
@@ -63,6 +79,8 @@ const CARD_WIDTH: f32 = 220.0;
 const CARD_HEIGHT: f32 = 140.0;
 const CARD_GAP: f32 = 24.0;
 const SCENE_MARGIN: f32 = 32.0;
+/// Side of one backdrop tile — and the grid a dragged card snaps onto.
+const TILE: f32 = 40.0;
 
 /// Initial story cards in reading order (top-leading to bottom-trailing).
 const CARDS: [(&str, &str); 9] = [
@@ -260,7 +278,7 @@ fn build_initial_scene() -> (SceneModel, CorkboardModel) {
 
     // Background tile grid (lightweight tier) — one RectItem per cell.
     let (scene_width, scene_height) = scene_size();
-    let tile = 40.0_f32;
+    let tile = TILE;
     let cols = (scene_width / tile).ceil() as i32;
     let rows = (scene_height / tile).ceil() as i32;
     let grid_color = Color::new(0.85, 0.85, 0.88, 0.6);
@@ -296,6 +314,7 @@ fn build_initial_scene() -> (SceneModel, CorkboardModel) {
             },
             r,
         );
+        model.set_flag(card_item, ItemFlags::IS_DRAGGABLE, true);
         let act_index = i / 3;
         model.set_a11y_parent(
             A11yNode::Item(card_item),
@@ -425,6 +444,35 @@ impl Camera {
     }
 }
 
+/// Keep every dragged card on the backdrop's 40-unit tile grid and inside the
+/// board — the document's standing geometry rule, installed once on the
+/// **model** so both panes and every input route obey the same one.
+///
+/// It is consulted before anything is applied, so the card under the pointer is
+/// already on the grid mid-drag; a `SceneModel::item_change_signal` observer
+/// could only ever correct it afterwards, one visible frame late and as a second
+/// change.
+///
+/// `snap` is read on every sample, so the toolbar toggle takes effect on the
+/// drag already in flight. The clamp is *not* behind the toggle: a card off the
+/// board is wrong whatever the snap setting is.
+fn install_snap_to_grid(model: &SceneModel, snap: Signal<bool>) {
+    let (scene_width, scene_height) = scene_size();
+    model.set_geometry_constraint(move |c| {
+        let mut f = c.proposed;
+        // `f.rect` is the dragged card's own box in scene coordinates, so this
+        // snaps the *card* — not the cursor, which carries the grab offset and
+        // would leave the card off-grid by it on every drag.
+        if snap.get() {
+            f.rect.x = (f.rect.x / TILE).round() * TILE;
+            f.rect.y = (f.rect.y / TILE).round() * TILE;
+        }
+        f.rect.x = f.rect.x.clamp(0.0, (scene_width - f.rect.width).max(0.0));
+        f.rect.y = f.rect.y.clamp(0.0, (scene_height - f.rect.height).max(0.0));
+        ChangeVerdict::Adjust(f)
+    });
+}
+
 /// Configure a pane over the shared model: same content, own camera + delegate,
 /// shared selection (so both panes highlight together).
 fn build_pane(model: &SceneModel, selection: &SceneSelection, camera: &Camera) -> SceneView {
@@ -437,6 +485,14 @@ fn build_pane(model: &SceneModel, selection: &SceneSelection, camera: &Camera) -
             build_card(card, delegate_selection.clone(), id)
         })
         .default_size(sw, sh)
+        // The route by which a heavyweight card moves at all: the frame drawn
+        // around the selection is on pixels no card owns, so it is grabbable
+        // over one. Per-view, unlike the geometry constraint — what a pane lets
+        // you do is a pane's business; where a card may end up is the
+        // document's.
+        .transform_controller(
+            TransformConfig::new().handles(TransformHandleSet::MOVE | TransformHandleSet::CORNERS),
+        )
         .view_state(
             camera.pan_x.clone(),
             camera.pan_y.clone(),
@@ -456,6 +512,7 @@ fn build_toolbar(
     cork: Rc<RefCell<CorkboardModel>>,
     main_cam: Camera,
     overview_cam: Camera,
+    snap: Signal<bool>,
 ) -> impl Widget + 'static {
     let pin_cork = cork.clone();
     let unpin_cork = cork.clone();
@@ -522,6 +579,7 @@ fn build_toolbar(
                 let cam = overview_cam.clone();
                 Button::new(lit!("Reset Overview")).on_activate_fn(move |_ctx| cam.reset(0.5))
             })
+            .child(Checkbox::new(snap).label(lit!("Snap to grid")))
             .child(Spacer::new())
             .child(teksilo::widgets::ThemeSwitcher::new()),
     )
@@ -549,6 +607,11 @@ fn main() {
                     let main_cam = Camera::new(1.0);
                     let overview_cam = Camera::new(0.5);
 
+                    // One geometry rule for the document, read live by both
+                    // panes and by every input route.
+                    let snap = Signal::new(true);
+                    install_snap_to_grid(&model, snap.clone());
+
                     let main_id = tree.add(build_pane(&model, &selection, &main_cam));
                     let overview_id = tree.add(
                         build_pane(&model, &selection, &overview_cam)
@@ -557,7 +620,7 @@ fn main() {
                     );
 
                     let toolbar =
-                        build_toolbar(main_id, model.clone(), cork, main_cam, overview_cam);
+                        build_toolbar(main_id, model.clone(), cork, main_cam, overview_cam, snap);
 
                     tree.add(
                         VStack::new().child(toolbar).child(
@@ -585,9 +648,26 @@ mod tests {
     use teksilo::core::WidgetTree;
 
     /// A `WidgetTree` + two panes over one shared model, the way `main()` wires
-    /// them. Returns `(tree, model, selection, main_id, overview_id)`.
+    /// them, with the snap-to-grid constraint installed and switched on.
+    /// Returns `(tree, model, selection, main_id, overview_id)`.
     fn two_pane_tree() -> (WidgetTree, SceneModel, SceneSelection, WidgetId, WidgetId) {
+        two_pane_tree_with_snap(Signal::new(true)).0
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn two_pane_tree_with_snap(
+        snap: Signal<bool>,
+    ) -> (
+        (WidgetTree, SceneModel, SceneSelection, WidgetId, WidgetId),
+        Vec<ItemId>,
+    ) {
         let (model, _cork) = build_initial_scene();
+        install_snap_to_grid(&model, snap);
+        let cards: Vec<ItemId> = model
+            .ids()
+            .into_iter()
+            .filter(|id| model.payload(*id).is_some())
+            .collect();
         let selection = SceneSelection::new(SceneSelectionMode::Multi);
         let main_cam = Camera::new(1.0);
         let overview_cam = Camera::new(0.5);
@@ -602,7 +682,102 @@ mod tests {
             ),
         );
         tree.layout(SizeProposal::exact(1200.0, 600.0));
-        (tree, model, selection, main_id, overview_id)
+        ((tree, model, selection, main_id, overview_id), cards)
+    }
+
+    /// Nudge the first card one step with `Alt`+arrow, through the main pane.
+    fn nudge(tree: &mut WidgetTree, view_id: WidgetId, key: teksilo::core::event::Key) {
+        tree.focus(view_id);
+        tree.dispatch_event(teksilo::core::event::WidgetEvent::KeyDown {
+            key,
+            modifiers: teksilo::core::event::Modifiers::ALT,
+            text: None,
+        });
+    }
+
+    #[test]
+    fn a_card_lands_on_the_tile_grid_however_it_is_moved() {
+        // The worked example, driven: the constraint is on the *model*, so the
+        // keyboard route obeys it exactly as the pointer does — which is what
+        // makes the two geometries one.
+        let ((mut tree, model, selection, main_id, _ov), cards) =
+            two_pane_tree_with_snap(Signal::new(true));
+        let card = cards[0];
+        selection.replace([card]);
+
+        let before = model.scene_rect(card).expect("card resolves");
+        assert_ne!(
+            before.x % TILE,
+            0.0,
+            "precondition: the board's margin leaves the cards off-grid"
+        );
+
+        // The first move pulls it onto the nearest tile, whatever its size:
+        // the constraint rewrites the whole proposal, not just the step.
+        nudge(&mut tree, main_id, teksilo::core::event::Key::ArrowRight);
+        let first = model.scene_rect(card).expect("alive");
+        assert_eq!(first.x % TILE, 0.0, "{first:?}");
+
+        // And every later sub-tile step keeps it there.
+        for _ in 0..3 {
+            nudge(&mut tree, main_id, teksilo::core::event::Key::ArrowRight);
+        }
+        let after = model.scene_rect(card).expect("alive");
+        assert_eq!(after.x, first.x, "{after:?}");
+    }
+
+    #[test]
+    fn the_snap_toggle_is_live_and_the_clamp_is_not_behind_it() {
+        let snap = Signal::new(false);
+        let ((mut tree, model, selection, main_id, _ov), cards) =
+            two_pane_tree_with_snap(snap.clone());
+        let card = cards[0];
+        selection.replace([card]);
+        let before = model.scene_rect(card).expect("alive");
+
+        // Snap off: a 1-unit nudge really is 1 unit.
+        nudge(&mut tree, main_id, teksilo::core::event::Key::ArrowRight);
+        let free = model.scene_rect(card).expect("alive");
+        assert_eq!(free.x, before.x + 1.0, "{free:?}");
+
+        // Snap on, no rebuild: the next nudge pulls it back onto the tile.
+        snap.set(true);
+        nudge(&mut tree, main_id, teksilo::core::event::Key::ArrowRight);
+        let snapped = model.scene_rect(card).expect("alive");
+        assert_eq!(snapped.x % TILE, 0.0, "{snapped:?}");
+
+        // The clamp is not behind the toggle: push the card at the leading edge
+        // off the board with the snap off and it stops at zero.
+        snap.set(false);
+        model.set_local_pos(card, Point::new(0.0, 0.0));
+        nudge(&mut tree, main_id, teksilo::core::event::Key::ArrowLeft);
+        assert_eq!(
+            model.scene_rect(card).expect("alive").x,
+            0.0,
+            "a card may not leave the board, snap or no snap"
+        );
+    }
+
+    #[test]
+    fn both_panes_obey_the_one_document_rule() {
+        // Geometry policy lives on the model, so a second pane cannot disagree
+        // with the first about where a card may be.
+        let ((mut tree, model, selection, main_id, overview_id), cards) =
+            two_pane_tree_with_snap(Signal::new(true));
+        let card = cards[0];
+        selection.replace([card]);
+
+        nudge(
+            &mut tree,
+            overview_id,
+            teksilo::core::event::Key::ArrowRight,
+        );
+        let from_overview = model.scene_rect(card).expect("alive");
+        assert_eq!(from_overview.x % TILE, 0.0, "{from_overview:?}");
+
+        nudge(&mut tree, main_id, teksilo::core::event::Key::ArrowRight);
+        let from_main = model.scene_rect(card).expect("alive");
+        assert_eq!(from_main.x % TILE, 0.0, "{from_main:?}");
     }
 
     #[test]

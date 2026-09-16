@@ -45,8 +45,11 @@
 //! );
 //!
 //! // Observe every mutation — fires after the change is already applied.
-//! let _guard = scene.item_change_signal().observe(|change| {
-//!     if let ItemChange::LocalPosChanged { id: _, old: _, new } = change {
+//! // Each notification is a `SceneChange`: the change itself, plus the
+//! // transaction it belongs to, whose it was, and whether it counts as
+//! // history. See `teksilo_scene::SceneChange`.
+//! let _guard = scene.item_change_signal().observe(|notification| {
+//!     if let ItemChange::LocalPosChanged { id: _, old: _, new } = &notification.change {
 //!         let _ = new; // react to the new position
 //!     }
 //! });
@@ -65,10 +68,17 @@ use std::rc::Rc;
 use crate::a11y::{A11yCategory, A11yGroup, A11yGroupBuilder, A11yGroupId, A11yNode, A11yRelation};
 use crate::flags::ItemFlags;
 use crate::index::{GridHashIndex, SpatialIndex};
-use crate::item::{ItemId, SceneItem};
+use crate::item::{AppearanceWrite, ItemId, SceneItem};
 use crate::item_handlers::SceneItemHandlerSet;
+use crate::journal::{
+    ChangeSource, EditJournal, EphemeralScope, HistoryMode, RemovalScope, Salvage, SceneChange,
+    SceneEdit,
+};
 use crate::magnet::{Magnet, MagnetId, MagnetRef, MagnetSnap, MagnetVerdict};
 use crate::pick::PaintKey;
+use crate::salvage::{
+    ItemA11yDecorations, RemovedItem, ReplaceItemError, ReplaceRejected, RestoreError,
+};
 use crate::shape::{ItemSelectionMode, ItemShape, SceneRegion};
 use crate::transform::local_to_parent;
 use teksilo_canvas::{Path, Point, Rect, StrokeStyle, Transform2D, Vec2};
@@ -85,55 +95,148 @@ use teksilo_core::widget_id::WidgetId;
 /// (when the mutation came through a [`SceneModel`](crate::SceneModel)) the
 /// observer may freely read *and* write the scene back.
 ///
+/// # Edits and derived notifications
+///
+/// Most variants are **edits**: one mutation, one variant, both sides of the
+/// value it replaced, and [`SceneTransactionRecord::edits`](crate::SceneTransactionRecord)
+/// carries them so a data layer can invert the transaction by walking them in
+/// reverse.
+///
+/// [`VisibilityChanged`](Self::VisibilityChanged) is not one. It is a
+/// *derived* notification — a convenience beside the
+/// [`FlagsChanged`](Self::FlagsChanged) that actually describes the mutation,
+/// emitted by both flag doors whenever `IS_VISIBLE` flips so a consumer need
+/// not diff two bitsets. It rides the signal and stays out of the record, so
+/// hiding a card is one edit whichever door hid it.
+/// [`is_edit`](Self::is_edit) is the test, for a consumer that counts changes
+/// off the signal and wants the same number the record has.
+///
 /// `#[non_exhaustive]`: this is the crate's outbound event vocabulary, matched
 /// by every observer, and it grows whenever the scene learns to report
 /// something new — `HandlersChanged` is the most recent. Without the
 /// attribute each such addition would stop a downstream `match` from
 /// compiling; with it, a consumer's wildcard arm keeps meaning "a change I do
 /// not act on".
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ItemChange {
     /// `set_local_pos`: position in parent coords moved.
-    LocalPosChanged { id: ItemId, old: Point, new: Point },
-    /// `set_local_bounds`: AABB in local coords changed.
-    LocalBoundsChanged { id: ItemId, old: Rect, new: Rect },
-    /// `set_transform`: local→parent transform changed.
-    TransformChanged { id: ItemId },
-    /// `set_visible` flipped IS_VISIBLE.
-    VisibilityChanged { id: ItemId, visible: bool },
-    /// `set_flags` / `set_flag` changed the bitset.
-    FlagsChanged {
+    LocalPosChanged {
+        /// The item that moved.
         id: ItemId,
+        /// Where it was, in its parent's frame.
+        old: Point,
+        /// Where it is now.
+        new: Point,
+    },
+    /// `set_local_bounds`: AABB in local coords changed.
+    LocalBoundsChanged {
+        /// The item that resized.
+        id: ItemId,
+        /// Its AABB in local coordinates before the write.
+        old: Rect,
+        /// Its AABB now.
+        new: Rect,
+    },
+    /// `set_transform`: local→parent transform changed.
+    TransformChanged {
+        /// The item whose basis changed.
+        id: ItemId,
+        /// Its local→parent transform before the write.
+        old: Transform2D,
+        /// Its local→parent transform now.
+        new: Transform2D,
+    },
+    /// `IS_VISIBLE` flipped, by whichever door flipped it — `set_visible`,
+    /// `set_flag` or a wholesale `set_flags`.
+    ///
+    /// A **derived notification**, always emitted immediately before the
+    /// [`FlagsChanged`](Self::FlagsChanged) that describes the same mutation.
+    /// It exists so a consumer that only cares about visibility need not diff
+    /// two [`ItemFlags`] bitsets, and it is deliberately not an edit:
+    /// [`is_edit`](Self::is_edit) is `false` for it and it never reaches a
+    /// transaction record, so one mutation is one recorded edit no matter which
+    /// door made it. (It used to be emitted by `set_flag` and not by
+    /// `set_flags`, which made hiding a card two recorded changes through one
+    /// door and one through the other.)
+    VisibilityChanged {
+        /// The item whose `IS_VISIBLE` bit flipped.
+        id: ItemId,
+        /// The bit's new value. Its own value, not the inherited one —
+        /// [`Scene::is_effectively_visible`] chains the parents.
+        visible: bool,
+    },
+    /// `set_flags` / `set_flag` changed the bitset. The edit that describes a
+    /// flag change, visibility included.
+    FlagsChanged {
+        /// The item whose flags changed.
+        id: ItemId,
+        /// The whole bitset before the write.
         old: ItemFlags,
+        /// The whole bitset now. Diff the two to see which bits moved.
         new: ItemFlags,
     },
     /// `set_opacity`: local opacity multiplier changed.
-    OpacityChanged { id: ItemId, old: f32, new: f32 },
+    OpacityChanged {
+        /// The item whose opacity changed.
+        id: ItemId,
+        /// Its local multiplier before the write.
+        old: f32,
+        /// Its local multiplier now.
+        new: f32,
+    },
     /// `set_z`: paint z-order changed.
-    ZChanged { id: ItemId, old: f32, new: f32 },
+    ZChanged {
+        /// The item that restacked.
+        id: ItemId,
+        /// Its paint z before the write.
+        old: f32,
+        /// Its paint z now.
+        new: f32,
+    },
     /// `set_layer`: the Under/Over paint band changed.
     LayerChanged {
+        /// The item that changed band.
         id: ItemId,
+        /// The band it was in.
         old: SceneLayer,
+        /// The band it is in now.
         new: SceneLayer,
     },
     /// `set_item_parent`: logical parent changed.
     ParentChanged {
+        /// The child that was reparented.
         id: ItemId,
+        /// Its logical parent before the write; `None` when it was a root.
         old: Option<ItemId>,
+        /// Its logical parent now; `None` when it is now a root.
         new: Option<ItemId>,
     },
     /// `remove`: item is gone.
-    Removed { id: ItemId },
+    Removed {
+        /// The item that is gone. Its contents travel the owning channel:
+        /// [`Scene::take`] hands the caller a [`RemovedItem`],
+        /// and [`Scene::remove`] routes one to the edit sink.
+        id: ItemId,
+    },
     /// `add_item` / `add_widget`: item was inserted.
-    Added { id: ItemId },
+    Added {
+        /// The item that was inserted.
+        id: ItemId,
+    },
     /// `set_payload`: the type-erased payload of a `Delegated` heavyweight
     /// entry was replaced. A `SceneView` rebuilds that entry's widget
     /// (re-invokes its delegate) on the next build. Routed through
     /// `emit_item_change`, so `mutation_seq` advances and the AT-walk gate
     /// notices.
-    PayloadChanged { id: ItemId },
+    PayloadChanged {
+        /// The `Delegated` heavyweight entry whose data was replaced.
+        id: ItemId,
+        /// The payload every view built its widget from until now.
+        old: ItemPayload,
+        /// The payload every view will rebuild from.
+        new: ItemPayload,
+    },
     /// `set_item_fill` / `set_item_stroke` / `clear_item_*`: a lightweight
     /// item's paint-only appearance (fill / stroke colour or style) changed.
     /// Never moves geometry, so the observing `SceneView` evicts the item's
@@ -143,21 +246,123 @@ pub enum ItemChange {
     /// [`PathItem`](crate::PathItem) derives its hit band from the stroke it
     /// draws, so a view caching hit geometry must re-read this item's shape
     /// even while skipping relayout.
-    AppearanceChanged { id: ItemId },
+    AppearanceChanged {
+        /// The lightweight item that was recoloured.
+        id: ItemId,
+        /// Which of fill or stroke moved, and to what.
+        change: AppearanceChange,
+    },
+    /// `replace_item`: the lightweight item box at this id was swapped for a
+    /// different one, keeping the entry — position, transform, z, layer,
+    /// parent, flags, opacity, handlers, magnets and logical-AT decorations
+    /// all survive, and so does the [`ItemId`].
+    ///
+    /// One change, not `Removed` + `Added`, because nothing about the item's
+    /// identity changed. Consumers must treat it as a **geometry** change: the
+    /// new item carries its own `local_bounds` and its own hit shape.
+    ///
+    /// `old_bounds` / `new_bounds` are the entry's AABB either side of the
+    /// swap; the replaced box itself is returned to whoever called
+    /// [`Scene::replace_item`].
+    ItemReplaced {
+        /// The entry whose item box was swapped. Its [`ItemId`] is unchanged.
+        id: ItemId,
+        /// The entry's AABB before the swap.
+        old_bounds: Rect,
+        /// The entry's AABB after it, carried by the new box.
+        new_bounds: Rect,
+    },
+    /// `set_placement`: parent, z, local position and transform written
+    /// together as one property.
+    ///
+    /// The atomic form of the four separate mutators. A visually-stable
+    /// reparent ("drag this card into that group") is one edit here, where
+    /// `set_item_parent` + `set_local_pos` + `set_transform` is three edits,
+    /// three undo steps, and two intermediate states in which the item is
+    /// visibly in the wrong place.
+    PlacementChanged {
+        /// The item that was placed.
+        id: ItemId,
+        /// Parent, z, local position and transform before the write.
+        old: Placement,
+        /// All four now.
+        new: Placement,
+    },
     /// `set_item_handlers` / `handlers_mut`: the item's handler set was
     /// replaced or handed out for mutation.
     ///
-    /// `handlers_mut` fires it on the way *in*, before the set it returns has
-    /// been written, because a `&mut` borrow cannot report what the caller will
-    /// do with it. So this variant means "this item's handlers are no longer
-    /// what you last read", which is exactly what a consumer caching them
-    /// needs, and nothing finer.
+    /// Always means at least "this item's handlers are no longer what you last
+    /// read", which is what a consumer caching them — the `SceneView`'s
+    /// dispatch snapshot — needs. Without it, the two handler mutators were the
+    /// only doors in the model that changed observable state silently.
     ///
-    /// Without it, the two handler mutators were the only doors in the model
-    /// that changed observable state silently, and anything caching a handler
-    /// set — the `SceneView`'s dispatch snapshot — would serve the old one
-    /// indefinitely.
-    HandlersChanged { id: ItemId },
+    /// Whether it *also* describes the change is
+    /// [`replaced`](Self::HandlersChanged::replaced); see
+    /// [`HandlerReplacement`].
+    HandlersChanged {
+        /// The item whose handlers changed.
+        id: ItemId,
+        /// Both sides, when the door that fired this knew them.
+        ///
+        /// `Some` from [`Scene::set_item_handlers`], which is handed the new
+        /// set and can clone the old one out — so that door produces a
+        /// reversible edit like every other mutator.
+        ///
+        /// `None` from [`Scene::handlers_mut`], which fires on the way *in*: a
+        /// `&mut` borrow cannot report what the caller will do with it, and
+        /// there is no later moment the scene is told about. That call is an
+        /// invalidation notice and nothing finer, so it is **not** recorded as
+        /// an edit — a record claiming to carry both sides must not carry an
+        /// entry that carries neither. An app that wants its handler edits in
+        /// the history makes them through `set_item_handlers`.
+        ///
+        /// Boxed because a [`SceneItemHandlerSet`] is a wide struct and this is
+        /// the rarest variant: inline, two of them would set the size of every
+        /// [`ItemChange`], every [`SceneChange`] and every
+        /// queued notification — a per-pointer-sample cost for a setup-time
+        /// call.
+        replaced: Option<Box<HandlerReplacement>>,
+    },
+}
+
+/// The two sides of a [`Scene::set_item_handlers`], as they ride an
+/// [`ItemChange::HandlersChanged`].
+///
+/// `None` on either side means "no handler set at all", which is a state an
+/// item can be in and is distinct from an empty one.
+///
+/// [`SceneItemHandlerSet`] stores its closures as `Rc<dyn Fn>`, so carrying
+/// both sides is a handful of refcount bumps rather than a deep copy — which
+/// is why this could be carried and, until it was, simply was not.
+///
+/// `#[non_exhaustive]`: this crate has out-of-tree consumers.
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct HandlerReplacement {
+    /// What the item had before. `None` when it had none.
+    pub old: Option<SceneItemHandlerSet>,
+    /// What it has now. `None` when the call cleared them.
+    pub new: Option<SceneItemHandlerSet>,
+}
+
+impl std::fmt::Debug for HandlerReplacement {
+    /// Hand-written: [`SceneItemHandlerSet`] holds `Rc<dyn Fn>` closures and is
+    /// not `Debug`, and [`ItemChange`] is. Reports which side was present,
+    /// which is the part of a handler swap that reads usefully in a log — the
+    /// same call the hand-written `Debug` for
+    /// [`RemovedItem`] makes about its magnets.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn side(set: &Option<SceneItemHandlerSet>) -> &'static str {
+            match set {
+                Some(_) => "SceneItemHandlerSet",
+                None => "none",
+            }
+        }
+        f.debug_struct("HandlerReplacement")
+            .field("old", &side(&self.old))
+            .field("new", &side(&self.new))
+            .finish()
+    }
 }
 
 impl ItemChange {
@@ -173,7 +378,7 @@ impl ItemChange {
         match *self {
             ItemChange::LocalPosChanged { id, .. }
             | ItemChange::LocalBoundsChanged { id, .. }
-            | ItemChange::TransformChanged { id }
+            | ItemChange::TransformChanged { id, .. }
             | ItemChange::VisibilityChanged { id, .. }
             | ItemChange::FlagsChanged { id, .. }
             | ItemChange::OpacityChanged { id, .. }
@@ -182,9 +387,155 @@ impl ItemChange {
             | ItemChange::ParentChanged { id, .. }
             | ItemChange::Removed { id }
             | ItemChange::Added { id }
-            | ItemChange::PayloadChanged { id }
-            | ItemChange::AppearanceChanged { id }
-            | ItemChange::HandlersChanged { id } => id,
+            | ItemChange::PayloadChanged { id, .. }
+            | ItemChange::AppearanceChanged { id, .. }
+            | ItemChange::ItemReplaced { id, .. }
+            | ItemChange::PlacementChanged { id, .. }
+            | ItemChange::HandlersChanged { id, .. } => id,
+        }
+    }
+
+    /// Whether this change is an **edit** — a mutation a transaction record
+    /// carries — rather than a *derived notification* the scene emits beside
+    /// one for a consumer's convenience.
+    ///
+    /// Two variants are not edits:
+    ///
+    /// * [`VisibilityChanged`](Self::VisibilityChanged), which always
+    ///   accompanies the [`FlagsChanged`](Self::FlagsChanged) that describes
+    ///   the same mutation.
+    /// * [`HandlersChanged`](Self::HandlersChanged) with no
+    ///   [`replaced`](Self::HandlersChanged::replaced) — the `handlers_mut`
+    ///   door, which cannot say what the handlers became.
+    ///
+    /// Filtering the change signal by this gives the same count the
+    /// transaction record has, which is what an app showing "N changes in this
+    /// edit" needs: hiding a card is one change through
+    /// [`Scene::set_visible`] and one through [`Scene::set_flags`].
+    pub fn is_edit(&self) -> bool {
+        !matches!(
+            self,
+            ItemChange::VisibilityChanged { .. }
+                | ItemChange::HandlersChanged { replaced: None, .. }
+        )
+    }
+}
+
+/// A `Delegated` heavyweight entry's type-erased payload, as it rides an
+/// [`ItemChange::PayloadChanged`].
+///
+/// A newtype rather than a bare `Rc<dyn Any>` for one reason: `dyn Any` is not
+/// `Debug`, and [`ItemChange`] is. Cloning one is a refcount bump, never a deep
+/// copy, so carrying both sides of a payload swap costs two increments.
+#[derive(Clone)]
+pub struct ItemPayload(Rc<dyn std::any::Any>);
+
+impl std::fmt::Debug for ItemPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `dyn Any` can report its concrete `TypeId` but not its name, and the
+        // payload is the app's own type — printing the pointer would be noise.
+        f.write_str("ItemPayload(<dyn Any>)")
+    }
+}
+
+impl ItemPayload {
+    /// The underlying handle, for a consumer that wants to downcast it itself.
+    pub fn as_rc(&self) -> &Rc<dyn std::any::Any> {
+        &self.0
+    }
+
+    /// Consume the wrapper for the handle.
+    pub fn into_rc(self) -> Rc<dyn std::any::Any> {
+        self.0
+    }
+
+    /// Downcast to the concrete payload type the app stored, or `None` when it
+    /// is something else.
+    pub fn downcast<T: 'static>(&self) -> Option<Rc<T>> {
+        self.0.clone().downcast::<T>().ok()
+    }
+}
+
+impl From<Rc<dyn std::any::Any>> for ItemPayload {
+    fn from(rc: Rc<dyn std::any::Any>) -> Self {
+        Self(rc)
+    }
+}
+
+/// Which paint-only appearance slot changed, with both sides of the write.
+///
+/// One variant per slot rather than one struct carrying both, because a write
+/// touches exactly one of them and a struct would have to invent a value for
+/// the other — which is the class of "plausible but wrong" data a journal must
+/// not contain.
+///
+/// `#[non_exhaustive]`: this crate has out-of-tree consumers, and an item may
+/// grow a third appearance slot.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum AppearanceChange {
+    /// [`Scene::set_item_fill`] / [`Scene::clear_item_fill`]. `None` on either
+    /// side means "no fill".
+    Fill {
+        /// The fill the item held before the write.
+        old: Option<ColorProp>,
+        /// The fill it holds now.
+        new: Option<ColorProp>,
+    },
+    /// [`Scene::set_item_stroke`] / [`Scene::clear_item_stroke`]. `None` on
+    /// either side means "no stroke".
+    Stroke {
+        /// The stroke the item held before the write.
+        old: Option<(ColorProp, StrokeStyle)>,
+        /// The stroke it holds now.
+        new: Option<(ColorProp, StrokeStyle)>,
+    },
+}
+
+/// Where an item sits, as **one** property: logical parent, paint z, position
+/// in the parent frame, and local to parent transform.
+///
+/// # Why these four together
+///
+/// [`Scene::set_item_parent`] deliberately does not rebase `local_pos` — a
+/// child's position is stated in its parent's frame, so adopting a new parent
+/// moves the item unless the caller compensates. A visually-stable reparent is
+/// therefore `set_item_parent` + `set_local_pos` + `set_transform`: three
+/// events, three things for a history to undo separately, and two intermediate
+/// states in which the item is visibly somewhere it never was.
+///
+/// Writing all four at once removes all three, and it is the half of Figma's
+/// "parent + fractional index as one property" that Teksilo was missing. The
+/// *other* half — O(1) reorder with no sibling rewrite — is already here: `z`
+/// is an `f32` and [`Scene::set_z`] writes one field, so
+/// [`Scene::z_between`] is a fractional insert.
+///
+/// `#[non_exhaustive]`: the crate hands this *to* consumer code and takes it
+/// back — and it is the one place a caller states a whole placement, so a fifth
+/// property joining the set is exactly the growth this guards. Build one with
+/// [`new`](Self::new).
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct Placement {
+    /// Logical parent, or `None` for scene-rooted.
+    pub parent: Option<ItemId>,
+    /// Paint z-order within the band.
+    pub z: f32,
+    /// Origin of the item's local frame, in the parent's coordinates.
+    pub local_pos: Point,
+    /// Rotation / scale applied around the local origin.
+    pub transform: Transform2D,
+}
+
+impl Placement {
+    /// A placement stated field by field — the constructor
+    /// [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+    pub fn new(parent: Option<ItemId>, z: f32, local_pos: Point, transform: Transform2D) -> Self {
+        Self {
+            parent,
+            z,
+            local_pos,
+            transform,
         }
     }
 }
@@ -201,10 +552,11 @@ impl ItemChange {
 /// are **state**, not events — [`Scene::current_pan_axes`] and friends read
 /// them back — so deferring their writes would make the scene lie about its
 /// own configuration inside an open write scope. They stay synchronous.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub(crate) enum PendingNotification {
-    /// One [`ItemChange`] through `item_change_signal`.
-    Item(ItemChange),
+    /// One [`SceneChange`] — an [`ItemChange`] plus its transaction envelope —
+    /// through `item_change_signal`.
+    Item(SceneChange),
     /// One `a11y_change_signal` bump, carrying the node the mutation was
     /// *about* (groups / parents / relations / live / landmarks / categories /
     /// magnets).
@@ -416,7 +768,7 @@ pub(crate) struct ChangeQueue {
     /// scene permanently, which is worse than the panic this whole mechanism
     /// replaced.
     draining: Cell<bool>,
-    item_signal: Signal<ItemChange>,
+    item_signal: Signal<SceneChange>,
     a11y_signal: Signal<u64>,
 }
 
@@ -445,12 +797,18 @@ impl ChangeQueue {
         Self {
             notifications: RefCell::new(VecDeque::new()),
             draining: Cell::new(false),
-            item_signal: Signal::new(ItemChange::Added { id: ItemId(0) }),
+            item_signal: Signal::new(SceneChange {
+                txn: crate::journal::TxnId::default(),
+                source: ChangeSource::Programmatic,
+                history: HistoryMode::Record,
+                ephemeral: false,
+                change: ItemChange::Added { id: ItemId(0) },
+            }),
             a11y_signal: Signal::new(0),
         }
     }
 
-    pub(crate) fn item_signal(&self) -> Signal<ItemChange> {
+    pub(crate) fn item_signal(&self) -> Signal<SceneChange> {
         self.item_signal.clone()
     }
 
@@ -461,6 +819,18 @@ impl ChangeQueue {
     /// Whether anything is waiting to be delivered.
     pub(crate) fn has_work(&self) -> bool {
         !self.notifications.borrow().is_empty()
+    }
+
+    /// Whether a drain loop is running right now.
+    ///
+    /// Read by [`SceneModel::deliver_records`](crate::SceneModel::deliver_records)
+    /// so a committed transaction waits for the change fan-out to settle. An
+    /// observer that writes the scene commits its own transaction *inside* the
+    /// drain, and delivering records from there would hand the edit sink a
+    /// transaction some views had not reconciled from yet — which is the one
+    /// ordering this seam promises.
+    pub(crate) fn is_draining(&self) -> bool {
+        self.draining.get()
     }
 
     /// Append one notification to the back of the queue.
@@ -554,7 +924,12 @@ impl ChangeQueue {
                 if cascading {
                     // Charged *before* delivery, so the notification named in
                     // the diagnostic is the one that broke the budget.
-                    Self::charge(&mut charged, &mut charged_total, notification, budget.total);
+                    Self::charge(
+                        &mut charged,
+                        &mut charged_total,
+                        &notification,
+                        budget.total,
+                    );
                 }
                 match notification {
                     PendingNotification::Item(change) => self.item_signal.set(change),
@@ -578,13 +953,13 @@ impl ChangeQueue {
     fn charge(
         charged: &mut HashMap<NotifyKey, u32>,
         charged_total: &mut u64,
-        notification: PendingNotification,
+        notification: &PendingNotification,
         limit: u64,
     ) {
         *charged_total += 1;
         let key: NotifyKey = match notification {
             PendingNotification::Item(change) => NotifyKey::Item(change.id()),
-            PendingNotification::A11y(node) => node.into(),
+            PendingNotification::A11y(node) => (*node).into(),
         };
         // Saturating: this count is a diagnostic, and a budget raised past
         // `u32::MAX` must not make the *counter* the thing that panics.
@@ -610,7 +985,7 @@ impl ChangeQueue {
     fn runaway(
         charged: &HashMap<NotifyKey, u32>,
         delivered: u64,
-        notification: PendingNotification,
+        notification: &PendingNotification,
         limit: u64,
     ) -> ! {
         let (top_key, top_count) = charged
@@ -933,6 +1308,14 @@ pub struct Scene {
     /// geometry *and* logical AT structure still delivers in the order it
     /// happened rather than splitting into two independently-ordered streams.
     pending: Rc<ChangeQueue>,
+    /// The transaction state machine, the edit sink, and the queue of
+    /// committed [`SceneTransactionRecord`](crate::SceneTransactionRecord)s
+    /// awaiting delivery.
+    ///
+    /// Behind an `Rc` beside this `Scene` for the same reason `pending` is: the
+    /// sink is invoked with **no** borrow on the scene, which is what lets it
+    /// read the scene and write it back. See [`crate::journal`].
+    journal: Rc<EditJournal>,
     /// Monotonic counter of *every* model mutation — item geometry / visibility
     /// / structure (each [`ItemChange`] fire) **and** logical-AT structure (each
     /// `bump_a11y_change`). Read via [`Scene::mutation_version`], or as
@@ -1010,6 +1393,26 @@ pub struct Scene {
     /// Reverse lookup `MagnetId -> owning ItemId` for O(1) resolution
     /// of a magnet's owner (and cleanup on `remove_magnet`).
     magnet_owner: HashMap<MagnetId, ItemId>,
+
+    // --- geometry constraint -----------------------------------------
+    /// The document's standing geometry rule — snap-to-grid, axis lock, page
+    /// clamp — consulted by every **user-driven** gesture before anything is
+    /// applied, and by no mutator at all. See [`crate::ProposedChange`].
+    geometry_constraint: Option<crate::constrain::GeometryConstraint>,
+    /// Whether a geometry-constraint call is running on this scene right now.
+    ///
+    /// Read by [`SceneModel::write_guard`](crate::SceneModel::write_guard) when
+    /// its borrow fails, so a constraint that tries to *write* the scene gets a
+    /// diagnostic naming the hook rather than `RefCell already borrowed`.
+    ///
+    /// A **flag**, not a counter, because the state it tracks is two-valued:
+    /// `ConstraintCall::new` asserts that no constraint is already running (a
+    /// constraint asking for another one would recurse without end, and the
+    /// assertion says so), so nesting is refused rather than counted. A counter
+    /// here would be a type promising a depth the code cannot reach — and
+    /// `saturating_sub` would quietly absorb an unbalanced exit instead of
+    /// surfacing it.
+    constraint_running: Cell<bool>,
 }
 
 impl Scene {
@@ -1029,6 +1432,7 @@ impl Scene {
             user_scene_rect: None,
             constraints: SceneConstraints::new(),
             pending: Rc::new(ChangeQueue::new()),
+            journal: Rc::new(EditJournal::new()),
             mutation_seq: Cell::new(0),
             dynamic_seq: Cell::new(0),
             item_change_seq: Cell::new(0),
@@ -1043,6 +1447,8 @@ impl Scene {
             a11y_categories: HashMap::new(),
             magnets: HashMap::new(),
             magnet_owner: HashMap::new(),
+            geometry_constraint: None,
+            constraint_running: Cell::new(false),
         }
     }
 
@@ -1120,12 +1526,18 @@ impl Scene {
         let Some(&pos) = self.entry_index.get(&id) else {
             panic!("set_payload: unknown ItemId {id:?}");
         };
-        match &mut self.entries[pos].kind {
-            SceneEntryKind::Widget(WidgetSource::Delegated { payload: slot }) => *slot = payload,
+        let old = match &mut self.entries[pos].kind {
+            SceneEntryKind::Widget(WidgetSource::Delegated { payload: slot }) => {
+                std::mem::replace(slot, payload.clone())
+            }
             _ => panic!("set_payload: {id:?} is not a Delegated widget entry"),
-        }
+        };
         // Entry borrow dropped above; `emit_item_change` is `&self`.
-        self.emit_item_change(ItemChange::PayloadChanged { id });
+        self.emit_item_change(ItemChange::PayloadChanged {
+            id,
+            old: ItemPayload::from(old),
+            new: ItemPayload::from(payload),
+        });
     }
 
     /// The current type-erased payload of a `Delegated` heavyweight entry.
@@ -1275,6 +1687,15 @@ impl Scene {
         let dynamic_ids: Vec<ItemId> = self.dynamic.clone();
         let mut changed = false;
         let seq_before = self.mutation_seq.get();
+        // This is the crate's one genuine per-frame model-mutation stream: an
+        // animating `add_item_dynamic` item re-reads its signal-driven AABB
+        // every build and writes it back, so it emits a `LocalBoundsChanged`
+        // per frame. Those changes must be *rendered* and must not be
+        // *recorded*, so they are tagged ephemeral for the duration of the
+        // refresh. An app driving its own per-frame stream marks it the same
+        // way with `SceneTransaction::ephemeral`.
+        let journal = Rc::clone(&self.journal);
+        let _ephemeral = EphemeralScope::new(&journal);
         for id in dynamic_ids {
             let Some(&pos) = self.entry_index.get(&id) else {
                 continue;
@@ -1309,19 +1730,74 @@ impl Scene {
         let pos = self.entries.len();
         self.entries.push(entry);
         self.entry_index.insert(id, pos);
-        // Entries only ever append, so both side lists stay in entry order —
-        // which `heavyweight_ids` promises and `SceneView` relies on for child
-        // ordering.
+        // A fresh insertion only ever appends, so both side lists stay in entry
+        // order — which `heavyweight_ids` promises and `SceneView` relies on for
+        // child ordering — at O(1). `push_entry_at` pays a scan to keep the same
+        // promise when it inserts in the middle; this path must not.
         if heavyweight {
             self.heavyweight.push(id);
         }
         if dynamic {
             self.dynamic.push(id);
         }
-        // Every insertion path builds a root-level entry today, but the
-        // adjacency is maintained here rather than assumed, so a future
-        // constructor that arrives parented cannot silently break the
-        // `parent` ⇄ `children` invariant.
+        self.finish_insert(id, parent)
+    }
+
+    /// Insert an entry at a **given** position in declaration order, for
+    /// [`Scene::restore`]: an item that comes back at the end of the order
+    /// comes back in the wrong place in the accessibility reading order, which
+    /// is the order the walk publishes siblings in.
+    ///
+    /// `at` is clamped to the current length, so a recorded index that no
+    /// longer exists (the scene shrank while the salvage was held) appends
+    /// rather than failing.
+    ///
+    /// Costs a reindex of the tail and a scan of each side list, which is the
+    /// price of not appending. A restore is not a hot path; `push_entry` is,
+    /// and keeps its O(1).
+    fn push_entry_at(&mut self, entry: SceneEntry, at: usize) -> ItemId {
+        let id = entry.id;
+        let parent = entry.parent;
+        let heavyweight = matches!(entry.kind, SceneEntryKind::Widget(_));
+        let dynamic = entry.dynamic_bounds;
+        let at = at.min(self.entries.len());
+        self.entries.insert(at, entry);
+        let reindexed: Vec<(ItemId, usize)> = self
+            .entries
+            .iter()
+            .enumerate()
+            .skip(at)
+            .map(|(pos, e)| (e.id, pos))
+            .collect();
+        for (eid, pos) in reindexed {
+            self.entry_index.insert(eid, pos);
+        }
+        if heavyweight {
+            let slot = self
+                .heavyweight
+                .iter()
+                .position(|hid| self.entry_index.get(hid).copied().unwrap_or(0) > at)
+                .unwrap_or(self.heavyweight.len());
+            self.heavyweight.insert(slot, id);
+        }
+        if dynamic {
+            let slot = self
+                .dynamic
+                .iter()
+                .position(|did| self.entry_index.get(did).copied().unwrap_or(0) > at)
+                .unwrap_or(self.dynamic.len());
+            self.dynamic.insert(slot, id);
+        }
+        self.finish_insert(id, parent)
+    }
+
+    /// The tail every insertion shares: adjacency, spatial index, `Added`.
+    ///
+    /// The `parent` ⇄ `children` adjacency is maintained here rather than
+    /// assumed, so a constructor that arrives parented — which
+    /// [`push_entry_at`](Self::push_entry_at) does, restoring a child — cannot
+    /// silently break the invariant.
+    fn finish_insert(&mut self, id: ItemId, parent: Option<ItemId>) -> ItemId {
         self.link_child(parent, id);
         let aabb = self.compute_scene_aabb(id).unwrap_or(Rect::ZERO);
         self.index.insert(id, aabb);
@@ -1375,7 +1851,7 @@ impl Scene {
     /// itself inside an open write scope. They still fan out synchronously
     /// under the borrow: an observer on one of those four must not re-enter
     /// the `SceneModel`.
-    pub fn item_change_signal(&self) -> Signal<ItemChange> {
+    pub fn item_change_signal(&self) -> Signal<SceneChange> {
         self.pending.item_signal()
     }
 
@@ -1433,7 +1909,37 @@ impl Scene {
         self.bump_mutation();
         self.item_change_seq
             .set(self.item_change_seq.get().wrapping_add(1));
-        self.notify_or_queue(PendingNotification::Item(change));
+        let (txn, source, history, ephemeral) = self.journal.stamp();
+        // Two kinds of change stay out of the record.
+        //
+        // A removal's edit carries ownership the notification cannot, so the
+        // removal path records its own `SceneEdit::Removed` with the salvage
+        // attached. Recording it again here would double it.
+        //
+        // A *derived notification* — `VisibilityChanged` beside the
+        // `FlagsChanged` that describes the same mutation, or the
+        // `HandlersChanged` that `handlers_mut` fires without knowing what the
+        // handlers became — is not an edit at all. Recording the first would
+        // make one mutation two edits; recording the second would put an entry
+        // nothing can invert into a record whose whole claim is that every
+        // entry carries both sides.
+        if change.is_edit() && !matches!(change, ItemChange::Removed { .. }) {
+            self.journal.record(SceneEdit::Change(change.clone()));
+        }
+        self.notify_or_queue(PendingNotification::Item(SceneChange {
+            txn,
+            source,
+            history,
+            ephemeral,
+            change,
+        }));
+    }
+
+    /// The edit journal, as a handle that outlives any borrow on this scene —
+    /// the same shape as [`change_queue`](Self::change_queue), and for the same
+    /// reason: a record is handed to the sink with the scene free.
+    pub(crate) fn journal(&self) -> Rc<EditJournal> {
+        Rc::clone(&self.journal)
     }
 
     /// How many [`ItemChange`]s this scene has emitted, ever — the counter a
@@ -1498,12 +2004,21 @@ impl Scene {
     /// which a `&mut self` method cannot do for its own `&mut self`.
     pub(crate) fn enter_write_scope(&self) {
         self.defer_depth.set(self.defer_depth.get() + 1);
+        // A write scope is also the **implicit transaction boundary**: one
+        // scope, one `TxnId`. That is what makes a subtree `remove` one
+        // transaction with N edits, and a `SceneWriteGuard` block one
+        // transaction, without a single mutator being wrapped by hand. An
+        // explicit `SceneTransaction` has already opened a scope, so this one
+        // joins it and its default stamp is ignored.
+        self.journal
+            .enter_scope(ChangeSource::default(), HistoryMode::default());
     }
 
     /// Close a write scope opened by [`enter_write_scope`](Self::enter_write_scope).
     pub(crate) fn exit_write_scope(&self) {
         self.defer_depth
             .set(self.defer_depth.get().saturating_sub(1));
+        self.journal.exit_scope();
     }
 
     /// The notification queue, as a handle that outlives any borrow on this
@@ -1519,6 +2034,35 @@ impl Scene {
     /// question a flush asks on every frame.
     pub(crate) fn has_pending_notifications(&self) -> bool {
         self.pending.has_work()
+    }
+
+    /// How many transaction / write scopes are open on this scene.
+    ///
+    /// Zero between mutations. A non-zero value outside a mutator means a
+    /// [`SceneTransaction`](crate::SceneTransaction) is being held, which is
+    /// only correct within one synchronous scope — see
+    /// [`SceneModel::transaction`](crate::SceneModel::transaction).
+    pub fn open_transaction_depth(&self) -> u32 {
+        self.journal.depth()
+    }
+
+    /// Whether any committed transaction is waiting for the edit sink. Same
+    /// shape and purpose as [`has_pending_notifications`](Self::has_pending_notifications).
+    pub(crate) fn has_pending_records(&self) -> bool {
+        self.journal.has_records()
+    }
+
+    /// Whether the change fan-out is mid-drain — see
+    /// [`ChangeQueue::is_draining`].
+    pub(crate) fn changes_are_draining(&self) -> bool {
+        self.pending.is_draining()
+    }
+
+    /// Fires once per committed transaction, after the edit sink, with the
+    /// scene unborrowed. See
+    /// [`SceneModel::transaction_signal`](crate::SceneModel::transaction_signal).
+    pub fn transaction_signal(&self) -> Signal<crate::journal::TxnId> {
+        self.journal.txn_signal()
     }
 
     /// Advance the unified model-mutation counter (wrapping). Shared by
@@ -1671,9 +2215,20 @@ impl Scene {
     /// subtree in the spatial index. No-op if the id is unknown.
     pub fn set_transform(&mut self, id: ItemId, transform: Transform2D) {
         if let Some(&pos) = self.entry_index.get(&id) {
-            self.entries[pos].transform = transform;
+            let old = std::mem::replace(&mut self.entries[pos].transform, transform);
+            if old == transform {
+                // An app driving a rotation from a `Signal<f32>` writes this
+                // every frame; without the guard that is a per-frame change
+                // stream for a scene that is not moving, and — once the change
+                // is recorded — a per-frame transaction too.
+                return;
+            }
             self.rebucket_subtree(id);
-            self.emit_item_change(ItemChange::TransformChanged { id });
+            self.emit_item_change(ItemChange::TransformChanged {
+                id,
+                old,
+                new: transform,
+            });
         }
     }
 
@@ -1817,6 +2372,11 @@ impl Scene {
     }
 
     /// Replace an item's flags wholesale. No-op if unknown.
+    ///
+    /// Announces exactly what [`set_flag`](Self::set_flag) announces for the
+    /// same net change: the derived [`ItemChange::VisibilityChanged`] when
+    /// `IS_VISIBLE` flipped, then the [`ItemChange::FlagsChanged`] that
+    /// describes the mutation.
     pub fn set_flags(&mut self, id: ItemId, flags: ItemFlags) {
         if let Some(&pos) = self.entry_index.get(&id) {
             let old = self.entries[pos].flags;
@@ -1824,11 +2384,7 @@ impl Scene {
                 return;
             }
             self.entries[pos].flags = flags;
-            self.emit_item_change(ItemChange::FlagsChanged {
-                id,
-                old,
-                new: flags,
-            });
+            self.announce_flags(id, old, flags);
         }
     }
 
@@ -1839,12 +2395,30 @@ impl Scene {
             self.entries[pos].flags.set(flag, on);
             let new = self.entries[pos].flags;
             if old != new {
-                if flag == ItemFlags::IS_VISIBLE {
-                    self.emit_item_change(ItemChange::VisibilityChanged { id, visible: on });
-                }
-                self.emit_item_change(ItemChange::FlagsChanged { id, old, new });
+                self.announce_flags(id, old, new);
             }
         }
+    }
+
+    /// The one announcement both flag doors make, so a hidden card is the same
+    /// pair of notifications and the same *single* recorded edit whichever door
+    /// hid it.
+    ///
+    /// [`ItemChange::VisibilityChanged`] first when `IS_VISIBLE` flipped — a
+    /// derived convenience that stays out of the transaction record
+    /// ([`ItemChange::is_edit`]) — then the [`ItemChange::FlagsChanged`] that
+    /// describes the mutation. `set_flag` used to emit the pair and `set_flags`
+    /// only the second, so one mutation had two record shapes depending on the
+    /// door, and an app counting the edits in a transaction reported 2 for
+    /// hiding a card and 1 for the same hide through `set_flags`.
+    fn announce_flags(&mut self, id: ItemId, old: ItemFlags, new: ItemFlags) {
+        if old.contains(ItemFlags::IS_VISIBLE) != new.contains(ItemFlags::IS_VISIBLE) {
+            self.emit_item_change(ItemChange::VisibilityChanged {
+                id,
+                visible: new.contains(ItemFlags::IS_VISIBLE),
+            });
+        }
+        self.emit_item_change(ItemChange::FlagsChanged { id, old, new });
     }
 
     /// Toggle the [`ItemFlags::IS_VISIBLE`] bit. Convenience for
@@ -1922,12 +2496,18 @@ impl Scene {
         let Some(&pos) = self.entry_index.get(&id) else {
             return;
         };
-        let applied = match &mut self.entries[pos].kind {
-            SceneEntryKind::Item(item) => item.set_fill(Some(prop)),
-            _ => false,
+        let write = match &mut self.entries[pos].kind {
+            SceneEntryKind::Item(item) => item.set_fill(Some(prop.clone())),
+            _ => AppearanceWrite::Refused,
         };
-        if applied {
-            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        if let Some(old) = write.into_previous() {
+            self.emit_item_change(ItemChange::AppearanceChanged {
+                id,
+                change: AppearanceChange::Fill {
+                    old,
+                    new: Some(prop),
+                },
+            });
         }
     }
 
@@ -1939,12 +2519,15 @@ impl Scene {
         let Some(&pos) = self.entry_index.get(&id) else {
             return;
         };
-        let applied = match &mut self.entries[pos].kind {
+        let write = match &mut self.entries[pos].kind {
             SceneEntryKind::Item(item) => item.set_fill(None),
-            _ => false,
+            _ => AppearanceWrite::Refused,
         };
-        if applied {
-            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        if let Some(old) = write.into_previous() {
+            self.emit_item_change(ItemChange::AppearanceChanged {
+                id,
+                change: AppearanceChange::Fill { old, new: None },
+            });
         }
     }
 
@@ -1957,12 +2540,18 @@ impl Scene {
         let Some(&pos) = self.entry_index.get(&id) else {
             return;
         };
-        let applied = match &mut self.entries[pos].kind {
-            SceneEntryKind::Item(item) => item.set_stroke(Some((prop, style))),
-            _ => false,
+        let write = match &mut self.entries[pos].kind {
+            SceneEntryKind::Item(item) => item.set_stroke(Some((prop.clone(), style.clone()))),
+            _ => AppearanceWrite::Refused,
         };
-        if applied {
-            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        if let Some(old) = write.into_previous() {
+            self.emit_item_change(ItemChange::AppearanceChanged {
+                id,
+                change: AppearanceChange::Stroke {
+                    old,
+                    new: Some((prop, style)),
+                },
+            });
         }
     }
 
@@ -1973,12 +2562,15 @@ impl Scene {
         let Some(&pos) = self.entry_index.get(&id) else {
             return;
         };
-        let applied = match &mut self.entries[pos].kind {
+        let write = match &mut self.entries[pos].kind {
             SceneEntryKind::Item(item) => item.set_stroke(None),
-            _ => false,
+            _ => AppearanceWrite::Refused,
         };
-        if applied {
-            self.emit_item_change(ItemChange::AppearanceChanged { id });
+        if let Some(old) = write.into_previous() {
+            self.emit_item_change(ItemChange::AppearanceChanged {
+                id,
+                change: AppearanceChange::Stroke { old, new: None },
+            });
         }
     }
 
@@ -1992,12 +2584,20 @@ impl Scene {
 
     /// Replace an item's handler set. Pass `None` to clear.
     ///
-    /// Fires [`ItemChange::HandlersChanged`], like every other mutator on this
-    /// type: a consumer that caches handlers has no other way to learn of it.
+    /// Fires [`ItemChange::HandlersChanged`] carrying **both sides**
+    /// ([`HandlerReplacement`]), like every other mutator on this type: a
+    /// consumer that caches handlers has no other way to learn of it, and a
+    /// data layer inverting a transaction has no other way to put them back.
+    /// This is the handler door that produces a reversible edit; see
+    /// [`handlers_mut`](Self::handlers_mut) for the one that cannot.
     pub fn set_item_handlers(&mut self, id: ItemId, handlers: Option<SceneItemHandlerSet>) {
         if let Some(&pos) = self.entry_index.get(&id) {
-            self.entries[pos].handlers = handlers.map(Box::new);
-            self.emit_item_change(ItemChange::HandlersChanged { id });
+            let old = self.entries[pos].handlers.as_deref().cloned();
+            self.entries[pos].handlers = handlers.clone().map(Box::new);
+            self.emit_item_change(ItemChange::HandlersChanged {
+                id,
+                replaced: Some(Box::new(HandlerReplacement { old, new: handlers })),
+            });
         }
     }
 
@@ -2005,15 +2605,22 @@ impl Scene {
     /// empty one if none exists. Returns `None` for unknown ids.
     /// Allows fluent chains: `scene.handlers_mut(id).unwrap().on_tap(…).cursor(…);`.
     ///
-    /// Fires [`ItemChange::HandlersChanged`] *before* handing the set out —
-    /// `&mut` cannot report back what the caller does with it, so the
-    /// notification means "no longer what you last read". A caller that takes
-    /// the borrow and changes nothing therefore costs one spurious
-    /// invalidation, which is the right way round: the alternative is a
-    /// consumer serving stale handlers.
+    /// Fires [`ItemChange::HandlersChanged`] *before* handing the set out, with
+    /// no [`HandlerReplacement`] — `&mut` cannot report back what the caller
+    /// does with it, so the notification means "no longer what you last read"
+    /// and nothing finer. A caller that takes the borrow and changes nothing
+    /// therefore costs one spurious invalidation, which is the right way round:
+    /// the alternative is a consumer serving stale handlers.
+    ///
+    /// Because it describes nothing, it is **not** recorded as an edit
+    /// ([`ItemChange::is_edit`]) — a transaction record whose every entry
+    /// carries both sides of what it replaced must not carry one that carries
+    /// neither. Make a handler change the history should be able to reverse
+    /// through [`set_item_handlers`](Self::set_item_handlers), which knows both
+    /// sides.
     pub fn handlers_mut(&mut self, id: ItemId) -> Option<&mut SceneItemHandlerSet> {
         let pos = *self.entry_index.get(&id)?;
-        self.emit_item_change(ItemChange::HandlersChanged { id });
+        self.emit_item_change(ItemChange::HandlersChanged { id, replaced: None });
         let entry = self.entries.get_mut(pos)?;
         if entry.handlers.is_none() {
             entry.handlers = Some(Box::new(SceneItemHandlerSet::new()));
@@ -2181,10 +2788,28 @@ impl Scene {
     /// `node.children` by z without recreating the widgets, so focus /
     /// text-edit / animation state survives the restack). No-op for
     /// unknown ids.
+    ///
+    /// # The no-op test is exact
+    ///
+    /// A write is ignored only when the entry already holds **that** value.
+    /// The guard used to be an absolute `|old - z| < f32::EPSILON`, which is
+    /// the wrong metric in both directions: `f32::EPSILON` is the spacing of
+    /// the representable numbers at 1.0, so out at `z = 1e6` (where the real
+    /// spacing is ~0.06) no two distinct floats are ever within it and the
+    /// guard never fires, while near zero (where the spacing is ~1e-45) it
+    /// swallows millions of distinct values.
+    ///
+    /// That second half was not theoretical: [`z_between`](Self::z_between)
+    /// bisects **relatively** and existed precisely so a caller is never told
+    /// "there is room" and then gets a silent no-op — and near zero the two
+    /// disagreed, so `z_between` returned `Some(6.25e-8)` and `set_z` dropped
+    /// it, emitting no [`ItemChange::ZChanged`] and leaving the order wrong
+    /// with nothing to observe. One metric now, and it is the one `z_between`
+    /// already used: two `z`s are the same iff they are the same float.
     pub fn set_z(&mut self, id: ItemId, z: f32) {
         if let Some(&pos) = self.entry_index.get(&id) {
             let old = self.entries[pos].z;
-            if (old - z).abs() < f32::EPSILON {
+            if old == z {
                 return;
             }
             self.entries[pos].z = z;
@@ -2353,6 +2978,332 @@ impl Scene {
     }
 
     // -----------------------------------------------------------------
+    // Geometry constraint
+    // -----------------------------------------------------------------
+
+    /// Install the document's standing geometry rule — snap-to-grid, axis lock,
+    /// page-bounds clamp — consulted before a **user-driven** gesture applies
+    /// anything.
+    ///
+    /// Replaces any previous constraint; there is one per scene, because a
+    /// document has one geometry. See [`ProposedChange`](crate::ProposedChange)
+    /// for what the closure is handed, and
+    /// [`SceneModel::set_geometry_constraint`](crate::SceneModel::set_geometry_constraint)
+    /// for the door an app normally uses.
+    ///
+    /// ```
+    /// use teksilo_canvas::{Point, Rect};
+    /// use teksilo_scene::{ChangeVerdict, RectItem, Scene};
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)), Point::ZERO);
+    /// // A 25-unit grid, snapping the moved box's own top-leading corner.
+    /// scene.set_geometry_constraint(|c| {
+    ///     let mut f = c.proposed;
+    ///     f.rect.x = (f.rect.x / 25.0).round() * 25.0;
+    ///     f.rect.y = (f.rect.y / 25.0).round() * 25.0;
+    ///     ChangeVerdict::Adjust(f)
+    /// });
+    /// assert!(scene.has_geometry_constraint());
+    /// ```
+    pub fn set_geometry_constraint(
+        &mut self,
+        f: impl Fn(&crate::constrain::ProposedChange<'_>) -> crate::constrain::ChangeVerdict + 'static,
+    ) {
+        self.geometry_constraint = Some(Rc::new(f));
+    }
+
+    /// Remove the geometry constraint. Gestures then apply their raw proposal.
+    pub fn clear_geometry_constraint(&mut self) {
+        self.geometry_constraint = None;
+    }
+
+    /// Whether a geometry constraint is installed.
+    pub fn has_geometry_constraint(&self) -> bool {
+        self.geometry_constraint.is_some()
+    }
+
+    /// Whether a geometry constraint is running **right now** on this thread.
+    ///
+    /// The probe [`SceneModel::write_guard`](crate::SceneModel::write_guard)
+    /// uses to turn "a constraint tried to write the scene" into a diagnostic
+    /// that names the hook.
+    pub fn in_geometry_constraint(&self) -> bool {
+        self.constraint_running.get()
+    }
+
+    /// The installed constraint, cloned. `None` when there is none — which is
+    /// the whole cost an unconstrained scene pays per gesture sample.
+    pub(crate) fn geometry_constraint(&self) -> Option<crate::constrain::GeometryConstraint> {
+        self.geometry_constraint.clone()
+    }
+
+    /// The running flag, for `ConstraintGuard`.
+    pub(crate) fn constraint_running_cell(&self) -> &Cell<bool> {
+        &self.constraint_running
+    }
+
+    // -----------------------------------------------------------------
+    // Selection transforms
+    // -----------------------------------------------------------------
+
+    /// `ids` pruned to its **roots**: any item whose ancestor is also in `ids`
+    /// is dropped.
+    ///
+    /// Moving an ancestor already moves its descendants — their `local_pos` is
+    /// parent-relative and is not touched — so transforming both would apply
+    /// the change twice. This is the mutation-side twin of the filter the paint
+    /// preview already runs over the same set.
+    ///
+    /// Order is preserved. **O(n·depth)**: the set is hashed once and each id
+    /// then walks its own ancestor chain, asking the set rather than asking
+    /// every other id whether it is an ancestor. The hop cap is the one
+    /// [`is_descendant_of`](Self::is_descendant_of) uses, so a malformed parent
+    /// cycle bounds rather than hangs, and an id that is its own ancestor is
+    /// kept (a cycle has no root to prefer).
+    ///
+    /// The complexity is load-bearing, not incidental: every selection-transform
+    /// recompute runs this once (plus one
+    /// [`transformable_roots`](Self::transformable_roots) per operation), and so
+    /// does the item-drag group and the keyboard nudge — so a quadratic form
+    /// here is a frozen window on a large selection rather than a slow one.
+    /// `selection_roots_is_linear_in_the_selection`, in
+    /// `tests/selection_roots_scaling_probe.rs`, pins it: 7.03 ms against
+    /// 36.3 µs for a 1 000-item selection, measured.
+    pub fn selection_roots(&self, ids: &[ItemId]) -> Vec<ItemId> {
+        // One id cannot be pruned by itself, so the whole question is moot
+        // below two — and a selection of one is the common case.
+        if ids.len() < 2 {
+            return ids.to_vec();
+        }
+        let set: HashSet<ItemId> = ids.iter().copied().collect();
+        let cap = self.entries.len();
+        ids.iter()
+            .copied()
+            .filter(|id| {
+                let mut cur = self.parent_of(*id);
+                let mut hops = 0usize;
+                while let Some(p) = cur {
+                    if p == *id {
+                        // Its own ancestor: a cycle, not a nesting. Matches
+                        // the old form, which never compared an id to itself.
+                        break;
+                    }
+                    if set.contains(&p) {
+                        return false;
+                    }
+                    cur = self.parent_of(p);
+                    hops += 1;
+                    if hops > cap {
+                        break;
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
+    /// The roots of `ids` that may take part in `op`.
+    ///
+    /// Two filters, in this order: the item must carry the operation's flag
+    /// ([`TransformOp::required_flag`](crate::TransformOp::required_flag)), and
+    /// — for [`TransformOp::Rotate`](crate::TransformOp::Rotate) — it must be a
+    /// lightweight entry, because a heavyweight card is sized from the AABB of
+    /// its transformed bounds and a rotation there inflates its layout box
+    /// without turning anything.
+    ///
+    /// The flag is checked **before** the descendant pruning, so a selected
+    /// child of a selected-but-locked parent still takes part on its own.
+    pub fn transformable_roots(
+        &self,
+        ids: &[ItemId],
+        op: crate::transform_session::TransformOp,
+    ) -> Vec<ItemId> {
+        let flag = op.required_flag();
+        let eligible: Vec<ItemId> = ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.flags(*id).is_some_and(|f| f.contains(flag))
+                    && (op != crate::transform_session::TransformOp::Rotate
+                        || self.item(*id).is_some())
+            })
+            .collect();
+        self.selection_roots(&eligible)
+    }
+
+    /// The item's own rotation in scene space, in radians — the angle of its
+    /// composed `local → scene` basis. `None` for an unknown id.
+    pub fn scene_rotation(&self, id: ItemId) -> Option<f32> {
+        if !self.entry_index.contains_key(&id) {
+            return None;
+        }
+        let m = self.scene_transform(id).m;
+        Some(m[1].atan2(m[0]))
+    }
+
+    /// The selection frame enclosing `roots` — the box a transform controller
+    /// draws its handles on. `None` when `roots` is empty or none of them
+    /// resolve.
+    ///
+    /// A **single** root's frame takes that item's own rotation, so resizing a
+    /// rotated item happens along its own axes and is exact. A multi-item
+    /// frame is axis-aligned, because the union of differently-rotated boxes
+    /// has no well-defined angle — Konva does the same.
+    pub fn transform_frame(
+        &self,
+        roots: &[ItemId],
+    ) -> Option<crate::transform_session::TransformFrame> {
+        use crate::transform_session::TransformFrame;
+        let rotation = if roots.len() == 1 {
+            self.scene_rotation(roots[0]).unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let to_frame = Transform2D::rotate(-rotation);
+        let mut acc: Option<(f32, f32, f32, f32)> = None;
+        let mut count = 0usize;
+        for id in roots.iter().copied() {
+            let Some(local) = self.local_bounds(id) else {
+                continue;
+            };
+            let to_scene = self.scene_transform(id);
+            count += 1;
+            for corner in [
+                Point::new(local.x, local.y),
+                Point::new(local.right(), local.y),
+                Point::new(local.right(), local.bottom()),
+                Point::new(local.x, local.bottom()),
+            ] {
+                let p = to_frame.apply_point(to_scene.apply_point(corner));
+                acc = Some(match acc {
+                    None => (p.x, p.y, p.x, p.y),
+                    Some((x0, y0, x1, y1)) => (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)),
+                });
+            }
+        }
+        let (x0, y0, x1, y1) = acc?;
+        Some(TransformFrame {
+            rect: Rect::new(x0, y0, x1 - x0, y1 - y0),
+            rotation,
+            count,
+        })
+    }
+
+    /// Apply `delta` to `roots` as a **single** operation, and the only place a
+    /// transform controller writes the model.
+    ///
+    /// Returns how many entry fields actually changed.
+    ///
+    /// Three writes per root at most, and each is the existing setter, so the
+    /// change stream, the spatial index and every observer see nothing new:
+    ///
+    /// * **position** — the item's scene anchor is mapped through the delta and
+    ///   restated in its parent's frame, so a scale about a pivot moves it and a
+    ///   rotation orbits it.
+    /// * **extent** — `local_bounds` is scaled, which makes the item *reflow*
+    ///   into the new box rather than be drawn at a stretched scale. The scale
+    ///   is resolved along the item's **own** axes, so a rotated item stays a
+    ///   rotated rectangle instead of shearing into a parallelogram; where the
+    ///   scale is non-uniform and the item is rotated relative to the frame,
+    ///   that is an approximation of the true (unrepresentable) result, and it
+    ///   is exact whenever the item is aligned with the frame — which includes
+    ///   every single-item selection.
+    /// * **orientation** — the item's own `Transform2D` is post-rotated. Skipped
+    ///   for a heavyweight entry, whose layout box is the AABB of its
+    ///   transformed bounds: a rotation there would inflate the box and turn
+    ///   nothing.
+    ///
+    /// The transaction boundary is this call. One gesture is one call, so an
+    /// app-level reversible-edit layer has exactly one thing to record — and
+    /// this crate ships no history of its own.
+    pub fn apply_transform_delta(
+        &mut self,
+        roots: &[ItemId],
+        delta: &crate::transform_session::TransformDelta,
+    ) -> usize {
+        if delta.is_identity() {
+            return 0;
+        }
+        let scene_delta = delta.to_scene_transform();
+        let rotating = delta.rotation.abs() > 1e-6;
+        let scaling = (delta.scale.x - 1.0).abs() > 1e-6 || (delta.scale.y - 1.0).abs() > 1e-6;
+        let mut changed = 0usize;
+        for id in roots.iter().copied() {
+            let Some(&pos) = self.entry_index.get(&id) else {
+                continue;
+            };
+            let is_lightweight = matches!(self.entries[pos].kind, SceneEntryKind::Item(_));
+            let parent = self.entries[pos].parent;
+            let parent_xform = match parent {
+                Some(p) => self.scene_transform(p),
+                None => Transform2D::identity(),
+            };
+            let Some(parent_inv) = parent_xform.inverse() else {
+                continue;
+            };
+            let old_anchor = self.scene_transform(id).apply_point(Point::ZERO);
+            let new_anchor = scene_delta.apply_point(old_anchor);
+
+            // Orientation first: the item's own transform decides where its
+            // local origin sits inside its `local → parent` map, and the new
+            // position is derived against the *new* one.
+            let old_transform = self.entries[pos].transform;
+            let new_transform = if rotating && is_lightweight {
+                old_transform.then(&Transform2D::rotate(delta.rotation))
+            } else {
+                old_transform
+            };
+            let rotated = new_transform != old_transform;
+            if rotated {
+                self.entries[pos].transform = new_transform;
+                changed += 1;
+                // Announced here, not only on the no-move path below: a
+                // rotation that also moved the item used to emit nothing but
+                // `LocalPosChanged`, so a consumer reconstructing the edit from
+                // the change stream lost the rotation entirely.
+                self.rebucket_subtree(id);
+                self.emit_item_change(ItemChange::TransformChanged {
+                    id,
+                    old: old_transform,
+                    new: new_transform,
+                });
+            }
+            let origin_offset = new_transform.apply_point(Point::ZERO);
+            let target_local = parent_inv.apply_point(new_anchor);
+            let new_local_pos = Point::new(
+                target_local.x - origin_offset.x,
+                target_local.y - origin_offset.y,
+            );
+
+            if scaling {
+                // The scale arrives in the frame's basis; resolve it onto the
+                // item's own axes. `|cos| · sx + |sin| · sy` is exact at 0° and
+                // at 90° (where the axes simply swap) and interpolates
+                // continuously between them.
+                let phi = self.scene_rotation(id).unwrap_or(0.0) - delta.basis;
+                let (sin, cos) = phi.sin_cos();
+                let (ac, as_) = (cos.abs(), sin.abs());
+                let sx = ac * delta.scale.x + as_ * delta.scale.y;
+                let sy = as_ * delta.scale.x + ac * delta.scale.y;
+                let b = self.entries[pos].local_bounds;
+                let scaled = Rect::new(b.x * sx, b.y * sy, b.width * sx, b.height * sy);
+                if scaled != b {
+                    self.set_local_bounds(id, scaled);
+                    changed += 1;
+                }
+            }
+
+            let old_pos = self.entries[pos].local_pos;
+            if new_local_pos != old_pos {
+                self.set_local_pos(id, new_local_pos);
+                changed += 1;
+            }
+        }
+        changed
+    }
+
+    // -----------------------------------------------------------------
     // Lookup
     // -----------------------------------------------------------------
 
@@ -2423,11 +3374,96 @@ impl Scene {
     /// To remove `id` without deleting its children, call
     /// [`Scene::orphan`] first to promote them to root-level, then
     /// `remove(id)`.
+    ///
+    /// # What happens to what it destroyed
+    ///
+    /// This is [`Scene::take`] with the salvage routed to the edit sink
+    /// instead of to the caller — identical work, identical events. With a
+    /// sink installed
+    /// ([`SceneModel::set_edit_sink`](crate::SceneModel::set_edit_sink)), each
+    /// removed entry arrives as a
+    /// [`SceneEdit::Removed`] carrying its
+    /// [`RemovedItem`], which [`Scene::restore`] puts back. With none, the
+    /// salvage is dropped, which is what a removal has always done.
     pub fn remove(&mut self, id: ItemId) {
-        use std::collections::HashSet;
-        if !self.entry_index.contains_key(&id) {
+        let salvage = self.take_inner(id);
+        if salvage.is_empty() {
             return;
         }
+        if self.journal.recording() {
+            for item in salvage {
+                let id = item.id();
+                self.journal.record(SceneEdit::Removed {
+                    id,
+                    salvage: Salvage::Owned(Box::new(item)),
+                });
+            }
+        }
+    }
+
+    /// Remove `id` and every descendant, **handing the salvage back** instead
+    /// of dropping it — item box, handlers, magnets and logical-AT decorations
+    /// intact, each still carrying its original [`ItemId`].
+    ///
+    /// The same work and the same events as [`Scene::remove`]; the difference
+    /// is who ends up owning what was removed. Feed a result to
+    /// [`Scene::restore_all`] to put the subtree back.
+    ///
+    /// # Order
+    ///
+    /// Deepest descendants first, the named root last — the order `remove`
+    /// announces in. [`Scene::restore_all`] reverses it; restoring by hand
+    /// means roots first.
+    ///
+    /// ```
+    /// use teksilo_canvas::{Point, Rect};
+    /// use teksilo_scene::{RectItem, Scene};
+    ///
+    /// let mut scene = Scene::new();
+    /// let card = scene.add_item(RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)), Point::ZERO);
+    /// let salvage = scene.take(card);
+    /// assert_eq!(scene.len(), 0);
+    ///
+    /// // Back at the same id, so selection, magnets and AT parenting still resolve.
+    /// let restored = scene.restore_all(salvage).unwrap();
+    /// assert_eq!(restored, vec![card]);
+    /// assert_eq!(scene.len(), 1);
+    /// ```
+    #[must_use = "the salvage is the only copy of the removed items; dropping it \
+                  makes the removal irreversible — call Scene::remove if that is \
+                  what you meant"]
+    pub fn take(&mut self, id: ItemId) -> Vec<RemovedItem> {
+        let salvage = self.take_inner(id);
+        if self.journal.recording() {
+            for item in &salvage {
+                self.journal.record(SceneEdit::Removed {
+                    id: item.id(),
+                    salvage: Salvage::TakenByCaller,
+                });
+            }
+        }
+        salvage
+    }
+
+    /// The one removal path. Lifts `id`'s subtree out of the scene whole and
+    /// returns it; [`Scene::remove`] and [`Scene::take`] differ only in where
+    /// the result goes.
+    ///
+    /// Written as one function on purpose: a `remove` that re-implemented the
+    /// teardown would be free to forget a side map, and the salvage would then
+    /// be a faithful copy of everything except the thing that was forgotten.
+    fn take_inner(&mut self, id: ItemId) -> Vec<RemovedItem> {
+        if !self.entry_index.contains_key(&id) {
+            return Vec::new();
+        }
+        // A subtree removal is one logical edit, and this is the one mutator
+        // that emits many changes from a single call — so it opens its own
+        // scope rather than relying on the caller's. Through a `SceneModel` it
+        // simply nests inside the write scope already open; through a bare
+        // `&mut Scene`, which opens none, it is what keeps the removal from
+        // being N unrelated transactions. Costs nothing when nothing is
+        // recording: a transaction with no edits is never queued.
+        let scope = RemovalScope::new(&self.journal);
         // Descendants, deepest-first via collect_descendants's BFS
         // (the order is leaf-to-root because we push children as we
         // visit each parent). Append the named id last.
@@ -2444,6 +3480,9 @@ impl Scene {
         // the named root can have a surviving parent — the loop is written
         // against every removed id anyway, so a partial removal could never
         // leave a stale link.
+        //
+        // The removed root keeps its own `parent` field, because that is what a
+        // restore needs in order to put it back where it was.
         for removed_id in &to_remove {
             let parent = self
                 .entry_index
@@ -2456,46 +3495,597 @@ impl Scene {
                 self.unlink_child(Some(parent), *removed_id);
             }
         }
-        self.entries.retain(|e| !removal_set.contains(&e.id));
+
+        // Declaration order, read before the entries move. This is the order
+        // the accessibility walk publishes siblings in — the order a screen
+        // reader reads the scene in — so a restore puts the entry back at its
+        // index rather than silently appending it to the end of the reading
+        // order.
+        let mut orders: HashMap<ItemId, usize> = HashMap::with_capacity(removal_set.len());
+        for removed_id in &removal_set {
+            if let Some(&pos) = self.entry_index.get(removed_id) {
+                orders.insert(*removed_id, pos);
+            }
+        }
+
+        let mut decorations = self.harvest_a11y(&removal_set);
+
+        let mut magnets: HashMap<ItemId, Vec<(MagnetId, Magnet)>> = HashMap::new();
+        for removed_id in &removal_set {
+            // Magnets are local to the item, so a removed item takes them with
+            // it — ids included, which is what lets a consumer keying
+            // connections on `MagnetId` survive a restore.
+            if let Some(attached) = self.magnets.remove(removed_id) {
+                for (mid, _) in &attached {
+                    self.magnet_owner.remove(mid);
+                }
+                magnets.insert(*removed_id, attached);
+            }
+        }
+
+        // Partition rather than `retain`: the entries are moved out, not
+        // dropped. That single change is what makes every removal salvageable,
+        // and it costs the same walk.
+        let mut taken: HashMap<ItemId, SceneEntry> = HashMap::with_capacity(removal_set.len());
+        let mut kept: Vec<SceneEntry> = Vec::with_capacity(self.entries.len() - removal_set.len());
+        for entry in self.entries.drain(..) {
+            if removal_set.contains(&entry.id) {
+                taken.insert(entry.id, entry);
+            } else {
+                kept.push(entry);
+            }
+        }
+        self.entries = kept;
         self.heavyweight.retain(|id| !removal_set.contains(id));
         self.dynamic.retain(|id| !removal_set.contains(id));
         self.entry_index.clear();
         for (pos, entry) in self.entries.iter().enumerate() {
             self.entry_index.insert(entry.id, pos);
         }
-        // The AT tree is separate from the visual tree, but a visually-removed
-        // item must also vanish from AccessKit. Drop every logical-structure
-        // entry that targets a removed item. For `a11y_parents` this also
-        // re-roots any *still-alive* node that was AT-parented under a removed
-        // item — dropping the `(child → removed)` mapping makes the child fall
-        // back to the SceneView root (mirrors `remove_a11y_group`). Removal
-        // itself fires `ItemChange::Removed`, so `SceneView` already re-walks
-        // AT through the item-change observer; no `a11y_change_signal` bump
-        // is needed here.
-        let is_removed = |n: &A11yNode| matches!(n, A11yNode::Item(i) if removal_set.contains(i));
-        self.a11y_parents
-            .retain(|child, parent| !is_removed(child) && !is_removed(parent));
-        self.a11y_relations
-            .retain(|(from, _, to)| !is_removed(from) && !is_removed(to));
-        for removed_id in &removal_set {
-            let node = A11yNode::Item(*removed_id);
-            self.a11y_live.remove(&node);
-            self.a11y_landmarks.remove(&node);
-            self.a11y_categories.remove(&node);
-            // Drop any magnets attached to the removed item, retiring
-            // their ids from the reverse-lookup map. Magnets are local
-            // to the item, so a removed item takes its magnets with it.
-            if let Some(magnets) = self.magnets.remove(removed_id) {
-                for (mid, _) in magnets {
-                    self.magnet_owner.remove(&mid);
+
+        let mut salvage = Vec::with_capacity(to_remove.len());
+        for removed_id in to_remove {
+            self.index.remove(removed_id);
+            if let Some(entry) = taken.remove(&removed_id) {
+                salvage.push(RemovedItem {
+                    entry,
+                    entry_order: orders.get(&removed_id).copied().unwrap_or(usize::MAX),
+                    magnets: magnets.remove(&removed_id).unwrap_or_default(),
+                    a11y: decorations.remove(&removed_id).unwrap_or_default(),
+                });
+            }
+            self.emit_item_change(ItemChange::Removed { id: removed_id });
+        }
+        drop(scope);
+        salvage
+    }
+
+    /// Lift every logical-AT decoration that a removal of `removal_set` would
+    /// destroy out of the scene's maps, partitioned by the removed item it
+    /// belongs to.
+    ///
+    /// **Both directions of every edge.** A removal cuts an item's own AT
+    /// parent (`removed → parent`) *and* every surviving node that was
+    /// AT-parented under it (`survivor → removed`) — the second re-roots those
+    /// survivors at the view root, which is correct while the item is gone and
+    /// has to be undone when it comes back. Recording only the first would make
+    /// a restore silently fail to re-adopt them, i.e. fail at exactly the case
+    /// this salvage exists for. The same applies to relations, which a removal
+    /// drops on either endpoint.
+    ///
+    /// A relation between two removed items is recorded once, on the `from`
+    /// endpoint's salvage, so restoring the pair does not duplicate it.
+    fn harvest_a11y(
+        &mut self,
+        removal_set: &HashSet<ItemId>,
+    ) -> HashMap<ItemId, ItemA11yDecorations> {
+        let mut out: HashMap<ItemId, ItemA11yDecorations> = HashMap::new();
+        let removed_item = |n: &A11yNode| match n {
+            A11yNode::Item(i) if removal_set.contains(i) => Some(*i),
+            _ => None,
+        };
+
+        if !self.a11y_parents.is_empty() {
+            let mut cut: Vec<A11yNode> = Vec::new();
+            for (child, parent) in self.a11y_parents.iter() {
+                if let Some(cid) = removed_item(child) {
+                    out.entry(cid).or_default().parent = Some(*parent);
+                    cut.push(*child);
+                } else if let Some(pid) = removed_item(parent) {
+                    out.entry(pid).or_default().adopted.push(*child);
+                    cut.push(*child);
                 }
+            }
+            for child in cut {
+                self.a11y_parents.remove(&child);
             }
         }
 
-        for removed_id in to_remove {
-            self.index.remove(removed_id);
-            self.emit_item_change(ItemChange::Removed { id: removed_id });
+        if !self.a11y_relations.is_empty() {
+            let all = std::mem::take(&mut self.a11y_relations);
+            let mut survivors = Vec::with_capacity(all.len());
+            for (from, relation, to) in all {
+                match removed_item(&from).or_else(|| removed_item(&to)) {
+                    Some(owner) => out
+                        .entry(owner)
+                        .or_default()
+                        .relations
+                        .push((from, relation, to)),
+                    None => survivors.push((from, relation, to)),
+                }
+            }
+            self.a11y_relations = survivors;
         }
+
+        for removed_id in removal_set {
+            let node = A11yNode::Item(*removed_id);
+            let live = self.a11y_live.remove(&node);
+            let landmark = self.a11y_landmarks.remove(&node);
+            let categories = self.a11y_categories.remove(&node);
+            if live.is_none() && landmark.is_none() && categories.is_none() {
+                continue;
+            }
+            let slot = out.entry(*removed_id).or_default();
+            slot.live = live;
+            slot.landmark = landmark;
+            slot.categories = categories.unwrap_or_default();
+        }
+        out
+    }
+
+    /// Re-insert a salvaged entry **at its original [`ItemId`]**, with its
+    /// magnets and its logical-AT decorations.
+    ///
+    /// # Identity is the point
+    ///
+    /// [`SceneSelection`](crate::SceneSelection) is keyed by `ItemId`,
+    /// `MagnetId → ItemId` is keyed by it, the whole logical AT tree is keyed
+    /// by `A11yNode::Item(ItemId)`, and — because a [`SceneItem`] has no
+    /// downcast — an app's own side map is the *only* way to reach item-specific
+    /// state, so it is keyed by it too. A restore that minted a fresh id would
+    /// restore the pixels and lose every one of them.
+    ///
+    /// # Order
+    ///
+    /// Roots before children: a salvage naming a parent that is not in the
+    /// scene fails with [`RestoreError::MissingParent`].
+    /// [`Scene::restore_all`] orders a whole [`Scene::take`] result for you.
+    ///
+    /// # What comes back, and what does not
+    ///
+    /// Geometry, transform, z, layer, parent link, flags, opacity, handlers,
+    /// magnets (ids included) and every logical-AT decoration whose other
+    /// endpoint is still alive. The entry returns to its recorded position in
+    /// declaration order when that index still exists, so the accessibility
+    /// reading order is preserved rather than the item being appended last.
+    ///
+    /// An edge to a node that has since been removed is **not** re-attached:
+    /// re-inserting it would name something the AT walker cannot resolve. Edges
+    /// are therefore attached **after** the entry is in, and — under
+    /// [`restore_all`](Self::restore_all) — after the whole batch is in, so an
+    /// edge between two items of one removed subtree is not dropped merely
+    /// because its far end had not arrived yet.
+    ///
+    /// A single-view heavyweight widget (`Scene::add_widget`) whose one
+    /// `Box<dyn Widget>` a view already drained restores as an entry with no
+    /// instance to materialise — unless the take and the restore happen inside
+    /// one build cycle, in which case the view's orphan reap never runs and the
+    /// arena instance survives. The restore is accepted either way, because
+    /// refusing it would refuse the restores that work; see
+    /// [`RemovedItem::widget_instance_present`]. Content that must survive an
+    /// undo in every view goes in through
+    /// [`SceneModel::add_widget_item`](crate::SceneModel::add_widget_item).
+    ///
+    /// # Restoring into a *different* scene is supported
+    ///
+    /// A [`RemovedItem`] taken from one scene may be restored into another,
+    /// and that is the move-between-documents door: cut a card out of one
+    /// board with [`take`](Self::take), restore it into a second, and it
+    /// arrives whole — item box, geometry, flags, handlers and magnets, at the
+    /// same [`ItemId`].
+    ///
+    /// Nothing special makes it work and nothing needs to refuse it.
+    /// [`ItemId`] is minted from a process-global counter, so an id from
+    /// another scene can never collide with one here; a salvage carries its
+    /// whole entry rather than an index into the scene it came from; and the
+    /// three consequences of crossing the boundary are exactly the rules that
+    /// already apply within one scene:
+    ///
+    /// * **A parented salvage is refused** with
+    ///   [`RestoreError::MissingParent`], because the parent it names is still
+    ///   in the other scene. Move the parent first and the child follows — the
+    ///   same roots-before-children rule, doing the same job — or call
+    ///   [`RemovedItem::detach`] to bring the item over as a root.
+    /// * **Logical-AT edges whose far end is not here are dropped**, by the
+    ///   same test that drops an edge to a since-removed node.
+    /// * **Declaration order is clamped**: the recorded index is where the
+    ///   entry sat in the *source* scene's reading order, and a shorter target
+    ///   takes it at the end.
+    ///
+    /// The salvage is consumed either way, so a refused move does not leave a
+    /// second copy behind — but it does drop the item, so check the `Result`.
+    pub fn restore(&mut self, salvage: RemovedItem) -> Result<ItemId, RestoreError> {
+        let mut edges = Vec::new();
+        let result = self.restore_entry(salvage, &mut edges);
+        // Attached even on the error path: a failure to restore *this* salvage
+        // must not strand edges an earlier one already deferred.
+        self.attach_a11y_edges(edges);
+        result
+    }
+
+    /// Restore a whole [`Scene::take`] result, roots first.
+    ///
+    /// `take` hands back leaves-then-root; restoring in that order would fail
+    /// the first child on [`RestoreError::MissingParent`], so this reverses it
+    /// for you — which also puts each parent's `children` list back in its
+    /// original order.
+    ///
+    /// Logical-AT edges are attached once the **whole batch** is in, so an edge
+    /// between two items of the removed subtree survives whatever order the two
+    /// ends land in.
+    ///
+    /// Stops at the first failure and returns it; everything restored before it
+    /// **stays restored**, because a rollback here would be the framework
+    /// applying an inverse, which is the data layer's job.
+    pub fn restore_all(&mut self, salvage: Vec<RemovedItem>) -> Result<Vec<ItemId>, RestoreError> {
+        let mut restored = Vec::with_capacity(salvage.len());
+        let mut edges = Vec::new();
+        let mut failure = None;
+        for item in salvage.into_iter().rev() {
+            match self.restore_entry(item, &mut edges) {
+                Ok(id) => restored.push(id),
+                Err(err) => {
+                    failure = Some(err);
+                    break;
+                }
+            }
+        }
+        self.attach_a11y_edges(edges);
+        match failure {
+            Some(err) => Err(err),
+            None => Ok(restored),
+        }
+    }
+
+    /// Put one salvaged entry back and re-attach everything that depends on
+    /// nothing else: magnets, live-region status, landmark role, categories.
+    ///
+    /// Its logical-AT **edges** are pushed onto `edges` instead, because an
+    /// edge's far end may be another salvage in the same batch that has not
+    /// been restored yet — and an edge dropped for that reason would be the
+    /// silent a11y loss this whole door exists to prevent.
+    fn restore_entry(
+        &mut self,
+        salvage: RemovedItem,
+        edges: &mut Vec<(ItemId, ItemA11yDecorations)>,
+    ) -> Result<ItemId, RestoreError> {
+        let id = salvage.entry.id;
+        if self.entry_index.contains_key(&id) {
+            return Err(RestoreError::IdAlreadyLive(id));
+        }
+        if let Some(parent) = salvage.entry.parent
+            && !self.entry_index.contains_key(&parent)
+        {
+            return Err(RestoreError::MissingParent { id, parent });
+        }
+
+        let RemovedItem {
+            mut entry,
+            entry_order,
+            magnets,
+            mut a11y,
+        } = salvage;
+        // `link_child` rebuilds this list as each child is restored after its
+        // parent, so keeping the salvaged copy would double every entry — and a
+        // child that is never restored would leave a link to nothing.
+        entry.children.clear();
+        self.push_entry_at(entry, entry_order);
+
+        if !magnets.is_empty() {
+            for (mid, _) in &magnets {
+                self.magnet_owner.insert(*mid, id);
+            }
+            self.magnets.insert(id, magnets);
+        }
+
+        let node = A11yNode::Item(id);
+        let mut touched = false;
+        if let Some(live) = a11y.live.take() {
+            self.a11y_live.insert(node, live);
+            touched = true;
+        }
+        if let Some(landmark) = a11y.landmark.take() {
+            self.a11y_landmarks.insert(node, landmark);
+            touched = true;
+        }
+        if !a11y.categories.is_empty() {
+            self.a11y_categories
+                .insert(node, std::mem::take(&mut a11y.categories));
+            touched = true;
+        }
+        if touched {
+            self.bump_a11y_change(node);
+        }
+        if a11y.parent.is_some() || !a11y.adopted.is_empty() || !a11y.relations.is_empty() {
+            edges.push((id, a11y));
+        }
+        Ok(id)
+    }
+
+    /// Re-attach the deferred logical-AT edges, skipping every one whose other
+    /// endpoint is not in the scene.
+    fn attach_a11y_edges(&mut self, edges: Vec<(ItemId, ItemA11yDecorations)>) {
+        for (id, a11y) in edges {
+            let node = A11yNode::Item(id);
+            if let Some(parent) = a11y.parent
+                && self.a11y_node_exists(parent)
+            {
+                self.a11y_parents.insert(node, parent);
+            }
+            for child in a11y.adopted {
+                if self.a11y_node_exists(child) {
+                    self.a11y_parents.insert(child, node);
+                }
+            }
+            for (from, relation, to) in a11y.relations {
+                if self.a11y_node_exists(from) && self.a11y_node_exists(to) {
+                    self.a11y_relations.push((from, relation, to));
+                }
+            }
+            self.bump_a11y_change(node);
+        }
+    }
+
+    /// Whether a logical-AT node is resolvable in this scene right now.
+    ///
+    /// A `Widget` node addresses the arena rather than the scene, so the scene
+    /// cannot check it and does not pretend to — an edge to one is re-attached
+    /// and the AT walker skips it if the widget is gone, exactly as it does for
+    /// one the app declared directly.
+    fn a11y_node_exists(&self, node: A11yNode) -> bool {
+        match node {
+            A11yNode::Item(id) => self.entry_index.contains_key(&id),
+            A11yNode::Group(id) => self.a11y_group_index.contains_key(&id),
+            A11yNode::Widget(_) => true,
+        }
+    }
+
+    /// Swap the lightweight item box at `id`, keeping the entry — and the
+    /// [`ItemId`]. Returns the box that was there.
+    ///
+    /// Position, transform, z, layer, parent, flags, opacity, handlers, magnets
+    /// and logical-AT decorations all survive, so a data row whose *content*
+    /// changed does not lose its selection membership, its connections or its
+    /// place in the accessibility tree. Emits one
+    /// [`ItemChange::ItemReplaced`], not `Removed` + `Added`.
+    ///
+    /// # Bounds and the spatial index
+    ///
+    /// The entry's AABB is **derived from the item**, so the new item's
+    /// `local_bounds` is read and the subtree re-bucketed. Skipping that would
+    /// leave the old rectangle in the index and quietly break
+    /// [`items_in_rect`](Self::items_in_rect), [`item_at`](Self::item_at), the
+    /// cull path and every cached hit snapshot.
+    ///
+    /// # Flags
+    ///
+    /// The **entry's** flags are kept; the replacement's
+    /// [`initial_flags`](SceneItem::initial_flags) are not consulted. They are
+    /// *initial* flags — they apply where an item is inserted — and an app that
+    /// has since called [`set_visible`](Self::set_visible) or
+    /// [`set_flag`](Self::set_flag) would otherwise have that silently undone
+    /// by a content refresh. Call [`set_flags`](Self::set_flags) afterwards to
+    /// adopt the new item's instead.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplaceItemError::UnknownItem`] for an id that is not in the scene,
+    /// [`ReplaceItemError::NotLightweight`] for a heavyweight widget entry —
+    /// swap a `Delegated` entry's *data* with
+    /// [`SceneModel::set_payload`](crate::SceneModel::set_payload) instead.
+    ///
+    /// Either way the [`ReplaceRejected`] hands the item **back**: a refused
+    /// write must not eat a value the caller cannot clone and may have paid to
+    /// build.
+    pub fn replace_item(
+        &mut self,
+        id: ItemId,
+        item: Box<dyn SceneItem>,
+    ) -> Result<Box<dyn SceneItem>, ReplaceRejected> {
+        let Some(&pos) = self.entry_index.get(&id) else {
+            return Err(ReplaceRejected {
+                error: ReplaceItemError::UnknownItem(id),
+                item,
+            });
+        };
+        if !matches!(self.entries[pos].kind, SceneEntryKind::Item(_)) {
+            return Err(ReplaceRejected {
+                error: ReplaceItemError::NotLightweight(id),
+                item,
+            });
+        }
+        let new_bounds = item.local_bounds();
+        let old_bounds = self.entries[pos].local_bounds;
+        let SceneEntryKind::Item(slot) = &mut self.entries[pos].kind else {
+            unreachable!("checked above")
+        };
+        let previous = std::mem::replace(slot, item);
+        self.entries[pos].local_bounds = new_bounds;
+        self.rebucket_subtree(id);
+        self.emit_item_change(ItemChange::ItemReplaced {
+            id,
+            old_bounds,
+            new_bounds,
+        });
+        Ok(previous)
+    }
+
+    // -----------------------------------------------------------------
+    // Placement (parent + z + position + transform, atomically)
+    // -----------------------------------------------------------------
+
+    /// Where `id` sits, as one value. `None` for an unknown id.
+    pub fn placement(&self, id: ItemId) -> Option<Placement> {
+        let pos = *self.entry_index.get(&id)?;
+        let entry = &self.entries[pos];
+        Some(Placement {
+            parent: entry.parent,
+            z: entry.z,
+            local_pos: entry.local_pos,
+            transform: entry.transform,
+        })
+    }
+
+    /// Write parent, z, position and transform **together**, emitting one
+    /// [`ItemChange::PlacementChanged`].
+    ///
+    /// The atomic alternative to four mutators and four events. No-op when the
+    /// placement is unchanged, when `id` is unknown, and — as with
+    /// [`set_item_parent`](Self::set_item_parent) — when the proposed parent is
+    /// `id` itself or one of its own descendants, which would make a cycle.
+    /// The whole write is refused in that last case rather than applied with
+    /// the old parent, because a partly-applied atomic write is the thing this
+    /// door exists to prevent.
+    pub fn set_placement(&mut self, id: ItemId, placement: Placement) {
+        let Some(&pos) = self.entry_index.get(&id) else {
+            return;
+        };
+        let old = Placement {
+            parent: self.entries[pos].parent,
+            z: self.entries[pos].z,
+            local_pos: self.entries[pos].local_pos,
+            transform: self.entries[pos].transform,
+        };
+        if old == placement {
+            return;
+        }
+        if let Some(p) = placement.parent
+            && (p == id || self.is_descendant_of(p, id))
+        {
+            return;
+        }
+        if old.parent != placement.parent {
+            self.entries[pos].parent = placement.parent;
+            self.unlink_child(old.parent, id);
+            self.link_child(placement.parent, id);
+        }
+        self.entries[pos].z = placement.z;
+        self.entries[pos].local_pos = placement.local_pos;
+        self.entries[pos].transform = placement.transform;
+        self.rebucket_subtree(id);
+        self.emit_item_change(ItemChange::PlacementChanged {
+            id,
+            old,
+            new: placement,
+        });
+    }
+
+    /// Reparent `id` while holding it **visually still** — "drag this card into
+    /// that group", correctly.
+    ///
+    /// [`set_item_parent`](Self::set_item_parent) reinterprets `local_pos` and
+    /// `transform` in the new parent's frame, so the item jumps unless the
+    /// caller compensates. This derives the local frame that leaves the item's
+    /// scene transform where it is, and applies parent and frame as **one**
+    /// [`set_placement`](Self::set_placement) write.
+    ///
+    /// The derived frame is normalised: the rotation/scale go in `transform`
+    /// (around the local origin, which is what that field means) and all of the
+    /// translation in `local_pos`. An item whose `transform` carried a
+    /// translation of its own comes back with the same visual result and that
+    /// translation folded into its position.
+    ///
+    /// No-op for an unknown id, for a parent that is already the current one,
+    /// for a cycle, and for a new parent whose scene transform is degenerate
+    /// (a zero scale somewhere in its chain) — there is no frame under it to
+    /// land in.
+    pub fn reparent_keeping_scene_pos(&mut self, id: ItemId, parent: Option<ItemId>) {
+        let Some(&pos) = self.entry_index.get(&id) else {
+            return;
+        };
+        if self.entries[pos].parent == parent {
+            return;
+        }
+        if let Some(p) = parent
+            && (p == id || self.is_descendant_of(p, id) || !self.entry_index.contains_key(&p))
+        {
+            return;
+        }
+        let old_scene = self.scene_transform(id);
+        let parent_scene = match parent {
+            Some(p) => self.scene_transform(p),
+            None => Transform2D::identity(),
+        };
+        let Some(parent_inverse) = parent_scene.inverse() else {
+            return;
+        };
+        // `t.then(u)` is "apply t, then u", i.e. `u * t`. We want the local
+        // frame `l` with `l.then(parent_scene) == old_scene`, so
+        // `l = parent_scene⁻¹ * old_scene = old_scene.then(parent_scene⁻¹)`.
+        let local = old_scene.then(&parent_inverse);
+        let [a, b, c, d, tx, ty] = local.m;
+        self.set_placement(
+            id,
+            Placement {
+                parent,
+                z: self.entries[pos].z,
+                local_pos: Point::new(tx, ty),
+                transform: Transform2D {
+                    m: [a, b, c, d, 0.0, 0.0],
+                },
+            },
+        );
+    }
+
+    /// A `z` strictly between two items' — the fractional insert that puts one
+    /// item between two others without renumbering a single sibling.
+    ///
+    /// `None` when there is no such value: the two are at the same `z`, either
+    /// id is unknown, or `f32` precision is exhausted at that locus. An `f32`
+    /// carries ~24 mantissa bits, so about two dozen bisections at one point in
+    /// the order run out — reachable in any card-shuffling UI.
+    ///
+    /// Asking first is what makes that visible. A caller that computed an
+    /// exhausted midpoint itself would get `mid == lo`, hand it to
+    /// [`set_z`](Self::set_z), and be given a **silent no-op**: the card simply
+    /// would not move, with no error and no event. The answer to `None` is to
+    /// renumber the band (a pass of evenly-spaced `z` values) and bisect again.
+    ///
+    /// The two agree on one metric, and it is this one. `set_z` ignores a write
+    /// only when the entry already holds that exact float, so **every `Some`
+    /// this returns is a value `set_z` will apply** — which is the whole
+    /// contract. (An absolute epsilon there used to break it near zero: with
+    /// `lo = 0.0` and `hi = 1.25e-7` this answers `Some(6.25e-8)` and the write
+    /// was dropped.)
+    ///
+    /// ```
+    /// use teksilo_canvas::{Point, Rect};
+    /// use teksilo_scene::{RectItem, Scene};
+    ///
+    /// let mut scene = Scene::new();
+    /// let r = || RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0));
+    /// let lower = scene.add_item(r(), Point::ZERO);
+    /// let upper = scene.add_item(r(), Point::ZERO);
+    /// scene.set_z(lower, 1.0);
+    /// scene.set_z(upper, 2.0);
+    ///
+    /// let middle = scene.add_item(r(), Point::ZERO);
+    /// let z = scene.z_between(lower, upper).expect("room between 1.0 and 2.0");
+    /// scene.set_z(middle, z);
+    /// assert!(scene.z(middle).unwrap() > 1.0 && scene.z(middle).unwrap() < 2.0);
+    ///
+    /// // No room between an item and itself.
+    /// assert_eq!(scene.z_between(lower, lower), None);
+    /// ```
+    pub fn z_between(&self, below: ItemId, above: ItemId) -> Option<f32> {
+        let a = self.z(below)?;
+        let b = self.z(above)?;
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        if !lo.is_finite() || !hi.is_finite() {
+            return None;
+        }
+        let mid = lo + (hi - lo) / 2.0;
+        (mid > lo && mid < hi).then_some(mid)
     }
 
     /// Promote `id`'s direct children to root-level (clear their
@@ -2786,6 +4376,30 @@ impl Scene {
         self.hit_candidates(scene_pt)
             .into_iter()
             .find(|id| self.lightweight_scene_hit(*id, scene_pt, view_scale))
+    }
+
+    /// Topmost entry of **either** tier whose geometry contains `scene_pt`, in
+    /// this scene's one paint order.
+    ///
+    /// The deliberate counterpart to [`Scene::item_at_scaled`], which skips
+    /// heavyweight entries because the arena owns their hit-testing. This one
+    /// answers the different question a *selection* asks — "which entry is on
+    /// top here?" — and answers it for a card with the card's scene rectangle,
+    /// which is exactly the rectangle `SceneView` laid the card out at. It is
+    /// not a substitute for arena dispatch and must not be used to route an
+    /// event to a widget; it is for deciding whether a press that already
+    /// reached the view landed on something the view is holding.
+    ///
+    /// Screen-anchored entries are skipped for the same reason `item_at` skips
+    /// them: a scene-space point cannot place them.
+    pub fn entry_at(&self, scene_pt: Point, view_scale: f32) -> Option<ItemId> {
+        self.hit_candidates(scene_pt).into_iter().find(|id| {
+            if self.item(*id).is_some() {
+                self.lightweight_scene_hit(*id, scene_pt, view_scale)
+            } else {
+                self.scene_rect(*id).is_some_and(|r| r.contains(scene_pt))
+            }
+        })
     }
 
     /// All lightweight items whose shape contains `scene_pt`, topmost-first by
@@ -3426,6 +5040,22 @@ impl Scene {
     pub fn a11y_categories_of(&self, node: A11yNode) -> Option<&[A11yCategory]> {
         self.a11y_categories.get(&node).map(|v| v.as_slice())
     }
+
+    /// Read a node's declared live-region politeness. `None` when it is not a
+    /// live region.
+    ///
+    /// The read half of [`set_a11y_live`](Self::set_a11y_live), added because a
+    /// consumer restoring a [`RemovedItem`] has to be able to check that the
+    /// semantics came back — and because the other four decorations already
+    /// had one.
+    pub fn a11y_live_of(&self, node: A11yNode) -> Option<accesskit::Live> {
+        self.a11y_live.get(&node).copied()
+    }
+
+    /// Read a node's declared landmark role. `None` when it is not a landmark.
+    pub fn a11y_landmark_of(&self, node: A11yNode) -> Option<accesskit::Role> {
+        self.a11y_landmarks.get(&node).copied()
+    }
 }
 
 impl Default for Scene {
@@ -3439,6 +5069,7 @@ impl std::fmt::Debug for Scene {
         f.debug_struct("Scene")
             .field("len", &self.entries.len())
             .field("index", &self.index)
+            .field("constrained", &self.geometry_constraint.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -3763,20 +5394,20 @@ mod tests {
 
     #[test]
     fn item_change_signal_fires_on_set_local_pos() {
-        use std::cell::Cell;
         use std::rc::Rc;
         let mut scene = Scene::new();
         let id = scene.add_item(
             RectItem::new(Rect::new(0.0, 0.0, 10.0, 10.0)),
             Point::new(0.0, 0.0),
         );
-        let last = Rc::new(Cell::new(None::<ItemChange>));
+        let last = Rc::new(std::cell::RefCell::new(None::<ItemChange>));
         let last_clone = last.clone();
         let _h = scene.item_change_signal().observe(move |c| {
-            last_clone.set(Some(*c));
+            *last_clone.borrow_mut() = Some(c.change.clone());
         });
         scene.set_local_pos(id, Point::new(50.0, 60.0));
-        match last.get() {
+        let taken = last.borrow().clone();
+        match taken {
             Some(ItemChange::LocalPosChanged { new, .. }) => {
                 assert_eq!(new, Point::new(50.0, 60.0));
             }
@@ -3793,7 +5424,7 @@ mod tests {
         let count = Rc::new(Cell::new(0_u32));
         let count_clone = count.clone();
         let _h = scene.item_change_signal().observe(move |c| {
-            if matches!(c, ItemChange::VisibilityChanged { .. }) {
+            if matches!(c.change, ItemChange::VisibilityChanged { .. }) {
                 count_clone.set(count_clone.get() + 1);
             }
         });
@@ -3969,7 +5600,7 @@ mod tests {
         let seen: Rc<RefCell<Vec<Rect>>> = Rc::new(RefCell::new(Vec::new()));
         let sink = seen.clone();
         let _h = scene.item_change_signal().observe(move |c| {
-            if let ItemChange::LocalBoundsChanged { new, .. } = c {
+            if let ItemChange::LocalBoundsChanged { new, .. } = &c.change {
                 sink.borrow_mut().push(*new);
             }
         });

@@ -14,6 +14,19 @@ use super::*;
 
 impl SceneView {
     pub(super) fn build_impl(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // A transaction is a synchronous scope. One still open when a frame
+        // starts is a guard that was stashed somewhere instead of dropped, and
+        // the symptom — edits that never reach the edit sink, salvage that
+        // accumulates — points nowhere near the cause. Nothing can catch it in
+        // release, but this catches the shape it actually takes.
+        debug_assert_eq!(
+            self.model.open_transaction_depth(),
+            0,
+            "a SceneTransaction was still open when SceneView::build ran. A \
+             transaction groups one synchronous burst of edits and commits when \
+             its guard drops; holding one across a frame means its record never \
+             reaches the edit sink."
+        );
         // Drain any pending drag-to-move commit. The drop closure
         // queued `(target_id, delta)` and bumped `reconcile_dirty` which
         // flagged this widget for rebuild. Translate the dragged
@@ -24,9 +37,29 @@ impl SceneView {
         // keeps translating the item to its dragged position until
         // the move actually lands; otherwise the item would visibly
         // "snap back" between drag-end and the rebuild.
+        // Drain a committed transform. One gesture posted one delta, and this
+        // applies it through one `Scene::apply_transform_delta` — the single
+        // place the controller writes the model, which is what makes the
+        // transaction boundary structural instead of a convention. An app that
+        // wants the edit to be reversible records it from
+        // `TransformConfig::on_end`; the history belongs to the data layer.
+        let pending_transform = self.transform_rt.pending_commit.borrow_mut().take();
+        if let Some((roots, delta)) = pending_transform {
+            // One gesture, one transaction, stamped `User`: without this the
+            // app cannot tell a finished transform from a programmatic move,
+            // because both arrive as bare geometry changes. The guard is held
+            // outside every model borrow, so the edit sink it commits to runs
+            // with the scene free.
+            let _txn = self.model.user_edit();
+            self.model.apply_transform_delta(&roots, &delta);
+        }
+
         if let Some((target_id, delta)) = self.pending_item_move.take() {
             // The whole selection when the grab was on a selected item — see
-            // `SceneView::drag_group`, which the paint feedback reads too.
+            // `SceneView::drag_group`, which the paint feedback reads too. One
+            // `User` transaction for the whole group, so undoing a multi-item
+            // drag is one step rather than one per item.
+            let _txn = self.model.user_edit();
             for id in self.drag_group(target_id) {
                 if let Some(local_pos) = self.model.local_pos(id) {
                     let new_local_pos = Point::new(local_pos.x + delta.x, local_pos.y + delta.y);
@@ -120,6 +153,97 @@ impl SceneView {
             BindingLevel::RepaintOnly,
         );
 
+        // The transform controller's two triggers, and the reason they are two.
+        //
+        // `tick` is bumped on every session change and bound at **Relayout**:
+        // `place_children` re-runs on a relayout and on nothing weaker, and the
+        // heavyweight tier's preview lives there. A repaint-only trigger — which
+        // is all a plain `Cell` can ever be — would have previewed the frame and
+        // the lightweight items while the cards sat still until the commit.
+        //
+        // `at_tick` is bumped only on discrete steps (session start and end,
+        // keyboard roving) and bound at **AccessibilityOnly**. Deliberately not
+        // per pointer sample: a full accessibility re-walk at pointer rate would
+        // cost the live set on every sample to move ten nodes, and no
+        // screen-reader user is driving a pointer drag. The handles' published
+        // rectangles are therefore stale for the duration of a pointer gesture,
+        // and the commit's own model change re-walks at the end.
+        //
+        // The two ticks are what the controller writes. Everything below them
+        // is what the controller *reads*: the memo already keys on all three
+        // (see `ChromeKey`, whose doc says so), but a right-keyed memo only
+        // answers correctly when something asks — and nothing asked. Each is
+        // bound twice on purpose, because the answer feeds two walkers that no
+        // single level covers: `place_children` and `post_paint` follow
+        // `Relayout`, the AccessKit walk follows `AccessibilityOnly` and
+        // nothing else, and the two buckets are independent in the registry.
+        if let Some(cfg) = self.transform.clone() {
+            let id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            self.transform_rt
+                .tick
+                .bind_to(id, registry, BindingLevel::Relayout);
+            self.transform_rt
+                .at_tick
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
+            // `enabled` decides whether there is any chrome at all. Unbound, a
+            // toolbar toggle wired to `enabled_signal()` — which the setter
+            // invites — left the frame and its handles painted and left the
+            // published tree serving a handle whose actions the flag had just
+            // made refuse: a screen reader offering a control that silently
+            // does nothing.
+            cfg.enabled.bind_to(id, registry, BindingLevel::Relayout);
+            cfg.enabled
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
+            // The selection decides what the chrome is drawn *around*. Bound
+            // only when a controller is installed, and that is not a shortcut:
+            // it is the one thing this view publishes that depends on the
+            // selection. A lightweight item's own colours bind the same signal
+            // themselves (see `SceneSelection`), and no item's AccessKit node
+            // carries selection state — so without a controller there is
+            // nothing here for a selection change to invalidate.
+            //
+            // A pointer selection change happened to be covered, because the
+            // press that made it also relayouts; a *programmatic* one —
+            // "select all", a search result, or the second pane of a shared
+            // `SceneSelection` — was not, and both panes went on describing the
+            // previous selection at its previous position.
+            let selection = self.selection.selection_signal();
+            selection.bind_to(id, registry, BindingLevel::Relayout);
+            selection.bind_to(id, registry, BindingLevel::AccessibilityOnly);
+            // The two reactive resize knobs. They bear only on a *live*
+            // gesture's resolution, which a pointer sample re-derives anyway —
+            // but a keyboard or assistive-technology session takes no samples,
+            // so an app toggling "lock aspect ratio" from a toolbar mid-gesture
+            // would have shown the old preview until the next key. Free when
+            // the knob is a plain `bool`.
+            cfg.keep_ratio
+                .register_if_bound(id, registry, BindingLevel::Relayout);
+            cfg.centered_scaling
+                .register_if_bound(id, registry, BindingLevel::Relayout);
+            // The names the handles announce, for the app that binds a plain
+            // `Signal<String>` rather than a `tr!` — a locale switch dirties
+            // the accessibility tree by itself, an arbitrary signal does not.
+            cfg.labels
+                .register_bindings(id, registry, BindingLevel::AccessibilityOnly);
+        }
+
+        // Magnetism's `enabled` is the same knob one door over, and it was the
+        // same defect: `MagnetismConfig::enabled_signal()` extends the same
+        // invitation, `SceneView::magnetism_active` reads it at use time, and it
+        // gates both the marker post-paint and the synthetic magnet AT nodes.
+        // Unbound, turning magnetism off on a live view left its markers drawn
+        // and left a screen reader still offered a "Port" node — while a fresh
+        // walk correctly returned none, which is the tell that the gate works
+        // and only the invalidation was missing.
+        if let Some(cfg) = self.magnetism.clone() {
+            let id = ctx.self_id();
+            let registry = ctx.binding_registry();
+            cfg.enabled.bind_to(id, registry, BindingLevel::Relayout);
+            cfg.enabled
+                .bind_to(id, registry, BindingLevel::AccessibilityOnly);
+        }
+
         // Wire the item-coordinate cache invalidation observer.
         // Cached frames are recorded in **local** coordinates, so
         // only changes that alter the local-coord paint output
@@ -136,20 +260,32 @@ impl SceneView {
             let appearance_dirty = self.appearance_dirty.clone();
             let payload_dirty = self.payload_dirty.clone();
             let hit_sync = self.hit_sync.clone();
-            let handle = self.model.item_change_signal().observe(move |change| {
-                use crate::scene::ItemChange;
-                // Hit-snapshot invalidation, recorded FIRST and for every
-                // variant — including the ones that return early below. It also
-                // counts the delivery, which is what proves to the next layout
-                // pass that this view saw the whole change stream and may
-                // therefore patch its snapshots instead of rebuilding them.
-                hit_sync.borrow_mut().record(change);
-                // The item cache holds *local-coordinate* paint output, so only
-                // a geometry change or a removal can invalidate a cached frame;
-                // pos / transform / opacity / z / layer / flags are re-applied
-                // as wrapping scopes at replay and don't bake into the cache.
-                match *change {
-                    ItemChange::Removed { id } | ItemChange::LocalBoundsChanged { id, .. } => {
+            let handle = self
+                .model
+                .item_change_signal()
+                .observe(move |scene_change| {
+                    use crate::scene::ItemChange;
+                    // The view reconciles from the change itself; the envelope's
+                    // transaction id, source and history are for the app's data
+                    // layer, and `ephemeral` is already accounted for by the
+                    // AT-re-walk gate's `structural_version`.
+                    let change = &scene_change.change;
+                    // Hit-snapshot invalidation, recorded FIRST and for every
+                    // variant — including the ones that return early below. It also
+                    // counts the delivery, which is what proves to the next layout
+                    // pass that this view saw the whole change stream and may
+                    // therefore patch its snapshots instead of rebuilding them.
+                    hit_sync.borrow_mut().record(change);
+                    // The item cache holds *local-coordinate* paint output, so only
+                    // a geometry change or a removal can invalidate a cached frame;
+                    // pos / transform / opacity / z / layer / flags are re-applied
+                    // as wrapping scopes at replay and don't bake into the cache.
+                    match *change {
+                    ItemChange::Removed { id }
+                    | ItemChange::LocalBoundsChanged { id, .. }
+                    // A different item box at the same id repaints from
+                    // scratch: the cached frame is the *old* item's drawing.
+                    | ItemChange::ItemReplaced { id, .. } => {
                         cache.borrow_mut().evict(id);
                     }
                     // `IS_ENABLED` feeds `ColorProp::resolve` (disabled-role
@@ -166,31 +302,31 @@ impl SceneView {
                     }
                     // A `Delegated` item's data changed: queue a targeted rebuild
                     // so the next build re-invokes the delegate for just that id.
-                    ItemChange::PayloadChanged { id } => {
+                    ItemChange::PayloadChanged { id, .. } => {
                         payload_dirty.borrow_mut().insert(id);
                     }
                     // Paint-only appearance change: colour bakes into the cached
                     // local-coord frame, so evict it, then repaint WITHOUT a
                     // rebuild — return before the shared `reconcile_dirty` bump.
-                    ItemChange::AppearanceChanged { id } => {
+                    ItemChange::AppearanceChanged { id, .. } => {
                         cache.borrow_mut().evict(id);
                         appearance_dirty.set(appearance_dirty.get().wrapping_add(1));
                         return;
                     }
                     _ => {}
                 }
-                // EVERY model mutation drives a reconcile pass. A relayout
-                // re-runs `build()` (materialise pending widgets, reap orphaned
-                // ones), re-places children (so screen-projected AccessKit
-                // bounds track moves/transforms), and — via `build()`'s
-                // `request_accessibility_update()` — forces an AT re-walk. A
-                // relayout alone no longer re-walks AT, and the visual scene
-                // and the *separate* AccessKit tree must both follow add /
-                // remove / move / reparent / visibility / opacity / z / layer:
-                // letting any variant fall through silently would desync
-                // assistive tech (and paint) from the model.
-                reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
-            });
+                    // EVERY model mutation drives a reconcile pass. A relayout
+                    // re-runs `build()` (materialise pending widgets, reap orphaned
+                    // ones), re-places children (so screen-projected AccessKit
+                    // bounds track moves/transforms), and — via `build()`'s
+                    // `request_accessibility_update()` — forces an AT re-walk. A
+                    // relayout alone no longer re-walks AT, and the visual scene
+                    // and the *separate* AccessKit tree must both follow add /
+                    // remove / move / reparent / visibility / opacity / z / layer:
+                    // letting any variant fall through silently would desync
+                    // assistive tech (and paint) from the model.
+                    reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
+                });
             *self._item_cache_observer.borrow_mut() = Some(handle);
         }
 
@@ -524,6 +660,12 @@ impl SceneView {
         {
             handlers = self.register_drag_handlers(handlers, input_tokens);
         }
+
+        // The transform controller's accessibility-action route. Installed
+        // whenever a controller exists — the enabled signal is live, and the
+        // handler re-reads it, so a controller toggled on at runtime does not
+        // need a rebuild to become reachable from assistive technology.
+        handlers = self.register_transform_handlers(handlers, self_id);
 
         ctx.apply_self_handlers(handlers);
 

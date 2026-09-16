@@ -80,7 +80,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::Color;
 
 use crate::flags::ItemFlags;
-use crate::item::{SceneItem, SceneItemA11yContext, SceneItemPaintContext};
+use crate::item::{AppearanceWrite, SceneItem, SceneItemA11yContext, SceneItemPaintContext};
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 use teksilo_i18n::LocalizedString;
 
@@ -453,15 +453,13 @@ impl SceneItem for TextItem {
         }
     }
 
-    fn set_fill(&mut self, fill: Option<ColorProp>) -> bool {
+    fn set_fill(&mut self, fill: Option<ColorProp>) -> AppearanceWrite<ColorProp> {
         // A text item's "fill" is its foreground colour — it always has one,
-        // so a `None` (clear) is rejected.
+        // so a `None` (clear) is rejected. The colour it replaces is never
+        // absent, so the accepted branch always reports `Some`.
         match fill {
-            Some(c) => {
-                self.color = c;
-                true
-            }
-            None => false,
+            Some(c) => AppearanceWrite::replaced(std::mem::replace(&mut self.color, c)),
+            None => AppearanceWrite::Refused,
         }
     }
 
@@ -810,8 +808,8 @@ mod tests {
     fn set_fill_maps_to_foreground_colour() {
         // #2: the SceneItem fill hook sets the text colour; None is rejected.
         let mut item = TextItem::new(lit!("Hi"), Rect::new(0.0, 0.0, 100.0, 30.0));
-        assert!(item.set_fill(Some(ColorProp::from(Color::RED))));
-        assert!(!item.set_fill(None));
+        assert!(item.set_fill(Some(ColorProp::from(Color::RED))).accepted());
+        assert!(!item.set_fill(None).accepted());
     }
 
     #[test]

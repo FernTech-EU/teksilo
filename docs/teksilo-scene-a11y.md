@@ -425,6 +425,13 @@ still for both tiers however far the camera had gone. One derived signal rather
 than four: it changes once per camera change however many of pan / zoom /
 rotation moved.
 
+**An observer sees a `SceneChange`, not a bare `ItemChange`.** The item channel
+carries the change plus the transaction it belongs to, whose it was, whether it
+counts as history, and whether it is a per-frame artefact — see
+[teksilo-scene.md](teksilo-scene.md) → *The reversible-mutation seam*. Nothing
+about the AT walk changes; the envelope is for the data layer, and the
+`a11y_change_signal` is a bare counter as before.
+
 A relayout no longer re-walks the AccessKit tree by itself (the walk is cached,
 gated on `a11y_dirty`). `SceneView::build()` calls
 `ctx.request_accessibility_update()` when it reconciles, which flips that flag —
@@ -439,6 +446,52 @@ settles. `Scene::remove` additionally re-roots any still-alive node that was
 AT-parented under a removed item (its explicit parent mapping is dropped, exactly
 like `remove_a11y_group`). Mark a runtime-added group `Live::Polite` to have the
 addition announced. Demo: the "Add Act" button in `cargo run -p scene-corkboard`.
+
+### An undone deletion restores the semantics, not just the pixels
+
+A removal destroys the item's whole slice of the logical AT tree — its AT
+parent, its relations, its live-region status, its landmark role, its rotor
+categories — and it does so *before* it announces `ItemChange::Removed`. So an
+app that reconstructed the item from the event alone would put the rectangle
+back and silently lose all five. On a crate whose differentiator is per-item
+accessibility, that is the failure worth naming.
+
+`Scene::take(id)` lifts those decorations out instead of dropping them, and
+`Scene::restore` puts them back **at the same `ItemId`** — which the whole
+logical tree is keyed by, so a restore that minted a fresh id would re-root the
+item, break every relation naming it and orphan whatever was AT-parented under
+it. `Scene::remove` is the same call with the salvage routed to the edit sink,
+so an app with a data layer gets the same completeness without changing which
+door it calls.
+
+**Both directions of every edge**, because a removal cuts both:
+
+| edge | what `remove` does | what a restore does |
+| --- | --- | --- |
+| the item's own AT parent (`removed → parent`) | drops it | re-inserts it, if the parent is still there |
+| a **survivor** AT-parented under it (`survivor → removed`) | drops it, re-rooting that survivor at the view root | re-adopts the survivor |
+| a relation at either endpoint | drops it | re-attaches it, if both ends are alive |
+| live / landmark / categories | drops them | re-inserts them |
+
+Recording only the first row would make a restore silently fail to re-adopt the
+survivors — failing at exactly the case the salvage exists for. An edge whose
+far end has since been removed is **not** re-attached: re-inserting it would
+name a node the walker cannot resolve, which is the dangling-reference class of
+defect this tree must not have. Edges are attached once the whole batch is in,
+so an edge between two items of one removed subtree survives whatever order the
+two ends land in.
+
+The entry also returns to its recorded place in **declaration order** — the
+order this walk publishes siblings in, i.e. the order a screen reader reads the
+scene in. Appending it would move the item to the end of that reading order for
+no reason a user could see.
+
+One heavyweight caveat, stated plainly: a single-view (`Scene::add_widget`)
+card whose instance a view has already reaped comes back as an entry with no
+widget to materialise, so it is in the scene and in no AT tree.
+`RemovedItem::widget_instance_present()` reports it, and content that must
+survive an undo goes in through `SceneModel::add_widget_item`, whose payload
+every view rebuilds from.
 
 **Multi-view.** When several `SceneView`s share one `SceneModel` (see
 [teksilo-scene.md](teksilo-scene.md) → *Shared model & multi-view*), each pane

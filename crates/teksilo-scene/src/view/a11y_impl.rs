@@ -45,6 +45,13 @@ use super::*;
 /// camera zooms rather than scaling with the drawing.
 const MAGNET_AT_HALF_EXTENT: f32 = 8.0;
 
+/// How far, in logical pixels on screen, a transform handle's accessibility box
+/// extends from the handle's centre. Larger than the painted disc for the same
+/// reason a magnet's box is: the node is a *pointer affordance*, and an
+/// assistive technology that hit-tests or draws a focus ring around it should
+/// get something comfortably bigger than a nine-pixel square.
+const TRANSFORM_HANDLE_AT_HALF_EXTENT: f32 = 9.0;
+
 /// The view transform's scale, for the one case that needs to undo it.
 ///
 /// The geometric mean of the two singular values via `|det|.sqrt()`, so a
@@ -375,6 +382,15 @@ impl SceneView {
             self.set_collected_role(builder, id, *role);
         }
 
+        // The selection transform frame and its handles.
+        //
+        // Emitted as synthetic children of the SceneView's **own** node, not of
+        // any item: the frame belongs to the *selection*, and a multi-item
+        // selection has no owner. At most ten nodes per view, and none of them
+        // enter the per-item walk — which is the whole reason the chrome is a
+        // paint pass rather than `Over`-band items.
+        self.emit_transform_nodes(builder, owner, view_transform);
+
         // Magnetism: in keyboard connect mode, point the SceneView's
         // `active_descendant` at the focused magnet's synthetic node (the
         // roving virtual-focus pattern — the SceneView keeps real arena
@@ -396,6 +412,167 @@ impl SceneView {
                     SyntheticKind::SceneMagnet,
                 ));
             }
+        }
+    }
+
+    /// Emit the transform controller's frame and handle nodes.
+    ///
+    /// Roles are chosen by what the handle actually is, and
+    /// [`TransformHandle::is_scalar`](crate::TransformHandle::is_scalar) is the one place that judgement is made.
+    /// An edge or the rotate puck is one number, so it is a `Slider` carrying
+    /// that number with a step — which is what makes `Increment` / `Decrement`
+    /// read naturally on every adapter, and what obliges the verb to move
+    /// *that* number. A **corner** is two numbers, and a single `numeric_value`
+    /// on one would be a lie, so it is a `Button` with no value. The frame band
+    /// is a `Button` for the same reason.
+    ///
+    /// Every handle takes `Increment` / `Decrement`, and the two-dimensional
+    /// ones take four named custom actions besides — see
+    /// [`TransformHandle::at_steps`](crate::TransformHandle::at_steps) for what each verb does and why a corner
+    /// gets both.
+    fn emit_transform_nodes(
+        &self,
+        builder: &mut teksilo_core::accessibility::AccessNodeBuilder,
+        owner: Option<teksilo_core::widget_id::WidgetId>,
+        view_transform: Transform2D,
+    ) {
+        use crate::transform_session::{TransformHandle, TransformOp};
+        use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id};
+
+        let Some(d) = self.transform_enabled() else {
+            return;
+        };
+        // The frame and its handles in one question — the accessibility walk
+        // used to ask for them separately and pay a full descendant prune of
+        // the selection for each piece. See `TransformDriver::chrome`.
+        let Some(state) = d.chrome() else {
+            return;
+        };
+        let frame = match d.resolved() {
+            Some((_, r)) => r.frame,
+            None => state.frame,
+        };
+        let handles = state.handles.clone();
+        if handles.is_empty() {
+            return;
+        }
+        let view_scale = view_scale(&view_transform);
+        let pad = d.cfg.padding_px / view_scale;
+        let outline = frame.outline(pad);
+        // The frame's own rectangle is stated in the frame's basis; an AT box is
+        // axis-aligned, so publish the AABB of the rotated outline rather than
+        // a rectangle that is only correct at zero degrees.
+        let outline_scene = Transform2D::rotate(frame.rotation).apply_rect(outline);
+        let frame_name = d.cfg.labels.frame_name();
+        let frame_id =
+            builder.push_scene_child_under(None, 0, SyntheticKind::SceneHandle, |child| {
+                child.set_role(accesskit::Role::Group);
+                child.set_name(frame_name);
+                child.set_value(format!(
+                    "{} by {}",
+                    frame.rect.width.round() as i64,
+                    frame.rect.height.round() as i64
+                ));
+                child.inner_mut().set_bounds(accesskit::Rect {
+                    x0: outline_scene.x as f64,
+                    y0: outline_scene.y as f64,
+                    x1: (outline_scene.x + outline_scene.width) as f64,
+                    y1: (outline_scene.y + outline_scene.height) as f64,
+                });
+                Self::declare_scene_space(child, None, view_transform);
+            });
+
+        let half = TRANSFORM_HANDLE_AT_HALF_EXTENT / view_scale;
+        let points: std::collections::HashMap<TransformHandle, teksilo_canvas::Point> =
+            d.handle_points(&frame, view_scale).into_iter().collect();
+        for handle in handles.iter().copied() {
+            let name = d.cfg.labels.handle_name(handle);
+            // The band has no dot of its own; its box is the whole frame.
+            let box_scene = match points.get(&handle) {
+                Some(p) => Rect::new(p.x - half, p.y - half, half * 2.0, half * 2.0),
+                None => outline_scene,
+            };
+            let is_slider = handle.is_scalar();
+            let step_names: Vec<String> = if is_slider {
+                Vec::new()
+            } else {
+                crate::transform_session::TransformStep::ALL
+                    .iter()
+                    .map(|s| d.cfg.labels.step_name(*s))
+                    .collect()
+            };
+            builder.push_scene_child_under(
+                Some(frame_id),
+                handle.index() as u64 + 1,
+                SyntheticKind::SceneHandle,
+                |child| {
+                    child.set_role(if is_slider {
+                        accesskit::Role::Slider
+                    } else {
+                        accesskit::Role::Button
+                    });
+                    child.set_name(name);
+                    if is_slider {
+                        let (value, step) = match handle {
+                            TransformHandle::Rotate => (frame.rotation.to_degrees() as f64, 1.0),
+                            TransformHandle::Leading => (frame.rect.x as f64, 1.0),
+                            TransformHandle::Trailing => (frame.rect.right() as f64, 1.0),
+                            TransformHandle::Top => (frame.rect.y as f64, 1.0),
+                            _ => (frame.rect.bottom() as f64, 1.0),
+                        };
+                        child.set_numeric_value(value);
+                        child.set_numeric_value_step(step);
+                    }
+                    child.add_action(accesskit::Action::Click);
+                    // Every handle takes both, slider or not: a corner has no
+                    // single value to announce but it still has two directions
+                    // to be pushed in, and refusing the actions there would
+                    // leave the only pointer-driven corner resize with no
+                    // assistive-technology route at all.
+                    child.add_action(accesskit::Action::Increment);
+                    child.add_action(accesskit::Action::Decrement);
+                    if !step_names.is_empty() {
+                        // …and, for the two-dimensional handles only, one axis
+                        // at a time. `Increment` on a corner moves both of its
+                        // coordinates, which is the only thing one number can
+                        // mean there; these are how a screen-reader user
+                        // changes the width without the height. The id is
+                        // `TransformStep::index`, so the order is the
+                        // published contract.
+                        child.add_action(accesskit::Action::CustomAction);
+                        child.set_custom_actions(
+                            step_names
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, description)| accesskit::CustomAction {
+                                    id: i as i32,
+                                    description,
+                                })
+                                .collect(),
+                        );
+                    }
+                    child.inner_mut().set_bounds(accesskit::Rect {
+                        x0: box_scene.x as f64,
+                        y0: box_scene.y as f64,
+                        x1: (box_scene.x + box_scene.width) as f64,
+                        y1: (box_scene.y + box_scene.height) as f64,
+                    });
+                },
+            );
+        }
+
+        // Roving virtual focus: the view keeps real arena focus and points
+        // `active_descendant` at the handle the keyboard mode is on — the same
+        // pattern magnetism's connect flow uses.
+        if d.rt.keyboard_mode.get()
+            && let (Some(focus), Some(o)) = (d.rt.keyboard_focus.get(), owner)
+        {
+            let _ = TransformOp::Move;
+            builder.set_active_descendant(synthetic_node_id(
+                o,
+                focus.index() as u64 + 1,
+                SyntheticKind::SceneHandle,
+            ));
         }
     }
 

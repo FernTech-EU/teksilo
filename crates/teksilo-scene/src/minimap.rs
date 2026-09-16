@@ -507,7 +507,12 @@ impl std::fmt::Debug for SceneMinimap {
 /// app can phrase and translate the announcement itself. Everything here is
 /// derived from the same `effective_extent` the picture is projected through,
 /// so a readout can never describe a frame other than the one on screen.
+///
+/// `#[non_exhaustive]`: the crate hands this *to* consumer code — it is the
+/// argument of an `access_readout` closure — and a readout may learn to carry
+/// another number. Build one with [`new`](Self::new).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct MinimapReadout {
     /// The scene-space rect actually projected onto the drawing area:
     /// `content_bounds ∪ every item rect ∪ viewport`.
@@ -522,6 +527,21 @@ pub struct MinimapReadout {
     /// `0.0..=1.0`. A degenerate axis reads `1.0`: you are seeing all there
     /// is of it.
     pub coverage: Size,
+}
+
+impl MinimapReadout {
+    /// A readout stated field by field — the constructor
+    /// [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+    /// The minimap derives its own; this is for a consumer testing its own
+    /// phrasing closure.
+    pub fn new(extent: Rect, viewport: Rect, position: Point, coverage: Size) -> Self {
+        Self {
+            extent,
+            viewport,
+            position,
+            coverage,
+        }
+    }
 }
 
 /// Derive the readout for a viewport inside an extent.

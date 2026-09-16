@@ -362,3 +362,227 @@ fn compute_item_snap_serves_heavyweight_consumer_path() {
     assert_eq!(snap.to, bm);
     assert!((snap.snap_vector.x - 2.0).abs() < 1e-3);
 }
+
+// ---------------------------------------------------------------------------
+// The geometry constraint and the magnet, on a rotated item
+// ---------------------------------------------------------------------------
+
+/// The hazard, stated without a gesture: a constraint that accepts everything
+/// still hands back a *different* translation for a rotated item.
+///
+/// `constrained_translation` states the proposal in the frame's own basis —
+/// `rotate(-theta)`, add to the frame's origin, ask, subtract the origin,
+/// `rotate(theta)` — and none of those four steps is bit-exact in `f32`. The
+/// error is small (a few times 1e-5 here) and utterly invisible, which is
+/// exactly why deciding "did the rule overrule the magnet?" with `==` was a bug
+/// that no amount of looking at the screen would find.
+///
+/// Reverting `constraint_kept` to `==` reddens the last assertion.
+#[test]
+fn a_rotated_accept_round_trips_inexactly_and_the_tolerance_absorbs_it() {
+    use crate::ChangeVerdict;
+    use crate::transform_session::TransformSource;
+    use crate::view::gestures_impl::constraint_kept;
+    use teksilo_canvas::{Transform2D, Vec2};
+
+    let model = SceneModel::new();
+    let a = model.add_item(
+        RectItem::new(Rect::new(-20.0, -20.0, 40.0, 40.0)),
+        Point::new(137.4, 91.7),
+    );
+    model.set_transform(a, Transform2D::rotate(0.6));
+    model.set_geometry_constraint(|_| ChangeVerdict::Accept);
+
+    let start = model.transform_frame(&[a]).expect("resolves");
+    assert!(
+        start.rotation.abs() > 1e-6,
+        "precondition: the frame carries the item\'s rotation"
+    );
+    let raw = Vec2::new(151.37, -37.91);
+    let applied = model.constrain_move(&[a], start, raw, TransformSource::Pointer);
+
+    assert_ne!(
+        applied, raw,
+        "precondition: the round trip really is lossy — if this ever becomes \
+         exact the `==` test below stops being a hazard and this test stops \
+         meaning anything"
+    );
+    let anchor = Point::new(137.4, 91.7);
+    let magnetised = Point::new(anchor.x + raw.x, anchor.y + raw.y);
+    let constrained = Point::new(anchor.x + applied.x, anchor.y + applied.y);
+    assert!(
+        constraint_kept(magnetised, constrained),
+        "a rule that accepted the proposal did not overrule the magnet: \
+         {magnetised:?} vs {constrained:?}"
+    );
+}
+
+/// The same thing end to end: a constraint that changes nothing must change
+/// nothing a user can observe.
+///
+/// It failed **only on rotated items**, which is why every other magnetism test
+/// in this file passed — at zero degrees the round trip is exact. The numbers
+/// here are deliberately not round: on a tidy grid the lossy round trip can
+/// land back on the same `f32` by luck, and a test that relies on that luck
+/// pins nothing.
+#[test]
+fn a_do_nothing_constraint_still_lets_a_rotated_item_connect() {
+    use crate::ChangeVerdict;
+
+    const THETA: f32 = 0.6;
+    const CARRY: f32 = 147.37;
+
+    /// Build the scene, drag A's body `CARRY` to the right, and report how many
+    /// connections fired and where A ended up.
+    fn run(with_constraint: bool) -> (u32, Point) {
+        let model = SceneModel::new();
+        // A's rect is centred on its own origin, so rotating it leaves its
+        // centre — the press point — exactly at its `local_pos`.
+        let a = model.add_item(
+            RectItem::new(Rect::new(-20.0, -20.0, 40.0, 40.0))
+                .fill(teksilo_tokens::Color::RED)
+                .draggable(true),
+            Point::new(137.4, 91.7),
+        );
+        model.set_transform(a, teksilo_canvas::Transform2D::rotate(THETA));
+        let am = model.add_magnet(
+            a,
+            Magnet::new(Point::new(20.0, 0.0)).role(MagnetRole::Source),
+        );
+        let source = model.magnet_scene_pos(am).expect("a's magnet resolves");
+        // Place B so its target magnet sits 2 units beyond where A's source
+        // magnet lands — inside the 14 px capture radius, so the snap closes it.
+        let b = model.add_item(
+            RectItem::new(Rect::new(0.0, 0.0, 40.0, 40.0)).fill(teksilo_tokens::Color::BLUE),
+            Point::new(source.x + CARRY + 2.0, source.y - 20.0),
+        );
+        model.add_magnet(
+            b,
+            Magnet::new(Point::new(0.0, 20.0)).role(MagnetRole::Target),
+        );
+        if with_constraint {
+            model.set_geometry_constraint(|_| ChangeVerdict::Accept);
+        }
+
+        let (cfg, (count, _pair)) = recording_config(source_to_target);
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::with_model(model).magnetism(cfg));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        down(&mut tree, Point::new(137.4, 91.7));
+        moved(&mut tree, Point::new(137.4 + CARRY, 91.7));
+        up(&mut tree, Point::new(137.4 + CARRY, 91.7));
+
+        let view = tree
+            .widget_as_any_mut(view_id)
+            .and_then(|w| w.downcast_mut::<SceneView>())
+            .expect("downcast");
+        view.flush_pending_item_move();
+        let pos = view.scene().local_pos(a).expect("a alive");
+        (count.get(), pos)
+    }
+
+    let (bare_count, bare_pos) = run(false);
+    assert_eq!(
+        bare_count, 1,
+        "precondition: without a constraint the magnet connects"
+    );
+
+    let (guarded_count, guarded_pos) = run(true);
+    assert_eq!(
+        guarded_count, 1,
+        "a constraint that accepts everything must not silently break magnetism: \
+         bare ended at {bare_pos:?}, constrained at {guarded_pos:?}"
+    );
+    assert!(
+        (guarded_pos.x - bare_pos.x).abs() < 1e-2 && (guarded_pos.y - bare_pos.y).abs() < 1e-2,
+        "and must not move the item either: {bare_pos:?} vs {guarded_pos:?}"
+    );
+}
+
+/// `MagnetismConfig::enabled` is offered as a signal, so a toolbar toggle is
+/// the expected way to drive it — and an unbound signal makes that toggle a
+/// lie in the two places it is read.
+///
+/// This is the transform controller's `enabled` defect one door over, and the
+/// tell is the same: the *fresh* walk was right all along, so the gate works
+/// and only the invalidation was missing. Reading the **published** tree
+/// (`sync_accessibility`, what a platform adapter is handed) rather than a
+/// fresh `accessibility_tree_snapshot` is the whole point — a snapshot cannot
+/// see this class of bug, and has now hidden it three times in this crate.
+#[test]
+fn turning_magnetism_off_takes_its_markers_and_its_at_nodes_with_it() {
+    use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id};
+
+    // Keyed on the scene's own `MagnetId`s, not a guessed range: the id is a
+    // process-global counter, so a fixed range only finds them when this test
+    // happens to run early.
+    fn magnet_nodes(tree: &mut WidgetTree, view_id: WidgetId, magnets: &[MagnetId]) -> usize {
+        let ours: Vec<accesskit::NodeId> = magnets
+            .iter()
+            .map(|m| synthetic_node_id(view_id, m.as_u64(), SyntheticKind::SceneMagnet))
+            .collect();
+        tree.sync_accessibility()
+            .nodes
+            .iter()
+            .filter(|(id, _)| ours.contains(id))
+            .count()
+    }
+    fn draws(tree: &mut WidgetTree) -> usize {
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.render().draw_order.len()
+    }
+
+    // Calibrate against a view whose magnetism was off from the very start, so
+    // the assertions below cannot pass by the markers having been invisible.
+    let off_from_the_start = {
+        let (scene, _a, am, _b, bm) = two_node_scene();
+        let (cfg, _) = recording_config(source_to_target);
+        cfg.enabled_signal().set(false);
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(
+            SceneView::new(scene).magnetism(cfg.markers(crate::magnet::MarkerVisibility::Always)),
+        );
+        let d = draws(&mut tree);
+        assert_eq!(magnet_nodes(&mut tree, view_id, &[am, bm]), 0);
+        d
+    };
+
+    let (scene, _a, am, _b, bm) = two_node_scene();
+    let (cfg, _) = recording_config(source_to_target);
+    let enabled = cfg.enabled_signal();
+    let mut tree = WidgetTree::new();
+    let view_id = tree
+        .add(SceneView::new(scene).magnetism(cfg.markers(crate::magnet::MarkerVisibility::Always)));
+
+    let on = draws(&mut tree);
+    assert!(
+        on > off_from_the_start,
+        "the markers must draw something to begin with ({on} vs {off_from_the_start})"
+    );
+    assert!(
+        magnet_nodes(&mut tree, view_id, &[am, bm]) > 0,
+        "…and the magnets must be published"
+    );
+
+    enabled.set(false);
+    assert_eq!(
+        draws(&mut tree),
+        off_from_the_start,
+        "a live `enabled` flip must leave exactly the frame a view with magnetism \
+         off from the start would have drawn"
+    );
+    assert_eq!(
+        magnet_nodes(&mut tree, view_id, &[am, bm]),
+        0,
+        "…and must stop offering a screen reader magnets it will no longer act on"
+    );
+
+    enabled.set(true);
+    assert_eq!(
+        draws(&mut tree),
+        on,
+        "the flag is a toggle, not a one-way door"
+    );
+    assert!(magnet_nodes(&mut tree, view_id, &[am, bm]) > 0);
+}

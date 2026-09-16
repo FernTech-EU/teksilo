@@ -13,6 +13,185 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+- **teksilo-scene:** a **geometry constraint** on `SceneModel` — one closure
+  that rewrites a gesture's proposed geometry before anything is applied, so
+  snap-to-grid, axis lock and page clamping reach the drag ghost rather than
+  correcting it a frame late. Installed with
+  `SceneModel::set_geometry_constraint`; the closure is handed a
+  `ProposedChange` (the scene read-only, the roots the gesture moves, and the
+  gesture's start and proposed *frames* in scene coordinates) and returns a
+  `ChangeVerdict` (`Accept` / `Adjust(frame)` / `Reject`). It is consulted by the
+  selection transform controller (both content tiers, pointer, keyboard and AT),
+  the lightweight item drag, and the `Alt`+arrow nudge; an app driving its own
+  drag calls `SceneModel::constrain_move` / `constrain_frame`. Programmatic
+  mutators are never constrained.
+- **teksilo-scene:** `scene-corkboard` cards are draggable, both panes carry a
+  selection transform controller, and a "Snap to grid" toggle drives one
+  geometry constraint shared by both panes.
+- **teksilo-scene:** a **reversible-mutation seam** — what the scene tells a data
+  layer so that layer can reverse an edit. (Undo itself stays in the data layer;
+  this crate ships no stack and no `undo()`.)
+  - Every notification now carries a transaction id, a `ChangeSource`
+    (`User` / `Programmatic` / `Remote`), a `HistoryMode`
+    (`Record` / `RecordPreserveRedo` / `Ignore`) and an `ephemeral` flag.
+  - One write scope is one transaction, so a subtree `remove` is one change to
+    undo rather than N. `SceneModel::transaction` / `user_edit` groups several
+    calls; nesting joins rather than splitting. The framework stamps its own
+    gesture commits `User`, so an app can tell a finished drag from a
+    programmatic move.
+  - `Scene::take` removes an item and hands back what it held — the item box,
+    its magnets (ids included) and its whole slice of the logical accessibility
+    tree, in both directions. `Scene::restore` puts it back at the **same**
+    `ItemId`, at its original place in the reading order. `Scene::remove` is the
+    same call with the salvage routed to the edit sink.
+  - `SceneModel::set_edit_sink` receives one owning `SceneTransactionRecord` per
+    committed transaction, with the scene unborrowed so the sink may read and
+    write it; the sink's own writes are journaled in turn.
+    `transaction_signal` fires once per transaction, after the sink.
+  - `SceneTransaction::abandon` tags a cancelled interaction (without rolling
+    the scene back); `squash` folds a transaction's repeated writes to one
+    quantity into its endpoints, off by default.
+  - `Scene::replace_item` swaps a lightweight item's box while keeping the
+    entry, the id and everything keyed on it, returning the box it replaced.
+  - `Placement { parent, z, local_pos, transform }` is written as one property:
+    `set_placement`, and `reparent_keeping_scene_pos` for a drag into a group
+    that does not move the item. `z_between` reports when `f32` precision has
+    run out at a locus, where a caller computing the midpoint itself would get a
+    silent no-op.
+  - `Scene::a11y_live_of` / `a11y_landmark_of`, and `a11y_relations` /
+    `a11y_live_of` / `a11y_landmark_of` / `a11y_categories_of` on `SceneModel`.
+  - `ItemChange::is_edit()` separates the scene's *edits* from the derived
+    notifications it emits beside them, so an app counting the changes in an
+    edit gets the same number the transaction record has.
+  - `RemovedItem::detach()` forgets a salvage's recorded parent, so it restores
+    at root level — the door `RestoreError::MissingParent` already pointed at,
+    and what moving an item into a *different* scene needs.
+- **teksilo-scene:** `SceneModel::downgrade()` and `WeakSceneModel` — a
+  non-owning handle to a scene. For a closure the scene itself owns: a geometry
+  constraint that captures a `SceneModel` closes a reference cycle through the
+  closure and leaks the whole scene. A constraint normally needs no handle at
+  all (`ProposedChange::scene` is the entire read surface); this is for a policy
+  object that holds one for its other work.
+
+#### The selection transform controller
+
+- **teksilo-scene:** `TransformStep` and four per-axis custom actions on the
+  handles that drive two coordinates — the four corners and the frame band.
+  A screen-reader user can now change the width without the height, which
+  `Increment` alone cannot express. `TransformLabels::step` names them, so they
+  take `tr!` like every other label the controller publishes.
+- **teksilo-scene:** `TransformHandle::is_scalar` — whether a handle's state is
+  one number (an edge coordinate, an angle) or two. The published AccessKit
+  role, the presence of a `numeric_value` and what one verb does all read it.
+- **teksilo-scene:** constructors for the types the crate hands to consumer
+  code: `TransformFrame::new`, `TransformDelta::new`, `TransformSession::new`,
+  `Placement::new`, `SceneItemA11yContext::new`, `MinimapReadout::new` and
+  `MagnetRef` / `MagnetConnection` / `MagnetSnap` / `MagnetMarker` /
+  `MagnetFeedback::new`.
+
+### Changed
+
+- **teksilo-scene:** `TransformConfig::bound_box` is replaced by the geometry
+  constraint, which is strictly wider: it sees the scene, the items and the
+  gesture's source, it can refuse a change, and it governs the lightweight drag
+  and the keyboard nudge as well as the transform controller.
+- **teksilo-scene:** `SceneListAdapter` keeps each row's `ItemId`. A row whose
+  content changed, and every row an insert or a removal shifted, keeps the id it
+  had — so selection, magnets and accessibility parenting survive a data change
+  instead of being retired with it. Each source change is one transaction.
+- **teksilo-scene:** `item_change_signal` carries a `SceneChange` (the change
+  plus its transaction envelope) rather than a bare `ItemChange`. Observers read
+  `notification.change`.
+- **teksilo-scene:** `ItemChange` is no longer `Copy`/`PartialEq` (it now
+  carries owned values) and gains `PlacementChanged` and `ItemReplaced`.
+  `TransformChanged`, `PayloadChanged` and `AppearanceChanged` carry both sides
+  of the value they replaced, so an edit is reversible from the event alone.
+- **teksilo-scene:** `SceneItem::set_fill` / `set_stroke` return an
+  `AppearanceWrite<T>` carrying the value they overwrote, instead of a `bool`.
+  A getter would have had to be defaulted, and a defaulted getter would report
+  "there was no fill" for any item that forgot to override it — making an undone
+  fill change *clear* the fill rather than restore it.
+- **teksilo-scene:** a rotation applied by `apply_transform_delta` that also
+  moves the item now emits `TransformChanged` as well as `LocalPosChanged`; it
+  used to emit only the move, so the rotation was invisible to the change
+  stream. `set_transform` ignores a write that changes nothing.
+- **teksilo-scene:** `ItemChange::HandlersChanged` carries the handler sets it
+  replaced. `set_item_handlers` knows both sides and now reports them, so a
+  handler change is reversible from the record like every other edit;
+  `handlers_mut` cannot (it hands out a `&mut` and is told nothing about what
+  the caller does with it), so it reports `replaced: None` and is not recorded
+  as an edit.
+- **teksilo-scene:** `ItemChange::VisibilityChanged` is emitted by **every**
+  door that flips `IS_VISIBLE`, not only `set_flag`, and is no longer recorded
+  as an edit. Hiding a card is one recorded edit and two notifications whether
+  it went through `set_visible`, `set_flag` or a wholesale `set_flags`; it used
+  to be two edits through one door and one through the other.
+- **teksilo-scene:** `Scene::set_z` ignores a write only when the entry already
+  holds that exact value. It used to ignore anything within `f32::EPSILON`,
+  which near zero swallowed millions of distinct floats — including the
+  midpoints `z_between` hands out, so a caller was told there was room and then
+  got a silent no-op with no `ZChanged` to observe.
+- **teksilo-scene:** a geometry constraint that returns
+  `ChangeVerdict::Adjust` with a frame that cannot be applied — non-finite, or
+  a negative extent — is refused rather than applied; a debug build panics
+  naming the frame. A `NaN` frame used to be stored verbatim, which removed the
+  item from hit-testing, from the marquee and from every spatial query for good,
+  with nothing raised to say so.
+- **teksilo-scene:** `Scene::selection_roots` is O(n·depth) rather than
+  O(n²·depth) — 36 µs against 7.03 ms for a 1 000-item selection, measured.
+  `SceneModel::constrain_move` / `constrain_frame` called inside an open write
+  scope panic naming the rule instead of reporting `RefCell already mutably
+  borrowed`.
+
+#### The selection transform controller
+
+- **teksilo-scene:** `Increment` and `Decrement` on a handle move the
+  coordinates that handle drives: an edge slider's own `numeric_value`, a
+  corner's two coordinates together, the frame band's whole rectangle. They
+  used to be a horizontal nudge whatever the handle was.
+- **teksilo-scene:** thirteen public types are `#[non_exhaustive]` —
+  `TransformFrame`, `TransformDelta`, `TransformSession`, `Placement`,
+  `SceneItemPaintContext`, `SceneItemA11yContext`, `MagnetRef`,
+  `MagnetConnection`, `MagnetSnap`, `MagnetMarker`, `MagnetFeedback`,
+  `MinimapReadout` and `ReplaceRejected`. Each is a value the crate hands *to*
+  consumer code, so a new field is a source break without it. Build them with
+  the constructors above; the fields stay public.
+
+### Fixed
+
+#### The selection transform controller
+
+- **teksilo-scene:** an item's **height** can be changed from assistive
+  technology. `Increment` on the "Resize top" or "Resize bottom" slider reported
+  the action handled, announced an unchanged number and moved nothing.
+- **teksilo-scene:** turning the controller off through
+  `TransformConfig::enabled` takes the frame and its handles off the screen and
+  out of the published accessibility tree. They stayed painted, and a screen
+  reader went on offering handles whose actions the flag had just made refuse.
+- **teksilo-scene:** a selection change no pointer made — "select all", a search
+  result, or the other pane of a shared `SceneSelection` — reaches the published
+  accessibility tree. Both panes kept describing the previous selection, at its
+  previous position.
+- **teksilo-scene:** `Esc` cancels a transform the **pointer** started. It only
+  ever reached a gesture started from the keyboard, so the focus the pointer
+  gesture takes in order to receive it bought nothing.
+- **teksilo-scene:** a revoked contact — a cancelled touch, a lost capture —
+  ends the gesture through the cancel path: `TransformConfig::on_end` fires with
+  `TransformOutcome::Cancelled`, and the edge auto-pan stops. The pan used to
+  keep tweening for up to thirty seconds with no input, and the hook an app
+  tears its overlay down on never fired.
+- **teksilo-scene:** `TransformConfig::min_size` floors only the axes the
+  dragged handle drives. Dragging the bottom edge of a 2 × 100 hairline widened
+  it to 4 — a horizontal change from a purely vertical gesture, on the first
+  sample.
+- **teksilo-scene:** a geometry constraint that returns `ChangeVerdict::Accept`
+  leaves a magnetised drag alone on a **rotated** item. The comparison that
+  decides whether the rule overruled the magnet was exact, and the constraint
+  path's rotation round-trip is not bit-exact off zero degrees — so the snap was
+  cleared and `on_connect` never fired.
+
 ## [0.10.0] - 2026-09-14
 
 One strand above all: the input model is a pointer model. A touchscreen, a pen

@@ -174,11 +174,21 @@ model but must not mutate it. The `on_connect` handler, by contrast,
 runs after every borrow is dropped and may freely mutate the model
 (add an edge item, reparent, fire an intent).
 
+`#[non_exhaustive]`: the crate hands this *to* consumer code — it is what a
+predicate inspects — the same reason `MagnetVisualState` carries it. Build
+one with `new`.
+
 ```rust
 pub struct MagnetRef { /* fields */ }
 ```
 
 ### Methods
+
+#### `pub fn new( id: MagnetId, item: ItemId, role: MagnetRole, payload: Option<Rc<dyn Any>>, scene_pos: Point, ) -> Self`
+
+A snapshot stated field by field — the constructor
+[`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+The scene builds its own; this is for a consumer testing its predicate.
 
 #### `pub fn payload_as<P: 'static>(&self) -> Option<&P>`
 
@@ -224,11 +234,20 @@ item's magnet, the grabbed port, or the keyboard-activated source);
 `to` is the magnet it connected onto. `payload` is whatever the
 predicate's `MagnetVerdict::Accept` carried.
 
+`#[non_exhaustive]`: the crate hands this *to* consumer code — it is the
+argument of `on_connect`. Build one with `new`.
+
 ```rust
 pub struct MagnetConnection { /* fields */ }
 ```
 
 ### Methods
+
+#### `pub fn new(from: MagnetRef, to: MagnetRef, payload: Option<Rc<dyn Any>>) -> Self`
+
+A connection stated field by field — the constructor
+[`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+The scene builds its own; this is for a consumer testing `on_connect`.
 
 #### `pub fn payload_as<P: 'static>(&self) -> Option<&P>`
 
@@ -245,9 +264,21 @@ place the item so `from` lands on `to`, and resolves `from` / `to`
 via `Scene::magnet` to build the connection
 for its own `on_connect`.
 
+`#[non_exhaustive]`: the crate hands this *to* consumer code — a
+heavyweight consumer driving its own drag reads it. Build one with
+`new`.
+
 ```rust
 pub struct MagnetSnap { /* fields */ }
 ```
+
+### Methods
+
+#### `pub fn new( from: MagnetId, to: MagnetId, snap_vector: Vec2, payload: Option<Rc<dyn Any>>, distance: f32, ) -> Self`
+
+A snap stated field by field — the constructor
+[`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+The scene computes its own; this is for a consumer's own tests.
 
 ## `pub enum MarkerVisibility`
 
@@ -288,9 +319,21 @@ pub enum MagnetVisualState { /* variants */ }
 
 One magnet's render data, handed to the feedback renderer.
 
+`#[non_exhaustive]`: the crate hands this *to* consumer code — it is what a
+custom `MagnetismConfig::feedback` draws, and it is the struct
+`MagnetVisualState` lives inside, which already says so for itself. Build
+one with `new`.
+
 ```rust
 pub struct MagnetMarker { /* fields */ }
 ```
+
+### Methods
+
+#### `pub fn new(id: MagnetId, scene_pos: Point, role: MagnetRole, state: MagnetVisualState) -> Self`
+
+A marker stated field by field — the constructor
+[`#[non_exhaustive]`](Self) takes the place of a struct literal for.
 
 ## `pub struct MagnetFeedback`
 
@@ -299,9 +342,20 @@ scene coordinates (the canvas is already in the view-transform
 scope). The built-in renderer draws markers plus a connector; a
 custom `MagnetismConfig::feedback` closure receives the same data.
 
+`#[non_exhaustive]`: the crate hands this *to* consumer code — it is the
+argument of a custom feedback renderer, and the set grows with every cue
+magnetism learns to draw. Build one with `new`.
+
 ```rust
 pub struct MagnetFeedback { /* fields */ }
 ```
+
+### Methods
+
+#### `pub fn new( zoom: f32, markers: Vec<MagnetMarker>, connector: Option<(Point, Point, bool)>, ) -> Self`
+
+A frame of feedback stated field by field — the constructor
+[`#[non_exhaustive]`](Self) takes the place of a struct literal for.
 
 ## `pub struct MagnetismConfig`
 

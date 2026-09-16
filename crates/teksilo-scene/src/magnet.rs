@@ -204,7 +204,12 @@ impl Magnet {
 /// model but must not mutate it. The `on_connect` handler, by contrast,
 /// runs after every borrow is dropped and may freely mutate the model
 /// (add an edge item, reparent, fire an intent).
+///
+/// `#[non_exhaustive]`: the crate hands this *to* consumer code — it is what a
+/// predicate inspects — the same reason [`MagnetVisualState`] carries it. Build
+/// one with [`new`](Self::new).
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct MagnetRef {
     /// The magnet's id.
     pub id: MagnetId,
@@ -231,6 +236,25 @@ impl std::fmt::Debug for MagnetRef {
 }
 
 impl MagnetRef {
+    /// A snapshot stated field by field — the constructor
+    /// [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+    /// The scene builds its own; this is for a consumer testing its predicate.
+    pub fn new(
+        id: MagnetId,
+        item: ItemId,
+        role: MagnetRole,
+        payload: Option<Rc<dyn Any>>,
+        scene_pos: Point,
+    ) -> Self {
+        Self {
+            id,
+            item,
+            role,
+            payload,
+            scene_pos,
+        }
+    }
+
     /// Borrow the payload downcast to `P`, or `None` if absent or a
     /// different type. The ergonomic way to read a typed payload inside
     /// a predicate.
@@ -273,7 +297,11 @@ impl MagnetVerdict {
 /// item's magnet, the grabbed port, or the keyboard-activated source);
 /// `to` is the magnet it connected onto. `payload` is whatever the
 /// predicate's [`MagnetVerdict::Accept`] carried.
+///
+/// `#[non_exhaustive]`: the crate hands this *to* consumer code — it is the
+/// argument of `on_connect`. Build one with [`new`](Self::new).
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct MagnetConnection {
     /// The initiating magnet.
     pub from: MagnetRef,
@@ -294,6 +322,13 @@ impl std::fmt::Debug for MagnetConnection {
 }
 
 impl MagnetConnection {
+    /// A connection stated field by field — the constructor
+    /// [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+    /// The scene builds its own; this is for a consumer testing `on_connect`.
+    pub fn new(from: MagnetRef, to: MagnetRef, payload: Option<Rc<dyn Any>>) -> Self {
+        Self { from, to, payload }
+    }
+
     /// Borrow the connection payload downcast to `P`.
     pub fn payload_as<P: 'static>(&self) -> Option<&P> {
         self.payload.as_ref().and_then(|p| p.downcast_ref::<P>())
@@ -308,7 +343,12 @@ impl MagnetConnection {
 /// place the item so `from` lands on `to`, and resolves `from` / `to`
 /// via [`Scene::magnet`](crate::Scene::magnet) to build the connection
 /// for its own `on_connect`.
+///
+/// `#[non_exhaustive]`: the crate hands this *to* consumer code — a
+/// heavyweight consumer driving its own drag reads it. Build one with
+/// [`new`](Self::new).
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct MagnetSnap {
     /// The dragged item's magnet that is snapping.
     pub from: MagnetId,
@@ -322,6 +362,27 @@ pub struct MagnetSnap {
     /// Scene-space distance between the pair before snapping (the
     /// tie-break used to pick the closest accepting pair).
     pub distance: f32,
+}
+
+impl MagnetSnap {
+    /// A snap stated field by field — the constructor
+    /// [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+    /// The scene computes its own; this is for a consumer's own tests.
+    pub fn new(
+        from: MagnetId,
+        to: MagnetId,
+        snap_vector: Vec2,
+        payload: Option<Rc<dyn Any>>,
+        distance: f32,
+    ) -> Self {
+        Self {
+            from,
+            to,
+            snap_vector,
+            payload,
+            distance,
+        }
+    }
 }
 
 impl std::fmt::Debug for MagnetSnap {
@@ -374,7 +435,13 @@ pub enum MagnetVisualState {
 }
 
 /// One magnet's render data, handed to the feedback renderer.
+///
+/// `#[non_exhaustive]`: the crate hands this *to* consumer code — it is what a
+/// custom [`MagnetismConfig::feedback`] draws, and it is the struct
+/// [`MagnetVisualState`] lives inside, which already says so for itself. Build
+/// one with [`new`](Self::new).
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct MagnetMarker {
     /// The magnet's id.
     pub id: MagnetId,
@@ -386,11 +453,29 @@ pub struct MagnetMarker {
     pub state: MagnetVisualState,
 }
 
+impl MagnetMarker {
+    /// A marker stated field by field — the constructor
+    /// [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+    pub fn new(id: MagnetId, scene_pos: Point, role: MagnetRole, state: MagnetVisualState) -> Self {
+        Self {
+            id,
+            scene_pos,
+            role,
+            state,
+        }
+    }
+}
+
 /// Everything the magnetism feedback renderer needs for one frame, in
 /// scene coordinates (the canvas is already in the view-transform
 /// scope). The built-in renderer draws markers plus a connector; a
 /// custom [`MagnetismConfig::feedback`] closure receives the same data.
+///
+/// `#[non_exhaustive]`: the crate hands this *to* consumer code — it is the
+/// argument of a custom feedback renderer, and the set grows with every cue
+/// magnetism learns to draw. Build one with [`new`](Self::new).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MagnetFeedback {
     /// The view's current geometric zoom, so the renderer can size
     /// constant-pixel chrome as `pixels / zoom` in scene units.
@@ -404,6 +489,22 @@ pub struct MagnetFeedback {
     /// second field marks an *accepted* connector (drawn solid /
     /// highlighted) versus a tentative one (the free port-drag wire).
     pub connector: Option<(Point, Point, bool)>,
+}
+
+impl MagnetFeedback {
+    /// A frame of feedback stated field by field — the constructor
+    /// [`#[non_exhaustive]`](Self) takes the place of a struct literal for.
+    pub fn new(
+        zoom: f32,
+        markers: Vec<MagnetMarker>,
+        connector: Option<(Point, Point, bool)>,
+    ) -> Self {
+        Self {
+            zoom,
+            markers,
+            connector,
+        }
+    }
 }
 
 /// Per-view magnetism configuration, installed via

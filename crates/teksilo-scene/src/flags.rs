@@ -92,6 +92,28 @@ impl ItemFlags {
     // Nothing else moved: the remaining bits keep their values, so a
     // `from_bits` round-trip of any previously-valid bitset is unchanged.
 
+    /// Item offers **resize** handles to a selection transform controller.
+    /// Default off, like [`IS_DRAGGABLE`](Self::IS_DRAGGABLE).
+    ///
+    /// A resize writes the item's `local_bounds`, so the item reflows into the
+    /// new box — a heavyweight card relayouts, a `RectItem` redraws at the new
+    /// size, a `PathItem` fits its geometry to it. Nothing is scaled visually
+    /// and then baked.
+    pub const IS_RESIZABLE: Self = Self(1 << 11);
+
+    /// Item offers a **rotate** handle to a selection transform controller.
+    /// Default off.
+    ///
+    /// Honoured for the lightweight tier only. A heavyweight entry carrying it
+    /// is refused, because `place_children` sizes a card from the AABB of its
+    /// transformed bounds: a rotation there inflates the layout box and rotates
+    /// nothing. See `SceneView::transform_controller`.
+    pub const IS_ROTATABLE: Self = Self(1 << 12);
+
+    /// A resize of this item keeps its aspect ratio whatever the controller's
+    /// `keep_ratio` setting says. Default off.
+    pub const ASPECT_LOCKED: Self = Self(1 << 13);
+
     /// Whether the bitset contains every flag in `other`.
     pub const fn contains(&self, other: Self) -> bool {
         (self.0 & other.0) == other.0
@@ -173,6 +195,9 @@ mod tests {
         assert!(f.contains(ItemFlags::IS_SELECTABLE));
         assert!(!f.contains(ItemFlags::IS_DRAGGABLE));
         assert!(!f.contains(ItemFlags::IS_FOCUSABLE));
+        assert!(!f.contains(ItemFlags::IS_RESIZABLE));
+        assert!(!f.contains(ItemFlags::IS_ROTATABLE));
+        assert!(!f.contains(ItemFlags::ASPECT_LOCKED));
     }
 
     #[test]

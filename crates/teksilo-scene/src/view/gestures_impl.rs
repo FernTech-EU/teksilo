@@ -99,6 +99,7 @@ impl SceneView {
             let press_floor_claimants = self.over_claimants.clone();
             let press_floor_memo = self.veto_memo.clone();
             let press_floor_generation = self.snapshot_generation.clone();
+            let transform_for_cursor = self.transform_driver();
             handlers = handlers.on_pointer_event(move |ev, ctx| {
                 use teksilo_core::event::PointerButton;
                 use teksilo_core::event::WidgetEvent as Ev;
@@ -313,14 +314,25 @@ impl SceneView {
                         // path already reports this view as the target, so the
                         // `floor` test alone would do it — this says so rather
                         // than relying on it.)
-                        let yielding = drag_target_for_cursor.get().is_none()
+                        // The transform chrome is painted on top of everything
+                        // and grabbed before everything, so its cursor outranks
+                        // everything too — including a card's, which is the one
+                        // case where saying nothing would be wrong. It also
+                        // records which handle is hovered, for the chrome.
+                        let transform_cursor = transform_for_cursor
+                            .as_ref()
+                            .and_then(|d| d.hover(scene_pt, slop));
+                        let yielding = transform_cursor.is_none()
+                            && drag_target_for_cursor.get().is_none()
                             && floor > crate::pick::RANK_UNDER
                             && item_cursor.is_none()
                             && !over_draggable;
                         if yielding {
                             ctx.release_cursor();
                         } else {
-                            let cursor = if drag_target_for_cursor.get().is_some() {
+                            let cursor = if let Some(c) = transform_cursor {
+                                c
+                            } else if drag_target_for_cursor.get().is_some() {
                                 CursorIcon::Grabbing
                             } else if let Some(c) = item_cursor {
                                 c
@@ -599,7 +611,7 @@ impl SceneView {
                 // keyboard connect flow's half-made connection is deliberately
                 // NOT in it: that is armed by a key, not by this pointer, and a
                 // revoked contact is no reason to drop it.
-                let had_visual = unwind.clear();
+                let had_visual = unwind.clear(ctx);
 
                 // A press that is taken away can never become a tap, and the
                 // hold it may have armed can never become a tooltip.
@@ -967,6 +979,7 @@ impl SceneView {
             let magnet_focus_keys = self.magnet_focus.clone();
             let magnet_pending_keys = self.magnet_pending.clone();
             let self_id_for_keys = self.self_widget_id.get();
+            let transform_for_keys = self.transform_driver();
             handlers = handlers.on_key(move |event, ctx| {
                 use crate::scene::PanAxes;
                 let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
@@ -989,13 +1002,28 @@ impl SceneView {
                 {
                     return EventResponse::Handled;
                 }
+                // The selection transform controller's keyboard route: the
+                // mode key enters it, then Tab roves the handles, arrows drive
+                // the roved one, Enter commits and Esc cancels. It runs before
+                // the pan/zoom keys because an active mode owns the arrows —
+                // and it deliberately declines an Alt+Arrow, which stays the
+                // immediate nudge below.
+                if let Some(d) = transform_for_keys.as_ref()
+                    && d.handle_key(key, *modifiers, ctx)
+                {
+                    return EventResponse::Handled;
+                }
                 // Alt+Arrow nudges the selected scene item(s) — the keyboard
                 // alternative to pointer drag-to-move (WCAG 2.5.7 Dragging
-                // Movements). Moves EVERY selected item so a multi-selection
-                // stays together, matching pointer group-drag. Directly mutates
-                // the model (SceneModel mutators are `&self`); the resulting
-                // ItemChange reconciles the view + AT bounds. Scene-coord step;
-                // Shift = x10. Ignores view rotation (v1).
+                // Movements). Moves every selected **root** so a multi-selection
+                // stays together, which is what the pointer's group drag does:
+                // a selected item whose ancestor is also selected is dropped,
+                // because its `local_pos` is parent-relative and moving the
+                // ancestor already moved it. (Moving both translated it twice,
+                // which is what this used to do.) Directly mutates the model
+                // (SceneModel mutators are `&self`); the resulting ItemChange
+                // reconciles the view + AT bounds. Scene-coord step; Shift = x10.
+                // Ignores view rotation (v1).
                 if modifiers.alt() {
                     let step = if modifiers.shift() { 10.0 } else { 1.0 };
                     let delta = match key {
@@ -1008,7 +1036,36 @@ impl SceneView {
                     if let Some((dx, dy)) = delta {
                         let selected = selection_for_keys.selected();
                         if !selected.is_empty() {
-                            for id in selected {
+                            let roots = model_for_keys.selection_roots(&selected);
+                            // The same document rule the pointer obeys, over
+                            // the same quantity — the roots' scene box, not a
+                            // per-item position. A nudge that ignored it would
+                            // give the keyboard a different geometry from the
+                            // mouse, which is the WCAG 2.5.7 equivalence this
+                            // handler exists to keep.
+                            let (dx, dy) = match model_for_keys.transform_frame(&roots) {
+                                Some(start) => {
+                                    let t = model_for_keys.constrain_move(
+                                        &roots,
+                                        start,
+                                        Vec2::new(dx, dy),
+                                        crate::transform_session::TransformSource::Keyboard,
+                                    );
+                                    (t.x, t.y)
+                                }
+                                None => (dx, dy),
+                            };
+                            // A refused nudge is (0, 0) and is applied anyway:
+                            // `Scene::set_local_pos` early-returns on an
+                            // unchanged value, so nothing is written and no
+                            // `ItemChange` is emitted. Guarding it here would be
+                            // a second, untestable statement of the same rule.
+                            // One `User` transaction for the whole selection:
+                            // a 12-item nudge is one edit the user made, and
+                            // without the guard it arrives as 12 unrelated
+                            // moves with nothing tying them together.
+                            let _txn = model_for_keys.user_edit();
+                            for id in roots {
                                 if let Some(p) = model_for_keys.local_pos(id) {
                                     model_for_keys.set_local_pos(
                                         id,
@@ -1148,11 +1205,22 @@ impl SceneView {
         // interaction state; `magnetism_for_drag` is the (optional)
         // config read live so a toolbar toggle takes effect next event.
         let model_for_drag = self.model.clone();
+        // The drag group (and hence the frame a geometry constraint measures
+        // against) is derived from the selection at the press. Captured as a
+        // handle, not snapshotted: `drag_group_of` is the one definition of
+        // "what is moving", shared with the commit and the paint feedback.
+        let selection_for_drag = self.selection.clone();
         let magnetism_for_drag = self.magnetism.clone();
         let port_drag = self.port_drag.clone();
         let item_snap = self.item_snap.clone();
         let drag_unwind = self.drag_unwind();
         let press_floor_for_drag = self.press_floor.clone();
+        // The selection transform controller, as a bundle of shared handles —
+        // a `HandlerSet` closure outlives the `&self` that built it, so the
+        // controller's behaviour cannot live on a `&self` method. `None` when
+        // no controller is installed, and then every branch below is exactly
+        // what it was.
+        let transform_for_drag = self.transform_driver();
         handlers = handlers.on_drag(move |phase, ctx| {
             // Per-event grab tolerance: see the twin in
             // `register_pointer_handlers`. Zero for a mouse by arithmetic, so
@@ -1217,6 +1285,23 @@ impl SceneView {
                         Some(inv) => inv.apply_point(position),
                         None => Point::ZERO,
                     };
+                    // The transform controller's chrome outranks everything
+                    // else: it is painted on top, and — because the frame is
+                    // drawn `padding` **outside** the selection — it is the one
+                    // affordance that is reachable over a heavyweight card,
+                    // whose own pixels stop at the content edge.
+                    if let Some(d) = transform_for_drag.as_ref()
+                        && let Some(handle) = d.hit_handle(scene_press, slop)
+                        && d.begin(
+                            handle,
+                            scene_press,
+                            Some(position),
+                            crate::transform_session::TransformSource::Pointer,
+                            ctx,
+                        )
+                    {
+                        return;
+                    }
                     // Magnetism: a press on a magnet handle starts a
                     // port-drag (a transient wire), taking priority over
                     // item-drag and marquee. The grab disc is a fixed
@@ -1240,6 +1325,31 @@ impl SceneView {
                             return;
                         }
                     }
+                    // Group move: a press on the **body** of a selected,
+                    // movable item drags the whole selection. This is the only
+                    // route by which a heavyweight card moves at all — the
+                    // draggable snapshot below is lightweight-only, by
+                    // construction — and it is best-effort over one, because a
+                    // card that claims its own press (`capture_pointer`, or its
+                    // own `on_drag`) wins it and this handler never runs. The
+                    // frame band above is the route that always works.
+                    //
+                    // `IS_DRAGGABLE` is honoured here, not bypassed: routing by
+                    // selection membership alone would make every default item
+                    // pointer-movable, since `ItemFlags::default()` carries
+                    // `IS_SELECTABLE` and not `IS_DRAGGABLE`.
+                    if let Some(d) = transform_for_drag.as_ref()
+                        && d.hit_body(scene_press)
+                        && d.begin(
+                            crate::transform_session::TransformHandle::Move,
+                            scene_press,
+                            Some(position),
+                            crate::transform_session::TransformSource::Pointer,
+                            ctx,
+                        )
+                    {
+                        return;
+                    }
                     // Narrow-phase hit-test: target the topmost draggable
                     // item whose actual SHAPE (not just its AABB) contains the
                     // press, so a thin draggable item (e.g. a connector path)
@@ -1262,10 +1372,36 @@ impl SceneView {
                     if let Some(item_id) = hit {
                         // Drag-to-move: enter that mode,
                         // not marquee.
+                        //
+                        // The group's scene box is captured **once**, here, and
+                        // is what a geometry constraint is measured against for
+                        // the rest of the gesture. It is deliberately not the
+                        // press point: a constraint stated over the pointer
+                        // would snap the cursor and leave the item off-grid by
+                        // the grab offset on every drag.
+                        //
+                        // Captured only when there is a rule to measure it
+                        // against. Both halves cost a full prune of the
+                        // selection, and `constrain_drag` is the only reader —
+                        // so an unconstrained scene, which is most scenes, would
+                        // otherwise pay them on the press of every drag for a
+                        // value nothing goes on to look at.
+                        let start_frame = model_for_drag
+                            .has_geometry_constraint()
+                            .then(|| {
+                                let group = super::drag_group_of(
+                                    &model_for_drag,
+                                    &selection_for_drag,
+                                    item_id,
+                                );
+                                model_for_drag.transform_frame(&group)
+                            })
+                            .flatten();
                         drag_target.set(Some(DragTarget {
                             item_id,
                             anchor_scene: scene_press,
                             current_scene: scene_press,
+                            start_frame,
                         }));
                     } else {
                         // Empty area — start a marquee.
@@ -1277,6 +1413,14 @@ impl SceneView {
                     }
                 }
                 DragPhase::Moved { position, .. } => {
+                    // A live transform owns the gesture: it was claimed at the
+                    // press, and nothing below can be running at the same time.
+                    if let Some(d) = transform_for_drag.as_ref()
+                        && d.is_active()
+                    {
+                        d.update(position, ctx);
+                        return;
+                    }
                     // Port-drag takes priority: update the wire's free end
                     // and re-evaluate the snapped target.
                     if port_drag.borrow().is_some() {
@@ -1342,6 +1486,31 @@ impl SceneView {
                                     }
                                 }
                             }
+                            // The document's standing geometry rule gets the
+                            // last word, over the magnetised proposal — and is
+                            // told that it is magnetised, so a policy that
+                            // wants an explicit magnet to outrank it says so in
+                            // one line. Constraining `current_scene` rather
+                            // than the committed delta is what makes the
+                            // dragged ghost show the constrained position:
+                            // the pair is only ever read as a difference, and
+                            // this keeps that difference equal to the applied
+                            // translation on every sample.
+                            let magnetised = target.current_scene;
+                            let was_snapped = item_snap.borrow().is_some();
+                            constrain_drag(
+                                &model_for_drag,
+                                &selection_for_drag,
+                                &mut target,
+                                was_snapped,
+                            );
+                            // A magnet the rule overruled is not snapped, and
+                            // must not go on drawing its marker as if it were.
+                            // The same verdict decides the geometry, the
+                            // feedback and (at the release) the connection.
+                            if was_snapped && !constraint_kept(magnetised, target.current_scene) {
+                                item_snap.replace(None);
+                            }
                             drag_target.set(Some(target));
                         }
                     } else if let Some(mut state) = marquee.get() {
@@ -1350,6 +1519,16 @@ impl SceneView {
                     }
                 }
                 DragPhase::Ended { position, .. } => {
+                    // The transform's one and only model write. Everything up
+                    // to here was a preview; this posts a single
+                    // `Scene::apply_transform_delta` for `build()` to apply.
+                    if let Some(d) = transform_for_drag.as_ref()
+                        && d.is_active()
+                    {
+                        d.update(position, ctx);
+                        d.commit(ctx);
+                        return;
+                    }
                     // Port-drag release: fire the connection if the wire
                     // snapped onto an accepting target. No item moves.
                     if port_drag.borrow().is_some() {
@@ -1390,6 +1569,7 @@ impl SceneView {
                         // overwritten by the raw projection above), apply
                         // it, and fire the connection. The snapped
                         // current_scene yields a snapped commit delta.
+                        let mut magnet_connection = None;
                         if let Some(cfg) = magnetism_for_drag.as_ref().filter(|c| c.enabled.get()) {
                             let delta = Vec2::new(
                                 target.current_scene.x - target.anchor_scene.x,
@@ -1407,15 +1587,35 @@ impl SceneView {
                                     target.current_scene.x + snap.snap_vector.x,
                                     target.current_scene.y + snap.snap_vector.y,
                                 );
-                                if let Some(conn) = build_connection(
+                                magnet_connection = build_connection(
                                     &model_for_drag,
                                     snap.from,
                                     snap.to,
                                     snap.payload,
-                                ) {
-                                    (cfg.on_connect)(&conn, ctx);
-                                }
+                                );
                             }
+                        }
+                        // The geometry constraint sees the release sample with
+                        // exactly the inputs the last preview gave it, so the
+                        // committed position is the previewed one and the item
+                        // does not jump at the release.
+                        let magnetised = target.current_scene;
+                        constrain_drag(
+                            &model_for_drag,
+                            &selection_for_drag,
+                            &mut target,
+                            magnet_connection.is_some(),
+                        );
+                        // A magnet whose alignment the document's rule overruled
+                        // did not connect anything. Two snapping systems that
+                        // disagree is worse than one, so the constraint's
+                        // verdict decides both the geometry and the connection.
+                        if let Some(conn) = magnet_connection
+                            && constraint_kept(magnetised, target.current_scene)
+                            && let Some(cfg) =
+                                magnetism_for_drag.as_ref().filter(|c| c.enabled.get())
+                        {
+                            (cfg.on_connect)(&conn, ctx);
                         }
                         item_snap.replace(None);
                         let delta = Vec2::new(
@@ -1488,7 +1688,7 @@ impl SceneView {
                 // unwinds the hover / pending-tap / hold state that lives over
                 // there.
                 DragPhase::Cancelled { .. } => {
-                    drag_unwind.clear();
+                    drag_unwind.clear(ctx);
                     reconcile_dirty.set(reconcile_dirty.get().wrapping_add(1));
                 }
                 _ => {}
@@ -1575,4 +1775,84 @@ pub(super) fn pan_by_touch(
     signals.pan_x.set(clamped.x);
     signals.pan_y.set(clamped.y);
     EventResponse::Handled
+}
+
+/// Apply the scene's geometry constraint to a live lightweight drag, in place.
+///
+/// Rewrites `target.current_scene` so that `current_scene − anchor_scene` is
+/// the **constrained** translation. That one field is what paint reads for the
+/// dragged ghost *and* what `Ended` turns into the committed delta, so
+/// constraining it here is what makes the preview, the commit and the
+/// notification agree — there is no second place for them to drift apart.
+///
+/// A no-op when the scene carries no constraint (one `Option` test, no closure
+/// built) or when the group had no resolvable geometry at the press.
+pub(super) fn constrain_drag(
+    model: &SceneModel,
+    selection: &crate::selection::SceneSelection,
+    target: &mut DragTarget,
+    magnet_snapped: bool,
+) {
+    let Some(start) = target.start_frame else {
+        return;
+    };
+    let raw = Vec2::new(
+        target.current_scene.x - target.anchor_scene.x,
+        target.current_scene.y - target.anchor_scene.y,
+    );
+    let scene = model.0.borrow();
+    let Some(call) = crate::constrain::ConstraintCall::new(&scene) else {
+        return;
+    };
+    // The drag group is resolved **here**, past the `Option` test, and not by
+    // the caller. It prunes the whole selection — `Scene::selection_roots` — so
+    // computing it before the test made a scene with no constraint at all pay
+    // that prune on every pointer sample of every drag. The published claim
+    // that an unconstrained scene "pays one `Option` test per gesture sample"
+    // was only ever true of a single-item selection.
+    //
+    // A second shared borrow of the scene is legal and is what
+    // `drag_group_of` needs; the exclusive one a mutator would take cannot
+    // exist while this one is open.
+    let group = super::drag_group_of(model, selection, target.item_id);
+    let applied = crate::constrain::constrained_translation(
+        &call,
+        &group,
+        &start,
+        raw,
+        crate::transform_session::TransformSource::Pointer,
+        magnet_snapped,
+    );
+    target.current_scene = Point::new(
+        target.anchor_scene.x + applied.x,
+        target.anchor_scene.y + applied.y,
+    );
+}
+
+/// Whether the geometry constraint left a magnetised proposal where it was.
+///
+/// Deliberately **not** `==`. The constraint path round-trips the translation
+/// through `Transform2D::rotate(-theta)` and back, and for any non-zero
+/// rotation that is not bit-exact — so an exact test reported "the rule
+/// overruled the magnet" for a rule that had said
+/// [`ChangeVerdict::Accept`](crate::ChangeVerdict::Accept), cleared the snap
+/// and never fired `on_connect`. It failed only on rotated items, which is why
+/// every in-tree test passed: at zero degrees the round-trip *is* exact.
+///
+/// The tolerance is stated in units in the last place rather than as a scene
+/// distance, because the error it must absorb is a relative one: 64 ulps of the
+/// larger coordinate. That is roughly two thousandths of a scene unit around
+/// the origin and well under one unit out at 1e5 — far below anything a user
+/// can see, and orders of magnitude below the smallest displacement a real
+/// rule (a grid snap, a page clamp) applies.
+pub(super) fn constraint_kept(before: Point, after: Point) -> bool {
+    let scale = before
+        .x
+        .abs()
+        .max(before.y.abs())
+        .max(after.x.abs())
+        .max(after.y.abs())
+        .max(1.0);
+    let tolerance = f32::EPSILON * 64.0 * scale;
+    (before.x - after.x).abs() <= tolerance && (before.y - after.y).abs() <= tolerance
 }

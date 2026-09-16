@@ -72,6 +72,18 @@ impl SceneView {
         let drag_group: Vec<crate::item::ItemId> = drag_target
             .map(|t| self.drag_group(t.item_id))
             .unwrap_or_default();
+        // The selection transform's live preview, resolved once per band. The
+        // heavyweight tier reads the SAME function in `place_children` — one
+        // affine, two tiers, so a mixed selection cannot half-move mid-gesture.
+        //
+        // Composing the affine is a **visual scale** for this tier: the item is
+        // drawn through it, so a resize thickens its strokes and stretches its
+        // glyphs until the commit writes `local_bounds` and it reflows. The
+        // heavyweight half lays the card out at the previewed rectangle instead
+        // and reflows live. Both preview the same box; see the
+        // `transform_session` module header for why the interiors differ and
+        // what would close it.
+        let transform_preview = self.transform_preview();
         let mut visible_ids = self.scene().items_in_rect(region);
         // Paint order: bottom-most first, so a later element paints on top.
         // The comparator is `PaintKey`, the *same* value every hit test in the
@@ -123,12 +135,25 @@ impl SceneView {
                     )
                 });
 
+            // …and the transform controller's preview, on the roots it carries
+            // and everything hanging off them (a child follows its transformed
+            // parent, exactly as it follows a dragged one).
+            let transform_delta = transform_preview.as_ref().and_then(|(roots, xform)| {
+                roots
+                    .iter()
+                    .any(|r| *r == id || self.scene().is_descendant_of(id, *r))
+                    .then_some(*xform)
+            });
+
             // Compose `local→scene`, optionally with a scene-coord drag
             // offset baked in. Push beneath the view transform so the item's
             // `paint` works in local coords. `save` / `restore` isolate
             // neighbouring items' transforms.
             let mut local_to_scene = self.scene().scene_transform(id);
             if let Some(t) = drag_delta {
+                local_to_scene = local_to_scene.then(&t);
+            }
+            if let Some(t) = transform_delta {
                 local_to_scene = local_to_scene.then(&t);
             }
             canvas.save();
@@ -269,6 +294,7 @@ impl SceneView {
             || self.debug_overlay.is_active()
             || self.scene().has_over_layer_items()
             || self.magnet_wants_post_paint()
+            || self.transform_wants_post_paint()
     }
 
     pub(super) fn post_paint_impl(
@@ -313,6 +339,12 @@ impl SceneView {
         // content and the app foreground, under the debug overlay. Same
         // scene-coord scope.
         self.paint_magnet_feedback(bounds, canvas, ctx);
+
+        // The selection transform frame and its handles, over the content and
+        // over the magnet feedback (they are what the pointer grabs first), and
+        // still under the debug overlay. A paint pass, not scene items — see
+        // `view::transform` for why that distinction is load-bearing.
+        self.paint_transform_chrome(canvas, ctx);
 
         // Visual-debug overlays, on top of everything.
         if self.debug_overlay.is_active() {
