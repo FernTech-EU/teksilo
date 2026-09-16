@@ -22,7 +22,10 @@ pub use geometry::{EdgeInsets, Point, Rect, Size, SizeProposal, Transform2D, Vec
 pub use paint::{
     FillRule, GradientStop, ImageHandle, LineCap, LineJoin, Paint, StrokeSpace, StrokeStyle,
 };
-pub use path::{Path, PathCommand};
+pub use path::{
+    ArcCubic, Path, PathCommand, Subpath, arc_to_cubics, arc_transform_is_exact,
+    subpaths_contain_point,
+};
 pub use raster::{ImageDecodeError, ImageFormat, RasterIcon};
 pub use render_frame::{
     AnimParams, AnimatedQuadClass, AnimatedQuadDraw, BlendMode, CosmeticLine, DecorationKind,
