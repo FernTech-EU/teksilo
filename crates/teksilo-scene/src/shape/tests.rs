@@ -752,8 +752,14 @@ fn an_anisotropic_map_inscribes_a_band_rather_than_covering_it() {
     // all does not carry one: the true image is elliptical and no single width
     // describes it. The mapped width is the widest one that fits *inside* that
     // image, so the band can under-reach along the stretched axis and can
-    // never claim ground the true band does not cover — which is what keeps a
-    // shape-mode query from picking an item its own bounding rect does not.
+    // never claim ground the true band does not cover.
+    //
+    // That is the honest answer for a caller who asked for a mapped region,
+    // and it is NOT how a selection query is answered — under-reaching keeps
+    // `IntersectsItemShape` inside its bounding-rect twin but puts
+    // `ContainsItemShape` outside its own. See
+    // `a_banded_region_against_an_anisotropic_item_is_answered_in_scene_space`
+    // for the route a query actually takes.
     let region = SceneRegion::stroke(Path::line(Point::ZERO, Point::new(100.0, 0.0)), 4.0);
     let stretched = region.to_local(&Transform2D::scale(1.0, 10.0));
     // Half-width 2 stays 2 — the least stretch — where the true image reaches
@@ -800,6 +806,267 @@ fn linear_scale_bounds_reports_both_singular_values() {
     assert!(lo.abs() < 1e-3);
 }
 
+#[test]
+fn is_similarity_admits_exactly_the_maps_that_carry_a_distance() {
+    assert!(is_similarity(&Transform2D::identity()));
+    assert!(is_similarity(&Transform2D::translate(40.0, -7.0)));
+    assert!(is_similarity(&Transform2D::rotate(0.7)));
+    assert!(is_similarity(&Transform2D::scale(3.0, 3.0)));
+    // A reflection is a similarity: it maps a circle to a circle.
+    assert!(is_similarity(&Transform2D::scale(-2.0, 2.0)));
+    assert!(is_similarity(
+        &Transform2D::rotate(0.4).then(&Transform2D::scale(1.5, 1.5))
+    ));
+    assert!(!is_similarity(&Transform2D::scale(1.0, 10.0)));
+    assert!(!is_similarity(&Transform2D::scale(0.5, 1.5)));
+    // A collapsed axis is the most anisotropic map there is.
+    assert!(!is_similarity(&Transform2D::scale(0.0, 4.0)));
+}
+
+// ---------------------------------------------------------------------------
+// Which frame a region query is answered in
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_banded_region_against_an_anisotropic_item_is_answered_in_scene_space() {
+    // The item is a single point at local (5, 0), stretched tenfold in y. The
+    // region is a vertical wire at scene x = 0, 20 wide, so its band reaches
+    // 10 either side of it and the item — at scene (5, 0) — sits squarely
+    // inside. Nothing about that is marginal: the point is half a band's
+    // half-width from the centreline.
+    let shape = ItemShape::bounds(Rect::new(5.0, 0.0, 0.0, 0.0));
+    let local_to_scene = Transform2D::scale(1.0, 10.0);
+    let region = SceneRegion::stroke(
+        Path::line(Point::new(0.0, -100.0), Point::new(0.0, 100.0)),
+        20.0,
+    );
+
+    assert!(
+        shape.contained_by_scene_region(&region, &local_to_scene, 1.0),
+        "scene (5, 0) is 5 from the wire, and the band reaches 10"
+    );
+    assert!(shape.intersects_scene_region(&region, &local_to_scene, 1.0));
+
+    // The bounding-rect mode answers the same question in scene space and gets
+    // the same answer, which is the monotonicity the two modes owe each other:
+    // a shape lies inside its own box, so a box the region contains drags its
+    // shape in with it.
+    let scene_box = ItemShape::bounds(local_to_scene.apply_rect(Rect::new(5.0, 0.0, 0.0, 0.0)));
+    assert!(scene_box.contained_by_region(&region, 1.0));
+
+    // And this is the defect, stated as the thing that is no longer done:
+    // pushing the region down into the item's frame scales its band by the
+    // *smallest* stretch — 0.1 here — so a band that truly reaches 10 along x
+    // claims 1, and the item five units away falls out of it.
+    let scene_to_local = local_to_scene.inverse().expect("invertible");
+    assert!(
+        !shape.contained_by_region(&region.to_local(&scene_to_local), 1.0),
+        "the mapped-region route is the one that gets this wrong"
+    );
+}
+
+#[test]
+fn an_anisotropic_item_band_is_written_out_rather_than_scaled() {
+    // A stroked wire, 10 long, with a band half-width of 3 (width 2 plus the
+    // fixed grab slack). Stretched tenfold in y, the band it is *painted* with
+    // is elliptical — `PathItem` strokes in local coordinates under the item's
+    // transform — so in scene space the wire reaches 30 above and below its
+    // centreline while reaching only 3 either end.
+    let shape = ItemShape::from_path(Path::line(Point::ZERO, Point::new(10.0, 0.0)))
+        .unfilled()
+        .hit_stroke_width(2.0);
+    let local_to_scene = Transform2D::scale(1.0, 10.0);
+    let along = Path::line(Point::ZERO, Point::new(10.0, 0.0));
+
+    // A band reaching 40 covers the whole stretched wire.
+    let roomy = SceneRegion::stroke(along.clone(), 80.0);
+    assert!(shape.contained_by_scene_region(&roomy, &local_to_scene, 1.0));
+
+    // A band reaching 10 does not: the wire's own band reaches 30 in y.
+    // Scaling the item's band by the least stretch instead would have claimed
+    // 3 and reported this contained.
+    let tight = SceneRegion::stroke(along.clone(), 20.0);
+    assert!(
+        !shape.contained_by_scene_region(&tight, &local_to_scene, 1.0),
+        "a band that reaches 30 in scene y does not fit inside one reaching 10"
+    );
+    // It still *meets* it — containment is the stronger claim.
+    assert!(shape.intersects_scene_region(&tight, &local_to_scene, 1.0));
+
+    // An unstretched wire's band is 3 all round, and 10 holds it.
+    assert!(shape.contained_by_scene_region(&tight, &Transform2D::identity(), 1.0));
+}
+
+#[test]
+fn a_similarity_keeps_the_query_in_the_items_own_frame() {
+    // Nothing above applies to a rotation or a uniform scale: those carry a
+    // distance, the mapped band is exact, and the query stays on the one-map
+    // path it has always taken. Pinned by answering at both sides of the
+    // band's edge under a uniform doubling.
+    let region = SceneRegion::stroke(
+        Path::line(Point::new(0.0, -100.0), Point::new(0.0, 100.0)),
+        20.0,
+    );
+    let doubled = Transform2D::scale(2.0, 2.0);
+    let inside = ItemShape::bounds(Rect::new(3.0, 0.0, 0.0, 0.0)); // scene x = 6
+    let outside = ItemShape::bounds(Rect::new(6.0, 0.0, 0.0, 0.0)); // scene x = 12
+    assert!(inside.contained_by_scene_region(&region, &doubled, 1.0));
+    assert!(!outside.contained_by_scene_region(&region, &doubled, 1.0));
+    assert!(!outside.intersects_scene_region(&region, &doubled, 1.0));
+
+    // A rotation is an isometry, so a point mapped with the region is answered
+    // identically however far it is turned.
+    let turned = Transform2D::rotate(0.9);
+    assert!(inside.contained_by_scene_region(
+        &region.to_local(&turned.inverse().expect("invertible")),
+        &turned,
+        1.0,
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// The band, written out as a path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_bands_capsules_union_rather_than_cancelling() {
+    // Two capsules meeting at a right angle overlap around the corner. They
+    // are read under `Winding`, so a point inside both must have a winding
+    // number of two rather than of zero — which is what it would be if the
+    // second capsule came out wound the other way because its segment runs in
+    // the other direction.
+    let mut corner = Path::new();
+    corner
+        .move_to(Point::new(0.0, 0.0))
+        .line_to(Point::new(10.0, 0.0))
+        .line_to(Point::new(10.0, 10.0));
+    let outline = corner.flatten(SHAPE_FLATTEN_TOLERANCE);
+    let band = band_as_path(&outline, 3.0).flatten(SHAPE_FLATTEN_TOLERANCE);
+
+    for p in [
+        Point::new(10.0, 0.0),  // the corner itself: inside both capsules
+        Point::new(9.0, 1.0),   // inside both, off the centreline
+        Point::new(5.0, 2.0),   // inside the first only
+        Point::new(10.0, 8.0),  // inside the second only
+        Point::new(-2.5, 0.0),  // inside the start cap
+        Point::new(10.0, 12.5), // inside the end cap
+    ] {
+        assert!(
+            subpaths_contain_point(&band, p, FillRule::Winding),
+            "{p:?} is within 3 of the outline and must be in the band"
+        );
+    }
+    for p in [
+        Point::new(5.0, 4.0),   // beside the first capsule
+        Point::new(6.0, 6.0),   // inside the bend, clear of both
+        Point::new(-4.0, 0.0),  // past the start cap
+        Point::new(10.0, 14.0), // past the end cap
+    ] {
+        assert!(
+            !subpaths_contain_point(&band, p, FillRule::Winding),
+            "{p:?} is further than 3 from the outline and must be outside"
+        );
+    }
+}
+
+#[test]
+fn a_capsules_orientation_does_not_follow_its_segments_direction() {
+    // The union above rests on every capsule coming out wound the same way.
+    // Reversing an outline must therefore give the same band, not its
+    // complement.
+    let forward = Path::line(Point::ZERO, Point::new(10.0, 0.0)).flatten(SHAPE_FLATTEN_TOLERANCE);
+    let backward = Path::line(Point::new(10.0, 0.0), Point::ZERO).flatten(SHAPE_FLATTEN_TOLERANCE);
+    let a = band_as_path(&forward, 3.0).flatten(SHAPE_FLATTEN_TOLERANCE);
+    let b = band_as_path(&backward, 3.0).flatten(SHAPE_FLATTEN_TOLERANCE);
+    for p in [Point::new(5.0, 0.0), Point::new(5.0, 2.5), Point::ZERO] {
+        assert!(subpaths_contain_point(&a, p, FillRule::Winding), "{p:?}");
+        assert!(subpaths_contain_point(&b, p, FillRule::Winding), "{p:?}");
+    }
+    assert!(!subpaths_contain_point(
+        &a,
+        Point::new(5.0, 4.0),
+        FillRule::Winding
+    ));
+    assert!(!subpaths_contain_point(
+        &b,
+        Point::new(5.0, 4.0),
+        FillRule::Winding
+    ));
+}
+
+#[test]
+fn a_bands_polygon_stays_inside_the_band_it_describes() {
+    // The caps are inscribed, so the written-out band is never *wider* than
+    // the true one — the direction that keeps a marquee from picking up
+    // something a click would miss — and by less than the tolerance, so the
+    // two do not visibly disagree either.
+    let outline = Path::line(Point::ZERO, Point::new(10.0, 0.0)).flatten(SHAPE_FLATTEN_TOLERANCE);
+    let half = 6.0_f32;
+    let band = band_as_path(&outline, half).flatten(SHAPE_FLATTEN_TOLERANCE);
+    for sp in &band {
+        for p in &sp.points {
+            let d = min_distance_to_centreline(&outline, *p);
+            assert!(d <= half + 1e-4, "{p:?} is {d} from the centreline");
+            assert!(
+                d >= half - BAND_FLATTEN_TOLERANCE - 1e-4,
+                "{p:?} is {d} from the centreline, well inside the band"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Degenerate segments, and what a band's outline is
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_zero_length_segment_is_in_a_band_when_its_one_point_is() {
+    // Every span `segment_within_band` collects is a projection onto `b - a`,
+    // which is the zero vector here, so the interval machinery reads a
+    // degenerate segment as outside however deep in the band it sits. Not an
+    // exotic input: a zero-size item's outline is four coincident points, and
+    // every closed outline produces one when its last point equals its first.
+    let outline = Path::line(Point::ZERO, Point::new(100.0, 0.0)).flatten(SHAPE_FLATTEN_TOLERANCE);
+    let on = Point::new(50.0, 1.0);
+    assert!(segment_within_band(on, on, &outline, 5.0));
+    let off = Point::new(50.0, 40.0);
+    assert!(!segment_within_band(off, off, &outline, 5.0));
+    // A band of no width contains nothing, degenerate segment or not.
+    assert!(!segment_within_band(on, on, &outline, 0.0));
+
+    // End to end: a zero-size item wholly inside a wire's band is contained.
+    let dot = ItemShape::bounds(Rect::new(50.0, 1.0, 0.0, 0.0));
+    let wire = SceneRegion::stroke(Path::line(Point::ZERO, Point::new(100.0, 0.0)), 10.0);
+    assert!(dot.contained_by_region(&wire, 1.0));
+    let far = ItemShape::bounds(Rect::new(50.0, 40.0, 0.0, 0.0));
+    assert!(!far.contained_by_region(&wire, 1.0));
+}
+
+#[test]
+fn a_bands_reach_is_measured_off_the_edges_a_stroke_walks() {
+    // An open three-point polyline is drawn as two segments. The chord back to
+    // its start is a fill's business, not a stroke's, so a point sitting on
+    // that chord and far from both drawn segments is outside the band — and
+    // `clearance`, which the containment modes ask, has to agree with
+    // `contains_point`, which the point query asks.
+    let mut bend = Path::new();
+    bend.move_to(Point::ZERO)
+        .line_to(Point::new(100.0, 0.0))
+        .line_to(Point::new(100.0, 100.0));
+    let region = SceneRegion::stroke(bend, 4.0);
+    let on_the_chord = Point::new(50.0, 50.0);
+    assert!(!region.contains_point(on_the_chord));
+    assert!(
+        region.clearance(on_the_chord) < 0.0,
+        "clearance is {}, and the point is 50 from either drawn segment",
+        region.clearance(on_the_chord)
+    );
+    // A point genuinely on a drawn segment is inside under both.
+    let on_a_segment = Point::new(50.0, 1.0);
+    assert!(region.contains_point(on_a_segment));
+    assert!(region.clearance(on_a_segment) > 0.0);
+}
+
 // ---------------------------------------------------------------------------
 // Containment inside a ribbon
 // ---------------------------------------------------------------------------
@@ -818,13 +1085,17 @@ fn bent_wire() -> Path {
 #[test]
 fn a_box_whose_corners_are_all_on_a_wire_is_not_therefore_inside_its_band() {
     // The defect a vertex-and-crossing test cannot see: every corner of this
-    // box is within the band's 4 units of the wire, and no box edge crosses the
-    // wire's *centreline* — but the box bulges out of the ribbon across the
-    // inside of the bend. A band's boundary is an offset curve it never stores,
-    // so the crossing test is blind to it and `segment_within_band` is what
-    // answers instead.
+    // box is within the band's 4 units of the wire — 2.8, 3.9, 3.4 and 0.02 of
+    // it — and no box edge crosses the wire's *centreline*, yet the box bulges
+    // more than 20 units out of the ribbon across the inside of the bend. A
+    // band's boundary is an offset curve it never stores, so the crossing test
+    // is blind to it and `segment_within_band` is what answers instead.
+    //
+    // The box spans the bend, a corner on each arm. Both arms are *drawn*
+    // segments: reaching the band through the chord back to the wire's start
+    // would not count, since a stroke does not walk one.
     let region = SceneRegion::stroke(bent_wire(), 8.0);
-    let box_rect = Rect::new(28.0, -88.0, 27.5, 39.5);
+    let box_rect = Rect::new(31.0, -86.0, 4.0, 49.5);
     for corner in [
         Point::new(box_rect.x, box_rect.y),
         Point::new(box_rect.right(), box_rect.y),

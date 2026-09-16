@@ -55,12 +55,18 @@
 //! # Spaces
 //!
 //! `ItemShape` is **local**. [`SceneRegion`] — the thing a marquee, a lasso or
-//! a collision query asks about — is **scene**-space until
-//! [`SceneRegion::to_local`] maps it into an item's frame. The two
-//! `…ItemBoundingRect` selection modes deliberately stay in scene space and
-//! compare the item's scene AABB; the two `…ItemShape` modes map the region
-//! into local space. For an item with a non-identity transform those are
-//! genuinely different tests — see [`ItemSelectionMode`].
+//! a collision query asks about — is **scene**-space. The two
+//! `…ItemBoundingRect` selection modes deliberately stay there and compare the
+//! item's scene AABB; the two `…ItemShape` modes compare the shape itself. For
+//! an item with a non-identity transform those are genuinely different tests —
+//! see [`ItemSelectionMode`].
+//!
+//! Which frame a `…ItemShape` query meets the region in is a **decision**, not
+//! a detail, because a stroke band is a *distance* and only a similarity
+//! carries one. Usually the region comes down into the item's frame via
+//! [`SceneRegion::to_local`]; when it cannot, the item goes up instead. The
+//! rule, and why no approximation substitutes for it, is on
+//! [`ItemShape::contained_by_scene_region`].
 
 use std::cell::OnceCell;
 use std::rc::Rc;
@@ -682,6 +688,167 @@ impl ItemShape {
         region.has_fill() && !outlines_meet(item_out, reg.as_slice(), item_half, true)
     }
 
+    /// Whether this shape, placed by `local_to_scene`, shares area with a
+    /// **scene**-space `region` — the `Intersects…` half of
+    /// [`ItemSelectionMode`], with the frame chosen rather than assumed.
+    ///
+    /// This is the door a region query comes in by, and the reason it exists
+    /// is spelled out on [`ItemShape::contained_by_scene_region`].
+    pub fn intersects_scene_region(
+        &self,
+        region: &SceneRegion,
+        local_to_scene: &Transform2D,
+        view_scale: f32,
+    ) -> bool {
+        if self.is_none() || region.is_empty() {
+            return false;
+        }
+        if !needs_scene_frame(region, local_to_scene) {
+            let Some(inv) = local_to_scene.inverse() else {
+                return false;
+            };
+            return self.intersects_region(&region.to_local(&inv), view_scale);
+        }
+        // Union of parts: any one of them overlapping is the shape overlapping.
+        self.in_scene_frame(local_to_scene, view_scale)
+            .iter()
+            .any(|part| part.intersects_region(region, 1.0))
+    }
+
+    /// Whether this shape, placed by `local_to_scene`, lies entirely inside a
+    /// **scene**-space `region` — the `Contains…` half of
+    /// [`ItemSelectionMode`], with the frame chosen rather than assumed.
+    ///
+    /// # Why the frame is a decision
+    ///
+    /// A query has two frames to choose from and they are not
+    /// interchangeable, because a **stroke band is a distance** and only a
+    /// similarity — a rotation, a uniform scale, a translation, a reflection —
+    /// carries one. Under any other affine the exact image of a round band is
+    /// an *elliptical* one, which neither [`ItemShape`] nor [`SceneRegion`]
+    /// can hold: both store a single width.
+    ///
+    /// Each side's band is round in its own frame. The region's is round in
+    /// **scene** space. The item's is round in **local** space — that is not a
+    /// convention but what the renderer does, since
+    /// [`PathItem`](crate::PathItem) strokes its path in local coordinates and
+    /// the item's transform is pushed on the canvas around it, so an
+    /// anisotropically scaled wire really is painted with an elliptical pen.
+    ///
+    /// So: when the region carries no band, or the transform is a similarity,
+    /// the local frame is exact and the query takes it — one map, the same
+    /// cost it has always had. Otherwise the region cannot come down, so the
+    /// **item goes up**: its outline is a polyline and
+    /// [`Path::transformed`] is exact for every affine, so lifting it costs
+    /// nothing in accuracy.
+    ///
+    /// A *mapped* band is then the only thing left, and it is dealt with by
+    /// not mapping one: `in_scene_frame` writes the item's band
+    /// out as an explicit outline **in local space, where it is round**, and
+    /// lifts that. What comes back is a union of band-free parts, and a union
+    /// is contained iff every part is.
+    ///
+    /// Approximating instead — scaling the band by one of the two stretches —
+    /// cannot work here, and the reason is worth stating because it looks like
+    /// it should. The two selection-mode families owe each other implications
+    /// in *opposite* directions: `IntersectsItemShape` must never exceed
+    /// `IntersectsItemBoundingRect`, which wants a band that under-reaches,
+    /// while `ContainsItemBoundingRect` must never exceed
+    /// `ContainsItemShape`, which wants one that over-reaches. No single
+    /// scalar satisfies both, so the only answer that keeps both is the exact
+    /// one.
+    pub fn contained_by_scene_region(
+        &self,
+        region: &SceneRegion,
+        local_to_scene: &Transform2D,
+        view_scale: f32,
+    ) -> bool {
+        if self.is_none() || region.is_empty() {
+            return false;
+        }
+        if !needs_scene_frame(region, local_to_scene) {
+            let Some(inv) = local_to_scene.inverse() else {
+                return false;
+            };
+            return self.contained_by_region(&region.to_local(&inv), view_scale);
+        }
+        // Union of parts: contained iff every part is. An empty union is not
+        // "contained" — it is a shape that covers nothing, like `none()`.
+        let parts = self.in_scene_frame(local_to_scene, view_scale);
+        !parts.is_empty()
+            && parts
+                .iter()
+                .all(|part| part.contained_by_region(region, 1.0))
+    }
+
+    /// This shape in another frame, as a **union of band-free parts**.
+    ///
+    /// For a transform that is not a similarity — the only case the callers
+    /// above use this for. The interior maps exactly; the band is written out
+    /// as a filled outline first, in this shape's own frame where it is still
+    /// round, and that outline maps exactly too.
+    ///
+    /// Up to two parts, and they are a union rather than one shape because the
+    /// band's outline is a union of overlapping capsules and can only be read
+    /// under [`FillRule::Winding`], while the interior keeps whatever rule its
+    /// author chose. An [`FillRule::EvenOdd`] ring merged into the same path
+    /// would read the capsules' overlaps as holes and its own hole as filled;
+    /// keeping the two apart costs one extra query and owes the fill rules
+    /// nothing.
+    ///
+    /// # Cost
+    ///
+    /// The band costs one convex polygon of about `2 * cap_steps` points per
+    /// outline segment — paid only by an item that is both stroked and
+    /// anisotropically transformed, and only against a banded region. Nothing
+    /// on the pointer-sample path reaches it: a point hit-test never leaves
+    /// the item's own frame.
+    fn in_scene_frame(&self, local_to_scene: &Transform2D, view_scale: f32) -> Vec<ItemShape> {
+        if self.is_none() {
+            return Vec::new();
+        }
+        let mut parts = Vec::with_capacity(2);
+        if let Some(interior) = self.mapped_interior(local_to_scene) {
+            parts.push(interior);
+        }
+        if let Some(half) = self.band_half_width(view_scale) {
+            let band =
+                band_as_path(self.outline_ref().as_slice(), half).transformed(local_to_scene);
+            if !band.is_empty() {
+                parts.push(ItemShape::path(ShapeGeometry::shared(band)));
+            }
+        }
+        parts
+    }
+
+    /// The filled part of this shape, mapped exactly into another frame.
+    /// `None` for a shape with no interior — an unfilled path, or
+    /// [`ItemShape::none`].
+    fn mapped_interior(&self, t: &Transform2D) -> Option<ItemShape> {
+        match &self.kind {
+            ShapeKind::None => None,
+            // A plain box that survives the map as a box stays the one kind
+            // with a one-compare fast path on the far side.
+            ShapeKind::Bounds(r) if axis_preserving(t) => Some(ItemShape::bounds(t.apply_rect(*r))),
+            ShapeKind::Bounds(r) => Some(ItemShape::path(ShapeGeometry::shared(
+                transformed_rect_path(*r, t),
+            ))),
+            ShapeKind::RoundedRect { rect, radius } => {
+                Some(ItemShape::path(ShapeGeometry::shared(
+                    Path::rounded_rect(*rect, teksilo_tokens::CornerRadius::uniform(*radius))
+                        .transformed(t),
+                )))
+            }
+            ShapeKind::Ellipse(r) => Some(ItemShape::path(ShapeGeometry::shared(
+                Path::ellipse(*r).transformed(t),
+            ))),
+            ShapeKind::Path(g) => {
+                let rule = self.fill?;
+                Some(ItemShape::path(ShapeGeometry::shared(g.path().transformed(t))).filled(rule))
+            }
+        }
+    }
+
     /// Re-publish this shape as a [`SceneRegion`] in another frame — its own
     /// scene transform, so a collision query can ask the rest of the scene
     /// about it.
@@ -693,8 +860,27 @@ impl ItemShape {
     /// [`SHAPE_FLATTEN_TOLERANCE`] in the *target* frame rather than
     /// inheriting a polyline sampled in this one.
     ///
-    /// A band's width scales by the transform's smallest stretch — see
-    /// [`SceneRegion::to_local`], which faces the same anisotropy.
+    /// # A band's width is still scaled here
+    ///
+    /// A region query picks the frame that keeps each band round
+    /// ([`ItemShape::contained_by_scene_region`]); this cannot, because it
+    /// returns one [`SceneRegion`] and one region holds one band width. So
+    /// under a transform that is not a similarity — where the exact image of a
+    /// round band is elliptical — the width is scaled by the transform's
+    /// **smallest** stretch: the widest uniform band that fits inside the true
+    /// image, under-reaching along the stretched axis and never claiming
+    /// ground the true band does not cover.
+    ///
+    /// Writing the band out as an outline, which is what the query path does
+    /// and which *is* exact, does not work here: a band is a union of
+    /// overlapping capsules and reads only under [`FillRule::Winding`], while
+    /// the interior it would have to be unioned with keeps its author's rule
+    /// and its author's subpath orientations. The query path escapes that by
+    /// keeping the two apart as separate parts, and a single region has
+    /// nowhere to put a second part. The consequence is confined to
+    /// [`Scene::item_region`](crate::Scene::item_region) and the collision
+    /// query built on it: an anisotropically scaled item carrying a stroke
+    /// collides as though its band were the narrowest the map allows.
     pub fn to_scene_region(&self, local_to_scene: &Transform2D) -> SceneRegion {
         if self.is_none() {
             return SceneRegion::empty();
@@ -934,14 +1120,23 @@ impl Outline<'_> {
 /// How a region query decides whether an item is picked — Qt's
 /// `Qt::ItemSelectionMode`, one variant for one.
 ///
-/// The `…ItemShape` modes consult [`SceneItem::shape`](crate::SceneItem::shape)
-/// with the region mapped into the item's **local** frame; the
-/// `…ItemBoundingRect` modes compare the item's **scene** AABB, in scene
-/// space. For an item whose transform is identity and whose shape is the
-/// default AABB the two coincide exactly. For an item carrying a rotation or
-/// a scale they do **not**: the scene AABB of a rotated box is the enlarged
+/// The `…ItemShape` modes consult [`SceneItem::shape`](crate::SceneItem::shape),
+/// in whichever frame keeps both sides' bands round — usually the item's
+/// **local** one, with the region mapped down into it, and scene space when
+/// the region's band cannot make that trip
+/// ([`ItemShape::contained_by_scene_region`]). The `…ItemBoundingRect` modes
+/// compare the item's **scene** AABB, in scene space.
+///
+/// For an item whose transform is identity and whose shape is the default AABB
+/// the two families coincide exactly. For an item carrying a rotation or a
+/// scale they do **not**: the scene AABB of a rotated box is the enlarged
 /// axis-aligned hull of it, so a bounding-rect query is strictly the looser
-/// test. That is a real behaviour difference, not a rounding one.
+/// test. That is a real behaviour difference, not a rounding one — and it is
+/// an *implication*, in both directions. A shape lies inside its own box, so
+/// a shape the region meets its box meets too, and a box the region contains
+/// drags its shape in with it. Both are pinned by
+/// `tests/prop_selection_modes.rs`, and holding them is what decides how a
+/// band may be mapped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ItemSelectionMode {
     /// Picked when its **shape** intersects the region. Qt's default and
@@ -1138,18 +1333,22 @@ impl SceneRegion {
     /// `scale(1, 10)` the true band is between one and ten times as wide
     /// depending on the direction, and the mapped one claims one: it can
     /// under-reach along the stretched axis, and it never claims ground the
-    /// true band does not cover.
+    /// true band does not cover. `Transform2D::geometric_scale` — the
+    /// geometric *mean* of the two stretches — would err in both directions at
+    /// once, over-reaching along one axis while under-reaching along the
+    /// other, which is why it is not used here.
     ///
-    /// That direction is not a coin flip. A region query that over-reached
-    /// could pick an item under `IntersectsItemShape` that
-    /// `IntersectsItemBoundingRect` did not — impossible for a shape that lies
-    /// inside its own bounding rect, and the exact incoherence between a
-    /// marquee and a click that `ItemShape` exists to remove. Under-reaching
-    /// only ever agrees with the cheaper mode.
-    /// `Transform2D::geometric_scale` — the geometric *mean* of the two
-    /// stretches — would err in both directions at once, over-reaching along
-    /// one axis while under-reaching along the other, which is why it is not
-    /// used here.
+    /// **This is a one-sided approximation, and the framework's own region
+    /// queries do not rely on it.** Under-reaching keeps
+    /// `IntersectsItemShape` inside `IntersectsItemBoundingRect`, but it puts
+    /// `ContainsItemShape` *outside* `ContainsItemBoundingRect` — the two
+    /// families want opposite errors, so no scalar serves both. A query
+    /// therefore never maps a banded region down into an anisotropic item's
+    /// frame: it lifts the item into scene space instead, where the band is
+    /// still round. See [`ItemShape::contained_by_scene_region`], which is the
+    /// door `Scene::items_in_region` comes in by. What is left here is the
+    /// honest answer for a caller who has asked for a mapped region and will
+    /// measure distances in the target frame.
     pub fn to_local(&self, scene_to_local: &Transform2D) -> SceneRegion {
         match &self.kind {
             RegionKind::Rect(r) => {
@@ -1278,13 +1477,16 @@ impl SceneRegion {
                 fill,
                 band,
             } => {
-                let dist = min_distance_to_outline(geometry.outline(), p);
                 let mut best = f32::NEG_INFINITY;
                 if let Some(rule) = fill {
+                    // The fill's boundary — every subpath closed, SVG-style.
+                    let dist = min_distance_to_outline(geometry.outline(), p);
                     let inside = subpaths_contain_point(geometry.outline(), p, *rule);
                     best = best.max(if inside { dist } else { -dist });
                 }
                 if band.is_some() {
+                    // The band's centreline — only the edges a stroke walks.
+                    let dist = min_distance_to_centreline(geometry.outline(), p);
                     best = best.max(self.band_half_width() - dist);
                 }
                 best
@@ -1409,6 +1611,16 @@ fn probe_points(out: &[Subpath]) -> impl Iterator<Item = Point> + '_ {
 fn segment_within_band(a: Point, b: Point, outline: &[Subpath], half: f32) -> bool {
     if !half.is_finite() || half <= 0.0 {
         return false;
+    }
+    // A zero-length segment has no parameter to cover: every span below is
+    // computed by projecting onto `b - a`, which is the zero vector here, so
+    // the spans come back empty and the whole segment reads as outside however
+    // deep in the band its one point sits. Degenerate segments are not exotic —
+    // a zero-size item's outline is four coincident points, and every closed
+    // outline produces one when its last point equals its first — so answer the
+    // question that is actually being asked: is that point inside?
+    if a == b {
+        return min_distance_to_centreline(outline, a) <= half;
     }
     let mut spans: Vec<(f32, f32)> = Vec::new();
     for sp in outline {
@@ -1564,10 +1776,28 @@ fn point_to_segment_distance_sq(p: Point, a: Point, b: Point) -> f32 {
     dx * dx + dy * dy
 }
 
+/// Shortest distance from `p` to the outline under **fill** semantics: every
+/// subpath is closed, because that is the boundary a fill rule draws.
 fn min_distance_to_outline(subpaths: &[Subpath], p: Point) -> f32 {
+    min_distance_to_edges(subpaths, p, true)
+}
+
+/// Shortest distance from `p` to the outline under **stroke** semantics: a
+/// subpath's implied closing chord is walked only when its author closed it.
+///
+/// A band is the set of points within a half-width of *this* distance — the
+/// same segments [`outline_within`] walks and [`segment_within_band`] builds
+/// its capsules from. Measured against the fill form instead, a three-point
+/// open polyline gains a fourth edge it is never drawn with, and its band
+/// claims ground the point test says it does not cover.
+fn min_distance_to_centreline(subpaths: &[Subpath], p: Point) -> f32 {
+    min_distance_to_edges(subpaths, p, false)
+}
+
+fn min_distance_to_edges(subpaths: &[Subpath], p: Point, close_implicitly: bool) -> f32 {
     let mut best = f32::INFINITY;
     for sp in subpaths {
-        for (a, b) in sp.segments(true) {
+        for (a, b) in sp.segments(close_implicitly) {
             best = best.min(point_to_segment_distance(p, a, b));
         }
     }
@@ -1750,6 +1980,142 @@ fn linear_scale_bounds(t: &Transform2D) -> (f32, f32) {
     } else {
         (1.0, 1.0)
     }
+}
+
+/// Whether `t` maps a circle onto a circle — a rotation, a uniform scale, a
+/// translation, a reflection, or any composition of them.
+///
+/// Exactly the transforms that carry a **distance**, which is what a stroke
+/// band is: for any other affine the image of the band's disc is an ellipse,
+/// and no single width describes it. Equivalently, the linear part's two
+/// singular values agree.
+///
+/// A non-finite or singular matrix answers `false` — a collapsed axis is the
+/// most anisotropic map there is, and [`linear_scale_bounds`]'s `(1.0, 1.0)`
+/// fallback for a non-finite one keeps that honest for the finite case only.
+fn is_similarity(t: &Transform2D) -> bool {
+    let (lo, hi) = linear_scale_bounds(t);
+    hi - lo <= 1e-4 * hi.max(1.0)
+}
+
+/// Whether a query against `region` has to be answered in **scene** space
+/// rather than in the item's own frame.
+///
+/// Only when the region carries a band that `local_to_scene`'s inverse cannot
+/// carry. Everything else — a rectangle marquee, a filled lasso, any item
+/// under a rotation or a uniform scale — maps exactly and stays on the
+/// one-map path. See [`ItemShape::contained_by_scene_region`].
+fn needs_scene_frame(region: &SceneRegion, local_to_scene: &Transform2D) -> bool {
+    region.band_half_width() > 0.0 && !is_similarity(local_to_scene)
+}
+
+/// Deviation allowed when a band's round cap or join is written out as a
+/// polygon, in the frame the band is round in.
+///
+/// Much finer than [`SHAPE_FLATTEN_TOLERANCE`], and deliberately: that one
+/// approximates a curve an item is *drawn* from, so the same polyline answers
+/// the point query and the region query and they agree by construction. This
+/// one approximates a band only for the duration of a region query, while the
+/// point query keeps testing the true round band — so any slack here is a
+/// disagreement between a marquee and a click, which is the incoherence this
+/// module exists to remove.
+const BAND_FLATTEN_TOLERANCE: f32 = 0.01;
+
+/// Cap on the points spent per semicircular cap, so a very wide band cannot
+/// allocate without bound. Past it the deviation grows with the half-width,
+/// at `half * (1 - cos(pi / (2 * MAX_CAP_STEPS)))` — under a hundredth of a
+/// unit for any band narrower than 8 units, and a twentieth at 40.
+const MAX_CAP_STEPS: usize = 32;
+
+/// The band of half-width `half` around `outline`, written out as a fillable
+/// path: one convex capsule per segment, every one wound the same way.
+///
+/// Read under [`FillRule::Winding`] that is exactly their union — a point
+/// inside `k` capsules has winding `±k`, a point inside none has winding `0` —
+/// which is what lets a band be carried through an affine map that could not
+/// carry its width. Even-odd would read the overlaps as holes, so the
+/// republished part always declares `Winding` whatever rule the item's own
+/// interior carries; the band is a union by construction and has no rule of
+/// its own.
+///
+/// Walks `segments(false)`: a subpath's implied closing chord is not part of a
+/// stroke, the same rule [`outline_within`] and [`segment_within_band`] keep.
+fn band_as_path(outline: &[Subpath], half: f32) -> Path {
+    let mut path = Path::new();
+    if !half.is_finite() || half <= 0.0 {
+        return path;
+    }
+    let steps = cap_steps(half);
+    for sp in outline {
+        for (a, b) in sp.segments(false) {
+            append_capsule(&mut path, a, b, half, steps);
+        }
+    }
+    path
+}
+
+/// Segments per semicircular cap that keep the inscribed polygon within
+/// [`BAND_FLATTEN_TOLERANCE`] of the true arc.
+///
+/// A chord subtending `alpha` on a circle of radius `r` deviates by
+/// `r * (1 - cos(alpha / 2))`; solve for `alpha` and spend `ceil(pi / alpha)`
+/// on the half turn.
+fn cap_steps(half: f32) -> usize {
+    let ratio = (1.0 - BAND_FLATTEN_TOLERANCE / half).clamp(-1.0, 1.0);
+    let alpha = 2.0 * ratio.acos();
+    if alpha <= f32::EPSILON {
+        return MAX_CAP_STEPS;
+    }
+    ((std::f32::consts::PI / alpha).ceil() as usize).clamp(1, MAX_CAP_STEPS)
+}
+
+/// Append the capsule of radius `half` around `a → b` as one closed convex
+/// polygon.
+///
+/// The traversal is built from the segment's own direction `u` and its left
+/// normal `n`, and reversing the segment reverses both — so every capsule
+/// comes out with the same orientation whichever way its segment runs, which
+/// is what the winding union in [`band_as_path`] rests on. The polygon is
+/// **inscribed**, so the band it describes is never wider than the true one;
+/// see [`BAND_FLATTEN_TOLERANCE`] for why that direction is the safe one.
+fn append_capsule(path: &mut Path, a: Point, b: Point, half: f32, steps: usize) {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let len = (dx * dx + dy * dy).sqrt();
+    let straight = len > 1e-6;
+    // A zero-length segment is a disc; any axis will do for it.
+    let (ux, uy) = if straight {
+        (dx / len, dy / len)
+    } else {
+        (1.0, 0.0)
+    };
+    let (nx, ny) = (-uy, ux);
+    // `c` along the normal, `s` along the direction, both in units of `half`.
+    let at = |p: Point, c: f32, s: f32| {
+        Point::new(
+            p.x + half * (c * nx + s * ux),
+            p.y + half * (c * ny + s * uy),
+        )
+    };
+    path.move_to(at(a, 1.0, 0.0));
+    if straight {
+        path.line_to(at(b, 1.0, 0.0));
+    }
+    // Cap at `b`: from `+n` round through `+u` to `-n`.
+    for i in 1..=steps {
+        let (s, c) = (std::f32::consts::PI * i as f32 / steps as f32).sin_cos();
+        path.line_to(at(b, c, s));
+    }
+    if straight {
+        path.line_to(at(a, -1.0, 0.0));
+    }
+    // Cap at `a`: from `-n` round through `-u` back to `+n`, which `close`
+    // supplies rather than a duplicated vertex.
+    for i in 1..steps {
+        let (s, c) = (std::f32::consts::PI * i as f32 / steps as f32).sin_cos();
+        path.line_to(at(a, -c, -s));
+    }
+    path.close();
 }
 
 /// Whether the transform maps an axis-aligned rectangle onto another

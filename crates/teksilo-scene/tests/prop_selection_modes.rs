@@ -16,12 +16,19 @@
 //!
 //! Every implication is asserted against a region **grown by [`SLACK`]** on
 //! the right-hand side, and that is not a hedge: the two selection-mode
-//! families compute in two coordinate spaces (`…ItemShape` maps the region into
-//! the item's frame, `…ItemBoundingRect` compares scene AABBs), so at an exact
-//! tangency — a band whose edge falls precisely on an item's — they round
-//! differently and *must*. `SLACK` is 0.05 against a generator on a 0.5 grid,
-//! so it swallows the rounding and nothing else: every defect this suite has
-//! caught was off by a factor, not by a hundredth.
+//! families compute in two coordinate spaces (`…ItemBoundingRect` compares
+//! scene AABBs, while `…ItemShape` answers wherever both sides' stroke bands
+//! stay round — the item's own frame when the region's band can be mapped into
+//! it, scene space when it cannot), so at an exact tangency — a band whose
+//! edge falls precisely on an item's — they round differently and *must*.
+//! `SLACK` is 0.05 against a generator on a 0.5 grid, so it swallows the
+//! rounding and nothing else: every defect this suite has caught was off by a
+//! factor, not by a hundredth.
+//!
+//! The anisotropic transforms in `arb_transform` are load-bearing and must
+//! stay: `scale(sx, sy)` with `sx != sy` is the only input that separates the
+//! two frames, and it is what caught the band-mapping defect the frame
+//! decision now exists for.
 //!
 //! Everything is queried at **unit view scale**, deliberately: a
 //! [`StrokeSpace::Device`](teksilo_canvas::StrokeSpace) band is wider than the
