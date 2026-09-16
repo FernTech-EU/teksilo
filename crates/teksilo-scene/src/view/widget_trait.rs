@@ -49,9 +49,9 @@ impl Widget for SceneView {
         true
     }
 
-    /// Reject a heavyweight child for a point an `Over`-band press claimant
-    /// covers, so the arena's verdict matches the one this view's own dispatch
-    /// gives.
+    /// Reject a heavyweight child for a point a press claimant **painted above
+    /// that child** covers, so the arena's verdict matches the one this view's
+    /// own dispatch gives.
     ///
     /// `point` is in scene coordinates: the view is a `content_transform` node,
     /// so the arena has already mapped the pointer through the inverse view
@@ -63,13 +63,55 @@ impl Widget for SceneView {
     /// view's own drag recognizer all resolve from the arena's target, so five
     /// of the six would stay on the card while the sixth went to the item.
     ///
+    /// **Above that child**, not "in the `Over` band": the question is asked
+    /// per child and answered by comparing whole
+    /// [`PaintKey`]s — so an
+    /// [`Interleaved`](crate::SceneLayer::Interleaved) claimant vetoes the
+    /// cards it is painted over and leaves the ones painted over *it* alone.
+    /// The `Over` band is above every card, so for it this is the rule it
+    /// always was.
+    ///
+    /// A child with no key — anything this view did not place, and the
+    /// paint-only nodes, which never reach here because they are
+    /// `event_pass_through` — is treated as sitting at the bottom of the widget
+    /// rank, which is the permissive pre-existing answer.
+    ///
     /// The rule is [`claims_press`](crate::claims_press), not "is painted": a
     /// decorative halo drawn over an embedded note never vetoes, so clicking it
     /// leaves focus in the note and leaves explore-by-touch announcing the
     /// note — which is the behaviour the crate's per-item AT tree exists to
     /// protect.
-    fn accepts_child_hit(&self, _child: WidgetId, point: teksilo_canvas::Point) -> bool {
-        !self.over_press_claimant_covers(point)
+    ///
+    /// # The order of the two questions is the cost of the feature
+    ///
+    /// The claimant is resolved **first** and the child's key looked up only
+    /// against an actual answer. Both halves of that matter, and getting either
+    /// backwards has already cost real time here:
+    ///
+    /// * the claimant query is memoised for the whole hit walk, so the arena's
+    ///   once-per-child call costs one snapshot scan for the walk rather than
+    ///   one per child — which is only true because the memoised question is
+    ///   floor-free (see `press_claimant_above` in `view.rs`);
+    /// * `SceneView::child_paint_key` is a `RefCell` borrow
+    ///   and a `HashMap` probe. Passed as an *argument* it is evaluated before
+    ///   the claimant check can decline it, so a scene with no press claimant at
+    ///   all — the case the `over_claimants` short-circuit exists to keep free —
+    ///   still paid for one on every child it was asked about. Asked in this
+    ///   order it pays for none.
+    ///
+    /// The arena's walk stops at the first child it can descend into, so the
+    /// per-child cost only multiplies when the veto is *rejecting* — which is
+    /// exactly the scene the feature is for, and why the claimant query has to
+    /// answer from a memo rather than a scan.
+    fn accepts_child_hit(&self, child: WidgetId, point: teksilo_canvas::Point) -> bool {
+        match self.topmost_press_claimant(point) {
+            None => true,
+            // Looked up only against an actual claimant — see the second
+            // bullet above. Binding it to a local first would evaluate it for
+            // every child of every scene, including the ones with no claimant
+            // at all.
+            Some(top) => top < self.child_paint_key(child),
+        }
     }
 
     fn preserves_children_on_rebuild(&self) -> bool {

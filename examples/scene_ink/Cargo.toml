@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "scene-ink"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+teksilo = { workspace = true }
+teksilo-scene = { workspace = true }
+teksilo-platform = { workspace = true }

@@ -167,6 +167,35 @@ impl PaintKey {
     pub const fn is_above_widgets(self) -> bool {
         self.rank > RANK_WIDGET
     }
+
+    /// A floor below every real key — "admit everything".
+    ///
+    /// `z` is `-inf` rather than a finite sentinel so that a real entry sitting
+    /// at `f32::MIN` is still admitted, and `Ord` compares `z` with
+    /// `total_cmp`, under which `-inf` is below every finite value.
+    pub const fn bottom() -> Self {
+        Self {
+            rank: RANK_UNDER,
+            z: f32::NEG_INFINITY,
+            seq: 0,
+        }
+    }
+
+    /// A floor admitting exactly the entries at `rank` and above.
+    ///
+    /// The coarse form of a floor, and the one the dispatch path uses: "a card
+    /// won the arena's walk, so only the band that outranks *every* card may
+    /// still take this event". The fine form — one specific entry's key — is
+    /// what the `accepts_child_hit` veto needs, because an
+    /// [`Interleaved`](crate::SceneLayer::Interleaved) entry is above some
+    /// cards and below others.
+    pub const fn rank_floor(rank: u8) -> Self {
+        Self {
+            rank,
+            z: f32::NEG_INFINITY,
+            seq: 0,
+        }
+    }
 }
 
 impl Eq for PaintKey {}
