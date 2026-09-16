@@ -61,7 +61,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`orientation`, `fill`, `collapsible`, `horizontal`, `on_header_drag`, `item`, `item_id`, `add`, `items`, `show_dividers`
+`orientation`, `fill`, `collapsible`, `horizontal`, `on_header_drag`, `item`, `add`, `items`, `show_dividers`
 
 ## API reference
 
@@ -302,15 +302,11 @@ section index) when a drag gesture *starts* on a header; it should
 begin a drag (e.g. `ctx.start_drag(source, payload)`). Tapping a
 header still selects it — the gesture arena tells a tap from a drag.
 
-#### `pub fn item(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self`
+#### `pub fn item( self, label: impl Into<LocalizedString>, content: impl teksilo_core::IntoTeksiChild, ) -> Self`
 
 Append an item with an inline content widget. Convenience wrapper
 around `ToolBox::add` that skips the `ToolBoxItem` builder for
 the common label-plus-content case.
-
-#### `pub fn item_id(self, label: impl Into<LocalizedString>, content_id: WidgetId) -> Self`
-
-Append an item whose content is a pre-registered widget id.
 
 #### `pub fn add(mut self, item: ToolBoxItem) -> Self`
 

@@ -128,11 +128,11 @@ after the band. Always `ZERO` with `Self::rubber_band` off.
 The scroll offset itself never leaves the range, so this is the signal
 a surface binds to draw a stretch or a glow; ignoring it is correct.
 
-#### `pub fn child(mut self, child: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, child: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the scrollable content widget.
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 

@@ -616,6 +616,41 @@ fn form_layout_lines() {
     );
 }
 
+/// `tabs`' content column takes `impl IntoTeksiChild`, not `impl Widget`, so a
+/// loop holding pane ids can use the plural without falling back to `tab_ids`.
+#[test]
+fn tab_widget_tabs_accept_ids() {
+    same_tree(
+        |t| {
+            let (a, b) = (t.add(leaf(10.0)), t.add(leaf(20.0)));
+            t.add(
+                TabWidget::new(Signal::new(None))
+                    .tab(lit!("A"), a)
+                    .tab(lit!("B"), b),
+            )
+        },
+        |t| {
+            let (a, b) = (t.add(leaf(10.0)), t.add(leaf(20.0)));
+            t.add(TabWidget::new(Signal::new(None)).tabs([(lit!("A"), a), (lit!("B"), b)]))
+        },
+    );
+}
+
+/// `ToolBox::item` takes `impl IntoTeksiChild`; its `item_id` twin is gone.
+#[test]
+fn tool_box_item_accepts_an_id() {
+    same_tree(
+        |t| {
+            let a = t.add(leaf(10.0));
+            t.add(ToolBox::new(Signal::new(0usize)).add(ToolBoxItem::new_id(lit!("A"), a)))
+        },
+        |t| {
+            let a = t.add(leaf(10.0));
+            t.add(ToolBox::new(Signal::new(0usize)).item(lit!("A"), a))
+        },
+    );
+}
+
 /// The field column of `lines` takes `impl IntoTeksiChild`, not `impl Widget`,
 /// so a loop holding ids can use the plural without falling back to `line_ids`.
 #[test]

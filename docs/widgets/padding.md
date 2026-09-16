@@ -45,7 +45,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`uniform`, `symmetric`, `child_id`, `child`, `child_opt`
+`uniform`, `symmetric`, `child`, `child_opt`
 
 ## API reference
 
@@ -58,7 +58,7 @@ A layout container that adds padding (insets) around a single child.
 See the `module documentation` for the full feature description and
 an example. Construct with `Padding::new`, `Padding::uniform`, or
 `Padding::symmetric`; attach a child with `.child(widget)` or
-`.child_id(id)`.
+`.child(id)`.
 
 ```rust
 pub struct Padding { /* fields */ }
@@ -85,15 +85,11 @@ Create a padding with equal top/bottom insets and equal leading/trailing insets.
 `vertical` applies to both top and bottom; `horizontal` applies to both
 leading and trailing sides (logical, RTL-aware).
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Set child by pre-registered ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 

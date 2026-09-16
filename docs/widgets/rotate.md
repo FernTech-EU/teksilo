@@ -45,7 +45,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`origin`, `child`, `child_opt`, `child_id`
+`origin`, `child`, `child_opt`
 
 ## API reference
 
@@ -71,11 +71,11 @@ static `f32` or a reactive `Signal<f32>`. Default pivot: `Center`.
 
 Pivot point for the rotation. Default `Center`.
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 
@@ -83,7 +83,3 @@ The conditional-child form. `teksu!`'s `if` without an `else` lowers to
 this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
-
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Pre-registered child by `WidgetId`.

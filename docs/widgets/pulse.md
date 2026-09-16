@@ -33,7 +33,7 @@ still communicates "active" without animating.
 
 ## Builder methods at a glance
 
-`opacity`, `period`, `child`, `child_opt`, `child_id`
+`opacity`, `period`, `child`, `child_opt`
 
 ## API reference
 
@@ -64,11 +64,11 @@ Default: `MotionTokens::duration_indeterminate_sweep` (~900 ms),
 the same continuous-loop budget the indeterminate progress bar
 and spinner use — so a re-themed motion stack stays consistent.
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 
@@ -76,7 +76,3 @@ The conditional-child form. `teksu!`'s `if` without an `else` lowers to
 this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
-
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Pre-registered child by `WidgetId`.

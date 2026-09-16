@@ -54,7 +54,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`label`, `item`, `items`, `item_id`, `item_ids`, `trailing_slot`, `trailing_slot_id`, `is_overflowing`
+`label`, `item`, `items`, `item_id`, `item_ids`, `trailing_slot`, `is_overflowing`
 
 ## API reference
 
@@ -207,17 +207,12 @@ Insert several pre-registered widgets as breadcrumb segment slots.
 The id-carrying twin of `items`. Like `item_id`, none of
 these crumbs ever collapses into the overflow menu.
 
-#### `pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn trailing_slot(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Append a trailing widget after all segments, pushed to the far edge
 by an intervening `Spacer`. Common uses: a search icon, refresh button,
 or current-path copy button. When a trailing slot is set, the breadcrumb
 spans the full proposed width.
-
-#### `pub fn trailing_slot_id(mut self, id: WidgetId) -> Self`
-
-Same as `trailing_slot` but accepts a
-pre-registered `WidgetId` instead of an inline widget.
 
 #### `pub fn is_overflowing(&self) -> Signal<bool>`
 

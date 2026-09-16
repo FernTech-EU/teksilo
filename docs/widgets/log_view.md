@@ -57,7 +57,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/log_view/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/code_editor/index.html)
 
 ## `pub struct LogView`
 

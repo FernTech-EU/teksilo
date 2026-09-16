@@ -33,7 +33,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`rail`, `rails`, `center`, `policy`, `disable_side`, `center_id`, `dock`, `docks`
+`rail`, `rails`, `center`, `policy`, `disable_side`, `dock`, `docks`
 
 ## API reference
 
@@ -74,7 +74,7 @@ Configure several sides' activity rails from an iterator.
 The loop form of `rail`. Each rail carries its own side, so
 a later entry for a side already configured replaces it.
 
-#### `pub fn center(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the always-present centre content (the app's main area).
 
@@ -87,10 +87,6 @@ See `DockPolicy`.
 
 Disable a side (sugar for `DockingModel::set_side_enabled``(side, false)`):
 it renders nothing, reserves no space, and rejects docks.
-
-#### `pub fn center_id(mut self, id: WidgetId) -> Self`
-
-Set the centre content by a pre-registered id.
 
 #### `pub fn dock(self, dock: DockWidget) -> Self`
 

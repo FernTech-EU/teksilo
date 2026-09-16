@@ -137,7 +137,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`child`, `child_opt`, `child_id`, `region`, `zone_size_factor`, `hint`, `hint_id`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `targeted_signal`, `drag_state_signal`, `active_region_signal`, `on_drop`, `on_drop_typed`, `on_region_drop`, `on_drag_leave`, `variant`, `style`
+`child`, `child_opt`, `region`, `zone_size_factor`, `hint`, `accept_any`, `accept_external`, `accept_external_files`, `accept_external_text`, `accept_external_extensions`, `accept_typed`, `accept_when`, `targeted_signal`, `drag_state_signal`, `active_region_signal`, `on_drop`, `on_drop_typed`, `on_region_drop`, `on_drag_leave`, `variant`, `style`
 
 ## API reference
 
@@ -215,14 +215,10 @@ pub struct DropRegionSpec { /* fields */ }
 
 An enabled spec with no hint.
 
-#### `pub fn hint(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn hint(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Widget shown (centered in this region's rect, inside a popup card) while
 a drag with an accepted payload hovers **this** region.
-
-#### `pub fn hint_id(mut self, id: WidgetId) -> Self`
-
-This region's hint content by pre-registered `WidgetId`.
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
@@ -248,11 +244,11 @@ pub struct DropTarget { /* fields */ }
 
 A drop target with no child yet — call `Self::child` (required).
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 The wrapped content — fills the bounds and is always visible.
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 
@@ -260,10 +256,6 @@ The conditional-child form. `teksu!`'s `if` without an `else` lowers to
 this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
-
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-The wrapped content by pre-registered `WidgetId`.
 
 #### `pub fn region( mut self, region: DropRegion, f: impl FnOnce(DropRegionSpec) -> DropRegionSpec, ) -> Self`
 
@@ -288,15 +280,11 @@ The fraction of the axis each **side** zone occupies (clamped to
 `0.1..=1.0`). `0.2` is the default fifth; `0.5` bisects. Applies to all
 four edge zones in common; `Center` takes the leftover middle.
 
-#### `pub fn hint(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn hint(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Widget shown centered inside a popup card while a drag with an accepted
 payload hovers. Sugar for `.region(DropRegion::Center, |z| z.hint(w))` —
 the classic whole-bounds single-zone case.
-
-#### `pub fn hint_id(mut self, id: WidgetId) -> Self`
-
-Hint content by pre-registered `WidgetId` (Center region).
 
 #### `pub fn accept_any(mut self) -> Self`
 

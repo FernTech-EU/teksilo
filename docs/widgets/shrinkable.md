@@ -36,7 +36,7 @@ let _row = HStack::new()
 
 ## Builder methods at a glance
 
-`shrink`, `min_width`, `min_height`, `child`, `child_opt`, `child_id`
+`shrink`, `min_width`, `min_height`, `child`, `child_opt`
 
 ## API reference
 
@@ -99,11 +99,11 @@ Set the minimum width the child may be compressed to.
 
 Set the minimum height the child may be compressed to.
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Wrap an inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 
@@ -111,7 +111,3 @@ The conditional-child form. `teksu!`'s `if` without an `else` lowers to
 this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
-
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Wrap a pre-registered child by id.

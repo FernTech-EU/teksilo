@@ -49,7 +49,7 @@ ladder aims for. 44 dp is never the AA figure.
 
 ## Builder methods at a glance
 
-`width`, `height`, `min_width`, `min_height`, `child_id`, `child`, `child_opt`
+`width`, `height`, `min_width`, `min_height`, `child`, `child_opt`
 
 ## API reference
 
@@ -87,15 +87,11 @@ Bind min width to a reactive state.
 
 Bind min height to a reactive state.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Set child by pre-registered ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 

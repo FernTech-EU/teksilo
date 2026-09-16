@@ -30,7 +30,7 @@ let _sidebar = FixedSize::new()
 
 ## Builder methods at a glance
 
-`child_id`, `child`, `child_opt`, `width`, `height`
+`child`, `child_opt`, `width`, `height`
 
 ## API reference
 
@@ -55,15 +55,11 @@ pub struct FixedSize { /* fields */ }
 Create a `FixedSize` with no child and no dimension bindings; the child's
 natural size will be used for both axes.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Set child by pre-registered ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 

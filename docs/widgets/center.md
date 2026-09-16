@@ -50,7 +50,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`child_id`, `child`, `child_opt`
+`child`, `child_opt`
 
 ## API reference
 
@@ -84,15 +84,11 @@ pub struct Center { /* fields */ }
 
 Create a new `Center` with no child attached.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Set child by pre-registered ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 

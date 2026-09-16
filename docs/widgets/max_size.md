@@ -27,7 +27,7 @@ let _w = MaxSize::width(240.0)
 
 ## Builder methods at a glance
 
-`width`, `height`, `max_width`, `max_height`, `child_id`, `child`, `child_opt`
+`width`, `height`, `max_width`, `max_height`, `child`, `child_opt`
 
 ## API reference
 
@@ -65,15 +65,11 @@ Bind max width to a reactive state.
 
 Bind max height to a reactive state.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Set child by pre-registered ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 

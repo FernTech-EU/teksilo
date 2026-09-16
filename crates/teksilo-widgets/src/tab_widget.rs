@@ -547,25 +547,17 @@ impl TabWidget {
     pub fn tabs<L, W>(self, tabs: impl IntoIterator<Item = (L, W)>) -> Self
     where
         L: Into<LocalizedString>,
-        W: Widget + 'static,
+        W: teksilo_core::IntoTeksiChild,
     {
         tabs.into_iter()
             .fold(self, |w, (label, content)| w.tab(label, content))
     }
 
-    /// `WidgetId` twin of [`tab`](Self::tab) — `tab_id(label, id)` is
-    /// `static_tab_id(TabInfo::new().title(label), id)`. This is what the
-    /// `teksu!` `tab:` slot lowers to when its content is an id binding
-    /// (`#{…}` / `name = Element`).
-    pub fn tab_id(self, label: impl Into<LocalizedString>, id: WidgetId) -> Self {
-        self.static_tab(TabInfo::new().title(label), id)
-    }
-
-    /// `WidgetId` twin of [`tabs`](Self::tabs): several title-only static tabs
-    /// from an iterator of `(label, id)` pairs.
+    /// Several title-only static tabs from an iterator of `(label, id)` pairs.
     ///
-    /// Reach for it when a loop has already registered its panes and holds the
-    /// `WidgetId`s.
+    /// [`tabs`](Self::tabs) accepts ids too, so this is the spelling that names
+    /// the id type rather than a capability the other method lacks. Reach for it
+    /// when a loop has already registered its panes and holds the `WidgetId`s.
     pub fn tab_ids<L>(self, tabs: impl IntoIterator<Item = (L, WidgetId)>) -> Self
     where
         L: Into<LocalizedString>,
@@ -594,8 +586,8 @@ impl TabWidget {
 
     /// Add several static tabs from an iterator of `(info, content_id)` pairs.
     ///
-    /// The id-carrying twin of [`static_tabs`](Self::static_tabs), for panes the
-    /// caller has already registered.
+    /// [`static_tabs`](Self::static_tabs) accepts ids too; this is the spelling
+    /// that names the id type, for panes the caller has already registered.
     pub fn static_tab_ids(self, tabs: impl IntoIterator<Item = (TabInfo, WidgetId)>) -> Self {
         tabs.into_iter()
             .fold(self, |w, (info, id)| w.static_tab(info, id))

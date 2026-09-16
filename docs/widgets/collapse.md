@@ -27,7 +27,7 @@ snaps to its end value instead of tweening.
 
 ## Builder methods at a glance
 
-`child`, `child_opt`, `child_id`
+`child`, `child_opt`
 
 ## API reference
 
@@ -50,11 +50,11 @@ Build a collapse wrapper bound to `expanded`. Initially
 collapsed iff `expanded.get()` is `false` at the first
 `build()`.
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 
@@ -62,7 +62,3 @@ The conditional-child form. `teksu!`'s `if` without an `else` lowers to
 this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
 adds no arena node, so nothing is laid out, painted, or published to the
 accessibility tree, and a stack applies no spacing around it.
-
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Pre-registered child by `WidgetId`.

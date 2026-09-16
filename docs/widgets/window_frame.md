@@ -64,11 +64,11 @@ so the list is now exhaustive and lint-guarded at its own impl.
 
 ## Builder methods at a glance
 
-`thickness`, `content`, `content_boxed`, `content_id`, `coarse_resize_borders`
+`thickness`, `content`, `content_boxed`, `coarse_resize_borders`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/window_frame/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/title_bar/index.html)
 
 ## `pub struct WindowFrame`
 
@@ -92,7 +92,7 @@ and `content` to configure it before adding to the tree.
 Logical-pixel thickness of each resize strip. Default:
 `WINDOW_FRAME_RESIZE_THICKNESS`.
 
-#### `pub fn content(mut self, w: impl Widget + 'static) -> Self`
+#### `pub fn content(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the inner content widget — typically a `VStack` containing a
 `TitleBar` and the application body.
@@ -101,11 +101,6 @@ Set the inner content widget — typically a `VStack` containing a
 
 Set the inner content widget from an already-boxed value. Prefer `content`
 for unboxed widgets; use this variant when the concrete type is not known at the call site.
-
-#### `pub fn content_id(mut self, id: WidgetId) -> Self`
-
-Set the inner content widget by its already-registered `WidgetId`. Use when the content
-was added to the tree before the frame was constructed and you need to retain its id.
 
 #### `pub fn coarse_resize_borders(&self, tokens: &InputTokens) -> ResizeBorders`
 

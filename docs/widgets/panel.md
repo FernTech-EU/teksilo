@@ -43,7 +43,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`variant`, `style`, `a11y_presentational`, `child_id`, `child`, `child_opt`, `background`, `border_color`, `border_width`, `corner_radius`, `padding`
+`variant`, `style`, `a11y_presentational`, `child`, `child_opt`, `background`, `border_color`, `border_width`, `corner_radius`, `padding`
 
 ## API reference
 
@@ -88,15 +88,11 @@ border, padding) doesn't introduce a spurious `Group` node
 between an outer widget (Toolbar, StatusBar, etc.) and the
 real content. Children remain visible in the a11y tree.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Set child by pre-registered ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
 
-#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
 Attach `widget` when it is `Some`, and do nothing when it is `None`.
 

@@ -95,8 +95,8 @@ pub enum ToolBoxOrientation {
 // ---------------------------------------------------------------------------
 
 /// One section of a [`ToolBox`]. Construct with [`ToolBoxItem::new`] and pass
-/// to [`ToolBox::add`], or use the convenience [`ToolBox::item`] /
-/// [`ToolBox::item_id`] builders directly when leading / trailing slots
+/// to [`ToolBox::add`], or use the convenience [`ToolBox::item`] builder
+/// directly (it takes a widget or a `WidgetId`) when leading / trailing slots
 /// and tooltip are not needed.
 ///
 /// Layout of the header row:
@@ -383,16 +383,15 @@ impl ToolBox {
     /// Append an item with an inline content widget. Convenience wrapper
     /// around [`ToolBox::add`] that skips the [`ToolBoxItem`] builder for
     /// the common label-plus-content case.
-    pub fn item(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
+    pub fn item(
+        self,
+        label: impl Into<LocalizedString>,
+        content: impl teksilo_core::IntoTeksiChild,
+    ) -> Self {
         match teksilo_core::IntoTeksiChild::into_pending(content) {
             teksilo_core::PendingChild::Id(id) => self.add(ToolBoxItem::new_id(label, id)),
             teksilo_core::PendingChild::Deferred(w) => self.add(ToolBoxItem::new(label, w)),
         }
-    }
-
-    /// Append an item whose content is a pre-registered widget id.
-    pub fn item_id(self, label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
-        self.add(ToolBoxItem::new_id(label, content_id))
     }
 
     /// Append a fully-built [`ToolBoxItem`] — required when an icon,
