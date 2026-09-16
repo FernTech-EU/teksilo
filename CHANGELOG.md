@@ -154,6 +154,17 @@ one name and that name takes a `WidgetId` or a widget.
   `DimWhenInactive > b` and lost the stack and `a`. The method is gone;
   `teksilo-teksu-guard` fails the build if a `WidgetBuilder` method returns a
   foreign wrapper again.
+- **ArrowLeft reaches a text editor again when a second one is mounted beside
+  it.** The dispatch root reads the inline-start arrow as "back toward the
+  parent overlay" once two or more non-host overlays are stacked, and it counted
+  every band alike. Each mounted `RichTextEditor` keeps one full-viewport
+  affordance host in the `TextAffordance` band for its selection handles, so two
+  editors on one page — a prose column and the synopsis next to it — read as a
+  submenu over its parent menu: the key tore down an affordance host and
+  returned, and no editor in that window saw an ArrowLeft for as long as both
+  were up. The count now considers `OverlayBand::Standard` overlays only, the
+  same line `OverlayBand::dismissed_by_outside_press` already draws for presses.
+  A submenu over a mounted affordance still closes on the back key.
 
 #### teksu
 

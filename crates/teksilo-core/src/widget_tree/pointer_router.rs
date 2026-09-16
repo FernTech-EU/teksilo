@@ -562,8 +562,31 @@ impl WidgetTree {
             // menu instead of letting the menubar navigate to the previous
             // one. Only when ≥2 non-host overlays are stacked (a submenu over
             // its parent menu) does the back key dismiss the top overlay.
+            //
+            // **Menus only**, which is what the band says. Every mounted text
+            // editor keeps one full-viewport affordance host alive in the
+            // [`TextAffordance`](crate::overlay::OverlayBand::TextAffordance)
+            // band for its selection handles, so counting bands alike made two
+            // editors on one page read as a menu cascade: the back key then
+            // tore down an affordance host and returned, and ArrowLeft stopped
+            // reaching *any* editor in that window for as long as a second one
+            // was mounted. A text affordance is not a cascade level, the same
+            // reason `OverlayBand::dismissed_by_outside_press` already excludes
+            // it from press dismissal.
+            //
+            // `dismiss_top` below stays correct because the stack is
+            // band-ordered (`OverlayManager::show_with_auto_dismiss` inserts,
+            // it does not push): a `Standard` overlay always sits above every
+            // `TextAffordance` one, so whenever this count exceeds one the top
+            // of the stack is the menu this key means.
             let nested_menu_overlays = {
-                let ids: Vec<_> = self.overlay_manager.stack.iter().map(|o| o.id).collect();
+                let ids: Vec<_> = self
+                    .overlay_manager
+                    .stack
+                    .iter()
+                    .filter(|o| o.band == crate::overlay::OverlayBand::Standard)
+                    .map(|o| o.id)
+                    .collect();
                 ids.into_iter()
                     .filter(|&id| !self.overlay_is_host_surface(id))
                     .count()

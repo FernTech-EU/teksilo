@@ -2402,6 +2402,149 @@ mod tests {
         assert_eq!(tree.active_overlays().len(), 1);
     }
 
+    /// A focusable leaf that records the keys it is handed, so a test can ask
+    /// the question the writer actually asks: did the keystroke reach me?
+    #[derive(Debug)]
+    struct KeyProbe {
+        seen: std::rc::Rc<std::cell::RefCell<Vec<Key>>>,
+    }
+
+    impl Widget for KeyProbe {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let seen = self.seen.clone();
+            ctx.apply_self_handlers(
+                crate::widget_builder::HandlerSet::new()
+                    .focusable(true)
+                    .on_key(move |event, _ctx| match event {
+                        WidgetEvent::KeyDown { key, .. } => {
+                            seen.borrow_mut().push(*key);
+                            crate::event::EventResponse::Handled
+                        }
+                        _ => crate::event::EventResponse::Ignored,
+                    }),
+            );
+            Vec::new()
+        }
+    }
+
+    /// ⚠ The regression this exists for. Every mounted text editor keeps one
+    /// full-viewport affordance host alive in the `TextAffordance` band for its
+    /// selection handles. Counting those alongside menus made **two editors on
+    /// one page** — a manuscript column and the synopsis beside it — read as a
+    /// submenu over its parent menu, so the back key dismissed an affordance
+    /// host and returned: ArrowLeft stopped reaching any editor in the window,
+    /// and the writer could no longer step the caret left at all.
+    ///
+    /// A text affordance is not a cascade level, which is exactly what its own
+    /// band says — the same distinction `dismissed_by_outside_press` already
+    /// makes for presses.
+    #[test]
+    fn back_key_ignores_text_affordance_overlays_and_reaches_the_editor() {
+        let mut tree = WidgetTree::new();
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let editor = tree.add(KeyProbe { seen: seen.clone() });
+        let handles_a = tree.add(FillWidget::new());
+        let handles_b = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(editor);
+
+        // Two editors on one page: one affordance host apiece.
+        for content in [handles_a, handles_b] {
+            tree.show_overlay_in_band(
+                crate::overlay::OverlayRequest {
+                    content_id: content,
+                    anchor: editor,
+                    placement: crate::overlay::OverlayPlacement::FullViewport,
+                    dismiss: crate::overlay::DismissBehavior::Manual,
+                    layer: crate::overlay::OverlayLayer::InTree,
+                    parent_overlay: None,
+                    on_dismiss: None,
+                    fade_duration: None,
+                },
+                crate::overlay::OverlayBand::TextAffordance,
+            );
+        }
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "a text affordance is not a menu cascade level — the back key must \
+             leave both hosts standing"
+        );
+        assert_eq!(
+            seen.borrow().as_slice(),
+            &[Key::ArrowLeft],
+            "ArrowLeft must reach the focused editor; swallowing it is the bug \
+             that left the caret unable to step left in any dual-pane tab"
+        );
+    }
+
+    /// The complement: a real menu cascade still navigates back, even while
+    /// affordance hosts are mounted beneath it. The band filter must narrow the
+    /// count, not disable the key.
+    #[test]
+    fn back_key_still_closes_a_submenu_over_a_mounted_text_affordance() {
+        let mut tree = WidgetTree::new();
+        let affordance = tree.add(FillWidget::new());
+        let anchor = tree.add(FillWidget::new());
+        let menu = tree.add(FillWidget::new());
+        let submenu = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay_in_band(
+            crate::overlay::OverlayRequest {
+                content_id: affordance,
+                anchor,
+                placement: crate::overlay::OverlayPlacement::FullViewport,
+                dismiss: crate::overlay::DismissBehavior::Manual,
+                layer: crate::overlay::OverlayLayer::InTree,
+                parent_overlay: None,
+                on_dismiss: None,
+                fade_duration: None,
+            },
+            crate::overlay::OverlayBand::TextAffordance,
+        );
+        let parent = tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: menu,
+            anchor,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        tree.show_overlay(crate::overlay::OverlayRequest {
+            content_id: submenu,
+            anchor: menu,
+            placement: crate::overlay::OverlayPlacement::Below,
+            dismiss: crate::overlay::DismissBehavior::Manual,
+            layer: crate::overlay::OverlayLayer::InTree,
+            parent_overlay: Some(parent),
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        assert_eq!(tree.active_overlays().len(), 3);
+
+        tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "the submenu must still close: the affordance host narrows the \
+             count, it does not disarm the back key"
+        );
+    }
+
     /// The back key navigates *menu* cascades only — it must never close a
     /// dialog/alert/modal on top. A modal is a scrim+panel overlay pair, so two
     /// stacked modals put two (non-host) scrims in the stack, which inflates the
