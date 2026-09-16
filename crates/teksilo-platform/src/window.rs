@@ -139,16 +139,57 @@ struct SharedGpu {
     queue: wgpu::Queue,
 }
 
+/// The platform display connection the wgpu instance is built against.
+///
+/// Installed by the app layer via [`install_display_handle`] before the first
+/// window exists, and read once by [`shared_instance`].
+static DISPLAY_HANDLE: OnceLock<winit::event_loop::OwnedDisplayHandle> = OnceLock::new();
+
+/// Hand wgpu the platform display connection, before any window is created.
+///
+/// Load-bearing for the OpenGL backend, which is the only backend a machine
+/// with no Vulkan driver has left — an older GPU, or a VM whose guest driver
+/// stops at GL. Without a display handle, wgpu-hal's GLES backend has no
+/// windowing system to bind EGL to and falls back to
+/// `EGL_MESA_platform_surfaceless`: a display that can render offscreen but can
+/// never be compatible with a *window* surface. `request_adapter` then rejects
+/// the only adapter on the machine with `incompatible_surface_backends: GL`,
+/// and the process dies before its first window. Vulkan, Metal and D3D12 ignore
+/// the handle entirely, so this costs those paths nothing.
+///
+/// Only the first call counts; later ones are ignored, because the instance is
+/// built once per process and wgpu forbids presenting a surface from a display
+/// other than the one the instance was created with.
+pub fn install_display_handle(handle: winit::event_loop::OwnedDisplayHandle) {
+    let _ = DISPLAY_HANDLE.set(handle);
+}
+
 /// The one wgpu instance for this process.
 ///
 /// A surface has to come from the same instance that later enumerates adapters
 /// for it, so this is the root every window hangs off. `Instance::new` is
 /// synchronous, which is why this one can be a plain `OnceLock` while the
 /// adapter and device below cannot.
+///
+/// The descriptor is built `_from_env`, so wgpu's own variables —
+/// `WGPU_BACKEND`, `WGPU_GLES_MINOR_VERSION` and the rest — work here as they
+/// do in every other wgpu application. That is the escape hatch for the machine
+/// whose preferred backend has a broken driver, and it is worth having
+/// precisely where the default choice is the thing under suspicion.
 fn shared_instance() -> &'static wgpu::Instance {
     static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
-    INSTANCE
-        .get_or_init(|| wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle()))
+    INSTANCE.get_or_init(|| {
+        let descriptor = match DISPLAY_HANDLE.get() {
+            Some(display) => wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
+                display.clone(),
+            )),
+            // No app layer installed one — an embedder driving `PlatformWindow`
+            // itself, or a test. Offscreen work is unaffected; only a GL-backed
+            // window needs the handle.
+            None => wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+        };
+        wgpu::Instance::new(descriptor)
+    })
 }
 
 /// The adapter, device and queue every window shares.
@@ -234,6 +275,78 @@ async fn open_device(
     }
 }
 
+/// Find an adapter that can present to `surface` *and* yields a device.
+///
+/// Adapter selection is a search, not a single request — the same lesson
+/// [`teksilo_render::test_support`] already encodes for its offscreen device,
+/// which the window path did not have. A host can enumerate an adapter it
+/// cannot actually open (a VM's GL driver is the usual one) while a perfectly
+/// good software adapter sits behind `force_fallback_adapter`. Treating the
+/// first failure as fatal reports "no GPU" on a machine that has one.
+///
+/// Both passes keep `compatible_surface`, so an adapter that cannot present to
+/// this window is never chosen — that is the check that failed on a machine
+/// with no Vulkan driver, and it is load-bearing, not a formality.
+///
+/// Panics only when *every* adapter on the machine declines, with a message
+/// naming what was tried and what the user can do about it.
+async fn open_gpu_for(
+    surface: &wgpu::Surface<'static>,
+) -> (wgpu::Adapter, wgpu::Device, wgpu::Queue) {
+    // `WGPU_POWER_PREF` is wgpu's own knob; honour it for the same reason the
+    // instance is built `_from_env`.
+    let power_preference = wgpu::PowerPreference::from_env().unwrap_or_default();
+    let mut adapter_error = None;
+    let mut device_error = None;
+
+    for force_fallback_adapter in [false, true] {
+        let adapter = match shared_instance()
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference,
+                compatible_surface: Some(surface),
+                force_fallback_adapter,
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(adapter) => adapter,
+            Err(err) => {
+                adapter_error.get_or_insert(err);
+                continue;
+            }
+        };
+
+        match open_device(&adapter).await {
+            Ok((device, queue)) => return (adapter, device, queue),
+            Err(err) => {
+                // Worth saying out loud: the next pass silently landing on a
+                // software adapter is a large performance difference, and an
+                // unexplained one is the sort of thing that gets reported as
+                // "Teksilo is slow on my machine".
+                eprintln!(
+                    "teksilo-platform: adapter {:?} could not open a device ({err}); \
+                     trying the next one",
+                    adapter.get_info().name
+                );
+                device_error.get_or_insert(err);
+            }
+        }
+    }
+
+    panic!(
+        "no usable GPU adapter for this window.\n\
+         Tried every backend wgpu was built with, then an explicit software \
+         fallback; none could both present to the window and open a device.\n\
+         adapter search: {adapter_error:?}\n\
+         device open:    {device_error:?}\n\
+         Teksilo needs Vulkan, Metal, D3D12 or OpenGL (3.3 desktop / ES 3.0). \
+         On Linux, installing a Vulkan driver is usually the fix: \
+         `mesa-vulkan-drivers` carries both the hardware drivers and the \
+         software `lavapipe`. `WGPU_BACKEND=gl|vulkan|dx12|metal` forces a \
+         specific backend."
+    );
+}
+
 async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
     static SHARED: Mutex<Option<SharedGpu>> = Mutex::new(None);
 
@@ -247,19 +360,7 @@ async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
         }
     }
 
-    let adapter = shared_instance()
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: Some(surface),
-            force_fallback_adapter: false,
-            ..Default::default()
-        })
-        .await
-        .expect("no compatible wgpu adapter available");
-
-    let (device, queue) = open_device(&adapter)
-        .await
-        .expect("wgpu device request failed");
+    let (adapter, device, queue) = open_gpu_for(surface).await;
 
     let gpu = SharedGpu {
         adapter,

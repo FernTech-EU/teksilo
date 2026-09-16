@@ -54,11 +54,11 @@ const MAX_KAWASE_LEVELS: u32 = 6;
 // also gives free linear-space blur math: sampling auto-linearizes,
 // the Kawase shader does linear ops, write re-encodes — no double sRGB.
 
-/// Recycled intermediate-texture pool. Textures are keyed on
-/// `(width, height)` rounded up to the next power of two — typical
-/// blur scopes within a frame share the same size buckets, so the
-/// pool gives us O(1) lookup with at most a handful of distinct
-/// allocations across the lifetime of the pool.
+/// Recycled intermediate-texture pool. Textures are keyed on their
+/// exact `(width, height)` — a stable blur scope asks for the same
+/// size every frame, so the pool gives us O(1) lookup with at most a
+/// handful of distinct allocations across its lifetime. Power-of-two
+/// padding was tried and rejected; [`BlurPool::acquire`] says why.
 ///
 /// Reset at the top of each frame: we mark every texture as available
 /// without freeing it, so steady-state usage allocates zero textures
@@ -66,7 +66,7 @@ const MAX_KAWASE_LEVELS: u32 = 6;
 /// consecutive frames are dropped to keep VRAM usage bounded under
 /// pathological "sometimes-blurred" workloads.
 pub(crate) struct BlurPool {
-    /// All pooled textures, grouped by their power-of-two size bucket.
+    /// All pooled textures, grouped by their exact size bucket.
     /// Each entry holds the texture, its view, the bind group binding
     /// it as input to the Kawase pipelines, and per-frame bookkeeping.
     buckets: HashMap<(u32, u32), Vec<PooledTexture>>,

@@ -22,6 +22,12 @@ const MAX_ANIM_SLOTS: usize = 128;
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    /// `max_texture_dimension_2d` of the device behind `device`.
+    ///
+    /// Cached because both atlases grow to a compiled-in ceiling that a
+    /// downlevel device need not be able to allocate, and the glyph atlas is
+    /// sized by the text backend rather than by this crate.
+    max_texture_dimension: u32,
     rect_pipeline: wgpu::RenderPipeline,
     sdf_pipeline: wgpu::RenderPipeline,
     quad_pipeline: wgpu::RenderPipeline,
@@ -155,6 +161,9 @@ impl Renderer {
         queue: wgpu::Queue,
         surface_format: wgpu::TextureFormat,
     ) -> Self {
+        // Read once, here: the atlases grow to a compiled-in ceiling that the
+        // device may not be able to honour.
+        let device_max_texture_dimension = device.limits().max_texture_dimension_2d;
         let rect_pipeline = create_rect_pipeline(&device, surface_format);
         let sdf_pipeline = create_sdf_pipeline(&device, surface_format);
         let quad_pipeline = create_quad_pipeline(&device, surface_format);
@@ -198,6 +207,7 @@ impl Renderer {
         Self {
             device,
             queue,
+            max_texture_dimension: device_max_texture_dimension,
             rect_pipeline,
             sdf_pipeline,
             quad_pipeline,
@@ -208,7 +218,11 @@ impl Renderer {
             anim_uniform_buffer,
             anim_uniform_bind_group,
             atlas_texture: None,
-            path_atlas: PathAtlas::new(512, 512),
+            path_atlas: {
+                let mut atlas = PathAtlas::new(512, 512);
+                atlas.cap_max_size(device_max_texture_dimension);
+                atlas
+            },
             path_atlas_texture: None,
             image_manager: ImageManager::new(),
             streams: StreamBuffers::new(),
@@ -222,6 +236,21 @@ impl Renderer {
     /// Upload atlas texture data from the text backend.
     pub fn upload_atlas(&mut self, width: u32, height: u32, pixels: &[u8]) {
         if width == 0 || height == 0 {
+            return;
+        }
+        // The glyph atlas is sized by the text backend, which has its own
+        // compiled-in ceiling and no view of this device. Asking wgpu for a
+        // texture past `max_texture_dimension_2d` is a validation error, i.e. a
+        // crash — on precisely the downlevel hardware least able to report one.
+        // Keeping the previous atlas loses newly-rasterized glyphs, which draws
+        // as missing text: bad, but legible, and recoverable the moment the
+        // backend evicts back under the cap.
+        if width > self.max_texture_dimension || height > self.max_texture_dimension {
+            eprintln!(
+                "teksilo-render: glyph atlas {width}x{height} exceeds this device's \
+                 max texture dimension ({}); skipping upload",
+                self.max_texture_dimension
+            );
             return;
         }
 

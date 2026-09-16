@@ -72,10 +72,12 @@ async fn open_shared_device(label: &'static str) -> Option<(wgpu::Device, wgpu::
         };
 
         // `downlevel_defaults` caps `max_texture_dimension_2d` at 2048, but the
-        // path atlas grows to 4096 — so a path-heavy frame would fail offscreen
-        // while rendering fine in a live window (which uses `Limits::default`).
-        // `using_resolution` lifts exactly the resolution limits to whatever
-        // this adapter really supports, keeping every other downlevel bound.
+        // path atlas grows past that — so a path-heavy frame would fail here
+        // while rendering fine anywhere the cap is lifted. `using_resolution`
+        // lifts exactly the resolution limits to whatever this adapter really
+        // supports, keeping every other downlevel bound. The live window path
+        // asks for the same set, so a frame that renders in a test renders in
+        // a window too.
         let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
 
         if let Ok((device, queue)) = adapter

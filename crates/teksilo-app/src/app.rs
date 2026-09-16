@@ -2784,6 +2784,12 @@ impl TeksiloAppHandler {
 
 impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // Before the first window, and so before the wgpu instance exists: the
+        // OpenGL backend cannot present to a window whose display connection it
+        // was never told about, and that backend is all a machine without a
+        // Vulkan driver has. Idempotent, so a resume after suspend is a no-op.
+        teksilo_platform::install_display_handle(event_loop.owned_display_handle());
+
         if !self.initial_created
             && let Some(config) = self.initial_window.take()
         {

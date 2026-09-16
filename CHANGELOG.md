@@ -11,12 +11,16 @@ though pre-1.0, so breaking changes can land in a minor bump. `release.toml`
 keeps every workspace crate on one shared version; entries below are grouped
 by crate for clarity, not because crates version independently.
 
-## [Unreleased]
+## [0.11.0] - 2026-09-16
 
 The `teksu!` DSL reaches the code applications are actually made of: a call to
 your own `fn row(..) -> impl Widget` is a child, where before only a stock
 widget was. Alongside it the container API loses its twin methods, so a slot has
 one name and that name takes a `WidgetId` or a widget.
+
+Underneath, the GPU floor drops to what the renderer actually needs. A machine
+with no Vulkan driver could not open a window at all; it now falls back to
+OpenGL, which is what an older GPU has.
 
 ### Added
 
@@ -142,6 +146,32 @@ one name and that name takes a `WidgetId` or a widget.
   a `WidgetId` directly.
 
 ### Fixed
+
+#### Platform
+
+- **Teksilo opens a window on a machine with no Vulkan driver.** OpenGL is the
+  only backend such a machine has left — an older GPU, a VM whose guest driver
+  stops at GL — and it was never handed the platform's display connection, so it
+  could render offscreen but never present to a window. Startup died before the
+  first frame with `incompatible_surface_backends: GL`. Confirmed fixed on both
+  Wayland and X11 with the Vulkan driver removed.
+- Adapter selection is a search rather than a single request. An adapter that
+  enumerates but cannot open a device no longer ends the process, and an
+  explicit software fallback is tried before giving up — the resilience the
+  offscreen test device already had, and the window path did not.
+- wgpu's own environment variables take effect: `WGPU_BACKEND`,
+  `WGPU_POWER_PREF` and the rest were silently ignored, leaving no way to move
+  off a backend whose driver is the problem.
+- The remaining "no GPU" failure names the backends tried, the errors each gave,
+  and what to install, in place of a `Debug`-printed wgpu struct.
+
+#### Rendering
+
+- Neither atlas asks for a texture the device cannot allocate. Both grow toward
+  a 4096-pixel ceiling that is this renderer's own, not a fact about the
+  hardware, and a downlevel device can sit below it; the path atlas now caps its
+  growth to what the device reports, and a glyph atlas that arrives oversized is
+  skipped rather than failing the frame.
 
 #### Core
 
@@ -1724,7 +1754,7 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...HEAD
+[0.11.0]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/FernTech-EU/teksilo/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/FernTech-EU/teksilo/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/FernTech-EU/teksilo/compare/v0.9.3...v0.9.4
