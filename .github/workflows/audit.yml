@@ -18,7 +18,5 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
       - uses: taiki-e/install-action@cargo-audit
       - run: cargo audit

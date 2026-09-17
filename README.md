@@ -199,6 +199,78 @@ python3 tools/extract_widget_api.py --list
 python3 tools/extract_widget_api.py button calendar tree_view
 ```
 
+## Development environment
+
+Working on Teksilo itself needs nothing beyond a stable Rust toolchain and the
+system libraries winit, wgpu and arboard link against. `text-document` and
+`text-typeset` are ordinary crates.io dependencies, so a clone builds and tests
+straight away:
+
+```sh
+git clone https://github.com/ferntech-eu/teksilo
+cd teksilo
+cargo test --workspace
+```
+
+On Debian or Ubuntu the system libraries are:
+
+```sh
+sudo apt-get install --no-install-recommends \
+  build-essential pkg-config \
+  libglib2.0-dev libgtk-3-dev libsoup-3.0-dev \
+  libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev \
+  libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb1-dev libx11-dev
+```
+
+### Building against local text-document / text-typeset
+
+The two siblings are developed alongside Teksilo, and a change in one is
+usually made together with the change in the other. To build against local
+checkouts rather than the published versions, check them out beside this
+repository and create `.cargo/config.toml`:
+
+```toml
+# Local development overrides — NOT committed (see .gitignore).
+#
+# Cargo.toml declares `text-document` and `text-typeset` as ordinary crates.io
+# dependencies, so a fresh clone and every CI job build without preparation.
+# This file redirects them at the sibling checkouts so that edits there are
+# picked up by the next `cargo build` here.
+#
+# Requires ../text-document and ../text-typeset beside this repository.
+# Delete this file to build against the published versions instead.
+[patch.crates-io]
+text-document = { path = "../text-document/crates/public_api" }
+text-typeset = { path = "../text-typeset" }
+```
+
+The layout it expects:
+
+```
+parent/
+├── teksilo/          # this repository
+├── text-document/
+└── text-typeset/
+```
+
+That file is gitignored: it is per-machine, and keeping it out of the manifest
+is what lets CI and a fresh clone resolve the siblings from crates.io with no
+preparation step. When a sibling publishes a new version, bump the version in
+`[workspace.dependencies]` in `Cargo.toml` — the patch carries no version of
+its own, so a local build will not tell you that you are behind.
+
+One consequence to know about: the committed `Cargo.lock` records the two
+siblings as path dependencies, which is the shape a patched build produces. A
+build **without** the patch re-resolves them to registry sources and rewrites
+the lockfile, so `git status` shows `Cargo.lock` modified. That rewrite is not
+a change worth committing — `git checkout Cargo.lock` and carry on.
+
+`teksilo-analytics-native` is the exception to all of this. It is excluded from
+the workspace (it builds protobuf from source, which needs `cmake` and a C++
+toolchain) and depends on `teksilo-collector-proto`, which is not published;
+that one keeps a plain path dependency on a sibling checkout. A default
+`cargo build` never reaches it.
+
 ## Documentation
 
 Reference documents live in `docs/`. Good entry points:

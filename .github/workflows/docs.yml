@@ -54,9 +54,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
-
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 

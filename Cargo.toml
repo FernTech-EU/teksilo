@@ -120,8 +120,14 @@ bytemuck = { version = "1", features = ["derive"] }
 # Default features enable tzdb + tz-system so `Zoned::now()` resolves
 # the user's local "today" from the OS.
 jiff = "0.2"
-text-document = { path = "../text-document/crates/public_api", version = "1.12.2" }
-text-typeset = { path = "../text-typeset", version = "1.11.1" }
+# The two external siblings, maintained alongside Teksilo but released on
+# their own cadence. Declared as plain crates.io deps so a fresh clone, a
+# `cargo publish` and every CI job resolve them with no preparation step.
+# Working against local checkouts is a `[patch.crates-io]` in a gitignored
+# `.cargo/config.toml` — see README, "Development environment". Bump the
+# version here when the sibling publishes; the patch has no version to bump.
+text-document = "1.12.2"
+text-typeset = "1.11.1"
 
 # Terminal engine (consumed only by the opt-in `teksilo-terminal` crate,
 # feature-gated so a default workspace build never pulls them). `portable-pty`

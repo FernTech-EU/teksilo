@@ -173,6 +173,13 @@ build-dir/
 # Added by cargo
 
 /target
+
+# Local cargo overrides: the `[patch.crates-io]` that points text-document and
+# text-typeset at sibling checkouts. Per-machine by nature — the committed
+# Cargo.toml depends on the published versions so CI needs no setup step.
+# `.cargo/audit.toml` beside it IS committed.
+/.cargo/config.toml
+
 out/
 temp
 temp_*/

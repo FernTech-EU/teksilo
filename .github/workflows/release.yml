@@ -66,12 +66,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # `cargo metadata` reads every member manifest, so a path dependency on a
-      # sibling repo that is not checked out here fails the read outright —
-      # even with `--no-deps`, which resolves nothing.
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
-
       - name: Verify version matches tag
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
@@ -106,13 +100,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      # `cargo publish` resolves the whole workspace before it packages
-      # anything, which must resolve workspace path deps. Sibling repos
-      # (text-document, text-typeset) are not checked out on the runner.
-      # This rewrites Cargo.toml, hence the `--allow-dirty` below.
-      - name: Strip path dependencies
-        uses: ./.github/actions/strip-path-deps
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -164,6 +151,13 @@ jobs:
             fi
 
             echo "::group::cargo publish (attempt $attempt, $pending pending)"
+            # `--allow-dirty` is about Cargo.lock, not the manifest. The
+            # committed lockfile records text-document and text-typeset as path
+            # dependencies, because a developer's `.cargo/config.toml` patches
+            # them to the sibling checkouts. No runner has that patch, so the
+            # first cargo command here re-resolves them to registry sources and
+            # rewrites the lockfile — a dirty tree the release did not cause
+            # and must not refuse to publish over.
             if cargo publish --workspace --allow-dirty "${excludes[@]}"; then
               echo "::endgroup::"
               echo "Publish complete."
