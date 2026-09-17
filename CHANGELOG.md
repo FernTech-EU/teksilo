@@ -13,6 +13,21 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed
+
+- **Behaviour change.** On Windows, Direct3D 12 is tried before Vulkan and
+  OpenGL. Other platforms keep the order they already had: Metal first on macOS
+  and iOS, Vulkan first elsewhere. `WGPU_BACKEND` still overrides all of it.
+
+### Fixed
+
+- **An app starts on a machine whose Vulkan driver cannot build wgpu's
+  indirect-call validation pipelines.** It died inside `request_device` with
+  "buckets are not empty, at least one BGL has not been unregistered" —
+  before the adapter search could reach another backend — and no window ever
+  appeared. That validation is now off unless `WGPU_VALIDATION_INDIRECT_CALL`
+  asks for it; this renderer issues no indirect draws for it to check.
+
 ## [0.12.0] - 2026-09-17
 
 `teksilo-scene` becomes an editor. A selection can be moved, resized and

@@ -224,10 +224,12 @@ pub fn install_display_handle(handle: winit::event_loop::OwnedDisplayHandle) {
 /// do in every other wgpu application. That is the escape hatch for the machine
 /// whose preferred backend has a broken driver, and it is worth having
 /// precisely where the default choice is the thing under suspicion.
+///
+/// One flag is cleared afterwards — see [`drop_unused_indirect_validation`].
 fn shared_instance() -> &'static wgpu::Instance {
     static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
     INSTANCE.get_or_init(|| {
-        let descriptor = match DISPLAY_HANDLE.get() {
+        let mut descriptor = match DISPLAY_HANDLE.get() {
             Some(display) => wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
                 display.clone(),
             )),
@@ -236,8 +238,51 @@ fn shared_instance() -> &'static wgpu::Instance {
             // window needs the handle.
             None => wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
         };
+        drop_unused_indirect_validation(&mut descriptor.flags);
         wgpu::Instance::new(descriptor)
     })
+}
+
+/// Stop validating a GPU feature this renderer never uses.
+///
+/// `InstanceFlags::VALIDATION_INDIRECT_CALL` is set in **release** builds too:
+/// `InstanceFlags::from_build_config` returns it from its non-debug branch, so
+/// it is not a debug-only cost. It makes `Device::new` build a set of compute
+/// and render pipelines that check the arguments of indirect draws. This
+/// renderer issues no indirect draws at all — not one `draw_indirect`,
+/// `dispatch_indirect` or `multi_draw_*` anywhere in the workspace — so those
+/// pipelines validate nothing we will ever submit.
+///
+/// That alone would only be wasted startup work. The reason it is cleared is
+/// that building them is also a way for device creation to *fail*, and failing
+/// there is not survivable. `wgpu_core::device::resource::Device::new` creates
+/// the hal device, then its `empty_bgl` — which registers a bind-group layout
+/// with the Vulkan backend's `DescriptorAllocator` — and only then calls
+/// `IndirectValidation::new(..)?`. A driver that cannot build those pipelines
+/// takes that `?`, and the early return drops the hal device *without*
+/// unregistering `empty_bgl`, because hal objects are not RAII and need an
+/// explicit destroy. `Drop for DescriptorAllocator` then finds a non-empty
+/// bucket and panics — "buckets are not empty, at least one BGL has not been
+/// unregistered" — from an ordinary, non-unwinding drop, so its own
+/// `thread::panicking()` guard does not suppress it.
+///
+/// The process therefore dies *inside* `request_device`, before
+/// [`open_gpu_for`] can fall through to the next adapter: a backend search
+/// cannot search past a panic. Reported from the field on an older Windows 10
+/// machine where the app never opened a window, and confirmed there by setting
+/// `WGPU_VALIDATION_INDIRECT_CALL=0`, which let the window open. D3D12 has no
+/// `DescriptorAllocator` and never runs the assertion, which is why forcing
+/// `WGPU_BACKEND=dx12` looked like a graphics fix when it was really a way of
+/// not reaching this code.
+///
+/// An explicit `WGPU_VALIDATION_INDIRECT_CALL` is honoured, so the flag stays
+/// reachable for anyone debugging wgpu itself. That is why this tests the
+/// environment variable rather than the resulting bit: after `_from_env` the
+/// flag wgpu defaulted to and the flag a developer asked for are identical.
+fn drop_unused_indirect_validation(flags: &mut wgpu::InstanceFlags) {
+    if std::env::var_os("WGPU_VALIDATION_INDIRECT_CALL").is_none() {
+        flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
+    }
 }
 
 /// The adapter, device and queue every window shares.
@@ -323,6 +368,107 @@ async fn open_device(
     }
 }
 
+/// The backends this platform prefers, most preferred first.
+///
+/// wgpu does not rank backends. `Instance::new` initialises them in a fixed
+/// order — Vulkan, Metal, D3D12, GLES — and `request_adapter` then sorts the
+/// adapters it collected **only** by device type, and only when a power
+/// preference is set. Ours is `PowerPreference::None` unless `WGPU_POWER_PREF`
+/// says otherwise, which is wgpu's own default and sorts nothing at all. So the
+/// winner has been "the first adapter the first initialised backend
+/// enumerated", which on Windows means D3D12 was never reached as long as any
+/// Vulkan ICD was installed, however old.
+///
+/// That is the wrong default there. D3D12 is the backend Windows GPU drivers
+/// are tested against hardest — it is what the browsers use on Windows — while
+/// Vulkan support on older Windows hardware ranges from good to a stub that
+/// enumerates an adapter it cannot really drive. The field report that prompted
+/// this is one of those: a Windows 10 machine whose Vulkan ICD cannot build
+/// wgpu's own indirect-validation pipelines (see
+/// [`drop_unused_indirect_validation`]) and, past that, cannot present at all,
+/// while D3D12 on the same machine works.
+///
+/// Elsewhere the order simply writes down what wgpu already did, so this is a
+/// change of behaviour on Windows only. An explicit `WGPU_BACKEND` still wins:
+/// it is applied at `Instance::new`, so the backends it excludes enumerate
+/// nothing here and this order silently narrows to the one that was asked for.
+fn preferred_backends() -> &'static [wgpu::Backends] {
+    #[cfg(target_os = "windows")]
+    {
+        &[
+            wgpu::Backends::DX12,
+            wgpu::Backends::VULKAN,
+            wgpu::Backends::GL,
+        ]
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        &[
+            wgpu::Backends::METAL,
+            wgpu::Backends::VULKAN,
+            wgpu::Backends::GL,
+        ]
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
+    {
+        &[wgpu::Backends::VULKAN, wgpu::Backends::GL]
+    }
+}
+
+/// The adapters on `backends` that can present to `surface`, ranked as
+/// `request_adapter` would rank them.
+///
+/// `enumerate_adapters` asks each backend for its adapters with no surface, so
+/// the "can this one actually present to this window" filter that
+/// `request_adapter` applies internally has to be applied here instead. A
+/// non-empty format list is wgpu's own answer to that question, and it is the
+/// same one [`shared_gpu_for`] uses to revalidate the cached adapter.
+///
+/// The ordering within a backend deliberately mirrors
+/// `wgpu_core::instance::request_adapter`: rank by device type under a power
+/// preference, and leave enumeration order alone under `None`. Keeping the two
+/// identical means this pass changes *which backend* is tried first and nothing
+/// else about how an adapter is chosen.
+async fn presentable_adapters(
+    surface: &wgpu::Surface<'static>,
+    backends: wgpu::Backends,
+    power_preference: wgpu::PowerPreference,
+) -> Vec<wgpu::Adapter> {
+    let mut adapters: Vec<wgpu::Adapter> = shared_instance()
+        .enumerate_adapters(backends)
+        .await
+        .into_iter()
+        .filter(|adapter| !surface.get_capabilities(adapter).formats.is_empty())
+        .collect();
+
+    let prefer_integrated = match power_preference {
+        wgpu::PowerPreference::LowPower => true,
+        wgpu::PowerPreference::HighPerformance => false,
+        // wgpu does not sort at all here, so neither do we.
+        _ => return adapters,
+    };
+    adapters
+        .sort_by_key(|adapter| device_type_rank(adapter.get_info().device_type, prefer_integrated));
+    adapters
+}
+
+/// `wgpu_core::instance::request_adapter`'s `get_order`, kept in step with it.
+///
+/// "Other" outranks the virtual and CPU types because a backend that does not
+/// report device types at all (OpenGL) lands there, and it is likelier to be
+/// real hardware than a software rasterizer is.
+fn device_type_rank(device_type: wgpu::DeviceType, prefer_integrated: bool) -> u8 {
+    match device_type {
+        wgpu::DeviceType::DiscreteGpu if prefer_integrated => 2,
+        wgpu::DeviceType::IntegratedGpu if prefer_integrated => 1,
+        wgpu::DeviceType::DiscreteGpu => 1,
+        wgpu::DeviceType::IntegratedGpu => 2,
+        wgpu::DeviceType::Other => 3,
+        wgpu::DeviceType::VirtualGpu => 4,
+        wgpu::DeviceType::Cpu => 5,
+    }
+}
+
 /// Find an adapter that can present to `surface` *and* yields a device.
 ///
 /// Adapter selection is a search, not a single request — the same lesson
@@ -332,9 +478,12 @@ async fn open_device(
 /// good software adapter sits behind `force_fallback_adapter`. Treating the
 /// first failure as fatal reports "no GPU" on a machine that has one.
 ///
-/// Both passes keep `compatible_surface`, so an adapter that cannot present to
-/// this window is never chosen — that is the check that failed on a machine
-/// with no Vulkan driver, and it is load-bearing, not a formality.
+/// Every pass filters on surface compatibility, so an adapter that cannot
+/// present to this window is never chosen — that is the check that failed on a
+/// machine with no Vulkan driver, and it is load-bearing, not a formality. The
+/// ordered pass tests it with [`presentable_adapters`], the fallback pass with
+/// `request_adapter`'s own `compatible_surface`; both ask wgpu the same
+/// question.
 ///
 /// Panics only when *every* adapter on the machine declines, with a message
 /// naming what was tried and what the user can do about it.
@@ -347,6 +496,31 @@ async fn open_gpu_for(
     let mut adapter_error = None;
     let mut device_error = None;
 
+    // First pass: this platform's own backend order (see
+    // `preferred_backends`). `request_adapter` cannot express "try D3D12
+    // before Vulkan" — its options carry no backend field — so the ordering
+    // has to be done by enumerating one backend at a time.
+    for &backends in preferred_backends() {
+        for adapter in presentable_adapters(surface, backends, power_preference).await {
+            match open_device(&adapter).await {
+                Ok((device, queue)) => return (adapter, device, queue),
+                Err(err) => {
+                    eprintln!(
+                        "teksilo-platform: adapter {:?} could not open a device ({err}); \
+                         trying the next one",
+                        adapter.get_info().name
+                    );
+                    device_error.get_or_insert(err);
+                }
+            }
+        }
+    }
+
+    // Second pass: whatever wgpu itself would have picked, then an explicit
+    // software adapter. The first arm is not redundant with the loop above —
+    // it reaches any backend `preferred_backends` does not name — and the
+    // second is the only way to ask for a CPU adapter, which
+    // `enumerate_adapters` cannot express.
     for force_fallback_adapter in [false, true] {
         let adapter = match shared_instance()
             .request_adapter(&wgpu::RequestAdapterOptions {
