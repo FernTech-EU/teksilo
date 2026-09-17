@@ -164,7 +164,7 @@ Closure fired on `Enter`. Unlike `on_blur_fn`, this does
 not move focus — the field stays focused and the caret
 stays where it was.
 
-#### `pub fn on_access_set_value(mut self, f: impl Fn(&str, &mut EventContext) + 'static) -> Self`
+#### `pub fn on_access_set_value( mut self, f: impl Fn(&str, &mut EventContext) -> bool + 'static, ) -> Self`
 
 Handle an assistive technology's whole-value write, given the string it
 set.

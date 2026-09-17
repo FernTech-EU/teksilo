@@ -336,7 +336,7 @@ pub(crate) fn build_grid_key_handler(
                     // follow. (This used to select unconditionally, so Space
                     // could never unpick a tile.)
                     let selection = cfg.selection.clone();
-                    let fallback = std::rc::Rc::new(move || {
+                    let fallback = std::rc::Rc::new(move |_ctx: &mut EventContext| {
                         if let Some(ref sel) = selection {
                             if sel.mode() == teksilo_data::SelectionMode::Multi {
                                 sel.toggle(current);
@@ -353,7 +353,7 @@ pub(crate) fn build_grid_key_handler(
                         .map(|(_, id)| *id)
                     {
                         Some(tile_id) => ctx.row_space_activate(tile_id, fallback),
-                        None => fallback(),
+                        None => fallback(ctx),
                     }
                     cfg.focused_index.set(Some(current));
                     return EventResponse::Handled;

@@ -294,14 +294,14 @@ impl<T: 'static> Repeater<T> {
             RepeaterLayout::Vertical => {
                 let mut container = VStack::new().spacing(self.spacing);
                 for &id in item_ids {
-                    container = container.add_child(id);
+                    container = container.child(id);
                 }
                 ctx.add(container)
             }
             RepeaterLayout::Horizontal => {
                 let mut container = HStack::new().spacing(self.spacing);
                 for &id in item_ids {
-                    container = container.add_child(id);
+                    container = container.child(id);
                 }
                 ctx.add(container)
             }
@@ -310,7 +310,7 @@ impl<T: 'static> Repeater<T> {
                     .spacing(self.spacing)
                     .line_spacing(self.line_spacing);
                 for &id in item_ids {
-                    container = container.add_child(id);
+                    container = container.child(id);
                 }
                 ctx.add(container)
             }

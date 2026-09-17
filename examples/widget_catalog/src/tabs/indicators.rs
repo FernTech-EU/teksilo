@@ -98,15 +98,15 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(progress_h)
-            .add_child(progress_indet)
-            .add_child(progress_v)
-            .add_child(spinner)
-            .add_child(link)
-            .add_child(badge)
-            .add_child(avatar),
+            .child(progress_h)
+            .child(progress_indet)
+            .child(progress_v)
+            .child(spinner)
+            .child(link)
+            .child(badge)
+            .child(avatar),
     )
 }
 

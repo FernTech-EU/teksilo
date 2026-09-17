@@ -70,11 +70,7 @@ impl Harness {
                 .height(20.0)
                 .child(crate::primitives::RectWidget::new().focusable(true)),
         );
-        tree.add(
-            crate::primitives::VStack::new()
-                .add_child(padded)
-                .add_child(other),
-        );
+        tree.add(crate::primitives::VStack::new().child(padded).child(other));
         tree.layout(viewport());
         // The engine lays out in `paint`, so a test that never renders
         // hit-tests an empty layout and every click lands at the document end.
@@ -389,7 +385,7 @@ fn a_finger_over_a_field_in_a_scroller_scrolls_it_and_leaves_the_selection_alone
     let inner = tree.add(crate::primitives::Padding::uniform(20.0).child(field));
     tree.add(
         crate::primitives::VStack::new()
-            .add_child(inner)
+            .child(inner)
             .scroll_container(teksilo_core::pointer::touch_action::PanAxes::BOTH)
             .pan_claim(teksilo_core::pointer::touch_action::PanClaim::vertical())
             .on_scroll(move |event, _ctx| {

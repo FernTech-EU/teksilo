@@ -33,7 +33,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`kind`, `dialog_title`, `starting_dir`, `default_file_name`, `add_filter`, `on_pick`, `placeholder`, `label`, `validation`, `enabled`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`kind`, `dialog_title`, `starting_dir`, `default_file_name`, `add_filter`, `add_filters`, `on_pick`, `placeholder`, `label`, `validation`, `enabled`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -90,6 +90,15 @@ No-op for `OpenFile` / `PickFolder`.
 
 Append an extension filter (label + extensions without leading dots).
 Repeat to add multiple rows.
+
+#### `pub fn add_filters<'a, L, E>(self, filters: impl IntoIterator<Item = (L, E)>) -> Self where L: Into<String>, E: AsRef<[&'a str]>,`
+
+Append several extension filters from an iterator of
+`(label, extensions)` pairs, in order.
+
+The loop form of `add_filter`, for a filter list that
+comes from data. The second element of each pair is anything that reads
+as a `&[&str]`, so both `["txt", "md"]` and `&["txt", "md"][..]` work.
 
 #### `pub fn on_pick(mut self, f: impl Fn(&FileDialogResult, &mut EventContext) + 'static) -> Self`
 

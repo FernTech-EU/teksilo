@@ -133,7 +133,7 @@ pub struct WidgetNode {
     /// embed, so the common path needs no wiring; a hand-written delegate
     /// calls `BuildContext::set_keyboard_toggle`.
     #[allow(clippy::type_complexity)]
-    pub(crate) keyboard_toggle: Option<std::rc::Rc<dyn Fn()>>,
+    pub(crate) keyboard_toggle: Option<std::rc::Rc<dyn Fn(&mut crate::widget::EventContext)>>,
     /// User-bound signal that the framework sets to `true` whenever
     /// the focused widget is a strict descendant of this node, and
     /// `false` otherwise. Used by `Panel` / `Card` / composite

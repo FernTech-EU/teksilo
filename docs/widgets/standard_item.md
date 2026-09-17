@@ -36,7 +36,7 @@ TreeView::new_with_context(tree, move |item, entry, selected, ctx| {
         .from_entry(entry)
         .selected(selected)
         .leading_slot(IconWidget::from_svg(FOLDER_ICON).icon_size(16.0))
-        .on_toggle_rc(ctx.toggle_callback());
+        .on_chevron_toggle_rc(ctx.toggle_callback());
     if entry.has_children {
         row = row.tristate_checkbox(checks.signal_for(entry.node_id));
     } else {
@@ -72,9 +72,13 @@ the wrapper.
 
 ## Touch and pen
 
-A row's **height** is a target floor and follows the density ladder — the
-recipe has carried both projected heights since the density sweep, and the row
-now reads them rather than the raw Compact constants.
+A row's **height** is a target floor and follows the density ladder: the row
+projects the raw module constants through `density::dp` at layout time. It does
+**not** read `StandardItemRecipe::min_height_single_line` /
+`min_height_two_line`, which have carried the same projected values since the
+density sweep and have no reader — so retuning either of those two recipe
+fields in a preset moves nothing. `layout_response` says the same thing at the
+site; `docs/touch-and-pen.md` §10.1 carries it as an open finding.
 
 A row's **press** is not the row's. Inside a `ListView` or a `TreeView` the
 body pane owns the tap, the double tap and the reorder drag, and resolves which
@@ -99,7 +103,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `interaction_signal`, `reveal_signal`, `label_slot`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`style`, `subtitle`, `leading_slot`, `leading_slot_boxed`, `center_slot`, `center_slot_boxed`, `trailing_slot`, `trailing_slot_boxed`, `subtitle_leading_slot`, `subtitle_leading_slot_boxed`, `subtitle_trailing_slot`, `subtitle_trailing_slot_boxed`, `checkbox`, `tristate_checkbox`, `on_checkbox_toggle`, `selected`, `enabled`, `label_style`, `subtitle_style`, `label_color`, `subtitle_color`, `interaction_signal`, `reveal_signal`, `label_slot`, `label_overflow`, `subtitle_overflow`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -186,6 +190,20 @@ Mutually exclusive with `tristate_checkbox` — last call wins.
 Optional tri-state checkbox bound to `Signal<CheckState>`.
 Cycles `Unchecked → Checked → Indeterminate`. Mutually
 exclusive with `checkbox` — last call wins.
+
+#### `pub fn on_checkbox_toggle( mut self, f: impl Fn(bool, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Run `f` when the **user** flips this row's checkbox, forwarded to the
+embedded `Checkbox::on_change`:
+same contract, same four paths, including `Space` on the focused row.
+
+Reach for it only when flipping the box has to touch the ambient
+context (`ctx.send_intent(..)`, opening a dialog). To *read* or react to
+check state, bind the row's box to a `CheckedModel` and use that:
+`is_checked` / `checked_indices` / `checked_count`, or
+`checked_signal()` for the reactive view. The model is the source of
+truth and it survives the row being recycled by virtualization, which a
+per-row callback does not.
 
 #### `pub fn selected(mut self, selected: impl Into<Prop<bool>>) -> Self`
 
@@ -414,6 +432,13 @@ Forwarded to the inner `StandardListItem` — see its
 Forwarded to the inner `StandardListItem` — see its
 `checkbox`.
 
+#### `pub fn on_checkbox_toggle( mut self, f: impl Fn(bool, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+
+Forwarded to the inner `StandardListItem` — see its
+`on_checkbox_toggle`. Distinct
+from `on_chevron_toggle`, which is the
+expand / collapse control.
+
 #### `pub fn tristate_checkbox(mut self, state: Signal<CheckState>) -> Self`
 
 Forwarded to the inner `StandardListItem` — see its
@@ -517,18 +542,20 @@ Set the expanded state, statically or reactively via a bound
 Convenience for the TreeView delegate path:
 `.from_entry(entry)` sets depth + has_children + is_expanded.
 
-#### `pub fn on_toggle( mut self, f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
+#### `pub fn on_chevron_toggle( mut self, f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
-Click handler for the chevron. Wired only when `has_children`
-is true. Typical use: `.on_toggle(ctx.toggle_callback())` from
-a `TreeRowContext` (see `TreeView::new_with_context`).
+Click handler for the **chevron** — the expand / collapse control, not
+the row's checkbox, which is `on_checkbox_toggle`
+on the inner item. Wired only when `has_children` is true. Typical use:
+`.on_chevron_toggle(ctx.toggle_callback())` from a `TreeRowContext`
+(see `TreeView::new_with_context`).
 
 The callback receives the firing `EventContext` so apps can
 dispatch an intent (e.g. lazy-load children on expand), open
 a dialog, or otherwise route the toggle through the framework
 before mutating model state.
 
-#### `pub fn on_toggle_rc(mut self, f: Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>) -> Self`
+#### `pub fn on_chevron_toggle_rc( mut self, f: Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>, ) -> Self`
 
 Variant accepting an already-`Rc`'d callback. Useful when the
 same callback is shared across multiple call sites without an

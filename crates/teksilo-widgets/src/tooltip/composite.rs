@@ -264,7 +264,7 @@ impl Widget for CompositeTooltipWidget {
                 tt::COMPOSITE_TOOLTIP_PADDING_VERTICAL,
                 tt::COMPOSITE_TOOLTIP_PADDING_HORIZONTAL,
             )
-            .child_id(scrolled),
+            .child(scrolled),
         );
 
         // No promotion, no countdown: a read-only surface builds no footer at
@@ -286,8 +286,8 @@ impl Widget for CompositeTooltipWidget {
                     .columns(vec![TrackSize::Fractional(1.0), TrackSize::Auto])
                     .rows(vec![TrackSize::Auto])
                     .column_gap(8.0)
-                    .add_child(footer_spacer)
-                    .add_child(indicator),
+                    .child(footer_spacer)
+                    .child(indicator),
             )
         });
 

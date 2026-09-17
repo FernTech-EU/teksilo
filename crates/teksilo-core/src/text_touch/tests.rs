@@ -1798,7 +1798,7 @@ fn a_handles_target_shadows_text_and_only_a_finger_claims_it() {
         let offered_to_root = offered_to_root.clone();
         tree.add(
             crate::test_widgets::StackWidget::new()
-                .add_child(layer)
+                .child(layer)
                 .on_pointer_event(move |event, _ctx| {
                     if matches!(event, WidgetEvent::PointerDown { .. }) {
                         offered_to_root.set(offered_to_root.get() + 1);

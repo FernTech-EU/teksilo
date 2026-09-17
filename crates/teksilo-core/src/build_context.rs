@@ -94,7 +94,7 @@ impl<'a> BuildContext<'a> {
     ///
     /// Pass the same signal the content's `visible_when` gate uses. Everything
     /// downstream of the returned id — `set_dormant` / `activate`,
-    /// `visible_when`, `OverlayRequest::content_id`, descendant checks,
+    /// `visible_when`, `OverlayRequest::content`, descendant checks,
     /// dismissal — is unchanged; only when the subtree below it exists moves.
     pub fn add_deferred(
         &mut self,
@@ -723,7 +723,11 @@ impl<'a> BuildContext<'a> {
     /// `StandardListItem` / `StandardTreeItem` publish one for the checkbox
     /// they embed; a hand-written row delegate calls this to get the same
     /// behaviour. Without it `Space` keeps meaning "toggle the selection".
-    pub fn set_keyboard_toggle(&mut self, id: WidgetId, f: std::rc::Rc<dyn Fn()>) {
+    pub fn set_keyboard_toggle(
+        &mut self,
+        id: WidgetId,
+        f: std::rc::Rc<dyn Fn(&mut crate::widget::EventContext)>,
+    ) {
         self.tree.set_keyboard_toggle(id, f);
     }
 

@@ -90,7 +90,7 @@ fn tree_view_widget() -> impl Widget + 'static {
             StandardTreeItem::new(lit!(item.clone()))
                 .from_entry(entry)
                 .selected(selected)
-                .on_toggle_rc(ctx.toggle_callback()),
+                .on_chevron_toggle_rc(ctx.toggle_callback()),
         )
     })
     .item_height(28.0)
@@ -340,16 +340,16 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(repeater)
-            .add_child(list_view)
-            .add_child(standard_list_item)
-            .add_child(standard_tree_item)
-            .add_child(tree_view)
-            .add_child(table_view)
-            .add_child(tree_table)
-            .add_child(grid_view),
+            .child(repeater)
+            .child(list_view)
+            .child(standard_list_item)
+            .child(standard_tree_item)
+            .child(tree_view)
+            .child(table_view)
+            .child(tree_table)
+            .child(grid_view),
     )
 }
 

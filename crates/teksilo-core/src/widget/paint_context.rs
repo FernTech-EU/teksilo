@@ -183,7 +183,14 @@ impl<'a> WidgetTreeView<'a> {
 }
 
 /// Placement of a child widget during layout.
+///
+/// `#[non_exhaustive]`: a parent reads and writes the fields of the slice it is
+/// handed, and never builds one — so the attribute costs a `place_children`
+/// implementation nothing, and it is what makes the next field addition a
+/// non-event rather than the breaking change `dormant` was. Use
+/// [`WidgetPlacement::new`] where one genuinely has to be constructed.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct WidgetPlacement {
     pub id: WidgetId,
     pub origin: teksilo_canvas::Point,
@@ -210,4 +217,20 @@ pub struct WidgetPlacement {
     /// interacting with clears focus and cancels pointers — see
     /// [`LayoutContext::for_each_interaction_ancestor`](crate::widget::LayoutContext::for_each_interaction_ancestor).
     pub dormant: bool,
+}
+
+impl WidgetPlacement {
+    /// A placement at `origin` sized `size`, awake.
+    ///
+    /// The framework fills the slice a parent is handed; this is for the cases
+    /// that stand outside a layout pass — a test driving `place_children`
+    /// directly, or a widget assembling placements of its own.
+    pub fn new(id: WidgetId, origin: teksilo_canvas::Point, size: Size) -> Self {
+        Self {
+            id,
+            origin,
+            size,
+            dormant: false,
+        }
+    }
 }

@@ -103,7 +103,7 @@ impl Widget for MenuBar {
                 root_child_id: None,
             };
             let trigger_id = ctx.add(trigger);
-            row = row.add_child(trigger_id);
+            row = row.child(trigger_id);
 
             if let Some(k) = parsed.key_lower {
                 if let Some(prev) = mnemonic_table.insert(k, i) {
@@ -145,10 +145,10 @@ impl Widget for MenuBar {
             .border_width(0.0_f32);
         let bg_id = ctx.add(bg);
 
-        let padding = Padding::symmetric(0.0, 2.0).child_id(row_id);
+        let padding = Padding::symmetric(0.0, 2.0).child(row_id);
         let padding_id = ctx.add(padding);
 
-        let zstack_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
+        let zstack_id = ctx.add(ZStack::new().child(bg_id).child(padding_id));
         // Shared cell holding the hamburger id once it's built below — the
         // `RevealHeightBox` measures it to size the floating bar (filled at
         // `anchor_cell.set(...)`, the same pattern as the overlay anchor).
@@ -177,7 +177,7 @@ impl Widget for MenuBar {
             // a follow-up, matching the docking handle-direction caveat).
             ctx.add(
                 Unroll::from_progress(self.reveal_progress.clone())
-                    .child_id(height_box)
+                    .child(height_box)
                     .access_role(teksilo_core::accesskit::Role::MenuBar),
             )
         } else {

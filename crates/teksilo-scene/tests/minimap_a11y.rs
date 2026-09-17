@@ -112,7 +112,7 @@ impl Fixture {
             }));
         let mut tree = WidgetTree::new();
         let minimap = tree.add(mm);
-        let root = tree.add(Padding::uniform(20.0).child_id(minimap));
+        let root = tree.add(Padding::uniform(20.0).child(minimap));
         tree.layout(PROPOSAL);
         let _ = tree.render();
         Self {
@@ -268,7 +268,7 @@ fn a_read_only_minimap_is_announced_but_is_not_a_dead_tab_stop() {
     let mm = SceneMinimap::new(CONTENT, viewport).size(200.0, 200.0);
     let mut tree = WidgetTree::new();
     let minimap = tree.add(mm);
-    let root = tree.add(Padding::uniform(20.0).child_id(minimap));
+    let root = tree.add(Padding::uniform(20.0).child(minimap));
     tree.layout(PROPOSAL);
     let _ = tree.render();
     let update = tree.sync_accessibility();
@@ -646,7 +646,7 @@ fn a_read_only_minimap_can_still_be_put_in_the_tab_order_by_the_app() {
         .focusable(true);
     let mut tree = WidgetTree::new();
     let minimap = tree.add(mm);
-    let root = tree.add(Padding::uniform(20.0).child_id(minimap));
+    let root = tree.add(Padding::uniform(20.0).child(minimap));
     tree.layout(PROPOSAL);
     let _ = tree.render();
 

@@ -42,7 +42,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`horizontal`, `vertical`, `flex`, `align_child`, `respect_intrinsic`, `child_id`, `child`
+`horizontal`, `vertical`, `flex`, `align_child`, `respect_intrinsic`, `child`, `child_opt`
 
 ## API reference
 
@@ -167,10 +167,15 @@ Rule of thumb: reach for this only when the parent genuinely has no
 bound to share (`height = None`). When the parent is bounded — a window
 root, a sized pane — the default zero basis is what you want.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
-
-Set child by pre-registered ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline child widget (deferred insertion).
+
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.

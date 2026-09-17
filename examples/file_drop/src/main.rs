@@ -145,8 +145,8 @@ fn main() {
                             VStack::new()
                                 .spacing(10.0)
                                 .child(TextWidget::new(lit!("Drag OUT (app → OS)")))
-                                .add_child(file_row)
-                                .add_child(text_row),
+                                .child(file_row)
+                                .child(text_row),
                         ),
                     );
 

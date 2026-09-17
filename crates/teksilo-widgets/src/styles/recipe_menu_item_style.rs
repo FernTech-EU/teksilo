@@ -140,7 +140,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         let mut row = HStack::new().spacing(0.0);
 
         if let Some(leading) = cfg.leading {
-            row = row.add_child(leading);
+            row = row.child(leading);
             // Explicit icon-to-label gap. Fixed-width Spacer rather than
             // HStack::spacing so we don't inject gaps around every other
             // child (which would push the trailing slot inward).
@@ -149,18 +149,18 @@ impl MenuItemStyle for RecipeMenuItemStyle {
                 FixedSize::new()
                     .width(recipe.icon_label_gap)
                     .height(1.0_f32)
-                    .child_id(gap_spacer),
+                    .child(gap_spacer),
             );
-            row = row.add_child(gap);
+            row = row.child(gap);
         }
 
-        row = row.add_child(cfg.label);
+        row = row.child(cfg.label);
         // MinSize ensures the shortcut never abuts the label when the menu
         // is narrower than label + shortcut combined.
         row = row.child(MinSize::width(recipe.shortcut_left_gap).child(Spacer::new()));
 
         if let Some(trailing) = cfg.trailing {
-            row = row.add_child(trailing);
+            row = row.child(trailing);
         }
 
         let row_id = ctx.add(row);
@@ -174,7 +174,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         let body_line = body.size * body.line_height;
         let pad_v = ((recipe.item_height - body_line) * 0.5).max(0.0);
         let padding =
-            ctx.add(Padding::new(pad_v, 0.0, pad_v, recipe.padding_leading).child_id(row_id));
+            ctx.add(Padding::new(pad_v, 0.0, pad_v, recipe.padding_leading).child(row_id));
 
         // Background — Hover / Highlighted both use AccentSubtle (the
         // same row tint), Pressed uses Pressed, Disabled stays
@@ -191,7 +191,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
                 .corner_radius(CornerRadius::uniform(recipe.item_corner_radius)),
         );
 
-        let stack = ctx.add(ZStack::new().add_child(bg).add_child(padding));
+        let stack = ctx.add(ZStack::new().child(bg).child(padding));
 
         // Claim the full width the row is given.
         //
@@ -210,7 +210,7 @@ impl MenuItemStyle for RecipeMenuItemStyle {
         // between its own text width and the widest row's. `respect_intrinsic`
         // keeps the natural width as the floor, so the panel still sizes to
         // its widest item; the fill is what the row was always meant to do.
-        ctx.add(Expand::horizontal().respect_intrinsic().child_id(stack))
+        ctx.add(Expand::horizontal().respect_intrinsic().child(stack))
     }
 
     fn metrics(&self) -> MenuItemMetrics {
@@ -267,7 +267,7 @@ mod tests {
         fn make_body(&self, cfg: &MenuItemStyleConfig, ctx: &mut BuildContext) -> WidgetId {
             let backdrop = ctx.add(RectWidget::new().background(SurfaceRole::Hover));
             let row = RecipeMenuItemStyle::for_tokens(&ctx.theme().input).make_body(cfg, ctx);
-            ctx.add(ZStack::new().add_child(backdrop).add_child(row))
+            ctx.add(ZStack::new().child(backdrop).child(row))
         }
     }
 

@@ -483,11 +483,11 @@ impl Widget for RadioTile {
         if self.indicator_side == RadioTileIndicatorSide::Leading
             && let Some(id) = indicator_id
         {
-            top_row = top_row.add_child(id);
+            top_row = top_row.child(id);
         }
         if let Some(icon) = self.icon.take() {
             let icon_id = ctx.add_boxed(icon);
-            top_row = top_row.add_child(icon_id);
+            top_row = top_row.child(icon_id);
         }
         if let Some(title) = &self.title {
             let title_widget = TextWidget::new(title.clone())
@@ -504,13 +504,13 @@ impl Widget for RadioTile {
                 .single_line()
                 .a11y_hidden();
             let title_id = ctx.add(title_widget);
-            top_row = top_row.add_child(title_id);
+            top_row = top_row.child(title_id);
         }
-        top_row = top_row.add_child(ctx.add(Spacer::new()));
+        top_row = top_row.child(ctx.add(Spacer::new()));
         // Trailing meta (right-aligned). Typed text tints to accent when
         // selected (the "20 chapters" cue); a custom slot is used as-is.
         if let Some(slot) = self.trailing_slot.take() {
-            top_row = top_row.add_child(ctx.add_boxed(slot));
+            top_row = top_row.child(ctx.add_boxed(slot));
         } else if let Some(trailing) = &self.trailing {
             let trailing_color = is_selected.map(|s| {
                 if *s {
@@ -524,12 +524,12 @@ impl Widget for RadioTile {
                 .color(trailing_color)
                 .single_line()
                 .a11y_hidden();
-            top_row = top_row.add_child(ctx.add(trailing_widget));
+            top_row = top_row.child(ctx.add(trailing_widget));
         }
         if self.indicator_side == RadioTileIndicatorSide::Trailing
             && let Some(id) = indicator_id
         {
-            top_row = top_row.add_child(id);
+            top_row = top_row.child(id);
         }
         let top_row_id = ctx.add(top_row);
 
@@ -537,12 +537,12 @@ impl Widget for RadioTile {
         let mut content_col = VStack::new()
             .spacing(tile_title_desc_gap(&ctx.theme().input))
             .alignment(HAlignment::Leading)
-            .add_child(top_row_id);
+            .child(top_row_id);
 
         if !self.compact {
             if let Some(body) = self.body.take() {
                 let body_id = ctx.add_boxed(body);
-                content_col = content_col.add_child(body_id);
+                content_col = content_col.child(body_id);
             } else if let Some(description) = &self.description {
                 let desc_widget = TextWidget::new(description.clone())
                     .style(
@@ -557,7 +557,7 @@ impl Widget for RadioTile {
                     )
                     .a11y_hidden();
                 let desc_id = ctx.add(desc_widget);
-                content_col = content_col.add_child(desc_id);
+                content_col = content_col.child(desc_id);
             }
         }
         let content_id = ctx.add(content_col);
@@ -817,7 +817,7 @@ mod tests {
                 .selection(1, selected.clone())
                 .title(lit!("B")),
         );
-        let _root = tree.add(crate::primitives::VStack::new().add_child(t0).add_child(t1));
+        let _root = tree.add(crate::primitives::VStack::new().child(t0).child(t1));
         tree.layout(SizeProposal::exact(300.0, 300.0));
 
         assert_eq!(selected.get(), 0);
@@ -870,7 +870,7 @@ mod tests {
                     .description(lit!(long)),
             ),
         );
-        let _root = tree.add(VStack::new().add_child(compact).add_child(card));
+        let _root = tree.add(VStack::new().child(compact).child(card));
         tree.layout(SizeProposal::exact(320.0, 600.0));
         let a = tree.find_by_label("A").unwrap();
         let b = tree.find_by_label("B").unwrap();
@@ -888,8 +888,8 @@ mod tests {
             let rect = ctx.add(crate::primitives::RectWidget::new().background(self.0));
             ctx.add(
                 crate::primitives::ZStack::new()
-                    .add_child(rect)
-                    .add_child(cfg.content),
+                    .child(rect)
+                    .child(cfg.content),
             )
         }
     }

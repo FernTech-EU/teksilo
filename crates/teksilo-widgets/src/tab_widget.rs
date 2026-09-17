@@ -490,14 +490,40 @@ impl TabWidget {
     /// subsequent rebuilds (caused by adjacent dynamic-model
     /// mutations) reuse the same pane WidgetId, preserving any
     /// internal state the content owns.
-    pub fn static_tab(mut self, info: TabInfo, content: impl Widget + 'static) -> Self {
-        let handle = TabHandle::static_handle(TabId::fresh(), info);
-        self.static_tabs.push(StaticTabSlot {
-            handle,
-            source: StaticContentSource::Owned(Some(Box::new(content))),
-            pane_id: None,
-        });
-        self
+    pub fn static_tab(mut self, info: TabInfo, content: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(content) {
+            teksilo_core::PendingChild::Id(id) => {
+                let handle = TabHandle::static_handle(TabId::fresh(), info);
+                self.static_tabs.push(StaticTabSlot {
+                    handle,
+                    source: StaticContentSource::PreId(Some(id)),
+                    pane_id: None,
+                });
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                let handle = TabHandle::static_handle(TabId::fresh(), info);
+                self.static_tabs.push(StaticTabSlot {
+                    handle,
+                    source: StaticContentSource::Owned(Some(w)),
+                    pane_id: None,
+                });
+                self
+            }
+        }
+    }
+
+    /// Add several static tabs from an iterator of `(info, content)` pairs.
+    ///
+    /// The loop form of [`static_tab`](Self::static_tab). Reach for it when the
+    /// tab set is data-driven and each tab needs more than a title; when a title
+    /// is all it needs, [`tabs`](Self::tabs) is shorter.
+    pub fn static_tabs<W>(self, tabs: impl IntoIterator<Item = (TabInfo, W)>) -> Self
+    where
+        W: teksilo_core::IntoTeksiChild,
+    {
+        tabs.into_iter()
+            .fold(self, |w, (info, content)| w.static_tab(info, content))
     }
 
     /// Ergonomic shorthand for a title-only static tab:
@@ -505,16 +531,39 @@ impl TabWidget {
     /// content)`. `label` accepts `tr!(...)` (translated) or `lit!(...)`.
     /// This is the method the `teksu!` `tab:` slot lowers to
     /// (`tab: lit!("Overview"), Card { … }`).
-    pub fn tab(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
+    pub fn tab(
+        self,
+        label: impl Into<LocalizedString>,
+        content: impl teksilo_core::IntoTeksiChild,
+    ) -> Self {
         self.static_tab(TabInfo::new().title(label), content)
     }
 
-    /// `WidgetId` twin of [`tab`](Self::tab) — `tab_id(label, id)` is
-    /// `static_tab_id(TabInfo::new().title(label), id)`. This is what the
-    /// `teksu!` `tab:` slot lowers to when its content is an id binding
-    /// (`#{…}` / `name = Element`).
-    pub fn tab_id(self, label: impl Into<LocalizedString>, id: WidgetId) -> Self {
-        self.static_tab_id(TabInfo::new().title(label), id)
+    /// Add several title-only static tabs from an iterator of
+    /// `(label, content)` pairs.
+    ///
+    /// The loop form of [`tab`](Self::tab), and the usual one once the tab set
+    /// comes from data rather than being written out tab by tab.
+    pub fn tabs<L, W>(self, tabs: impl IntoIterator<Item = (L, W)>) -> Self
+    where
+        L: Into<LocalizedString>,
+        W: teksilo_core::IntoTeksiChild,
+    {
+        tabs.into_iter()
+            .fold(self, |w, (label, content)| w.tab(label, content))
+    }
+
+    /// Several title-only static tabs from an iterator of `(label, id)` pairs.
+    ///
+    /// [`tabs`](Self::tabs) accepts ids too, so this is the spelling that names
+    /// the id type rather than a capability the other method lacks. Reach for it
+    /// when a loop has already registered its panes and holds the `WidgetId`s.
+    pub fn tab_ids<L>(self, tabs: impl IntoIterator<Item = (L, WidgetId)>) -> Self
+    where
+        L: Into<LocalizedString>,
+    {
+        tabs.into_iter()
+            .fold(self, |w, (label, id)| w.tab(label, id))
     }
 
     /// Add a static tab whose content is constructed by a factory
@@ -535,19 +584,13 @@ impl TabWidget {
         self
     }
 
-    /// Element-valued slot variant for the `teksu!` DSL — accepts a
-    /// pre-registered widget id rather than a `Box<dyn Widget>`.
-    /// Equivalent to [`static_tab`](Self::static_tab) with an
-    /// already-built child; the id is wrapped in a tab pane on
-    /// first build and the pane id is memoized thereafter.
-    pub fn static_tab_id(mut self, info: TabInfo, content_id: WidgetId) -> Self {
-        let handle = TabHandle::static_handle(TabId::fresh(), info);
-        self.static_tabs.push(StaticTabSlot {
-            handle,
-            source: StaticContentSource::PreId(Some(content_id)),
-            pane_id: None,
-        });
-        self
+    /// Add several static tabs from an iterator of `(info, content_id)` pairs.
+    ///
+    /// [`static_tabs`](Self::static_tabs) accepts ids too; this is the spelling
+    /// that names the id type, for panes the caller has already registered.
+    pub fn static_tab_ids(self, tabs: impl IntoIterator<Item = (TabInfo, WidgetId)>) -> Self {
+        tabs.into_iter()
+            .fold(self, |w, (info, id)| w.static_tab(info, id))
     }
 
     /// Add a static tab with a caller-provided [`TabId`] — useful
@@ -925,29 +968,15 @@ impl TabWidget {
 
     /// Place a widget on the leading edge of the tab strip (before the first
     /// tab). Memoized: registered once on first build, reused on rebuilds.
-    pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self {
-        self.bar_leading_slot = Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
+    pub fn bar_leading_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.bar_leading_slot = Some(BarSlot::new(teksilo_core::IntoTeksiChild::into_pending(w)));
         self
     }
     /// Place a widget on the trailing edge of the tab strip (after the last
     /// tab and overflow button). Memoized like
     /// [`bar_leading_slot`](Self::bar_leading_slot).
-    pub fn bar_trailing_slot(mut self, w: impl Widget + 'static) -> Self {
-        self.bar_trailing_slot = Some(BarSlot::new(PendingChild::Deferred(Box::new(w))));
-        self
-    }
-
-    /// Element-valued variant of
-    /// [`bar_leading_slot`](Self::bar_leading_slot) accepting a
-    /// pre-registered `WidgetId` (for the `teksu!` DSL).
-    pub fn bar_leading_slot_id(mut self, id: WidgetId) -> Self {
-        self.bar_leading_slot = Some(BarSlot::new(PendingChild::Id(id)));
-        self
-    }
-    /// Element-valued variant of
-    /// [`bar_trailing_slot`](Self::bar_trailing_slot).
-    pub fn bar_trailing_slot_id(mut self, id: WidgetId) -> Self {
-        self.bar_trailing_slot = Some(BarSlot::new(PendingChild::Id(id)));
+    pub fn bar_trailing_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.bar_trailing_slot = Some(BarSlot::new(teksilo_core::IntoTeksiChild::into_pending(w)));
         self
     }
 }
@@ -1444,11 +1473,11 @@ impl Widget for TabWidget {
 
             if let Some(ref mut slot) = self.bar_leading_slot {
                 let id = slot.resolve(ctx);
-                bar = bar.bar_leading_slot_id(id);
+                bar = bar.bar_leading_slot(id);
             }
             if let Some(ref mut slot) = self.bar_trailing_slot {
                 let id = slot.resolve(ctx);
-                bar = bar.bar_trailing_slot_id(id);
+                bar = bar.bar_trailing_slot(id);
             }
             Some(ctx.add(bar))
         } else {
@@ -1469,7 +1498,7 @@ impl Widget for TabWidget {
         let mut switcher =
             Switcher::new(self.switcher_index.clone()).capture_child_ids_into(panel_ids);
         for &pane_id in &pane_ids {
-            switcher = switcher.child_id(pane_id);
+            switcher = switcher.child(pane_id);
         }
         let switcher_id = ctx.add(switcher);
         // Tab content area must claim BOTH axes: full panel width
@@ -1478,19 +1507,19 @@ impl Widget for TabWidget {
         // `respect_intrinsic` makes the cross-axis fall back to the
         // switcher's intrinsic when a parent queries us with an
         // unspecified proposal, instead of reporting 0.
-        let content_id = ctx.add(Expand::new().respect_intrinsic().child_id(switcher_id));
+        let content_id = ctx.add(Expand::new().respect_intrinsic().child(switcher_id));
 
         // When the strip is hidden (`bar_visibility`), the content
         // fills the whole area — no bar/content stack is needed.
         let root_id = match (bar_id, orientation) {
             (None, _) => content_id,
             (Some(bar_id), TabBarOrientation::Horizontal) => {
-                ctx.add(VStack::new().add_child(bar_id).add_child(content_id))
+                ctx.add(VStack::new().child(bar_id).child(content_id))
             }
             (Some(bar_id), TabBarOrientation::Vertical) => ctx.add(
                 crate::primitives::HStack::new()
-                    .add_child(bar_id)
-                    .add_child(content_id),
+                    .child(bar_id)
+                    .child(content_id),
             ),
         };
         self.root_child_id = Some(root_id);
@@ -1693,7 +1722,7 @@ impl Widget for TabPane {
 
 /// One-shot wrapper that "absorbs" a pre-registered `WidgetId` on
 /// first build, returning it as the wrapper's only child. Used by
-/// [`TabWidget::static_tab_id`] to bridge the
+/// [`TabWidget::static_tab`] to bridge the
 /// `teksu!` DSL's element-valued-slot pattern (which pre-registers
 /// the inner widget and hands the parent its id) into the factory
 /// shape `static_tab_factory` expects.

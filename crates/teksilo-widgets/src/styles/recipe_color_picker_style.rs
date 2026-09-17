@@ -193,64 +193,58 @@ impl ColorPickerStyle for RecipeColorPickerStyle {
     fn make_body(&self, cfg: &ColorPickerStyleConfig, ctx: &mut BuildContext) -> WidgetId {
         let body = match cfg.layout {
             ColorPickerLayout::Compact => {
-                let mut col = VStack::new()
-                    .spacing(self.recipe.gap)
-                    .add_child(cfg.top_row);
+                let mut col = VStack::new().spacing(self.recipe.gap).child(cfg.top_row);
                 if let Some(hex) = cfg.compact_hex {
-                    col = col.add_child(hex);
+                    col = col.child(hex);
                 }
                 if let Some(footer) = cfg.footer {
-                    col = col.add_child(footer);
+                    col = col.child(footer);
                 }
                 ctx.add(col)
             }
             ColorPickerLayout::Standard => {
-                let mut col = VStack::new()
-                    .spacing(self.recipe.gap)
-                    .add_child(cfg.top_row);
+                let mut col = VStack::new().spacing(self.recipe.gap).child(cfg.top_row);
                 if let Some(preview) = cfg.preview_row {
-                    col = col.add_child(preview);
+                    col = col.child(preview);
                 }
                 if let Some(rgb) = cfg.rgb_row {
-                    col = col.add_child(rgb);
+                    col = col.child(rgb);
                 }
                 if let Some(hsv) = cfg.hsv_row {
-                    col = col.add_child(hsv);
+                    col = col.child(hsv);
                 }
                 if let Some(grid) = cfg.swatches {
-                    col = col.add_child(grid);
+                    col = col.child(grid);
                 }
                 if let Some(footer) = cfg.footer {
-                    col = col.add_child(footer);
+                    col = col.child(footer);
                 }
                 ctx.add(col)
             }
             ColorPickerLayout::Wide => {
                 let mut side_col = VStack::new().spacing(self.recipe.gap);
                 if let Some(preview) = cfg.preview_row {
-                    side_col = side_col.add_child(preview);
+                    side_col = side_col.child(preview);
                 }
                 if let Some(rgb) = cfg.rgb_row {
-                    side_col = side_col.add_child(rgb);
+                    side_col = side_col.child(rgb);
                 }
                 if let Some(hsv) = cfg.hsv_row {
-                    side_col = side_col.add_child(hsv);
+                    side_col = side_col.child(hsv);
                 }
                 let side_col_id = ctx.add(side_col);
                 let main_row_id = ctx.add(
                     HStack::new()
                         .spacing(self.recipe.gap)
-                        .add_child(cfg.top_row)
-                        .add_child(side_col_id),
+                        .child(cfg.top_row)
+                        .child(side_col_id),
                 );
-                let mut col = VStack::new()
-                    .spacing(self.recipe.gap)
-                    .add_child(main_row_id);
+                let mut col = VStack::new().spacing(self.recipe.gap).child(main_row_id);
                 if let Some(grid) = cfg.swatches {
-                    col = col.add_child(grid);
+                    col = col.child(grid);
                 }
                 if let Some(footer) = cfg.footer {
-                    col = col.add_child(footer);
+                    col = col.child(footer);
                 }
                 ctx.add(col)
             }
@@ -263,7 +257,7 @@ impl ColorPickerStyle for RecipeColorPickerStyle {
             Panel::new()
                 .padding(self.recipe.padding)
                 .border_width(1.0)
-                .child_id(body),
+                .child(body),
         )
     }
 }

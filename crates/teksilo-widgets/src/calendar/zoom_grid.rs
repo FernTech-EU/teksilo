@@ -115,13 +115,13 @@ impl Widget for MonthsGrid {
                         ctx_evt.request_frame();
                     }),
                 );
-                row = row.add_child(ctx.add(cell));
+                row = row.child(ctx.add(cell));
             }
             rows.push(ctx.add(row));
         }
         let mut col = VStack::new().spacing(cell_spacing(&ctx.theme().input));
         for id in rows {
-            col = col.add_child(id);
+            col = col.child(id);
         }
         let root = ctx.add(col);
         self.root_id = Some(root);
@@ -238,13 +238,13 @@ impl Widget for YearsGrid {
                         ctx_evt.request_frame();
                     }),
                 );
-                row = row.add_child(ctx.add(cell));
+                row = row.child(ctx.add(cell));
             }
             rows.push(ctx.add(row));
         }
         let mut col = VStack::new().spacing(cell_spacing(&ctx.theme().input));
         for id in rows {
-            col = col.add_child(id);
+            col = col.child(id);
         }
         let root = ctx.add(col);
         self.root_id = Some(root);

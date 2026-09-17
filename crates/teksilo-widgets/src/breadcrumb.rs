@@ -699,6 +699,14 @@ impl Breadcrumb {
         self
     }
 
+    /// Append several `BreadcrumbItem` segments from an iterator, in order.
+    ///
+    /// The loop form of [`item`](Self::item), and the usual one: a trail is
+    /// normally walked out of a path rather than written crumb by crumb.
+    pub fn items(self, items: impl IntoIterator<Item = BreadcrumbItem>) -> Self {
+        items.into_iter().fold(self, Self::item)
+    }
+
     /// Insert a pre-registered widget as a breadcrumb segment slot.
     /// The caller is responsible for the segment's visual + interaction.
     /// Note: a pre-registered crumb never collapses into the overflow menu
@@ -709,19 +717,20 @@ impl Breadcrumb {
         self
     }
 
+    /// Insert several pre-registered widgets as breadcrumb segment slots.
+    ///
+    /// The id-carrying twin of [`items`](Self::items). Like `item_id`, none of
+    /// these crumbs ever collapses into the overflow menu.
+    pub fn item_ids(self, ids: impl IntoIterator<Item = WidgetId>) -> Self {
+        ids.into_iter().fold(self, Self::item_id)
+    }
+
     /// Append a trailing widget after all segments, pushed to the far edge
     /// by an intervening `Spacer`. Common uses: a search icon, refresh button,
     /// or current-path copy button. When a trailing slot is set, the breadcrumb
     /// spans the full proposed width.
-    pub fn trailing_slot(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing_slot = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Same as [`trailing_slot`](Self::trailing_slot) but accepts a
-    /// pre-registered `WidgetId` instead of an inline widget.
-    pub fn trailing_slot_id(mut self, id: WidgetId) -> Self {
-        self.trailing_slot = Some(PendingChild::Id(id));
+    pub fn trailing_slot(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.trailing_slot = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
@@ -791,12 +800,7 @@ impl Widget for Breadcrumb {
                 seg_id
             } else {
                 let sep_id = ctx.add(BreadcrumbSeparator);
-                ctx.add(
-                    HStack::new()
-                        .spacing(0.0)
-                        .add_child(sep_id)
-                        .add_child(seg_id),
-                )
+                ctx.add(HStack::new().spacing(0.0).child(sep_id).child(seg_id))
             };
             unit_ids.push(unit_id);
 
@@ -857,12 +861,7 @@ impl Widget for Breadcrumb {
             let chevron_id = ctx.add(chevron);
 
             let sep_id = ctx.add(BreadcrumbSeparator);
-            let unit_id = ctx.add(
-                HStack::new()
-                    .spacing(0.0)
-                    .add_child(sep_id)
-                    .add_child(chevron_id),
-            );
+            let unit_id = ctx.add(HStack::new().spacing(0.0).child(sep_id).child(chevron_id));
             ctx.visible_when(unit_id, self.is_overflowing.clone());
             Some(unit_id)
         } else {
@@ -873,10 +872,10 @@ impl Widget for Breadcrumb {
         // [Spacer trailing?].
         let mut row = HStack::new().spacing(0.0);
         for (i, &uid) in unit_ids.iter().enumerate() {
-            row = row.add_child(uid);
+            row = row.child(uid);
             if i == 0 {
                 if let Some(eu) = self.ellipsis_unit_id {
-                    row = row.add_child(eu);
+                    row = row.child(eu);
                 }
             }
         }
@@ -888,7 +887,7 @@ impl Widget for Breadcrumb {
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
             self.trailing_id = Some(trailing_id);
-            row = row.child(Spacer::new()).add_child(trailing_id);
+            row = row.child(Spacer::new()).child(trailing_id);
         }
 
         let root_id = ctx.add(row);
@@ -1294,7 +1293,7 @@ mod tests {
         );
         let _bar = tree.add(
             crate::primitives::HStack::new()
-                .add_child(trail)
+                .child(trail)
                 .on_tap(move |_e, _c| bar_taps.set(bar_taps.get() + 1)),
         );
         tree.layout(SizeProposal::exact(300.0, 40.0));

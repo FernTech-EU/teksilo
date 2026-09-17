@@ -70,22 +70,21 @@ impl VStack {
         self
     }
 
-    /// Add a pre-registered child by ID.
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.pending.push(PendingChild::Id(id));
-        self
-    }
-
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
         for widget in iter {
-            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         }
         self
     }
@@ -93,7 +92,8 @@ impl VStack {
     /// Conditionally add a child. No-op if None.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
-            self.pending.push(PendingChild::Deferred(Box::new(w)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(w));
         }
         self
     }
@@ -227,7 +227,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 30.0));
         let b = tree.add(FixedLeaf(60.0, 50.0));
-        let _stack = tree.add(VStack::new().add_child(a).add_child(b));
+        let _stack = tree.add(VStack::new().child(a).child(b));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         assert!((tree.bounds(a).height - 30.0).abs() < 0.01);
@@ -250,13 +250,13 @@ mod tests {
         let mut tree = WidgetTree::new();
         let tab_bar = tree.add(FixedLeaf(120.0, 32.0));
         let content = tree.add(FixedLeaf(120.0, 200.0));
-        let filled = tree.add(Expand::vertical().respect_intrinsic().child_id(content));
-        let inner = tree.add(VStack::new().add_child(tab_bar).add_child(filled));
+        let filled = tree.add(Expand::vertical().respect_intrinsic().child(content));
+        let inner = tree.add(VStack::new().child(tab_bar).child(filled));
 
         // Outer VStack with another sibling underneath. Height is
         // unconstrained so the outer has to fall back to intrinsic sizes.
         let sibling = tree.add(FixedLeaf(120.0, 40.0));
-        let outer = tree.add(VStack::new().add_child(inner).add_child(sibling));
+        let outer = tree.add(VStack::new().child(inner).child(sibling));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -301,7 +301,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 40.0));
         let b = tree.add(FixedLeaf(80.0, 40.0));
-        let _stack = tree.add(VStack::new().spacing(10.0).add_child(a).add_child(b));
+        let _stack = tree.add(VStack::new().spacing(10.0).child(a).child(b));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         assert!((tree.bounds(b).y - 50.0).abs() < 0.01); // 40 + 10
@@ -322,7 +322,7 @@ mod tests {
                 .child(Spacer::new())
                 .child(FixedLeaf(40.0, 30.0)),
         );
-        let _col = tree.add(VStack::new().add_child(row));
+        let _col = tree.add(VStack::new().child(row));
         tree.layout(SizeProposal::exact(400.0, 500.0)); // 500 ≫ 30 → lots of vertical slack
 
         // The row keeps its 30px content height; it does NOT stretch to 500.
@@ -337,7 +337,7 @@ mod tests {
     fn cross_axis_leading_alignment_ltr() {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 30.0));
-        let _stack = tree.add(VStack::new().add_child(a)); // default: Leading
+        let _stack = tree.add(VStack::new().child(a)); // default: Leading
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         assert!((tree.bounds(a).x - 0.0).abs() < 0.01); // Leading = left in LTR
@@ -347,7 +347,7 @@ mod tests {
     fn cross_axis_center_alignment() {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 30.0));
-        let _stack = tree.add(VStack::new().alignment(HAlignment::Center).add_child(a));
+        let _stack = tree.add(VStack::new().alignment(HAlignment::Center).child(a));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         assert!((tree.bounds(a).x - 60.0).abs() < 0.01); // (200-80)/2
@@ -357,7 +357,7 @@ mod tests {
     fn cross_axis_trailing_alignment() {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 30.0));
-        let _stack = tree.add(VStack::new().alignment(HAlignment::Trailing).add_child(a));
+        let _stack = tree.add(VStack::new().alignment(HAlignment::Trailing).child(a));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         assert!((tree.bounds(a).x - 120.0).abs() < 0.01); // 200 - 80
@@ -368,7 +368,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 30.0));
         let b = tree.add(FixedLeaf(60.0, 30.0));
-        let _stack = tree.add(VStack::new().add_child(a).add_child(b)); // default: Leading
+        let _stack = tree.add(VStack::new().child(a).child(b)); // default: Leading
         tree.set_alignment(
             b,
             teksilo_tokens::Alignment {
@@ -412,7 +412,7 @@ mod tests {
     fn mixed_add_child_and_inline_child() {
         let mut tree = WidgetTree::new();
         let pre = tree.add(FixedLeaf(80.0, 20.0));
-        let stack = tree.add(VStack::new().add_child(pre).child(FixedLeaf(80.0, 40.0)));
+        let stack = tree.add(VStack::new().child(pre).child(FixedLeaf(80.0, 40.0)));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         let kids = tree.children(stack);
@@ -511,13 +511,7 @@ mod tests {
         let a = tree.add(FixedLeaf(80.0, 30.0));
         let b = tree.add(FixedLeaf(80.0, 40.0));
         let c = tree.add(FixedLeaf(80.0, 50.0));
-        let _stack = tree.add(
-            VStack::new()
-                .spacing(10.0)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
-        );
+        let _stack = tree.add(VStack::new().spacing(10.0).child(a).child(b).child(c));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         // Before dormant: a(0..30), gap(10), b(40..80), gap(10), c(90..140)
@@ -541,13 +535,7 @@ mod tests {
         let b = tree.add(FixedLeaf(80.0, 40.0));
         tree.visible_when(b, show_b.clone());
         let c = tree.add(FixedLeaf(80.0, 50.0));
-        let _stack = tree.add(
-            VStack::new()
-                .spacing(10.0)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
-        );
+        let _stack = tree.add(VStack::new().spacing(10.0).child(a).child(b).child(c));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         // All visible: a(0..30), gap(10), b(40..80), gap(10), c(90..140)
@@ -576,8 +564,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(100.0, 40.0));
         let b = tree.add(FixedLeaf(100.0, 40.0));
-        let row = tree.add(crate::primitives::HStack::new().add_child(a).add_child(b));
-        let stack = tree.add(VStack::new().add_child(row));
+        let row = tree.add(crate::primitives::HStack::new().child(a).child(b));
+        let stack = tree.add(VStack::new().child(row));
 
         // 200 dp of content in a 560 dp slot.
         tree.layout(SizeProposal::exact(560.0, 400.0));

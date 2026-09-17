@@ -106,10 +106,14 @@ fn fold_command(state: u64, cmd: &PathCommand) -> u64 {
 /// incrementally as commands are appended, so a consumer that needs to know
 /// "is this the same geometry I saw last frame?" can ask in constant time
 /// instead of walking the commands. The renderer's path-mask cache is that
-/// consumer, and the difference is not a micro-optimisation: keyed by a walk,
-/// a *cache hit* on a 2 000-point stroke cost 13.7 µs — so a stroke that grows
-/// by one point per pointer sample paid O(n) to discover it had nothing to do,
-/// which is O(n²) over the stroke. See `docs/ink.md`.
+/// consumer, and the difference is not a micro-optimisation: keyed by a walk, a
+/// *cache hit* on a long stroke cost microseconds and grew with the stroke — so
+/// a stroke that grows by one point per pointer sample paid O(n) to discover it
+/// had nothing to do, which is O(n²) over the stroke. The measured table lives
+/// in `docs/ink.md` §5 and is quoted nowhere else, so that the two columns stay
+/// one run of one machine; the gate that holds the shape rather than the
+/// numbers is `a_cache_hit_does_not_scale_with_the_paths_length` in
+/// `crates/teksilo-render/tests/wet_stroke_cost.rs`.
 ///
 /// A public `Vec` cannot be kept in step with a stamp, so the commands are
 /// reached through [`commands`](Self::commands) and appended through the

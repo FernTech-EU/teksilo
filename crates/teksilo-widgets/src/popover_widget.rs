@@ -851,7 +851,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 });
             let trigger_id = ctx.add(trigger);
             let caret_id = ctx.add(DisclosureCaret { role: role_signal });
-            let root_id = ctx.add(ZStack::new().add_child(trigger_id).add_child(caret_id));
+            let root_id = ctx.add(ZStack::new().child(trigger_id).child(caret_id));
             self.root_child_id = Some(root_id);
             if let Some(content) = self.composite_tooltip_content.take() {
                 let delay = ctx.theme().motion.tooltip_delay_heavy;
@@ -1042,7 +1042,7 @@ mod tests {
             Button::new(lit!("Fire"))
                 .on_activate_fn(|ctx| ctx.send_intent(Intent::new("test.open"))),
         );
-        tree.add(VStack::new().add_child(pb_id).add_child(fire_id));
+        tree.add(VStack::new().child(pb_id).child(fire_id));
         tree.layout(SizeProposal::exact(300.0, 160.0));
 
         assert!(!open_signal.get(), "starts closed");

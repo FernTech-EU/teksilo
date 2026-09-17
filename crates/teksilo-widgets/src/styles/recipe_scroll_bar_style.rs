@@ -247,7 +247,7 @@ impl ScrollBarStyle for RecipeScrollBarStyle {
                 let full_id = ctx.add(full);
                 ctx.set_opacity(thin_id, inactive_opacity);
                 ctx.set_opacity(full_id, revealed);
-                ctx.add(ZStack::new().add_child(thin_id).add_child(full_id))
+                ctx.add(ZStack::new().child(thin_id).child(full_id))
             }
         }
     }

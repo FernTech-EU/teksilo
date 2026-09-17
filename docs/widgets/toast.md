@@ -38,7 +38,7 @@ ctx.show_toast(
 
 ## Builder methods at a glance
 
-`info`, `success`, `warning`, `error`, `loading`, `body`, `leading`, `action`, `primary_action`, `auto_dismiss_after`, `persistent`, `priority`, `id`, `on_click`, `on_dismiss`, `show_close_button`, `closable_on_escape`, `announcement`, `archive`, `style`, `target`, `broadcast`, `present`
+`info`, `success`, `warning`, `error`, `loading`, `body`, `leading`, `action`, `actions`, `primary_action`, `auto_dismiss_after`, `persistent`, `priority`, `id`, `on_click`, `on_dismiss`, `show_close_button`, `closable_on_escape`, `announcement`, `archive`, `style`, `target`, `broadcast`, `present`
 
 ## API reference
 
@@ -320,6 +320,13 @@ toast remains object-safe.
 #### `pub fn action(mut self, action: ToastAction) -> Self`
 
 Append a `ToastAction` (link or button) to the toast.
+
+#### `pub fn actions(self, actions: impl IntoIterator<Item = ToastAction>) -> Self`
+
+Append several `ToastAction`s from an iterator, in order.
+
+The loop form of `action`. Toasts carry few actions, so
+reach for it only when the set is genuinely data-driven.
 
 #### `pub fn primary_action( self, label: impl Into<LocalizedString>, on_invoke: impl Fn(&mut EventContext) + 'static, ) -> Self`
 

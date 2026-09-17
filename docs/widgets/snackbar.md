@@ -57,7 +57,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`style`, `content`, `content_id`, `variant`, `enabled`, `dismiss_behavior`, `auto_dismiss_after`, `persistent`, `trigger`, `trigger_id`, `announcement`
+`style`, `content`, `variant`, `enabled`, `dismiss_behavior`, `auto_dismiss_after`, `persistent`, `trigger`, `announcement`
 
 ## API reference
 
@@ -88,7 +88,7 @@ Per-call style override for the snackbar surface chrome.
 Replaces the theme-wide default `SnackbarStyle` for just this
 instance.
 
-#### `pub fn content(mut self, content: impl Widget + 'static) -> Self`
+#### `pub fn content(mut self, content: impl teksilo_core::IntoTeksiChild) -> Self`
 
 The snackbar body — the message (and optional inline action)
 shown on the floating surface.
@@ -101,11 +101,6 @@ So any `TextWidget` you pass here must set
 is dark and renders nearly invisible on the dark surface in light
 theme. If you install a light-surface `SnackbarStyle`, color the
 content to match that instead.
-
-#### `pub fn content_id(mut self, id: WidgetId) -> Self`
-
-Supply the notification body by `WidgetId` (already added to the
-tree). Mutually exclusive with `.content(...)`.
 
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 
@@ -129,15 +124,11 @@ duration without user interaction (default: 4 s).
 Keep the snackbar visible until explicitly dismissed; disables
 the auto-dismiss timeout.
 
-#### `pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self`
+#### `pub fn trigger(mut self, trigger: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Replace the default `Button` trigger with a custom widget. The
 widget is wired for tap, keyboard (Enter/Space), and AT Click
 activation automatically.
-
-#### `pub fn trigger_id(mut self, id: WidgetId) -> Self`
-
-Supply the custom trigger by `WidgetId` (already added to the tree).
 
 #### `pub fn announcement(mut self, text: impl Into<LocalizedString>) -> Self`
 

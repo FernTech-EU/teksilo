@@ -190,7 +190,7 @@ pub enum AccordionOrientation {
 ///
 /// Supply the title and a `Signal<bool>` for the expanded state, then attach
 /// content via [`.content(w)`](Accordion::content) or
-/// [`.content_id(id)`](Accordion::content_id). The signal can be toggled externally
+/// [`.content(id)`](Accordion::content). The signal can be toggled externally
 /// (e.g. from a "collapse all" button) and the disclosure animation will follow.
 pub struct Accordion {
     /// Header title. Kept as a `LocalizedString` (not eagerly resolved)
@@ -234,7 +234,7 @@ pub struct Accordion {
     trailing: Option<Box<dyn Widget>>,
     /// A pre-registered trailing slot by id (for callers that must build the
     /// slot in-context first). Takes precedence over `trailing`. See
-    /// [`Accordion::trailing_id`].
+    /// [`Accordion::trailing`].
     trailing_id: Option<WidgetId>,
     /// Fill-mode layout state: the header + animated body are direct children
     /// laid out by the accordion itself (so the body fills the leftover *and*
@@ -305,17 +305,17 @@ impl Accordion {
     /// clicking them does not toggle the accordion. Mirrors
     /// [`ToolBoxItem::trailing`](crate::tool_box::ToolBoxItem) /
     /// [`TabWidget::bar_trailing_slot`](crate::tab_widget::TabWidget::bar_trailing_slot).
-    pub fn trailing(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing = Some(Box::new(widget));
-        self
-    }
-
-    /// Like [`trailing`](Self::trailing) but takes a **pre-registered** widget
-    /// id — for callers that must build the slot in-context (e.g. a slot that
-    /// itself adds boxed children). Takes precedence over `trailing`.
-    pub fn trailing_id(mut self, id: WidgetId) -> Self {
-        self.trailing_id = Some(id);
-        self
+    pub fn trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => {
+                self.trailing_id = Some(id);
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                self.trailing = Some(w);
+                self
+            }
+        }
     }
 
     /// Override the header foreground color used for the title text and
@@ -336,16 +336,18 @@ impl Accordion {
         self
     }
 
-    /// Set the content widget by pre-registered ID.
-    pub fn content_id(mut self, id: WidgetId) -> Self {
-        self.content_id = Some(id);
-        self
-    }
-
     /// Set an inline content widget (deferred insertion).
-    pub fn content(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_content = Some(Box::new(widget));
-        self
+    pub fn content(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => {
+                self.content_id = Some(id);
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                self.pending_content = Some(w);
+                self
+            }
+        }
     }
 }
 
@@ -417,7 +419,7 @@ impl Widget for Accordion {
         let trailing_id = self
             .trailing_id
             .or_else(|| self.trailing.take().map(|w| ctx.add_boxed(w)))
-            .map(|tid| ctx.add(crate::primitives::DeadZone::new().child_id(tid)));
+            .map(|tid| ctx.add(crate::primitives::DeadZone::new().child(tid)));
 
         // Header: a horizontal row (vertical orientation) or a narrow vertical
         // strip with a rotated label (horizontal orientation). Two chevrons
@@ -437,13 +439,13 @@ impl Widget for Accordion {
             let spacer_id = ctx.add(Spacer::new());
             let mut col = VStack::new()
                 .spacing(8.0)
-                .add_child(chevron_left_id)
-                .add_child(chevron_right_id)
-                .add_child(title_id);
+                .child(chevron_left_id)
+                .child(chevron_right_id)
+                .child(title_id);
             if let Some(t) = trailing_id {
-                col = col.add_child(t);
+                col = col.child(t);
             }
-            ctx.add(col.add_child(spacer_id))
+            ctx.add(col.child(spacer_id))
         } else {
             let chevron_down_id = ctx.add(IconWidget::chevron_down(16.0).color(header_fg.clone()));
             let chevron_right_id =
@@ -463,14 +465,11 @@ impl Widget for Accordion {
             let title_id = ctx.add(title_widget);
             let spacer_id = ctx.add(Spacer::new());
 
-            let mut row = HStack::new()
-                .spacing(8.0)
-                .add_child(title_id)
-                .add_child(spacer_id);
+            let mut row = HStack::new().spacing(8.0).child(title_id).child(spacer_id);
             if let Some(t) = trailing_id {
-                row = row.add_child(t);
+                row = row.child(t);
             }
-            ctx.add(row.add_child(chevron_down_id).add_child(chevron_right_id))
+            ctx.add(row.child(chevron_down_id).child(chevron_right_id))
         };
 
         // Int UI focus convention: an accent-colored border
@@ -496,8 +495,8 @@ impl Widget for Accordion {
         );
         let header_with_ring = ctx.add(
             crate::primitives::ZStack::new()
-                .add_child(focus_rect_id)
-                .add_child(header),
+                .child(focus_rect_id)
+                .child(header),
         );
 
         if self.fill {
@@ -509,9 +508,9 @@ impl Widget for Accordion {
             // extent so a fully-collapsed pane is exactly the header.
             let extent = accordion_fill_header_extent(&ctx.theme().input);
             let header = if horizontal {
-                ctx.add(MinSize::new(extent, 0.0).child_id(header_with_ring))
+                ctx.add(MinSize::new(extent, 0.0).child(header_with_ring))
             } else {
-                ctx.add(MinSize::new(0.0, extent).child_id(header_with_ring))
+                ctx.add(MinSize::new(0.0, extent).child(header_with_ring))
             };
             self.fill_header_id = Some(header);
             if let Some(content_id) = self.content_id {
@@ -531,19 +530,19 @@ impl Widget for Accordion {
                     ctx.visible_when(region_id, self.expanded.clone());
                     region_id
                 } else {
-                    ctx.add(Collapse::new(self.expanded.clone()).child_id(region_id))
+                    ctx.add(Collapse::new(self.expanded.clone()).child(region_id))
                 }
             });
             let root = if horizontal {
-                let mut hstack = HStack::new().spacing(2.0).add_child(header_with_ring);
+                let mut hstack = HStack::new().spacing(2.0).child(header_with_ring);
                 if let Some(w) = content_wrapper {
-                    hstack = hstack.add_child(w);
+                    hstack = hstack.child(w);
                 }
                 ctx.add(hstack)
             } else {
-                let mut vstack = VStack::new().spacing(2.0).add_child(header_with_ring);
+                let mut vstack = VStack::new().spacing(2.0).child(header_with_ring);
                 if let Some(w) = content_wrapper {
-                    vstack = vstack.add_child(w);
+                    vstack = vstack.child(w);
                 }
                 ctx.add(vstack)
             };
@@ -905,7 +904,7 @@ mod tests {
         let expanded = Signal::new(true);
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let content = tree.add(TextWidget::new(lit!("Content text")));
-        let acc = tree.add(Accordion::new(lit!("Details"), expanded.clone()).content_id(content));
+        let acc = tree.add(Accordion::new(lit!("Details"), expanded.clone()).content(content));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let b = tree.bounds(acc);
         assert!(b.height > 0.0);
@@ -981,7 +980,7 @@ mod tests {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let content = tree.add(TextWidget::new(lit!("Some content")));
-        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content_id(content));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -1012,7 +1011,7 @@ mod tests {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let content = tree.add(TextWidget::new(lit!("Some content")));
-        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content_id(content));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -1053,7 +1052,7 @@ mod tests {
         let expanded = Signal::new(false);
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let content = tree.add(TextWidget::new(lit!("Some content text here")));
-        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content_id(content));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content(content));
         tree.layout(SizeProposal {
             width: Some(300.0),
             height: None,
@@ -1106,7 +1105,7 @@ mod tests {
         let acc = tree.add(
             Accordion::new(lit!("Panel"), expanded.clone())
                 .fill(true)
-                .content_id(content),
+                .content(content),
         );
         tree.layout(SizeProposal::exact(220.0, 300.0));
 
@@ -1139,7 +1138,7 @@ mod tests {
             Accordion::new(lit!("Panel"), expanded)
                 .fill(true)
                 .on_header_drag(move |_ctx| sink.set(true))
-                .content_id(content),
+                .content(content),
         );
         tree.layout(SizeProposal::exact(220.0, 300.0));
         let b = tree.bounds(acc);
@@ -1160,7 +1159,7 @@ mod tests {
         let acc = tree.add(
             Accordion::new(lit!("Panel"), expanded)
                 .fill(true)
-                .content_id(content),
+                .content(content),
         );
         tree.layout(SizeProposal::exact(220.0, 300.0));
         // children = [header, body]; the body fills the leftover after the
@@ -1190,7 +1189,7 @@ mod tests {
         let acc = tree.add(
             Accordion::new(lit!("Panel"), expanded)
                 .fill(true)
-                .content_id(content),
+                .content(content),
         );
         tree.layout(SizeProposal::exact(220.0, 300.0));
         // The collapse body never extends past the pane bottom (the oversized
@@ -1229,8 +1228,8 @@ mod tests {
         let acc = tree.add(
             Accordion::new(lit!("Panel"), expanded.clone())
                 .fill(true)
-                .trailing_id(trailing)
-                .content_id(content),
+                .trailing(trailing)
+                .content(content),
         );
         tree.layout(SizeProposal::exact(260.0, 140.0));
 
@@ -1283,9 +1282,9 @@ mod tests {
         let acc = tree.add(
             Accordion::new(lit!("Panel"), expanded.clone())
                 .fill(true)
-                .trailing_id(trailing)
+                .trailing(trailing)
                 .on_header_drag(move |_ctx| hd.set(true))
-                .content_id(content),
+                .content(content),
         );
         tree.layout(SizeProposal::exact(260.0, 140.0));
 
@@ -1340,9 +1339,9 @@ mod tests {
         let _acc = tree.add(
             Accordion::new(lit!("Panel"), expanded.clone())
                 .fill(true)
-                .trailing_id(trailing)
+                .trailing(trailing)
                 .on_header_drag(move |_ctx| hd.set(true))
-                .content_id(content),
+                .content(content),
         );
         tree.layout(SizeProposal::exact(260.0, 140.0));
 
@@ -1374,7 +1373,7 @@ mod tests {
             Accordion::new(lit!("Panel"), expanded)
                 .horizontal()
                 .fill(true)
-                .content_id(content),
+                .content(content),
         );
         tree.layout(SizeProposal::exact(320.0, 120.0));
         let b = tree.bounds(acc);

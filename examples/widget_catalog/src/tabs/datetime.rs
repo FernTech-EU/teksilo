@@ -70,14 +70,14 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(calendar_single)
-            .add_child(calendar_range)
-            .add_child(date_edit)
-            .add_child(time_edit)
-            .add_child(datetime_edit)
-            .add_child(date_range_edit),
+            .child(calendar_single)
+            .child(calendar_range)
+            .child(date_edit)
+            .child(time_edit)
+            .child(datetime_edit)
+            .child(date_range_edit),
     )
 }
 

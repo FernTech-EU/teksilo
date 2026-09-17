@@ -244,7 +244,7 @@ impl Widget for ProgressBar {
                 .clone()
                 .unwrap_or_else(|| SurfaceRole::Accent.into());
             let leaf_id = ctx.add(IndeterminateSweepLeaf::signal(self.orientation, pos, fill));
-            ctx.add(ZStack::new().add_child(frame_id).add_child(leaf_id))
+            ctx.add(ZStack::new().child(frame_id).child(leaf_id))
         } else {
             // Determinate: register the bound value on the ProgressBar itself at
             // AccessibilityOnly so a progress update re-walks the AT tree and

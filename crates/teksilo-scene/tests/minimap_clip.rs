@@ -589,7 +589,7 @@ fn tap_lands_on_what_was_painted(nest: Option<f32>) {
     let mut tree = WidgetTree::new();
     let id = tree.add(mm);
     if let Some(inset) = nest {
-        let _root = tree.add(Padding::uniform(inset).child_id(id));
+        let _root = tree.add(Padding::uniform(inset).child(id));
     }
     tree.layout(SizeProposal::unspecified());
     // Paint records the projection the tap must agree with.
@@ -830,7 +830,7 @@ fn a_border_wider_than_the_widget_is_still_contained() {
 fn render_nested(mm: SceneMinimap, inset: f32) -> (Rect, Vec<(Rect, [f32; 4])>) {
     let mut tree = WidgetTree::new();
     let mm_id = tree.add(mm);
-    let _root = tree.add(Padding::uniform(inset).child_id(mm_id));
+    let _root = tree.add(Padding::uniform(inset).child(mm_id));
     tree.layout(SizeProposal::unspecified());
     let bounds = tree.bounds(mm_id);
     let frame = tree.render();

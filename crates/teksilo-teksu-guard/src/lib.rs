@@ -27,9 +27,10 @@
 //! Membership is decided by the **return type**, not by a naming convention:
 //! a `WidgetBuilder` method returning `WidgetWithHandlers<Self>` is exactly a
 //! method that performs the wrap, and the wrap is what breaks the chain.
-//! Two of the trait's methods return something else
-//! (`dim_when_inactive` / `dim_when_inactive_default` return a wrapper
-//! *widget*), and they correctly do not belong to the list.
+//! A method returning something else is not merely outside the list, it is a
+//! defect: the rest of the chain silently retargets at the other type, and
+//! because a wrapper widget has its own `.child(..)` the result compiles and
+//! builds a different tree. [`foreign_wrapper_returns`] pins that set empty.
 //!
 //! [`missing_from_predicate`] is the load-bearing direction. [`stale_in_predicate`]
 //! catches the opposite drift — a name kept in the list after the method it
@@ -98,6 +99,75 @@ pub fn widget_builder_wrapping_methods(source: &str) -> BTreeSet<String> {
         .filter_map(|item| match item {
             syn::TraitItem::Fn(f) if returns_widget_with_handlers(&f.sig.output) => {
                 Some(f.sig.ident.to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Parse `widget_builder.rs` and return every `WidgetBuilder` method whose
+/// return type is a **widget wrapper other than** `WidgetWithHandlers<Self>`.
+///
+/// This is the hazard the reorder rule cannot see. `is_widget_builder_method`
+/// is keyed on `-> WidgetWithHandlers<Self>`, correctly, because that return is
+/// what breaks a builder chain in a way the reorder can repair. A method
+/// returning a *different* wrapper breaks the chain in a way it cannot: the
+/// rest of the chain silently retargets at the new widget, and because that
+/// widget usually has its own `.child(..)`, nothing fails to compile. The
+/// author gets a different tree.
+///
+/// `dim_when_inactive` / `dim_when_inactive_default` were exactly that, and
+/// `teksu!(ctx => VStack { dim_when_inactive: 0.7  A  B })` mounted
+/// `DimWhenInactive > B`, losing the stack and `A`. They were removed from the
+/// trait; every other wrapper widget in the framework (`Fade`, `Blur`,
+/// `Scale`, `Collapse`, `DimWhenInactive`) is used as `Wrapper::new().child(w)`
+/// and carries no trait method.
+///
+/// The set must stay empty. A `WidgetBuilder` method should return
+/// `WidgetWithHandlers<Self>`, `Self`, or a non-widget query type.
+///
+/// # Panics
+///
+/// Panics if the file cannot be parsed.
+pub fn foreign_wrapper_returns(source: &str) -> BTreeSet<String> {
+    let file = syn::parse_file(source).expect("widget_builder.rs must parse as Rust");
+    let trait_item = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Trait(t) if t.ident == "WidgetBuilder" => Some(t),
+            _ => None,
+        })
+        .expect("widget_builder.rs must declare `trait WidgetBuilder`");
+
+    trait_item
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::TraitItem::Fn(f) => {
+                let syn::ReturnType::Type(_, ty) = &f.sig.output else {
+                    return None;
+                };
+                if returns_widget_with_handlers(&f.sig.output) {
+                    return None;
+                }
+                let syn::Type::Path(path) = ty.as_ref() else {
+                    return None;
+                };
+                let last = path.path.segments.last()?;
+                let name = last.ident.to_string();
+                // `Self`, `bool`, `Option<..>`, `Vec<WidgetId>` and friends are
+                // queries and pass-throughs, not wrappers. A wrapper is an
+                // UpperCamel concrete type that is neither of those.
+                let is_query = matches!(
+                    name.as_str(),
+                    "Self" | "Option" | "Vec" | "bool" | "String" | "WidgetId"
+                ) || name.chars().next().is_some_and(|c| c.is_lowercase());
+                if is_query {
+                    None
+                } else {
+                    Some(f.sig.ident.to_string())
+                }
             }
             _ => None,
         })

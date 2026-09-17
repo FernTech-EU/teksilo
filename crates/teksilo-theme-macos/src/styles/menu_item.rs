@@ -115,7 +115,7 @@ impl MenuItemStyle for MacOsMenuItemStyle {
                 0.0,
                 spacing(HIGHLIGHT_INSET, ctx_tokens),
             )
-            .child_id(backdrop),
+            .child(backdrop),
         );
 
         // Delegate the row arithmetic, with the interaction signals held
@@ -134,7 +134,7 @@ impl MenuItemStyle for MacOsMenuItemStyle {
         let row = RecipeMenuItemStyle::new(macos_menu_item_recipe_for(&ctx.theme().input))
             .make_body(&inner_cfg, ctx);
 
-        ctx.add(ZStack::new().add_child(inset_backdrop).add_child(row))
+        ctx.add(ZStack::new().child(inset_backdrop).child(row))
     }
 
     /// Delegate the metrics alongside the row. `MenuItem` builds the icon and

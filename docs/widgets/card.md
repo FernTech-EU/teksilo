@@ -49,7 +49,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`header`, `header_id`, `content`, `content_id`, `footer`, `footer_id`, `shadow`, `background`, `corner_radius`, `padding`, `variant`, `style`
+`header`, `content`, `footer`, `shadow`, `background`, `corner_radius`, `padding`, `variant`, `style`
 
 ## API reference
 
@@ -69,29 +69,17 @@ pub struct Card { /* fields */ }
 
 Construct an empty card with no slots and the default `CardVariant::Plain`.
 
-#### `pub fn header(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn header(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the header slot (topmost section) to an inline widget.
 
-#### `pub fn header_id(mut self, id: WidgetId) -> Self`
-
-Set the header slot to a pre-registered `WidgetId`.
-
-#### `pub fn content(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn content(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the main content slot (middle section) to an inline widget.
 
-#### `pub fn content_id(mut self, id: WidgetId) -> Self`
-
-Set the main content slot to a pre-registered `WidgetId`.
-
-#### `pub fn footer(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn footer(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the footer slot (bottommost section) to an inline widget.
-
-#### `pub fn footer_id(mut self, id: WidgetId) -> Self`
-
-Set the footer slot to a pre-registered `WidgetId`.
 
 #### `pub fn shadow(mut self, shadow: Shadow) -> Self`
 

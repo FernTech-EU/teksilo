@@ -143,12 +143,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(menu_bar)
-            .add_child(collapsible)
-            .add_child(menu_list)
-            .add_child(menu_item),
+            .child(menu_bar)
+            .child(collapsible)
+            .child(menu_list)
+            .child(menu_item),
     )
 }
 

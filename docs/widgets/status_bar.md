@@ -35,7 +35,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`child`, `add_child`, `background`, `corner_radius`, `border_color`, `border_width`, `name`, `announce_changes`
+`child`, `children`, `child_opt`, `background`, `corner_radius`, `border_color`, `border_width`, `name`, `announce_changes`
 
 ## API reference
 
@@ -109,13 +109,25 @@ pub struct StatusBar { /* fields */ }
 Create an empty status bar with default styling (`SurfaceRole::Sunken`,
 square corners, no live region).
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
-#### `pub fn add_child(mut self, id: WidgetId) -> Self`
+#### `pub fn children( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
-Add a pre-registered child widget by ID.
+Add several inline children from an iterator.
+
+The loop form of `child`: one call where a chain of
+`.child(..)` would otherwise repeat per element.
+
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
 
 #### `pub fn background(mut self, color: impl Into<ColorProp>) -> Self`
 

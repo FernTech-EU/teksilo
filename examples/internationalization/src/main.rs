@@ -155,10 +155,10 @@ impl Widget for Root {
         let language_row = ctx.add(
             HStack::new()
                 .spacing(8.0)
-                .add_child(lang_label)
-                .add_child(en_btn)
-                .add_child(fr_btn)
-                .add_child(ar_btn),
+                .child(lang_label)
+                .child(en_btn)
+                .child(fr_btn)
+                .child(ar_btn),
         );
 
         // The same locale switch as a single drop-in `LanguageSwitcher`:
@@ -174,8 +174,8 @@ impl Widget for Root {
         let switcher_row = ctx.add(
             HStack::new()
                 .spacing(8.0)
-                .add_child(switcher_label)
-                .add_child(switcher),
+                .child(switcher_label)
+                .child(switcher),
         );
 
         // The RTL showcase: `Button::new(tr!(leading_button()))` + trailing
@@ -189,8 +189,8 @@ impl Widget for Root {
         let direction_row = ctx.add(
             HStack::new()
                 .spacing(12.0)
-                .add_child(leading_btn)
-                .add_child(trailing_btn),
+                .child(leading_btn)
+                .child(trailing_btn),
         );
 
         // ====== Locale-aware formatting showcase ======
@@ -295,9 +295,9 @@ impl Widget for Root {
         let price_controls = ctx.add(
             HStack::new()
                 .spacing(8.0)
-                .add_child(price_label)
-                .add_child(price_minus)
-                .add_child(price_plus),
+                .child(price_label)
+                .child(price_minus)
+                .child(price_plus),
         );
 
         let count_label = ctx.add(
@@ -324,38 +324,38 @@ impl Widget for Root {
         let count_controls = ctx.add(
             HStack::new()
                 .spacing(8.0)
-                .add_child(count_label)
-                .add_child(count_minus)
-                .add_child(count_plus),
+                .child(count_label)
+                .child(count_minus)
+                .child(count_plus),
         );
 
         let column = ctx.add(
             VStack::new()
                 .spacing(16.0)
-                .add_child(heading)
-                .add_child(greeting)
-                .add_child(body)
-                .add_child(direction_note)
-                .add_child(language_row)
-                .add_child(switcher_row)
-                .add_child(direction_row)
-                .add_child(formatting_heading)
-                .add_child(bundle_currency)
-                .add_child(bundle_date)
-                .add_child(signal_decimal_row)
-                .add_child(signal_currency_row)
-                .add_child(signal_percent_row)
-                .add_child(signal_date_row)
-                .add_child(cart_summary_text)
-                .add_child(price_controls)
-                .add_child(count_controls),
+                .child(heading)
+                .child(greeting)
+                .child(body)
+                .child(direction_note)
+                .child(language_row)
+                .child(switcher_row)
+                .child(direction_row)
+                .child(formatting_heading)
+                .child(bundle_currency)
+                .child(bundle_date)
+                .child(signal_decimal_row)
+                .child(signal_currency_row)
+                .child(signal_percent_row)
+                .child(signal_date_row)
+                .child(cart_summary_text)
+                .child(price_controls)
+                .child(count_controls),
         );
 
         // The showcase column is taller than the window once every
         // formatting row is present, so wrap it in a ScrollArea (inside the
         // full-window Panel chrome) to keep all content reachable.
         let scroll = ctx.add(ScrollArea::from_id(column));
-        let root_id = ctx.add(Panel::new().padding(24.0).child_id(scroll));
+        let root_id = ctx.add(Panel::new().padding(24.0).child(scroll));
         self.root_child_id = Some(root_id);
         vec![root_id]
     }
@@ -403,8 +403,8 @@ fn formatting_row(ctx: &mut BuildContext, label: &'static str, value: Signal<Str
     ctx.add(
         HStack::new()
             .spacing(8.0)
-            .add_child(label_widget)
-            .add_child(value_widget),
+            .child(label_widget)
+            .child(value_widget),
     )
 }
 

@@ -1117,7 +1117,7 @@ mod tests {
                 .background(Color::RED)
                 .corner_radius(CornerRadius::uniform(4.0)),
         );
-        let parent = tree.add(StackWidget::new().add_child(child));
+        let parent = tree.add(StackWidget::new().child(child));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         let frame = tree.render();

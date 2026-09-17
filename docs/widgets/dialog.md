@@ -66,7 +66,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`content`, `variant`, `enabled`, `presentation`, `close_behavior`, `trigger`, `trigger_id`
+`content`, `variant`, `enabled`, `presentation`, `close_behavior`, `trigger`
 
 ## API reference
 
@@ -178,22 +178,14 @@ the enclosing `ModalContainer` via `accessible_title_hint`.
 
 Secondary description text shown below the title.
 
-#### `pub fn body(mut self, body: impl Widget + 'static) -> Self`
+#### `pub fn body(mut self, body: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Main scrollable content slot (any widget).
 
-#### `pub fn body_id(mut self, id: WidgetId) -> Self`
-
-Main content slot by pre-registered `WidgetId`.
-
-#### `pub fn footer(mut self, footer: impl Widget + 'static) -> Self`
+#### `pub fn footer(mut self, footer: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Footer slot separated from the body by a `Divider` (typically action
 buttons like "OK" / "Cancel").
-
-#### `pub fn footer_id(mut self, id: WidgetId) -> Self`
-
-Footer slot by pre-registered `WidgetId`.
 
 ## `pub struct Dialog`
 
@@ -236,11 +228,7 @@ Override the modal presentation mode (default `ModalPresentation::Auto`).
 
 Override how the dialog may be closed (default `EscapeOrClickOutside`).
 
-#### `pub fn trigger(mut self, trigger: impl Widget + 'static) -> Self`
+#### `pub fn trigger(mut self, trigger: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Replace the default `Button` trigger with a custom widget. The widget
 receives the same tap / key / AT-action handlers as the button would.
-
-#### `pub fn trigger_id(mut self, id: WidgetId) -> Self`
-
-Custom trigger by pre-registered `WidgetId`.

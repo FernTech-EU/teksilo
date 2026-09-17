@@ -462,6 +462,15 @@ impl DockRail {
         self
     }
 
+    /// Append several dockless command buttons from an iterator, in order.
+    ///
+    /// The loop form of [`action`](Self::action), for a rail whose command
+    /// cluster comes from data. The same duplicate-id `debug_assert!` applies to
+    /// every action in the iterator.
+    pub fn actions(self, actions: impl IntoIterator<Item = DockAction>) -> Self {
+        actions.into_iter().fold(self, Self::action)
+    }
+
     /// Choose the glyph for the overflow trigger — the item shown (in place of
     /// the surplus items) when they don't all fit. Tapping it opens a popover
     /// list of the overflowed entries.
@@ -699,7 +708,7 @@ impl Widget for DockActivityBar {
         // prunes it and the items read as direct tablist children.
         let mut items_stack = VStack::new().spacing(RAIL_ITEM_SPACING);
         for id in &items {
-            items_stack = items_stack.add_child(*id);
+            items_stack = items_stack.child(*id);
         }
         let items_stack = ctx.add(items_stack);
         let shown_tabs = shown_rail_count(&self.item_ids, &self.visible_count);
@@ -708,12 +717,12 @@ impl Widget for DockActivityBar {
         // Item column (pushed to the top by a trailing Spacer).
         let mut column = VStack::new().spacing(RAIL_ITEM_SPACING);
         if let Some(top) = &self.config.top_slot {
-            column = column.add_child(ctx.add_boxed((top)()));
+            column = column.child(ctx.add_boxed((top)()));
         }
         if let Some(group) = self.build_action_group(ctx, DockActionPlacement::Start) {
-            column = column.add_child(group);
+            column = column.child(group);
         }
-        column = column.add_child(tab_list);
+        column = column.child(tab_list);
         // Overflow trigger: a caller-chosen glyph that opens a popover list of
         // the overflowed entries. Shown only while something overflows.
         if let Some(of_icon) = &self.config.overflow_icon {
@@ -731,34 +740,31 @@ impl Widget for DockActivityBar {
                     .placement(teksilo_core::overlay::OverlayPlacement::TrailingEdge),
             );
             ctx.visible_when(overflow, visible_count.map(move |c| *c < total));
-            column = column.add_child(overflow);
+            column = column.child(overflow);
         }
         if let Some(group) = self.build_action_group(ctx, DockActionPlacement::End) {
-            column = column.add_child(group);
+            column = column.child(group);
         }
         let spacer = ctx.add(Spacer::new());
-        column = column.add_child(spacer);
+        column = column.child(spacer);
         if let Some(group) = self.build_action_group(ctx, DockActionPlacement::Pinned) {
-            column = column.add_child(group);
+            column = column.child(group);
         }
         if let Some(bottom) = &self.config.bottom_slot {
             let b = ctx.add_boxed((bottom)());
-            column = column.add_child(b);
+            column = column.child(b);
         }
 
         let column_id = ctx.add(column);
-        let padded = ctx.add(Padding::uniform(RAIL_PADDING).child_id(column_id));
+        let padded = ctx.add(Padding::uniform(RAIL_PADDING).child(column_id));
         // Insertion-line overlay (topmost) — painted while a dock tab / dock
         // widget is dragged over the rail.
         let indicator = ctx.add(RailDropIndicator::new(self.drop_indicator.clone()));
-        let mut stack = ZStack::new()
-            .add_child(bg)
-            .add_child(padded)
-            .add_child(indicator);
+        let mut stack = ZStack::new().child(bg).child(padded).child(indicator);
         // Optional divider between the rail and the side's content, on the
         // content-facing edge (drawn above the background so it isn't covered).
         if let Some(color) = self.config.divider.clone() {
-            stack = stack.add_child(ctx.add(RailEdgeDivider {
+            stack = stack.child(ctx.add(RailEdgeDivider {
                 side: self.side,
                 color,
             }));
@@ -1264,7 +1270,7 @@ impl Widget for DockRailActionGroup {
                 self.item_ids.clone(),
             ));
             ids.push(id);
-            stack = stack.add_child(id);
+            stack = stack.child(id);
         }
         *self.item_ids.borrow_mut() = ids;
         // The roving stop can outlive a rebuild that shortened the list (an
@@ -1437,12 +1443,12 @@ impl Widget for DockRailActionItem {
                 .icon_size(self.glyph)
                 .color(glyph_color.clone()),
         );
-        let centered = ctx.add(Center::new().child_id(icon));
+        let centered = ctx.add(Center::new().child(icon));
         let icon_box = ctx.add(
             FixedSize::new()
                 .width(self.extent)
                 .height(self.extent)
-                .child_id(centered),
+                .child(centered),
         );
 
         let content = if self.labeled {
@@ -1454,14 +1460,14 @@ impl Widget for DockRailActionItem {
                 VStack::new()
                     .alignment(HAlignment::Center)
                     .spacing(2.0)
-                    .add_child(label)
-                    .add_child(icon_box),
+                    .child(label)
+                    .child(icon_box),
             );
-            ctx.add(Padding::new(LABELED_TOP_MARGIN, 0.0, 0.0, 0.0).child_id(stack))
+            ctx.add(Padding::new(LABELED_TOP_MARGIN, 0.0, 0.0, 0.0).child(stack))
         } else {
             icon_box
         };
-        let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(content));
+        let root = ctx.add(ZStack::new().child(bg_rect).child(content));
         self.root = Some(root);
 
         if !self.labeled {
@@ -1801,10 +1807,10 @@ impl Widget for DockOverflowMenu {
             ));
             self.row_ids.borrow_mut().push((p, row));
             ctx.visible_when(row, self.visible_count.map(move |c| p >= *c));
-            column = column.add_child(row);
+            column = column.child(row);
         }
         let column_id = ctx.add(column);
-        let root = ctx.add(Padding::uniform(4.0).child_id(column_id));
+        let root = ctx.add(Padding::uniform(4.0).child(column_id));
         self.root = Some(root);
         vec![root]
     }
@@ -2009,12 +2015,12 @@ impl Widget for DockRailItem {
                     .a11y_hidden(),
             )
         };
-        let centered = ctx.add(Center::new().child_id(glyph));
+        let centered = ctx.add(Center::new().child(glyph));
         let icon_box = ctx.add(
             FixedSize::new()
                 .width(self.extent)
                 .height(self.extent)
-                .child_id(centered),
+                .child(centered),
         );
 
         // Labeled mode: a 90°-rotated title above the icon square (the
@@ -2029,16 +2035,16 @@ impl Widget for DockRailItem {
                 VStack::new()
                     .alignment(HAlignment::Center)
                     .spacing(2.0)
-                    .add_child(label)
-                    .add_child(icon_box),
+                    .child(label)
+                    .child(icon_box),
             );
             // A bit of top breathing room so the rotated title's top character
             // isn't flush against the rail item's top edge.
-            ctx.add(Padding::new(LABELED_TOP_MARGIN, 0.0, 0.0, 0.0).child_id(stack))
+            ctx.add(Padding::new(LABELED_TOP_MARGIN, 0.0, 0.0, 0.0).child(stack))
         } else {
             icon_box
         };
-        let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(content));
+        let root = ctx.add(ZStack::new().child(bg_rect).child(content));
         self.root = Some(root);
 
         if !self.labeled {
@@ -2292,13 +2298,8 @@ impl Widget for DockOverflowRow {
                 .a11y_hidden(),
         );
         let spacer = ctx.add(Spacer::new());
-        let row = ctx.add(
-            HStack::new()
-                .spacing(8.0)
-                .add_child(label)
-                .add_child(spacer),
-        );
-        let content = ctx.add(Padding::symmetric(6.0, 10.0).child_id(row));
+        let row = ctx.add(HStack::new().spacing(8.0).child(label).child(spacer));
+        let content = ctx.add(Padding::symmetric(6.0, 10.0).child(row));
 
         // Backing surface: a subtle highlight on focus + the keyboard
         // `:focus-visible` ring, so a row navigated to by keyboard is visible
@@ -2332,7 +2333,7 @@ impl Widget for DockOverflowRow {
                 .border_width(border_width)
                 .corner_radius(CornerRadius::uniform(ICON_BUTTON_CORNER_RADIUS)),
         );
-        let root = ctx.add(ZStack::new().add_child(bg_rect).add_child(content));
+        let root = ctx.add(ZStack::new().child(bg_rect).child(content));
         self.root = Some(root);
 
         // Single activation path (tap / Enter-Space / AT Click): select the
@@ -2443,6 +2444,38 @@ impl Widget for DockOverflowRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `DockRail::actions` is a fold over `action`, so N singular calls and one
+    /// plural call over the same values must leave the same cluster behind.
+    /// A rail's actions only reach the arena once the side is in Rail
+    /// presentation, so this reads the field instead of the tree.
+    #[test]
+    fn rail_actions_plural_matches_the_singular_chain() {
+        fn act(name: &'static str) -> DockAction {
+            DockAction::new(
+                DockActionId::named(name),
+                lit!(name),
+                || IconWidget::checkmark(16.0),
+                |_| {},
+            )
+        }
+        let singular = DockRail::new(DockSide::Leading)
+            .action(act("one"))
+            .action(act("two"))
+            .action(act("three"));
+        let plural =
+            DockRail::new(DockSide::Leading).actions([act("one"), act("two"), act("three")]);
+        let ids = |r: &DockRail| r.actions.iter().map(|a| a.id()).collect::<Vec<_>>();
+        assert_eq!(
+            ids(&singular),
+            vec![
+                DockActionId::named("one"),
+                DockActionId::named("two"),
+                DockActionId::named("three"),
+            ]
+        );
+        assert_eq!(ids(&singular), ids(&plural));
+    }
 
     #[test]
     fn rail_insertion_picks_the_gap_under_the_pointer() {

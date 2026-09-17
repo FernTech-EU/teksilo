@@ -4,9 +4,9 @@
 //! FormLayout — a two-column settings or preferences form layout.
 //!
 //! Children are added as label/field pairs via [`FormLayout::line`] (inline
-//! widgets) or [`FormLayout::line_ids`] (pre-registered IDs). Full-width rows
+//! widgets) or [`FormLayout::line`] (pre-registered IDs). Full-width rows
 //! that span both columns — section headers, `Divider`s, or banners — are
-//! added via [`FormLayout::full_width`] / [`FormLayout::full_width_id`]. The
+//! added via [`FormLayout::full_width`] / [`FormLayout::full_width`]. The
 //! label column auto-sizes to the widest label across all pairs so all field
 //! inputs are left-aligned. RTL layouts are handled automatically: the label
 //! column migrates to the trailing side and the field column moves to the
@@ -122,37 +122,61 @@ impl FormLayout {
     }
 
     /// Add a label/field pair row.
-    pub fn line(mut self, label: impl Widget + 'static, field: impl Widget + 'static) -> Self {
+    pub fn line(
+        mut self,
+        label: impl teksilo_core::IntoTeksiChild,
+        field: impl teksilo_core::IntoTeksiChild,
+    ) -> Self {
         self.pending_rows.push(PendingFormRow::Pair(
-            PendingChild::Deferred(Box::new(label)),
-            PendingChild::Deferred(Box::new(field)),
+            teksilo_core::IntoTeksiChild::into_pending(label),
+            teksilo_core::IntoTeksiChild::into_pending(field),
         ));
         self
     }
 
-    /// Add a label/field pair row with pre-registered widget IDs.
-    pub fn line_ids(mut self, label_id: WidgetId, field_id: WidgetId) -> Self {
-        self.pending_rows.push(PendingFormRow::Pair(
-            PendingChild::Id(label_id),
-            PendingChild::Id(field_id),
-        ));
-        self
+    /// Add several label/field pair rows from an iterator of `(label, field)`
+    /// pairs, in order.
+    ///
+    /// The loop form of [`line`](Self::line), and the usual one once the form is
+    /// generated from a settings schema rather than written row by row.
+    pub fn lines<L, F>(self, rows: impl IntoIterator<Item = (L, F)>) -> Self
+    where
+        L: teksilo_core::IntoTeksiChild,
+        F: teksilo_core::IntoTeksiChild,
+    {
+        rows.into_iter()
+            .fold(self, |form, (label, field)| form.line(label, field))
+    }
+
+    /// Add several label/field pair rows from an iterator of
+    /// `(label_id, field_id)` pairs, in order.
+    ///
+    /// [`lines`](Self::lines) accepts ids in both columns too, so this is the
+    /// spelling that states the id types outright rather than a capability the
+    /// other method lacks. Reach for it when a loop has already registered both
+    /// columns and naming the type reads better than inferring it.
+    pub fn line_ids(self, rows: impl IntoIterator<Item = (WidgetId, WidgetId)>) -> Self {
+        rows.into_iter()
+            .fold(self, |form, (label, field)| form.line(label, field))
     }
 
     /// Add a full-width row spanning both columns.
-    pub fn full_width(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_rows
-            .push(PendingFormRow::FullWidth(PendingChild::Deferred(Box::new(
-                widget,
-            ))));
+    pub fn full_width(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_rows.push(PendingFormRow::FullWidth(
+            teksilo_core::IntoTeksiChild::into_pending(widget),
+        ));
         self
     }
 
-    /// Add a full-width row with a pre-registered widget ID.
-    pub fn full_width_id(mut self, id: WidgetId) -> Self {
-        self.pending_rows
-            .push(PendingFormRow::FullWidth(PendingChild::Id(id)));
-        self
+    /// Add several full-width rows from an iterator, in order.
+    ///
+    /// The loop form of [`full_width`](Self::full_width), for a run of banners
+    /// or section headers that comes from data.
+    pub fn full_width_rows(
+        self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
+        iter.into_iter().fold(self, Self::full_width)
     }
 
     /// Flatten all rows into a child ID list.
@@ -213,7 +237,7 @@ impl Widget for FormLayout {
                         // WCAG 3.3.2 / EN 301 549 11.5.2.7: name the field after
                         // its visible label so assistive tech reads "<label>,
                         // edit text" instead of an unlabelled field. Serves both
-                        // `line()` (deferred) and `line_ids()` (pre-registered).
+                        // `line()` (deferred) and `line_id()` (pre-registered).
                         ctx.access_labelled_by(f, l);
                         FormRow::Pair(l, f)
                     }
@@ -230,7 +254,7 @@ impl Widget for FormLayout {
     ///
     /// A form's children are handed in once — `line(..)` takes a
     /// `Box<dyn Widget>` that can be added to the arena exactly once, and
-    /// `line_ids(..)` names widgets the caller registered itself — so there
+    /// `line_id(..)` names widgets the caller registered itself — so there
     /// is no recipe to replay on a rebuild. Under the default
     /// tear-down-and-reconstruct semantics `build()` found `pending_rows`
     /// already drained, re-attached the previous generation's ids, and got a
@@ -470,7 +494,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(60.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 25.0));
-        let _form = tree.add(FormLayout::new().line_ids(label, field));
+        let _form = tree.add(FormLayout::new().line(label, field));
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
         assert!((tree.bounds(label).x - 0.0).abs() < 0.01);
@@ -503,7 +527,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(60.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 25.0));
-        let _form = tree.add(FormLayout::new().line_ids(label, field));
+        let _form = tree.add(FormLayout::new().line(label, field));
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
         let update = tree.sync_accessibility();
@@ -537,7 +561,7 @@ mod tests {
         let f1 = tree.add(FixedLeaf(100.0, 20.0));
         let l2 = tree.add(FixedLeaf(100.0, 20.0)); // wider label
         let f2 = tree.add(FixedLeaf(80.0, 20.0));
-        let _form = tree.add(FormLayout::new().line_ids(l1, f1).line_ids(l2, f2));
+        let _form = tree.add(FormLayout::new().line(l1, f1).line(l2, f2));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // Label column = 100 (widest label). Both fields start at x=100.
@@ -552,7 +576,7 @@ mod tests {
     fn full_width_row_spans_entire_width() {
         let mut tree = WidgetTree::new();
         let fw = tree.add(FixedLeaf(50.0, 30.0));
-        let _form = tree.add(FormLayout::new().full_width_id(fw));
+        let _form = tree.add(FormLayout::new().full_width(fw));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         assert!((tree.bounds(fw).x - 0.0).abs() < 0.01);
@@ -568,12 +592,7 @@ mod tests {
         let fw = tree.add(FixedLeaf(200.0, 30.0));
         let l2 = tree.add(FixedLeaf(60.0, 20.0));
         let f2 = tree.add(FixedLeaf(100.0, 20.0));
-        let _form = tree.add(
-            FormLayout::new()
-                .line_ids(l1, f1)
-                .full_width_id(fw)
-                .line_ids(l2, f2),
-        );
+        let _form = tree.add(FormLayout::new().line(l1, f1).full_width(fw).line(l2, f2));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // Row 0 (Pair): height 25, y=0
@@ -589,7 +608,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(80.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 20.0));
-        let _form = tree.add(FormLayout::new().label_gap(12.0).line_ids(label, field));
+        let _form = tree.add(FormLayout::new().label_gap(12.0).line(label, field));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // Field starts at label_width + gap = 80 + 12 = 92
@@ -606,8 +625,8 @@ mod tests {
         let _form = tree.add(
             FormLayout::new()
                 .row_spacing(10.0)
-                .line_ids(l1, f1)
-                .line_ids(l2, f2),
+                .line(l1, f1)
+                .line(l2, f2),
         );
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
@@ -623,12 +642,7 @@ mod tests {
         let f1 = tree.add(FixedLeaf(100.0, 25.0));
         let l2 = tree.add(FixedLeaf(60.0, 30.0));
         let f2 = tree.add(FixedLeaf(100.0, 20.0));
-        let form = tree.add(
-            FormLayout::new()
-                .row_spacing(5.0)
-                .line_ids(l1, f1)
-                .line_ids(l2, f2),
-        );
+        let form = tree.add(FormLayout::new().row_spacing(5.0).line(l1, f1).line(l2, f2));
         tree.layout(SizeProposal {
             width: Some(400.0),
             height: None,
@@ -643,7 +657,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(80.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 20.0));
-        let _form = tree.add(FormLayout::new().label_gap(10.0).line_ids(label, field));
+        let _form = tree.add(FormLayout::new().label_gap(10.0).line(label, field));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // Field width = 400 - 80 - 10 = 310
@@ -655,7 +669,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(70.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 20.0));
-        let _form = tree.add(FormLayout::new().line_ids(label, field));
+        let _form = tree.add(FormLayout::new().line(label, field));
         tree.layout(SizeProposal::exact(300.0, 200.0));
 
         assert!((tree.bounds(label).x - 0.0).abs() < 0.01);
@@ -686,9 +700,9 @@ mod tests {
         let form = tree.add(
             FormLayout::new()
                 .row_spacing(10.0)
-                .line_ids(l1, f1)
-                .line_ids(l2, f2)
-                .line_ids(l3, f3),
+                .line(l1, f1)
+                .line(l2, f2)
+                .line(l3, f3),
         );
         tree.layout(SizeProposal::exact(400.0, 300.0));
 
@@ -715,7 +729,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let l1 = tree.add(FixedLeaf(80.0, 20.0));
         let f1 = tree.add(FixedLeaf(200.0, 20.0));
-        let form = tree.add(FormLayout::new().label_gap(10.0).line_ids(l1, f1));
+        let form = tree.add(FormLayout::new().label_gap(10.0).line(l1, f1));
         tree.layout(SizeProposal {
             width: None,
             height: Some(200.0),
@@ -752,7 +766,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(80.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 20.0));
-        let form = tree.add(FormLayout::new().label_gap(10.0).line_ids(label, field));
+        let form = tree.add(FormLayout::new().label_gap(10.0).line(label, field));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let before = tree.bounds(field);
         assert!(before.width > 0.0, "the row is laid out to begin with");
@@ -777,7 +791,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let label = tree.add(FixedLeaf(80.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 20.0));
-        let form = tree.add(FormLayout::new().line_ids(label, field));
+        let form = tree.add(FormLayout::new().line(label, field));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         let relations = |tree: &mut WidgetTree| {
@@ -807,7 +821,7 @@ mod tests {
         tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
         let label = tree.add(FixedLeaf(80.0, 20.0));
         let field = tree.add(FixedLeaf(100.0, 20.0));
-        let _form = tree.add(FormLayout::new().label_gap(10.0).line_ids(label, field));
+        let _form = tree.add(FormLayout::new().label_gap(10.0).line(label, field));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         // field_col_width = 400 - 80 - 10 = 310

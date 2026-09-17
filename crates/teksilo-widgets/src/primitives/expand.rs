@@ -196,16 +196,22 @@ impl Expand {
         self
     }
 
-    /// Set child by pre-registered ID.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -400,7 +406,7 @@ mod tests {
             natural_width: 400.0,
             line_height: 16.0,
         });
-        let expand = tree.add(Expand::horizontal().child_id(child));
+        let expand = tree.add(Expand::horizontal().child(child));
 
         // The parent binds width and leaves height open — exactly what `ToastHost`
         // proposes to each toast surface.
@@ -428,7 +434,7 @@ mod tests {
             natural_width: 400.0,
             line_height: 16.0,
         });
-        let expand = tree.add(Expand::horizontal().child_id(child));
+        let expand = tree.add(Expand::horizontal().child(child));
 
         tree.layout(SizeProposal::unspecified());
 
@@ -446,7 +452,7 @@ mod tests {
         // and fills its child to those bounds.
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let expand = tree.add(Expand::new().child_id(child));
+        let expand = tree.add(Expand::new().child(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let eb = tree.bounds(expand);
@@ -466,7 +472,7 @@ mod tests {
         let _expand = tree.add(
             Expand::new()
                 .align_child(Alignment::TOP_TRAILING)
-                .child_id(child),
+                .child(child),
         );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 

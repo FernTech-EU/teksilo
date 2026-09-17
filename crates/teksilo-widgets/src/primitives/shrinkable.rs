@@ -108,15 +108,21 @@ impl Shrinkable {
     }
 
     /// Wrap an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// Wrap a pre-registered child by id.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -196,9 +202,9 @@ mod tests {
         // 60 sibling. Bounds 100 → deficit 160; the wrapped child absorbs it
         // down to its 50 floor (residual overflow), the sibling stays 60.
         let big = tree.add(FixedLeaf(200.0, 20.0));
-        let wrapped = tree.add(Shrinkable::new().min_width(50.0).child_id(big));
+        let wrapped = tree.add(Shrinkable::new().min_width(50.0).child(big));
         let rigid = tree.add(FixedLeaf(60.0, 20.0));
-        let _stack = tree.add(HStack::new().add_child(wrapped).add_child(rigid));
+        let _stack = tree.add(HStack::new().child(wrapped).child(rigid));
         tree.layout(SizeProposal::exact(100.0, 40.0));
         assert!(
             (tree.bounds(wrapped).width - 50.0).abs() < 0.01,
@@ -218,8 +224,8 @@ mod tests {
     fn shrinkable_does_not_shrink_when_there_is_room() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(80.0, 20.0));
-        let wrapped = tree.add(Shrinkable::new().min_width(20.0).child_id(child));
-        let _stack = tree.add(HStack::new().add_child(wrapped));
+        let wrapped = tree.add(Shrinkable::new().min_width(20.0).child(child));
+        let _stack = tree.add(HStack::new().child(wrapped));
         tree.layout(SizeProposal::exact(300.0, 40.0));
         // Plenty of room → keeps its natural width (no growth, no shrink).
         assert!((tree.bounds(wrapped).width - 80.0).abs() < 0.01);

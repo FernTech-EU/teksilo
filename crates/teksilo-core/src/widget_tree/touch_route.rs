@@ -695,12 +695,14 @@ mod tests {
         let own = fired.clone();
         let mut tree = WidgetTree::new();
         let inner = tree.add(FillWidget::new().on_long_press(move |_e, _c| own.set(own.get() + 1)));
-        let _outer = tree.add(StackWidget::new().add_child(inner).context_menu(
-            move |_pos, _ctx| {
-                counter.set(counter.get() + 1);
-                Some(menu())
-            },
-        ));
+        let _outer = tree.add(
+            StackWidget::new()
+                .child(inner)
+                .context_menu(move |_pos, _ctx| {
+                    counter.set(counter.get() + 1);
+                    Some(menu())
+                }),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let at = tree.bounds(inner).center();
@@ -723,7 +725,7 @@ mod tests {
         let inner = tree.add(FillWidget::new());
         let _outer = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .long_press_role(LongPressRole::DragHandle)
                 .context_menu(move |_pos, _ctx| {
                     counter.set(counter.get() + 1);
@@ -754,7 +756,7 @@ mod tests {
         let inner = tree.add(FillWidget::new());
         let _outer = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .long_press_role(LongPressRole::DragHandle)
                 .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
         );
@@ -790,7 +792,7 @@ mod tests {
         let inner = tree.add(FillWidget::new());
         let _outer = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .long_press_role(LongPressRole::DragHandle)
                 .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
         );
@@ -820,7 +822,7 @@ mod tests {
         let inner = tree.add(FillWidget::new());
         let _outer = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .long_press_role(LongPressRole::DragHandle)
                 .context_menu(move |_pos, _ctx| {
                     counter.set(counter.get() + 1);
@@ -870,7 +872,7 @@ mod tests {
             let row = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
             let _list = tree.add(
                 StackWidget::new()
-                    .add_child(row)
+                    .child(row)
                     .drag_activation(teksilo_tokens::DragActivation::AfterLongPress)
                     .on_drag(|_phase, _c| {})
                     .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
@@ -916,7 +918,7 @@ mod tests {
         let inner = tree.add(FillWidget::new());
         let _outer = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .long_press_role(LongPressRole::DragHandle)
                 .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
         );
@@ -943,12 +945,14 @@ mod tests {
         let counter = opened.clone();
         let mut tree = WidgetTree::new();
         let inner = tree.add(FillWidget::new());
-        let _outer = tree.add(StackWidget::new().add_child(inner).context_menu(
-            move |_pos, _ctx| {
-                counter.set(counter.get() + 1);
-                Some(menu())
-            },
-        ));
+        let _outer = tree.add(
+            StackWidget::new()
+                .child(inner)
+                .context_menu(move |_pos, _ctx| {
+                    counter.set(counter.get() + 1);
+                    Some(menu())
+                }),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let at = tree.bounds(inner).center();
@@ -982,7 +986,7 @@ mod tests {
         let inner = tree.add(FillWidget::new());
         let _outer = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .long_press_role(LongPressRole::None)
                 .on_long_press(move |_e, _ctx| counter.set(counter.get() + 1)),
         );
@@ -1005,12 +1009,14 @@ mod tests {
         let counter = opened.clone();
         let mut tree = WidgetTree::new();
         let inner = tree.add(FillWidget::new().long_press_role(LongPressRole::None));
-        let _outer = tree.add(StackWidget::new().add_child(inner).context_menu(
-            move |_pos, _ctx| {
-                counter.set(counter.get() + 1);
-                Some(menu())
-            },
-        ));
+        let _outer = tree.add(
+            StackWidget::new()
+                .child(inner)
+                .context_menu(move |_pos, _ctx| {
+                    counter.set(counter.get() + 1);
+                    Some(menu())
+                }),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let at = tree.bounds(inner).center();
@@ -1026,12 +1032,14 @@ mod tests {
         let counter = opened.clone();
         let mut tree = WidgetTree::new();
         let anchor = tree.add(FillWidget::new().long_press_role(LongPressRole::Tooltip));
-        let _outer = tree.add(StackWidget::new().add_child(anchor).context_menu(
-            move |_pos, _ctx| {
-                counter.set(counter.get() + 1);
-                Some(menu())
-            },
-        ));
+        let _outer = tree.add(
+            StackWidget::new()
+                .child(anchor)
+                .context_menu(move |_pos, _ctx| {
+                    counter.set(counter.get() + 1);
+                    Some(menu())
+                }),
+        );
         let tip = tree.add(FillWidget::new().label("tip text"));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         tree.attach_tooltip(anchor, tip, std::time::Duration::from_millis(500));
@@ -1202,12 +1210,14 @@ mod tests {
         let counter = opened.clone();
         let mut tree = WidgetTree::new();
         let inner = tree.add(SelfDeclaring(LongPressRole::None));
-        let _outer = tree.add(StackWidget::new().add_child(inner).context_menu(
-            move |_pos, _ctx| {
-                counter.set(counter.get() + 1);
-                Some(menu())
-            },
-        ));
+        let _outer = tree.add(
+            StackWidget::new()
+                .child(inner)
+                .context_menu(move |_pos, _ctx| {
+                    counter.set(counter.get() + 1);
+                    Some(menu())
+                }),
+        );
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let at = tree.bounds(inner).center();

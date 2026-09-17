@@ -39,7 +39,7 @@ hit-widening mechanism is involved.
 ## Accessibility
 
 Announces as `Role::CheckBox`. A label is required in debug builds
-unless `.labels_hidden(true)` is set (for embedding inside a composite
+unless `.labelled_externally()` is set (for embedding inside a composite
 row that owns the AT name). Keyboard: Space toggles; lone-KeyUp guard
 prevents spurious toggle when focus is restored after a shortcut.
 
@@ -62,7 +62,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`tristate`, `labels_hidden`, `label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`tristate`, `on_change`, `labelled_externally`, `label`, `caption`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -92,29 +92,48 @@ sources — `TreeCheckedModel` aggregation when descendants are mixed,
 "select all" indicators, etc. Matches the Outlook / Files-app
 folder-checkbox semantic. Useful for parent checkboxes in tree views.
 
-#### `pub fn labels_hidden(mut self, hidden: bool) -> Self`
+#### `pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self`
 
-Suppress the visual label/caption AND the debug-time
-"missing accessible label" assertion. Use this **only** when
+Run `f` when the **user** checks or unchecks this box, with the
+checked-ness the activation produced and an `EventContext`, so it can do
+what a bare `Signal` write cannot (`ctx.send_intent(...)`,
+`ctx.set_theme(...)`, opening a window). Fires for the pointer, for
+`Space`, for an assistive-technology `Click`, and for `Space` on a data
+view's focused row.
+
+Does **not** fire for programmatic writes to the bound signal — there is
+no event in flight to carry. Observe the signal for that. The signal
+stays the source of truth either way: it is written first, and `f` sees
+the value it now holds.
+
+A tristate checkbox reports a `bool` too: activation cycles
+`Checked` ↔ `Unchecked` only, and `Indeterminate` is external-source-only.
+
+#### `pub fn labelled_externally(mut self) -> Self`
+
+Declare that this checkbox's accessible name comes from an
+ancestor, suppressing the visual label/caption AND the
+debug-time "missing accessible label" assertion. Use it when
 the checkbox is embedded inside a composite that owns the
-row's accessible name (e.g. `StandardListItem` /
-`StandardTreeItem`, where the row's `accessibility(builder)`
-calls `set_name(...)` with the row label).
+row's name (e.g. `StandardListItem` / `StandardTreeItem`,
+where the row's `accessibility(builder)` calls `set_name(...)`
+with the row label).
 
-**A11y contract:** when `labels_hidden(true)` is set, the
-caller MUST guarantee that an addressable AT ancestor
-provides the name — either via that ancestor's own
-`accessibility()` impl or a builder-level
+**A11y contract:** the caller MUST guarantee that an
+addressable AT ancestor provides the name — either via that
+ancestor's own `accessibility()` impl or a builder-level
 `.access_label*` override. Without it the AT tree exposes a
 `Role::CheckBox` node with no name; screen readers announce
 "checkbox, checked" with no context. The Outlook /
 Files-app row pattern (where the row label covers the
 embedded checkbox) is the supported use case.
 
+Spelled the same way on `Toggle`.
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Set the visible label rendered to the right of the checkbox box,
-also used as the AT name. Required unless `.labels_hidden(true)` is set.
+also used as the AT name. Required unless `.labelled_externally()` is set.
 
 #### `pub fn caption(mut self, text: impl Into<LocalizedString>) -> Self`
 

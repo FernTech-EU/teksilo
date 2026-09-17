@@ -297,6 +297,20 @@ What it ships is a record complete enough to invert.
   `SceneItemA11yContext`. A `match` gains a `_` arm; a struct literal becomes the
   type's `new` constructor, which every one of them now has, with its fields
   still public.
+- **`WidgetPlacement` gained a `dormant` field and is now `#[non_exhaustive]`.**
+  A `place_children` implementation reads and writes the slice it is handed and
+  is unaffected. What breaks is a struct literal — `WidgetPlacement { id, origin,
+  size }` — which becomes `WidgetPlacement::new(id, origin, size)`. The field
+  arrives pre-set to the child's current state, so a parent that ignores it
+  changes nothing; it is read only for a parent whose `culls_children` returns
+  `true`.
+- **`SceneCard` has one method per slot.** `header_id`, `header_boxed`,
+  `header_trailing_id`, `header_trailing_boxed`, `body_id` and `body_boxed` are
+  gone; `header`, `header_trailing` and `body` each take a widget, a
+  `Box<dyn Widget>` or a `WidgetId`. Drop the suffix — `.body_id(id)` becomes
+  `.body(id)`. This follows the slot-twin purge the widget catalog went through
+  in 0.11.0, so a card addresses its slots the way every other container does,
+  and last call wins where before an id set after a widget left both stored.
 
 #### Performance
 
@@ -371,6 +385,28 @@ What it ships is a record complete enough to invert.
 - **An `Over` item occludes a card only if it would act on a press.** A
   decorative halo over an embedded note takes nothing and focus stays in the
   note; a hover affordance is not a press claim, and neither is accepting a drop.
+- **A marquee no longer takes screen-pinned items.** `commit_marquee` runs
+  through `Scene::items_in_region`, which answers in scene coordinates, and a
+  pinned item does not live there — it holds a fixed place in the viewport, so
+  the scene rectangle a rubber band describes says nothing about whether the
+  pointer crossed it. Dragging a band across the page therefore leaves a pinned
+  badge alone where it used to select it. Selecting one deliberately still works
+  by click. There is no screen-space region query yet; the deferral is recorded
+  at the query's own site.
+- **`SceneView::retention_margin(px)`** sets how far outside the viewport a
+  heavyweight card stays mounted — the band that keeps a fling from mounting and
+  unmounting cards under the finger. Default 96 screen px; read it back with
+  `current_retention_margin`.
+
+#### Platform
+
+- `PlatformWindow::reconfigure_surface` answers `bool` rather than `()`:
+  `false` means the display server is gone and the caller should wind down
+  instead of asking for another frame, which would return to the same place.
+- `FrameOutcome` gains `DisplayLost`, distinct from `Error` and
+  `NeedsReconfigure` because it is terminal: reconfiguring or redrawing after
+  it spins the loop.
+
 
 ### Fixed
 
@@ -461,6 +497,31 @@ What it ships is a record complete enough to invert.
   discarded, with no accessor and two constructors writing it out empty, so a
   tool written the obvious way drew at frame rate on a 200–360 Hz digitizer.
 
+#### Platform
+
+- **A compositor that exits no longer takes the application down as a crash.**
+  When the display server goes away, the window surface stops answering for the
+  adapter it was matched against, and the next `Surface::configure` failed
+  inside wgpu's default error handler, which panics. What the user saw was
+  `wgpu error: Validation Error / In Surface::configure / Surface does not
+  support the adapter's queue family`, and what that reads like is a GPU
+  mismatch. It is not one: `request_adapter` filters candidates on the very
+  query that fails there, so the adapter had answered yes to the same question
+  moments earlier. The message cost a real investigation, and a bug report
+  aimed at the renderer for a compositor crash.
+  Every `Surface::configure` now runs inside an error scope, so the failure is
+  returned rather than thrown. A surface with no formats left for the adapter
+  it was matched against is reported as a lost display server, in those words;
+  anything else keeps wgpu's own message, so a genuine mistake is not
+  relabelled as a dead compositor.
+- The same event reaching winit first is no longer a panic either. Both Linux
+  backends report a failed dispatch or flush as `ExitFailure(errno)`, and
+  `run` treated every error alike. A lost display connection now exits
+  cleanly with one line naming the cause; `NotSupported`, `Os` and
+  `RecreationAttempt` stay fatal, since those are genuine startup faults where
+  a backtrace is the useful answer.
+
+
 ### Known limitations
 
 - **An assistive-technology probe and the pointer still disagree over an
@@ -473,6 +534,199 @@ What it ships is a record complete enough to invert.
   than a hit-test one. Documented in `docs/teksilo-scene-a11y.md` and pinned by
   `what_the_press_claiming_rule_does_and_does_not_reconcile`, so it cannot drift
   silently.
+
+
+## [0.11.0] - 2026-09-16
+
+The `teksu!` DSL reaches the code applications are actually made of: a call to
+your own `fn row(..) -> impl Widget` is a child, where before only a stock
+widget was. Alongside it the container API loses its twin methods, so a slot has
+one name and that name takes a `WidgetId` or a widget.
+
+Underneath, the GPU floor drops to what the renderer actually needs. A machine
+with no Vulkan driver could not open a window at all; it now falls back to
+OpenGL, which is what an older GPU has.
+
+### Added
+
+#### teksu
+
+- A lowercase identifier that continues into a call, a method chain or an index
+  at body position is a child: `VStack { my_row(x) }` and
+  `VStack { row(1).spacing(4.0) }` compile. A lowercase identifier standing
+  alone is still the argument-free property.
+- A keyword-rooted head is a child too: `self.row(x)`, `Self::header()`,
+  `crate::ui::header()`, `super::row()`.
+- `#{ expr }` carries a widget value as well as a `WidgetId`, which is how a
+  Rust struct literal is passed at body position: `#{ Card { title: t } }`.
+
+#### Widgets
+
+- `on_change` on `Checkbox`, `Toggle`, `RadioButton` and `Slider`, taking the
+  value the activation produced and an `EventContext`, so flipping one can send an intent, set the
+  theme or open a window — things a bare `Signal` write cannot do, because an
+  observer receives only `&T`. They fire for the pointer, for `Space`, for an
+  assistive-technology `Click`, and, for a checkbox inside a data-view row, for
+  `Space` on that row. They do **not** fire for programmatic writes to the bound
+  signal: there is no event in flight to carry, and the signal remains the
+  source of truth. A tristate checkbox reports a `bool` too, since activation
+  cycles `Checked` ↔ `Unchecked` only. `RadioButton` reports only a real change,
+  so re-activating the selected button is silent. `Slider` reports every value a
+  drag produces, but not a write that changes nothing (a drag past the end, a
+  snap onto the grid point already held); it has no commit-on-release callback,
+  so once-per-interaction work still belongs on the signal.
+- `StandardListItem::on_checkbox_toggle` and the `StandardTreeItem` forwarder,
+  which make the embedded checkbox's `on_change` reachable — the canonical row
+  builds its own checkbox, so it was the one place the callback could not be
+  installed. To *read* check state, `CheckedModel` remains the answer: it is the
+  source of truth and it survives row recycling, which a per-row callback does
+  not.
+- `child_opt` on every container that has `child`, 38 of them, up from 7. A
+  bare `teksu!` `if` now works inside a single-child wrapper, not only inside a
+  stack.
+- 45 accumulator builders gained the plural twin that a `for` loop needs:
+  `tabs`, `static_tabs`, `panes`, `items`, `actions`, `lines`, `rails`,
+  `docks`, `radios`, `full_width_rows`, `add_children` and others.
+
+#### Core
+
+- **Behaviour change.** The row-activation marker a widget publishes with
+  `BuildContext::set_keyboard_toggle`, and the fallback passed to
+  `EventContext::row_space_activate`, are now `Rc<dyn Fn(&mut EventContext)>`
+  rather than `Rc<dyn Fn()>`. `Space` on a data view's focused row therefore
+  runs with a context, which is what lets a row checkbox fire `on_change` on
+  that path instead of only under the pointer.
+- `Box<W>` implements `Widget` for any `W: Widget + ?Sized`, so a boxed widget
+  goes wherever a widget goes and adds no arena node.
+- `HandlerSet::merge_under` composes two handler sets, the later declaration
+  winning.
+
+#### Documentation
+
+- The `teksu!` reference leads with the real widget catalog: worked examples for
+  `ListView`, `TreeView`, `TableView`, `TabWidget`, `FormLayout`, `MenuList`,
+  `Toolbar`, `Switcher` and `DockingLayout`, and a section listing only what
+  genuinely does not work, with the compiler's own text.
+- The spec gains a **Why there is no v4** section: what the DSL was measured to
+  cost, the four charges against it that measurement did not support, the three
+  silent-wrong-program bugs and the one grammar rule that did stand, and the two
+  exits that stay available if the question reopens. It replaces the standalone
+  decision note, which is removed.
+- The binding trap is written down in both documents: binding names are one flat
+  namespace per block, so two bindings sharing a name alias, both attach sites
+  resolving to the later widget while the earlier one is built and attached
+  nowhere.
+- A root `NOTICE` file records what the theme presets derive from and on what
+  terms: the WinUI theme-resource values under Microsoft's MIT licence, the
+  Material 3 baseline tokens from documentation Google publishes under CC-BY-4.0,
+  the macOS preset's mix of published and measured numbers, and every bundled
+  font with its licence, its copyright line, and whether it is embedded by
+  default.
+- The trademark policy gains a **Third-party trademarks** section: it names the
+  owners of macOS, Fluent, Material Design and Int UI, states that Teksilo is
+  neither affiliated with nor endorsed by any of them, and separates the
+  `fluent` theme preset from Project Fluent, the unrelated localization system
+  behind Teksilo's translations.
+- The two bundled-font license files are corrected. `roboto-LICENSE.txt` carried
+  a summary of Apache-2.0 -- four of its nine clauses, paraphrased, with the
+  redistribution conditions collapsed to one line -- where section 4(a) requires
+  a copy; it now carries the complete text. `noto-LICENSE.txt` named one project
+  and one year for two faces; it now carries the copyright line each font's own
+  name table declares, `notofonts/arabic` 2022 and `notofonts/hebrew` 2024.
+
+### Changed
+
+- CI runs `cargo teksilo-fmt --check` over `crates` and `examples`.
+- `FormLayout::lines` takes `impl IntoTeksiChild` in both columns; the field
+  column used to require `impl Widget`, so a loop holding ids could not use it.
+- `teksu-language-spec-v3.md` is the design rationale and names
+  `teksu-macro-reference.md` normative for behaviour; fourteen divergences from
+  the implementation are corrected, and appendices A.2, A.3, A.4 and A.6 are
+  marked superseded where they describe an API that has since been removed.
+
+### Removed
+
+**Behaviour change, breaking.**
+
+- `StandardTreeItem::on_toggle` / `on_toggle_rc` are renamed
+  `on_chevron_toggle` / `on_chevron_toggle_rc`. They are the expand / collapse
+  control, and the name became ambiguous the moment a row gained
+  `on_checkbox_toggle`.
+
+- `add_child`, `child_id`, `child_boxed` and every `*_id` slot twin, 80 methods.
+  Call the slot by its own name instead: `.child(id)`, `.content(id)`,
+  `.header(id)`, `.pane(id)`. Every widget-accepting slot method takes
+  `impl IntoTeksiChild`, which is implemented for `WidgetId` and for every
+  `Widget`. Not affected: `shortcut_id`, `static_tab_with_id`, the alternate
+  constructors (`from_id`, `new_id`, `around_id`, `custom_id`,
+  `with_child_id`), and `Breadcrumb::item_id`.
+- `WidgetBuilder::dim_when_inactive` and `dim_when_inactive_default`. Wrap
+  instead: `DimWhenInactive::new().factor(f).child(w)`.
+- `Checkbox::labels_hidden(bool)` is now `Checkbox::labelled_externally()`, the
+  name and shape `Toggle` already used for the same thing: the control's
+  accessible name comes from an ancestor, so it renders no label of its own.
+- `FormLayout::line_ids` no longer adds one row from two ids; it takes an
+  iterator of `(label_id, field_id)` pairs and adds a row per pair. The
+  single-row form is gone because `line` takes `impl IntoTeksiChild` and accepts
+  a `WidgetId` directly.
+
+### Fixed
+
+#### Platform
+
+- **Teksilo opens a window on a machine with no Vulkan driver.** OpenGL is the
+  only backend such a machine has left — an older GPU, a VM whose guest driver
+  stops at GL — and it was never handed the platform's display connection, so it
+  could render offscreen but never present to a window. Startup died before the
+  first frame with `incompatible_surface_backends: GL`. Confirmed fixed on both
+  Wayland and X11 with the Vulkan driver removed.
+- Adapter selection is a search rather than a single request. An adapter that
+  enumerates but cannot open a device no longer ends the process, and an
+  explicit software fallback is tried before giving up — the resilience the
+  offscreen test device already had, and the window path did not.
+- wgpu's own environment variables take effect: `WGPU_BACKEND`,
+  `WGPU_POWER_PREF` and the rest were silently ignored, leaving no way to move
+  off a backend whose driver is the problem.
+- The remaining "no GPU" failure names the backends tried, the errors each gave,
+  and what to install, in place of a `Debug`-printed wgpu struct.
+
+#### Rendering
+
+- Neither atlas asks for a texture the device cannot allocate. Both grow toward
+  a 4096-pixel ceiling that is this renderer's own, not a fact about the
+  hardware, and a downlevel device can sit below it; the path atlas now caps its
+  growth to what the device reports, and a glyph atlas that arrives oversized is
+  skipped rather than failing the frame.
+
+#### Core
+
+- **Behaviour change.** A builder method with no inherent twin on
+  `WidgetWithHandlers` wrapped an already-wrapped widget, and only the outer
+  handler set reached the node, so `.on_tap(cb).clips_children_on(true)` never
+  fired. Handler sets at any depth now arrive.
+- Chaining past `dim_when_inactive` retargeted the rest of the chain at the
+  wrapper, so `VStack::new().dim_when_inactive(0.7).child(a).child(b)` built
+  `DimWhenInactive > b` and lost the stack and `a`. The method is gone;
+  `teksilo-teksu-guard` fails the build if a `WidgetBuilder` method returns a
+  foreign wrapper again.
+- **ArrowLeft reaches a text editor again when a second one is mounted beside
+  it.** The dispatch root reads the inline-start arrow as "back toward the
+  parent overlay" once two or more non-host overlays are stacked, and it counted
+  every band alike. Each mounted `RichTextEditor` keeps one full-viewport
+  affordance host in the `TextAffordance` band for its selection handles, so two
+  editors on one page — a prose column and the synopsis next to it — read as a
+  submenu over its parent menu: the key tore down an affordance host and
+  returned, and no editor in that window saw an ArrowLeft for as long as both
+  were up. The count now considers `OverlayBand::Standard` overlays only, the
+  same line `OverlayBand::dismissed_by_outside_press` already draws for presses.
+  A submenu over a mounted affordance still closes on the back key.
+
+#### teksu
+
+- `teksilo-fmt` re-indented a multi-line expression child by the block's own
+  indent on every run, walking a multi-line argument list further right each
+  time.
+
 
 ## [0.10.0] - 2026-09-14
 
@@ -2025,7 +2279,7 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...HEAD
+[0.11.0]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/FernTech-EU/teksilo/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/FernTech-EU/teksilo/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/FernTech-EU/teksilo/compare/v0.9.3...v0.9.4

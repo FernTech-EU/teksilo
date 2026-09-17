@@ -49,7 +49,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`label`, `labelled_externally`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`label`, `on_change`, `labelled_externally`, `enabled`, `variant`, `style`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -70,11 +70,14 @@ pub struct Toggle { /* fields */ }
 Create a toggle bound to `on`. The signal is both read (to paint the
 current state) and written (flipped on each activation).
 
+See `on_change` when flipping it has to reach the
+ambient context rather than only app state.
+
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Accessible label announced by AT and optionally displayed beside the switch.
 
-#### `pub fn labelled_externally(mut self) -> Self`
+#### `pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self`
 
 Declare that this toggle's accessible name comes from a **sibling label
 widget**, wired by a container after mount (`FormLayout::line` does this
@@ -85,6 +88,20 @@ properly labelled: the `labelled_by` relation is pushed post-mount, so
 `accessibility()` cannot see it and every form-hosted toggle looks
 nameless. Setting `.label(..)` instead would satisfy the assert but
 render the text a second time, beside a label column that already has it.
+Run `f` when the **user** flips this switch, with the value the
+activation produced and an `EventContext`, so it can do what a bare
+`Signal` write cannot (`ctx.send_intent(...)`, `ctx.set_theme(...)`,
+opening a window). Fires for the pointer, for `Space`, and for an
+assistive-technology `Click`.
+
+Does **not** fire for programmatic writes to the bound signal — there is
+no event in flight to carry. Observe the signal for that. The signal
+stays the source of truth either way: it is written first, and `f` sees
+the value it now holds.
+
+Spelled the same way on `Checkbox`.
+
+#### `pub fn labelled_externally(mut self) -> Self`
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 

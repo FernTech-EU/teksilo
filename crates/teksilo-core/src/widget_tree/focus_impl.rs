@@ -1085,7 +1085,7 @@ mod tests {
         use crate::test_widgets::StackWidget;
         tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .on_scroll(move |event, _ctx| {
                     if let WidgetEvent::ScrollIntoView { target_bounds, .. } = event {
                         seen.borrow_mut().push(*target_bounds);
@@ -1332,11 +1332,7 @@ mod tests {
         let a = tree.add(FillWidget::new().focusable());
         let _not_focusable = tree.add(FillWidget::new());
         let b = tree.add(FillWidget::new().focusable());
-        let root = tree.add(
-            crate::test_widgets::StackWidget::new()
-                .add_child(a)
-                .add_child(b),
-        );
+        let root = tree.add(crate::test_widgets::StackWidget::new().child(a).child(b));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         assert_eq!(tree.first_focusable_descendant(root), Some(a));
@@ -1373,7 +1369,7 @@ mod tests {
         // leaf. Suppressing the composite must remove that leaf from Tab.
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new().focusable());
-        let composite = tree.add(crate::test_widgets::StackWidget::new().add_child(leaf));
+        let composite = tree.add(crate::test_widgets::StackWidget::new().child(leaf));
         let other = tree.add(FillWidget::new().focusable());
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -1488,7 +1484,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FillWidget::new().focusable());
         let inner = tree.add(FillWidget::new().focusable());
-        let disabled_container = tree.add(StackWidget::new().add_child(inner));
+        let disabled_container = tree.add(StackWidget::new().child(inner));
         let c = tree.add(FillWidget::new().focusable());
         tree.enabled_when(disabled_container, Signal::new(false));
         tree.layout(SizeProposal::exact(200.0, 100.0));
@@ -1637,8 +1633,8 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new().focusable());
-        let mid = tree.add(StackWidget::new().add_child(leaf));
-        let _outer = tree.add(StackWidget::new().add_child(mid).focus_within(halo.clone()));
+        let mid = tree.add(StackWidget::new().child(leaf));
+        let _outer = tree.add(StackWidget::new().child(mid).focus_within(halo.clone()));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert!(!halo.get(), "no focus yet → signal is false");
@@ -1679,7 +1675,7 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let item = tree.add(FillWidget::new()); // a row item — NOT focusable
-        let view = tree.add(StackWidget::new().add_child(item).focusable(true));
+        let view = tree.add(StackWidget::new().child(item).focusable(true));
         let outside = tree.add(FillWidget::new().focusable());
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -1713,8 +1709,8 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let row = tree.add(FillWidget::new()); // row item — NOT focusable
-        let pane = tree.add(StackWidget::new().add_child(row)); // body pane — NOT focusable
-        let root = tree.add(StackWidget::new().add_child(pane).focusable(true));
+        let pane = tree.add(StackWidget::new().child(row)); // body pane — NOT focusable
+        let root = tree.add(StackWidget::new().child(pane).focusable(true));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // What the pane opens for its rows: a scope keyed on the root.
@@ -1777,17 +1773,9 @@ mod tests {
         let mut tree = WidgetTree::new();
         let leaf_a = tree.add(FillWidget::new().focusable());
         let leaf_b = tree.add(FillWidget::new().focusable());
-        let mid_a = tree.add(
-            StackWidget::new()
-                .add_child(leaf_a)
-                .focus_within(sig_a.clone()),
-        );
-        let mid_b = tree.add(
-            StackWidget::new()
-                .add_child(leaf_b)
-                .focus_within(sig_b.clone()),
-        );
-        let _root = tree.add(StackWidget::new().add_child(mid_a).add_child(mid_b));
+        let mid_a = tree.add(StackWidget::new().child(leaf_a).focus_within(sig_a.clone()));
+        let mid_b = tree.add(StackWidget::new().child(leaf_b).focus_within(sig_b.clone()));
+        let _root = tree.add(StackWidget::new().child(mid_a).child(mid_b));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf_a);
@@ -1809,11 +1797,7 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new().focusable());
-        let _outer = tree.add(
-            StackWidget::new()
-                .add_child(leaf)
-                .focus_within(halo.clone()),
-        );
+        let _outer = tree.add(StackWidget::new().child(leaf).focus_within(halo.clone()));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         tree.focus(leaf);
@@ -1837,11 +1821,7 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new());
-        let _outer = tree.add(
-            StackWidget::new()
-                .add_child(leaf)
-                .hover_within(glow.clone()),
-        );
+        let _outer = tree.add(StackWidget::new().child(leaf).hover_within(glow.clone()));
 
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert!(!glow.get());
@@ -1904,11 +1884,11 @@ mod tests_scope {
         let mut tree = WidgetTree::new();
         let a1 = indexed(&mut tree, 1);
         let a2 = indexed(&mut tree, 2);
-        let scope_a = tree.add(StackWidget::new().add_child(a1).add_child(a2));
+        let scope_a = tree.add(StackWidget::new().child(a1).child(a2));
         let b1 = indexed(&mut tree, 1);
         let b2 = indexed(&mut tree, 2);
-        let scope_b = tree.add(StackWidget::new().add_child(b1).add_child(b2));
-        let _root = tree.add(StackWidget::new().add_child(scope_a).add_child(scope_b));
+        let scope_b = tree.add(StackWidget::new().child(b1).child(b2));
+        let _root = tree.add(StackWidget::new().child(scope_a).child(scope_b));
         tree.set_traversal_scope(scope_a, Continue);
         tree.set_traversal_scope(scope_b, Continue);
         tree.layout(SizeProposal::exact(100.0, 100.0));
@@ -1927,14 +1907,9 @@ mod tests_scope {
         let a = tree.add(FillWidget::new().focusable());
         let c1 = tree.add(FillWidget::new().focusable());
         let c2 = tree.add(FillWidget::new().focusable());
-        let scope_c = tree.add(StackWidget::new().add_child(c1).add_child(c2));
+        let scope_c = tree.add(StackWidget::new().child(c1).child(c2));
         let b = tree.add(FillWidget::new().focusable());
-        let _root = tree.add(
-            StackWidget::new()
-                .add_child(a)
-                .add_child(scope_c)
-                .add_child(b),
-        );
+        let _root = tree.add(StackWidget::new().child(a).child(scope_c).child(b));
         tree.set_traversal_scope(scope_c, Continue);
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
@@ -1955,8 +1930,8 @@ mod tests_scope {
         let a = tree.add(FillWidget::new().focusable());
         let d1 = tree.add(FillWidget::new().focusable());
         let d2 = tree.add(FillWidget::new().focusable());
-        let scope_d = tree.add(StackWidget::new().add_child(d1).add_child(d2));
-        let _root = tree.add(StackWidget::new().add_child(a).add_child(scope_d));
+        let scope_d = tree.add(StackWidget::new().child(d1).child(d2));
+        let _root = tree.add(StackWidget::new().child(a).child(scope_d));
         tree.set_traversal_scope(scope_d, Cycle);
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
@@ -1986,12 +1961,7 @@ mod tests_scope {
         let a = tree.add(FillWidget::new().focusable());
         let empty = tree.add(StackWidget::new());
         let b = tree.add(FillWidget::new().focusable());
-        let _root = tree.add(
-            StackWidget::new()
-                .add_child(a)
-                .add_child(empty)
-                .add_child(b),
-        );
+        let _root = tree.add(StackWidget::new().child(a).child(empty).child(b));
         tree.set_traversal_scope(empty, Continue);
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
@@ -2005,7 +1975,7 @@ mod tests_scope {
     fn single_member_cycle_scope_stays_put() {
         let mut tree = WidgetTree::new();
         let e = tree.add(FillWidget::new().focusable());
-        let scope_e = tree.add(StackWidget::new().add_child(e));
+        let scope_e = tree.add(StackWidget::new().child(e));
         tree.set_traversal_scope(scope_e, Cycle);
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -2023,14 +1993,9 @@ mod tests_scope {
         let x = tree.add(FillWidget::new().focusable());
         let i1 = tree.add(FillWidget::new().focusable());
         let i2 = tree.add(FillWidget::new().focusable());
-        let inner = tree.add(StackWidget::new().add_child(i1).add_child(i2));
+        let inner = tree.add(StackWidget::new().child(i1).child(i2));
         let y = tree.add(FillWidget::new().focusable());
-        let outer = tree.add(
-            StackWidget::new()
-                .add_child(x)
-                .add_child(inner)
-                .add_child(y),
-        );
+        let outer = tree.add(StackWidget::new().child(x).child(inner).child(y));
         tree.set_traversal_scope(inner, Continue);
         tree.set_traversal_scope(outer, Cycle);
         tree.layout(SizeProposal::exact(100.0, 100.0));
@@ -2053,14 +2018,9 @@ mod tests_scope {
         let x = tree.add(FillWidget::new().focusable());
         let i1 = tree.add(FillWidget::new().focusable());
         let i2 = tree.add(FillWidget::new().focusable());
-        let inner = tree.add(StackWidget::new().add_child(i1).add_child(i2));
+        let inner = tree.add(StackWidget::new().child(i1).child(i2));
         let y = tree.add(FillWidget::new().focusable());
-        let outer = tree.add(
-            StackWidget::new()
-                .add_child(x)
-                .add_child(inner)
-                .add_child(y),
-        );
+        let outer = tree.add(StackWidget::new().child(x).child(inner).child(y));
         tree.set_traversal_scope(inner, Cycle);
         tree.set_traversal_scope(outer, Cycle);
         tree.layout(SizeProposal::exact(100.0, 100.0));
@@ -2083,7 +2043,7 @@ mod tests_scope {
         let f3 = indexed(&mut tree, 3);
         let f1 = indexed(&mut tree, 1);
         let f2 = indexed(&mut tree, 2);
-        let scope_f = tree.add(StackWidget::new().add_child(f3).add_child(f1).add_child(f2));
+        let scope_f = tree.add(StackWidget::new().child(f3).child(f1).child(f2));
         tree.set_traversal_scope(scope_f, Cycle);
         tree.layout(SizeProposal::exact(100.0, 100.0));
 
@@ -2112,7 +2072,7 @@ mod tests_scope {
         // (it is a boundary, not a stop).
         let mut tree = WidgetTree::new();
         let inner = tree.add(FillWidget::new().focusable());
-        let scope = tree.add(StackWidget::new().add_child(inner).focusable(true));
+        let scope = tree.add(StackWidget::new().child(inner).focusable(true));
         tree.set_traversal_scope(scope, Continue);
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
@@ -2149,7 +2109,7 @@ mod tests_scope {
         let outside2 = tree.add(FillWidget::new().focusable());
         let m1 = tree.add(FillWidget::new().focusable());
         let m2 = tree.add(FillWidget::new().focusable());
-        let content = tree.add(StackWidget::new().add_child(m1).add_child(m2));
+        let content = tree.add(StackWidget::new().child(m1).child(m2));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.show_overlay(crate::overlay::OverlayRequest {
@@ -2217,7 +2177,7 @@ mod tests_focus_out_dismissal {
         let anchor = tree.add(FillWidget::new().focusable());
         let after = tree.add(FillWidget::new().focusable());
         let inner = tree.add(FillWidget::new().focusable());
-        let content = tree.add(StackWidget::new().add_child(inner));
+        let content = tree.add(StackWidget::new().child(inner));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         show_anchored(&mut tree, content, anchor, None);
 
@@ -2238,7 +2198,7 @@ mod tests_focus_out_dismissal {
         let mut tree = WidgetTree::new();
         let outside = tree.add(FillWidget::new().focusable());
         let m1 = tree.add(FillWidget::new().focusable());
-        let content = tree.add(StackWidget::new().add_child(m1));
+        let content = tree.add(StackWidget::new().child(m1));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         tree.show_overlay(OverlayRequest {
             content_id: content,
@@ -2273,7 +2233,7 @@ mod tests_focus_out_dismissal {
         let m1 = tree.add(FillWidget::new().focusable());
         let m2 = tree.add(FillWidget::new().focusable());
         let scrim = tree.add(FillWidget::new());
-        let content = tree.add(StackWidget::new().add_child(m1).add_child(m2));
+        let content = tree.add(StackWidget::new().child(m1).child(m2));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         tree.show_overlay(OverlayRequest {
@@ -2315,9 +2275,9 @@ mod tests_focus_out_dismissal {
         let mut tree = WidgetTree::new();
         let anchor = tree.add(FillWidget::new().focusable());
         let parent_item = tree.add(FillWidget::new().focusable());
-        let parent_content = tree.add(StackWidget::new().add_child(parent_item));
+        let parent_content = tree.add(StackWidget::new().child(parent_item));
         let child_item = tree.add(FillWidget::new().focusable());
-        let child_content = tree.add(StackWidget::new().add_child(child_item));
+        let child_content = tree.add(StackWidget::new().child(child_item));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let parent = show_anchored(&mut tree, parent_content, anchor, None);
@@ -2340,9 +2300,9 @@ mod tests_focus_out_dismissal {
         let mut tree = WidgetTree::new();
         let anchor = tree.add(FillWidget::new().focusable());
         let parent_item = tree.add(FillWidget::new().focusable());
-        let parent_content = tree.add(StackWidget::new().add_child(parent_item));
+        let parent_content = tree.add(StackWidget::new().child(parent_item));
         let child_item = tree.add(FillWidget::new().focusable());
-        let child_content = tree.add(StackWidget::new().add_child(child_item));
+        let child_content = tree.add(StackWidget::new().child(child_item));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let parent = show_anchored(&mut tree, parent_content, anchor, None);
@@ -2366,9 +2326,9 @@ mod tests_focus_out_dismissal {
         let anchor = tree.add(FillWidget::new().focusable());
         let away = tree.add(FillWidget::new().focusable());
         let parent_item = tree.add(FillWidget::new().focusable());
-        let parent_content = tree.add(StackWidget::new().add_child(parent_item));
+        let parent_content = tree.add(StackWidget::new().child(parent_item));
         let child_item = tree.add(FillWidget::new().focusable());
-        let child_content = tree.add(StackWidget::new().add_child(child_item));
+        let child_content = tree.add(StackWidget::new().child(child_item));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let parent = show_anchored(&mut tree, parent_content, anchor, None);
@@ -2398,7 +2358,7 @@ mod tests_focus_out_dismissal {
         let opener = tree.add(FillWidget::new().focusable());
         let trigger = tree.add(FillWidget::new().focusable());
         let next = tree.add(FillWidget::new().focusable());
-        let modal_content = tree.add(StackWidget::new().add_child(trigger).add_child(next));
+        let modal_content = tree.add(StackWidget::new().child(trigger).child(next));
         let panel = tree.add(StackWidget::new());
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
@@ -2482,9 +2442,9 @@ mod tests_focus_out_dismissal {
         let opener = tree.add(FillWidget::new().focusable());
         let away = tree.add(FillWidget::new().focusable());
         let modal_item = tree.add(FillWidget::new().focusable());
-        let modal_content = tree.add(StackWidget::new().add_child(modal_item));
+        let modal_content = tree.add(StackWidget::new().child(modal_item));
         let menu_item = tree.add(FillWidget::new().focusable());
-        let menu_content = tree.add(StackWidget::new().add_child(menu_item));
+        let menu_content = tree.add(StackWidget::new().child(menu_item));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         // A centered modal is unconditionally a host surface.

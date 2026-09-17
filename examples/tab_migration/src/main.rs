@@ -178,9 +178,9 @@ impl Widget for Root {
         let root = ctx.add(
             HStack::new()
                 .spacing(12.0)
-                .child(Expand::new().flex(1.0).child_id(group_a))
+                .child(Expand::new().flex(1.0).child(group_a))
                 .child(Divider::vertical())
-                .child(Expand::new().flex(1.0).child_id(group_b)),
+                .child(Expand::new().flex(1.0).child(group_b)),
         );
         self.root_child_id = Some(root);
         vec![root]

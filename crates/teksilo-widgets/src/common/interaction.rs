@@ -175,7 +175,7 @@ mod tests {
         );
         let list = tree.add(
             VStack::new()
-                .add_child(row)
+                .child(row)
                 .pan_claim(PanClaim::vertical())
                 .on_scroll(|_e, _c| EventResponse::Handled),
         );

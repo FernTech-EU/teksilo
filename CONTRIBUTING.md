@@ -63,20 +63,43 @@ git commit -s -m "Your commit message"
 
 This adds a `Signed-off-by: Your Name <your.email@example.com>` line to your commit, certifying that you wrote or have the right to submit the code under the project's license (MPL-2.0).
 
-### Setting up automatic sign-off
+### Signing off without typing `-s`
 
-You can configure Git to always set your identity for your commits for this repository:
+No Git configuration adds the trailer to `git commit`: `format.signOff` applies
+to `git format-patch` only, and there is no `commit.signOff`. Two things do
+work.
+
+An alias, which you still have to remember to reach for:
+
+```bash
+git config --global alias.cs "commit -s"
+```
+
+Or a `prepare-commit-msg` hook, which covers every commit you make in this
+repository, `git commit --amend` included, and adds nothing when the trailer is
+already there:
+
+```bash
+cat > .git/hooks/prepare-commit-msg <<'EOF'
+#!/bin/sh
+git interpret-trailers --if-exists doNothing --trailer \
+    "Signed-off-by: $(git config user.name) <$(git config user.email)>" \
+    --in-place "$1"
+EOF
+chmod +x .git/hooks/prepare-commit-msg
+```
+
+The hook signs off as whoever `user.name` and `user.email` resolve to, so if
+this repository should use an identity other than your global one, set it
+before you commit:
 
 ```bash
 git config user.name "Your Name"
 git config user.email "your.email@example.com"
 ```
 
-Then use `git commit -s` for each commit, or create a Git alias:
-
-```bash
-git config --global alias.cs "commit -s"
-```
+Hooks are local to your clone and are not version-controlled, so each clone
+needs this once.
 
 ### What if I forgot to sign off?
 

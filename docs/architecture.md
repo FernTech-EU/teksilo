@@ -604,7 +604,7 @@ For a one-shot dump suitable for downstream tooling: `python3 tools/extract_widg
 
 The unified `Widget` trait, `Signal<T>` reactivity, attached handlers, `BuildContext::signal` / `effect` / `animated_signal` / `app_state` / `subscribe_event`, the four widget shapes (leaf / container / composing / hybrid), and the `take_widget` / `restore_widget` arena extraction pattern that makes `build(&mut self)` borrow-safe — all documented in CLAUDE.md "Unified Widget Trait" plus the focused docs ([`events-and-gestures.md`](events-and-gestures.md), [`reactive-theme.md`](reactive-theme.md), [`animation.md`](animation.md)). The V2 model is what the entire widget library is written against; reading [`crates/teksilo-widgets/src/button.rs`](../crates/teksilo-widgets/src/button.rs) is the fastest way to see all of it together in one ~200-line widget.
 
-The `teksu!` DSL desugars to V2 builder calls one-to-one at macro-expansion time — no runtime, no virtual tree. References: [`teksu-macro-reference.md`](teksu-macro-reference.md) (user-facing) and [`teksu-language-spec-v3.md`](teksu-language-spec-v3.md) (grammar and desugaring spec).
+The `teksu!` DSL desugars to V2 builder calls one-to-one at macro-expansion time — no runtime, no virtual tree. References: [`teksu-macro-reference.md`](teksu-macro-reference.md) (user-facing, and normative for behaviour) and [`teksu-language-spec-v3.md`](teksu-language-spec-v3.md) (design rationale).
 
 ---
 

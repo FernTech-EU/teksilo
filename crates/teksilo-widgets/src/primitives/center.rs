@@ -71,16 +71,22 @@ impl Center {
         }
     }
 
-    /// Set child by pre-registered ID.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -188,7 +194,7 @@ mod tests {
     fn centers_child() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let _center = tree.add(Center::new().child_id(child));
+        let _center = tree.add(Center::new().child(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let cb = tree.bounds(child);
@@ -200,7 +206,7 @@ mod tests {
     fn claims_full_space() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(40.0, 20.0));
-        let center = tree.add(Center::new().child_id(child));
+        let center = tree.add(Center::new().child(child));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let cb = tree.bounds(center);
@@ -241,7 +247,7 @@ mod tests {
             natural_width: 300.0,
             height: 16.0,
         });
-        let _center = tree.add(Center::new().child_id(child));
+        let _center = tree.add(Center::new().child(child));
         tree.layout(SizeProposal::exact(100.0, 40.0));
 
         let cb = tree.bounds(child);
@@ -259,7 +265,7 @@ mod tests {
             natural_width: 40.0,
             height: 16.0,
         });
-        let _c2 = t2.add(Center::new().child_id(small));
+        let _c2 = t2.add(Center::new().child(small));
         t2.layout(SizeProposal::exact(100.0, 40.0));
         let sb = t2.bounds(small);
         assert!((sb.width - 40.0).abs() < 0.01);
@@ -280,8 +286,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let logo = tree.add(FixedLeaf(50.0, 20.0));
         let title = tree.add(FixedLeaf(40.0, 20.0));
-        let center = tree.add(Center::new().child_id(title));
-        let _row = tree.add(HStack::new().add_child(logo).add_child(center));
+        let center = tree.add(Center::new().child(title));
+        let _row = tree.add(HStack::new().child(logo).child(center));
         tree.layout(SizeProposal::exact(300.0, 20.0));
 
         assert!(
@@ -302,9 +308,9 @@ mod tests {
         let mut t2 = WidgetTree::new();
         let logo2 = t2.add(FixedLeaf(50.0, 20.0));
         let title2 = t2.add(FixedLeaf(40.0, 20.0));
-        let center2 = t2.add(Center::new().child_id(title2));
-        let exp = t2.add(Expand::horizontal().child_id(center2));
-        let _row2 = t2.add(HStack::new().add_child(logo2).add_child(exp));
+        let center2 = t2.add(Center::new().child(title2));
+        let exp = t2.add(Expand::horizontal().child(center2));
+        let _row2 = t2.add(HStack::new().child(logo2).child(exp));
         t2.layout(SizeProposal::exact(300.0, 20.0));
 
         assert!(

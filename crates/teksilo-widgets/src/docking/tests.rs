@@ -368,7 +368,7 @@ fn clicking_a_toggle_button_does_not_hang() {
             );
             self.model
                 .open_dock(dock, DockOpenLocation::side(DockSide::Leading));
-            let root = ctx.add(VStack::new().add_child(btn).add_child(layout));
+            let root = ctx.add(VStack::new().child(btn).child(layout));
             self.root = Some(root);
             vec![root]
         }
@@ -2255,9 +2255,9 @@ fn tab_dropped_on_a_pane_relocates_to_its_side() {
         inner,
     ));
     let src = t.add(TabSource(tab_id));
-    let es = t.add(Expand::new().flex(1.0).child_id(src));
-    let ep = t.add(Expand::new().flex(1.0).child_id(pane));
-    t.add(HStack::new().add_child(es).add_child(ep));
+    let es = t.add(Expand::new().flex(1.0).child(src));
+    let ep = t.add(Expand::new().flex(1.0).child(pane));
+    t.add(HStack::new().child(es).child(ep));
     t.layout(SizeProposal::exact(400.0, 200.0));
 
     let from = t.bounds(src).center();
@@ -2329,9 +2329,9 @@ fn dock_dropped_on_a_pane_centre_stacks_into_its_tab() {
         inner,
     ));
     let src = t.add(DockSource(d));
-    let es = t.add(Expand::new().flex(1.0).child_id(src));
-    let ep = t.add(Expand::new().flex(1.0).child_id(pane));
-    t.add(HStack::new().add_child(es).add_child(ep));
+    let es = t.add(Expand::new().flex(1.0).child(src));
+    let ep = t.add(Expand::new().flex(1.0).child(pane));
+    t.add(HStack::new().child(es).child(ep));
     t.layout(SizeProposal::exact(400.0, 200.0));
 
     let from = t.bounds(src).center();
@@ -2392,9 +2392,9 @@ fn pane_droptarget_chrome_is_at_hidden_and_highlights() {
         inner,
     ));
     let src = t.add(DockSource(DockWidgetId::fresh()));
-    let es = t.add(Expand::new().flex(1.0).child_id(src));
-    let ep = t.add(Expand::new().flex(1.0).child_id(pane));
-    t.add(HStack::new().add_child(es).add_child(ep));
+    let es = t.add(Expand::new().flex(1.0).child(src));
+    let ep = t.add(Expand::new().flex(1.0).child(pane));
+    t.add(HStack::new().child(es).child(ep));
     t.layout(SizeProposal::exact(400.0, 300.0));
     t.sync_accessibility();
 
@@ -2490,7 +2490,7 @@ fn splitter_pane_size_is_invariant_to_content_flex() {
             dm.clone(),
             inner1,
         ));
-        t.add(Splitter::new(model).pane_id(p0).pane_id(p1));
+        t.add(Splitter::new(model).pane(p0).pane(p1));
         t.layout(SizeProposal::exact(600.0, 200.0));
         (t.bounds(p0).width, t.bounds(p1).width)
     };
@@ -3107,4 +3107,53 @@ fn an_accelerator_chord_does_not_resize_a_dock_side() {
         );
         assert!(model.is_side_visible(DockSide::Leading));
     }
+}
+
+// ── Accumulator plurals ─────────────────────────────────────────────────────
+//
+// `rails` and `docks` are folds over `rail` and `dock`, so N singular calls and
+// one plural call over the same values must leave the same layout behind.
+// Neither accumulator reaches the arena at build time (rails only render in Rail
+// presentation, dock content only when a dock is opened), so these read the
+// layout's own state rather than the tree.
+
+#[test]
+fn rails_plural_matches_the_singular_chain() {
+    use super::activity_bar::DockRail;
+
+    let sides = [DockSide::Leading, DockSide::Trailing, DockSide::Bottom];
+    let singular = DockingLayout::new(DockingModel::new())
+        .rail(DockRail::new(sides[0]))
+        .rail(DockRail::new(sides[1]))
+        .rail(DockRail::new(sides[2]));
+    let plural = DockingLayout::new(DockingModel::new()).rails(sides.map(DockRail::new));
+
+    let configured = |l: &DockingLayout| {
+        let mut v: Vec<String> = l.rails.keys().map(|s| format!("{s:?}")).collect();
+        v.sort();
+        v
+    };
+    assert_eq!(configured(&singular).len(), 3, "the fixture lost a rail");
+    assert_eq!(configured(&singular), configured(&plural));
+}
+
+#[test]
+fn docks_plural_matches_the_singular_chain() {
+    let a = DockWidgetId::fresh();
+    let b = DockWidgetId::fresh();
+    let make = |id| DockWidget::new(id, lit!("Panel"), |_| FixedLeaf(120.0, 120.0));
+
+    let singular = DockingLayout::new(DockingModel::new())
+        .dock(make(a))
+        .dock(make(b));
+    let plural = DockingLayout::new(DockingModel::new()).docks([make(a), make(b)]);
+
+    // Registered means the content factory answers for that id.
+    let registered = |l: &DockingLayout| {
+        [a, b]
+            .map(|id| l.registry.borrow().build(id).is_some())
+            .to_vec()
+    };
+    assert_eq!(registered(&singular), vec![true, true]);
+    assert_eq!(registered(&singular), registered(&plural));
 }

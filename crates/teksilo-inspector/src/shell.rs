@@ -144,11 +144,11 @@ impl Widget for InspectorShell {
         }
 
         let z = ZStack::new()
-            .add_child(self.user_root_id)
+            .child(self.user_root_id)
             .child(highlight)
-            .add_child(picker_overlay_id)
-            .add_child(watch_overlay_id)
-            .add_child(grip_id);
+            .child(picker_overlay_id)
+            .child(watch_overlay_id)
+            .child(grip_id);
 
         // Slot for the inspector panel + its top-edge resize handle.
         // The Switcher gates the whole block on `state.open`: closed
@@ -551,7 +551,7 @@ fn build_pick_chain_menu(ctx: &mut BuildContext, state: InspectorState) -> Widge
     }
     let mut menu_vstack = VStack::new().spacing(0.0);
     for id in row_ids {
-        menu_vstack = menu_vstack.add_child(id);
+        menu_vstack = menu_vstack.child(id);
     }
     let panel = Panel::new()
         .background(teksilo_tokens::SurfaceRole::Raised)

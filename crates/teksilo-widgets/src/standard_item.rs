@@ -32,7 +32,7 @@
 //!         .from_entry(entry)
 //!         .selected(selected)
 //!         .leading_slot(IconWidget::from_svg(FOLDER_ICON).icon_size(16.0))
-//!         .on_toggle_rc(ctx.toggle_callback());
+//!         .on_chevron_toggle_rc(ctx.toggle_callback());
 //!     if entry.has_children {
 //!         row = row.tristate_checkbox(checks.signal_for(entry.node_id));
 //!     } else {
@@ -135,6 +135,7 @@ pub struct StandardListItem {
     subtitle_leading_slot: Option<Box<dyn Widget>>,
     subtitle_trailing_slot: Option<Box<dyn Widget>>,
     checkbox: Option<CheckboxKind>,
+    on_checkbox_toggle: Option<Rc<dyn Fn(bool, &mut teksilo_core::widget::EventContext)>>,
     selected: Signal<bool>,
     enabled: Signal<bool>,
     label_style: teksilo_core::color_prop::TextStyleProp,
@@ -181,6 +182,7 @@ impl StandardListItem {
             subtitle_leading_slot: None,
             subtitle_trailing_slot: None,
             checkbox: None,
+            on_checkbox_toggle: None,
             selected: Signal::new(false),
             enabled: Signal::new(true),
             label_style: TextStyleRole::Body.into(),
@@ -291,6 +293,25 @@ impl StandardListItem {
     /// exclusive with `checkbox` — last call wins.
     pub fn tristate_checkbox(mut self, state: Signal<CheckState>) -> Self {
         self.checkbox = Some(CheckboxKind::TriState(state));
+        self
+    }
+
+    /// Run `f` when the **user** flips this row's checkbox, forwarded to the
+    /// embedded [`Checkbox::on_change`](crate::checkbox::Checkbox::on_change):
+    /// same contract, same four paths, including `Space` on the focused row.
+    ///
+    /// Reach for it only when flipping the box has to touch the ambient
+    /// context (`ctx.send_intent(..)`, opening a dialog). To *read* or react to
+    /// check state, bind the row's box to a `CheckedModel` and use that:
+    /// `is_checked` / `checked_indices` / `checked_count`, or
+    /// `checked_signal()` for the reactive view. The model is the source of
+    /// truth and it survives the row being recycled by virtualization, which a
+    /// per-row callback does not.
+    pub fn on_checkbox_toggle(
+        mut self,
+        f: impl Fn(bool, &mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_checkbox_toggle = Some(Rc::new(f));
         self
     }
 
@@ -630,14 +651,14 @@ impl StandardListItem {
                 .alignment(VAlignment::Center);
             if let Some(w) = self.subtitle_leading_slot.take() {
                 let id = ctx.add_boxed(w);
-                sub_row = sub_row.add_child(id);
+                sub_row = sub_row.child(id);
             }
             sub_row = sub_row
-                .add_child(subtitle_text_id)
-                .add_child(ctx.add(Spacer::new()));
+                .child(subtitle_text_id)
+                .child(ctx.add(Spacer::new()));
             if let Some(w) = self.subtitle_trailing_slot.take() {
                 let id = ctx.add_boxed(w);
-                sub_row = sub_row.add_child(id);
+                sub_row = sub_row.child(id);
             }
             let sub_row_id = ctx.add(sub_row);
 
@@ -645,8 +666,8 @@ impl StandardListItem {
                 VStack::new()
                     .spacing(si::STANDARD_ITEM_LABEL_SUBTITLE_GAP)
                     .alignment(HAlignment::Leading)
-                    .add_child(label_id)
-                    .add_child(sub_row_id),
+                    .child(label_id)
+                    .child(sub_row_id),
             )
         } else {
             // Single-line: just the label.
@@ -663,7 +684,7 @@ impl StandardListItem {
             ctx.add(
                 Shrinkable::new()
                     .min_width(si::STANDARD_ITEM_LABEL_COLUMN_MIN_WIDTH)
-                    .child_id(label_column_id),
+                    .child(label_column_id),
             )
         } else {
             label_column_id
@@ -677,7 +698,7 @@ impl StandardListItem {
 
         if let Some(kind) = self.checkbox.take() {
             // Propagate the row's label as the checkbox's accessible
-            // name. With `labels_hidden(true)` the visual label is
+            // name. With `labelled_externally()` the visual label is
             // suppressed; without an `access_label*` override the AT
             // node would be a nameless `Role::CheckBox`. Using
             // `access_label` on the WidgetBuilder applies an override
@@ -689,28 +710,29 @@ impl StandardListItem {
             // `Checkbox::build`), which is what the view's `Space` finds once
             // the row is out of the Tab order — nothing to wire here.
             use teksilo_core::widget_builder::WidgetBuilder;
-            let cb = match kind {
+            let mut cb = match kind {
                 CheckboxKind::TwoState(s) => Checkbox::new(s),
                 CheckboxKind::TriState(s) => Checkbox::tristate(s),
             }
-            .labels_hidden(true);
+            .labelled_externally();
+            if let Some(f) = self.on_checkbox_toggle.take() {
+                cb = cb.on_change(move |now, ctx| f(now, ctx));
+            }
             let cb_id = ctx.add(cb.access_label(self.label.clone()));
-            row = row.add_child(cb_id);
+            row = row.child(cb_id);
         }
         if let Some(w) = self.leading_slot.take() {
             let id = ctx.add_boxed(w);
-            row = row.add_child(id);
+            row = row.child(id);
         }
         if let Some(w) = self.center_slot.take() {
             let id = ctx.add_boxed(w);
-            row = row.add_child(id);
+            row = row.child(id);
         }
-        row = row
-            .add_child(label_column_id)
-            .add_child(ctx.add(Spacer::new()));
+        row = row.child(label_column_id).child(ctx.add(Spacer::new()));
         if let Some(w) = self.trailing_slot.take() {
             let id = ctx.add_boxed(w);
-            row = row.add_child(id);
+            row = row.child(id);
         }
 
         ctx.add(row)
@@ -1058,6 +1080,18 @@ impl StandardTreeItem {
     }
 
     /// Forwarded to the inner [`StandardListItem`] — see its
+    /// [`on_checkbox_toggle`](StandardListItem::on_checkbox_toggle). Distinct
+    /// from [`on_chevron_toggle`](Self::on_chevron_toggle), which is the
+    /// expand / collapse control.
+    pub fn on_checkbox_toggle(
+        mut self,
+        f: impl Fn(bool, &mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.inner = self.inner.on_checkbox_toggle(f);
+        self
+    }
+
+    /// Forwarded to the inner [`StandardListItem`] — see its
     /// [`tristate_checkbox`](StandardListItem::tristate_checkbox).
     pub fn tristate_checkbox(mut self, state: Signal<CheckState>) -> Self {
         self.inner = self.inner.tristate_checkbox(state);
@@ -1205,15 +1239,17 @@ impl StandardTreeItem {
             .is_expanded(entry.is_expanded)
     }
 
-    /// Click handler for the chevron. Wired only when `has_children`
-    /// is true. Typical use: `.on_toggle(ctx.toggle_callback())` from
-    /// a `TreeRowContext` (see `TreeView::new_with_context`).
+    /// Click handler for the **chevron** — the expand / collapse control, not
+    /// the row's checkbox, which is [`on_checkbox_toggle`](StandardListItem::on_checkbox_toggle)
+    /// on the inner item. Wired only when `has_children` is true. Typical use:
+    /// `.on_chevron_toggle(ctx.toggle_callback())` from a `TreeRowContext`
+    /// (see `TreeView::new_with_context`).
     ///
     /// The callback receives the firing [`EventContext`] so apps can
     /// dispatch an intent (e.g. lazy-load children on expand), open
     /// a dialog, or otherwise route the toggle through the framework
     /// before mutating model state.
-    pub fn on_toggle(
+    pub fn on_chevron_toggle(
         mut self,
         f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static,
     ) -> Self {
@@ -1225,7 +1261,10 @@ impl StandardTreeItem {
     /// same callback is shared across multiple call sites without an
     /// extra clone — e.g. `TreeRowContext::toggle_callback()` returns
     /// this shape directly.
-    pub fn on_toggle_rc(mut self, f: Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>) -> Self {
+    pub fn on_chevron_toggle_rc(
+        mut self,
+        f: Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>,
+    ) -> Self {
         self.on_toggle = Some(f);
         self
     }
@@ -1288,9 +1327,9 @@ impl Widget for StandardTreeItem {
             HStack::new()
                 .spacing(0.0)
                 .alignment(VAlignment::Center)
-                .add_child(indent_id)
-                .add_child(chevron_column_id)
-                .add_child(inner_content_id),
+                .child(indent_id)
+                .child(chevron_column_id)
+                .child(inner_content_id),
         );
 
         // 5. Wrap with the rounded selection bg + interaction handler
@@ -2016,7 +2055,7 @@ mod tests {
                 .depth(0)
                 .has_children(true)
                 .is_expanded(false)
-                .on_toggle(move |_ctx| fired_clone.set(fired_clone.get() + 1)),
+                .on_chevron_toggle(move |_ctx| fired_clone.set(fired_clone.get() + 1)),
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);
@@ -2091,7 +2130,7 @@ mod tests {
             StandardTreeItem::new(lit!("Leaf"))
                 .depth(0)
                 .has_children(false)
-                .on_toggle(move |_ctx| fired_clone.set(fired_clone.get() + 1)),
+                .on_chevron_toggle(move |_ctx| fired_clone.set(fired_clone.get() + 1)),
         );
         tree.layout(SizeProposal::exact(400.0, 60.0));
         let bounds = tree.bounds(id);

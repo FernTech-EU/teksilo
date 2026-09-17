@@ -18,10 +18,7 @@
 //! any ancestor opacity scope.
 //!
 //! ```ignore
-//! use teksilo_core::widget_builder::WidgetBuilder;
 //! // Fade a custom panel to 40 % when the window is inactive:
-//! ctx.add(my_panel.dim_when_inactive(0.4));
-//! // Or directly:
 //! ctx.add(DimWhenInactive::new().child(my_panel).factor(0.4));
 //! ```
 //!
@@ -55,7 +52,7 @@ pub struct DimWhenInactive {
 
 impl DimWhenInactive {
     /// New dim wrapper with the [`DEFAULT_DIM_FACTOR`]. Attach a child with
-    /// [`child`](Self::child) / [`child_id`](Self::child_id).
+    /// [`child`](Self::child), which takes a widget or a `WidgetId`.
     pub fn new() -> Self {
         Self {
             pending_child: None,
@@ -65,14 +62,8 @@ impl DimWhenInactive {
     }
 
     /// Inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Pre-registered child by `WidgetId`.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
+    pub fn child(mut self, widget: impl crate::IntoTeksiChild) -> Self {
+        self.pending_child = Some(crate::IntoTeksiChild::into_pending(widget));
         self
     }
 

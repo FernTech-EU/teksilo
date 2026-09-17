@@ -437,30 +437,30 @@ impl Widget for FormatToolbar {
         let row1 = ctx.add(
             Toolbar::new()
                 .label(lit!("Formatting"))
-                .add_child(bold_id)
-                .add_child(italic_id)
-                .add_child(underline_id)
-                .add_child(strike_id)
+                .child(bold_id)
+                .child(italic_id)
+                .child(underline_id)
+                .child(strike_id)
                 .child(Divider::vertical())
-                .add_child(heading_picker_id)
-                .add_child(font_picker_id)
+                .child(heading_picker_id)
+                .child(font_picker_id)
                 .child(Divider::vertical())
-                .add_child(align_left_id)
-                .add_child(align_center_id)
-                .add_child(align_right_id)
-                .add_child(align_justify_id)
+                .child(align_left_id)
+                .child(align_center_id)
+                .child(align_right_id)
+                .child(align_justify_id)
                 .child(Divider::vertical())
-                .add_child(bullet_id)
-                .add_child(numbered_id)
-                .add_child(indent_id)
-                .add_child(outdent_id)
+                .child(bullet_id)
+                .child(numbered_id)
+                .child(indent_id)
+                .child(outdent_id)
                 .child(Divider::vertical())
-                .add_child(blockquote_id)
+                .child(blockquote_id)
                 .child(Divider::vertical())
-                .add_child(insert_table_id)
+                .child(insert_table_id)
                 .child(Divider::vertical())
-                .add_child(undo_id)
-                .add_child(redo_id),
+                .child(undo_id)
+                .child(redo_id),
         );
 
         // ── Row 2: table operations, all 7 buttons gated on is_in_table ──
@@ -538,17 +538,17 @@ impl Widget for FormatToolbar {
         let row2 = ctx.add(
             Toolbar::new()
                 .label(lit!("Table operations"))
-                .add_child(row_above_id)
-                .add_child(row_below_id)
-                .add_child(col_before_id)
-                .add_child(col_after_id)
+                .child(row_above_id)
+                .child(row_below_id)
+                .child(col_before_id)
+                .child(col_after_id)
                 .child(Divider::vertical())
-                .add_child(del_row_id)
-                .add_child(del_col_id)
-                .add_child(remove_table_id),
+                .child(del_row_id)
+                .child(del_col_id)
+                .child(remove_table_id),
         );
 
-        let root = ctx.add(VStack::new().add_child(row1).add_child(row2));
+        let root = ctx.add(VStack::new().child(row1).child(row2));
         self.root = Some(root);
         vec![root]
     }

@@ -210,41 +210,23 @@ impl TitleBar {
 
     /// Set the leading-edge content (e.g. app icon, menus). Rendered to the
     /// right of the macOS traffic-light inset.
-    pub fn leading(mut self, widget: impl Widget + 'static) -> Self {
-        self.leading = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Set the leading-edge content by pre-registered ID.
-    pub fn leading_id(mut self, id: WidgetId) -> Self {
-        self.leading = Some(PendingChild::Id(id));
+    pub fn leading(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.leading = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Set the center content (e.g. search box, breadcrumbs). Wrapped in a
     /// flexible drag region: clicks that are not consumed by the child
     /// initiate a window drag.
-    pub fn center(mut self, widget: impl Widget + 'static) -> Self {
-        self.center = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Set the center content by pre-registered ID.
-    pub fn center_id(mut self, id: WidgetId) -> Self {
-        self.center = Some(PendingChild::Id(id));
+    pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.center = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Set the trailing-edge content (e.g. user avatar, notification bell).
     /// Rendered before the window controls.
-    pub fn trailing(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Set the trailing-edge content by pre-registered ID.
-    pub fn trailing_id(mut self, id: WidgetId) -> Self {
-        self.trailing = Some(PendingChild::Id(id));
+    pub fn trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.trailing = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
@@ -351,17 +333,17 @@ impl Widget for TitleBar {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
-            row = row.add_child(id);
+            row = row.child(id);
         }
 
-        row = row.add_child(drag_region_id);
+        row = row.child(drag_region_id);
 
         if let Some(trailing) = self.trailing.take() {
             let id = match trailing {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
             };
-            row = row.add_child(id);
+            row = row.child(id);
         }
 
         if trailing_inset.width > 0.0 {
@@ -369,7 +351,7 @@ impl Widget for TitleBar {
         }
 
         if let Some(id) = controls_id {
-            row = row.add_child(id);
+            row = row.child(id);
         }
 
         let root = ctx.add(row);
@@ -639,12 +621,7 @@ mod tests {
             )));
         let bar_id = tree.add(bar_widget);
         let body_id = tree.add(Expand::new());
-        let _root = tree.add(
-            VStack::new()
-                .spacing(0.0)
-                .add_child(bar_id)
-                .add_child(body_id),
-        );
+        let _root = tree.add(VStack::new().spacing(0.0).child(bar_id).child(body_id));
         tree.layout(SizeProposal::exact(900.0, 600.0));
         (tree, bar_id)
     }
@@ -743,12 +720,7 @@ mod tests {
         }));
         let bar_id = tree.add(TitleBar::new(host as Rc<dyn PlatformTitleBarHost>).height(40.0));
         let body_id = tree.add(Expand::new());
-        let _root = tree.add(
-            VStack::new()
-                .spacing(0.0)
-                .add_child(bar_id)
-                .add_child(body_id),
-        );
+        let _root = tree.add(VStack::new().spacing(0.0).child(bar_id).child(body_id));
         tree.layout(SizeProposal::exact(900.0, 600.0));
         (tree, bar_id)
     }
@@ -810,7 +782,7 @@ mod tests {
                 .controls_visible(visible.clone()),
         );
         let body = tree.add(Expand::new());
-        let _root = tree.add(VStack::new().spacing(0.0).add_child(bar).add_child(body));
+        let _root = tree.add(VStack::new().spacing(0.0).child(bar).child(body));
         tree.layout(SizeProposal::exact(900.0, 600.0));
 
         // row = [leading, drag_region, trailing, controls]. Asserted as a shape
@@ -896,7 +868,7 @@ mod tests {
                 .controls_visible(visible.clone()),
         );
         let body = tree.add(Expand::new());
-        let _root = tree.add(VStack::new().spacing(0.0).add_child(bar).add_child(body));
+        let _root = tree.add(VStack::new().spacing(0.0).child(bar).child(body));
         tree.layout(SizeProposal::exact(900.0, 600.0));
         assert!(controls_are_live(&tree, bar), "starts shown");
 
@@ -1222,12 +1194,7 @@ mod tests {
             .with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
         let bar_id = tree.add(bar_widget);
         let body_id = tree.add(Expand::new());
-        tree.add(
-            VStack::new()
-                .spacing(0.0)
-                .add_child(bar_id)
-                .add_child(body_id),
-        );
+        tree.add(VStack::new().spacing(0.0).child(bar_id).child(body_id));
 
         tree.layout(SizeProposal::exact(900.0, 600.0));
         let light_glyphs: Vec<[f32; 4]> = tree.render().glyphs.iter().map(|g| g.color).collect();

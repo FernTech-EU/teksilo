@@ -132,21 +132,21 @@ impl ToastStyle for RecipeToastStyle {
         );
 
         // Row layout: [glyph] [body (expands)] [close?].
-        let body = ctx.add(Expand::horizontal().child_id(cfg.content));
+        let body = ctx.add(Expand::horizontal().child(cfg.content));
         let mut row = HStack::new()
             .spacing(self.recipe.content_gap)
             .alignment(VAlignment::Top)
-            .add_child(cfg.leading_glyph)
-            .add_child(body);
+            .child(cfg.leading_glyph)
+            .child(body);
         if let Some(close_id) = cfg.trailing_close {
-            row = row.add_child(close_id);
+            row = row.child(close_id);
         }
         let row_id = ctx.add(row);
         let padded = ctx.add(
             Padding::symmetric(self.recipe.padding_vertical, self.recipe.padding_horizontal)
-                .child_id(row_id),
+                .child(row_id),
         );
 
-        ctx.add(ZStack::new().add_child(bg).add_child(padded))
+        ctx.add(ZStack::new().child(bg).child(padded))
     }
 }

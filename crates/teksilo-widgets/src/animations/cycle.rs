@@ -75,11 +75,17 @@ impl Cycle {
         self.deferred_children.push(Box::new(widget));
         self
     }
-
-    /// Append a pre-boxed child to the rotation.
-    pub fn child_boxed(mut self, widget: Box<dyn Widget>) -> Self {
-        self.deferred_children.push(widget);
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// Append children from an iterator.
@@ -114,7 +120,7 @@ impl Widget for Cycle {
 
         let mut switcher = Switcher::new(selected.clone());
         for child in children {
-            switcher = switcher.child_boxed(child);
+            switcher = switcher.child(child);
         }
         let root = ctx.add(switcher);
         self.root_child_id = Some(root);

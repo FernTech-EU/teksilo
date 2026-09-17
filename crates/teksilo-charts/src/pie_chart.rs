@@ -15,7 +15,7 @@
 //! used by [`Card`](https://docs.rs/teksilo-widgets) /
 //! [`DialogContent`](https://docs.rs/teksilo-widgets) / `GroupBox`: two
 //! fields (`pending_center` + `center_id`), two builders
-//! (`.center(impl Widget)` / `.center_id(WidgetId)`), and `build()`
+//! (`.center(impl Widget)` / `.center(WidgetId)`), and `build()`
 //! resolves the pending child via `ctx.add_boxed`.
 
 use std::cell::{Cell, RefCell};
@@ -247,14 +247,8 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
 
     /// Set the donut center widget. Silently ignored if
     /// `inner_radius_ratio == 0.0` (pie mode).
-    pub fn center(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_center = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// Use a pre-registered widget id as the donut center.
-    pub fn center_id(mut self, id: WidgetId) -> Self {
-        self.pending_center = Some(PendingChild::Id(id));
+    pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_center = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 

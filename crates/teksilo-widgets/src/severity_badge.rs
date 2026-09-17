@@ -144,11 +144,7 @@ impl Widget for SeverityBadge {
                 .mode(IconMode::Tintable)
                 .color(symbol_color),
         );
-        let root = ctx.add(
-            crate::primitives::ZStack::new()
-                .add_child(disc)
-                .add_child(symbol),
-        );
+        let root = ctx.add(crate::primitives::ZStack::new().child(disc).child(symbol));
         self.root_child_id = Some(root);
         vec![root]
     }

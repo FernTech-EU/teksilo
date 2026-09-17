@@ -4,7 +4,7 @@
 
 # Teksilo Trademark Policy
 
-**Version 1.0. Last revised: 2026-08-28.**
+**Version 1.1. Last revised: 2026-09-15.**
 
 "Teksilo"™ identifies this project, maintained by FernTech. This document says what you can do with the name without asking, and what you can't. It covers the Teksilo name and any Teksilo logo or wordmark.
 
@@ -37,6 +37,23 @@ More generally, don't do anything with the name or FernTech's branding that woul
 ## Trademark status
 
 "Teksilo" is the subject of French trademark application No. 5292025, filed with the INPI by FernTech (classes 9 and 42). The application is pending; this document will be updated when it is registered.
+
+## Third-party trademarks
+
+Teksilo ships theme presets that reproduce the look of design languages published by other vendors, and each is named for what it reproduces: `macos`, `fluent`, `material3`, and the `intui` default. The name is there to say which design language a preset imitates — a theme reproducing Apple's Aqua cannot be identified without naming it. We use the word and nothing else: no logo, no wordmark, no icon set, and no proprietary font is redistributed. See [NOTICE](NOTICE) for what each preset actually derives from and on what terms.
+
+The marks belong to their owners:
+
+- **macOS**, **Aqua**, **San Francisco** — Apple Inc.
+- **Fluent**, **WinUI**, **Windows**, **Segoe UI**, **Consolas** — Microsoft Corporation.
+- **Material Design**, **Noto**, **Roboto** — Google LLC.
+- **Int UI**, **JetBrains**, **JetBrains Mono** — JetBrains s.r.o.
+
+Teksilo is not affiliated with, endorsed by, sponsored by, or certified by any of them. The presets are independent implementations by FernTech, built from published specifications and — where a vendor publishes nothing — from measurement. They are not vendor-supplied, not vendor-reviewed, and not guaranteed to match any vendor's current design.
+
+One of those names is overloaded inside Teksilo itself. The `fluent` theme preset is Microsoft's design language; the Fluent behind Teksilo's translations is [Project Fluent](https://projectfluent.org/), Mozilla's localization system, reached through the unrelated `fluent` crate. Neither owner is affiliated with the other.
+
+Nothing above is a claim on any of these marks, and the policy stated earlier in this document covers "Teksilo" only — it does not extend to them. If you fork Teksilo and keep the presets, these acknowledgements travel with them, as do the limits: the names remain usable to say what a theme imitates, and not to suggest that a vendor stands behind it.
 
 ## About this document
 

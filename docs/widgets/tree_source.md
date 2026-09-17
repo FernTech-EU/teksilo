@@ -24,7 +24,7 @@ handed to the legacy delegate — lives in `tree_view.rs`, not here.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/tree_source/index.html)
 
 ## `pub struct TreeRowMeta`
 
@@ -51,4 +51,4 @@ pub struct TreeRow { /* fields */ }
 #### `pub fn toggle_callback(&self) -> Rc<dyn Fn(&mut EventContext)>`
 
 Toggle callback for this row's chevron. Wires in one line:
-`.on_toggle_rc(row.toggle_callback())`.
+`.on_chevron_toggle_rc(row.toggle_callback())`.

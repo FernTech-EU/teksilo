@@ -36,14 +36,18 @@ impl Stack {
         Self::default()
     }
 
-    fn add_child(self, id: WidgetId) -> Self {
+    fn child(self, c: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(c) {
+            teksilo_core::PendingChild::Id(id) => {
         self.child_ids.borrow_mut().push(id);
+            }
+            // This stub only records ids; an inline widget is ignored,
+            // exactly as the generic `child` it replaces did.
+            teksilo_core::PendingChild::Deferred(_) => {}
+        }
         self
     }
 
-    fn child<W: Widget + 'static>(self, _w: W) -> Self {
-        self
-    }
 
     fn linked_to(self, id: WidgetId) -> Self {
         *self.linked_to.borrow_mut() = Some(id);

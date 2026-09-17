@@ -93,7 +93,7 @@ impl SplitButtonStyle for RecipeSplitButtonStyle {
                 .corner_radius(CornerRadius::uniform(SPLIT_BUTTON_CORNER_RADIUS)),
         );
 
-        let frame_id = ctx.add(ZStack::new().add_child(bg_id).add_child(cfg.content));
+        let frame_id = ctx.add(ZStack::new().child(bg_id).child(cfg.content));
 
         // Enforce the overall minimum: main min_width + divider + chevron.
         // Only the height is a target floor — the width is the sum of three
@@ -106,7 +106,7 @@ impl SplitButtonStyle for RecipeSplitButtonStyle {
             TargetAxes::HEIGHT,
             &ctx.theme().input,
         );
-        ctx.add(MinSize::new(min.width, min.height).child_id(frame_id))
+        ctx.add(MinSize::new(min.width, min.height).child(frame_id))
     }
 }
 

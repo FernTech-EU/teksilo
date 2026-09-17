@@ -93,7 +93,7 @@ impl Board {
                         .mode(md.clone())
                         .label(lit!("Note"))
                         .header(TextWidget::new(lit!("Title")))
-                        .body_boxed(body()),
+                        .body(body()),
                 )) as Box<dyn Widget>
             });
 
@@ -1015,9 +1015,9 @@ impl Widget for PreMounted {
         let card = ctx.add(
             SceneCard::new(self.model.clone(), self.item)
                 .label(lit!("Note"))
-                .header_id(header)
-                .body_id(body)
-                .header_trailing_id(trailing),
+                .header(header)
+                .body(body)
+                .header_trailing(trailing),
         );
         self.card = Some(card);
         vec![card]

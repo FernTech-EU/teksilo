@@ -158,6 +158,9 @@ pub struct PathAtlas {
     width: u32,
     height: u32,
     /// Maximum atlas dimension.
+    ///
+    /// The default is the size this renderer wants; [`Self::cap_max_size`]
+    /// lowers it to what the device can actually create.
     max_size: u32,
     /// Cache from path key to atlas region.
     cache: HashMap<PathCacheKey, AtlasRegion>,
@@ -197,6 +200,21 @@ impl PathAtlas {
             shelf_height: 0,
             oversize_skips: 0,
         }
+    }
+
+    /// Lower the growth cap to what the GPU can actually allocate.
+    ///
+    /// The 4096 default is this renderer's own ceiling, not a fact about the
+    /// hardware. `Limits::downlevel_defaults` guarantees only 2048, and the
+    /// window path can legitimately open a device on an adapter's own limits,
+    /// which on GLES-3-class hardware may sit below 4096. Growing past what the
+    /// device allows is a `create_texture` validation error at the first
+    /// path-heavy frame — a crash on the machine least able to report it.
+    ///
+    /// Only ever lowers: a device that allows more than this renderer asks for
+    /// does not get a bigger atlas, because the cap is also a memory bound.
+    pub fn cap_max_size(&mut self, device_max: u32) {
+        self.max_size = self.max_size.min(device_max);
     }
 
     /// How many paths have been skipped for being too large to ever fit the atlas.
@@ -1009,6 +1027,56 @@ fn emit_arc(
 mod tests {
     use super::*;
     use teksilo_canvas::geometry::Point;
+
+    /// The device cap lowers the growth ceiling and never raises it.
+    ///
+    /// Both directions matter. A device that allows less than this renderer
+    /// wants must win, or the first atlas growth past its
+    /// `max_texture_dimension_2d` is a `create_texture` validation error — a
+    /// crash on downlevel hardware. A device that allows *more* must not win,
+    /// because the ceiling is also the memory bound: a 16384-capable GPU is not
+    /// an invitation to spend 1 GiB on rasterized paths.
+    #[test]
+    fn cap_max_size_only_lowers() {
+        let mut atlas = PathAtlas::new(512, 512);
+        let default_cap = atlas.max_size;
+
+        atlas.cap_max_size(16384);
+        assert_eq!(
+            atlas.max_size, default_cap,
+            "a device with more headroom must not raise the renderer's own ceiling"
+        );
+
+        atlas.cap_max_size(2048);
+        assert_eq!(
+            atlas.max_size, 2048,
+            "a device that allows less than the renderer wants must lower the ceiling"
+        );
+
+        atlas.cap_max_size(4096);
+        assert_eq!(
+            atlas.max_size, 2048,
+            "capping is a floor-taking operation, so it never undoes an earlier cap"
+        );
+    }
+
+    /// Growth stops at the capped size, not at the compiled-in default.
+    ///
+    /// `cap_max_size` would be decorative if `grow` still doubled past it.
+    #[test]
+    fn growth_honours_the_device_cap() {
+        let mut atlas = PathAtlas::new(512, 512);
+        atlas.cap_max_size(1024);
+
+        while atlas.try_grow() {}
+
+        assert!(
+            atlas.width <= 1024 && atlas.height <= 1024,
+            "atlas grew to {}x{}, past the device cap of 1024",
+            atlas.width,
+            atlas.height
+        );
+    }
 
     /// A path larger than the atlas can ever hold must be rejected **before** it is
     /// rasterized — not after.

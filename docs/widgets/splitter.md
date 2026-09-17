@@ -44,7 +44,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`pane`, `pane_id`, `child`, `pane_label`, `style`, `enabled`
+`pane`, `panes`, `child`, `children`, `child_opt`, `pane_label`, `style`, `enabled`
 
 ## API reference
 
@@ -68,19 +68,36 @@ pub struct Splitter { /* fields */ }
 Create a `Splitter` bound to the given model. Panes must be appended
 with `pane` in model order.
 
-#### `pub fn pane(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn pane(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Append a content pane (model order). Call once per pane; the count
 must match `model.pane_count()`.
 
-#### `pub fn pane_id(mut self, id: WidgetId) -> Self`
+#### `pub fn panes(self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>) -> Self`
 
-Append a pre-registered content pane by id.
+Append several content panes from an iterator, in model order.
 
-#### `pub fn child(self, widget: impl Widget + 'static) -> Self`
+The loop form of `pane`. The total pane count still has to
+match `model.pane_count()`.
+
+#### `pub fn child(self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 `teksu!` ergonomic alias for `pane`: a bare child in a
 `Splitter { ... }` block lowers to `.child(...)`.
+
+#### `pub fn children( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
+
+`teksu!` ergonomic alias for `panes`: a `for` loop in a
+`Splitter { ... }` block lowers to `.children(...)`.
+
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
 
 #### `pub fn pane_label(mut self, index: usize, label: impl Into<Prop<String>>) -> Self`
 

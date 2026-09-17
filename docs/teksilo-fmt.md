@@ -304,8 +304,9 @@ printing happens in the library crates.
 
 - [teksu-macro-reference.md](teksu-macro-reference.md) — surface
   language for the DSL the formatter operates on.
-- [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — design spec
-  with worked translations of widget-catalog examples.
+- [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — design
+  rationale, with worked translations of widget-catalog examples. The
+  reference above is normative for behaviour.
 - [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
   — trybuild fixtures that double as canonical examples of well-
   formatted `teksu!` blocks.

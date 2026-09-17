@@ -431,7 +431,7 @@ mod tests {
         let mut tree = measured_tree();
         let spacer = tree.add(FixedSize::new().width(offset.clone()).height(1.0));
         let badge = tree.add(Badge::new(lit!("NEW")));
-        let _row = tree.add(HStack::new().add_child(spacer).add_child(badge));
+        let _row = tree.add(HStack::new().child(spacer).child(badge));
         offset.bind_to(
             spacer,
             tree.binding_registry(),

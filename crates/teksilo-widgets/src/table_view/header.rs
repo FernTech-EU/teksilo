@@ -507,15 +507,15 @@ impl Widget for HeaderCell {
 
         let mut row = HStack::new()
             .spacing(4.0)
-            .add_child(label_id)
-            .add_child(ctx.add(Spacer::new()));
+            .child(label_id)
+            .child(ctx.add(Spacer::new()));
 
         if self.current_sort.is_some() {
             let chevron = ctx.add(SortIndicator::new(
                 self.current_sort,
                 cp::SORT_INDICATOR_SIZE,
             ));
-            row = row.add_child(chevron);
+            row = row.child(chevron);
         }
 
         // Filter popover trigger — appears at the trailing end of the
@@ -558,7 +558,7 @@ impl Widget for HeaderCell {
             .placement(OverlayPlacement::BelowPreferred)
             .show_disclosure_caret(false);
             let popover_id = ctx.add(popover);
-            row = row.add_child(popover_id);
+            row = row.child(popover_id);
         }
         // Route the header cell's chrome through `TableStyle::make_header_cell`.
         // The default `RecipeTableStyle` returns a `ZStack` that overlays
@@ -578,7 +578,7 @@ impl Widget for HeaderCell {
                 style.cell_padding_vertical(&tokens),
                 style.cell_padding_horizontal(&tokens),
             )
-            .child_id(row_id),
+            .child(row_id),
         );
         let cell_cfg = TableHeaderCellConfig {
             label: padded,

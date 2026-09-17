@@ -593,7 +593,7 @@ fn a_finger_drag_on_the_hue_strip_inside_a_scroller_sets_the_hue() {
     let strip = tree.add(HueStrip::new(hue.clone(), setter, dragging));
     let _list = tree.add(
         crate::primitives::VStack::new()
-            .add_child(strip)
+            .child(strip)
             .scroll_container(PanAxes::BOTH)
             .pan_claim(PanClaim::vertical())
             .on_scroll(move |_e, _c| {
@@ -648,7 +648,7 @@ fn pinch_is_refused_on(subject: Box<dyn teksilo_core::widget::Widget>, size: (f3
     let n = started.clone();
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     let id = tree.add_boxed(subject);
-    let _surface = tree.add(crate::primitives::ZStack::new().add_child(id).on_pinch(
+    let _surface = tree.add(crate::primitives::ZStack::new().child(id).on_pinch(
         move |phase, _c| {
             if matches!(phase, PinchPhase::Started { .. }) {
                 n.set(n.get() + 1);
@@ -743,8 +743,8 @@ fn strip_in_a_tappable_row(
     let filler = tree.add(crate::primitives::RectWidget::new());
     let _row = tree.add(
         crate::primitives::HStack::new()
-            .add_child(strip)
-            .add_child(filler)
+            .child(strip)
+            .child(filler)
             .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
     );
     tree.layout(SizeProposal::exact(200.0, 400.0));
@@ -900,7 +900,7 @@ fn the_hue_strip_reports_its_body_and_its_thumb() {
     let dragging = Rc::new(std::cell::Cell::new(false));
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     let strip = tree.add(HueStrip::new(hue, setter, dragging));
-    let _row = tree.add(crate::primitives::HStack::new().add_child(strip));
+    let _row = tree.add(crate::primitives::HStack::new().child(strip));
     tree.layout(SizeProposal::exact(60.0, 400.0));
     let bounds = tree.bounds(strip);
     let regions = tree.widget_target_regions(strip);
@@ -924,7 +924,7 @@ fn the_alpha_strip_reports_its_body_and_its_thumb() {
     let dragging = Rc::new(std::cell::Cell::new(false));
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     let strip = tree.add(AlphaStrip::new(color, alpha.clone(), setter, dragging));
-    let _row = tree.add(crate::primitives::HStack::new().add_child(strip));
+    let _row = tree.add(crate::primitives::HStack::new().child(strip));
     tree.layout(SizeProposal::exact(60.0, 400.0));
     let bounds = tree.bounds(strip);
     let regions = tree.widget_target_regions(strip);
@@ -980,8 +980,8 @@ fn swatch_pair_in_a_tappable_row(
     let _row = tree.add(
         crate::primitives::HStack::new()
             .spacing(6.0)
-            .add_child(a)
-            .add_child(b)
+            .child(a)
+            .child(b)
             .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
     );
     tree.layout(SizeProposal::exact(200.0, 60.0));

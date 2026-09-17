@@ -163,14 +163,14 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(text_input)
-            .add_child(spin_box)
-            .add_child(search)
-            .add_child(password)
-            .add_child(file_picker)
-            .add_child(input_dialog),
+            .child(text_input)
+            .child(spin_box)
+            .child(search)
+            .child(password)
+            .child(file_picker)
+            .child(input_dialog),
     )
 }
 

@@ -421,7 +421,7 @@ impl Widget for Stepper {
                 indicator_ids.clone(),
             );
             let pane_id = ctx.add(pane);
-            switcher = switcher.child_id(pane_id);
+            switcher = switcher.child(pane_id);
         }
         let switcher_id = ctx.add(switcher);
 
@@ -461,31 +461,31 @@ impl Widget for Stepper {
             self.cancel_action.clone(),
         ));
 
-        let content = ctx.add(Expand::new().child_id(switcher_id));
+        let content = ctx.add(Expand::new().child(switcher_id));
 
         let body = match self.orientation {
             StepperOrientation::Horizontal => ctx.add(
                 VStack::new()
                     .spacing(12.0)
-                    .add_child(strip_id)
+                    .child(strip_id)
                     .child(Divider::new())
-                    .add_child(content)
+                    .child(content)
                     .child(Divider::new())
-                    .add_child(footer_id),
+                    .child(footer_id),
             ),
             StepperOrientation::Vertical => {
                 let right = ctx.add(
                     VStack::new()
                         .spacing(12.0)
-                        .add_child(content)
+                        .child(content)
                         .child(Divider::new())
-                        .add_child(footer_id),
+                        .child(footer_id),
                 );
                 ctx.add(
                     HStack::new()
                         .spacing(20.0)
-                        .add_child(strip_id)
-                        .child(Expand::new().child_id(right)),
+                        .child(strip_id)
+                        .child(Expand::new().child(right)),
                 )
             }
         };
@@ -500,15 +500,15 @@ impl Widget for Stepper {
                 ctx.add(
                     VStack::new()
                         .spacing(12.0)
-                        .add_child(chrome_id)
-                        .child(Expand::new().child_id(body)),
+                        .child(chrome_id)
+                        .child(Expand::new().child(body)),
                 )
             } else {
                 ctx.add(
                     HStack::new()
                         .spacing(16.0)
-                        .add_child(chrome_id)
-                        .child(Expand::new().child_id(body)),
+                        .child(chrome_id)
+                        .child(Expand::new().child(body)),
                 )
             }
         } else {

@@ -202,8 +202,7 @@ impl Shooter {
         let pad_x = Signal::new(opts.padding);
         let pad_y = Signal::new(opts.padding);
         let _root = tree.add(
-            Padding::new(pad_y.clone(), pad_x.clone(), pad_y.clone(), pad_x.clone())
-                .child_id(inner),
+            Padding::new(pad_y.clone(), pad_x.clone(), pad_y.clone(), pad_x.clone()).child(inner),
         );
 
         let base = opts.padding * 2.0;

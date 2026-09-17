@@ -251,14 +251,8 @@ impl DropRegionSpec {
 
     /// Widget shown (centered in this region's rect, inside a popup card) while
     /// a drag with an accepted payload hovers **this** region.
-    pub fn hint(mut self, widget: impl Widget + 'static) -> Self {
-        self.hint = Some(PendingChild::Deferred(Box::new(widget)));
-        self
-    }
-
-    /// This region's hint content by pre-registered `WidgetId`.
-    pub fn hint_id(mut self, id: WidgetId) -> Self {
-        self.hint = Some(PendingChild::Id(id));
+    pub fn hint(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.hint = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
@@ -365,15 +359,21 @@ impl DropTarget {
     // ── Child slot (required) ───────────────────────────────────────────────
 
     /// The wrapped content — fills the bounds and is always visible.
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// The wrapped content by pre-registered `WidgetId`.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     // ── Zones (optional multi-region) ────────────────────────────────────────
@@ -414,14 +414,8 @@ impl DropTarget {
     /// Widget shown centered inside a popup card while a drag with an accepted
     /// payload hovers. Sugar for `.region(DropRegion::Center, |z| z.hint(w))` —
     /// the classic whole-bounds single-zone case.
-    pub fn hint(mut self, widget: impl Widget + 'static) -> Self {
+    pub fn hint(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
         self.set_region(DropRegion::Center, DropRegionSpec::new().hint(widget));
-        self
-    }
-
-    /// Hint content by pre-registered `WidgetId` (Center region).
-    pub fn hint_id(mut self, id: WidgetId) -> Self {
-        self.set_region(DropRegion::Center, DropRegionSpec::new().hint_id(id));
         self
     }
 
@@ -635,7 +629,7 @@ impl Widget for DropTarget {
         let content_id = match self.pending_child.take() {
             Some(PendingChild::Id(id)) => id,
             Some(PendingChild::Deferred(w)) => ctx.add_boxed(w),
-            None => panic!("DropTarget requires a child — call .child(...) or .child_id(...)"),
+            None => panic!("DropTarget requires a child — call .child(...) or .child(...)"),
         };
         self.child_id = Some(content_id);
 
@@ -950,7 +944,7 @@ mod tests {
     fn child_fills_bounds() {
         let mut tree = themed_tree();
         let inner = tree.add(RectWidget::new());
-        tree.add(DropTarget::new().child_id(inner));
+        tree.add(DropTarget::new().child(inner));
         tree.layout(SizeProposal::exact(300.0, 200.0));
         let cb = tree.bounds(inner);
         assert!((cb.width - 300.0).abs() < 0.01 && (cb.height - 200.0).abs() < 0.01);
@@ -965,10 +959,10 @@ mod tests {
         use crate::primitives::{Expand, Padding, ZStack};
         let mut tree = themed_tree();
         let inner = tree.add(RectWidget::new());
-        let expand = tree.add(Expand::new().child_id(inner));
-        let dt = tree.add(DropTarget::new().child_id(expand));
-        let pad = tree.add(Padding::uniform(16.0).child_id(dt));
-        let _z = tree.add(ZStack::new().child(RectWidget::new()).add_child(pad));
+        let expand = tree.add(Expand::new().child(inner));
+        let dt = tree.add(DropTarget::new().child(expand));
+        let pad = tree.add(Padding::uniform(16.0).child(dt));
+        let _z = tree.add(ZStack::new().child(RectWidget::new()).child(pad));
         tree.layout(SizeProposal::exact(800.0, 600.0));
         let b = tree.bounds(inner);
         assert!(
@@ -988,7 +982,7 @@ mod tests {
         let t = tapped.clone();
         let mut tree = themed_tree();
         let inner = tree.add(RectWidget::new().on_tap(move |_e, _ctx| t.set(true)));
-        tree.add(DropTarget::new().child_id(inner));
+        tree.add(DropTarget::new().child(inner));
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let center = tree.bounds(inner).center();
         tree.pointer_down_button(center, PointerButton::Primary);
@@ -1070,17 +1064,9 @@ mod tests {
             });
         let source_id = tree.add(TypedDragSource);
         let target_id = tree.add(target);
-        let es = tree.add(
-            crate::primitives::Expand::new()
-                .flex(1.0)
-                .child_id(source_id),
-        );
-        let et = tree.add(
-            crate::primitives::Expand::new()
-                .flex(1.0)
-                .child_id(target_id),
-        );
-        tree.add(crate::primitives::HStack::new().add_child(es).add_child(et));
+        let es = tree.add(crate::primitives::Expand::new().flex(1.0).child(source_id));
+        let et = tree.add(crate::primitives::Expand::new().flex(1.0).child(target_id));
+        tree.add(crate::primitives::HStack::new().child(es).child(et));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         let from = tree.bounds(source_id).center();
@@ -1136,17 +1122,9 @@ mod tests {
             });
         let source_id = tree.add(OtherSource);
         let target_id = tree.add(target);
-        let es = tree.add(
-            crate::primitives::Expand::new()
-                .flex(1.0)
-                .child_id(source_id),
-        );
-        let et = tree.add(
-            crate::primitives::Expand::new()
-                .flex(1.0)
-                .child_id(target_id),
-        );
-        tree.add(crate::primitives::HStack::new().add_child(es).add_child(et));
+        let es = tree.add(crate::primitives::Expand::new().flex(1.0).child(source_id));
+        let et = tree.add(crate::primitives::Expand::new().flex(1.0).child(target_id));
+        tree.add(crate::primitives::HStack::new().child(es).child(et));
         tree.layout(SizeProposal::exact(400.0, 200.0));
 
         let from = tree.bounds(source_id).center();

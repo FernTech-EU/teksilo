@@ -441,6 +441,62 @@ pub struct HandlerSet {
 }
 
 impl HandlerSet {
+    /// Absorb `base`'s declarations wherever `self` is silent.
+    ///
+    /// `self` is the **later** declaration and wins on conflict, so this reads
+    /// left to right like the builder chain that produced the two sets. It is
+    /// Compose's `Modifier.then`, expressed on the value Teksilo already has.
+    ///
+    /// The accessibility block is **merged, not assigned**: an overrides block
+    /// carries lists (`controls`, `described_by`, `custom_actions`, ...) that a
+    /// plain assignment would drop. `WidgetArena` makes the same point at its
+    /// own merge site.
+    pub fn merge_under(&mut self, mut base: HandlerSet) {
+        macro_rules! take_if_empty {
+            ($($field:ident),* $(,)?) => {
+                $( if self.$field.is_none() { self.$field = base.$field.take(); } )*
+            };
+        }
+        take_if_empty!(
+            focusable,
+            tab_index,
+            cursor,
+            clips_children,
+            ime,
+            event_pass_through,
+            gesture_dead_zone,
+            long_press_role,
+            touch_action,
+            pan_claim,
+            overscroll_behavior,
+            drag_activation,
+            multi_contact,
+            keyboard_capture,
+            hit_transparent,
+            hit_slop,
+            no_hit_slop,
+            context_menu_factory,
+            focus_within,
+            hover_within,
+            visible_when,
+        );
+        if self.access_subtree.is_none() {
+            self.access_subtree = base.access_subtree.take();
+        }
+        // `base` is the earlier block, `self` the later one, and
+        // `merge_from` lets its argument win — so fold self INTO base and
+        // keep the result.
+        match (base.access.take(), self.access.take()) {
+            (Some(mut earlier), Some(later)) => {
+                earlier.merge_from(*later);
+                self.access = Some(earlier);
+            }
+            (earlier, later) => self.access = later.or(earlier),
+        }
+        self.handlers
+            .merge_under(std::mem::take(&mut base.handlers));
+    }
+
     /// Create an empty handler set for use in `BuildContext::apply_self_handlers()`.
     pub fn new() -> Self {
         Self {
@@ -1218,6 +1274,17 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
+    /// `WidgetBuilder::clips_children_on`'s inherent twin.
+    ///
+    /// The trait spells it `clips_children_on` because `clips_children` is
+    /// already taken on `Widget` as a `&self` query. Without this twin the
+    /// trait method applies to an already-wrapped widget and wraps it a second
+    /// time; `Widget::take_handler_set` now merges through that, so it is a
+    /// wasted node rather than lost behaviour, but the twin avoids both.
+    pub fn clips_children_on(self, clips: bool) -> Self {
+        self.clips_children(clips)
+    }
+
     /// Declare this node a text-input surface, enabling the OS input method
     /// (with `ctx`'s purpose) while it is focused. See [`crate::ime`].
     pub fn ime_input(mut self, ctx: crate::ime::ImeContext) -> Self {
@@ -1956,7 +2023,14 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
     /// The call is the inherent `WidgetWithHandlers::take_handler_set`, not this
     /// one.
     fn take_handler_set(&mut self) -> Option<HandlerSet> {
-        Some(self.take_handler_set())
+        // Recursive, because a `WidgetBuilder` method with no inherent twin on
+        // this type wraps an already-wrapped widget. Lifting only the outer set
+        // silently drops every handler attached before that call.
+        let mut outer = WidgetWithHandlers::take_handler_set(self);
+        if let Some(inner) = crate::widget::Widget::take_handler_set(&mut self.widget) {
+            outer.merge_under(inner);
+        }
+        Some(outer)
     }
 }
 
@@ -2017,27 +2091,6 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// `on_long_press`. Default [`ButtonMask::PRIMARY`].
     fn accept_long_press_buttons(self, mask: impl Into<ButtonMask>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).accept_long_press_buttons(mask)
-    }
-
-    /// Dim this widget's subtree to `factor` opacity whenever the host window
-    /// is **inactive** (not focused / occluded), restoring full opacity when it
-    /// becomes active again. The opt-in, per-widget layer of the window-active
-    /// appearance model — for custom content an app wants to fade back when its
-    /// window isn't the active one. Stock widgets handle their own
-    /// inactive appearance (caret hiding, selection desaturation) and need no
-    /// wrapping. Layout- and a11y-transparent; the opacity snaps (no tween),
-    /// which is correct under `prefers-reduced-motion`. See
-    /// [`DimWhenInactive`](crate::dim_when_inactive::DimWhenInactive).
-    fn dim_when_inactive(self, factor: f32) -> crate::dim_when_inactive::DimWhenInactive {
-        crate::dim_when_inactive::DimWhenInactive::new()
-            .child(self)
-            .factor(factor)
-    }
-
-    /// [`dim_when_inactive`](Self::dim_when_inactive) with the default factor
-    /// ([`DEFAULT_DIM_FACTOR`](crate::dim_when_inactive::DEFAULT_DIM_FACTOR), 70 %).
-    fn dim_when_inactive_default(self) -> crate::dim_when_inactive::DimWhenInactive {
-        crate::dim_when_inactive::DimWhenInactive::new().child(self)
     }
 
     fn on_drag(

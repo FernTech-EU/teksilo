@@ -102,13 +102,13 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(theme_switcher)
-            .add_child(text_scale)
-            .add_child(language_switcher)
-            .add_child(shortcuts)
-            .add_child(privacy),
+            .child(theme_switcher)
+            .child(text_scale)
+            .child(language_switcher)
+            .child(shortcuts)
+            .child(privacy),
     )
 }
 
@@ -159,7 +159,7 @@ pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     border_width: 1.0
                     corner_radius: 8.0
                     padding: 16.0
-                    child_id: theme_switcher_body_id
+                    child: theme_switcher_body_id
                 }
             }
 
@@ -175,7 +175,7 @@ pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     border_width: 1.0
                     corner_radius: 8.0
                     padding: 16.0
-                    child_id: text_scale_body_id
+                    child: text_scale_body_id
                 }
             }
 
@@ -191,7 +191,7 @@ pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     border_width: 1.0
                     corner_radius: 8.0
                     padding: 16.0
-                    child_id: language_switcher_body_id
+                    child: language_switcher_body_id
                 }
             }
 
@@ -207,7 +207,7 @@ pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     border_width: 1.0
                     corner_radius: 8.0
                     padding: 16.0
-                    child_id: shortcut_body_id
+                    child: shortcut_body_id
                 }
             }
 
@@ -223,7 +223,7 @@ pub fn teksu(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
                     border_width: 1.0
                     corner_radius: 8.0
                     padding: 16.0
-                    child_id: privacy_body_id
+                    child: privacy_body_id
                 }
             }
         }

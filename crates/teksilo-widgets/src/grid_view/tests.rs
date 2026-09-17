@@ -497,14 +497,9 @@ fn keyboard_selection_chases_outer_scroll_area() {
         .tile_size(100.0, 50.0)
         .selection(sel);
     let grid_id = tree.add(grid);
-    let grid_box = tree.add(
-        FixedSize::new()
-            .width(120.0)
-            .height(200.0)
-            .child_id(grid_id),
-    );
+    let grid_box = tree.add(FixedSize::new().width(120.0).height(200.0).child(grid_id));
     let filler = tree.add(FixedLeaf(120.0, 200.0));
-    let outer_content = tree.add(VStack::new().add_child(grid_box).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(grid_box).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);

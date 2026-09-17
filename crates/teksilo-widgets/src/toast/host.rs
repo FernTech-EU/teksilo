@@ -534,12 +534,12 @@ mod tests {
         match structure {
             // install_toast as shipped before the fix: ZStack { root, host }.
             "bare" => {
-                tree.add(ZStack::new().add_child(user_root).add_child(host_id));
+                tree.add(ZStack::new().child(user_root).child(host_id));
             }
             // install_toast with the Expand fill wrap: ZStack { Expand(root), host }.
             "expand" => {
-                let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
-                tree.add(ZStack::new().add_child(filled).add_child(host_id));
+                let filled = tree.add(Expand::new().respect_intrinsic().child(user_root));
+                tree.add(ZStack::new().child(filled).child(host_id));
             }
             _ => unreachable!(),
         }
@@ -613,7 +613,7 @@ mod tests {
                     .height(30.0)
                     .child(Spacer::new()),
             );
-            let mut vstack = VStack::new().spacing(0.0).add_child(toolbar);
+            let mut vstack = VStack::new().spacing(0.0).child(toolbar);
             if with_expand {
                 let body = tree.add(
                     FixedSize::new()
@@ -621,8 +621,8 @@ mod tests {
                         .height(100.0)
                         .child(Spacer::new()),
                 );
-                let filled = tree.add(Expand::vertical().respect_intrinsic().child_id(body));
-                vstack = vstack.add_child(filled);
+                let filled = tree.add(Expand::vertical().respect_intrinsic().child(body));
+                vstack = vstack.child(filled);
             } else {
                 let body = tree.add(
                     FixedSize::new()
@@ -630,9 +630,9 @@ mod tests {
                         .height(100.0)
                         .child(Spacer::new()),
                 );
-                vstack = vstack.add_child(body);
+                vstack = vstack.child(body);
             }
-            vstack = vstack.add_child(status);
+            vstack = vstack.child(status);
             let root = tree.add(vstack);
             tree.layout(SizeProposal::exact(900.0, 600.0));
             (tree.bounds(root), tree.bounds(status))
@@ -669,8 +669,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let user_root = tree.add(small_root());
         let host_id = tree.add(ToastHost::new(registry.clone(), o));
-        let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
-        tree.add(ZStack::new().add_child(filled).add_child(host_id));
+        let filled = tree.add(Expand::new().respect_intrinsic().child(user_root));
+        tree.add(ZStack::new().child(filled).child(host_id));
 
         tree.layout(SizeProposal::exact(900.0, 600.0));
         assert_eq!(
@@ -708,8 +708,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let user_root = tree.add(small_root());
         let host_id = tree.add(ToastHost::new(registry.clone(), o));
-        let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
-        tree.add(ZStack::new().add_child(filled).add_child(host_id));
+        let filled = tree.add(Expand::new().respect_intrinsic().child(user_root));
+        tree.add(ZStack::new().child(filled).child(host_id));
 
         tree.layout(SizeProposal::exact(900.0, 600.0));
         assert_eq!(tree.children(host_id).len(), 0);
@@ -761,8 +761,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let user_root = tree.add(small_root());
         let host_id = tree.add(ToastHost::new(registry.clone(), o));
-        let filled = tree.add(Expand::new().respect_intrinsic().child_id(user_root));
-        tree.add(ZStack::new().add_child(filled).add_child(host_id));
+        let filled = tree.add(Expand::new().respect_intrinsic().child(user_root));
+        tree.add(ZStack::new().child(filled).child(host_id));
 
         let wake = tree.wake_at_handle();
 
@@ -876,8 +876,8 @@ mod tests {
                 let _ = Toast::info(lit!("Saved")).present(ctx);
             }));
             let host_id = tree.add(ToastHost::new(registry.clone(), o.clone()));
-            let filled = tree.add(Expand::new().respect_intrinsic().child_id(btn));
-            tree.add(ZStack::new().add_child(filled).add_child(host_id));
+            let filled = tree.add(Expand::new().respect_intrinsic().child(btn));
+            tree.add(ZStack::new().child(filled).child(host_id));
             tree.layout(SizeProposal::exact(900.0, 600.0));
             (tree, btn, host_id)
         };

@@ -447,6 +447,15 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      # `teksu!` bodies are macro input, so rustfmt leaves them alone. The
+      # DSL's own formatter is what keeps them consistent, and it is what
+      # renders the one dangerous mis-parse visible: a trailing comma before a
+      # child (`padding: 8.0,` then `Leaf`) reads the child as a second
+      # argument, and the formatter prints it back on one line where the
+      # reading is obvious in the diff.
+      - name: Check teksu! formatting
+        run: cargo run -q -p cargo-teksilo-fmt -- --check crates examples
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

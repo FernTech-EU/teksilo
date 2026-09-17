@@ -1360,7 +1360,7 @@ mod tests {
         let leaf = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
         let outer = tree.add(
             StackWidget::new()
-                .add_child(leaf)
+                .child(leaf)
                 .touch_action(TouchAction::PAN_Y),
         );
         tree.layout(SizeProposal::exact(100.0, 100.0));

@@ -80,7 +80,7 @@ impl Harness {
         let sink = outer.clone();
         let root = tree.add(
             ZStack::new()
-                .add_child(view_id)
+                .child(view_id)
                 .on_scroll(move |ev, _ctx| {
                     if let WidgetEvent::ScrollIntoView { target_bounds, .. } = ev {
                         sink.borrow_mut().push(*target_bounds);
@@ -234,7 +234,7 @@ fn a_non_interactive_view_still_lets_a_wheel_through_to_an_enclosing_scroller() 
     let sink = wheels.clone();
     let _root = tree.add(
         ZStack::new()
-            .add_child(view_id)
+            .child(view_id)
             .on_scroll(move |ev, _ctx| {
                 if matches!(ev, WidgetEvent::Scroll { .. }) {
                     sink.set(sink.get() + 1);

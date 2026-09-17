@@ -291,7 +291,7 @@ fn main() {
                 let layout = VStack::new()
                     .spacing(6.0)
                     .child(Padding::symmetric(6.0_f32, 12.0_f32).child(toolbar))
-                    .child(Panel::new().child_id(table_id));
+                    .child(Panel::new().child(table_id));
                 tree.add(
                     VStack::new()
                         .child(dark_mode_toolbar())

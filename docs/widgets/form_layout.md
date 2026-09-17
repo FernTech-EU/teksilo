@@ -8,9 +8,9 @@
 FormLayout — a two-column settings or preferences form layout.
 
 Children are added as label/field pairs via `FormLayout::line` (inline
-widgets) or `FormLayout::line_ids` (pre-registered IDs). Full-width rows
+widgets) or `FormLayout::line` (pre-registered IDs). Full-width rows
 that span both columns — section headers, `Divider`s, or banners — are
-added via `FormLayout::full_width` / `FormLayout::full_width_id`. The
+added via `FormLayout::full_width` / `FormLayout::full_width`. The
 label column auto-sizes to the widest label across all pairs so all field
 inputs are left-aligned. RTL layouts are handled automatically: the label
 column migrates to the trailing side and the field column moves to the
@@ -41,7 +41,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`label_gap`, `row_spacing`, `label`, `line`, `line_ids`, `full_width`, `full_width_id`
+`label_gap`, `row_spacing`, `label`, `line`, `lines`, `line_ids`, `full_width`, `full_width_rows`
 
 ## API reference
 
@@ -94,18 +94,35 @@ the page. When unset, the widget demotes to a presentational
 `GenericContainer` — an unnamed landmark is worse than no
 landmark for AT users.
 
-#### `pub fn line(mut self, label: impl Widget + 'static, field: impl Widget + 'static) -> Self`
+#### `pub fn line( mut self, label: impl teksilo_core::IntoTeksiChild, field: impl teksilo_core::IntoTeksiChild, ) -> Self`
 
 Add a label/field pair row.
 
-#### `pub fn line_ids(mut self, label_id: WidgetId, field_id: WidgetId) -> Self`
+#### `pub fn lines<L, F>(self, rows: impl IntoIterator<Item = (L, F)>) -> Self where L: teksilo_core::IntoTeksiChild, F: teksilo_core::IntoTeksiChild,`
 
-Add a label/field pair row with pre-registered widget IDs.
+Add several label/field pair rows from an iterator of `(label, field)`
+pairs, in order.
 
-#### `pub fn full_width(mut self, widget: impl Widget + 'static) -> Self`
+The loop form of `line`, and the usual one once the form is
+generated from a settings schema rather than written row by row.
+
+#### `pub fn line_ids(self, rows: impl IntoIterator<Item = (WidgetId, WidgetId)>) -> Self`
+
+Add several label/field pair rows from an iterator of
+`(label_id, field_id)` pairs, in order.
+
+`lines` accepts ids in both columns too, so this is the
+spelling that states the id types outright rather than a capability the
+other method lacks. Reach for it when a loop has already registered both
+columns and naming the type reads better than inferring it.
+
+#### `pub fn full_width(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add a full-width row spanning both columns.
 
-#### `pub fn full_width_id(mut self, id: WidgetId) -> Self`
+#### `pub fn full_width_rows( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
-Add a full-width row with a pre-registered widget ID.
+Add several full-width rows from an iterator, in order.
+
+The loop form of `full_width`, for a run of banners
+or section headers that comes from data.

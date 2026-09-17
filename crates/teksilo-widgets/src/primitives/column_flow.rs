@@ -388,22 +388,21 @@ impl ColumnFlow {
         self
     }
 
-    /// Add a pre-registered child by ID.
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.pending.push(PendingChild::Id(id));
-        self
-    }
-
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
         for widget in iter {
-            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         }
         self
     }
@@ -411,7 +410,8 @@ impl ColumnFlow {
     /// Conditionally add a child. No-op if `None`.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
-            self.pending.push(PendingChild::Deferred(Box::new(w)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(w));
         }
         self
     }
@@ -962,7 +962,7 @@ mod tests {
         let ids: Vec<_> = (0..6).map(|_| tree.add(FixedLeaf(50.0, 40.0))).collect();
         let mut flow = ColumnFlow::new().min_column_width(100.0);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         let flow_id = tree.add(flow);
         (ids, flow_id)
@@ -1027,7 +1027,7 @@ mod tests {
             .collect();
         let mut flow = ColumnFlow::new().min_column_width(100.0).item_spacing(8.0);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         let flow_id = tree.add(flow);
 
@@ -1066,7 +1066,7 @@ mod tests {
             .min_column_width(100.0)
             .column_spacing(10.0);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         tree.add(flow);
         // floor((320 + 10) / (100 + 10)) = 3 columns; width (320 - 20)/3 = 100.
@@ -1082,7 +1082,7 @@ mod tests {
         let ids: Vec<_> = (0..4).map(|_| tree.add(FixedLeaf(50.0, 40.0))).collect();
         let mut flow = ColumnFlow::new().min_column_width(100.0).item_spacing(8.0);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         tree.add(flow);
         // 2 columns: [0,1] [2,3]; second item sits at 40 + 8.
@@ -1098,7 +1098,7 @@ mod tests {
             let ids: Vec<_> = (0..6).map(|_| tree.add(FixedLeaf(50.0, 40.0))).collect();
             let mut flow = ColumnFlow::new().min_column_width(100.0).max_columns(2);
             for &id in &ids {
-                flow = flow.add_child(id);
+                flow = flow.child(id);
             }
             let flow_id = tree.add(flow);
             (ids, flow_id)
@@ -1120,7 +1120,7 @@ mod tests {
             .max_columns(2)
             .alignment(HAlignment::Center);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         tree.add(flow);
         // 1000 wide: 2 columns, each clamped 500 -> 300. Used = 600,
@@ -1140,12 +1140,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(80.0, 40.0));
         let b = tree.add(FixedLeaf(60.0, 30.0));
-        let flow = tree.add(
-            ColumnFlow::new()
-                .min_column_width(50.0)
-                .add_child(a)
-                .add_child(b),
-        );
+        let flow = tree.add(ColumnFlow::new().min_column_width(50.0).child(a).child(b));
         tree.layout(SizeProposal {
             width: None,
             height: Some(400.0),
@@ -1169,8 +1164,8 @@ mod tests {
                 .min_column_width(50.0)
                 .max_columns(3)
                 .column_spacing(10.0)
-                .add_child(a)
-                .add_child(b),
+                .child(a)
+                .child(b),
         );
         tree.layout(SizeProposal {
             width: None,
@@ -1201,7 +1196,7 @@ mod tests {
         let ids: Vec<_> = (0..4).map(|_| tree.add(FixedLeaf(50.0, 40.0))).collect();
         let mut flow = ColumnFlow::new().min_column_width(100.0);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         tree.add(flow);
         tree.layout(SizeProposal::exact(200.0, 400.0));
@@ -1247,7 +1242,7 @@ mod tests {
         let count = flow.column_count_signal();
         let mut f = flow;
         for &id in &ids {
-            f = f.add_child(id);
+            f = f.child(id);
         }
         tree.add(f);
 
@@ -1321,7 +1316,7 @@ mod tests {
             .collect();
         let mut flow = ColumnFlow::new().min_column_width(100.0);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         let flow_id = tree.add(flow);
         tree.layout(SizeProposal::exact(200.0, 400.0));
@@ -1372,7 +1367,7 @@ mod tests {
             .min_column_width(100.0)
             .semantic_list(true);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         let flow_id = tree.add(flow);
         tree.layout(SizeProposal::exact(300.0, 400.0));
@@ -1428,7 +1423,7 @@ mod tests {
             flow = flow.column_rule(1.0, teksilo_tokens::BorderRole::Divider);
         }
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         tree.add(flow)
     }
@@ -1482,7 +1477,7 @@ mod tests {
             .column_spacing(20.0)
             .column_rule(1.0, teksilo_tokens::BorderRole::Divider);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         tree.add(flow);
         // floor((340 + 20) / 120) = 3 columns; width = (340 - 40)/3 = 100.
@@ -1503,7 +1498,7 @@ mod tests {
             .min_column_width(100.0)
             .semantic_list(true);
         for &id in &ids {
-            flow = flow.add_child(id);
+            flow = flow.child(id);
         }
         tree.add(flow);
         tree.layout(SizeProposal::exact(200.0, 400.0));

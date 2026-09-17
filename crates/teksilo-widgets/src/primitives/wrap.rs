@@ -65,22 +65,21 @@ impl Wrap {
         self
     }
 
-    /// Add a pre-registered child by ID.
-    pub fn add_child(mut self, id: WidgetId) -> Self {
-        self.pending.push(PendingChild::Id(id));
-        self
-    }
-
     /// Add an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending.push(PendingChild::Deferred(Box::new(widget)));
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending
+            .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
 
     /// Add multiple inline children from an iterator.
-    pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+    pub fn children(
+        mut self,
+        iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>,
+    ) -> Self {
         for widget in iter {
-            self.pending.push(PendingChild::Deferred(Box::new(widget)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(widget));
         }
         self
     }
@@ -88,7 +87,8 @@ impl Wrap {
     /// Conditionally add a child. No-op if `None`.
     pub fn child_opt(mut self, widget: Option<impl Widget + 'static>) -> Self {
         if let Some(w) = widget {
-            self.pending.push(PendingChild::Deferred(Box::new(w)));
+            self.pending
+                .push(teksilo_core::IntoTeksiChild::into_pending(w));
         }
         self
     }
@@ -275,7 +275,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let a = tree.add(FixedLeaf(40.0, 20.0));
         let b = tree.add(FixedLeaf(40.0, 20.0));
-        let _wrap = tree.add(Wrap::new().spacing(10.0).add_child(a).add_child(b));
+        let _wrap = tree.add(Wrap::new().spacing(10.0).child(a).child(b));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         assert!((tree.bounds(a).y - 0.0).abs() < 0.01);
@@ -293,9 +293,9 @@ mod tests {
             Wrap::new()
                 .spacing(10.0)
                 .line_spacing(5.0)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
+                .child(a)
+                .child(b)
+                .child(c),
         );
         tree.layout(SizeProposal::exact(200.0, 200.0));
 
@@ -317,9 +317,9 @@ mod tests {
             Wrap::new()
                 .spacing(10.0)
                 .line_spacing(5.0)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
+                .child(a)
+                .child(b)
+                .child(c),
         );
         tree.layout(SizeProposal {
             width: Some(140.0),
@@ -347,13 +347,7 @@ mod tests {
         let a = tree.add(FixedLeaf(40.0, 20.0));
         let b = tree.add(FixedLeaf(50.0, 25.0));
         let c = tree.add(FixedLeaf(60.0, 30.0));
-        let _wrap = tree.add(
-            Wrap::new()
-                .spacing(10.0)
-                .add_child(a)
-                .add_child(b)
-                .add_child(c),
-        );
+        let _wrap = tree.add(Wrap::new().spacing(10.0).child(a).child(b).child(c));
         tree.layout(SizeProposal::exact(300.0, 100.0));
 
         // Before dormant: a at x=0, b at x=50, c at x=110

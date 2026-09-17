@@ -1889,7 +1889,7 @@ mod tests {
             }
             EventResponse::Ignored
         }));
-        let parent = tree.add(StackWidget::new().add_child(child));
+        let parent = tree.add(StackWidget::new().child(child));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // A press inside the child captures the pointer to it.
@@ -3439,7 +3439,7 @@ mod tick_arbitration_tests {
         }));
         tree.add(
             StackWidget::new()
-                .add_child(child)
+                .child(child)
                 .on_drag(|_phase, _c| {})
                 .on_long_press(move |_e, _c| flag.set(true)),
         );

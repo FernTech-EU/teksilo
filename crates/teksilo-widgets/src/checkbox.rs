@@ -35,7 +35,7 @@
 //! ## Accessibility
 //!
 //! Announces as `Role::CheckBox`. A label is required in debug builds
-//! unless `.labels_hidden(true)` is set (for embedding inside a composite
+//! unless `.labelled_externally()` is set (for embedding inside a composite
 //! row that owns the AT name). Keyboard: Space toggles; lone-KeyUp guard
 //! prevents spurious toggle when focus is restored after a shortcut.
 //!
@@ -100,11 +100,15 @@ impl CheckKind {
         }
     }
 
-    fn toggle(&self) {
+    /// Flip, and report the checked-ness the activation produced. Activation
+    /// never yields `Indeterminate` (see below), so a `bool` is lossless for
+    /// both kinds and `Checkbox::on_change` can take one.
+    fn toggle(&self) -> bool {
         match self {
             CheckKind::TwoState(s) => {
                 let current = s.get();
                 s.set(!current);
+                !current
             }
             CheckKind::TriState(s) => {
                 // User clicks toggle Checked ↔ Unchecked. The
@@ -121,6 +125,7 @@ impl CheckKind {
                     CheckState::Checked
                 };
                 s.set(next);
+                matches!(next, CheckState::Checked)
             }
         }
     }
@@ -155,12 +160,13 @@ pub struct Checkbox {
     /// for providing the AT name (typically via its own `set_name(...)`
     /// or an `access_label*` override). Used by `StandardListItem` /
     /// `StandardTreeItem`.
-    labels_hidden: bool,
+    labelled_externally: bool,
     tooltip_text: Option<LocalizedString>,
     rich_tooltip_source: Option<crate::tooltip::RichTooltipSource>,
     composite_tooltip_content: Option<Box<dyn teksilo_core::widget::Widget>>,
     variant: CheckboxVariant,
     style_override: Option<SharedCheckboxStyle>,
+    on_change: Option<Rc<dyn Fn(bool, &mut EventContext)>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -172,12 +178,13 @@ impl Checkbox {
             caption: None,
             kind: CheckKind::TwoState(checked),
             enabled: Prop::Static(true),
-            labels_hidden: false,
+            labelled_externally: false,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             variant: CheckboxVariant::default(),
             style_override: None,
+            on_change: None,
             root_child_id: None,
         }
     }
@@ -195,39 +202,61 @@ impl Checkbox {
             caption: None,
             kind: CheckKind::TriState(state),
             enabled: Prop::Static(true),
-            labels_hidden: false,
+            labelled_externally: false,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
             variant: CheckboxVariant::default(),
             style_override: None,
+            on_change: None,
             root_child_id: None,
         }
     }
 
-    /// Suppress the visual label/caption AND the debug-time
-    /// "missing accessible label" assertion. Use this **only** when
-    /// the checkbox is embedded inside a composite that owns the
-    /// row's accessible name (e.g. `StandardListItem` /
-    /// `StandardTreeItem`, where the row's `accessibility(builder)`
-    /// calls `set_name(...)` with the row label).
+    /// Run `f` when the **user** checks or unchecks this box, with the
+    /// checked-ness the activation produced and an `EventContext`, so it can do
+    /// what a bare `Signal` write cannot (`ctx.send_intent(...)`,
+    /// `ctx.set_theme(...)`, opening a window). Fires for the pointer, for
+    /// `Space`, for an assistive-technology `Click`, and for `Space` on a data
+    /// view's focused row.
     ///
-    /// **A11y contract:** when `labels_hidden(true)` is set, the
-    /// caller MUST guarantee that an addressable AT ancestor
-    /// provides the name — either via that ancestor's own
-    /// `accessibility()` impl or a builder-level
+    /// Does **not** fire for programmatic writes to the bound signal — there is
+    /// no event in flight to carry. Observe the signal for that. The signal
+    /// stays the source of truth either way: it is written first, and `f` sees
+    /// the value it now holds.
+    ///
+    /// A tristate checkbox reports a `bool` too: activation cycles
+    /// `Checked` ↔ `Unchecked` only, and `Indeterminate` is external-source-only.
+    pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self {
+        self.on_change = Some(Rc::new(f));
+        self
+    }
+
+    /// Declare that this checkbox's accessible name comes from an
+    /// ancestor, suppressing the visual label/caption AND the
+    /// debug-time "missing accessible label" assertion. Use it when
+    /// the checkbox is embedded inside a composite that owns the
+    /// row's name (e.g. `StandardListItem` / `StandardTreeItem`,
+    /// where the row's `accessibility(builder)` calls `set_name(...)`
+    /// with the row label).
+    ///
+    /// **A11y contract:** the caller MUST guarantee that an
+    /// addressable AT ancestor provides the name — either via that
+    /// ancestor's own `accessibility()` impl or a builder-level
     /// `.access_label*` override. Without it the AT tree exposes a
     /// `Role::CheckBox` node with no name; screen readers announce
     /// "checkbox, checked" with no context. The Outlook /
     /// Files-app row pattern (where the row label covers the
     /// embedded checkbox) is the supported use case.
-    pub fn labels_hidden(mut self, hidden: bool) -> Self {
-        self.labels_hidden = hidden;
+    ///
+    /// Spelled the same way on [`Toggle`](crate::toggle::Toggle).
+    pub fn labelled_externally(mut self) -> Self {
+        self.labelled_externally = true;
         self
     }
 
     /// Set the visible label rendered to the right of the checkbox box,
-    /// also used as the AT name. Required unless `.labels_hidden(true)` is set.
+    /// also used as the AT name. Required unless `.labelled_externally()` is set.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -388,8 +417,8 @@ impl Widget for Checkbox {
 
         let mut row = HStack::new()
             .spacing(cb_dims::CHECKBOX_LABEL_GAP)
-            .add_child(body_id);
-        if !self.labels_hidden
+            .child(body_id);
+        if !self.labelled_externally
             && let Some(ref label) = self.label
         {
             let label_widget = TextWidget::new(label.clone())
@@ -405,16 +434,11 @@ impl Widget for Checkbox {
                     .color(TextRole::Secondary)
                     .a11y_hidden();
                 let caption_id = ctx.add(caption_widget);
-                ctx.add(
-                    VStack::new()
-                        .spacing(2.0)
-                        .add_child(label_id)
-                        .add_child(caption_id),
-                )
+                ctx.add(VStack::new().spacing(2.0).child(label_id).child(caption_id))
             } else {
                 label_id
             };
-            row = row.add_child(label_column_id);
+            row = row.child(label_column_id);
         }
         // When a caption is present, top-align the row so the box sits next
         // to the label's first line rather than the center of both lines.
@@ -426,9 +450,8 @@ impl Widget for Checkbox {
         // a density switch moves both together.
         let style_recipe = crate::styles::CheckboxRecipe::for_tokens(&ctx.theme().input);
         let row_id = ctx.add(row);
-        let root_id = ctx.add(
-            MinSize::new(style_recipe.box_hit_area, style_recipe.box_hit_area).child_id(row_id),
-        );
+        let root_id = ctx
+            .add(MinSize::new(style_recipe.box_hit_area, style_recipe.box_hit_area).child(row_id));
 
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
@@ -447,6 +470,9 @@ impl Widget for Checkbox {
         let kind_tap = self.kind.clone();
         let kind_key = self.kind.clone();
         let kind_access = self.kind.clone();
+        let changed_tap = self.on_change.clone();
+        let changed_key = self.on_change.clone();
+        let changed_access = self.on_change.clone();
         let int_tap = interaction.clone();
         let int_hover = interaction.clone();
         let int_key = interaction.clone();
@@ -470,7 +496,10 @@ impl Widget for Checkbox {
             .on_tap({
                 let hovering = pointer_over.clone();
                 move |_pos, ctx: &mut EventContext| {
-                    kind_tap.toggle();
+                    let now = kind_tap.toggle();
+                    if let Some(ref f) = changed_tap {
+                        f(now, ctx);
+                    }
                     // A mouse or a pen is still over the control after the
                     // release; a finger is gone and sends no hover-leave to
                     // correct a `Hovered` state with.
@@ -494,7 +523,7 @@ impl Widget for Checkbox {
                 }
             })
             .on_key({
-                move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space, ..
@@ -512,7 +541,10 @@ impl Widget for Checkbox {
                             if int_key.get() != InteractionState::Pressed {
                                 return EventResponse::Ignored;
                             }
-                            kind_key.toggle();
+                            let now = kind_key.toggle();
+                            if let Some(ref f) = changed_key {
+                                f(now, ctx);
+                            }
                             int_key.set(InteractionState::Focused);
                             EventResponse::Handled
                         }
@@ -533,10 +565,13 @@ impl Widget for Checkbox {
             })
             .on_access_action({
                 move |action: teksilo_core::accesskit::Action,
-                      _ctx: &mut EventContext|
+                      ctx: &mut EventContext|
                       -> EventResponse {
                     if action == teksilo_core::accesskit::Action::Click {
-                        kind_access.toggle();
+                        let now = kind_access.toggle();
+                        if let Some(ref f) = changed_access {
+                            f(now, ctx);
+                        }
                         EventResponse::Handled
                     } else {
                         EventResponse::Ignored
@@ -564,7 +599,16 @@ impl Widget for Checkbox {
         // Space/Enter handling above.
         {
             let kind_space = self.kind.clone();
-            ctx.set_keyboard_toggle(ctx.self_id(), std::rc::Rc::new(move || kind_space.toggle()));
+            let changed_space = self.on_change.clone();
+            ctx.set_keyboard_toggle(
+                ctx.self_id(),
+                std::rc::Rc::new(move |ctx: &mut EventContext| {
+                    let now = kind_space.toggle();
+                    if let Some(ref f) = changed_space {
+                        f(now, ctx);
+                    }
+                }),
+            );
         }
 
         vec![root_id]
@@ -598,11 +642,11 @@ impl Widget for Checkbox {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         debug_assert!(
-            self.label.is_some() || self.labels_hidden,
+            self.label.is_some() || self.labelled_externally,
             "Checkbox is missing an accessible label — \
              screen readers will announce \"checkbox\" with no context. \
              Call .label(...) when constructing the widget, or \
-             .labels_hidden(true) when embedded in a composite that \
+             .labelled_externally() when embedded in a composite that \
              owns the AT name."
         );
         builder.set_role(teksilo_core::accesskit::Role::CheckBox);
@@ -703,6 +747,84 @@ mod tests {
         assert!(checked.get());
         tree.press_key(Key::Space, Modifiers::NONE);
         assert!(!checked.get());
+    }
+
+    #[test]
+    fn on_change_fires_for_every_user_path_and_reports_the_new_value() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let checked = Signal::new(false);
+        let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let cb = tree.add(
+            Checkbox::new(checked.clone())
+                .label(lit!("Accept"))
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        tree.click(cb);
+        tree.focus(cb);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(cb),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+
+        // Pointer, keyboard, assistive technology — and each reports the value
+        // the activation produced, not the one before it.
+        assert_eq!(*seen.borrow(), vec![true, false, true]);
+        assert!(checked.get());
+    }
+
+    #[test]
+    fn on_change_is_silent_for_a_programmatic_write() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let checked = Signal::new(false);
+        let fired = Rc::new(Cell::new(false));
+        let sink = fired.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let _cb = tree.add(
+            Checkbox::new(checked.clone())
+                .label(lit!("Accept"))
+                .on_change(move |_now, _ctx| sink.set(true)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        // No event in flight to carry, so nothing to report. Observe the
+        // signal for this direction.
+        checked.set(true);
+        assert!(!fired.get());
+    }
+
+    #[test]
+    fn on_change_reports_a_bool_from_a_tristate() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let state = Signal::new(CheckState::Indeterminate);
+        let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let cb = tree.add(
+            Checkbox::tristate(state.clone())
+                .label(lit!("All"))
+                .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 80.0));
+
+        // Activation from Indeterminate checks the whole, then unchecks; it
+        // never produces Indeterminate, which is why a bool is lossless here.
+        tree.click(cb);
+        tree.click(cb);
+        assert_eq!(*seen.borrow(), vec![true, false]);
+        assert_eq!(state.get(), CheckState::Unchecked);
     }
 
     #[test]

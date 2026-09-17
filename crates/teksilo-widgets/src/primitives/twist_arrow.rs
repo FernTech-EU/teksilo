@@ -241,8 +241,8 @@ mod tests {
         let label = tree.add(TextWidget::new(teksilo_i18n::lit!("Documents")));
         let _row = tree.add(
             HStack::new()
-                .add_child(arrow)
-                .add_child(label)
+                .child(arrow)
+                .child(label)
                 .on_tap(move |_e, _c| row_taps.set(row_taps.get() + 1)),
         );
         tree.layout(SizeProposal::exact(240.0, 28.0));

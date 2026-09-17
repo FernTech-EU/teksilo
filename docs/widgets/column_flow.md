@@ -74,7 +74,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`min_column_width`, `max_column_width`, `max_columns`, `column_spacing`, `item_spacing`, `alignment`, `column_rule`, `semantic_list`, `add_child`, `child`, `children`, `child_opt`, `column_count_signal`
+`min_column_width`, `max_column_width`, `max_columns`, `column_spacing`, `item_spacing`, `alignment`, `column_rule`, `semantic_list`, `child`, `children`, `child_opt`, `column_count_signal`
 
 ## API reference
 
@@ -180,15 +180,11 @@ Off by default: a layout primitive should not invent semantics its
 content may not have. Turn it on when the children genuinely *are* a
 list of peers. Costs one extra node per child.
 
-#### `pub fn add_child(mut self, id: WidgetId) -> Self`
-
-Add a pre-registered child by ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
-#### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+#### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
 

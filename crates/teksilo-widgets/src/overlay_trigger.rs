@@ -84,7 +84,10 @@ impl OverlayTrigger {
 
     /// Wrap any widget as a popover trigger.
     pub fn around(widget: impl Widget + 'static) -> Self {
-        Self::from_pending(PendingChild::Deferred(Box::new(widget)), HandlerSet::new())
+        Self::from_pending(
+            teksilo_core::IntoTeksiChild::into_pending(widget),
+            HandlerSet::new(),
+        )
     }
 
     /// [`around`](Self::around) for a widget already inserted by id.

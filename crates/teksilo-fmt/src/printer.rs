@@ -235,6 +235,17 @@ impl<'a> Printer<'a> {
         match item {
             BodyItem::Property(p) => self.print_property(p),
             BodyItem::Child(el) => self.print_element(el),
+            BodyItem::ExprChild { expr, .. } => {
+                // `write_verbatim_multiline`, not a plain slice: a helper call
+                // at body position routinely spans lines (`wide_chart(\n a,\n
+                // b,\n)`), and printing the slice as one token re-indents every
+                // continuation line by the block's own indent. Same treatment
+                // as a multi-line property value, which is the same shape.
+                self.write_verbatim_multiline(&expr.to_token_stream());
+                if let Some(end) = ts_end(&expr.to_token_stream()) {
+                    self.cursor = self.cursor.max(end);
+                }
+            }
             BodyItem::Binding { name, element } => {
                 self.write(&name.to_string());
                 self.write(" = ");
@@ -488,6 +499,7 @@ fn body_item_to_tokens(item: &BodyItem, ts: &mut TokenStream) {
             }
         }
         BodyItem::Child(el) => element_to_tokens(el, ts),
+        BodyItem::ExprChild { expr, .. } => expr.to_tokens(ts),
         BodyItem::Binding { name, element } => {
             name.to_tokens(ts);
             element_to_tokens(element, ts);

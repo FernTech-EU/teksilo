@@ -132,8 +132,8 @@ impl Widget for GroupHeader {
         let row_id = ctx.add(
             HStack::new()
                 .spacing(self.gap)
-                .add_child(label_id)
-                .add_child(rule_id),
+                .child(label_id)
+                .child(rule_id),
         );
         self.root_child_id = Some(row_id);
 

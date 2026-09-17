@@ -109,11 +109,40 @@ impl RadioGroup {
         self
     }
 
+    /// Add several radio buttons from an iterator, in order.
+    ///
+    /// The loop form of [`radio`](Self::radio), and the usual one: a radio group
+    /// is normally generated from the list of choices it offers. Each button
+    /// gets the group's shared sibling-id buffer exactly as `radio` gives it.
+    pub fn radios(self, buttons: impl IntoIterator<Item = RadioButton>) -> Self {
+        buttons.into_iter().fold(self, Self::radio)
+    }
+
     /// Add a non-radio child (divider, caption label, etc.). Passed
     /// straight through to the internal stack without a11y wiring.
     pub fn child(mut self, widget: impl Widget + 'static) -> Self {
         self.pending.push(RadioGroupChild::Other(Box::new(widget)));
         self
+    }
+
+    /// Add several non-radio children from an iterator, in order.
+    ///
+    /// The loop form of [`child`](Self::child). Like `child`, none of these get
+    /// the group's a11y wiring: use [`radios`](Self::radios) for the buttons.
+    pub fn children(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+        iter.into_iter().fold(self, Self::child)
+    }
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -164,14 +193,14 @@ impl Widget for RadioGroup {
             Orientation::Vertical => {
                 let mut stack = VStack::new().spacing(spacing);
                 for id in child_ids {
-                    stack = stack.add_child(id);
+                    stack = stack.child(id);
                 }
                 ctx.add(stack)
             }
             Orientation::Horizontal => {
                 let mut stack = HStack::new().spacing(spacing);
                 for id in child_ids {
-                    stack = stack.add_child(id);
+                    stack = stack.child(id);
                 }
                 ctx.add(stack)
             }

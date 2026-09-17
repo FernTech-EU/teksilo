@@ -128,7 +128,7 @@ fn dual_role_captor_with(activation: Option<DragActivation>, long_press: bool) -
     let cancels = log.cancels.clone();
 
     let view = Stack::new()
-        .add_child(leaf)
+        .child(leaf)
         .pan_claim(PanClaim::both())
         .on_drag(move |phase, _c| {
             if matches!(phase, DragPhase::Started { .. }) {
@@ -172,7 +172,7 @@ fn dual_role_ancestor() -> Fixture {
     let mut tree = WidgetTree::new();
     tree.set_density(TargetDensity::Compact);
     let leaf = tree.add(Leaf::new());
-    let item = tree.add(Stack::new().add_child(leaf).on_tap(|_e, _c| {}));
+    let item = tree.add(Stack::new().child(leaf).on_tap(|_e, _c| {}));
 
     let drag_started = log.drag_started.clone();
     let scrolls = log.scrolls.clone();
@@ -180,7 +180,7 @@ fn dual_role_ancestor() -> Fixture {
 
     let view = tree.add(
         Stack::new()
-            .add_child(item)
+            .child(item)
             .pan_claim(PanClaim::both())
             .on_drag(move |phase, _c| {
                 if matches!(phase, DragPhase::Started { .. }) {
@@ -469,7 +469,7 @@ fn tapping_claimant() -> Fixture {
 
     let view = tree.add(
         Stack::new()
-            .add_child(leaf)
+            .child(leaf)
             .pan_claim(PanClaim::vertical())
             .on_scroll(move |_e, _c| {
                 scrolls.set(scrolls.get() + 1);
@@ -742,7 +742,7 @@ fn per_press_activation(answer: Rc<Cell<Option<DragActivation>>>) -> Fixture {
 
     let view = tree.add(
         Stack::new()
-            .add_child(leaf)
+            .child(leaf)
             .pan_claim(PanClaim::both())
             .on_pointer_event(move |event, ctx| {
                 if matches!(event, WidgetEvent::PointerDown { .. })
@@ -891,7 +891,7 @@ fn dual_role_with_menus(child_menu: bool, view_menu: bool, child_long_press: boo
     tree.set_density(TargetDensity::Compact);
     let leaf = tree.add(Leaf::new());
 
-    let mut child = Stack::new().add_child(leaf).on_tap(|_e, _c| {});
+    let mut child = Stack::new().child(leaf).on_tap(|_e, _c| {});
     if child_menu {
         let counter = menus.clone();
         child = child.context_menu(move |_pos, _ctx| {
@@ -909,7 +909,7 @@ fn dual_role_with_menus(child_menu: bool, view_menu: bool, child_long_press: boo
     let scrolls = log.scrolls.clone();
     let cancels = log.cancels.clone();
     let mut view = Stack::new()
-        .add_child(child)
+        .child(child)
         .pan_claim(PanClaim::both())
         .on_drag(move |phase, _c| {
             if matches!(phase, DragPhase::Started { .. }) {
@@ -1027,7 +1027,7 @@ fn a_dual_role_nodes_own_hold_is_still_spent_on_its_own_grab() {
     let drag_started = log.drag_started.clone();
     let view = tree.add(
         Stack::new()
-            .add_child(leaf)
+            .child(leaf)
             .pan_claim(PanClaim::both())
             .on_drag(move |phase, _c| {
                 if matches!(phase, DragPhase::Started { .. }) {
@@ -1103,7 +1103,7 @@ fn a_view_menu_reopens_when_the_press_is_not_a_grab() {
     let drag_started = log.drag_started.clone();
     let view = tree.add(
         Stack::new()
-            .add_child(leaf)
+            .child(leaf)
             .pan_claim(PanClaim::both())
             .on_pointer_event(|event, ctx| {
                 if matches!(event, WidgetEvent::PointerDown { .. }) {
@@ -1312,7 +1312,7 @@ fn a_deferred_drag_ancestor_does_not_eat_the_hold_of_a_child() {
     let mn = menus.clone();
     let child = tree.add(
         Stack::new()
-            .add_child(leaf)
+            .child(leaf)
             .on_tap(|_e, _c| {})
             .on_long_press(move |_e, _c| lp.set(lp.get() + 1))
             .context_menu(move |_pos, _ctx| {
@@ -1321,11 +1321,11 @@ fn a_deferred_drag_ancestor_does_not_eat_the_hold_of_a_child() {
             }),
     );
     // A plain drag-capable container — no claim of its own.
-    let container = tree.add(Stack::new().add_child(child).on_drag(|_p, _c| {}));
+    let container = tree.add(Stack::new().child(child).on_drag(|_p, _c| {}));
     let sc = scrolls.clone();
     let _scroller = tree.add(
         Stack::new()
-            .add_child(container)
+            .child(container)
             .pan_claim(PanClaim::vertical())
             .on_scroll(move |_e, _c| {
                 sc.set(sc.get() + 1);

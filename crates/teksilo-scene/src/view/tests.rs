@@ -1384,7 +1384,7 @@ fn zoom_about_cursor_keeps_anchor_in_an_offset_scene_view() {
     let mut tree = WidgetTree::new();
     let spacer = tree.add(Filler(400.0, 120.0));
     let scene_id = tree.add(SceneView::new(Scene::new()).default_size(400.0, 300.0));
-    let _root = tree.add(VStack::new().add_child(spacer).add_child(scene_id));
+    let _root = tree.add(VStack::new().child(spacer).child(scene_id));
     tree.layout(SizeProposal::exact(400.0, 420.0));
 
     // Sanity: the view really is offset (otherwise the test proves nothing).
@@ -1573,7 +1573,7 @@ fn heavyweight_and_lightweight_project_identically_in_an_offset_view() {
         let mut tree = WidgetTree::new();
         let spacer = tree.add(Spacer(120.0));
         let scene_id = tree.add(SceneView::new(scene).default_size(600.0, 400.0));
-        let _root = tree.add(VStack::new().add_child(spacer).add_child(scene_id));
+        let _root = tree.add(VStack::new().child(spacer).child(scene_id));
         tree.layout(SizeProposal::exact(600.0, 520.0));
 
         assert!(

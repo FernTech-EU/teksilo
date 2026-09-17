@@ -95,8 +95,8 @@ pub enum ToolBoxOrientation {
 // ---------------------------------------------------------------------------
 
 /// One section of a [`ToolBox`]. Construct with [`ToolBoxItem::new`] and pass
-/// to [`ToolBox::add`], or use the convenience [`ToolBox::item`] /
-/// [`ToolBox::item_id`] builders directly when leading / trailing slots
+/// to [`ToolBox::add`], or use the convenience [`ToolBox::item`] builder
+/// directly (it takes a widget or a `WidgetId`) when leading / trailing slots
 /// and tooltip are not needed.
 ///
 /// Layout of the header row:
@@ -151,7 +151,7 @@ impl ToolBoxItem {
             tooltip_text: None,
             rich_tooltip: None,
             composite_tooltip_content: None,
-            content: PendingChild::Deferred(Box::new(content)),
+            content: teksilo_core::IntoTeksiChild::into_pending(content),
             enabled: Prop::Static(true),
         }
     }
@@ -383,13 +383,15 @@ impl ToolBox {
     /// Append an item with an inline content widget. Convenience wrapper
     /// around [`ToolBox::add`] that skips the [`ToolBoxItem`] builder for
     /// the common label-plus-content case.
-    pub fn item(self, label: impl Into<LocalizedString>, content: impl Widget + 'static) -> Self {
-        self.add(ToolBoxItem::new(label, content))
-    }
-
-    /// Append an item whose content is a pre-registered widget id.
-    pub fn item_id(self, label: impl Into<LocalizedString>, content_id: WidgetId) -> Self {
-        self.add(ToolBoxItem::new_id(label, content_id))
+    pub fn item(
+        self,
+        label: impl Into<LocalizedString>,
+        content: impl teksilo_core::IntoTeksiChild,
+    ) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(content) {
+            teksilo_core::PendingChild::Id(id) => self.add(ToolBoxItem::new_id(label, id)),
+            teksilo_core::PendingChild::Deferred(w) => self.add(ToolBoxItem::new(label, w)),
+        }
     }
 
     /// Append a fully-built [`ToolBoxItem`] — required when an icon,
@@ -647,13 +649,13 @@ impl Widget for ToolBoxHeader {
             ctx.add(
                 FixedSize::new()
                     .height(TOOL_BOX_INDICATOR_THICKNESS)
-                    .child_id(indicator_rect_id),
+                    .child(indicator_rect_id),
             )
         } else {
             ctx.add(
                 FixedSize::new()
                     .width(TOOL_BOX_INDICATOR_THICKNESS)
-                    .child_id(indicator_rect_id),
+                    .child(indicator_rect_id),
             )
         };
 
@@ -677,25 +679,25 @@ impl Widget for ToolBoxHeader {
             let label_id = ctx.add(RotatedLabel::new(self.label.clone(), text_role));
 
             let mut col = VStack::new().spacing(tool_box_icon_text_spacing(&ctx.theme().input));
-            col = col.add_child(indicator_id);
+            col = col.child(indicator_id);
             if let Some(id) = leading_id {
-                col = col.add_child(id);
+                col = col.child(id);
             }
             col = col
-                .add_child(chevron_left_id)
-                .add_child(chevron_right_id)
-                .add_child(label_id);
+                .child(chevron_left_id)
+                .child(chevron_right_id)
+                .child(label_id);
             if let Some(id) = trailing_id {
-                col = col.add_child(id);
+                col = col.child(id);
             }
-            col = col.add_child(spacer_id);
+            col = col.child(spacer_id);
             let col_id = ctx.add(col);
             ctx.add(
                 crate::primitives::Padding::symmetric(
                     tool_box_header_padding_horizontal(&ctx.theme().input),
                     0.0,
                 )
-                .child_id(col_id),
+                .child(col_id),
             )
         } else {
             // Horizontal row:
@@ -715,15 +717,15 @@ impl Widget for ToolBoxHeader {
             ctx.visible_when(chevron_right_id, is_selected.map(|v| !*v));
 
             let mut row = HStack::new().spacing(tool_box_icon_text_spacing(&ctx.theme().input));
-            row = row.add_child(indicator_id);
+            row = row.child(indicator_id);
             if let Some(id) = leading_id {
-                row = row.add_child(id);
+                row = row.child(id);
             }
-            row = row.add_child(label_id).add_child(spacer_id);
+            row = row.child(label_id).child(spacer_id);
             if let Some(id) = trailing_id {
-                row = row.add_child(id);
+                row = row.child(id);
             }
-            row = row.add_child(chevron_down_id).add_child(chevron_right_id);
+            row = row.child(chevron_down_id).child(chevron_right_id);
             let row_id = ctx.add(row);
             // The indicator sits inset by the container's padding (IntelliJ
             // Settings convention).
@@ -732,7 +734,7 @@ impl Widget for ToolBoxHeader {
                     0.0,
                     tool_box_header_padding_horizontal(&ctx.theme().input),
                 )
-                .child_id(row_id),
+                .child(row_id),
             )
         };
 
@@ -750,21 +752,21 @@ impl Widget for ToolBoxHeader {
                 .border_width(focus_border_width),
         );
         let focus_padded_id =
-            ctx.add(crate::primitives::Padding::uniform(focus_inset).child_id(focus_rect_id));
+            ctx.add(crate::primitives::Padding::uniform(focus_inset).child(focus_rect_id));
         let zstack_id = ctx.add(
             ZStack::new()
-                .add_child(bg_rect_id)
-                .add_child(focus_padded_id)
-                .add_child(padded_content_id),
+                .child(bg_rect_id)
+                .child(focus_padded_id)
+                .child(padded_content_id),
         );
 
         // Enforce the Int UI 28 dp extent on the cross axis: min height
         // for a horizontal header row, min width for a vertical strip.
         let header_extent = tool_box_header_min_height(&ctx.theme().input);
         let root_id = if is_horizontal {
-            ctx.add(MinSize::new(header_extent, 0.0).child_id(zstack_id))
+            ctx.add(MinSize::new(header_extent, 0.0).child(zstack_id))
         } else {
-            ctx.add(MinSize::new(0.0, header_extent).child_id(zstack_id))
+            ctx.add(MinSize::new(0.0, header_extent).child(zstack_id))
         };
         self.root_child_id = Some(root_id);
 
@@ -1383,14 +1385,14 @@ impl Widget for ToolBox {
             ToolBoxOrientation::Vertical => {
                 let mut stack = VStack::new().spacing(0.0);
                 for id in child_ids {
-                    stack = stack.add_child(id);
+                    stack = stack.child(id);
                 }
                 ctx.add(stack)
             }
             ToolBoxOrientation::Horizontal => {
                 let mut stack = HStack::new().spacing(0.0);
                 for id in child_ids {
-                    stack = stack.add_child(id);
+                    stack = stack.child(id);
                 }
                 ctx.add(stack)
             }

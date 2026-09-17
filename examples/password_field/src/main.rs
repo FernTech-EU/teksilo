@@ -121,7 +121,7 @@ impl Widget for Root {
                     let btn = Button::new(lit!("Sign in")).variant(ButtonVariant::Filled);
                     let id = ctx.add(btn);
                     ctx.enabled_when(id, can_submit);
-                    HStack::new().child(Spacer::new()).add_child(id)
+                    HStack::new().child(Spacer::new()).child(id)
                 }),
         );
 

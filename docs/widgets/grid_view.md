@@ -43,21 +43,34 @@ outward. A pan that starts on a tile scrolls rather than activating it.
 
 In `teksilo_data::SelectionMode::Multi` a drag on the empty background
 sweeps a selection rectangle. That drag deliberately does **not** live on
-this view's own node, which is the one carrying the `PanClaim`: the node that
-captures a press has its gesture arena driven by the capture dispatch, which
-runs *before* the arbitration advances, so a drag there latches at
-`drag_slop` and decides the sequence before a claim can win at `pan_slop`.
-While it did, a `Multi`-selection grid did not scroll under a finger from
-anywhere at all, and a finger on the background swept a band immediately
-rather than after a hold — a press on a tile got neither, since the marquee
-declines such a press only after winning the arbitration for it.
+this view's own node, which is the one carrying the `PanClaim`.
+
+The reason it *was* structural has since been fixed in the framework: a node
+that both declares a claim and carries `on_drag` is now given a say through
+`PointerSequence::defer_own_drag`, which resolves its
+`teksilo_tokens::DragActivation` against the claim it is competing with.
+Before that arm existed the claim holder's own drag latched at `drag_slop`
+and decided the sequence before the claim could win at `pan_slop`, so a
+`Multi`-selection grid did not scroll under a finger from anywhere at all,
+and a finger on the background swept a band immediately rather than after a
+hold.
+
+What the surface still buys is **scope**, and that is why it stays. This
+root's children are the body pane, the scrollbar, the pinned section header,
+the empty view, the loading view and the focus overlay — all siblings, most
+of them filling the same rectangle. A marquee hung here would be a drag
+ancestor of every one of them; hung on a `DragSurface` that encloses the body
+pane alone, it sweeps the background and nothing else. The wrapper is also
+not this view's to remove in any case: the four row views wrap each **row**
+in one, and a row is not a claimant, so `defer_own_drag` — which refuses
+anything but a live `MemberRole::Pan` member — cannot reach it. See
+`crate::data_views::DragSurface`.
 
 So the body pane carries a no-op tap that gives it an arena of its own (the
-press is captured *inside* the claimant, not by it) and the marquee's drag
-hangs on a `DragSurface` that strictly encloses the pane. That is the one
-shape the tree arms `teksilo_tokens::DragActivation` for, which is what
-makes the marquee wait for a long press under a finger and latch at 5 dp
-under a mouse.
+press is captured *inside* the surface, not by it) and the marquee's drag
+hangs on a `DragSurface` that strictly encloses the pane — the shape the tree
+arms `DragActivation` for through its ancestor walk, which is what makes the
+marquee wait for a long press under a finger and latch at 5 dp under a mouse.
 
 Every **tile** carries that same no-op tap as well, for a reason with nothing
 to do with dragging. With the pane holding one, a tile without an arena of

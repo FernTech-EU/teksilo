@@ -357,7 +357,7 @@ impl Widget for Root {
         // Panel chrome rather than being clipped away — the same shape
         // the internationalization demo uses.
         let scroll = ctx.add(ScrollArea::from_id(column));
-        let root = ctx.add(Padding::uniform(24.0).child(Panel::new().child_id(scroll)));
+        let root = ctx.add(Padding::uniform(24.0).child(Panel::new().child(scroll)));
         self.root_child_id = Some(root);
         vec![root]
     }

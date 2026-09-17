@@ -372,7 +372,7 @@ fn static_tab_id_survives_rebuild() {
     let content_id = tree.add(FixedLeaf(120.0, 48.0));
     tree.add(
         TabWidget::new(selected.clone())
-            .static_tab_id(TabInfo::new().title(label("Pre")), content_id)
+            .static_tab(TabInfo::new().title(label("Pre")), content_id)
             .dynamic_tab::<()>("doc", |_h, _s| {
                 Box::new(FixedLeaf(120.0, 48.0)) as Box<dyn Widget>
             })
@@ -2006,12 +2006,12 @@ fn vertical_fill_sizing_stretches_pills_to_sidebar_width() {
         // A `Spacer` above pins the nav to the sidebar's bottom — no
         // height pin on the bar itself.
         let spacer = tree.add(crate::primitives::Spacer::new());
-        let column = tree.add(VStack::new().add_child(spacer).add_child(bar_id));
+        let column = tree.add(VStack::new().child(spacer).child(bar_id));
         let _sidebar = tree.add(
             FixedSize::new()
                 .width(SIDEBAR_W)
                 .height(SIDEBAR_H)
-                .child_id(column),
+                .child(column),
         );
         tree.layout(SizeProposal::exact(SIDEBAR_W, SIDEBAR_H));
         (tree, bar_id)
@@ -2639,9 +2639,9 @@ fn cross_bar_transfer_moves_tab_and_preserves_state() {
 
     let a_id = tree.add(bar_a);
     let b_id = tree.add(bar_b);
-    let expand_a = tree.add(crate::Expand::new().flex(1.0).child_id(a_id));
-    let expand_b = tree.add(crate::Expand::new().flex(1.0).child_id(b_id));
-    tree.add(crate::HStack::new().add_child(expand_a).add_child(expand_b));
+    let expand_a = tree.add(crate::Expand::new().flex(1.0).child(a_id));
+    let expand_b = tree.add(crate::Expand::new().flex(1.0).child(b_id));
+    tree.add(crate::HStack::new().child(expand_a).child(expand_b));
     tree.layout(SizeProposal::exact(900.0, 80.0));
 
     // Drag A's first tab onto B's header strip.
@@ -2708,9 +2708,9 @@ fn cross_bar_rejected_when_target_not_opted_in() {
 
     let a_id = tree.add(bar_a);
     let b_id = tree.add(bar_b);
-    let expand_a = tree.add(crate::Expand::new().flex(1.0).child_id(a_id));
-    let expand_b = tree.add(crate::Expand::new().flex(1.0).child_id(b_id));
-    tree.add(crate::HStack::new().add_child(expand_a).add_child(expand_b));
+    let expand_a = tree.add(crate::Expand::new().flex(1.0).child(a_id));
+    let expand_b = tree.add(crate::Expand::new().flex(1.0).child(b_id));
+    tree.add(crate::HStack::new().child(expand_a).child(expand_b));
     tree.layout(SizeProposal::exact(900.0, 80.0));
 
     let from = header_center(&tree, a_id, 0);
@@ -2756,8 +2756,8 @@ fn intra_bar_reorder_does_not_fire_transfer_out() {
     });
 
     let bar_id = tree.add(bar);
-    let expand = tree.add(crate::Expand::new().flex(1.0).child_id(bar_id));
-    tree.add(crate::HStack::new().add_child(expand));
+    let expand = tree.add(crate::Expand::new().flex(1.0).child(bar_id));
+    tree.add(crate::HStack::new().child(expand));
     tree.layout(SizeProposal::exact(600.0, 80.0));
 
     // Drag tab 0 onto tab 2's slot — an intra-bar reorder.
@@ -2841,13 +2841,9 @@ fn on_external_drop_accepts_non_tab_payload() {
     let source_id = tree.add(FileDragSource {
         name: "notes.txt".to_string(),
     });
-    let expand_bar = tree.add(crate::Expand::new().flex(1.0).child_id(bar_id));
-    let expand_src = tree.add(crate::Expand::new().flex(1.0).child_id(source_id));
-    tree.add(
-        crate::HStack::new()
-            .add_child(expand_src)
-            .add_child(expand_bar),
-    );
+    let expand_bar = tree.add(crate::Expand::new().flex(1.0).child(bar_id));
+    let expand_src = tree.add(crate::Expand::new().flex(1.0).child(source_id));
+    tree.add(crate::HStack::new().child(expand_src).child(expand_bar));
     tree.layout(SizeProposal::exact(900.0, 80.0));
 
     let from = tree.bounds(source_id).center();
@@ -2884,13 +2880,9 @@ fn non_tab_payload_rejected_without_handler() {
     let source_id = tree.add(FileDragSource {
         name: "x.txt".to_string(),
     });
-    let expand_bar = tree.add(crate::Expand::new().flex(1.0).child_id(bar_id));
-    let expand_src = tree.add(crate::Expand::new().flex(1.0).child_id(source_id));
-    tree.add(
-        crate::HStack::new()
-            .add_child(expand_src)
-            .add_child(expand_bar),
-    );
+    let expand_bar = tree.add(crate::Expand::new().flex(1.0).child(bar_id));
+    let expand_src = tree.add(crate::Expand::new().flex(1.0).child(source_id));
+    tree.add(crate::HStack::new().child(expand_src).child(expand_bar));
     tree.layout(SizeProposal::exact(900.0, 80.0));
 
     // Should not panic, and the model is untouched (no tab created).

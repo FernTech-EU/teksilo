@@ -2324,15 +2324,29 @@ impl TeksiloAppHandler {
                 return;
             }
             teksilo_platform::FrameOutcome::NeedsReconfigure => {
-                managed.platform_window.reconfigure_surface();
-                managed.platform_window.request_redraw();
+                if managed.platform_window.reconfigure_surface() {
+                    managed.platform_window.request_redraw();
+                } else {
+                    event_loop.exit();
+                }
+                self.wm.reinsert_managed(window_id, current);
+                return;
+            }
+            teksilo_platform::FrameOutcome::DisplayLost => {
+                // Every window in the process shares the one connection, so
+                // there is nothing left to draw anywhere. Ask the loop to
+                // unwind rather than request a frame that would return here.
+                event_loop.exit();
                 self.wm.reinsert_managed(window_id, current);
                 return;
             }
             teksilo_platform::FrameOutcome::Error(e) => {
                 eprintln!("teksilo-app: {e}, reconfiguring surface");
-                managed.platform_window.reconfigure_surface();
-                managed.platform_window.request_redraw();
+                if managed.platform_window.reconfigure_surface() {
+                    managed.platform_window.request_redraw();
+                } else {
+                    event_loop.exit();
+                }
                 self.wm.reinsert_managed(window_id, current);
                 return;
             }
@@ -2784,6 +2798,12 @@ impl TeksiloAppHandler {
 
 impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // Before the first window, and so before the wgpu instance exists: the
+        // OpenGL backend cannot present to a window whose display connection it
+        // was never told about, and that backend is all a machine without a
+        // Vulkan driver has. Idempotent, so a resume after suspend is a no-op.
+        teksilo_platform::install_display_handle(event_loop.owned_display_handle());
+
         if !self.initial_created
             && let Some(config) = self.initial_window.take()
         {
@@ -3977,10 +3997,17 @@ impl TeksiloAppBuilder {
                     .build()
                     .expect("winit event loop creation failed")
             },
-            |event_loop, app| {
-                event_loop
-                    .run_app(app)
-                    .expect("winit event loop exited with error");
+            |event_loop, app| match event_loop.run_app(app) {
+                Ok(()) => {}
+                Err(err) if display_connection_lost(&err) => {
+                    // Not a fault of this application, and emphatically not a
+                    // crash: the compositor exited or died underneath it.
+                    // Panicking here produced a stack trace, a crash report
+                    // and a bug filed against the renderer, for an event the
+                    // application had no part in.
+                    eprintln!("teksilo-app: the display server went away ({err}); shutting down");
+                }
+                Err(err) => panic!("winit event loop exited with error: {err:?}"),
             },
         );
     }
@@ -5104,11 +5131,7 @@ mod tests {
         fn build(&mut self, ctx: &mut teksilo_core::BuildContext) -> Vec<WidgetId> {
             let first = ctx.add(Button::new(lit!("First")));
             let second = ctx.add(Button::new(lit!("Second")));
-            let row = ctx.add(
-                teksilo_widgets::HStack::new()
-                    .add_child(first)
-                    .add_child(second),
-            );
+            let row = ctx.add(teksilo_widgets::HStack::new().child(first).child(second));
             self.root = Some(row);
             self.second = Some(second);
             vec![row]
@@ -5271,5 +5294,51 @@ mod occluded_band_tests {
     #[test]
     fn a_degenerate_scale_reports_nothing_rather_than_dividing_by_it() {
         assert!(occluded_band_in_client((0, 0), (800, 600), 0.0, (0, 0, 800, 600)).is_none());
+    }
+}
+
+/// Whether a winit event-loop failure means the connection to the display
+/// server was lost.
+///
+/// winit has no variant that says so. Both Linux backends turn a failed
+/// dispatch or flush into `ExitFailure(errno)` and unwind, deliberately:
+/// "crashing downstream is not really an option", as their own comment puts
+/// it. Nothing in teksilo ever asks the loop to exit with a non-zero code
+/// (`ActiveEventLoop::exit` sets zero), so a non-zero `ExitFailure` is that
+/// and nothing else.
+///
+/// The remaining variants stay fatal. `NotSupported`, `Os` and
+/// `RecreationAttempt` are genuine faults at startup, where a panic and its
+/// backtrace are the useful answer.
+fn display_connection_lost(err: &winit::error::EventLoopError) -> bool {
+    matches!(err, winit::error::EventLoopError::ExitFailure(code) if *code != 0)
+}
+
+#[cfg(test)]
+mod display_connection_tests {
+    use super::display_connection_lost;
+    use winit::error::EventLoopError;
+
+    /// The defect this pins: a compositor that exits under a running
+    /// application took the process down through a panic and a crash report,
+    /// when the only honest reading is that the session ended.
+    #[test]
+    fn a_failed_dispatch_reads_as_a_lost_display_server() {
+        assert!(display_connection_lost(&EventLoopError::ExitFailure(1)));
+        assert!(display_connection_lost(&EventLoopError::ExitFailure(32)));
+    }
+
+    /// A clean `exit()` carries code zero, and must not be mistaken for the
+    /// compositor leaving.
+    #[test]
+    fn a_clean_exit_is_not_a_lost_display_server() {
+        assert!(!display_connection_lost(&EventLoopError::ExitFailure(0)));
+    }
+
+    /// Everything else is a real fault and stays fatal, so that narrowing the
+    /// panic does not quietly swallow the failures it was there for.
+    #[test]
+    fn a_loop_that_could_not_be_built_stays_fatal() {
+        assert!(!display_connection_lost(&EventLoopError::RecreationAttempt));
     }
 }

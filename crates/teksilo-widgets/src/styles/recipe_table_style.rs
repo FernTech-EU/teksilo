@@ -195,7 +195,7 @@ impl TableStyle for RecipeTableStyle {
                 .background(ColorProp::DynamicSurfaceRole(role))
                 .corner_radius(CornerRadius::uniform(self.recipe.corner_radius)),
         );
-        ctx.add(ZStack::new().add_child(bg).add_child(cfg.label))
+        ctx.add(ZStack::new().child(bg).child(cfg.label))
     }
 
     fn make_sort_indicator(&self, _direction: SortDirection, ctx: &mut BuildContext) -> WidgetId {

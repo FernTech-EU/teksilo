@@ -519,7 +519,7 @@ fn a_finger_tapping_a_radio_tile_leaves_it_untinted() {
             .selection(2usize, selected.clone())
             .title(lit!("Slow")),
     );
-    tree.add(VStack::new().add_child(a).add_child(b));
+    tree.add(VStack::new().child(a).child(b));
     tree.layout(SizeProposal::exact(300.0, 200.0));
     let a_at = centre(tree.bounds(a));
     let b_at = centre(tree.bounds(b));
@@ -581,7 +581,7 @@ fn a_standard_row_follows_the_density_ladder() {
             tree.add(StandardListItem::new(lit!("Two lines")).subtitle(lit!("and a subtitle")));
         // Inside a stack: a root row is handed the whole viewport and measures
         // 400 dp at every density, which is a number that proves nothing.
-        tree.add(VStack::new().add_child(plain).add_child(subtitled));
+        tree.add(VStack::new().child(plain).child(subtitled));
         tree.layout(SizeProposal::exact(400.0, 400.0));
         // Exactly the floor for the single-line row — the floor is what decides
         // its height, and 28 dp at Compact is the value it has always had.

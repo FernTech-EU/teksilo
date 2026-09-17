@@ -129,8 +129,8 @@ impl WindowFrame {
 
     /// Set the inner content widget — typically a `VStack` containing a
     /// `TitleBar` and the application body.
-    pub fn content(mut self, w: impl Widget + 'static) -> Self {
-        self.pending_content = Some(PendingChild::Deferred(Box::new(w)));
+    pub fn content(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_content = Some(teksilo_core::IntoTeksiChild::into_pending(w));
         self
     }
 
@@ -138,13 +138,6 @@ impl WindowFrame {
     /// for unboxed widgets; use this variant when the concrete type is not known at the call site.
     pub fn content_boxed(mut self, w: Box<dyn Widget>) -> Self {
         self.pending_content = Some(PendingChild::Deferred(w));
-        self
-    }
-
-    /// Set the inner content widget by its already-registered `WidgetId`. Use when the content
-    /// was added to the tree before the frame was constructed and you need to retain its id.
-    pub fn content_id(mut self, id: WidgetId) -> Self {
-        self.pending_content = Some(PendingChild::Id(id));
         self
     }
 

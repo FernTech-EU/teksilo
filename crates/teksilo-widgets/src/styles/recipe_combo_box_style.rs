@@ -115,9 +115,8 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         // this variant are responsible for any surrounding visuals.
         if matches!(cfg.variant, ComboBoxVariant::Plain) {
             let row_id = build_inner_row(ctx, cfg.selected_label, border_width, divider_height);
-            let padded_id =
-                ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child_id(row_id));
-            return ctx.add(crate::primitives::MinSize::new(0.0, height).child_id(padded_id));
+            let padded_id = ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child(row_id));
+            return ctx.add(crate::primitives::MinSize::new(0.0, height).child(padded_id));
         }
 
         // Derived role signals. Roles encode "what this colour means";
@@ -183,7 +182,7 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
         });
 
         let row_id = build_inner_row(ctx, cfg.selected_label, border_width, divider_height);
-        let padding_id = ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child_id(row_id));
+        let padding_id = ctx.add(Padding::symmetric(padding_h * 0.5, padding_h).child(row_id));
 
         let bg = RectWidget::new()
             .background(bg_role)
@@ -192,8 +191,8 @@ impl ComboBoxStyle for RecipeComboBoxStyle {
             .corner_radius(CornerRadius::uniform(corner_radius));
         let bg_id = ctx.add(bg);
 
-        let visual_id = ctx.add(ZStack::new().add_child(bg_id).add_child(padding_id));
-        ctx.add(crate::primitives::MinSize::new(0.0, height).child_id(visual_id))
+        let visual_id = ctx.add(ZStack::new().child(bg_id).child(padding_id));
+        ctx.add(crate::primitives::MinSize::new(0.0, height).child(visual_id))
     }
 }
 
@@ -211,7 +210,7 @@ fn build_inner_row(
         FixedSize::new()
             .width(border_width)
             .height(divider_height)
-            .child_id(divider_fill_id),
+            .child(divider_fill_id),
     );
 
     // Chevron colour: `text_primary` at 50 % alpha. No role captures
@@ -226,9 +225,9 @@ fn build_inner_row(
     ctx.add(
         HStack::new()
             .spacing(8.0)
-            .add_child(selected_label)
+            .child(selected_label)
             .child(Spacer::new())
-            .add_child(divider_id)
-            .add_child(chevron_id),
+            .child(divider_id)
+            .child(chevron_id),
     )
 }

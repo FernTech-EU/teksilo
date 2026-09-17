@@ -61,12 +61,17 @@ pub enum BodyItem {
     Property(TeksiProperty),
     /// A bare element at body position — attaches via `.child(...)`.
     Child(TeksiElement),
+    /// A bare Rust *expression* at body position that evaluates to a
+    /// widget — the `section("Header")` / `row(x).bold()` helper-call
+    /// shape. Attaches via `.child(expr)`. Distinct from `Child`, which
+    /// is a teksu element the macro constructs itself.
+    ExprChild { expr: Expr, span: Span },
     /// `name = Element` — a binding that hoists `let name = ctx.add(...)`
     /// to the enclosing statement-forming block, then attaches via
-    /// `.add_child(name)` on the parent.
+    /// `.child(name)` on the parent.
     Binding { name: Ident, element: TeksiElement },
     /// `#{ expr }` at body position — the expr is expected to evaluate
-    /// to a `WidgetId` and attaches via `.add_child(expr)`.
+    /// to a `WidgetId` and attaches via `.child(expr)`.
     /// The semantics are simple: always WidgetId. The full
     /// `IntoTeksiChild` routing (widget-or-id dispatch) is not yet implemented.
     Escape { expr: Expr, span: Span },

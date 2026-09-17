@@ -238,10 +238,10 @@ impl Widget for CollapsibleBody {
         let disclosure = ctx.add(
             HStack::new()
                 .spacing(toast_disclosure_action_gap(&ctx.theme().input))
-                .add_child(show_more)
-                .add_child(show_less)
-                .add_child(copy)
-                .add_child(copied_label),
+                .child(show_more)
+                .child(show_less)
+                .child(copy)
+                .child(copied_label),
         );
         // The whole row rides on the clamp: a body short enough to be fully visible gains
         // no chrome at all, which is the overwhelming majority of toasts.
@@ -250,9 +250,9 @@ impl Widget for CollapsibleBody {
         let column = ctx.add(
             VStack::new()
                 .spacing(toast_body_disclosure_gap(&ctx.theme().input))
-                .add_child(clamped)
-                .add_child(full)
-                .add_child(disclosure),
+                .child(clamped)
+                .child(full)
+                .child(disclosure),
         );
         self.column_id = Some(column);
         vec![column]

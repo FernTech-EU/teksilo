@@ -1,0 +1,203 @@
+Teksilo
+Copyright (c) 2026 FernTech
+
+Teksilo's own source code is licensed under the Mozilla Public License 2.0;
+see LICENSE. This file lists third-party material that Teksilo redistributes
+or derives from, together with the conditions attached to it. Those
+conditions travel with the code: if you redistribute Teksilo, in source or
+binary form, you carry them too.
+
+Trademarks are covered separately, in TRADEMARKS.md. Nothing in this file
+grants any trademark right.
+
+
+===========================================================================
+1. DESIGN-LANGUAGE REFERENCE MATERIAL
+===========================================================================
+
+The theme presets under crates/teksilo-theme-* reproduce the look of design
+languages published by other vendors. What each preset took, and on what
+terms, differs; each is stated separately below. No vendor logo, icon set,
+artwork, or proprietary font is included in any of them.
+
+
+1.1  WinUI / Fluent  --  crates/teksilo-theme-fluent
+---------------------------------------------------------------------------
+
+The colour values in crates/teksilo-theme-fluent/src/palette.rs are
+transcribed from the WinUI theme-resource dictionaries
+(Common_themeresources_any.xaml and the per-control theme-resource files) in
+the microsoft/microsoft-ui-xaml repository, which Microsoft publishes under
+the MIT License. Only values are taken, and they are projected onto
+Teksilo's own token taxonomy rather than reproduced as a dictionary; no
+WinUI source code is included.
+
+    Source: https://github.com/microsoft/microsoft-ui-xaml
+
+    MIT License
+
+    Copyright (c) Microsoft Corporation. All rights reserved.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to
+    the following conditions:
+
+    The above copyright notice and this permission notice shall be included
+    in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+    OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+    IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+    CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+    TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+    SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+1.2  Material 3  --  crates/teksilo-theme-material3
+---------------------------------------------------------------------------
+
+The baseline token values -- the static Material 3 reference scheme derived
+from the canonical seed #6750A4, the M3 type ramp, and the state-layer and
+disabled-state opacities -- are read from Google's published Material
+Design 3 specification. Google publishes that documentation under the
+Creative Commons Attribution 4.0 International License and its code samples
+under the Apache License 2.0. No Material Design source code is included,
+and no text or image is copied from the documentation.
+
+    Source: https://m3.material.io/
+    Content license: https://creativecommons.org/licenses/by/4.0/
+    Site policies: https://developers.google.com/site-policies
+
+    Material Design is published by Google LLC.
+
+
+1.3  macOS Aqua and Dark Aqua  --  crates/teksilo-theme-macos
+---------------------------------------------------------------------------
+
+Apple publishes very little of the numeric detail this preset needs. Every
+literal in the crate is tagged at its definition as [HIG] (published on
+developer.apple.com), [measured] (observed from a running system), or
+[derived] (computed by Teksilo). Published metrics and measurements are
+facts rather than licensed material; Apple grants no licence over them and
+none is claimed here. No Apple source code, artwork, icon, or font is
+included. San Francisco is named under an off-by-default Cargo feature and
+is never embedded.
+
+
+1.4  Int UI  --  crates/teksilo-core/src/presets/intui.rs
+---------------------------------------------------------------------------
+
+Teksilo's default token set is an independent implementation informed by
+JetBrains' published Int UI design language. No JetBrains source code,
+resource file, or artwork is included, and no token value is transcribed
+from one.
+
+
+===========================================================================
+2. BUNDLED FONTS
+===========================================================================
+
+Each font below is redistributed unmodified. The full licence text ships
+beside the font file, at the path given with each entry. "Default" in the
+Embedded column means the face is compiled into any binary built with that
+crate's default features.
+
+None of these faces carries a Reserved Font Name, so the OFL's font-name
+restriction does not apply to them.
+
+
+2.1  Inter  --  crates/teksilo-text/fonts/
+---------------------------------------------------------------------------
+    Copyright (c) 2016 The Inter Project Authors
+    (https://github.com/rsms/inter)
+
+    Licence:  SIL Open Font License, Version 1.1
+    Text:     crates/teksilo-text/fonts/inter-LICENSE.txt
+    Files:    InterVariable.ttf, InterVariable-Italic.ttf
+    Embedded: always (Teksilo's default UI face)
+
+
+2.2  JetBrains Mono  --  crates/teksilo-text/fonts/
+---------------------------------------------------------------------------
+    Copyright 2020 The JetBrains Mono Project Authors
+    (https://github.com/JetBrains/JetBrainsMono)
+
+    Licence:  SIL Open Font License, Version 1.1
+    Text:     crates/teksilo-text/fonts/jetbrains-mono-LICENSE.txt
+    Files:    JetBrainsMono.ttf, JetBrainsMono-Italic.ttf
+    Embedded: always (Teksilo's default monospace face)
+
+
+2.3  Noto Sans Arabic  --  crates/teksilo-text/fonts/
+---------------------------------------------------------------------------
+    Copyright 2022 The Noto Project Authors
+    (https://github.com/notofonts/arabic)
+
+    Licence:  SIL Open Font License, Version 1.1
+    Text:     crates/teksilo-text/fonts/noto-LICENSE.txt
+    File:     NotoSansArabic-VariableFont_wdth,wght.ttf
+    Embedded: default, via the teksilo-text "fonts-arabic" feature
+
+    Noto is a trademark of Google LLC.
+
+
+2.4  Noto Sans Hebrew  --  crates/teksilo-text/fonts/
+---------------------------------------------------------------------------
+    Copyright 2024 The Noto Project Authors
+    (https://github.com/notofonts/hebrew)
+
+    Licence:  SIL Open Font License, Version 1.1
+    Text:     crates/teksilo-text/fonts/noto-LICENSE.txt
+    File:     NotoSansHebrew-VariableFont_wdth,wght.ttf
+    Embedded: default, via the teksilo-text "fonts-hebrew" feature
+
+    Noto is a trademark of Google LLC.
+
+
+2.5  Roboto Flex  --  crates/teksilo-theme-material3/fonts/
+---------------------------------------------------------------------------
+    Copyright 2017 The Roboto Flex Project Authors
+    (https://github.com/googlefonts/roboto-flex)
+
+    Licence:  Apache License, Version 2.0
+    Text:     crates/teksilo-theme-material3/fonts/roboto-LICENSE.txt
+    File:     Roboto.ttf
+    Embedded: only with the teksilo-theme-material3 "bundled-fonts"
+              feature, which is off by default
+
+
+===========================================================================
+3. FONTS NAMED BUT NOT REDISTRIBUTED
+===========================================================================
+
+Two theme presets can ask the platform's text stack for a proprietary system
+face by name. Neither font is included in this repository or in any binary
+built from it, and no licence to either is granted or implied. The face
+resolves only on a machine that already has it installed; on any other, the
+text stack falls back to the bundled Inter and JetBrains Mono.
+
+    Segoe UI Variable, Consolas    Microsoft Corporation
+                                   teksilo-theme-fluent, "system-fonts"
+
+    SF Pro Text, SF Mono           Apple Inc.
+                                   teksilo-theme-macos, "system-fonts"
+
+The same applies to the platform colour-emoji faces (Noto Color Emoji, Apple
+Color Emoji, Segoe UI Emoji) that the teksilo-text "system-emoji" feature
+reads from well-known paths at startup: located at runtime, never embedded.
+
+
+===========================================================================
+4. CARGO DEPENDENCIES
+===========================================================================
+
+This file covers material vendored into the Teksilo source tree. Teksilo's
+Cargo dependencies are not vendored here; each carries its own licence,
+resolvable from Cargo.lock. A binary you build and ship links them, so its
+own notice file needs to account for them -- `cargo about` or `cargo deny`
+will generate that list.

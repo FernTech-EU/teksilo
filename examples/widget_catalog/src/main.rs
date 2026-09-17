@@ -144,7 +144,7 @@ fn main() {
                         let title_bar: Box<dyn Widget> = match host.clone() {
                             Some(h) => Box::new(build_title_bar(h, &theme, menu_bar)),
                             None => Box::new(
-                                VStack::new().spacing(4.0).add_child(menu_bar).child(
+                                VStack::new().spacing(4.0).child(menu_bar).child(
                                     TextWidget::new(tr!(app_unsupported_chrome()))
                                         .style(TextStyleRole::Small)
                                         .color(TextRole::Error),
@@ -161,7 +161,7 @@ fn main() {
                             selected_tab.clone(),
                         ));
                         let catalog_filled =
-                            tree.add(Expand::vertical().respect_intrinsic().child_id(catalog));
+                            tree.add(Expand::vertical().respect_intrinsic().child(catalog));
 
                         // Invisible: persists + restores the chosen theme.
                         // `--theme` forces the startup theme and skips restore.
@@ -171,9 +171,9 @@ fn main() {
                         let inner = tree.add(
                             VStack::new()
                                 .spacing(0.0)
-                                .add_child(theme_persist)
-                                .add_child(title_bar_id)
-                                .add_child(catalog_filled),
+                                .child(theme_persist)
+                                .child(title_bar_id)
+                                .child(catalog_filled),
                         );
 
                         // Optional resize frame on platforms that need
@@ -181,7 +181,7 @@ fn main() {
                         // we skip the frame.
                         match host {
                             Some(h) if h.needs_custom_resize_handles() => {
-                                tree.add(WindowFrame::new(h).thickness(6.0).content_id(inner))
+                                tree.add(WindowFrame::new(h).thickness(6.0).content(inner))
                             }
                             _ => inner,
                         }
@@ -256,7 +256,7 @@ fn build_title_bar(
         .style(TextStyleRole::BodyBold)
         .color(TextRole::Primary);
 
-    let leading: HStack = HStack::new().spacing(4.0).add_child(menu_bar).child(brand);
+    let leading: HStack = HStack::new().spacing(4.0).child(menu_bar).child(brand);
 
     // Center the subtitle with flexible spacers rather than `Center`:
     // `Center` reports `flex = 0`, so in an HStack it shrink-wraps to the
@@ -610,7 +610,7 @@ impl Widget for WidgetCatalog {
         // The auto basis is for a wrapper inside an *unconstrained* parent; the
         // window gives this root a bounded height, so the zero basis is correct —
         // the bar takes the slack left after the status bar and scrolls its tabs.
-        let tabs_filling = ctx.add(Expand::vertical().child_id(tabs_id));
+        let tabs_filling = ctx.add(Expand::vertical().child(tabs_id));
 
         // ── StatusBar ────────────────────────────────────────────────
         let status = ctx.add(
@@ -621,12 +621,7 @@ impl Widget for WidgetCatalog {
             ),
         );
 
-        let root = ctx.add(
-            VStack::new()
-                .spacing(0.0)
-                .add_child(tabs_filling)
-                .add_child(status),
-        );
+        let root = ctx.add(VStack::new().spacing(0.0).child(tabs_filling).child(status));
         self.root_child_id = Some(root);
         vec![root]
     }
@@ -723,10 +718,10 @@ impl Widget for TabContent {
 
         let switcher = ctx.add(
             Switcher::new(self.view_mode.clone())
-                .child_id(classic_id)
-                .child_id(teksi_id),
+                .child(classic_id)
+                .child(teksi_id),
         );
-        let padded = ctx.add(Padding::uniform(20.0).child_id(switcher));
+        let padded = ctx.add(Padding::uniform(20.0).child(switcher));
         let scrolled = ctx.add(ScrollArea::from_id(padded));
         self.root_child_id = Some(scrolled);
         vec![scrolled]

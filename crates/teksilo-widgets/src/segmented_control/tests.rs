@@ -92,7 +92,7 @@ fn hugged_width(labels: &[&'static str]) -> f32 {
     }
     let mut t = measured_tree();
     let id = t.add(control);
-    t.add(crate::primitives::VStack::new().add_child(id));
+    t.add(crate::primitives::VStack::new().child(id));
     settle(&mut t, 2000.0, 60.0);
     t.bounds(id).width
 }
@@ -118,7 +118,7 @@ fn the_control_hugs_its_measured_content_when_not_filling() {
     let selected = Signal::new(Some(A));
     let mut t = measured_tree();
     let control = t.add(abc(selected).fill_width(false));
-    t.add(crate::primitives::VStack::new().add_child(control));
+    t.add(crate::primitives::VStack::new().child(control));
     settle(&mut t, 800.0, 60.0);
     let width = t.bounds(control).width;
     assert!(
@@ -133,7 +133,7 @@ fn filling_is_the_default() {
     let selected = Signal::new(Some(A));
     let mut t = measured_tree();
     let control = t.add(abc(selected));
-    t.add(crate::primitives::VStack::new().add_child(control));
+    t.add(crate::primitives::VStack::new().child(control));
     settle(&mut t, 800.0, 60.0);
     assert!(
         (t.bounds(control).width - 800.0).abs() < 0.5,
@@ -468,7 +468,7 @@ fn a_caption_bound_to_is_overflowing_still_settles() {
     let boxed = t.add(
         crate::primitives::FixedSize::new()
             .width(300.0_f32)
-            .child_id(control_id),
+            .child(control_id),
     );
     let caption = t.add(
         crate::primitives::TextWidget::new(lit!("")).text(overflowing.map(|over| {
@@ -479,11 +479,7 @@ fn a_caption_bound_to_is_overflowing_still_settles() {
             }
         })),
     );
-    t.add(
-        crate::primitives::VStack::new()
-            .add_child(boxed)
-            .add_child(caption),
-    );
+    t.add(crate::primitives::VStack::new().child(boxed).child(caption));
 
     settle(&mut t, 800.0, 200.0);
     assert!(
@@ -851,7 +847,7 @@ fn the_height_follows_the_measured_content_instead_of_a_fixed_constant() {
     let plain_selected = Signal::new(Some(A));
     let mut plain_tree = measured_tree();
     let plain = plain_tree.add(abc(plain_selected));
-    plain_tree.add(crate::primitives::VStack::new().add_child(plain));
+    plain_tree.add(crate::primitives::VStack::new().child(plain));
     settle(&mut plain_tree, 400.0, 400.0);
     let plain_height = plain_tree.bounds(plain).height;
 
@@ -865,7 +861,7 @@ fn the_height_follows_the_measured_content_instead_of_a_fixed_constant() {
             Segment::new(lit!("B")).id(B),
         ]),
     );
-    tall_tree.add(crate::primitives::VStack::new().add_child(tall));
+    tall_tree.add(crate::primitives::VStack::new().child(tall));
     settle(&mut tall_tree, 400.0, 400.0);
     let tall_height = tall_tree.bounds(tall).height;
 

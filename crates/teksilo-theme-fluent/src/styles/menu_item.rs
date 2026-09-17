@@ -107,7 +107,7 @@ impl MenuItemStyle for FluentMenuItemStyle {
         let row = RecipeMenuItemStyle::new(fluent_menu_item_recipe_for(&ctx.theme().input))
             .make_body(&inner_cfg, ctx);
 
-        ctx.add(ZStack::new().add_child(backdrop).add_child(row))
+        ctx.add(ZStack::new().child(backdrop).child(row))
     }
 
     /// Delegate the metrics alongside the row. `MenuItem` builds the icon and

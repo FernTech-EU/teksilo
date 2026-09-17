@@ -56,7 +56,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`rubber_band`, `overscroll_signal`, `child`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_past_end`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `restore_scroll_y`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `max_scroll_x_signal`
+`rubber_band`, `overscroll_signal`, `child`, `child_opt`, `from_id`, `scroll_bar_style`, `scroll_bar_thumb_color`, `vertical_scroll_bar_policy`, `horizontal_scroll_bar_policy`, `line_height`, `scroll_bar_thickness`, `widget_resizable`, `smooth_scrolling`, `smooth_scroll_duration`, `scroll_past_end`, `preferred_size`, `preferred_height`, `overscroll_behavior`, `restore_scroll_y`, `scroll_y_signal`, `scroll_x_signal`, `max_scroll_y_signal`, `viewport_ratio_y_signal`, `max_scroll_x_signal`
 
 ## API reference
 
@@ -74,7 +74,7 @@ pub enum ScrollBarMode { /* variants */ }
 
 - **`Overlay`** — Scroll bar overlays the content (macOS-style): a thin passive indicator is painted while scrolling; the full interactive track expands on pointer proximity. Does not reduce the viewport width.
 - **`Permanent`** — Scroll bar is a permanent layout sibling of the viewport, reserving its full thickness and always remaining interactive — the classic Windows/Linux gutter style.
-- **`Thin`** — Floats over the content like `Overlay` but only ever shows the thin resting indicator, never the full track. A passive scroll-position display for minimal UIs; drag, track-click, and keyboard still work against the full slot bounds.
+- **`Thin`** — Floats over the content like `Overlay` but only ever shows the thin resting indicator, never the full track. A passive scroll-position display for minimal UIs; drag and track-click still work against the full slot bounds.  **Not the keyboard.** The bar's arrow / `Home` / `End` / `Page` arms sit on a node built `focusable(false)`, so no keyboard user reaches them under any of the three modes — see `ScrollBarPolicy::AlwaysOff`, which states the same limit from the other side, and `docs/touch-and-pen.md` §10.2, which carries it as an open finding.
 
 ## `pub enum ScrollBarPolicy`
 
@@ -128,9 +128,18 @@ after the band. Always `ZERO` with `Self::rubber_band` off.
 The scroll offset itself never leaves the range, so this is the signal
 a surface binds to draw a stretch or a glow; ignoring it is correct.
 
-#### `pub fn child(mut self, child: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, child: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the scrollable content widget.
+
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
+
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
 
 #### `pub fn from_id(child: WidgetId) -> Self`
 

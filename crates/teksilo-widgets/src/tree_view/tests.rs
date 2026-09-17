@@ -794,7 +794,7 @@ fn make_standard_tree_view() -> (WidgetTree, WidgetId, teksilo_data::SelectionMo
                 crate::StandardTreeItem::new(lit!((*item).to_string()))
                     .from_entry(entry)
                     .selected(selected)
-                    .on_toggle_rc(ctx.toggle_callback()),
+                    .on_chevron_toggle_rc(ctx.toggle_callback()),
             ) as Box<dyn Widget>
         })
         .item_height(28.0)
@@ -880,7 +880,7 @@ fn make_reorderable_standard_tree_view() -> (WidgetTree, WidgetId) {
                 crate::StandardTreeItem::new(lit!((*item).to_string()))
                     .from_entry(entry)
                     .selected(selected)
-                    .on_toggle_rc(ctx.toggle_callback()),
+                    .on_chevron_toggle_rc(ctx.toggle_callback()),
             ) as Box<dyn Widget>
         })
         .item_height(28.0)
@@ -1717,9 +1717,9 @@ fn nested_tree_fixture(inner: OverscrollBehavior) -> (WidgetTree, Signal<f32>) {
     .item_height(20.0)
     .overscroll_behavior(inner);
     let tv_id = tree.add(tv);
-    let viewport = tree.add(FixedSize::new().width(200.0).height(100.0).child_id(tv_id));
+    let viewport = tree.add(FixedSize::new().width(200.0).height(100.0).child(tv_id));
     let filler = tree.add(FixedLeaf(200.0, 200.0));
-    let outer_content = tree.add(VStack::new().add_child(viewport).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(viewport).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);
@@ -1797,9 +1797,9 @@ fn keyboard_selection_chases_outer_scroll_area() {
     })
     .item_height(20.0);
     let tv_id = tree.add(tv);
-    let tv_box = tree.add(FixedSize::new().width(200.0).height(200.0).child_id(tv_id));
+    let tv_box = tree.add(FixedSize::new().width(200.0).height(200.0).child(tv_id));
     let filler = tree.add(FixedLeaf(200.0, 200.0));
-    let outer_content = tree.add(VStack::new().add_child(tv_box).add_child(filler));
+    let outer_content = tree.add(VStack::new().child(tv_box).child(filler));
     let outer = ScrollArea::from_id(outer_content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer = tree.add(outer);
@@ -2198,12 +2198,7 @@ fn from_source_row_scope_is_the_treeview_not_a_higher_ancestor() {
     );
     let editor = tree.add(FixedLeaf(100.0, 24.0).focusable(true));
     // Outer shell holds both, and is itself focusable (like `App`).
-    let _shell = tree.add(
-        ZStack::new()
-            .add_child(tv)
-            .add_child(editor)
-            .focusable(true),
-    );
+    let _shell = tree.add(ZStack::new().child(tv).child(editor).focusable(true));
     tree.layout(SizeProposal::exact(400.0, 300.0));
     let rows = row_ids(&tree, tv);
     let scope = tree.view_focus_active_for(rows[0]);
@@ -2922,7 +2917,7 @@ fn collapsing_a_branch_above_keeps_the_cursor_on_the_same_logical_row() {
                 crate::StandardTreeItem::new(lit!((*item).to_string()))
                     .from_entry(entry)
                     .selected(selected)
-                    .on_toggle_rc(ctx.toggle_callback()),
+                    .on_chevron_toggle_rc(ctx.toggle_callback()),
             ) as Box<dyn Widget>
         })
         .item_height(28.0)

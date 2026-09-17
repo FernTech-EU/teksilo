@@ -31,7 +31,7 @@ the host from the widget tree:
 
 ## Builder methods at a glance
 
-`controls_visible`, `height`, `background`, `border`, `leading`, `leading_id`, `center`, `center_id`, `trailing`, `trailing_id`, `close_action`
+`controls_visible`, `height`, `background`, `border`, `leading`, `center`, `trailing`, `close_action`
 
 ## API reference
 
@@ -140,33 +140,21 @@ the body.
 Color accepts the same range as `Self::background`; pair with
 `BorderRole::Default` for a theme-tracking divider.
 
-#### `pub fn leading(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn leading(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the leading-edge content (e.g. app icon, menus). Rendered to the
 right of the macOS traffic-light inset.
 
-#### `pub fn leading_id(mut self, id: WidgetId) -> Self`
-
-Set the leading-edge content by pre-registered ID.
-
-#### `pub fn center(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the center content (e.g. search box, breadcrumbs). Wrapped in a
 flexible drag region: clicks that are not consumed by the child
 initiate a window drag.
 
-#### `pub fn center_id(mut self, id: WidgetId) -> Self`
-
-Set the center content by pre-registered ID.
-
-#### `pub fn trailing(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the trailing-edge content (e.g. user avatar, notification bell).
 Rendered before the window controls.
-
-#### `pub fn trailing_id(mut self, id: WidgetId) -> Self`
-
-Set the trailing-edge content by pre-registered ID.
 
 #### `pub fn close_action(mut self, action: impl Fn(&mut EventContext) + 'static) -> Self`
 

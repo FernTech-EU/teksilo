@@ -47,7 +47,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/notification/center_button/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/notification/index.html)
 
 ## `pub struct NotificationCenterButton`
 

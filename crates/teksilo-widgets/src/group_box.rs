@@ -108,15 +108,29 @@ impl GroupBox {
     }
 
     /// Set the content widget inline (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_content = Some(Box::new(widget));
-        self
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(widget) {
+            teksilo_core::PendingChild::Id(id) => {
+                self.content_id = Some(id);
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                self.pending_content = Some(w);
+                self
+            }
+        }
     }
-
-    /// Set the content widget by pre-registered ID.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.content_id = Some(id);
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -172,7 +186,7 @@ impl Widget for GroupBox {
         let padded_content_id = if let Some(content_id) = self.content_id {
             ctx.add(
                 Padding::new(0.0, 0.0, 0.0, group_box_content_indent(&ctx.theme().input))
-                    .child_id(content_id),
+                    .child(content_id),
             )
         } else {
             ctx.add(Padding::new(
@@ -192,11 +206,7 @@ impl Widget for GroupBox {
             let dim_overlay_id = ctx.add(RectWidget::new().background(dim_color));
             ctx.visible_when(dim_overlay_id, checked.map(|v| !*v));
             ctx.enabled_when(padded_content_id, checked.clone());
-            ctx.add(
-                ZStack::new()
-                    .add_child(padded_content_id)
-                    .add_child(dim_overlay_id),
-            )
+            ctx.add(ZStack::new().child(padded_content_id).child(dim_overlay_id))
         } else {
             padded_content_id
         };
@@ -204,8 +214,8 @@ impl Widget for GroupBox {
         let root = ctx.add(
             VStack::new()
                 .spacing(group_box_title_content_spacing(&ctx.theme().input))
-                .add_child(title_row_id)
-                .add_child(content_wrapper_id),
+                .child(title_row_id)
+                .child(content_wrapper_id),
         );
         self.root_child_id = Some(root);
 

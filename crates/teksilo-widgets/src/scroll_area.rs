@@ -301,10 +301,31 @@ impl ScrollArea {
     }
 
     /// Set the scrollable content widget.
-    pub fn child(mut self, child: impl Widget + 'static) -> Self {
-        self.content_child = Some(Box::new(child));
-        self.content_child_id = None;
-        self
+    pub fn child(mut self, child: impl teksilo_core::IntoTeksiChild) -> Self {
+        match teksilo_core::IntoTeksiChild::into_pending(child) {
+            teksilo_core::PendingChild::Id(id) => {
+                self.content_child_id = Some(id);
+                self.content_child = None;
+                self
+            }
+            teksilo_core::PendingChild::Deferred(w) => {
+                self.content_child = Some(w);
+                self.content_child_id = None;
+                self
+            }
+        }
+    }
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 
     /// Construct from an already-registered child WidgetId.
@@ -1396,7 +1417,7 @@ mod tests {
         let a = tree.add(TallLeaf::new(200.0, 100.0));
         let b = tree.add(TallLeaf::new(200.0, 100.0));
         let c = tree.add(TallLeaf::new(200.0, 100.0));
-        let content = tree.add(VStack::new().add_child(a).add_child(b).add_child(c));
+        let content = tree.add(VStack::new().child(a).child(b).child(c));
 
         let scroll = tree.add(ScrollArea::from_id(content));
 
@@ -1419,7 +1440,7 @@ mod tests {
 
         let a = tree.add(TallLeaf::new(200.0, 100.0));
         let b = tree.add(TallLeaf::new(200.0, 100.0));
-        let content = tree.add(VStack::new().add_child(a).add_child(b));
+        let content = tree.add(VStack::new().child(a).child(b));
 
         let _scroll = tree.add(ScrollArea::from_id(content).smooth_scrolling(false));
 
@@ -2152,9 +2173,9 @@ mod tests {
         // Focusable target near the top of the content.
         let target = tree.add(TallLeaf::new(200.0, 20.0).focusable(true));
         let after = tree.add(TallLeaf::new(200.0, 470.0));
-        let content = tree.add(VStack::new().add_child(target).add_child(after));
+        let content = tree.add(VStack::new().child(target).child(after));
         let scroll = tree.add(ScrollArea::from_id(content).smooth_scrolling(false));
-        let _root = tree.add(VStack::new().add_child(header).add_child(scroll));
+        let _root = tree.add(VStack::new().child(header).child(scroll));
 
         tree.layout(SizeProposal::exact(200.0, 250.0));
 
@@ -2237,7 +2258,7 @@ mod tests {
                 EventResponse::Handled
             },
         ));
-        let content = tree.add(VStack::new().add_child(actor));
+        let content = tree.add(VStack::new().child(actor));
         let sa = ScrollArea::from_id(content)
             .smooth_scrolling(false)
             .scroll_past_end(past_end);
@@ -2399,26 +2420,21 @@ mod tests {
         let inner_tail = tree.add(TallLeaf::new(200.0, 100.0));
         let inner_content = tree.add(
             VStack::new()
-                .add_child(inner_spacer)
-                .add_child(target)
-                .add_child(inner_tail),
+                .child(inner_spacer)
+                .child(target)
+                .child(inner_tail),
         );
         let inner_sa = tree.add(ScrollArea::from_id(inner_content).smooth_scrolling(false));
         // Bound the inner ScrollArea to an 80px viewport.
-        let inner_box = tree.add(
-            FixedSize::new()
-                .width(200.0)
-                .height(80.0)
-                .child_id(inner_sa),
-        );
+        let inner_box = tree.add(FixedSize::new().width(200.0).height(80.0).child(inner_sa));
         // Outer content: 200px spacer, the inner box (below the fold), 200px tail.
         let outer_spacer = tree.add(TallLeaf::new(200.0, 200.0));
         let outer_tail = tree.add(TallLeaf::new(200.0, 200.0));
         let outer_content = tree.add(
             VStack::new()
-                .add_child(outer_spacer)
-                .add_child(inner_box)
-                .add_child(outer_tail),
+                .child(outer_spacer)
+                .child(inner_box)
+                .child(outer_tail),
         );
         let outer_sa = tree.add(ScrollArea::from_id(outer_content).smooth_scrolling(false));
 
@@ -2512,7 +2528,7 @@ mod tests {
         let inner = tree.add(inner_sa);
 
         let filler = tree.add(TallLeaf::new(200.0, 200.0));
-        let outer_content = tree.add(VStack::new().add_child(inner).add_child(filler));
+        let outer_content = tree.add(VStack::new().child(inner).child(filler));
         let outer_sa = ScrollArea::from_id(outer_content).smooth_scrolling(false);
         let outer_y = outer_sa.scroll_y_signal().clone();
         let _outer = tree.add(outer_sa);
@@ -2716,11 +2732,11 @@ mod tests {
             .collect();
         let mut row = HStack::new();
         for &c in &cells {
-            row = row.add_child(c);
+            row = row.child(c);
         }
         let row = tree.add(row);
-        let col = tree.add(VStack::new().add_child(row));
-        let padded = tree.add(Padding::uniform(20.0).child_id(col));
+        let col = tree.add(VStack::new().child(row));
+        let padded = tree.add(Padding::uniform(20.0).child(col));
         let _scroll = tree.add(ScrollArea::from_id(padded).smooth_scrolling(false));
 
         tree.layout(SizeProposal::exact(600.0, 400.0));
@@ -3298,7 +3314,7 @@ mod pan_tests {
         let inner = tree.add(inner_sa);
 
         let filler = tree.add(TallLeaf::new(200.0, 400.0));
-        let outer_content = tree.add(VStack::new().add_child(inner).add_child(filler));
+        let outer_content = tree.add(VStack::new().child(inner).child(filler));
         let outer_sa = ScrollArea::from_id(outer_content)
             .smooth_scrolling(false)
             .vertical_scroll_bar_policy(ScrollBarPolicy::AlwaysOff)

@@ -432,8 +432,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     // outside the mutable borrow chain.
                     let twist_and_label = HStack::new()
                         .spacing(cp::TREE_TWIST_LABEL_GAP)
-                        .add_child(twist)
-                        .add_child(inner_id);
+                        .child(twist)
+                        .child(inner_id);
                     let twist_label_id = ctx.add(twist_and_label);
                     // Clip the indent + twist to the column. Both are rigid
                     // (a fixed indent per level, a fixed-size chevron), so a
@@ -449,7 +449,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     // documents that a cell may draw past its column edge, and
                     // that still holds — only this chrome wrapper clips.
                     let indent_id = ctx.add(
-                        Padding::new(0.0_f32, 0.0_f32, 0.0_f32, indent_px).child_id(twist_label_id),
+                        Padding::new(0.0_f32, 0.0_f32, 0.0_f32, indent_px).child(twist_label_id),
                     );
                     ctx.apply_handlers(
                         indent_id,

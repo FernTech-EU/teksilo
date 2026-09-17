@@ -168,19 +168,19 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(fade)
-            .add_child(pulse)
-            .add_child(cycle)
-            .add_child(crossfade)
-            .add_child(collapse)
-            .add_child(smooth_size)
-            .add_child(slide)
-            .add_child(shake)
-            .add_child(scale)
-            .add_child(rotate)
-            .add_child(blur),
+            .child(fade)
+            .child(pulse)
+            .child(cycle)
+            .child(crossfade)
+            .child(collapse)
+            .child(smooth_size)
+            .child(slide)
+            .child(shake)
+            .child(scale)
+            .child(rotate)
+            .child(blur),
     )
 }
 

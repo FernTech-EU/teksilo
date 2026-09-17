@@ -112,8 +112,8 @@ fn main() {
                     let inner = tree.add(
                         VStack::new()
                             .spacing(0.0)
-                            .add_child(title_bar_id)
-                            .add_child(body_id),
+                            .child(title_bar_id)
+                            .child(body_id),
                     );
 
                     // Wrap in a 6 px resize frame on the 4 edges *only* when the
@@ -129,18 +129,14 @@ fn main() {
                     // either; we just return the inner content uncovered.
                     let frame_or_inner = match tree.title_bar_host() {
                         Some(host) if host.needs_custom_resize_handles() => {
-                            tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner))
+                            tree.add(WindowFrame::new(host).thickness(6.0).content(inner))
                         }
                         _ => inner,
                     };
 
                     let toolbar_id = tree.add(dark_mode_toolbar());
-                    let expanded_content_id = tree.add(Expand::new().child_id(frame_or_inner));
-                    tree.add(
-                        VStack::new()
-                            .add_child(toolbar_id)
-                            .add_child(expanded_content_id),
-                    )
+                    let expanded_content_id = tree.add(Expand::new().child(frame_or_inner));
+                    tree.add(VStack::new().child(toolbar_id).child(expanded_content_id))
                 }),
         )
         .run();

@@ -386,7 +386,7 @@ pub fn widget_fixtures() -> Vec<TargetFixture> {
                             .has_children(true)
                             .is_expanded(true)
                             .checkbox(Signal::new(false))
-                            .on_toggle(|_| {}),
+                            .on_chevron_toggle(|_| {}),
                     )
                     .child(
                         StandardTreeItem::new(lit!("Leaf"))
@@ -484,7 +484,7 @@ pub fn widget_fixtures() -> Vec<TargetFixture> {
                     Box::new(
                         StandardTreeItem::new(lit!(item.clone()))
                             .from_entry(entry)
-                            .on_toggle_rc(cx.toggle_callback()),
+                            .on_chevron_toggle_rc(cx.toggle_callback()),
                     )
                 },
             ))
@@ -849,7 +849,7 @@ pub fn widget_fixtures() -> Vec<TargetFixture> {
             t.add(
                 teksilo_widgets::primitives::ZStack::new()
                     .child(TextWidget::new(lit!("Page")))
-                    .add_child(host),
+                    .child(host),
             )
         }),
         TargetFixture::sized("notification_log", 420.0, 420.0, |t| {

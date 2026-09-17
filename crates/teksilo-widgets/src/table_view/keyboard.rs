@@ -505,7 +505,7 @@ pub(crate) fn build_key_handler(
                     let fallback_cfg = cfg.clone();
                     ctx.row_space_activate(
                         cell_id,
-                        std::rc::Rc::new(move || {
+                        std::rc::Rc::new(move |_ctx: &mut EventContext| {
                             toggle_selection(&fallback_cfg, row, col);
                         }),
                     );

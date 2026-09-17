@@ -304,7 +304,7 @@ fn an_app_installed_style_slot_survives_a_density_switch() {
             cfg: &teksilo_core::styles::ButtonStyleConfig,
             ctx: &mut teksilo_core::BuildContext,
         ) -> teksilo_core::WidgetId {
-            ctx.add(teksilo_widgets::primitives::MinSize::new(50.0, 50.0).child_id(cfg.label))
+            ctx.add(teksilo_widgets::primitives::MinSize::new(50.0, 50.0).child(cfg.label))
         }
     }
 

@@ -112,9 +112,9 @@ impl ButtonStyle for MacOsButtonStyle {
                 spacing(PADDING_V, tokens),
                 spacing(PADDING_H, tokens),
             )
-            .child_id(cfg.label),
+            .child(cfg.label),
         );
-        let stack = ctx.add(ZStack::new().add_child(chrome).add_child(padded));
+        let stack = ctx.add(ZStack::new().child(chrome).child(padded));
         // `[measured]` 22 dp is below the 24 dp WCAG 2.2 SC 2.5.8 floor, and a
         // *minimum hit box* is exactly what that floor governs — so this one
         // site is raised while `MACOS_CONTROL_HEIGHT` itself, the painted
@@ -124,7 +124,7 @@ impl ButtonStyle for MacOsButtonStyle {
             TargetAxes::HEIGHT,
             tokens,
         );
-        ctx.add(MinSize::new(0.0, min.height).child_id(stack))
+        ctx.add(MinSize::new(0.0, min.height).child(stack))
     }
 
     fn label_text_role(&self, variant: ButtonVariant) -> Option<TextRole> {

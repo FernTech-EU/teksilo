@@ -136,6 +136,22 @@ impl FilePickerField {
         self
     }
 
+    /// Append several extension filters from an iterator of
+    /// `(label, extensions)` pairs, in order.
+    ///
+    /// The loop form of [`add_filter`](Self::add_filter), for a filter list that
+    /// comes from data. The second element of each pair is anything that reads
+    /// as a `&[&str]`, so both `["txt", "md"]` and `&["txt", "md"][..]` work.
+    pub fn add_filters<'a, L, E>(self, filters: impl IntoIterator<Item = (L, E)>) -> Self
+    where
+        L: Into<String>,
+        E: AsRef<[&'a str]>,
+    {
+        filters.into_iter().fold(self, |field, (label, exts)| {
+            field.add_filter(label, exts.as_ref())
+        })
+    }
+
     /// Hook invoked with the raw [`FileDialogResult`] after the dialog
     /// closes — useful when the caller needs to react to cancellation
     /// or backend errors. The bound text signal is already updated by
@@ -378,6 +394,32 @@ mod tests {
     use super::*;
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
+
+    /// `add_filters` is a fold over `add_filter`, so N singular calls and one
+    /// plural call over the same pairs must leave the same filter list behind.
+    /// The filters never reach the arena (they go to the file dialog at click
+    /// time), so this reads the field rather than the tree.
+    #[test]
+    fn add_filters_plural_matches_the_singular_chain() {
+        let singular = FilePickerField::new(Signal::new(String::new()))
+            .add_filter("Images", &["png", "jpg"])
+            .add_filter("Text", &["txt"]);
+        let plural = FilePickerField::new(Signal::new(String::new())).add_filters([
+            ("Images", ["png", "jpg"].as_slice()),
+            ("Text", ["txt"].as_slice()),
+        ]);
+        assert_eq!(
+            singular.filters,
+            vec![
+                (
+                    "Images".to_string(),
+                    vec!["png".to_string(), "jpg".to_string()]
+                ),
+                ("Text".to_string(), vec!["txt".to_string()]),
+            ]
+        );
+        assert_eq!(singular.filters, plural.filters);
+    }
 
     #[test]
     fn file_picker_builds() {

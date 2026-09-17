@@ -82,6 +82,99 @@ fn space_checks_the_focused_row_and_ctrl_space_still_selects() {
 }
 
 #[test]
+fn space_on_a_row_fires_the_checkbox_on_change() {
+    // The path this test exists for: a checkbox inside a data-view row is out
+    // of the Tab order, so `Space` on the focused row is its only keyboard
+    // route. That route runs the row's published `keyboard_toggle`, which used
+    // to be a bare `Fn()` with no context — so a checkbox `on_change` would
+    // have fired under the pointer and stayed silent here, which is the worst
+    // kind of hole: invisible, and only in the embedding the framework
+    // advertises most. The marker carries an `EventContext` now.
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let model = ListModel::from_vec((0..20usize).collect());
+    let checks = CheckedModel::new();
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let (sel, ck) = (selection.clone(), checks.clone());
+    let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let lv = tree.add(
+        ListView::new(model, move |i, _item, _selected| {
+            let sink = sink.clone();
+            Box::new(
+                crate::checkbox::Checkbox::new(ck.signal_for(i))
+                    .label(lit!("Row"))
+                    .on_change(move |now, _ctx| sink.borrow_mut().push(now)),
+            )
+        })
+        .item_height(24.0)
+        .selection(sel),
+    );
+    let p = SizeProposal::exact(400.0, 240.0);
+    tree.layout(p);
+    tree.focus(lv);
+    selection.select(2);
+    tree.layout(p);
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    assert!(checks.signal_for(2).get(), "Space checked the focused row");
+    assert_eq!(
+        *seen.borrow(),
+        vec![true],
+        "and the checkbox reported it through on_change"
+    );
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    assert_eq!(*seen.borrow(), vec![true, false]);
+}
+
+#[test]
+fn standard_list_item_forwards_on_checkbox_toggle() {
+    // `StandardListItem` builds its checkbox internally, so without this
+    // forwarder the canonical row is the one place `Checkbox::on_change` is
+    // unreachable — an app would have to re-implement the row to get it.
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let model = ListModel::from_vec((0..20usize).collect());
+    let checks = CheckedModel::new();
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let (sel, ck) = (selection.clone(), checks.clone());
+    let seen: Rc<RefCell<Vec<bool>>> = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let lv = tree.add(
+        ListView::new(model, move |i, item, selected| {
+            let sink = sink.clone();
+            Box::new(
+                crate::StandardListItem::new(lit!(format!("Row {item}")))
+                    .selected(selected)
+                    .checkbox(ck.signal_for(i))
+                    .on_checkbox_toggle(move |now, _ctx| sink.borrow_mut().push(now)),
+            )
+        })
+        .item_height(24.0)
+        .selection(sel),
+    );
+    let p = SizeProposal::exact(400.0, 240.0);
+    tree.layout(p);
+    tree.focus(lv);
+    selection.select(1);
+    tree.layout(p);
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    assert!(checks.signal_for(1).get());
+    assert_eq!(*seen.borrow(), vec![true]);
+}
+
+#[test]
 fn a_row_without_a_checkbox_keeps_space_on_the_selection() {
     let model = ListModel::from_vec((0..20usize).collect());
     let selection = SelectionModel::new(SelectionMode::Multi);

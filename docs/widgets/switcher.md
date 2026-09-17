@@ -12,12 +12,12 @@ with a relayout that shows the new page and dormantizes all others (excluded
 from focus traversal, accessibility tree, hit-test, and paint).
 
 **Lazy mount.** Pages added via `child` /
-`children` / `child_boxed`
+`children` / `child`
 stay unconstructed until their index is selected for the first time. Once
 mounted, the page's subtree persists for the `Switcher`'s lifetime — switching
 away then back finds it in the exact state the user left it (focus, scroll
 offsets, text-input contents, signal subscriptions). Pages added via
-`child_id` are pre-mounted by the caller and treated
+`child` are pre-mounted by the caller and treated
 eagerly.
 
 The `Switcher` itself reports the maximum natural size across every
@@ -37,7 +37,7 @@ let _w = Switcher::new(page.clone())
 
 ## Builder methods at a glance
 
-`capture_child_ids_into`, `child`, `child_boxed`, `child_id`, `children`
+`capture_child_ids_into`, `child`, `child_opt`, `children`
 
 ## API reference
 
@@ -48,12 +48,12 @@ let _w = Switcher::new(page.clone())
 A container that shows exactly one child at a time, driven by a
 `Signal<usize>` index.
 
-**Lazy mount.** A page added via `Self::child` / `Self::child_boxed`
+**Lazy mount.** A page added via `Self::child` / `Self::child`
 / `Self::children` stays unconstructed until its index is first
 selected. Once mounted, the page's subtree persists for the
 Switcher's lifetime — switching away then back finds it in the
 state the user left it (focus, scroll, text-input contents, …).
-Pages added via `Self::child_id` are pre-mounted by the caller
+Pages added via `Self::child` are pre-mounted by the caller
 and treated eagerly: no lazy benefit, no semantic change.
 
 The Switcher itself reports the maximum natural size across every
@@ -95,26 +95,25 @@ The buffer reflects the **currently-mounted** set, not every
 declared page. With lazy mount, a page added via `child(...)`
 only appears in the buffer once it has been selected for the
 first time. Callers that need every id up front should pass
-pre-mounted ids via `Self::child_id` instead — those are
+pre-mounted ids via `Self::child` instead — those are
 eagerly recorded.
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add a child page. The widget stays Boxed until its index is
 selected for the first time, then is mounted into the arena
 and kept alive across selection changes.
 
-#### `pub fn child_boxed(mut self, widget: Box<dyn Widget>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
-Add a pre-boxed child page (lazy, same as `Self::child`).
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
 
-Add a child page by its already-allocated `WidgetId`. Pre-mounted
-pages are wired eagerly — the lazy path doesn't apply because
-the caller has already paid the construction cost.
-
-#### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+#### `pub fn children( self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple child pages from an iterator (lazy, same as
 `Self::child`).

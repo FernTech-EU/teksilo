@@ -116,8 +116,7 @@ impl std::fmt::Debug for FormHost {
 impl Widget for FormHost {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let form = crate::knob_form::build_knob_form(ctx, &self.spec, &self.values);
-        let padded =
-            ctx.add(teksilo_widgets::primitives::Padding::symmetric(8.0, 8.0).child_id(form));
+        let padded = ctx.add(teksilo_widgets::primitives::Padding::symmetric(8.0, 8.0).child(form));
         let scroller = ctx.add(teksilo_widgets::ScrollArea::from_id(padded));
         self.root = Some(scroller);
         vec![scroller]

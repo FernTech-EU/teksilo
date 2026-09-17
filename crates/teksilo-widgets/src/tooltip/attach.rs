@@ -1004,7 +1004,7 @@ mod tests {
             Duration::from_millis(200),
             TooltipPlacement::Side,
         );
-        let _root = tree.add(VStack::new().add_child(anchor));
+        let _root = tree.add(VStack::new().child(anchor));
         tree.layout(SizeProposal::exact(600.0, 400.0));
         tree.pointer_move(tree.bounds(anchor).center());
         tree.advance_time(Duration::from_millis(250));
@@ -1035,7 +1035,7 @@ mod tests {
         let content = tree.add(TooltipWidget::new(lit!("Tip")));
         // Default placement is Below.
         tree.attach_tooltip(anchor, content, Duration::from_millis(200));
-        let _root = tree.add(VStack::new().add_child(anchor));
+        let _root = tree.add(VStack::new().child(anchor));
         tree.layout(SizeProposal::exact(600.0, 400.0));
         tree.pointer_move(tree.bounds(anchor).center());
         tree.advance_time(Duration::from_millis(250));

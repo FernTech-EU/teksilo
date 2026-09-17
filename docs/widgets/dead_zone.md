@@ -17,7 +17,7 @@ pointer-kind-specific.
 
 ## Builder methods at a glance
 
-`child`, `child_id`
+`child`, `child_opt`
 
 ## API reference
 
@@ -64,12 +64,17 @@ pub struct DeadZone { /* fields */ }
 #### `pub fn new() -> Self`
 
 A new, empty dead zone. Attach content with `child` or
-`child_id`.
+`child`.
 
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Wrap an inline widget.
 
-#### `pub fn child_id(mut self, id: WidgetId) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 
-Wrap a pre-registered widget by id.
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.

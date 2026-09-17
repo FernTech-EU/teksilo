@@ -392,8 +392,8 @@ fn one_layer_in_two_views_paints_and_repaints_both() {
     );
     tree.add(
         HStack::new()
-            .child(Expand::new().child_id(a))
-            .child(Expand::new().child_id(b)),
+            .child(Expand::new().child(a))
+            .child(Expand::new().child(b)),
     );
     tree.layout(SizeProposal::exact(800.0, 300.0));
     tree.render();

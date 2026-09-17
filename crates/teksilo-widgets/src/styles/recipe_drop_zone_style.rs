@@ -103,8 +103,8 @@ impl DropZoneStyle for RecipeDropZoneStyle {
         );
 
         let centered =
-            Center::new().child(Padding::uniform(self.recipe.padding).child_id(cfg.content));
+            Center::new().child(Padding::uniform(self.recipe.padding).child(cfg.content));
 
-        ctx.add(ZStack::new().add_child(rect).child(centered))
+        ctx.add(ZStack::new().child(rect).child(centered))
     }
 }

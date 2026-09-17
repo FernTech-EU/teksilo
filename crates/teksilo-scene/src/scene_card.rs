@@ -172,7 +172,7 @@ use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
 use teksilo_core::gesture::DragPhase;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::CardVariant;
-use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget};
+use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, PendingChild, Widget};
 use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::lit;
@@ -461,24 +461,16 @@ impl SceneCard {
     ///
     /// A press here moves the card and nothing else — see the
     /// `scene_card` module docs for the three-row table that makes that true.
-    pub fn header(mut self, widget: impl Widget + 'static) -> Self {
-        self.header_pending = Some(Box::new(widget));
-        self
-    }
-
-    /// [`header`](Self::header), for a widget already in the tree.
-    pub fn header_id(mut self, id: WidgetId) -> Self {
-        self.header = Some(id);
-        self
-    }
-
-    /// [`header`](Self::header), for a widget a factory produced.
     ///
-    /// The delegate that builds a card is itself handed out as a
-    /// `Box<dyn Widget>`, so the boxed form is the shape an app composing cards
-    /// from its own factories already has.
-    pub fn header_boxed(mut self, widget: Box<dyn Widget>) -> Self {
-        self.header_pending = Some(widget);
+    /// Takes a widget, a `Box<dyn Widget>` (the shape a card factory hands
+    /// back), or a [`WidgetId`] already in the tree — one method per slot, so
+    /// the caller does not pick a spelling to match what they happen to hold.
+    pub fn header(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        Self::put(
+            teksilo_core::IntoTeksiChild::into_pending(widget),
+            &mut self.header,
+            &mut self.header_pending,
+        );
         self
     }
 
@@ -488,21 +480,15 @@ impl SceneCard {
     /// Wrapped in a [`DeadZone`](teksilo_widgets::primitives::DeadZone), so the
     /// header drags everywhere **except** here and a click on the control with
     /// a few pixels of jitter still reads as a click.
-    pub fn header_trailing(mut self, widget: impl Widget + 'static) -> Self {
-        self.trailing_pending = Some(Box::new(widget));
-        self
-    }
-
-    /// [`header_trailing`](Self::header_trailing), for a widget already in the
-    /// tree.
-    pub fn header_trailing_id(mut self, id: WidgetId) -> Self {
-        self.trailing = Some(id);
-        self
-    }
-
-    /// [`header_trailing`](Self::header_trailing), boxed.
-    pub fn header_trailing_boxed(mut self, widget: Box<dyn Widget>) -> Self {
-        self.trailing_pending = Some(widget);
+    ///
+    /// Takes a widget, a boxed widget or a [`WidgetId`], like
+    /// [`header`](Self::header).
+    pub fn header_trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        Self::put(
+            teksilo_core::IntoTeksiChild::into_pending(widget),
+            &mut self.trailing,
+            &mut self.trailing_pending,
+        );
         self
     }
 
@@ -512,21 +498,36 @@ impl SceneCard {
     /// Not wrapped in anything — the card root's dead zone already covers it,
     /// and wrapping would put a node between the body and the card that the
     /// body's own gesture arena would have to argue with.
-    pub fn body(mut self, widget: impl Widget + 'static) -> Self {
-        self.body_pending = Some(Box::new(widget));
+    ///
+    /// Takes a widget, a boxed widget or a [`WidgetId`], like
+    /// [`header`](Self::header).
+    pub fn body(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        Self::put(
+            teksilo_core::IntoTeksiChild::into_pending(widget),
+            &mut self.body,
+            &mut self.body_pending,
+        );
         self
     }
 
-    /// [`body`](Self::body), for a widget already in the tree.
-    pub fn body_id(mut self, id: WidgetId) -> Self {
-        self.body = Some(id);
-        self
-    }
-
-    /// [`body`](Self::body), boxed — the shape a content factory hands back.
-    pub fn body_boxed(mut self, widget: Box<dyn Widget>) -> Self {
-        self.body_pending = Some(widget);
-        self
+    /// File a slot's child into whichever of the two stores fits it, clearing
+    /// the other.
+    ///
+    /// The pair is what `build` reads (`id.or_else(|| pending.take())`), so a
+    /// method that only ever *set* its own store would make an id shadow a
+    /// widget handed over later: last call has to win, and that means the
+    /// losing store is cleared here rather than left to the resolution order.
+    fn put(child: PendingChild, id: &mut Option<WidgetId>, pending: &mut Option<Box<dyn Widget>>) {
+        match child {
+            PendingChild::Id(w) => {
+                *id = Some(w);
+                *pending = None;
+            }
+            PendingChild::Deferred(w) => {
+                *pending = Some(w);
+                *id = None;
+            }
+        }
     }
 
     /// Replace the chrome. The closure is handed the id of the card's content
@@ -534,14 +535,14 @@ impl SceneCard {
     /// it.
     ///
     /// The default is
-    /// `Card::new().variant(CardVariant::Elevated).content_id(content)`, so the
+    /// `Card::new().variant(CardVariant::Elevated).content(content)`, so the
     /// card is Tier-3 themed through the existing `style_slots.card` with no
     /// new style protocol. Override it for a different variant, a per-card
     /// colour, or a surface of your own:
     ///
     /// ```ignore
     /// card.surface(|content| {
-    ///     Box::new(Card::new().variant(CardVariant::Outlined).content_id(content))
+    ///     Box::new(Card::new().variant(CardVariant::Outlined).content(content))
     /// })
     /// ```
     pub fn surface(mut self, f: impl Fn(WidgetId) -> Box<dyn Widget> + 'static) -> Self {
@@ -686,7 +687,7 @@ impl SceneCard {
 
         let mut row = teksilo_widgets::primitives::HStack::new().spacing(4.0);
         if let Some(h) = header {
-            row = row.add_child(h);
+            row = row.child(h);
         }
         row = row.child(teksilo_widgets::primitives::Spacer::new());
         if let Some(t) = trailing {
@@ -695,7 +696,7 @@ impl SceneCard {
             // boundary on a press that lands inside it, so the row's `on_drag`
             // above is never enrolled — even for a click that jitters by a few
             // pixels, which a recognizer-timing race would lose.
-            row = row.child(teksilo_widgets::primitives::DeadZone::new().child_id(t));
+            row = row.child(teksilo_widgets::primitives::DeadZone::new().child(t));
         }
 
         if !self.movable {
@@ -835,7 +836,7 @@ impl Widget for SceneCard {
 
         let mut stack = teksilo_widgets::primitives::VStack::new().spacing(0.0);
         if let Some(h) = header_row {
-            stack = stack.add_child(h);
+            stack = stack.child(h);
         }
         if let Some(b) = body {
             // `respect_intrinsic` is the whole of the size story. Without it an
@@ -848,7 +849,7 @@ impl Widget for SceneCard {
             stack = stack.child(
                 teksilo_widgets::primitives::Expand::vertical()
                     .respect_intrinsic()
-                    .child_id(b),
+                    .child(b),
             );
         }
         let content = ctx.add(stack);
@@ -858,7 +859,7 @@ impl Widget for SceneCard {
             None => ctx.add(
                 teksilo_widgets::Card::new()
                     .variant(CardVariant::Elevated)
-                    .content_id(content)
+                    .content(content)
                     // The card itself is the named `Role::Group`; the surface
                     // is chrome. Left alone, `Card` publishes a second,
                     // nameless `Role::Group` **inside** the named one, which a
@@ -1048,15 +1049,15 @@ impl Widget for SceneCard {
             .child(
                 teksilo_widgets::primitives::Expand::new()
                     .respect_intrinsic()
-                    .child_id(surface),
+                    .child(surface),
             )
-            .add_child(ring);
+            .child(ring);
         // The focus gate, when there is a body to focus into. Zero size, so a
         // `ZStack` layer costs nothing; content-free, so the accessibility
         // walker collapses it out of the tree the same way it collapses the
         // ring; no children, so its rebuild is one node.
         if let Some(b) = body {
-            layers = layers.add_child(ctx.add(EditFocusGate {
+            layers = layers.child(ctx.add(EditFocusGate {
                 editing: self.mode.map(|m| *m == CardMode::Editing),
                 focus_within: self.focus_within.clone(),
                 body: b,

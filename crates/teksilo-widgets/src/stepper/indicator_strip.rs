@@ -127,15 +127,15 @@ impl Widget for IndicatorStrip {
                     let spacer_id = ctx.add(Spacer::new());
                     let c = self.controller.clone();
                     ctx.visible_when(spacer_id, version.map(move |_| c.is_visible(i)));
-                    row = row.add_child(spacer_id);
+                    row = row.child(spacer_id);
                 }
-                row = row.add_child(id);
+                row = row.child(id);
             }
             ctx.add(row)
         } else {
             let mut col = VStack::new().spacing(16.0);
             for &id in &indicator_ids {
-                col = col.add_child(id);
+                col = col.child(id);
             }
             ctx.add(col)
         };

@@ -1733,8 +1733,8 @@ fn a_shared_selection_moves_both_panes_chrome_and_both_published_trees() {
     );
     tree.add(
         HStack::new()
-            .child(Expand::new().child_id(pane_a))
-            .child(Expand::new().child_id(pane_b)),
+            .child(Expand::new().child(pane_a))
+            .child(Expand::new().child(pane_b)),
     );
     tree.layout(SizeProposal::exact(800.0, 400.0));
 

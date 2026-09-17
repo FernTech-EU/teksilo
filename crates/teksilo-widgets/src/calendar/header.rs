@@ -305,7 +305,7 @@ impl Widget for NavArrow {
             ArrowKind::RightDouble => double_chevron_right_icon(12.0 * scale),
         };
         let icon_id = ctx.add(icon);
-        let centered = ctx.add(Center::new().child_id(icon_id));
+        let centered = ctx.add(Center::new().child(icon_id));
 
         // Focus state drives the Int UI accent border on focus. No
         // hover/pressed roles needed for these tiny chrome buttons —
@@ -327,7 +327,7 @@ impl Widget for NavArrow {
             .border_width(border_width)
             .corner_radius(CornerRadius::uniform(CALENDAR_NAV_ARROW_RADIUS * scale));
         let bg_id = ctx.add(bg);
-        let z = ctx.add(ZStack::new().add_child(bg_id).add_child(centered));
+        let z = ctx.add(ZStack::new().child(bg_id).child(centered));
         // The arrow's painted footprint comes from the active `CalendarStyle`,
         // which is what lets a preset set it — macOS's `NSDatePicker` stepper is
         // 20 dp, and the arrow used to render the shipped 24 whatever the
@@ -343,7 +343,7 @@ impl Widget for NavArrow {
         // they stayed non-conformant with the outset alone. Under Int UI —
         // whose arrow is the density's target at every rung — the box is the
         // identity and the helper adds no nodes at all.
-        let chrome = ctx.add(FixedSize::new().width(painted).height(painted).child_id(z));
+        let chrome = ctx.add(FixedSize::new().width(painted).height(painted).child(z));
         let (sized, box_size) = conformance_box(ctx, chrome, Size::new(painted, painted));
         self.extent.set(box_size.width);
 

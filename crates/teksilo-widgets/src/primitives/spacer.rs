@@ -106,7 +106,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let spacer = tree.add(Spacer::new());
         let btn = tree.add(FixedLeaf(60.0, 30.0));
-        let _stack = tree.add(HStack::new().add_child(spacer).add_child(btn));
+        let _stack = tree.add(HStack::new().child(spacer).child(btn));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         // Spacer takes 300-60=240, button at x=240
@@ -119,7 +119,7 @@ mod tests {
         let s1 = tree.add(Spacer::new());
         let label = tree.add(FixedLeaf(60.0, 30.0));
         let s2 = tree.add(Spacer::new());
-        let _stack = tree.add(HStack::new().add_child(s1).add_child(label).add_child(s2));
+        let _stack = tree.add(HStack::new().child(s1).child(label).child(s2));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         // Remaining = 300-60 = 240, each spacer = 120
@@ -132,7 +132,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let spacer = tree.add(Spacer::new());
         let btn = tree.add(FixedLeaf(60.0, 30.0));
-        let _stack = tree.add(VStack::new().add_child(spacer).add_child(btn));
+        let _stack = tree.add(VStack::new().child(spacer).child(btn));
         tree.layout(SizeProposal::exact(200.0, 300.0));
 
         // Spacer takes 300-30=270, button at y=270
@@ -145,12 +145,7 @@ mod tests {
         let btn1 = tree.add(FixedLeaf(60.0, 30.0));
         let spacer = tree.add(Spacer::new().min_length(20.0));
         let btn2 = tree.add(FixedLeaf(60.0, 30.0));
-        let _stack = tree.add(
-            HStack::new()
-                .add_child(btn1)
-                .add_child(spacer)
-                .add_child(btn2),
-        );
+        let _stack = tree.add(HStack::new().child(btn1).child(spacer).child(btn2));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         // Spacer gets 300-60-60 = 180 (well above min_length)
@@ -165,7 +160,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let btn = tree.add(FixedLeaf(60.0, 30.0));
         let spacer = tree.add(Spacer::new().min_length(80.0));
-        let stack = tree.add(HStack::new().add_child(btn).add_child(spacer));
+        let stack = tree.add(HStack::new().child(btn).child(spacer));
         // Width fixed, height open → intrinsic height.
         tree.layout(SizeProposal {
             width: Some(400.0),
@@ -186,12 +181,7 @@ mod tests {
         let btn1 = tree.add(FixedLeaf(60.0, 30.0));
         let spacer = tree.add(Spacer::new().min_length(40.0));
         let btn2 = tree.add(FixedLeaf(60.0, 30.0));
-        let stack = tree.add(
-            HStack::new()
-                .add_child(btn1)
-                .add_child(spacer)
-                .add_child(btn2),
-        );
+        let stack = tree.add(HStack::new().child(btn1).child(spacer).child(btn2));
         // 60 + 40 + 60 = 160 exactly → spacer at its floor, btn2 at x=100.
         tree.layout(SizeProposal::exact(160.0, 50.0));
         assert!((tree.bounds(btn2).x - 100.0).abs() < 0.01);

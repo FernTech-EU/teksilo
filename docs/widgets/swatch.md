@@ -44,7 +44,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/color_picker/swatch/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/color_picker/index.html)
 
 ## `pub struct ColorSwatch`
 

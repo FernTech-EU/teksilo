@@ -155,7 +155,7 @@ pub mod prelude {
 
     // Window-active appearance: the opt-in per-widget dim wrapper. The
     // automatic layers (caret hide, selection desaturation) need no import;
-    // `.dim_when_inactive(..)` rides in via `WidgetBuilder` above.
+    // this one is explicit: `DimWhenInactive::new().factor(f).child(w)`.
     pub use teksilo_core::dim_when_inactive::DimWhenInactive;
 
     // Geometry (lives in teksilo-canvas)

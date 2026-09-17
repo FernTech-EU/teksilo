@@ -36,7 +36,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`spacing`, `alignment`, `add_child`, `child`, `children`, `child_opt`
+`spacing`, `alignment`, `child`, `children`, `child_opt`
 
 ## API reference
 
@@ -70,15 +70,11 @@ Set inter-child spacing. Accepts a static `f32` or a reactive
 
 Set the vertical alignment for children that are shorter than the stack's height.
 
-#### `pub fn add_child(mut self, id: WidgetId) -> Self`
-
-Add a pre-registered child by ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
-#### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+#### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
 

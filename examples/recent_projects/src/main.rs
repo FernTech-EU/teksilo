@@ -289,13 +289,13 @@ impl Widget for Root {
 
         let toolbar = HStack::new()
             .spacing(8.0)
-            .add_child(smaller_btn)
-            .add_child(bigger_btn)
-            .add_child(show_paths_btn)
-            .add_child(hide_paths_btn)
+            .child(smaller_btn)
+            .child(bigger_btn)
+            .child(show_paths_btn)
+            .child(hide_paths_btn)
             .child(Spacer::new())
-            .add_child(seed_btn)
-            .add_child(clear_btn);
+            .child(seed_btn)
+            .child(clear_btn);
 
         // ----- Recents list (Repeater) -------------------------------
         let theme_for_factory = theme.clone();

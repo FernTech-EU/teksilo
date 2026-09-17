@@ -731,8 +731,8 @@ fn main() {
                             Expand::new().child(
                                 HStack::new()
                                     // Editor pane gets 2/3, overview 1/3.
-                                    .child(Expand::new().flex(2.0).child_id(main_id))
-                                    .child(Expand::new().child_id(overview_id)),
+                                    .child(Expand::new().flex(2.0).child(main_id))
+                                    .child(Expand::new().child(overview_id)),
                             ),
                         ),
                     )
@@ -777,8 +777,8 @@ mod tests {
         let _root = tree.add(
             VStack::new().child(
                 HStack::new()
-                    .child(Expand::new().child_id(main_id))
-                    .child(Expand::new().child_id(overview_id)),
+                    .child(Expand::new().child(main_id))
+                    .child(Expand::new().child(overview_id)),
             ),
         );
         tree.layout(SizeProposal::exact(1200.0, 600.0));
@@ -987,8 +987,8 @@ mod tests {
             VStack::new().child(TextWidget::new(lit!("toolbar"))).child(
                 Expand::new().child(
                     HStack::new()
-                        .child(Expand::new().flex(2.0).child_id(main_id))
-                        .child(Expand::new().child_id(overview_id)),
+                        .child(Expand::new().flex(2.0).child(main_id))
+                        .child(Expand::new().child(overview_id)),
                 ),
             ),
         );
@@ -1082,7 +1082,7 @@ mod tests {
         let cam = Camera::new(1.0);
         let mut tree = text_tree();
         let pane = tree.add(build_pane(&model, &selection, &cam));
-        tree.add(VStack::new().child(Expand::new().child_id(pane)));
+        tree.add(VStack::new().child(Expand::new().child(pane)));
         tree.layout(SizeProposal::exact(1200.0, 600.0));
         let _ = tree.render();
 
@@ -1141,7 +1141,7 @@ mod tests {
         let cam = Camera::new(1.0);
         let mut tree = text_tree();
         let pane = tree.add(build_pane(&model, &selection, &cam));
-        tree.add(VStack::new().child(Expand::new().child_id(pane)));
+        tree.add(VStack::new().child(Expand::new().child(pane)));
         // A viewport that shows the first row and nothing below it.
         tree.layout(SizeProposal::exact(1200.0, 220.0));
 
@@ -1188,7 +1188,7 @@ mod tests {
         let cam = Camera::new(1.0);
         let mut tree = text_tree();
         let pane = tree.add(build_pane(&model, &selection, &cam));
-        tree.add(VStack::new().child(Expand::new().child_id(pane)));
+        tree.add(VStack::new().child(Expand::new().child(pane)));
         tree.layout(SizeProposal::exact(1200.0, 600.0));
         let _ = tree.render();
         let cards: Vec<ItemId> = model

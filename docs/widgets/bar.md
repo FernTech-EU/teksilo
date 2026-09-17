@@ -48,7 +48,7 @@ let _bar = TabBar::horizontal(model, delegate, selected, |_i, t| t.id)
 
 ## Builder methods at a glance
 
-`horizontal`, `horizontal_from_source`, `vertical`, `vertical_from_source`, `tab_sizing`, `tab_display`, `min_tab_width`, `tab_bar_height`, `max_tab_width`, `tab_spacing`, `pinned_tab_width`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `style`, `on_pin_toggle`, `bar_leading_slot`, `bar_leading_slot_id`, `bar_trailing_slot`, `bar_trailing_slot_id`, `separator`, `show_scroll_arrows`, `overflow_button`, `show_overflow_dropdown`, `vertical_wheel_scrolls_horizontally`, `shift_wheel_scrolls_horizontally`, `on_close`, `reorderable`, `on_reorder`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`
+`horizontal`, `horizontal_from_source`, `vertical`, `vertical_from_source`, `tab_sizing`, `tab_display`, `min_tab_width`, `tab_bar_height`, `max_tab_width`, `tab_spacing`, `pinned_tab_width`, `tab_background`, `selected_tab_background`, `hover_tab_background`, `idle_tab_background`, `bar_background`, `tab_dividers`, `tab_divider_color`, `active_indicator`, `selected_text_role`, `idle_text_role`, `style`, `on_pin_toggle`, `bar_leading_slot`, `bar_trailing_slot`, `separator`, `show_scroll_arrows`, `overflow_button`, `show_overflow_dropdown`, `vertical_wheel_scrolls_horizontally`, `shift_wheel_scrolls_horizontally`, `on_close`, `reorderable`, `on_reorder`, `accept_external_tabs`, `on_tab_received`, `on_transfer_out`, `on_external_drop`
 
 ## API reference
 
@@ -349,23 +349,15 @@ transition via a dialog or route it through an intent before
 mutating the item; apps decide whether to actually flip the
 pinned state.
 
-#### `pub fn bar_leading_slot(mut self, w: impl Widget + 'static) -> Self`
+#### `pub fn bar_leading_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Bar-level leading slot — a widget rendered before the headers
 row (and before any pinned region in later phases).
 
-#### `pub fn bar_leading_slot_id(mut self, id: WidgetId) -> Self`
-
-Bar-level leading slot accepting a pre-registered widget id.
-
-#### `pub fn bar_trailing_slot(mut self, w: impl Widget + 'static) -> Self`
+#### `pub fn bar_trailing_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Bar-level trailing slot — a widget rendered after the headers
 row (and after any overflow dropdown in later phases).
-
-#### `pub fn bar_trailing_slot_id(mut self, id: WidgetId) -> Self`
-
-Bar-level trailing slot accepting a pre-registered widget id.
 
 #### `pub fn separator(mut self, on: bool) -> Self`
 

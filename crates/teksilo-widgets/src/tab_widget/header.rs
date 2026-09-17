@@ -539,7 +539,7 @@ impl Widget for TabHeader {
             // gets the disabled tint.
             let icon = icon.color(role_signal.clone());
             let id = ctx.add(icon);
-            row = row.add_child(id);
+            row = row.child(id);
         }
 
         if self.pinned || icon_only {
@@ -554,7 +554,7 @@ impl Widget for TabHeader {
         } else {
             if let Some(slot) = self.leading_slot.take() {
                 let id = ctx.add_boxed(slot);
-                row = row.add_child(id);
+                row = row.child(id);
             }
 
             // Label as a TextWidget — reactive on locale change because
@@ -572,7 +572,7 @@ impl Widget for TabHeader {
                 .color(role_signal.clone())
                 .a11y_hidden();
             let label_id = ctx.add(label_widget);
-            row = row.add_child(label_id);
+            row = row.child(label_id);
 
             // Flexible spacer between the label and the trailing
             // controls. `Spacer::new()` reports natural size 0 with
@@ -583,11 +583,11 @@ impl Widget for TabHeader {
             // extent), pushing the close button against the
             // trailing edge of the pill regardless of label length.
             let spacer_id = ctx.add(crate::primitives::Spacer::new());
-            row = row.add_child(spacer_id);
+            row = row.child(spacer_id);
 
             if let Some(slot) = self.trailing_slot.take() {
                 let id = ctx.add_boxed(slot);
-                row = row.add_child(id);
+                row = row.child(id);
             }
 
             // Trailing close button for closable tabs. Visible only
@@ -621,7 +621,7 @@ impl Widget for TabHeader {
                         interaction.map(|s| matches!(*s, TabHeaderInteraction::Hovered));
                     ctx.visible_when(close_id, visible_when);
                 }
-                row = row.add_child(close_id);
+                row = row.child(close_id);
             }
         }
 
@@ -758,13 +758,13 @@ impl Widget for TabHeader {
             // the selected / hover fills would never paint. As direct
             // children each rect is queried with the exact bounds proposal
             // and fills; `visible_when` (RepaintOnly) shows exactly one.
-            let filled_chrome = ctx.add(Expand::new().child_id(chrome_id));
+            let filled_chrome = ctx.add(Expand::new().child(chrome_id));
             ctx.add(
                 ZStack::new()
-                    .add_child(sel_bg)
-                    .add_child(hov_bg)
-                    .add_child(idle_bg)
-                    .add_child(filled_chrome),
+                    .child(sel_bg)
+                    .child(hov_bg)
+                    .child(idle_bg)
+                    .child(filled_chrome),
             )
         } else {
             chrome_id

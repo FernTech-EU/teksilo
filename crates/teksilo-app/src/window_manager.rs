@@ -2326,7 +2326,7 @@ mod initial_focus_tests {
             let second = ctx.add(Button::new(lit!("Second")));
             self.second = Some(second);
             self.second_out.set(Some(second));
-            let col = ctx.add(VStack::new().add_child(first).add_child(second));
+            let col = ctx.add(VStack::new().child(first).child(second));
             self.root = Some(col);
             vec![col]
         }

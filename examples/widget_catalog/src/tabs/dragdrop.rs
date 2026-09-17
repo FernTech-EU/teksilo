@@ -113,12 +113,12 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
     ctx.add(
         VStack::new()
             .spacing(20.0)
-            .add_child(header)
+            .child(header)
             .child(Divider::new())
-            .add_child(any)
-            .add_child(images)
-            .add_child(target)
-            .add_child(logs),
+            .child(any)
+            .child(images)
+            .child(target)
+            .child(logs),
     )
 }
 

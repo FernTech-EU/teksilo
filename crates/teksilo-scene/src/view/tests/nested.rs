@@ -165,7 +165,7 @@ fn scene_pan_at_bound_chains_to_outer_scrollarea() {
     let scene_id = tree.add(scene_view);
 
     let filler = tree.add(TallLeaf(200.0, 300.0));
-    let content = tree.add(VStack::new().add_child(scene_id).add_child(filler));
+    let content = tree.add(VStack::new().child(scene_id).child(filler));
     let outer = ScrollArea::from_id(content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer_id = tree.add(outer);
@@ -226,7 +226,7 @@ fn scene_overscroll_contain_does_not_chain_to_outer_scrollarea() {
     let scene_id = tree.add(scene_view);
 
     let filler = tree.add(TallLeaf(200.0, 300.0));
-    let content = tree.add(VStack::new().add_child(scene_id).add_child(filler));
+    let content = tree.add(VStack::new().child(scene_id).child(filler));
     let outer = ScrollArea::from_id(content).smooth_scrolling(false);
     let outer_y = outer.scroll_y_signal().clone();
     let _outer_id = tree.add(outer);

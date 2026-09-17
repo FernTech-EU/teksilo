@@ -645,7 +645,7 @@ fn a_finger_pan_over_the_calendar_scrolls_its_container() {
     let cal = tree.add(Calendar::single(date.clone()));
     let _page = tree.add(
         crate::primitives::VStack::new()
-            .add_child(cal)
+            .child(cal)
             .scroll_container(PanAxes::BOTH)
             .pan_claim(PanClaim::vertical())
             .on_scroll(move |_e, _c| {

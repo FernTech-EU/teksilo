@@ -810,7 +810,7 @@ mod tests {
         let log: PayloadLog = Rc::new(RefCell::new(Vec::new()));
         let mut tree = WidgetTree::new();
         let leaf = tree.add(payload_grip(&log));
-        let branch = tree.add(StackWidget::new().add_child(leaf));
+        let branch = tree.add(StackWidget::new().child(leaf));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let contact = new_contact();
@@ -965,7 +965,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let leaf = tree.add(grip(&log, slot.clone()));
         slot.set(Some(leaf));
-        let branch = tree.add(StackWidget::new().add_child(leaf));
+        let branch = tree.add(StackWidget::new().child(leaf));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         press(&mut tree, Point::new(20.0, 50.0));
@@ -987,8 +987,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let leaf_a = tree.add(FillWidget::new());
         let leaf_b = tree.add(FillWidget::new());
-        let inner = tree.add(StackWidget::new().add_child(leaf_a).add_child(leaf_b));
-        let outer = tree.add(StackWidget::new().add_child(inner));
+        let inner = tree.add(StackWidget::new().child(leaf_a).child(leaf_b));
+        let outer = tree.add(StackWidget::new().child(inner));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let parked = tree.arena.set_dormant(outer);
@@ -1023,12 +1023,8 @@ mod tests {
         let mut tree = WidgetTree::new();
         let leaf = tree.add(grip(&log, slot.clone()));
         slot.set(Some(leaf));
-        let branch = tree.add(
-            StackWidget::new()
-                .add_child(leaf)
-                .visible_when(shown.clone()),
-        );
-        let _root = tree.add(StackWidget::new().add_child(branch));
+        let branch = tree.add(StackWidget::new().child(leaf).visible_when(shown.clone()));
+        let _root = tree.add(StackWidget::new().child(branch));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         let at = tree.bounds(leaf).center();
@@ -1181,10 +1177,10 @@ mod tests {
         // The tap owner: it takes the capture, which is what enrols the
         // drag-capable ancestors above it as competitors.
         let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
-        let inner = tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        let inner = tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
         let outer = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .on_drag(|_phase, _c| {})
                 .on_pointer_cancel({
                     let log = log.clone();
@@ -1240,7 +1236,7 @@ mod tests {
     fn a_destroyed_member_is_revoked_alone() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
-        let ancestor = tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        let ancestor = tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
         tree.layout(SizeProposal::exact(400.0, 100.0));
 
         press(&mut tree, Point::new(20.0, 50.0));
@@ -1271,7 +1267,7 @@ mod tests {
         let mut tree = WidgetTree::new();
         let leaf = tree.add(grip(&log, slot.clone()));
         slot.set(Some(leaf));
-        let host = tree.add(StackWidget::new().add_child(leaf));
+        let host = tree.add(StackWidget::new().child(leaf));
         tree.layout(SizeProposal::exact(200.0, 100.0));
 
         press(&mut tree, Point::new(20.0, 50.0));
@@ -1517,7 +1513,7 @@ mod tests {
     fn revoking_a_member_leaves_the_pointer_alive() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
-        let ancestor = tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        let ancestor = tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
         tree.layout(SizeProposal::exact(400.0, 100.0));
 
         press(&mut tree, Point::new(20.0, 50.0));

@@ -204,12 +204,7 @@ impl Widget for TextScaleControl {
             ctx.access_labelled_by(spin_id, label_id);
             let self_id = ctx.self_id();
             ctx.access_labelled_by(self_id, label_id);
-            ctx.add(
-                HStack::new()
-                    .spacing(8.0)
-                    .add_child(label_id)
-                    .add_child(spin_id),
-            )
+            ctx.add(HStack::new().spacing(8.0).child(label_id).child(spin_id))
         } else {
             spin_id
         };

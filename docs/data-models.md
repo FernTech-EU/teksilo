@@ -309,7 +309,7 @@ TreeView::new_with_context(tree, move |item, entry, _sel, ctx| {
         StandardTreeItem::new(lit!(&item.title))
             .from_entry(entry)
             .tristate_checkbox(tree_checks.signal_for(entry.node_id))
-            .on_toggle_rc(ctx.toggle_callback())
+            .on_chevron_toggle_rc(ctx.toggle_callback())
     )
 })
 ```

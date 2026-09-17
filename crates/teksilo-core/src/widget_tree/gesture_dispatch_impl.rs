@@ -728,15 +728,11 @@ mod tests {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().on_tap(move |_p, _c| t.set(true)));
         // Ancestor container carries the drag; child sits on top and taps.
-        let _parent = tree.add(
-            StackWidget::new()
-                .add_child(child)
-                .on_drag(move |phase, _c| {
-                    if matches!(phase, DragPhase::Started { .. }) {
-                        d.set(true);
-                    }
-                }),
-        );
+        let _parent = tree.add(StackWidget::new().child(child).on_drag(move |phase, _c| {
+            if matches!(phase, DragPhase::Started { .. }) {
+                d.set(true);
+            }
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // 1) A plain click on the child fires the child's tap, not the drag.
@@ -820,19 +816,15 @@ mod tests {
         // Card: an on_tap wrapper around a container holding the inner leaf.
         let card = tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .on_tap(move |_p, _c| { /* select */ }),
         );
         // Canvas: an on_drag container holding the card.
-        let _canvas = tree.add(
-            StackWidget::new()
-                .add_child(card)
-                .on_drag(move |phase, _c| {
-                    if matches!(phase, DragPhase::Started { .. }) {
-                        d.set(true);
-                    }
-                }),
-        );
+        let _canvas = tree.add(StackWidget::new().child(card).on_drag(move |phase, _c| {
+            if matches!(phase, DragPhase::Started { .. }) {
+                d.set(true);
+            }
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         tree.dispatch_event(WidgetEvent::pointer_down(
@@ -880,15 +872,11 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().on_tap(move |_p, _c| { /* select */ }));
-        let _parent = tree.add(
-            StackWidget::new()
-                .add_child(child)
-                .on_drag(move |phase, _c| {
-                    if matches!(phase, DragPhase::Started { .. }) {
-                        d.set(true);
-                    }
-                }),
-        );
+        let _parent = tree.add(StackWidget::new().child(child).on_drag(move |phase, _c| {
+            if matches!(phase, DragPhase::Started { .. }) {
+                d.set(true);
+            }
+        }));
         tree.layout(SizeProposal::exact(100.0, 50.0));
 
         // Click (press then release at the same point — the tap resolves).
@@ -1281,7 +1269,7 @@ mod tests {
         let widget = tree.add(FillWidget::new().on_long_press(move |_e, _ctx| {
             flag.set(true);
         }));
-        let _root = tree.add(StackWidget::new().add_child(widget).add_child(panel));
+        let _root = tree.add(StackWidget::new().child(widget).child(panel));
         tree.layout(SizeProposal::exact(100.0, 50.0));
         assert!(!tree.is_visible(panel), "precondition: the panel is parked");
 
@@ -1431,7 +1419,7 @@ mod arbitration_tests {
                 let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
                 tree.add(
                     StackWidget::new()
-                        .add_child(child)
+                        .child(child)
                         .touch_action(action)
                         .on_drag(move |phase, _c| {
                             if matches!(phase, DragPhase::Started { .. }) && l.get().is_none() {
@@ -1510,7 +1498,7 @@ mod arbitration_tests {
 
         let mut tree = WidgetTree::new();
         let leaf = tree.add(FillWidget::new());
-        let inner = tree.add(StackWidget::new().add_child(leaf).on_pointer_event(
+        let inner = tree.add(StackWidget::new().child(leaf).on_pointer_event(
             move |event, _ctx| {
                 if matches!(event, WidgetEvent::PointerDown { .. }) {
                     inner_order.borrow_mut().push("inner");
@@ -1518,7 +1506,7 @@ mod arbitration_tests {
                 EventResponse::Ignored
             },
         ));
-        let outer = tree.add(StackWidget::new().add_child(inner).on_pointer_event(
+        let outer = tree.add(StackWidget::new().child(inner).on_pointer_event(
             move |event, _ctx| {
                 if matches!(event, WidgetEvent::PointerDown { .. }) {
                     outer_order.borrow_mut().push("outer");
@@ -1572,15 +1560,11 @@ mod arbitration_tests {
                     EventResponse::Ignored
                 }),
         );
-        let ancestor = tree.add(
-            StackWidget::new()
-                .add_child(handle)
-                .on_drag(move |phase, _c| {
-                    if matches!(phase, DragPhase::Started { .. }) {
-                        d.set(true);
-                    }
-                }),
-        );
+        let ancestor = tree.add(StackWidget::new().child(handle).on_drag(move |phase, _c| {
+            if matches!(phase, DragPhase::Started { .. }) {
+                d.set(true);
+            }
+        }));
         tree.layout(SizeProposal::exact(200.0, 50.0));
 
         press(&mut tree, Point::new(20.0, 25.0));
@@ -1622,7 +1606,7 @@ mod arbitration_tests {
         }));
         let scroller = tree.add(
             StackWidget::new()
-                .add_child(handle)
+                .child(handle)
                 .pan_claim(PanClaim::vertical()),
         );
         tree.layout(SizeProposal::exact(200.0, 400.0));
@@ -1672,7 +1656,7 @@ mod arbitration_tests {
         let row = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
         let list = tree.add(
             StackWidget::new()
-                .add_child(row)
+                .child(row)
                 .drag_activation(DragActivation::AfterLongPress)
                 .on_drag(|_phase, _c| {}),
         );
@@ -1718,8 +1702,8 @@ mod arbitration_tests {
     fn losing_the_captor_cancels_the_sequence() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
-        let mid = tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
-        let outer = tree.add(StackWidget::new().add_child(mid).on_drag(|_phase, _c| {}));
+        let mid = tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
+        let outer = tree.add(StackWidget::new().child(mid).on_drag(|_phase, _c| {}));
         tree.layout(SizeProposal::exact(200.0, 50.0));
 
         press(&mut tree, Point::new(20.0, 25.0));
@@ -1762,15 +1746,11 @@ mod arbitration_tests {
                 EventResponse::Ignored
             },
         ));
-        tree.add(
-            StackWidget::new()
-                .add_child(child)
-                .on_drag(move |phase, _c| {
-                    if matches!(phase, DragPhase::Started { .. }) {
-                        d.set(true);
-                    }
-                }),
-        );
+        tree.add(StackWidget::new().child(child).on_drag(move |phase, _c| {
+            if matches!(phase, DragPhase::Started { .. }) {
+                d.set(true);
+            }
+        }));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         press(&mut tree, Point::new(20.0, 25.0));
@@ -1819,7 +1799,7 @@ mod arbitration_tests {
             }
             EventResponse::Ignored
         }));
-        tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         let max_hold = teksilo_tokens::GestureProfile::MOUSE.max_hold;
@@ -1871,7 +1851,7 @@ mod arbitration_tests {
             }
             EventResponse::Ignored
         }));
-        tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
         tree.layout(SizeProposal::exact(300.0, 50.0));
 
         let max_hold = teksilo_tokens::GestureProfile::MOUSE.max_hold;
@@ -1925,7 +1905,7 @@ mod arbitration_tests {
         let row = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
         let list = tree.add(
             StackWidget::new()
-                .add_child(row)
+                .child(row)
                 .drag_activation(DragActivation::AfterLongPress)
                 .on_drag(|_phase, _c| {}),
         );
@@ -1974,7 +1954,7 @@ mod arbitration_tests {
                 EventResponse::Ignored
             },
         ));
-        let ancestor = tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        let ancestor = tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
         tree.layout(SizeProposal::exact(200.0, 50.0));
 
         press(&mut tree, Point::new(20.0, 25.0));
@@ -1998,7 +1978,7 @@ mod arbitration_tests {
     fn touch_disabled_forms_no_sequence() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FillWidget::new().on_tap(|_e, _c| {}));
-        tree.add(StackWidget::new().add_child(child).on_drag(|_phase, _c| {}));
+        tree.add(StackWidget::new().child(child).on_drag(|_phase, _c| {}));
         tree.layout(SizeProposal::exact(200.0, 50.0));
         tree.set_touch_enabled(false);
 
@@ -2109,12 +2089,12 @@ mod arbitration_tests {
         }));
         let inner = tree.add(
             StackWidget::new()
-                .add_child(leaf)
+                .child(leaf)
                 .touch_action(TouchAction::PAN),
         );
         tree.add(
             StackWidget::new()
-                .add_child(inner)
+                .child(inner)
                 .touch_action(TouchAction::PAN_Y),
         );
         tree.layout(SizeProposal::exact(200.0, 50.0));

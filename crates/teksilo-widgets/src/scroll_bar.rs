@@ -1837,7 +1837,7 @@ mod touch_tests {
         tree.add(
             crate::primitives::HStack::new()
                 .child(crate::primitives::Spacer::new())
-                .add_child(bar_id),
+                .child(bar_id),
         );
         tree.layout(SizeProposal::exact(200.0, 400.0));
         tree.render();

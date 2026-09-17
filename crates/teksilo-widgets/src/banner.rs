@@ -145,14 +145,14 @@ impl Widget for Banner {
         );
         let mut text_column = VStack::new()
             .spacing(banner_tokens::BANNER_TITLE_DESCRIPTION_GAP)
-            .add_child(title);
+            .child(title);
         if let Some(description) = &self.description {
             let desc = ctx.add(
                 TextWidget::new(description.clone())
                     .style(TextStyleRole::Body)
                     .color(TextRole::Secondary),
             );
-            text_column = text_column.add_child(desc);
+            text_column = text_column.child(desc);
         }
         let text_column_id = ctx.add(text_column);
 
@@ -161,9 +161,9 @@ impl Widget for Banner {
         let mut content = HStack::new()
             .spacing(banner_tokens::BANNER_CONTENT_GAP)
             .alignment(VAlignment::Center)
-            .add_child(ctx.add(Expand::horizontal().child_id(text_column_id)));
+            .child(ctx.add(Expand::horizontal().child(text_column_id)));
         if let Some(action) = self.action.take() {
-            content = content.add_child(ctx.add_boxed(action));
+            content = content.child(ctx.add_boxed(action));
         }
         if let Some(on_dismiss) = self.on_dismiss.take() {
             // IconButton::clear() ships with its own translated
@@ -174,7 +174,7 @@ impl Widget for Banner {
             let btn = IconButton::clear()
                 .embedded()
                 .on_activate_fn(move |c| on_dismiss(c));
-            content = content.add_child(ctx.add(btn));
+            content = content.child(ctx.add(btn));
         }
         let content_id = ctx.add(content);
 

@@ -39,7 +39,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`spacing`, `line_spacing`, `add_child`, `child`, `children`, `child_opt`
+`spacing`, `line_spacing`, `child`, `children`, `child_opt`
 
 ## API reference
 
@@ -69,15 +69,11 @@ Horizontal spacing between items on the same line. Accepts a static
 Vertical spacing between lines. Accepts a static `f32` or a
 reactive `Signal<f32>`.
 
-#### `pub fn add_child(mut self, id: WidgetId) -> Self`
-
-Add a pre-registered child by ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
-#### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+#### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
 

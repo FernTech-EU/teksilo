@@ -165,11 +165,11 @@ signal gets the body focused too, with no dispatch of its own to do it in.
 
 ## Builder methods at a glance
 
-`header`, `header_id`, `header_boxed`, `header_trailing`, `header_trailing_id`, `header_trailing_boxed`, `body`, `body_id`, `body_boxed`, `surface`, `mode`, `mode_signal`, `selection`, `label`, `activate_label`, `movable`, `height_for_width`, `size_policy`, `on_activate`
+`header`, `header_trailing`, `body`, `surface`, `mode`, `mode_signal`, `selection`, `label`, `activate_label`, `movable`, `height_for_width`, `size_policy`, `on_activate`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/scene_card/index.html)
 
 ## `pub enum CardMode`
 
@@ -223,26 +223,18 @@ SceneView::with_model(model.clone())
     })
 ```
 
-#### `pub fn header(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn header(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 The grab handle, and the card's title strip.
 
 A press here moves the card and nothing else — see the
 `scene_card` module docs for the three-row table that makes that true.
 
-#### `pub fn header_id(mut self, id: WidgetId) -> Self`
+Takes a widget, a `Box<dyn Widget>` (the shape a card factory hands
+back), or a `WidgetId` already in the tree — one method per slot, so
+the caller does not pick a spelling to match what they happen to hold.
 
-`header`, for a widget already in the tree.
-
-#### `pub fn header_boxed(mut self, widget: Box<dyn Widget>) -> Self`
-
-`header`, for a widget a factory produced.
-
-The delegate that builds a card is itself handed out as a
-`Box<dyn Widget>`, so the boxed form is the shape an app composing cards
-from its own factories already has.
-
-#### `pub fn header_trailing(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn header_trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 A control at the trailing end of the header — a `⋮` menu, a colour
 swatch, a pin.
@@ -251,16 +243,10 @@ Wrapped in a `DeadZone`, so the
 header drags everywhere **except** here and a click on the control with
 a few pixels of jitter still reads as a click.
 
-#### `pub fn header_trailing_id(mut self, id: WidgetId) -> Self`
+Takes a widget, a boxed widget or a `WidgetId`, like
+`header`.
 
-`header_trailing`, for a widget already in the
-tree.
-
-#### `pub fn header_trailing_boxed(mut self, widget: Box<dyn Widget>) -> Self`
-
-`header_trailing`, boxed.
-
-#### `pub fn body(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn body(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 The content. Anything at all: a text editor, an image, a chart, a
 `SceneView` of its own.
@@ -269,13 +255,8 @@ Not wrapped in anything — the card root's dead zone already covers it,
 and wrapping would put a node between the body and the card that the
 body's own gesture arena would have to argue with.
 
-#### `pub fn body_id(mut self, id: WidgetId) -> Self`
-
-`body`, for a widget already in the tree.
-
-#### `pub fn body_boxed(mut self, widget: Box<dyn Widget>) -> Self`
-
-`body`, boxed — the shape a content factory hands back.
+Takes a widget, a boxed widget or a `WidgetId`, like
+`header`.
 
 #### `pub fn surface(mut self, f: impl Fn(WidgetId) -> Box<dyn Widget> + 'static) -> Self`
 
@@ -284,14 +265,14 @@ Replace the chrome. The closure is handed the id of the card's content
 it.
 
 The default is
-`Card::new().variant(CardVariant::Elevated).content_id(content)`, so the
+`Card::new().variant(CardVariant::Elevated).content(content)`, so the
 card is Tier-3 themed through the existing `style_slots.card` with no
 new style protocol. Override it for a different variant, a per-card
 colour, or a surface of your own:
 
 ```ignore
 card.surface(|content| {
-    Box::new(Card::new().variant(CardVariant::Outlined).content_id(content))
+    Box::new(Card::new().variant(CardVariant::Outlined).content(content))
 })
 ```
 

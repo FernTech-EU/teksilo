@@ -71,7 +71,7 @@ impl Widget for DragPreview {
             Panel::new()
                 .background(SurfaceRole::Raised)
                 .corner_radius(6.0)
-                .child_id(inner_id),
+                .child(inner_id),
         );
         self.child_id = Some(panel_id);
         vec![panel_id]

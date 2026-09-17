@@ -188,7 +188,7 @@ impl Widget for MenuItem {
                 crate::primitives::FixedSize::new()
                     .width(metrics.icon_column_width)
                     .height(metrics.icon_column_width)
-                    .child_id(icon_child_id),
+                    .child(icon_child_id),
             )
         };
 
@@ -344,9 +344,9 @@ impl Widget for MenuItem {
                 crate::primitives::FixedSize::new()
                     .width(metrics.trailing_column_width)
                     .height(metrics.icon_column_width)
-                    .child_id(chevron_child_id),
+                    .child(chevron_child_id),
             );
-            trailing_row = trailing_row.add_child(chevron_column);
+            trailing_row = trailing_row.child(chevron_column);
             ctx.add(trailing_row)
         };
 

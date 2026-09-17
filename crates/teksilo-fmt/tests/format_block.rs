@@ -278,3 +278,15 @@ fn multiline_call_expr_arg_is_stable() {
     let canonical = "HStack {\n    MinSizeForLabel::new(TextWidget::new(\n        \"Fill\",\n    )) {\n        width: 220.0\n    }\n}";
     assert_eq!(fmt(canonical), canonical);
 }
+
+/// A multi-line expression child keeps its own shape.
+///
+/// A helper call at body position routinely spans lines. Printing its source
+/// slice as one token re-indents every continuation line by the block's indent,
+/// which walks the argument list further right on each run. It is the same
+/// shape as a multi-line property value and takes the same path.
+#[test]
+fn a_multiline_expression_child_is_not_re_indented() {
+    let canonical = "VStack {\n    spacing: 8.0\n    wide_chart(\n        points.len(),\n        CHART_HEIGHT,\n    )\n    footer\n}";
+    assert_eq!(fmt(canonical), canonical);
+}

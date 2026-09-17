@@ -83,16 +83,22 @@ impl MaxSize {
         self
     }
 
-    /// Set child by pre-registered ID.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -210,7 +216,7 @@ mod tests {
     fn clamps_large_child_to_maximum() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 600.0));
-        let max = tree.add(MaxSize::new(400.0, 300.0).child_id(child));
+        let max = tree.add(MaxSize::new(400.0, 300.0).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
@@ -222,7 +228,7 @@ mod tests {
     fn small_child_is_not_clamped() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 50.0));
-        let max = tree.add(MaxSize::new(400.0, 300.0).child_id(child));
+        let max = tree.add(MaxSize::new(400.0, 300.0).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
@@ -234,7 +240,7 @@ mod tests {
     fn max_width_only() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
-        let max = tree.add(MaxSize::width(400.0).child_id(child));
+        let max = tree.add(MaxSize::width(400.0).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(max);
@@ -247,11 +253,7 @@ mod tests {
         let max_w = Signal::new(400.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(800.0, 50.0));
-        let max = tree.add(
-            MaxSize::width(9999.0)
-                .max_width(max_w.clone())
-                .child_id(child),
-        );
+        let max = tree.add(MaxSize::width(9999.0).max_width(max_w.clone()).child(child));
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(max).width - 400.0).abs() < 0.01);
 

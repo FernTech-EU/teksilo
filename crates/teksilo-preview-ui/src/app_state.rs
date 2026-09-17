@@ -411,20 +411,18 @@ impl Widget for PreviewerRoot {
         );
         let outer_split_id = ctx.add(
             Splitter::new(layout)
-                .pane_id(navigator)
-                .pane_id(canvas)
-                .pane_id(inspector),
+                .pane(navigator)
+                .pane(canvas)
+                .pane(inspector),
         );
 
         // Wrap the split in `Expand::vertical()` so the
         // VStack gives it all remaining vertical space below the
         // toolbar — without this the split collapses to its minimum
         // and the whole previewer renders in <360 px height.
-        let outer_split_expanded = ctx.add(Expand::vertical().child_id(outer_split_id));
+        let outer_split_expanded = ctx.add(Expand::vertical().child(outer_split_id));
 
-        let root = VStack::new()
-            .add_child(toolbar)
-            .add_child(outer_split_expanded);
+        let root = VStack::new().child(toolbar).child(outer_split_expanded);
         let root_id = ctx.add(root);
         self.root_id = Some(root_id);
         vec![root_id]

@@ -37,7 +37,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`column_spacing`, `item_spacing`, `add_child`, `child`, `children`, `child_opt`
+`column_spacing`, `item_spacing`, `child`, `children`, `child_opt`
 
 ## API reference
 
@@ -83,15 +83,11 @@ Horizontal gap between columns.
 
 Vertical gap between items within the same column.
 
-#### `pub fn add_child(mut self, id: WidgetId) -> Self`
-
-Add a pre-registered child by ID.
-
-#### `pub fn child(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Add an inline child widget (deferred insertion).
 
-#### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
+#### `pub fn children( mut self, iter: impl IntoIterator<Item = impl teksilo_core::IntoTeksiChild>, ) -> Self`
 
 Add multiple inline children from an iterator.
 

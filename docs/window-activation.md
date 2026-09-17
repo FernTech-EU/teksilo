@@ -119,7 +119,7 @@ If an app sets an explicit selection colour — e.g.
 matches macOS, where an app-set selection colour opts out of system management.
 Only theme-driven (default) selections desaturate.
 
-## `.dim_when_inactive(..)` — opt-in for custom content
+## `DimWhenInactive` — opt-in for custom content
 
 The automatic layers cover stock widgets. For *custom* content an app wants to
 fade back in a background window (a colourful side panel, a bespoke accent
@@ -128,13 +128,18 @@ surface), wrap it:
 ```rust
 use teksilo::prelude::*;
 
-ctx.add(my_panel.dim_when_inactive(0.4));   // 40 % opacity when inactive
-ctx.add(my_panel.dim_when_inactive_default());   // default 70 %
+ctx.add(DimWhenInactive::new().factor(0.4).child(my_panel));   // 40 % when inactive
+ctx.add(DimWhenInactive::new().child(my_panel));               // default 70 %
 ```
 
-`.dim_when_inactive(factor)` (on the `WidgetBuilder` trait) wraps the subtree in
-`DimWhenInactive`, which drives a node-level opacity scope from
-`window_active_signal`. It is layout- and a11y-transparent, and the opacity
+The wrapper drives a node-level opacity scope from `window_active_signal`.
+There is no `WidgetBuilder::dim_when_inactive`: it was the one builder method
+returning a foreign wrapper instead of `WidgetWithHandlers<Self>`, so the rest
+of a chain past it resolved against `DimWhenInactive`, whose `child` *replaces*
+its pending child, and `VStack::new().dim_when_inactive(0.7).child(a).child(b)`
+silently built `DimWhenInactive > b`. It was removed, and
+`teksilo_teksu_guard::foreign_wrapper_returns` now fails the build if a method
+of that shape comes back. It is layout- and a11y-transparent, and the opacity
 **snaps** (no tween) — correct under `prefers-reduced-motion`, since window
 activation is an OS state change, not a user-initiated motion.
 
@@ -175,7 +180,7 @@ A fresh tree starts active (`is_window_active() == true`). See the tests in
 ## Demo
 
 `cargo run -p multi_window` — two windows, each with a status label, a
-`TextInput`, and a `.dim_when_inactive` panel. Click between them to watch the
+`TextInput`, and a `DimWhenInactive` panel. Click between them to watch the
 inactive window hide its caret, mute its selection, dim its panel, and flip its
 status label.
 

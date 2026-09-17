@@ -83,7 +83,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
+`on_change`, `step`, `page_step`, `orientation`, `enabled`, `variant`, `tick_count`, `style`, `label`, `tooltip`, `rich_tooltip`, `rich_tooltip_content`, `composite_tooltip`
 
 ## API reference
 
@@ -123,11 +123,28 @@ pub struct Slider { /* fields */ }
 Create a horizontal slider bound to `value` with the given inclusive
 range. Use `orientation` to switch to vertical.
 
-#### `pub fn step(mut self, step: f32) -> Self`
+#### `pub fn on_change( mut self, f: impl Fn(f32, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Set the discrete step size for keyboard arrows and accessibility
 Increment/Decrement actions. When unset, defaults to 1 % of the
 range.
+Run `f` for every value this control produces under the **user's**
+hand, with an `EventContext`, so it can do what a bare `Signal` write
+cannot (`ctx.send_intent(...)`, opening a window). Fires for a track
+click, for each step of a drag, for the arrows, and for an assistive
+technology's `Increment` / `Decrement` / `SetValue`.
+
+**A drag fires this repeatedly** — once per value it actually produces,
+not once per pointer sample, since a write that changes nothing reports
+nothing. It is still the wrong place for work that should happen once
+per interaction: persisting to disk, a network call, an undo entry.
+There is no commit-on-release callback yet; observe the signal and do
+that work when the value settles.
+
+Does **not** fire for programmatic writes to the bound signal — there is
+no event in flight to carry. Observe the signal for that.
+
+#### `pub fn step(mut self, step: f32) -> Self`
 
 #### `pub fn page_step(mut self, page_step: f32) -> Self`
 

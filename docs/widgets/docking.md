@@ -33,7 +33,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`rail`, `center`, `policy`, `disable_side`, `center_id`, `dock`
+`rail`, `rails`, `center`, `policy`, `disable_side`, `dock`, `docks`
 
 ## API reference
 
@@ -67,7 +67,14 @@ Configure a side's activity rail (item size, top/bottom slots, overflow
 trigger). The side still needs `DockingModel::set_side_rail` to put it
 in Rail presentation; this only styles the rail. See `DockRail`.
 
-#### `pub fn center(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn rails(self, rails: impl IntoIterator<Item = DockRail>) -> Self`
+
+Configure several sides' activity rails from an iterator.
+
+The loop form of `rail`. Each rail carries its own side, so
+a later entry for a side already configured replaces it.
+
+#### `pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the always-present centre content (the app's main area).
 
@@ -81,15 +88,18 @@ See `DockPolicy`.
 Disable a side (sugar for `DockingModel::set_side_enabled``(side, false)`):
 it renders nothing, reserves no space, and rejects docks.
 
-#### `pub fn center_id(mut self, id: WidgetId) -> Self`
-
-Set the centre content by a pre-registered id.
-
 #### `pub fn dock(self, dock: DockWidget) -> Self`
 
 Declare a dock widget (its content factory + chrome metadata). The
 dock is registered immediately, so the app may set the initial layout
 on the model (`open_dock` / `import_state`) before mounting.
+
+#### `pub fn docks(self, docks: impl IntoIterator<Item = DockWidget>) -> Self`
+
+Declare several dock widgets from an iterator, in order.
+
+The loop form of `dock`, and the usual one once an app has
+more than a couple of panels to register.
 
 ## `pub type DockRailSlot`
 
@@ -306,6 +316,14 @@ can flip presentation at runtime, so a side that flips Rail → Strip drops
 its whole action cluster. If that is reachable in your app, mirror the
 cluster with `trailing_slot`, which the same
 `DockRail` can carry alongside its actions.
+
+#### `pub fn actions(self, actions: impl IntoIterator<Item = DockAction>) -> Self`
+
+Append several dockless command buttons from an iterator, in order.
+
+The loop form of `action`, for a rail whose command
+cluster comes from data. The same duplicate-id `debug_assert!` applies to
+every action in the iterator.
 
 #### `pub fn overflow_icon(mut self, f: impl Fn() -> IconWidget + 'static) -> Self`
 

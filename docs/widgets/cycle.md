@@ -29,7 +29,7 @@ built (so widget construction is identical) but are never shown.
 
 ## Builder methods at a glance
 
-`period`, `child`, `child_boxed`, `children`
+`period`, `child`, `child_opt`, `children`
 
 ## API reference
 
@@ -58,9 +58,14 @@ advancing to the next. Default 3 s.
 
 Append a child to the rotation.
 
-#### `pub fn child_boxed(mut self, widget: Box<dyn Widget>) -> Self`
+#### `pub fn child_opt(self, widget: Option<impl Widget + 'static>) -> Self`
 
-Append a pre-boxed child to the rotation.
+Attach `widget` when it is `Some`, and do nothing when it is `None`.
+
+The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+adds no arena node, so nothing is laid out, painted, or published to the
+accessibility tree, and a stack applies no spacing around it.
 
 #### `pub fn children(mut self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self`
 

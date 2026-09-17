@@ -167,7 +167,7 @@ impl Widget for KeyboardHighlightWrapper {
         let bg = RectWidget::new().background(bg_role);
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(self.item_id);
+        let zstack = ZStack::new().child(bg_id).child(self.item_id);
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 
@@ -344,10 +344,18 @@ impl MenuList {
             .is_some_and(|mi| mi.is_submenu());
         self.submenu_flags.push(is_submenu);
         self.entries.push(MenuEntry::Item {
-            pending: PendingChild::Deferred(Box::new(widget)),
+            pending: teksilo_core::IntoTeksiChild::into_pending(widget),
             visible: None,
         });
         self
+    }
+
+    /// Add several menu items from an iterator, in order.
+    ///
+    /// The loop form of [`item`](Self::item): reach for it when the rows come
+    /// from data rather than being written out one call at a time.
+    pub fn items(self, iter: impl IntoIterator<Item = impl Widget + 'static>) -> Self {
+        iter.into_iter().fold(self, Self::item)
     }
 
     /// Add a menu item that is shown only while `visible` is `true`. When the
@@ -365,6 +373,21 @@ impl MenuList {
         visible: impl Into<teksilo_core::signal::Prop<bool>>,
     ) -> Self {
         self.item_boxed_when(Box::new(widget), visible)
+    }
+
+    /// Add several gated rows from an iterator of `(widget, visible)` pairs.
+    ///
+    /// The loop form of [`item_when`](Self::item_when), for a gated row set
+    /// built from data. Each pair carries its own gate, so the rows appear and
+    /// disappear independently.
+    pub fn items_when<W, V>(self, iter: impl IntoIterator<Item = (W, V)>) -> Self
+    where
+        W: Widget + 'static,
+        V: Into<teksilo_core::signal::Prop<bool>>,
+    {
+        iter.into_iter().fold(self, |list, (widget, visible)| {
+            list.item_when(widget, visible)
+        })
     }
 
     /// [`item_when`](Self::item_when) for an already-boxed widget — used when
@@ -387,6 +410,20 @@ impl MenuList {
         self
     }
 
+    /// Add several gated rows from an iterator of `(widget, visible)` pairs.
+    ///
+    /// The loop form of [`item_boxed_when`](Self::item_boxed_when), for a gated
+    /// row set built from data. Each pair carries its own gate, so the rows may
+    /// appear and disappear independently.
+    pub fn items_boxed_when<V>(self, iter: impl IntoIterator<Item = (Box<dyn Widget>, V)>) -> Self
+    where
+        V: Into<teksilo_core::signal::Prop<bool>>,
+    {
+        iter.into_iter().fold(self, |list, (widget, visible)| {
+            list.item_boxed_when(widget, visible)
+        })
+    }
+
     /// Add a separator line.
     pub fn separator(mut self) -> Self {
         self.entries.push(MenuEntry::Separator);
@@ -400,8 +437,9 @@ impl MenuList {
     /// `GroupHeader` does) or it is silently pruned from the AT tree as a
     /// content-free container.
     pub fn header(mut self, widget: impl Widget + 'static) -> Self {
-        self.entries
-            .push(MenuEntry::Header(PendingChild::Deferred(Box::new(widget))));
+        self.entries.push(MenuEntry::Header(
+            teksilo_core::IntoTeksiChild::into_pending(widget),
+        ));
         self
     }
 
@@ -584,7 +622,7 @@ impl Widget for MenuList {
                     if let Some(vis) = visible {
                         ctx.visible_when(wrapper_id, vis);
                     }
-                    vstack = vstack.add_child(wrapper_id);
+                    vstack = vstack.child(wrapper_id);
                     item_counter += 1;
                 }
                 MenuEntry::Separator => {
@@ -600,7 +638,7 @@ impl Widget for MenuList {
                         PendingChild::Id(id) => id,
                         PendingChild::Deferred(w) => ctx.add_boxed(w),
                     };
-                    vstack = vstack.add_child(header_id);
+                    vstack = vstack.child(header_id);
                 }
             }
         }
@@ -613,7 +651,7 @@ impl Widget for MenuList {
 
         let vstack_id = ctx.add(vstack);
 
-        let padding = Padding::uniform(4.0).child_id(vstack_id);
+        let padding = Padding::uniform(4.0).child(vstack_id);
         let padding_id = ctx.add(padding);
 
         // Viewport cap. When `max_visible_items` is set and the real
@@ -632,7 +670,7 @@ impl Widget for MenuList {
                 // to its minimum width and every row was clipped to a middle slice.
                 let scrollable = ScrollArea::from_id(padding_id).preferred_height(max_height);
                 let scrollable_id = ctx.add(scrollable);
-                ctx.add(MaxSize::height(max_height).child_id(scrollable_id))
+                ctx.add(MaxSize::height(max_height).child(scrollable_id))
             }
             _ => padding_id,
         };

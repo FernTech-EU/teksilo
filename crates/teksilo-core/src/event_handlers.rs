@@ -153,6 +153,51 @@ pub(crate) struct EventHandlers {
 }
 
 impl EventHandlers {
+    /// Absorb `base`'s handlers wherever `self` is silent.
+    ///
+    /// `self` is the **later** declaration and wins on conflict, matching the
+    /// left-to-right reading of a builder chain. Used when two
+    /// [`HandlerSet`](crate::widget_builder::HandlerSet)s end up stacked on one
+    /// node, which happens whenever a `WidgetBuilder` method without an
+    /// inherent twin wraps an already-wrapped widget: without this, the arena
+    /// lifts only the outer set and every handler attached before it is
+    /// silently lost.
+    pub(crate) fn merge_under(&mut self, mut base: EventHandlers) {
+        macro_rules! take_if_empty {
+            ($($field:ident),* $(,)?) => {
+                $( if self.$field.is_none() { self.$field = base.$field.take(); } )*
+            };
+        }
+        take_if_empty!(
+            on_tap,
+            on_double_tap,
+            on_triple_tap,
+            on_long_press,
+            tap_buttons,
+            double_tap_buttons,
+            triple_tap_buttons,
+            long_press_buttons,
+            on_drag,
+            on_swipe,
+            on_pinch,
+            on_hover,
+            on_key,
+            on_key_preview,
+            on_focus,
+            on_pointer_event,
+            on_scroll,
+            on_access_action,
+            on_access_action_request,
+            on_drag_hover,
+            on_drag_leave,
+            on_drag_tick,
+            on_drop,
+            on_pointer_cancel,
+            on_drag_ended,
+            gesture_arena,
+        );
+    }
+
     pub fn new() -> Self {
         Self {
             on_tap: None,

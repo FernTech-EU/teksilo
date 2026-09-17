@@ -104,16 +104,22 @@ impl MinSize {
         self
     }
 
-    /// Set child by pre-registered ID.
-    pub fn child_id(mut self, id: WidgetId) -> Self {
-        self.pending_child = Some(PendingChild::Id(id));
+    /// Set an inline child widget (deferred insertion).
+    pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self {
+        self.pending_child = Some(teksilo_core::IntoTeksiChild::into_pending(widget));
         self
     }
-
-    /// Set an inline child widget (deferred insertion).
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.pending_child = Some(PendingChild::Deferred(Box::new(widget)));
-        self
+    /// Attach `widget` when it is `Some`, and do nothing when it is `None`.
+    ///
+    /// The conditional-child form. `teksu!`'s `if` without an `else` lowers to
+    /// this, and it is what `cond.then(|| w)` is for in a builder chain. `None`
+    /// adds no arena node, so nothing is laid out, painted, or published to the
+    /// accessibility tree, and a stack applies no spacing around it.
+    pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self {
+        match widget {
+            Some(w) => self.child(w),
+            None => self,
+        }
     }
 }
 
@@ -245,7 +251,7 @@ mod tests {
     fn clamps_small_child_to_minimum() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
-        let min = tree.add(MinSize::new(48.0, 48.0).child_id(child));
+        let min = tree.add(MinSize::new(48.0, 48.0).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
@@ -257,7 +263,7 @@ mod tests {
     fn large_child_is_not_clamped() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(100.0, 80.0));
-        let min = tree.add(MinSize::new(48.0, 48.0).child_id(child));
+        let min = tree.add(MinSize::new(48.0, 48.0).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
@@ -269,7 +275,7 @@ mod tests {
     fn min_width_only() {
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
-        let min = tree.add(MinSize::width(48.0).child_id(child));
+        let min = tree.add(MinSize::width(48.0).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);
@@ -282,7 +288,7 @@ mod tests {
         let min_w = Signal::new(48.0_f32);
         let mut tree = WidgetTree::new();
         let child = tree.add(FixedLeaf(20.0, 10.0));
-        let min = tree.add(MinSize::width(0.0).min_width(min_w.clone()).child_id(child));
+        let min = tree.add(MinSize::width(0.0).min_width(min_w.clone()).child(child));
         tree.layout(SizeProposal::unspecified());
         assert!((tree.bounds(min).width - 48.0).abs() < 0.01);
 
@@ -321,8 +327,8 @@ mod tests {
 
         let mut tree = WidgetTree::new();
         let child = tree.add(WrappingLeaf);
-        let min = tree.add(MinSize::width(100.0).child_id(child));
-        let _stack = tree.add(VStack::new().add_child(min));
+        let min = tree.add(MinSize::width(100.0).child(child));
+        let _stack = tree.add(VStack::new().child(min));
         tree.layout(SizeProposal {
             width: None,
             height: None,
@@ -349,7 +355,7 @@ mod tests {
         // against the constraint it will actually be placed into.
         let mut tree = WidgetTree::new();
         let child = tree.add(WrappingLeaf);
-        let min = tree.add(MinSize::width(80.0).child_id(child));
+        let min = tree.add(MinSize::width(80.0).child(child));
         tree.layout(SizeProposal::unspecified());
 
         let mb = tree.bounds(min);

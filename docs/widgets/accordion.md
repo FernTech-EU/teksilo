@@ -56,7 +56,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`orientation`, `horizontal`, `fill`, `on_header_drag`, `trailing`, `trailing_id`, `title_color`, `title_style`, `content_id`, `content`
+`orientation`, `horizontal`, `fill`, `on_header_drag`, `trailing`, `title_color`, `title_style`, `content`
 
 ## API reference
 
@@ -152,7 +152,7 @@ A collapsible section widget whose header button shows or hides attached content
 
 Supply the title and a `Signal<bool>` for the expanded state, then attach
 content via `.content(w)` or
-`.content_id(id)`. The signal can be toggled externally
+`.content(id)`. The signal can be toggled externally
 (e.g. from a "collapse all" button) and the disclosure animation will follow.
 
 ```rust
@@ -191,7 +191,7 @@ Make the header a **drag source**: a drag gesture starting on it fires
 `f` (which should begin a drag, e.g. `ctx.start_drag(source, payload)`).
 Tap-to-toggle is unaffected — the gesture arena tells a tap from a drag.
 
-#### `pub fn trailing(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn trailing(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Place a widget at the trailing end of the header, before the disclosure
 chevron — an options (`⋮`) button, an inline action toolbar, etc. The
@@ -199,12 +199,6 @@ slot's own controls capture their gestures (innermost hit wins), so
 clicking them does not toggle the accordion. Mirrors
 `ToolBoxItem::trailing` /
 `TabWidget::bar_trailing_slot`.
-
-#### `pub fn trailing_id(mut self, id: WidgetId) -> Self`
-
-Like `trailing` but takes a **pre-registered** widget
-id — for callers that must build the slot in-context (e.g. a slot that
-itself adds boxed children). Takes precedence over `trailing`.
 
 #### `pub fn title_color(mut self, color: impl Into<ColorProp>) -> Self`
 
@@ -220,10 +214,6 @@ non-body typography role. Accepts a static
 `TextStyle` or a
 `TextStyleRole`.
 
-#### `pub fn content_id(mut self, id: WidgetId) -> Self`
-
-Set the content widget by pre-registered ID.
-
-#### `pub fn content(mut self, widget: impl Widget + 'static) -> Self`
+#### `pub fn content(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set an inline content widget (deferred insertion).

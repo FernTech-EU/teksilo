@@ -529,7 +529,7 @@ impl Widget for CommandPalette {
                 .map(|(_, id)| *id);
             self.state.active_row.set(active);
 
-            Box::new(Expand::new().child_id(list_id))
+            Box::new(Expand::new().child(list_id))
         };
 
         let key_state = self.state.clone();
@@ -541,7 +541,7 @@ impl Widget for CommandPalette {
         let column = VStack::new()
             .spacing(4.0)
             .child(Padding::symmetric(8.0, 8.0).child(field))
-            .add_child(ctx.add_boxed(body))
+            .child(ctx.add_boxed(body))
             .on_key(move |ev, ctx| match ev {
                 WidgetEvent::KeyDown {
                     key: Key::ArrowDown,

@@ -53,7 +53,7 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
             ButtonLayout::Hidden => None,
             ButtonLayout::Stacked => match (cfg.step_up, cfg.step_down) {
                 (Some(up), Some(down)) => {
-                    Some(ctx.add(VStack::new().spacing(0.0).add_child(up).add_child(down)))
+                    Some(ctx.add(VStack::new().spacing(0.0).child(up).child(down)))
                 }
                 _ => None,
             },
@@ -64,10 +64,10 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
         // wrapped field's natural default does NOT enter the rigid pool,
         // so the field gets exactly the leftover width inside the
         // SpinBox's MaxSize-capped bounds.
-        let expanded_field_id = ctx.add(Expand::horizontal().child_id(cfg.field));
+        let expanded_field_id = ctx.add(Expand::horizontal().child(cfg.field));
         let row_id = {
             let mut row = HStack::new().spacing(0.0);
-            row = row.add_child(expanded_field_id);
+            row = row.child(expanded_field_id);
             if let Some(buttons_id) = buttons_id_opt {
                 // Thin vertical divider between text and buttons so
                 // the click targets read as distinct affordances. `Field`
@@ -75,7 +75,7 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
                 // inside an inert field reads as a rendering glitch.
                 let divider = Divider::vertical().thickness(1.0).color(BorderRole::Field);
                 let divider_id = ctx.add(Padding::new(2.0, 0.0, 2.0, 0.0).child(divider));
-                row = row.add_child(divider_id).add_child(buttons_id);
+                row = row.child(divider_id).child(buttons_id);
             }
             ctx.add(row)
         };
@@ -85,7 +85,7 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
         // up on forms.
         let padded_row_id = ctx.add(
             Padding::new(0.0, field.padding_horizontal, 0.0, field.padding_horizontal)
-                .child_id(row_id),
+                .child(row_id),
         );
 
         // ── Frame: focus-aware border + background ───────────────
@@ -129,7 +129,7 @@ impl SpinBoxStyle for RecipeSpinBoxStyle {
             .corner_radius(CornerRadius::uniform(field.corner_radius));
         let bg_id = ctx.add(bg);
 
-        ctx.add(ZStack::new().add_child(bg_id).add_child(padded_row_id))
+        ctx.add(ZStack::new().child(bg_id).child(padded_row_id))
     }
 }
 

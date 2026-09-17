@@ -57,8 +57,7 @@ impl Widget for MenuBarTrigger {
             TextStyleRole::Small,
         ));
 
-        let padding =
-            Padding::symmetric(4.0, menu::MENU_ITEM_PADDING_HORIZONTAL).child_id(label_id);
+        let padding = Padding::symmetric(4.0, menu::MENU_ITEM_PADDING_HORIZONTAL).child(label_id);
         let padding_id = ctx.add(padding);
 
         let bg = RectWidget::new()
@@ -66,7 +65,7 @@ impl Widget for MenuBarTrigger {
             .corner_radius(teksilo_tokens::CornerRadius::uniform(radius_control));
         let bg_id = ctx.add(bg);
 
-        let zstack = ZStack::new().add_child(bg_id).add_child(padding_id);
+        let zstack = ZStack::new().child(bg_id).child(padding_id);
         let root_id = ctx.add(zstack);
         self.root_child_id = Some(root_id);
 

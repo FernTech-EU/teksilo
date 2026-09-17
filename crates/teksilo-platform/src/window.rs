@@ -15,6 +15,40 @@ use teksilo_render::Renderer;
 #[error("Surface error: {0}")]
 pub struct SurfaceRenderError(pub String);
 
+/// Why a window could not configure its swapchain.
+///
+/// `Surface::configure` reports nothing: it hands its error to wgpu's
+/// uncaptured-error handler, whose default is to panic. Every configure in
+/// this file goes through [`configure_surface`] instead, which catches the
+/// error and sorts it into one of these two.
+///
+/// Crate-internal: what a caller outside acts on is
+/// [`FrameOutcome::DisplayLost`] and [`PlatformWindow::display_lost`], not the
+/// classification behind them.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SurfaceConfigureError {
+    /// The surface can no longer answer for its adapter. On every backend
+    /// that means the connection to the display server is gone: the
+    /// compositor exited or crashed, or the GPU was reset under it.
+    ///
+    /// wgpu's own wording for this is `Surface does not support the
+    /// adapter's queue family`, which reads like a hardware mismatch and has
+    /// been reported as one. It is not. The adapter was chosen with
+    /// `compatible_surface`, and `request_adapter` filters on the very query
+    /// that fails here (`wgpu_core::instance`), so it answered yes to the
+    /// same question moments earlier. What changed is the surface, not the
+    /// adapter.
+    #[error(
+        "the display server connection is gone: the window surface now reports no \
+         supported formats for an adapter that was selected for it"
+    )]
+    DisplayLost,
+    /// wgpu refused the configuration for some other reason, carrying its own
+    /// message so a genuine mistake is not relabelled as a dead compositor.
+    #[error("wgpu refused the surface configuration: {0}")]
+    Rejected(String),
+}
+
 /// Outcome of [`PlatformWindow::render_frame`]. Mirrors the wgpu
 /// surface-status cases that matter to the caller so the app loop can
 /// decide how to respond (ignore, reconfigure, log) without every frame
@@ -33,6 +67,11 @@ pub enum FrameOutcome {
     /// Surface became outdated (resize, scale change, device switch).
     /// Caller should reconfigure the surface and try again.
     NeedsReconfigure,
+    /// The display server is gone, so this window can never present again.
+    /// Caller should wind the application down. It must not reconfigure or
+    /// ask for another redraw: both come straight back here, and that spin
+    /// is the whole reason this is its own outcome rather than an `Error`.
+    DisplayLost,
     /// Acquisition failed with a non-transient error.
     Error(SurfaceRenderError),
 }
@@ -43,6 +82,15 @@ pub struct PlatformWindow {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
+    /// The adapter this surface was matched against. Kept so that a configure
+    /// failure can ask the surface whether it still has formats for it, which
+    /// is how [`classify_configure_failure`] tells a departed display server
+    /// from a configuration wgpu genuinely refused.
+    adapter: wgpu::Adapter,
+    /// Latched the first time the display server is found to be gone. Every
+    /// later configure and every frame is then skipped: with no compositor
+    /// there is nothing to present to, and retrying only spins the loop.
+    display_lost: bool,
     renderer: Renderer,
     scale_factor: f64,
     a11y_adapter: Option<accesskit_winit::Adapter>,
@@ -139,16 +187,57 @@ struct SharedGpu {
     queue: wgpu::Queue,
 }
 
+/// The platform display connection the wgpu instance is built against.
+///
+/// Installed by the app layer via [`install_display_handle`] before the first
+/// window exists, and read once by [`shared_instance`].
+static DISPLAY_HANDLE: OnceLock<winit::event_loop::OwnedDisplayHandle> = OnceLock::new();
+
+/// Hand wgpu the platform display connection, before any window is created.
+///
+/// Load-bearing for the OpenGL backend, which is the only backend a machine
+/// with no Vulkan driver has left — an older GPU, or a VM whose guest driver
+/// stops at GL. Without a display handle, wgpu-hal's GLES backend has no
+/// windowing system to bind EGL to and falls back to
+/// `EGL_MESA_platform_surfaceless`: a display that can render offscreen but can
+/// never be compatible with a *window* surface. `request_adapter` then rejects
+/// the only adapter on the machine with `incompatible_surface_backends: GL`,
+/// and the process dies before its first window. Vulkan, Metal and D3D12 ignore
+/// the handle entirely, so this costs those paths nothing.
+///
+/// Only the first call counts; later ones are ignored, because the instance is
+/// built once per process and wgpu forbids presenting a surface from a display
+/// other than the one the instance was created with.
+pub fn install_display_handle(handle: winit::event_loop::OwnedDisplayHandle) {
+    let _ = DISPLAY_HANDLE.set(handle);
+}
+
 /// The one wgpu instance for this process.
 ///
 /// A surface has to come from the same instance that later enumerates adapters
 /// for it, so this is the root every window hangs off. `Instance::new` is
 /// synchronous, which is why this one can be a plain `OnceLock` while the
 /// adapter and device below cannot.
+///
+/// The descriptor is built `_from_env`, so wgpu's own variables —
+/// `WGPU_BACKEND`, `WGPU_GLES_MINOR_VERSION` and the rest — work here as they
+/// do in every other wgpu application. That is the escape hatch for the machine
+/// whose preferred backend has a broken driver, and it is worth having
+/// precisely where the default choice is the thing under suspicion.
 fn shared_instance() -> &'static wgpu::Instance {
     static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
-    INSTANCE
-        .get_or_init(|| wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle()))
+    INSTANCE.get_or_init(|| {
+        let descriptor = match DISPLAY_HANDLE.get() {
+            Some(display) => wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
+                display.clone(),
+            )),
+            // No app layer installed one — an embedder driving `PlatformWindow`
+            // itself, or a test. Offscreen work is unaffected; only a GL-backed
+            // window needs the handle.
+            None => wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+        };
+        wgpu::Instance::new(descriptor)
+    })
 }
 
 /// The adapter, device and queue every window shares.
@@ -234,6 +323,78 @@ async fn open_device(
     }
 }
 
+/// Find an adapter that can present to `surface` *and* yields a device.
+///
+/// Adapter selection is a search, not a single request — the same lesson
+/// [`teksilo_render::test_support`] already encodes for its offscreen device,
+/// which the window path did not have. A host can enumerate an adapter it
+/// cannot actually open (a VM's GL driver is the usual one) while a perfectly
+/// good software adapter sits behind `force_fallback_adapter`. Treating the
+/// first failure as fatal reports "no GPU" on a machine that has one.
+///
+/// Both passes keep `compatible_surface`, so an adapter that cannot present to
+/// this window is never chosen — that is the check that failed on a machine
+/// with no Vulkan driver, and it is load-bearing, not a formality.
+///
+/// Panics only when *every* adapter on the machine declines, with a message
+/// naming what was tried and what the user can do about it.
+async fn open_gpu_for(
+    surface: &wgpu::Surface<'static>,
+) -> (wgpu::Adapter, wgpu::Device, wgpu::Queue) {
+    // `WGPU_POWER_PREF` is wgpu's own knob; honour it for the same reason the
+    // instance is built `_from_env`.
+    let power_preference = wgpu::PowerPreference::from_env().unwrap_or_default();
+    let mut adapter_error = None;
+    let mut device_error = None;
+
+    for force_fallback_adapter in [false, true] {
+        let adapter = match shared_instance()
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference,
+                compatible_surface: Some(surface),
+                force_fallback_adapter,
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(adapter) => adapter,
+            Err(err) => {
+                adapter_error.get_or_insert(err);
+                continue;
+            }
+        };
+
+        match open_device(&adapter).await {
+            Ok((device, queue)) => return (adapter, device, queue),
+            Err(err) => {
+                // Worth saying out loud: the next pass silently landing on a
+                // software adapter is a large performance difference, and an
+                // unexplained one is the sort of thing that gets reported as
+                // "Teksilo is slow on my machine".
+                eprintln!(
+                    "teksilo-platform: adapter {:?} could not open a device ({err}); \
+                     trying the next one",
+                    adapter.get_info().name
+                );
+                device_error.get_or_insert(err);
+            }
+        }
+    }
+
+    panic!(
+        "no usable GPU adapter for this window.\n\
+         Tried every backend wgpu was built with, then an explicit software \
+         fallback; none could both present to the window and open a device.\n\
+         adapter search: {adapter_error:?}\n\
+         device open:    {device_error:?}\n\
+         Teksilo needs Vulkan, Metal, D3D12 or OpenGL (3.3 desktop / ES 3.0). \
+         On Linux, installing a Vulkan driver is usually the fix: \
+         `mesa-vulkan-drivers` carries both the hardware drivers and the \
+         software `lavapipe`. `WGPU_BACKEND=gl|vulkan|dx12|metal` forces a \
+         specific backend."
+    );
+}
+
 async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
     static SHARED: Mutex<Option<SharedGpu>> = Mutex::new(None);
 
@@ -247,19 +408,7 @@ async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
         }
     }
 
-    let adapter = shared_instance()
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface: Some(surface),
-            force_fallback_adapter: false,
-            ..Default::default()
-        })
-        .await
-        .expect("no compatible wgpu adapter available");
-
-    let (device, queue) = open_device(&adapter)
-        .await
-        .expect("wgpu device request failed");
+    let (adapter, device, queue) = open_gpu_for(surface).await;
 
     let gpu = SharedGpu {
         adapter,
@@ -277,14 +426,71 @@ async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
     gpu
 }
 
+/// Configure `surface`, handing back the failure instead of letting wgpu's
+/// default uncaptured-error handler panic.
+///
+/// Every `Surface::configure` in this file goes through here, and the error
+/// scope is what makes that sufficient. Asking the surface whether it is still
+/// alive and *then* configuring it leaves a gap between the two in which the
+/// compositor can exit, and that gap is the bug: `request_adapter` validated
+/// this adapter against this surface with the same query `configure` runs, so
+/// only a change in between can make the second one fail. A scope catches the
+/// error from this exact call, however late the display server goes away.
+///
+/// `pop` resolves immediately on native (wgpu answers with a ready future) and
+/// wgpu's error scopes are thread-local. Both hold because every window in this
+/// process is created and drawn on the winit main thread.
+fn configure_surface(
+    surface: &wgpu::Surface<'static>,
+    adapter: &wgpu::Adapter,
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+) -> Result<(), SurfaceConfigureError> {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    surface.configure(device, config);
+    match pollster::block_on(scope.pop()) {
+        None => Ok(()),
+        Some(err) => Err(classify_configure_failure(
+            err.to_string(),
+            !surface.get_capabilities(adapter).formats.is_empty(),
+        )),
+    }
+}
+
+/// Sort a configure failure into "the display server left" and everything
+/// else, on the one signal that separates them.
+///
+/// A live surface offers its adapter a non-empty format list; a surface whose
+/// display server has gone offers none, and that transition is observable:
+/// seven formats before the compositor exits, zero after. Deliberately not a
+/// match on wgpu's message text, which is both misleading here and free to
+/// change between releases.
+fn classify_configure_failure(
+    description: String,
+    surface_has_formats: bool,
+) -> SurfaceConfigureError {
+    if surface_has_formats {
+        SurfaceConfigureError::Rejected(description)
+    } else {
+        SurfaceConfigureError::DisplayLost
+    }
+}
+
+/// What [`PlatformWindow::surface_and_renderer`] hands to both constructors.
+struct WindowGpu {
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+    renderer: Renderer,
+    adapter: wgpu::Adapter,
+    display_lost: bool,
+}
+
 impl PlatformWindow {
     /// Everything both constructors do: surface, shared device, swapchain
     /// configuration, renderer. Kept in one place because the two entry points
     /// differ only in whether they attach an AccessKit adapter, and sixty
     /// duplicated lines of GPU setup is exactly the sort of thing that drifts.
-    async fn surface_and_renderer(
-        window: &Arc<Window>,
-    ) -> (wgpu::Surface<'static>, wgpu::SurfaceConfiguration, Renderer) {
+    async fn surface_and_renderer(window: &Arc<Window>) -> WindowGpu {
         let size = window.inner_size();
         let surface = shared_instance()
             .create_surface(window.clone())
@@ -321,12 +527,29 @@ impl PlatformWindow {
             // non-`Rgba16Float` formats we select above.
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
-        surface.configure(&gpu.device, &surface_config);
+        // A compositor that goes away while the device above is being opened
+        // lands here, because opening one is the slowest step between the
+        // adapter's validation and this call. It used to panic out of wgpu's
+        // default error handler before the window ever existed.
+        let display_lost =
+            match configure_surface(&surface, &gpu.adapter, &gpu.device, &surface_config) {
+                Ok(()) => false,
+                Err(err) => {
+                    eprintln!("teksilo-platform: {err}");
+                    matches!(err, SurfaceConfigureError::DisplayLost)
+                }
+            };
 
         // The renderer stays per-window: it owns the glyph atlas, the path
         // atlas and the blur pool, and it is `!Sync` besides.
         let renderer = Renderer::new(gpu.device, gpu.queue, surface_format);
-        (surface, surface_config, renderer)
+        WindowGpu {
+            surface,
+            surface_config,
+            renderer,
+            adapter: gpu.adapter,
+            display_lost,
+        }
     }
 
     /// Create a new platform window from a winit window.
@@ -337,7 +560,13 @@ impl PlatformWindow {
     ) -> Self {
         let window = Arc::new(window);
         let scale_factor = window.scale_factor();
-        let (surface, surface_config, renderer) = Self::surface_and_renderer(&window).await;
+        let WindowGpu {
+            surface,
+            surface_config,
+            renderer,
+            adapter,
+            display_lost,
+        } = Self::surface_and_renderer(&window).await;
 
         // Create AccessKit adapter with action channel
         let (action_tx, action_rx) = mpsc::channel();
@@ -378,6 +607,8 @@ impl PlatformWindow {
             window,
             surface,
             surface_config,
+            adapter,
+            display_lost,
             renderer,
             scale_factor,
             a11y_adapter: Some(a11y_adapter),
@@ -391,13 +622,21 @@ impl PlatformWindow {
     pub async fn new(window: Window) -> Self {
         let window = Arc::new(window);
         let scale_factor = window.scale_factor();
-        let (surface, surface_config, renderer) = Self::surface_and_renderer(&window).await;
+        let WindowGpu {
+            surface,
+            surface_config,
+            renderer,
+            adapter,
+            display_lost,
+        } = Self::surface_and_renderer(&window).await;
         let (_action_tx, action_rx) = mpsc::channel();
 
         Self {
             window,
             surface,
             surface_config,
+            adapter,
+            display_lost,
             renderer,
             scale_factor,
             a11y_adapter: None,
@@ -435,13 +674,16 @@ impl PlatformWindow {
     }
 
     /// Resize the surface.
+    ///
+    /// A resize that arrives once the display server has gone is dropped:
+    /// there is nothing left to present to.
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.surface_config.width = new_size.width;
-            self.surface_config.height = new_size.height;
-            self.surface
-                .configure(self.renderer.device(), &self.surface_config);
+        if self.display_lost || new_size.width == 0 || new_size.height == 0 {
+            return;
         }
+        self.surface_config.width = new_size.width;
+        self.surface_config.height = new_size.height;
+        self.apply_surface_config();
     }
 
     /// Get current surface dimensions.
@@ -451,9 +693,40 @@ impl PlatformWindow {
 
     /// Reconfigure the surface with the current config.
     /// Use after a Lost or Outdated surface error.
-    pub fn reconfigure_surface(&mut self) {
-        self.surface
-            .configure(self.renderer.device(), &self.surface_config);
+    ///
+    /// Answers whether this window can still present. `false` means the
+    /// display server is gone, and the caller should wind down rather than ask
+    /// for another frame: the next one would come back here unchanged.
+    pub fn reconfigure_surface(&mut self) -> bool {
+        if self.display_lost {
+            return false;
+        }
+        self.apply_surface_config();
+        !self.display_lost
+    }
+
+    /// Whether the display server has gone away under this window.
+    pub fn display_lost(&self) -> bool {
+        self.display_lost
+    }
+
+    /// Push `surface_config` to the surface, latching a departed display
+    /// server and reporting anything else wgpu refused.
+    ///
+    /// The latch is what keeps the report to one line: every later configure
+    /// returns before reaching here.
+    fn apply_surface_config(&mut self) {
+        if let Err(err) = configure_surface(
+            &self.surface,
+            &self.adapter,
+            self.renderer.device(),
+            &self.surface_config,
+        ) {
+            eprintln!("teksilo-platform: {err}");
+            if matches!(err, SurfaceConfigureError::DisplayLost) {
+                self.display_lost = true;
+            }
+        }
     }
 
     /// Render a frame to the surface.
@@ -462,6 +735,9 @@ impl PlatformWindow {
         frame: &teksilo_canvas::RenderFrame,
         clear_color: [f32; 4],
     ) -> FrameOutcome {
+        if self.display_lost {
+            return FrameOutcome::DisplayLost;
+        }
         let current = self.surface.get_current_texture();
         let output = match current {
             wgpu::CurrentSurfaceTexture::Success(tex)
@@ -757,6 +1033,41 @@ impl accesskit::DeactivationHandler for TeksiloDeactivationHandler {
         self.bridge.on_deactivate();
         // The UI thread reads the flag once per frame, so it needs a frame.
         self.window.request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod surface_configure_tests {
+    use super::{SurfaceConfigureError, classify_configure_failure};
+
+    /// The defect this pins: a compositor crash reached the user as
+    /// `Surface does not support the adapter's queue family`, and was read as
+    /// a GPU mismatch by everyone who saw it, including the maintainer. A
+    /// surface with no formats left for the adapter it was matched against has
+    /// lost its display server, whatever wgpu chooses to call it.
+    #[test]
+    fn a_surface_with_no_formats_left_means_the_display_server_is_gone() {
+        let err = classify_configure_failure(
+            "Surface does not support the adapter's queue family".to_string(),
+            false,
+        );
+        assert!(matches!(err, SurfaceConfigureError::DisplayLost));
+        assert!(err.to_string().contains("display server"));
+    }
+
+    /// The other half, and the reason this is not simply "any configure
+    /// failure means the compositor left": a surface that still answers with
+    /// formats has a real configuration problem, and its own message has to
+    /// survive rather than be relabelled as a dead compositor.
+    #[test]
+    fn a_surface_that_still_has_formats_keeps_wgpus_own_message() {
+        let err = classify_configure_failure(
+            "Requested format Rgba8Unorm is not in the list of supported formats".to_string(),
+            true,
+        );
+        assert!(matches!(err, SurfaceConfigureError::Rejected(_)));
+        assert!(err.to_string().contains("Rgba8Unorm"));
+        assert!(!err.to_string().contains("display server"));
     }
 }
 

@@ -359,7 +359,7 @@ impl Widget for OverlayDemo {
                                         .content(snackbar_content)
                                         .auto_dismiss_after(Duration::from_millis(2500)),
                                 )
-                                .add_child(modal_trigger_id),
+                                .child(modal_trigger_id),
                         ),
                     )
                     .child(self.message_box_panel())

@@ -16,12 +16,16 @@
 //!   rather than a method-chain link.
 //!
 //! Bindings anywhere in the tree hoist to the outermost teksu! block
-//! per spec §3.3. Per-structural-arm hoist scoping is a known
-//! limitation: bindings declared inside an `if`/`else`/`match`/`for`
-//! body currently hoist to the outer block rather than the arm.
-//! Widgets are then created unconditionally even when the arm doesn't
-//! run; the parent still only attaches to the child when the arm is
-//! taken, so this is a performance rather than correctness concern.
+//! per spec §3.3: one flat `hoisted` vector, every `let` emitted at the
+//! root of the expansion, then the tree expression. There is no
+//! per-arm scoping question to answer, because a binding is not a legal
+//! structural-arm body: every arm parses through `parse_element`.
+//! What the flat block does cost is aliasing. Two bindings sharing a
+//! name shadow, and since the tree expression is emitted after all the
+//! lets, *both* attach sites resolve to the later widget while the
+//! earlier one is constructed and attached nowhere. That is a
+//! correctness trap rather than the performance concern this comment
+//! used to claim; spec §3.3 documents it.
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
@@ -142,7 +146,7 @@ fn lower_element_stmt(
             BodyItem::Spread { expr, span } => {
                 stmts.push(quote_spanned! { *span =>
                     for __spread_id in #expr {
-                        __parent = __parent.add_child(__spread_id);
+                        __parent = __parent.child(__spread_id);
                     }
                 });
             }
@@ -179,6 +183,9 @@ fn lower_body_attach(
                 .child(#child_expr)
             })
         }
+        BodyItem::ExprChild { expr, span } => Ok(quote_spanned! { *span =>
+            .child(#expr)
+        }),
         BodyItem::Binding { name, element } => {
             let element_expr = lower_element(element, ctx_tok, hoisted)?;
             let name_span = name.span();
@@ -186,11 +193,16 @@ fn lower_body_attach(
                 let #name = #ctx_tok.add(#element_expr);
             });
             Ok(quote_spanned! { name_span =>
-                .add_child(#name)
+                .child(#name)
             })
         }
+        // `.child`, not `.add_child`: every container's `child` takes
+        // `impl IntoTeksiChild`, so one escape carries a `WidgetId` and a
+        // widget value alike. That is what makes `#{ }` the answer to a Rust
+        // struct literal at body position, which the element form would
+        // otherwise claim.
         BodyItem::Escape { expr, span } => Ok(quote_spanned! { *span =>
-            .add_child(#expr)
+            .child(#expr)
         }),
         BodyItem::Rust {
             block,
@@ -227,27 +239,19 @@ fn lower_property_call(
         });
     }
 
-    let forces_id_suffix = prop
-        .args
-        .iter()
-        .any(|a| matches!(a, PropArg::Escape(_) | PropArg::Binding { .. }));
-
+    // No `_id` suffix synthesis. A slot method takes `impl IntoTeksiChild`, so
+    // the same name accepts a widget value and a `WidgetId` alike, and the
+    // macro no longer has to know that a binding or an escape at a slot
+    // position means "call the other method". One name per slot.
     let lowered_args: Vec<TokenStream2> = prop
         .args
         .iter()
         .map(|arg| lower_prop_arg(arg, ctx_tok, hoisted))
         .collect::<Result<Vec<_>, _>>()?;
 
-    if forces_id_suffix {
-        let id_name = syn::Ident::new(&format!("{}_id", name), name.span());
-        Ok(quote_spanned! { method_span =>
-            .#id_name(#(#lowered_args),*)
-        })
-    } else {
-        Ok(quote_spanned! { method_span =>
-            .#name(#(#lowered_args),*)
-        })
-    }
+    Ok(quote_spanned! { method_span =>
+        .#name(#(#lowered_args),*)
+    })
 }
 
 fn lower_prop_arg(

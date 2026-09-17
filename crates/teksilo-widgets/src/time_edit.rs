@@ -629,7 +629,7 @@ impl Widget for TimeEdit {
                 ctx.add(
                     crate::primitives::Expand::horizontal()
                         .respect_intrinsic()
-                        .child_id(inner_id),
+                        .child(inner_id),
                 )
             }
         };

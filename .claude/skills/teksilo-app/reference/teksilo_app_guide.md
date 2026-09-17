@@ -181,9 +181,9 @@ VStack::new().children(items.iter().map(|it| TextWidget::new(lit!(it.name.clone(
 // Conditional child
 container.child_opt(show_extra.then(|| TextWidget::new(lit!("Extra"))))
 
-// Pre-registered child when you need the id
+// Pre-registered child when you need the id — .child() takes a WidgetId too
 let label = ctx.add(TextWidget::new(lit!("Status")).text(status_signal));
-HStack::new().add_child(label)
+HStack::new().child(label)
 
 // Switcher — show one child at a time, driven by Signal<usize>
 let page = ctx.signal(0usize);
@@ -705,12 +705,16 @@ teksu!(ctx =>
 )
 ```
 
-To splice an **already-registered** id, use the `#{ id }` escape (`→ .add_child(id)`), or the
-plain property forms `add_child: id` / `child_id: id` / `<slot>_id: id`.
+To splice an **already-registered** id, use the `#{ id }` escape (`→ .child(id)`), or the
+plain property forms `child: id` / `<slot>: id`. Every child- and slot-taking method takes
+`impl IntoTeksiChild`, so one name accepts a `WidgetId` and a widget alike — there are no
+`add_child` / `*_id` twins.
 
 This is also the standard escape hatch when a child needs a builder chain `teksu!` can't
-express inline (a multi-arg constructor plus method calls — `teksu!` has no method-chain form
-at a property/child head): pre-register it with `ctx.add(...)`, then splice the `WidgetId`.
+express inline (an UpperCamel constructor followed by method calls — `teksu!` reads an
+UpperCamel head as an element, so only a *lowercase*-rooted chain like `section("x").pad(4.0)`
+goes through the expression path): pre-register it with `ctx.add(...)`, then splice the
+`WidgetId`.
 The stock `widget-catalog` example does exactly this for its richer controls:
 
 ```rust,ignore
@@ -722,7 +726,7 @@ let confirm = ctx.add(
 teksu!(ctx =>
     HStack {
         spacing: 8.0
-        #{ confirm }                                      // → .add_child(confirm)
+        #{ confirm }                                      // → .child(confirm)
         Button(lit!("Cancel")) { on_activate_fn: |ctx| ctx.send_intent(AppIntent::Cancel) }
     }
 )
