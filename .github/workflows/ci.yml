@@ -37,6 +37,13 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Full DWARF (`debuginfo=2`, the dev-profile default) is the largest single
+  # thing in a `target/` dir, and no job here reads it: a panic backtrace needs
+  # function names and file:line, which is precisely what line tables carry.
+  # `profile.test` inherits `profile.dev`, so this one variable covers every
+  # test binary as well. It lives here and not in Cargo.toml so that a local
+  # `cargo test` keeps the full debug info a debugger actually wants.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   ci:
@@ -74,6 +81,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # This is the only job that builds every test binary in the workspace,
+      # and it is the one that ran the runner's root filesystem out of space at
+      # v0.12.0. Runs before apt, so the package install has room too.
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
 
@@ -90,8 +103,20 @@ jobs:
         with:
           shared-key: linux
 
+      # `cargo test --no-run` rather than `cargo check --all-targets`: a check
+      # pass compiles the whole dependency graph to rmeta and then throws it
+      # away, because the Test step needs rlibs and recompiles every bit of it
+      # — a second copy of the graph on a filesystem that just ran out of
+      # room. Still its own step so a compile failure names itself instead of
+      # reading as a test failure.
+      #
+      # The one thing `--all-targets` covered here and this does not is
+      # teksilo-core's two bench targets (`cargo test` does not build them).
+      # The `check (debug)` and `check (release)` jobs build those on both
+      # profiles, so a bench that stops compiling is still caught — by a job
+      # that does nothing else, which is a clearer signal than this one.
       - name: Build
-        run: cargo check --workspace --all-targets
+        run: cargo test --workspace --no-run
 
       - name: Test
         run: cargo test --workspace

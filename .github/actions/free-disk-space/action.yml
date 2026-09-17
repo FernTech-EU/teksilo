@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+name: 'Free disk space'
+description: 'Delete the preinstalled toolchains an Ubuntu runner ships and this workspace never uses, so a full debug build of every target fits'
+
+# An `ubuntu-latest` runner starts with a little over 20 GB free on `/` — the
+# step below prints the real figure before and after, so nobody has to trust
+# that number. A cold `cargo test --workspace` on this repo no longer fits in
+# it: 43 crates and 56 examples whose test binaries all carry debug info, plus
+# the `teksu!` trybuild fixtures, which compile a second copy of the graph into
+# their own `target/tests/` tree.
+#
+# Worth knowing because the failure does not say "disk". At v0.12.0 it read as
+# `rustc-LLVM ERROR: IO failure on output stream: No space left on device` on
+# one crate, `collect2: fatal error: ld terminated with signal 7 [Bus error]`
+# on the next, and an `ENOENT ... opendir target/tests/target` from the
+# post-cache step walking a half-written tree.
+#
+# What is deleted is chosen for being large, preinstalled, and unreachable from
+# a Rust workspace: the Android SDK/NDK, the .NET and Haskell toolchains, and
+# the CodeQL bundles. The hosted tool cache is otherwise left alone —
+# `actions/setup-*` and the runner's own Python live there.
+runs:
+  using: 'composite'
+  steps:
+    - name: Delete unused preinstalled toolchains
+      shell: bash
+      run: |
+        echo "Before:"
+        df -h /
+
+        # Backgrounded because these are tens of thousands of small files and
+        # the step is otherwise ~40 s of serial unlink. Failures are ignored on
+        # purpose: the runner image's contents change without notice, and a
+        # path that has moved must not fail a build job.
+        sudo rm -rf /usr/local/lib/android &
+        sudo rm -rf /usr/share/dotnet &
+        sudo rm -rf /opt/ghc /usr/local/.ghcup &
+        sudo rm -rf /opt/hostedtoolcache/CodeQL &
+        wait
+
+        # The image preloads container images no job here runs.
+        sudo docker image prune --all --force >/dev/null 2>&1 || true
+
+        echo "After:"
+        df -h /
