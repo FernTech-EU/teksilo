@@ -62,6 +62,11 @@ jobs:
         with:
           shared-key: next-${{ matrix.name }}
 
+      # This job runs the trybuild fixtures, so it grows a `target/tests` that
+      # trips an un-awaited probe in rust-cache's post step; see the action.
+      - name: Rust-cache nested-target probe dir
+        uses: ./.github/actions/rust-cache-probe-dir
+
       - name: Build
         run: cargo build --workspace --all-targets
 

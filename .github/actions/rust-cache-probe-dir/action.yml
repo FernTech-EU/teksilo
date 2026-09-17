@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+name: 'Rust-cache nested-target probe dir'
+description: "Create the nested target directory Swatinem/rust-cache's post step probes for, so its un-awaited ENOENT stops annotating green runs"
+
+# `Swatinem/rust-cache`'s post step special-cases `target/tests`, where
+# trybuild-style harnesses keep a nested workspace, and probes BOTH known
+# layouts — `tests/target` (kaos, macrotest) and `tests/trybuild` (what
+# `teksilo`'s trybuild fixtures actually use). Neither probe is awaited, so the
+# `try {}` wrapped around them cannot catch the rejection, and the ENOENT for
+# the layout this repo does not use escapes as a red `Error:` annotation on an
+# otherwise green run. See `cleanProfileTarget` in rust-cache@v2 src/cleanup.ts.
+#
+# An empty directory is enough: the probe opens it, finds nothing, returns.
+# rust-cache's own keep-list for `target/tests` is `{"target", "trybuild"}`, so
+# it survives the cleanup rather than being deleted and re-reported next run.
+#
+# Only jobs that RUN the trybuild fixtures (`cargo test --workspace`) ever grow
+# a `target/tests`, which is why this is per-job rather than global. Delete the
+# whole action once rust-cache awaits those two calls.
+runs:
+  using: 'composite'
+  steps:
+    - name: Create target/tests/target
+      shell: bash
+      run: mkdir -p target/tests/target

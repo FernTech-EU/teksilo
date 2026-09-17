@@ -100,6 +100,11 @@ jobs:
         with:
           shared-key: linux
 
+      # This job runs the trybuild fixtures, so it grows a `target/tests` that
+      # trips an un-awaited probe in rust-cache's post step; see the action.
+      - name: Rust-cache nested-target probe dir
+        uses: ./.github/actions/rust-cache-probe-dir
+
       # `cargo test --no-run` rather than `cargo check --all-targets`: a check
       # pass compiles the whole dependency graph to rmeta and then throws it
       # away, because the Test step needs rlibs and recompiles every bit of it
@@ -158,6 +163,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux
+          # Restore only. `test-linux` owns the `linux` key and has already
+          # saved it by the time this job runs, and `Automation (linux)` shares
+          # it too — two jobs writing one key means one of them loses the race
+          # ("Unable to reserve cache with key ..."). Saving from here would
+          # also overwrite a whole-workspace cache with the two crates this job
+          # builds.
+          save-if: false
 
       # A single x11rb in the graph. Teksilo and winit both depend on it, and a
       # version fork would silently double the X11 code in every binary and make
@@ -227,10 +239,18 @@ jobs:
         with:
           toolchain: stable
 
+      # This job builds the whole workspace, so it owns the write for its
+      # platform's key; the Automation job on the same platform shares that key
+      # and only restores.
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.name }}
+
+      # This job runs the trybuild fixtures, so it grows a `target/tests` that
+      # trips an un-awaited probe in rust-cache's post step; see the action.
+      - name: Rust-cache nested-target probe dir
+        uses: ./.github/actions/rust-cache-probe-dir
 
       - name: Build
         run: cargo build --workspace --all-targets
@@ -293,6 +313,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.name }}
+          # Restore only. This shares a key with the Test job that builds the
+          # whole workspace on the same platform, and two jobs cannot write one
+          # key: whichever finishes first wins and the other logs "Unable to
+          # reserve cache with key ...". A key per job is not the answer either
+          # — the repo already sits at GitHub's 10 GB cache ceiling, so three
+          # more entries would only buy evictions.
+          save-if: false
 
       - name: Build the bridge smoke and the MCP server
         run: cargo build -p automation_bridge_smoke -p teksilo-automation-mcp
