@@ -13,6 +13,8 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-17
+
 `teksilo-scene` becomes an editor. A selection can be moved, resized and
 rotated — with a pointer, from the keyboard and through a screen reader — where
 a heavyweight item could not be dragged with a pointer at all. `SceneCard` is
@@ -520,6 +522,24 @@ What it ships is a record complete enough to invert.
   cleanly with one line naming the cause; `NotSupported`, `Os` and
   `RecreationAttempt` stay fatal, since those are genuine startup faults where
   a backtrace is the useful answer.
+- **Opening a window no longer kills a GNOME session on a machine with no
+  touchscreen.** The Wayland drag-and-drop backend asked the seat for its
+  pointer and its touch as soon as a window attached, on the reasoning that a
+  seat lacking the capability would hand back a proxy that never emits. The
+  protocol says otherwise: `wl_seat::get_touch` without the touch capability is
+  a `missing_capability` error, and the client is the one at fault. Mutter
+  (GNOME 50) does not answer with that error — it serves the request out of a
+  `MetaWaylandTouch` whose list head is still all-zero, because the `wl_list`
+  is initialised only when a touch device appears, and writes through it.
+  gnome-shell takes SIGSEGV, and since the compositor *is* the session, every
+  window on the desktop dies with it, a second or two after the app opened
+  one. KWin is unaffected, which is what made it read as a compositor bug
+  rather than ours. Both objects are now bound from the `wl_seat::capabilities`
+  event instead, and released when a capability is withdrawn — the press
+  serials `start_drag` needs arrive on the same terms as before, since a seat
+  that can start a drag is by definition one that announced the capability.
+  (This is the cause of the lost display server the two entries above learned
+  to survive.)
 
 
 ### Known limitations
@@ -2279,6 +2299,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/FernTech-EU/teksilo/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/FernTech-EU/teksilo/compare/v0.9.5...v0.10.0
 [0.9.5]: https://github.com/FernTech-EU/teksilo/compare/v0.9.4...v0.9.5

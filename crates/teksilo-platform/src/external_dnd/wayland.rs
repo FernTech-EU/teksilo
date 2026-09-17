@@ -57,7 +57,7 @@ use wayland_client::protocol::wl_data_offer::{Event as DataOfferEvent, WlDataOff
 use wayland_client::protocol::wl_data_source::{Event as DataSourceEvent, WlDataSource};
 use wayland_client::protocol::wl_pointer::{ButtonState, Event as PointerEvent, WlPointer};
 use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::protocol::wl_seat::WlSeat;
+use wayland_client::protocol::wl_seat::{Capability, Event as SeatEvent, WlSeat};
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::wl_touch::{Event as TouchEvent, WlTouch};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
@@ -205,13 +205,14 @@ struct DndState {
     cmd_rx: Receiver<Command>,
     // Held to keep the proxies alive for the queue's lifetime.
     _seat: WlSeat,
-    _pointer: WlPointer,
-    /// Bound so a `wl_touch::down` serial is observable: without it a finger
-    /// cannot start an outbound drag at all. Bound unconditionally, exactly as
-    /// the pointer above is — `wl_seat::get_touch` on a seat with no touch
-    /// capability simply takes no effect, and this thread never listens for the
-    /// capability event.
-    _touch: WlTouch,
+    /// The seat's pointer, bound only once the seat has announced the
+    /// capability — see [`Dispatch<WlSeat, ()>`]. `None` on a seat with no
+    /// pointer, and again after the capability is withdrawn.
+    pointer: Option<WlPointer>,
+    /// The seat's touch, bound on the same terms as `pointer` above. It exists
+    /// so a `wl_touch::down` serial is observable: without one a finger cannot
+    /// start an outbound drag at all.
+    touch: Option<WlTouch>,
 }
 
 impl DndState {
@@ -385,13 +386,80 @@ impl Dispatch<WlRegistry, GlobalListContents> for DndState {
 
 impl Dispatch<WlSeat, ()> for DndState {
     fn event(
-        _: &mut Self,
-        _: &WlSeat,
-        _: <WlSeat as Proxy>::Event,
+        state: &mut Self,
+        seat: &WlSeat,
+        event: <WlSeat as Proxy>::Event,
         _: &(),
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
+        // `wl_seat::get_pointer` / `get_touch` may only be issued for a
+        // capability the seat has announced — the protocol names asking
+        // without one a `missing_capability` error, and it is the client that
+        // is at fault, not the compositor.
+        //
+        // This is not a theoretical nicety. This backend used to bind both
+        // eagerly at `attach`, on the reasoning that a seat lacking the
+        // capability would hand back a proxy that simply never emits. Mutter
+        // (GNOME 50 / libmutter-18) instead serves `get_touch` out of a
+        // `MetaWaylandTouch` whose `resource_list` head is still all-zero —
+        // `wl_list_init` for it runs in `meta_wayland_touch_enable`, which
+        // only runs once a touch device exists — and the resulting
+        // `wl_list_insert` writes through a NULL `next`. gnome-shell takes
+        // SIGSEGV inside `wl_list_insert`, and because the compositor *is*
+        // the session, every window on the desktop dies with it. A machine
+        // with no touchscreen (a VM, most desktops) lost its GNOME session a
+        // second or two after this app opened a window. KWin is unaffected,
+        // which is exactly what made it look like a compositor bug rather
+        // than ours.
+        //
+        // So: bind on announcement, never ahead of it.
+        let SeatEvent::Capabilities {
+            capabilities: WEnum::Value(capabilities),
+        } = event
+        else {
+            return;
+        };
+
+        // The pointer carries the `wl_pointer::button` press serial that
+        // `start_drag` must be handed to convert an implicit grab.
+        if capabilities.contains(Capability::Pointer) {
+            if state.pointer.is_none() {
+                state.pointer = Some(seat.get_pointer(qh, ()));
+            }
+        } else if let Some(pointer) = state.pointer.take() {
+            release_pointer(&pointer);
+        }
+
+        // The touch counterpart: a finger's grab is opened by
+        // `wl_touch::down`, and no pointer serial can stand in for it.
+        if capabilities.contains(Capability::Touch) {
+            if state.touch.is_none() {
+                state.touch = Some(seat.get_touch(qh, ()));
+            }
+        } else if let Some(touch) = state.touch.take() {
+            release_touch(&touch);
+        }
+    }
+}
+
+/// Give a withdrawn pointer back to the compositor.
+///
+/// A seat may drop a capability while the client is running (the last mouse is
+/// unplugged), and the protocol asks the client to release the object it was
+/// given. `wl_pointer::release` is a version 3 request, so on an older seat
+/// there is nothing to send and dropping the proxy is all that is available.
+fn release_pointer(pointer: &WlPointer) {
+    if pointer.version() >= 3 {
+        pointer.release();
+    }
+}
+
+/// The touch counterpart of [`release_pointer`]; `wl_touch::release` is a
+/// version 3 request on the same terms.
+fn release_touch(touch: &WlTouch) {
+    if touch.version() >= 3 {
+        touch.release();
     }
 }
 
@@ -804,16 +872,12 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             return Box::new(NoopDndGuard);
         };
         let data_device = ddm.get_data_device(&seat, &qh, ());
-        // Bind the seat pointer on our own connection to observe button-press
-        // serials (start_drag needs one). Same multi-queue model as the rest
-        // of this backend — we never read the socket ourselves.
-        let pointer = seat.get_pointer(&qh, ());
-        // And the touch object, for the same reason. A seat without the touch
-        // capability answers with a proxy that never emits, which is harmless —
-        // `serial_for(Touch)` then reports no serial and the outbound drag is
-        // declined cleanly instead of being refused by the compositor in
-        // silence.
-        let touch = seat.get_touch(&qh, ());
+        // The seat's pointer and touch — which carry the press serials
+        // `start_drag` demands — are *not* bound here. They are bound from the
+        // `wl_seat::capabilities` event, which is the only point at which the
+        // protocol permits it; see [`Dispatch<WlSeat, ()>`] for what asking
+        // early costs. The event arrives on our queue within a tick of the
+        // next socket read, long before any user input could start a drag.
 
         // winit's surface id (same connection ⇒ comparable to `enter.surface`).
         let target_surface = unsafe {
@@ -864,8 +928,8 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             outbound_finished: false,
             cmd_rx,
             _seat: seat,
-            _pointer: pointer,
-            _touch: touch,
+            pointer: None,
+            touch: None,
         };
 
         std::thread::Builder::new()
