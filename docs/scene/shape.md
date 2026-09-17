@@ -76,7 +76,7 @@ rule, and why no approximation substitutes for it, is on
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/shape/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
 ## `pub const SHAPE_FLATTEN_TOLERANCE`
 

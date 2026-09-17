@@ -106,14 +106,6 @@ pub struct TextRunSpec {
     pub attrs: TextRunAttributes,
 }
 
-/// The text a node announces, read the way every platform adapter reads it.
-///
-/// A `Role::Label` carries its text in `value`, not `label` — Windows UIA
-/// derives the Name from `value` for that role, macOS exposes it as
-/// `AXValue`, and `accesskit_consumer` reads `value` when another control is
-/// `labelled_by` it. `AccessNodeBuilder::build` moves it there. Everything
-/// else carries its name in `label`. A test or probe that reads one property
-/// sees nothing on half the tree.
 /// A Teksilo affine as AccessKit expresses one.
 ///
 /// Both store a 3×2 matrix mapping `(x, y)` to
@@ -138,6 +130,14 @@ pub fn to_accesskit_affine(t: teksilo_canvas::Transform2D) -> accesskit::Affine 
     accesskit::Affine::new([a as f64, b as f64, c as f64, d as f64, tx as f64, ty as f64])
 }
 
+/// The text a node announces, read the way every platform adapter reads it.
+///
+/// A `Role::Label` carries its text in `value`, not `label` — Windows UIA
+/// derives the Name from `value` for that role, macOS exposes it as
+/// `AXValue`, and `accesskit_consumer` reads `value` when another control is
+/// `labelled_by` it. `AccessNodeBuilder::build` moves it there. Everything
+/// else carries its name in `label`. A test or probe that reads one property
+/// sees nothing on half the tree.
 pub fn announced_text(node: &Node) -> Option<&str> {
     if node.role() == Role::Label {
         node.value().or_else(|| node.label())

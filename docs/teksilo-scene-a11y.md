@@ -274,8 +274,10 @@ RectItem::new(rect)
     .access_subtree(AccessSubtreeMode::Merge);
 ```
 
-`access_label_literal`, `access_description_literal` (and friends)
-are `#[doc(hidden)]` twins for explicitly-untranslated strings.
+There are no `_literal` twins on this tier — every one of these takes
+`impl Into<LocalizedString>`, and a bare `&str` does not compile. Wrap an
+explicitly-untranslated string in `lit!(...)`; see
+[teksilo-scene.md § i18n](teksilo-scene.md#i18n).
 
 Data-bearing items — gauges, value marks, progress dots — additionally carry
 `access_value` / `access_numeric_value` / `access_numeric_range` /

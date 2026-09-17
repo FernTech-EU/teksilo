@@ -617,12 +617,15 @@ impl<'ops> EventContext<'ops> {
         self
     }
 
-    /// Record which node's handler is about to run.
+    /// Record the node the arena picked for this event — the *target*, which is
+    /// not in general the node whose handler is running (a preview fires on
+    /// every strict ancestor of it).
     pub(crate) fn with_dispatch_target(mut self, target: WidgetId) -> Self {
         self.dispatch_target = Some(target);
         self
     }
 
+    /// Record which node's handler is about to run.
     pub(crate) fn with_dispatch_node(mut self, node: WidgetId) -> Self {
         self.dispatch_node = Some(node);
         self

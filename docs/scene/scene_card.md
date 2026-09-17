@@ -169,7 +169,7 @@ signal gets the body focused too, with no dispatch of its own to do it in.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/scene_card/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
 ## `pub enum CardMode`
 

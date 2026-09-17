@@ -13,184 +13,466 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+`teksilo-scene` becomes an editor. A selection can be moved, resized and
+rotated — with a pointer, from the keyboard and through a screen reader — where
+a heavyweight item could not be dragged with a pointer at all. `SceneCard` is
+the container a note lives in, and a card can hand its height to its own words.
+One picker now answers every "what did the pointer hit?", over one geometry
+descriptor that also brings Qt's four selection modes and a lasso. A pan over
+fifty thousand *lightweight* items costs what a pan over an empty scene costs,
+and the cards nobody can see cost no accessibility node and no Tab stop. Around
+that: a third
+paint band and a surface for ink that is still wet, every position the OS
+batched, a seam a data layer can reverse a scene edit through, and a finger that
+can pan a `SceneView` with selection or magnetism switched on.
+
+Breaking, pre-1.0: `PathItem::new` takes one argument, `SceneItem` loses two
+methods and gains one, `Path::commands` is a method, `item_change_signal`
+carries an envelope, and several types the crate hands *to* consumer code are
+now `#[non_exhaustive]`. Each one is listed under **Breaking changes** below
+with what to do about it.
+
 ### Added
 
-- **teksilo-scene:** a **geometry constraint** on `SceneModel` — one closure
-  that rewrites a gesture's proposed geometry before anything is applied, so
-  snap-to-grid, axis lock and page clamping reach the drag ghost rather than
-  correcting it a frame late. Installed with
-  `SceneModel::set_geometry_constraint`; the closure is handed a
-  `ProposedChange` (the scene read-only, the roots the gesture moves, and the
-  gesture's start and proposed *frames* in scene coordinates) and returns a
-  `ChangeVerdict` (`Accept` / `Adjust(frame)` / `Reject`). It is consulted by the
-  selection transform controller (both content tiers, pointer, keyboard and AT),
-  the lightweight item drag, and the `Alt`+arrow nudge; an app driving its own
-  drag calls `SceneModel::constrain_move` / `constrain_frame`. Programmatic
-  mutators are never constrained.
-- **teksilo-scene:** `scene-corkboard` cards are draggable, both panes carry a
-  selection transform controller, and a "Snap to grid" toggle drives one
-  geometry constraint shared by both panes.
-- **teksilo-scene:** a **reversible-mutation seam** — what the scene tells a data
-  layer so that layer can reverse an edit. (Undo itself stays in the data layer;
-  this crate ships no stack and no `undo()`.)
-  - Every notification now carries a transaction id, a `ChangeSource`
-    (`User` / `Programmatic` / `Remote`), a `HistoryMode`
-    (`Record` / `RecordPreserveRedo` / `Ignore`) and an `ephemeral` flag.
-  - One write scope is one transaction, so a subtree `remove` is one change to
-    undo rather than N. `SceneModel::transaction` / `user_edit` groups several
-    calls; nesting joins rather than splitting. The framework stamps its own
-    gesture commits `User`, so an app can tell a finished drag from a
-    programmatic move.
-  - `Scene::take` removes an item and hands back what it held — the item box,
-    its magnets (ids included) and its whole slice of the logical accessibility
-    tree, in both directions. `Scene::restore` puts it back at the **same**
-    `ItemId`, at its original place in the reading order. `Scene::remove` is the
-    same call with the salvage routed to the edit sink.
-  - `SceneModel::set_edit_sink` receives one owning `SceneTransactionRecord` per
-    committed transaction, with the scene unborrowed so the sink may read and
-    write it; the sink's own writes are journaled in turn.
-    `transaction_signal` fires once per transaction, after the sink.
-  - `SceneTransaction::abandon` tags a cancelled interaction (without rolling
-    the scene back); `squash` folds a transaction's repeated writes to one
-    quantity into its endpoints, off by default.
-  - `Scene::replace_item` swaps a lightweight item's box while keeping the
-    entry, the id and everything keyed on it, returning the box it replaced.
-  - `Placement { parent, z, local_pos, transform }` is written as one property:
-    `set_placement`, and `reparent_keeping_scene_pos` for a drag into a group
-    that does not move the item. `z_between` reports when `f32` precision has
-    run out at a locus, where a caller computing the midpoint itself would get a
-    silent no-op.
-  - `Scene::a11y_live_of` / `a11y_landmark_of`, and `a11y_relations` /
-    `a11y_live_of` / `a11y_landmark_of` / `a11y_categories_of` on `SceneModel`.
-  - `ItemChange::is_edit()` separates the scene's *edits* from the derived
-    notifications it emits beside them, so an app counting the changes in an
-    edit gets the same number the transaction record has.
-  - `RemovedItem::detach()` forgets a salvage's recorded parent, so it restores
-    at root level — the door `RestoreError::MissingParent` already pointed at,
-    and what moving an item into a *different* scene needs.
-- **teksilo-scene:** `SceneModel::downgrade()` and `WeakSceneModel` — a
-  non-owning handle to a scene. For a closure the scene itself owns: a geometry
-  constraint that captures a `SceneModel` closes a reference cycle through the
-  closure and leaks the whole scene. A constraint normally needs no handle at
-  all (`ProposedChange::scene` is the entire read surface); this is for a policy
-  object that holds one for its other work.
+#### Moving, resizing and rotating a selection
 
-#### The selection transform controller
+- **A selection transform controller**, opted into per view with
+  `SceneView::transform_controller(TransformConfig)`: a frame around the
+  selection, eight resize handles, a rotate handle and a body drag. Knobs for
+  aspect lock, centred scaling, rotation snaps and their tolerance, a minimum
+  size, handle and padding sizes, edge auto-pan distance and speed, and a
+  `chrome` closure for painting the whole thing yourself. `on_start` /
+  `on_change` / `on_end` report the gesture; `LivePreview` decides whether the
+  content moves under the frame or only the frame does.
+- The model is written **once, when the gesture ends**, through
+  `Scene::apply_transform_delta`. One gesture is one step to reverse, `Esc`
+  cancels with nothing to roll back, and a sample costs a relayout rather than
+  one model write per selected item.
+- **Keyboard**: the transform key (`t` by default) enters the controller, `Tab`
+  cycles the handles, the arrows move or resize by a step, `Esc` cancels.
+- `SceneView::transform_session_signal()` publishes the live gesture, for an
+  app-owned inspector, status bar or size readout.
+- **Assistive technology**: every handle is published with a role, a name and —
+  where it drives a single number — a value. `Increment` and `Decrement` move
+  the coordinates that handle actually drives, and each two-dimensional handle
+  also advertises a named action per direction (`TransformStep`), so a width can
+  be changed without a height. `TransformLabels` takes `tr!` like every other
+  label.
+- **Both tiers move.** A heavyweight card is draggable with a pointer at last;
+  the lightweight drag, the `Alt`+arrow nudge and the controller all go through
+  one door.
+- `SceneView::transform_enabled_signal()` and `magnetism_enabled_signal()` for a
+  toolbar to bind. Turning either off takes its chrome off the screen *and* out
+  of the published accessibility tree.
 
-- **teksilo-scene:** `TransformStep` and four per-axis custom actions on the
-  handles that drive two coordinates — the four corners and the frame band.
-  A screen-reader user can now change the width without the height, which
-  `Increment` alone cannot express. `TransformLabels::step` names them, so they
-  take `tr!` like every other label the controller publishes.
-- **teksilo-scene:** `TransformHandle::is_scalar` — whether a handle's state is
-  one number (an edge coordinate, an angle) or two. The published AccessKit
-  role, the presence of a `numeric_value` and what one verb does all read it.
-- **teksilo-scene:** constructors for the types the crate hands to consumer
-  code: `TransformFrame::new`, `TransformDelta::new`, `TransformSession::new`,
-  `Placement::new`, `SceneItemA11yContext::new`, `MinimapReadout::new` and
-  `MagnetRef` / `MagnetConnection` / `MagnetSnap` / `MagnetMarker` /
-  `MagnetFeedback::new`.
+#### `SceneCard`, and a card that sizes itself to its content
+
+- **`SceneCard`** — the container a heavyweight item usually wants: a surface, a
+  header that is the grab handle, a selection ring, three `CardMode`s
+  (`Idle` / `Selected` / `Editing`) and one named `Role::Group`, with no opinion
+  about what is inside it. Dragging the title strip moves the card; dragging the
+  prose inside it selects text; a trailing header slot holds buttons that can be
+  clicked — even with the jitter a real click carries — without starting the
+  drag. Slots take a widget, a boxed widget or an id, and `surface(..)` replaces
+  the chrome entirely.
+- **`SizePolicy`** on a heavyweight entry — `Fixed` (today's behaviour and the
+  default), `HeightForWidth` (the width is authored, the height follows the
+  words) and `Intrinsic` (the entry shrink-wraps its widget). Set it with
+  `Scene::set_size_policy` / `SceneModel::set_size_policy`, or with
+  `SceneCard::height_for_width()`. Only the cards a pass lays out are measured,
+  so an off-screen card keeps the estimate it was created with and a pan still
+  costs the viewport. `Scene::set_measured_size` is there for an app measuring
+  something the framework cannot.
+- **A `SceneView` answers `ScrollIntoView`.** A caret moving inside an embedded
+  editor pans the camera to follow it, with no app wiring, and an outer
+  `ScrollArea` is re-targeted to where the card will land. It honours reduced
+  motion, which the public `SceneView::ensure_visible` cannot.
+- Double-clicking a card puts the caret in its body even when that body is a
+  `Switcher` that swaps the editor in on the next pass.
+
+#### One geometry, one picker
+
+- **`SceneItem::shape() -> ItemShape`** is how an item describes its geometry: a
+  rectangle, a rounded rectangle, an ellipse or a path, with a fill rule and an
+  optional stroke band in local or screen units. It replaces `shape_contains`
+  *and* `clone_shape_test`, which had to be kept in agreement by hand.
+- **Qt's four `ItemSelectionMode`s** — `IntersectsItemShape` (the default),
+  `ContainsItemShape`, `IntersectsItemBoundingRect` and
+  `ContainsItemBoundingRect` — chosen per view with
+  `SceneView::marquee_selection_mode`, or per call on `Scene::items_in_region`
+  and `colliding_items_with`.
+- **`SceneRegion` is a rectangle *or* a path**, so a lasso is expressible:
+  `SceneRegion::lasso(path)`, `::stroke(path, width)`, `::from_screen_rect(..)`.
+  A rotated marquee stops over-selecting.
+- **One resolver decides every pick.** `PaintKey` — band, then `z`, then
+  insertion order — is the order the tap, the drag, the hover, the cursor, the
+  tooltip, the hold and `Scene::item_at` all read. `claims_press` and
+  `hit_testable` are public for a consumer running its own pass.
+- `PathItem` carries a real `fill_rule`, used by painting and hit-testing alike,
+  and `hit_stroke_width` for a hairline that should still be clickable.
+- **On `Path`**: `flatten(tolerance)` (a polyline per subpath),
+  `exact_bounds(tolerance)` (a tight box, where `bounds()` returns the
+  control-point hull and so over-reports every curve),
+  `contains_point(p, rule, tolerance)`, the `Subpath` type, and `arc_to_cubics`
+  shared rather than duplicated inside the path atlas.
+
+#### Ink
+
+- **A third paint band.** `SceneLayer::Interleaved` orders a lightweight item
+  against the heavyweight cards by `z`, so a dried stroke can sit above note A
+  and below note B — which two bands could not express. The pointer still
+  resolves through the lightweight hit snapshot, the item keeps its own
+  accessibility node, and the Tab ring does not move.
+- **`WetLayer`** — a surface for content being authored right now, installed
+  with `SceneView::wet_layer(..)`. It repaints on its own without re-running the
+  band beneath it, and always sits above every card and interleaved item and
+  below the `Over` band. `WetLayer::request_repaint(ctx)` from a pointer
+  handler; `WetNode` names the nodes it owns.
+- **`EventContext::coalesced()`** — the positions the OS batched into the packet
+  being dispatched, oldest first, each with its own timestamp *and* its own
+  pressure and tilt. A drawing surface fans out over it and then over
+  `pointer_position()`. Opt the producer in with
+  `TeksiloAppBuilder::pen_batching(PenBatching::Coalesce)`, which emits one
+  dispatch per pen drain instead of one per packet and never folds a transition.
+  Not `on_drag` — the drag recogniser swallows every move inside its slop and
+  reports the press position, so the start of a stroke never arrives there.
+- **[docs/ink.md](docs/ink.md)** — the shape of a drawing tool on a scene page:
+  what to read a stroke from, what to put on which band, and what a wet stroke
+  costs.
+
+#### A seam a data layer can reverse a scene edit through
+
+Undo itself stays in the data layer; this crate ships no stack and no `undo()`.
+What it ships is a record complete enough to invert.
+
+- Every notification carries a transaction id, a `ChangeSource`
+  (`User` / `Programmatic` / `Remote`), a `HistoryMode`
+  (`Record` / `RecordPreserveRedo` / `Ignore`) and an `ephemeral` flag. The
+  framework stamps its own gesture commits `User`, so an app can tell a finished
+  drag from a programmatic move.
+- **One write scope is one transaction**, so removing a subtree is one change to
+  reverse rather than N. Group several calls with `SceneModel::transaction` /
+  `user_edit`; nesting joins rather than splits. `SceneTransaction::abandon`
+  tags a cancelled interaction, and `squash` (off by default) folds a
+  transaction's repeated writes to one quantity into its endpoints.
+- **`Scene::take` / `Scene::restore`** — an owning salvage door. `take` hands
+  back the item box, its magnets (ids included) and its whole slice of the
+  logical accessibility tree; `restore` puts it back at the **same** `ItemId`
+  and the same place in the reading order, which is what selection, magnets,
+  relations and every app side-map are keyed on. `Scene::remove` is the same
+  call with the salvage routed to the edit sink, and `RemovedItem::detach()`
+  forgets the recorded parent so a salvage restores at root level — or into a
+  different scene.
+- **`SceneModel::set_edit_sink`** receives one owning `SceneTransactionRecord`
+  per committed transaction, with the scene unborrowed so the sink may read and
+  write it; the sink's own writes are journaled in turn. `transaction_signal`
+  fires once per transaction, after the sink.
+- `Scene::replace_item` swaps a lightweight item's box while keeping the entry,
+  the id and everything keyed on it. `Placement { parent, z, local_pos,
+  transform }` is written as one property with `set_placement`, plus
+  `reparent_keeping_scene_pos` for a drag into a group that must not move the
+  item, and `z_between`, which reports when `f32` precision has run out at a
+  locus.
+- `ItemChange::is_edit()` separates the scene's edits from the derived
+  notifications emitted beside them, so an app counting the changes in an edit
+  gets the number the transaction record has.
+- Accessibility readers to match the writers: `Scene::a11y_live_of` /
+  `a11y_landmark_of`, and `a11y_relations` / `a11y_live_of` /
+  `a11y_landmark_of` / `a11y_categories_of` on `SceneModel`.
+
+#### Saying what a change should become before it is applied
+
+- **A geometry constraint on `SceneModel`** — one closure that rewrites a
+  gesture's proposed geometry *before* anything is applied, so snap-to-grid,
+  axis lock and page clamping reach the drag ghost instead of correcting it a
+  frame late. Install it with `SceneModel::set_geometry_constraint`; it is handed
+  a `ProposedChange` (the scene read-only, the roots the gesture moves, and the
+  gesture's start and proposed frames in scene coordinates) and returns a
+  `ChangeVerdict` — `Accept`, `Adjust(frame)` or `Reject`.
+- It governs the transform controller on both tiers, the lightweight item drag
+  and the `Alt`+arrow nudge, for pointer, keyboard and assistive technology
+  alike. An app driving its own drag calls `SceneModel::constrain_move` /
+  `constrain_frame`. Programmatic mutators are never constrained.
+- **`SceneModel::downgrade()` and `WeakSceneModel`** — a non-owning handle. A
+  constraint normally needs no handle at all (`ProposedChange::scene` is the
+  whole read surface); this is for a policy object that holds one for its other
+  work, and it is what keeps such a closure from leaking the scene that owns it.
+
+#### Core, platform and canvas
+
+- **`Widget::accepts_child_hit(child, point)`** — a parent can veto one child for
+  one point, which is the per-point question `hit_transparent` (a per-node
+  declaration) cannot ask.
+- **`EventContext::dispatch_target()`** — the arena's own answer to who the press
+  landed on, so a container need not guess it from a rectangle.
+- **`EventContext::release_cursor()`** — withdraws a handler's cursor override so
+  the node-declared one resolves again.
+- **A pan claimant may carry its own drag.** A node that declares a `PanClaim`
+  and also installs `on_drag` now competes as both: the pan wins at `pan_slop`,
+  and a hold arms the node's own drag. `LongPressRole::DragHandle` declares that
+  the hold inside a subtree belongs to that drag, and applies to a direct
+  pointer only — a mouse enrols no pan member at all, so nothing about it
+  changes.
+- **Every pen sample carries the device's own time.** `PenPacket::device_time_ms`
+  plus a shared `back_date` rule that places a drained batch on the tree's
+  timeline, wrapped 32-bit counters and missing clocks included. Windows now
+  drains `GetPointerPenInfoHistory`, so a digitizer running above the message
+  rate delivers every sample with its own pressure and tilt rather than one per
+  message.
+- `AccessNodeBuilder::set_custom_actions` advertises `Action::CustomAction`
+  itself, so a node's custom actions are reachable rather than decorative.
+- A stroke carrying a `StrokeStyle` — dashed, dotted, or a custom cap or join —
+  reaches the screen from every canvas stroke primitive, not only `stroke_path`.
+
+#### Accessibility
+
+- **`SceneMinimap` is operable.** Given an `on_click` it is focusable, publishes
+  a `Role::Group` node, advertises `Click` and the four scroll actions, pans with
+  the arrow keys and recentres on `Home` / `Enter` / `Space`. `access_readout`
+  supplies the phrasing for where the viewport sits, as a `MinimapReadout`, so it
+  can be localised.
+
+#### Demos
+
+- **`cargo run -p scene-ink`** — every pen sample through `ctx.coalesced()`, a
+  `WetLayer` that repaints alone, and a dried stroke interleaved between two
+  notes.
+- **`cargo run -p scene-corkboard`** — beats are `SceneCard`s with real editors:
+  drag the title strip to move one, drag its prose to select text, pan a beat
+  off-screen and keep typing (the camera follows the caret), and "Fit to text"
+  hands every beat's height to its words. Both panes carry a transform
+  controller, and one "Snap to grid" toggle drives a single geometry constraint
+  shared by both.
 
 ### Changed
 
-- **teksilo-scene:** `TransformConfig::bound_box` is replaced by the geometry
-  constraint, which is strictly wider: it sees the scene, the items and the
-  gesture's source, it can refuse a change, and it governs the lightweight drag
-  and the keyboard nudge as well as the transform controller.
-- **teksilo-scene:** `SceneListAdapter` keeps each row's `ItemId`. A row whose
-  content changed, and every row an insert or a removal shifted, keeps the id it
-  had — so selection, magnets and accessibility parenting survive a data change
-  instead of being retired with it. Each source change is one transaction.
-- **teksilo-scene:** `item_change_signal` carries a `SceneChange` (the change
-  plus its transaction envelope) rather than a bare `ItemChange`. Observers read
+#### Breaking changes
+
+- **`PathItem::new(path)`** takes one argument and derives its own bounds. Drop
+  the `local_bounds` you were passing; if you were widening it to make a hairline
+  clickable, use `hit_stroke_width` instead.
+- **`ItemFlags::NEGATIVE_Z_BEHIND_PARENT` is removed.** It was declared and
+  documented but read by nothing, and `PaintKey` is flat, so it could not have
+  been honoured without making the key hierarchical. Nothing observable changes;
+  delete the reference.
+- **`PointerSequence::has_deferred_grab()` is now `has_deferred_grab_for(id)`.**
+  A deferred grab is a statement about the node it arms, not about the press:
+  read sequence-wide it suppressed every descendant's touch long-press and
+  context menu. Pass the node you are asking about.
+- **`SceneItem::shape_contains` and `clone_shape_test` are gone**, replaced by
+  `shape() -> ItemShape`. An item that overrode either overrides `shape()` now;
+  the default returns the item's `local_bounds`, which is what an item that
+  overrode neither already got.
+- **`SceneItem::set_fill` / `set_stroke` return `AppearanceWrite<T>`** instead of
+  `bool`, carrying the value they overwrote — the only place a journal can get it
+  from. `AppearanceWrite::Refused` is the default, and is what an item with no
+  such slot should keep returning.
+- **`SceneItemA11yContext` publishes scene coordinates.** `screen_bounds`,
+  `local_to_screen`, `advertised_bounds` and `bounds_space` are replaced by
+  `scene_bounds` and `local_to_scene`; the camera is declared once as an
+  AccessKit transform above the whole subtree. An item emitting its own
+  sub-element geometry stops projecting through the view transform and publishes
+  in scene space. `A11yBoundsSpace` is removed with them.
+- **`item_change_signal` carries a `SceneChange`** — the change plus its
+  transaction envelope — rather than a bare `ItemChange`. Observers read
   `notification.change`.
-- **teksilo-scene:** `ItemChange` is no longer `Copy`/`PartialEq` (it now
-  carries owned values) and gains `PlacementChanged` and `ItemReplaced`.
-  `TransformChanged`, `PayloadChanged` and `AppearanceChanged` carry both sides
-  of the value they replaced, so an edit is reversible from the event alone.
-- **teksilo-scene:** `SceneItem::set_fill` / `set_stroke` return an
-  `AppearanceWrite<T>` carrying the value they overwrote, instead of a `bool`.
-  A getter would have had to be defaulted, and a defaulted getter would report
-  "there was no fill" for any item that forgot to override it — making an undone
-  fill change *clear* the fill rather than restore it.
-- **teksilo-scene:** a rotation applied by `apply_transform_delta` that also
-  moves the item now emits `TransformChanged` as well as `LocalPosChanged`; it
-  used to emit only the move, so the rotation was invisible to the change
-  stream. `set_transform` ignores a write that changes nothing.
-- **teksilo-scene:** `ItemChange::HandlersChanged` carries the handler sets it
-  replaced. `set_item_handlers` knows both sides and now reports them, so a
-  handler change is reversible from the record like every other edit;
-  `handlers_mut` cannot (it hands out a `&mut` and is told nothing about what
-  the caller does with it), so it reports `replaced: None` and is not recorded
-  as an edit.
-- **teksilo-scene:** `ItemChange::VisibilityChanged` is emitted by **every**
-  door that flips `IS_VISIBLE`, not only `set_flag`, and is no longer recorded
-  as an edit. Hiding a card is one recorded edit and two notifications whether
-  it went through `set_visible`, `set_flag` or a wholesale `set_flags`; it used
-  to be two edits through one door and one through the other.
-- **teksilo-scene:** `Scene::set_z` ignores a write only when the entry already
-  holds that exact value. It used to ignore anything within `f32::EPSILON`,
-  which near zero swallowed millions of distinct floats — including the
-  midpoints `z_between` hands out, so a caller was told there was room and then
-  got a silent no-op with no `ZChanged` to observe.
-- **teksilo-scene:** a geometry constraint that returns
-  `ChangeVerdict::Adjust` with a frame that cannot be applied — non-finite, or
-  a negative extent — is refused rather than applied; a debug build panics
-  naming the frame. A `NaN` frame used to be stored verbatim, which removed the
-  item from hit-testing, from the marquee and from every spatial query for good,
-  with nothing raised to say so.
-- **teksilo-scene:** `Scene::selection_roots` is O(n·depth) rather than
-  O(n²·depth) — 36 µs against 7.03 ms for a 1 000-item selection, measured.
-  `SceneModel::constrain_move` / `constrain_frame` called inside an open write
+- **`ItemChange` is no longer `Copy` or `PartialEq`** (it carries owned values
+  now) and gains `PlacementChanged`, `ItemReplaced`, `HandlersChanged`,
+  `MeasuredSizeChanged` and `SizePolicyChanged`. `TransformChanged`,
+  `PayloadChanged` and `AppearanceChanged` carry both sides of the value they
+  replaced.
+- **`Path::commands` is a method.** Read with `commands()`, append with `push`,
+  build from a vector with `Path::from_commands`. The field backs a rolling
+  content stamp that a public `Vec` could not be kept in step with.
+- **`PointerSample::coalesced` is a `Vec<CoalescedSample>`**, not a tuple — each
+  batched position keeps its own axes, which the tuple dropped.
+- **`PenPacket::time: EventTime` is replaced by `device_time_ms: Option<u32>`**,
+  the device's own counter rather than a stamp with an unknown epoch, and
+  `ToolEvent::Frame` carries `time_ms`. A backend reports what the device said;
+  `back_date` places the batch on the tree's timeline.
+- **`#[non_exhaustive]` on the types the crate hands *to* consumer code**, so a
+  new field is not a source break next time: `ItemChange`, `SceneLayer`,
+  `MagnetVisualState`, `MagnetRef`, `MagnetConnection`, `MagnetSnap`,
+  `MagnetMarker`, `MagnetFeedback`, `SceneItemPaintContext` and
+  `SceneItemA11yContext`. A `match` gains a `_` arm; a struct literal becomes the
+  type's `new` constructor, which every one of them now has, with its fields
+  still public.
+
+#### Performance
+
+- **A pan costs the viewport, not the model.** One pan sample over a scene with a
+  50 000-item **lightweight** off-screen tail went from **16 ms to 1.8 µs** —
+  what a pan over an *empty* scene costs. The two hit snapshots are pure
+  functions of the model, so they are built once and patched per item from the
+  change stream instead of being rebuilt on every sample.
+  (`crates/teksilo-scene/tests/pan_scaling_probe.rs`.)
+  A pan over off-screen **heavyweight cards** is cheaper than it was but is not
+  flat: the cards are parked rather than laid out, and what remains is the
+  framework's own walk over their arena nodes.
+  (`crates/teksilo-scene/tests/heavyweight_retention_probe.rs` prints both.)
+- **Off-screen cards park.** At 50 000 of them the published accessibility node
+  count and the Tab-stop count equal the on-screen counts exactly, and the
+  accessibility walk no longer grows with the tail. A card carrying focus or a
+  live pointer is pinned wherever the camera goes.
+  (`crates/teksilo-scene/tests/heavyweight_retention_probe.rs`.)
+- **Moving one item costs the moved subtree, not the scene.**
+  `Scene::set_local_pos` walks a kept adjacency list instead of rebuilding a
+  scene-wide parent map on every move.
+  (`crates/teksilo-scene/tests/mutation_scaling_probe.rs`.)
+- **A hover no longer costs the selection.** `Scene::selection_roots` is linear
+  rather than quadratic in the number of selected items, and the transform
+  controller resolves it once per hover instead of thirteen times per pointer
+  move. With the whole of a 5 000-item scene selected, one `selection_roots`
+  call went from 177 ms to a figure that no longer grows with the selection, and
+  a drag sample in a scene with no constraint installed no longer pays for the
+  selection at all.
+  (`crates/teksilo-scene/tests/selection_roots_scaling_probe.rs`,
+  `transform_scaling_probe.rs` print the tables.)
+- **A growing wet stroke is no longer quadratic.** The renderer's path-mask cache
+  keys on a rolling content stamp, so a cache hit does not scale with the path's
+  length. (`crates/teksilo-render/tests/wet_stroke_cost.rs`.)
+
+#### Scene
+
+- **An `item_change_signal` observer may read and write the scene.** Changes are
+  queued and drained after the mutation's borrow drops — the `teksilo-data`
+  mutate-then-notify discipline — so the snap-to-grid pattern the docs describe
+  is implementable at last. An observer that panics mid-flush costs that
+  observer's delivery and nothing else. A `CascadeBudget` bounds one drain's
+  observer-generated deliveries (100 000 by default, flat, a knob on
+  `SceneModel::set_cascade_budget`), and its diagnostic names the subject that
+  piled up.
+- **`SceneListAdapter` keeps each row's `ItemId`.** A row whose content changed,
+  and every row an insert or a removal shifted, keeps the id it had — so
+  selection, magnets and accessibility parenting survive a data change instead of
+  being retired with it. Each source change is one transaction.
+- `ItemChange::VisibilityChanged` is emitted by **every** door that flips
+  `IS_VISIBLE`, not only `set_flag`, and is a derived notification rather than an
+  edit. Hiding a card is one recorded edit and two notifications whichever door
+  it went through; it used to be two edits through one and one through the other.
+- `Scene::set_z` ignores a write only when the entry already holds that exact
+  value. Its old `f32::EPSILON` test never fired at 1e6 and swallowed millions of
+  distinct floats near zero — including the midpoints `z_between` hands out, so a
+  caller was told there was room and then got a silent no-op.
+- A rotation applied by `apply_transform_delta` that also moves the item now
+  emits `TransformChanged` as well as `LocalPosChanged`; `set_transform` ignores
+  a write that changes nothing.
+- `ItemChange::HandlersChanged` carries the handler sets it replaced.
+  `handlers_mut` cannot know what the caller does with the `&mut` it hands out,
+  so it announces without recording.
+- A geometry constraint returning `Adjust` with a frame that cannot be applied —
+  non-finite, or a negative extent — is refused rather than stored, and a debug
+  build panics naming the frame. A `NaN` frame used to be kept verbatim, which
+  removed the item from hit-testing, from the marquee and from every spatial
+  query for good, with nothing raised to say so.
+- `SceneModel::constrain_move` / `constrain_frame` called inside an open write
   scope panic naming the rule instead of reporting `RefCell already mutably
   borrowed`.
-
-#### The selection transform controller
-
-- **teksilo-scene:** `Increment` and `Decrement` on a handle move the
-  coordinates that handle drives: an edge slider's own `numeric_value`, a
-  corner's two coordinates together, the frame band's whole rectangle. They
-  used to be a horizontal nudge whatever the handle was.
-- **teksilo-scene:** thirteen public types are `#[non_exhaustive]` —
-  `TransformFrame`, `TransformDelta`, `TransformSession`, `Placement`,
-  `SceneItemPaintContext`, `SceneItemA11yContext`, `MagnetRef`,
-  `MagnetConnection`, `MagnetSnap`, `MagnetMarker`, `MagnetFeedback`,
-  `MinimapReadout` and `ReplaceRejected`. Each is a value the crate hands *to*
-  consumer code, so a new field is a source break without it. Build them with
-  the constructors above; the fields stay public.
+- **An `Over` item occludes a card only if it would act on a press.** A
+  decorative halo over an embedded note takes nothing and focus stays in the
+  note; a hover affordance is not a press claim, and neither is accepting a drop.
 
 ### Fixed
 
-#### The selection transform controller
+#### Scene
 
-- **teksilo-scene:** an item's **height** can be changed from assistive
-  technology. `Increment` on the "Resize top" or "Resize bottom" slider reported
-  the action handled, announced an unchanged number and moved nothing.
-- **teksilo-scene:** turning the controller off through
-  `TransformConfig::enabled` takes the frame and its handles off the screen and
-  out of the published accessibility tree. They stayed painted, and a screen
-  reader went on offering handles whose actions the flag had just made refuse.
-- **teksilo-scene:** a selection change no pointer made — "select all", a search
-  result, or the other pane of a shared `SceneSelection` — reaches the published
-  accessibility tree. Both panes kept describing the previous selection, at its
-  previous position.
-- **teksilo-scene:** `Esc` cancels a transform the **pointer** started. It only
-  ever reached a gesture started from the keyboard, so the focus the pointer
-  gesture takes in order to receive it bought nothing.
-- **teksilo-scene:** a revoked contact — a cancelled touch, a lost capture —
-  ends the gesture through the cancel path: `TransformConfig::on_end` fires with
-  `TransformOutcome::Cancelled`, and the edge auto-pan stops. The pan used to
-  keep tweening for up to thirty seconds with no input, and the hook an app
-  tears its overlay down on never fired.
-- **teksilo-scene:** `TransformConfig::min_size` floors only the axes the
-  dragged handle drives. Dragging the bottom edge of a 2 × 100 hairline widened
-  it to 4 — a horizontal change from a purely vertical gesture, on the first
-  sample.
-- **teksilo-scene:** a geometry constraint that returns `ChangeVerdict::Accept`
-  leaves a magnetised drag alone on a **rotated** item. The comparison that
-  decides whether the rule overruled the magnet was exact, and the constraint
-  path's rotation round-trip is not bit-exact off zero degrees — so the snap was
-  cleared and `on_connect` never fired.
+- **A `SceneView` with selection or magnetism switched on can be panned with a
+  finger.** The view's own drag was enrolled in a way that was never resolved, so
+  its recogniser latched at the mouse slop and the pan was never evaluated.
+- **A won pan no longer fires the claimant's own `on_tap`** — panning a list with
+  a finger used to tap a row on the way past.
+- **A revoked drag no longer leaves the item displaced.** The scene had no
+  `PointerCancel` arm at all, so a cancelled touch or a lost capture left the
+  item wherever the last sample put it.
+- **Leaving a `SceneView` clears what leaving it should clear.** Its
+  `PointerLeave` arm had never run, so an item stayed hovered for ever, the
+  tooltip stayed armed, and the cursor stayed on `Grab` with the pointer outside
+  the view.
+- **Two `ItemFlags` do what their documentation says.** An item without
+  `IS_VISIBLE` is no longer clickable or draggable, and one without `IS_ENABLED`
+  no longer eats a click.
+- **Paint order and hit order agree.** Equal-`z` ties were resolved to the
+  bottom-most item, exactly inverting paint, and the scene's two pickers were
+  wired to opposite halves of the dispatch pipeline — so a tap beat every card
+  and a drag lost to every card.
+- **A card's published rectangle tracks the camera.** A heavyweight item's
+  accessibility bounds were its arena rectangle in scene coordinates while a
+  lightweight item's were projected to the screen, so the two tiers disagreed and
+  a pan, zoom or rotation moved neither. Both are published in scene space now,
+  under one declared camera transform, and an accessibility hit-test at the
+  painted position finds the card.
+- **A selection change no pointer made** — "select all", a search result, or the
+  other pane of a shared `SceneSelection` — reaches the published accessibility
+  tree. Both panes kept describing the previous selection, at its previous
+  position.
+- **An item's height can be changed from assistive technology.** `Increment` on a
+  "Resize top" or "Resize bottom" slider reported the action handled, announced
+  an unchanged number and moved nothing.
+- **`Esc` cancels a transform the pointer started**, not only one begun from the
+  keyboard.
+- **A revoked contact ends the gesture through the cancel path**: `on_end` fires
+  with `TransformOutcome::Cancelled` and the edge auto-pan stops. The pan used to
+  keep tweening for up to thirty seconds with no input, and the hook an app tears
+  its overlay down on never fired.
+- `TransformConfig::min_size` floors only the axes the dragged handle drives.
+  Dragging the bottom edge of a 2 × 100 hairline used to widen it to 4.
+- A geometry constraint that accepts a change leaves a magnetised drag alone on a
+  **rotated** item; the comparison deciding whether the rule had overruled the
+  magnet was exact across a rotation round-trip that is not bit-exact.
+- A banded region — a lasso drawn as a stroke — is answered in the frame where
+  its band is round, so an anisotropic scale no longer lets a containment query
+  pick an item the matching shape query then rejects. A zero-length segment, and
+  an open polyline's phantom closing chord, are both handled.
+
+#### The minimap
+
+- **It stays inside its own frame.** Zooming in projected the viewport rectangle
+  outside the widget, and nothing clipped the result, so the minimap painted over
+  its neighbours — a caller-supplied border by half its own width, unclamped. The
+  projection now runs through the union of content and viewport, and the widget
+  clips its own paint.
+- Its content extent is computed in one place; paint and click used to carry
+  separate copies of the same formula.
+
+#### Rendering and canvas
+
+- **A dashed or dotted stroke reaches the screen.** `stroke_rect`,
+  `stroke_rounded_rect`, `stroke_circle`, `stroke_ellipse` and `draw_line` all
+  accepted a `StrokeStyle` and dropped it, along with `line_cap` and `line_join`.
+  A styled stroke now routes to the tier that carries the pattern, and a solid
+  one keeps its cheaper tier.
+- **The renderer no longer paints what hit-testing cannot see.** A path opening
+  with an arc was rasterised with an injected `MoveTo` at the bitmap origin,
+  drawing a long spoke from there to the shape — visibly painted, and a click
+  inside it hit nothing. The atlas opens each implicit subpath where the
+  flattener opens it.
+- `Path::transformed` and `Path::flatten` agree about where a subpath begins.
+  They did not for an arc following a `Close`, so rotating a two-loop lasso
+  changed what it selected.
+
+#### Input
+
+- **Pen samples are spaced by the device's own clock.** Both pen backends stamped
+  zero and the translator then stamped one instant across a whole drained batch,
+  so velocity, smoothing and prediction were all computed from zero spacing. On
+  Windows the batch was also genuinely one packet per message — the history
+  buffer was never drained.
+- **`PointerSample::coalesced` reaches a handler.** It was populated and then
+  discarded, with no accessor and two constructors writing it out empty, so a
+  tool written the obvious way drew at frame rate on a 200–360 Hz digitizer.
+
+### Known limitations
+
+- **An assistive-technology probe and the pointer still disagree over an
+  *interactive* scene overlay.** `accesskit_consumer` resolves a hit by walking
+  a node's children in reverse, and the scene emits its children in band order,
+  so the heavyweight tier wins an explore-by-touch probe whatever band the
+  overlay is in and whatever it claims. The press-claiming rule below fixes the
+  *pointer* answer, not this one. Closing it means reordering an AccessKit child
+  list, which is also the reading order — an accessibility-tree decision rather
+  than a hit-test one. Documented in `docs/teksilo-scene-a11y.md` and pinned by
+  `what_the_press_claiming_rule_does_and_does_not_reconcile`, so it cannot drift
+  silently.
 
 ## [0.10.0] - 2026-09-14
 

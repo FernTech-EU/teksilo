@@ -284,6 +284,48 @@ teksilo-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equi
                      `rotation(radians)`, and `measure(&mut dyn TextBackend) -> Size`. Per-item a11y
                      overrides gained `access_value`/`access_numeric_value`/`access_numeric_range`/
                      `access_numeric_step` for gauge/value-mark-like items.
+                     **Geometry constraint** (`constrain.rs`): snap-to-grid, axis lock, page
+                     clamp and lane rules are ONE closure on the **model**
+                     (`SceneModel::set_geometry_constraint`) — Qt's
+                     `QGraphicsItem::itemChange` in the shape the borrow checker allows: the
+                     scene is lent read-only and the decision is *returned*
+                     (`ProposedChange { start, proposed, source, magnet_snapped }` +
+                     `translation()`/`translated()` → `ChangeVerdict::{Accept, Adjust(frame),
+                     Reject}`). The quantity is a **`TransformFrame`**, not a pointer position
+                     and not a `local_pos`: snapping the cursor lands an item grabbed 37 dp
+                     from its corner permanently off-grid, and `local_pos` is in the parent's
+                     frame so one rule means two things across a parented scene. `Reject` ==
+                     `Adjust(start)` (stateless refusal — a "freeze at the last accepted
+                     sample" form would need history and then jump). **No phase parameter**, so
+                     preview and commit cannot disagree. Consulted by the transform controller,
+                     the lightweight item drag and the Alt+arrow nudge; opt-in for an app's own
+                     drag (`constrain_move`/`constrain_frame`); **never** by a programmatic
+                     mutator (`set_local_pos` lands where it says — snapping a document load is
+                     `itemChange`'s own best-known trap). Writing the scene from inside it
+                     panics naming the hook, via `SceneModel::write_guard`.
+                     **Reversible-mutation seam** (`journal.rs`, `salvage.rs`): an observer
+                     receives a `SceneChange` envelope — the `ItemChange` plus its `TxnId`,
+                     `ChangeSource`, `HistoryMode` and whether it is ephemeral — so a data layer
+                     can reverse a scene mutation without the scene owning undo.
+                     `SceneModel::transaction(source, history)` is the scope (`squash` keeps
+                     endpoints instead of the path, `abandon` drops a cancelled interaction);
+                     `set_edit_sink` routes edits out. `Scene::take`/`restore` lift and
+                     re-insert an item's **whole logical-AT slice** (its AT parent, the
+                     survivors parented under it, relations at either end, live, landmark,
+                     categories) **at the same `ItemId`** — a restore that minted a fresh id
+                     would put the rectangle back and silently lose all five, on a crate whose
+                     differentiator is per-item accessibility. `replace_item` is new content at
+                     the same identity.
+                     **Selection transform** (`transform_session.rs`): move / resize / rotate a
+                     selection through one `TransformSession` — pointer, keyboard and AT — with
+                     `TransformConfig` chrome (handles, labels, edge-pan), `LivePreview`, and
+                     `TransformOutcome`. The whole gesture is ONE model write on release
+                     (`apply_transform_delta` over a `TransformDelta::between` re-derived from
+                     the constrained frame), so a constrained gesture is still one reversible
+                     step and a cancelled one has nothing to roll back. `selection_roots` prunes
+                     a selection to its roots in one pass over the ids (it was O(n²·depth) and
+                     runs on the free hover path — `tests/selection_roots_scaling_probe.rs`
+                     gates it at <25× for 10× the items).
                      **Cards** (`scene_card.rs`): `SceneCard` is the container a heavyweight item
                      usually wants — surface, grab handle, selection ring, three `CardMode`s
                      (`Idle`/`Selected`/`Editing`) and ONE `Role::Group` — with no opinion about
@@ -319,8 +361,14 @@ teksilo-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equi
                      an app measuring something the framework cannot. Changing the policy IS an
                      edit (`ItemChange::SizePolicyChanged`) and does dirty the views — a policy
                      that emitted nothing took effect only when something unrelated happened to
-                     dirty the view. Non-idempotent bodies are bounded by a two-cycle detector
-                     that pins the taller answer. **`ScrollIntoView`**: a `SceneView` clips, so it
+                     dirty the view. Non-idempotent bodies are bounded by `MeasureTrack`
+                     (`view.rs`), which pins **nothing**: a contradiction on a pass nothing
+                     external drove resolves to the larger of the two answers and scores a
+                     strike, and at `MAX_CONTRADICTIONS` (2) the entry re-states the size the
+                     model already holds — writing nothing, and a pass that writes nothing
+                     schedules no successor. The discriminator is *who drove the pass*, not the
+                     value pattern, so a user typing a character that wraps and then deleting it
+                     is never mistaken for a flip-flop. **`ScrollIntoView`**: a `SceneView` clips, so it
                      is on the framework's reveal walk, and it now answers — a caret moving inside
                      an embedded `RichTextEditor` pans the camera to follow it, with no app wiring.
                      `target_bounds` arrives in SCENE coordinates (core projects the rect into
@@ -747,7 +795,7 @@ combo_button.access_controls(listbox_id);
 field.access_described_by(error_message_id);
 ```
 
-**Naming and i18n.** All user-visible-string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<Prop<String>>` and store a `Prop<String>`. With the `i18n` feature, `teksilo_i18n::LocalizedString` (the type produced by `tr!`) implements `From<LocalizedString> for Prop<String>`, so `.access_label(tr!(save()))` stays **locale-reactive** — the AT tree re-walks on a locale change and re-resolves the announced value (no composite rebuild needed). For intentionally-untranslated AT strings use `lit!(...)` (`access_label(lit!("Debug"))`); a bare `&str` no longer compiles. The `#[doc(hidden)]` `access_*_literal` twins survive only as the literal path reachable from inside `teksilo-core` itself (where `lit!` isn't available).
+**Naming and i18n.** All user-visible-string methods (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) accept `impl Into<Prop<String>>` and store a `Prop<String>`. With the `i18n` feature, `teksilo_i18n::LocalizedString` (the type produced by `tr!`) implements `From<LocalizedString> for Prop<String>`, so `.access_label(tr!(save()))` stays **locale-reactive** — the AT tree re-walks on a locale change and re-resolves the announced value (no composite rebuild needed). For intentionally-untranslated AT strings use `lit!(...)` (`access_label(lit!("Debug"))`). A bare `&str` still **compiles** here — `impl From<&str> for Prop<String>` exists (`signal.rs`) so call sites written against the older `impl Into<String>` setters kept working — so `lit!` is a convention, not a compiler-enforced one; use it anyway, because it is what makes an untranslated AT string greppable. (The `LocalizedString`-typed setters are the ones where a bare `&str` genuinely does not compile: `teksilo-i18n` deliberately ships no `From<&str>`/`From<String>` for it, which is what `teksilo-scene`'s item builders take.) The `#[doc(hidden)]` `access_*_literal` twins survive only as the literal path reachable from inside `teksilo-core` itself (where `lit!` isn't available).
 
 **Merge rules.** Scalars (`label`, `description`, `value`, `role`, `identifier`, `shortcut`, `live`, `aria_current`, `has_popup`, `orientation`, numeric range/step) replace if `Some`. Lists (`controls`, `described_by`, `labelled_by`, advertised actions, custom actions) append. `access_remove_action` suppresses an action the widget emitted before override-advertised actions are added. `access_customize(|b| ...)` runs **last** with full `&mut AccessNodeBuilder` access (including `inner_mut()`) — it's the supported escape hatch for synthetic-children surgery (rich-text paragraphs / text runs) and any AccessKit field the typed surface doesn't cover.
 
@@ -957,7 +1005,7 @@ The macro auto-clones the `Signal<T>` arg expressions, so the caller's handles s
 |------|------|----------|
 | 1 | `DecorationRect` | Backgrounds, borders, focus ring |
 | 2 | `ShapeQuad` (SDF) | Rounded rects, circles, gradients |
-| 3 | `PathEntry` (tiny-skia) | Arbitrary paths, SVG icons. `Path` carries a rolling content **stamp** maintained as commands are appended (`commands` is private; use `commands()` / `push` / `from_commands`), and the mask cache keys on that one word — so a *cache hit* is O(1) instead of O(n). A 2 000-point growing stroke's per-frame hit went 13.7 µs → 41 ns. See [docs/ink.md](docs/ink.md). |
+| 3 | `PathEntry` (tiny-skia) | Arbitrary paths, SVG icons. `Path` carries a rolling content **stamp** maintained as commands are appended (`commands` is private; use `commands()` / `push` / `from_commands`), and the mask cache keys on that one word — so a *cache hit* is O(1) instead of O(n): linear in the command count, to flat. On a 2 000-point growing stroke a hit cost ~13.7 µs keyed by the walk (the figure `path.rs` records) against tens of nanoseconds keyed by the stamp — absolute figures move with the machine, so the gate asserts the *shape*: `a_cache_hit_does_not_scale_with_the_paths_length` in `crates/teksilo-render/tests/wet_stroke_cost.rs` (~1× with the stamp, 8.4× with the walk restored). That file's `measure` test prints the table in [docs/ink.md](docs/ink.md) §5; nothing else re-quotes it. |
 | Text | `GlyphQuad` | Glyph atlas text |
 
 Seven render pipelines: `rect_pipeline`, `sdf_pipeline`, `quad_pipeline`, `shadow_pipeline`, `path_gradient_pipeline`, `anim_proc_pipeline`, `anim_sprite_pipeline` — plus the dual-Kawase `BlurPipelines` in [crates/teksilo-render/src/blur.rs](crates/teksilo-render/src/blur.rs), which run in their own offscreen pass (see `BuildContext::set_blur`).

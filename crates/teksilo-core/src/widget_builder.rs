@@ -1810,11 +1810,11 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.accessibility(builder)
     }
 
-    /// Gate and hook again — see [`Widget::wants_after_paint`].
     fn culls_children(&self) -> bool {
         self.widget.culls_children()
     }
 
+    /// Gate and hook again — see [`Widget::wants_after_paint`].
     fn wants_descendant_redirects(&self) -> bool {
         self.widget.wants_descendant_redirects()
     }

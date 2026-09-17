@@ -3102,11 +3102,28 @@ Pass the result of `tr!(...)` directly:
 RectItem::new(rect).access_label(tr!(save_card()))
 ```
 
-Each translated method has an `_literal` `#[doc(hidden)]` twin (e.g.
-`access_label_literal`, `tooltip_literal`, `TextItem::new_literal`)
-that takes `impl Into<String>`. Use the twin for engine-internal
-debug copy or scaffolding where translation is overkill — they're a
-grep marker for "intentionally untranslated."
+A bare `&str` does **not** compile: there is deliberately no
+`From<&str>` / `From<String>` for `LocalizedString`
+([localized_string.rs](../crates/teksilo-i18n/src/localized_string.rs)), so a
+plain string can never become an untranslated label by accident. For copy that
+is *intentionally* untranslated — debug overlays, scaffolding,
+developer-facing item names — wrap it in `lit!`:
+
+```rust
+RectItem::new(rect).access_label(lit!("origin marker"))
+```
+
+`lit!(x)` is `LocalizedString::literal(x)` and takes anything
+`impl Into<String>`. It freezes the value, so it does not follow a locale
+change. Between them, `tr!` and `lit!` make every user-visible string in a
+scene findable in one grep, and the omission a decision rather than an
+oversight. (This crate has no `_literal` method twins; that shim exists only
+on `WidgetBuilder` in `teksilo-core`, where `lit!` is not reachable.)
+
+`SceneCard` is a *widget*, not a `SceneItem`, so it follows the widget tier
+instead: [`SceneCard::label`](#cards--scenecard) takes `impl Into<Prop<String>>`
+and accepts a `&str`, a `String` or a `Signal<String>` as well as a
+`LocalizedString`.
 
 ---
 
