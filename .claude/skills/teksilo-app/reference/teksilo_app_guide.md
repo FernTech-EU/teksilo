@@ -27,7 +27,7 @@ directly.
 
 ```toml
 [dependencies]
-teksilo = "0.9"
+teksilo = "0.12"
 ```
 
 Then in code:
@@ -66,7 +66,7 @@ and opt-outs:
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
-For a Latin-only minimal build: `teksilo = { version = "0.9", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
+For a Latin-only minimal build: `teksilo = { version = "0.12", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
 
 ## App entry point
 
@@ -259,9 +259,15 @@ Dispatch is a **preview pass** (root → strict ancestors) then a **bubble pass*
 (target → root). Handlers attach via the `WidgetBuilder` blanket impl on any widget:
 
 - `.on_tap()`, `.on_double_tap()`, `.on_triple_tap()`, `.on_long_press()` — take
-  `&TapEvent { position, button, modifiers }`. Default acceptance is primary button only;
-  widen with `.accept_tap_buttons(...)`.
-- `.on_hover()`, `.on_scroll()`, `.on_pointer_event()`.
+  `&TapEvent { position, button, modifiers, pointer }`. Default acceptance is primary button
+  only; widen with `.accept_tap_buttons(...)`. `pointer: PointerInfo` says which pointer
+  produced the gesture — read `pointer.kind` to tell a finger tap from a click without
+  consulting the tree.
+- `.on_hover()`, `.on_scroll()`, `.on_pointer_event()`, `.on_pointer_cancel()` — the last is
+  **terminal**: no `PointerUp` follows, nothing may activate, and it is where a widget unwinds
+  its own press state (the framework has already released capture and cleared the press
+  visual). A contact never produces hover, so every hover-gated affordance needs a second
+  route on a touch device.
 - `.on_key()`, `.on_key_preview()` (ancestors claim chords before a focused descendant),
   `.on_focus()`, `.on_access_action()`.
 - `.focusable(true)`, `.cursor(CursorIcon::Pointer)`.
@@ -566,6 +572,23 @@ Import from `teksilo::widgets`. The main families:
 - **Scene** (`teksilo-scene`): pannable/zoomable viewport for corkboards, mind maps,
   node graphs, CAD-style canvases.
 
+**Value-bound controls: the signal is the state, `on_change` is the context.** `Checkbox`,
+`Toggle`, `RadioButton` and `Slider` are driven by a `Signal` you hand them, and that signal
+is both the state and the notification — observe it for the value. What a signal cannot do is
+reach the ambient context, so each also takes `.on_change(|value, ctx| …)`:
+
+| Widget | `value` | Fires |
+|---|---|---|
+| `Checkbox` | `bool` | activation cycles Checked/Unchecked only (a tristate's Indeterminate is an aggregation result the user cannot type) |
+| `Toggle` | `bool` | on flip |
+| `RadioButton` | `usize` (the index) | on a **real** change — re-activating the selected button says nothing |
+| `Slider` | `f32` | once per value produced, continuously through a drag; no commit-on-release |
+
+Reach for it only when the change must `ctx.send_intent(..)`, `ctx.set_theme(..)` or open a
+window — the "Follow system language" / "Enable telemetry" shape. It fires on **user
+activation only**, never on a programmatic write to the bound signal, because there is no
+event in flight to carry then. `SegmentedControl::on_change` has the same contract.
+
 > **Charts and Scene are separate crates, NOT re-exported by the `teksilo` umbrella.** Add
 > `teksilo-charts` / `teksilo-scene` as direct dependencies (version them alongside `teksilo`)
 > and import from those crates — they are *not* reachable via a `teksilo::` path.
@@ -692,7 +715,8 @@ teksu!(ctx =>
 
 **Bind an id** with `name = Element` when a later item — usually a handler closure — needs to
 reference that widget. It hoists a `let name = ctx.add(Element)` and stays in scope for the
-rest of the block (in a slot it routes to the slot's `*_id` twin):
+rest of the block; in a slot it passes the id to the slot method itself (there is no `*_id`
+twin to route to any more — see below):
 
 ```rust,ignore
 teksu!(ctx =>
@@ -706,9 +730,19 @@ teksu!(ctx =>
 ```
 
 To splice an **already-registered** id, use the `#{ id }` escape (`→ .child(id)`), or the
-plain property forms `child: id` / `<slot>: id`. Every child- and slot-taking method takes
-`impl IntoTeksiChild`, so one name accepts a `WidgetId` and a widget alike — there are no
-`add_child` / `*_id` twins.
+plain property forms `child: id` / `<slot>: id`. The structural slots — `child`, `content`,
+`header`, `pane`, `tab` — take `impl IntoTeksiChild`, so one name accepts a `WidgetId` and a
+widget alike, and the `add_child` / `*_id` twins for those are gone.
+
+**Not every slot takes an id, though, and the slot's name does not tell you.** 65 slot
+declarations still take `impl Widget + 'static` and reject a `WidgetId`. The ones that bite:
+**`PopoverWidget::content`** (a named slot that nonetheless refuses an id),
+`TextInput::leading_slot` / `trailing_slot`, every `StandardListItem` / `StandardTreeItem`
+slot (`leading_slot`, `center_slot`, `trailing_slot`, `label_slot`, `subtitle_*_slot`),
+`MenuList::item` / `header`, `Banner::action`, `CompositeTooltipWidget::content` and the whole
+`composite_tooltip` family, plus `Cycle::child` and `RadioGroup::child`. Passing an id there
+is a trait-bound error on `IntoTeksiChild`; build the widget inline instead, or use the
+`*_boxed` twin where one exists. Check the real signature before assuming.
 
 This is also the standard escape hatch when a child needs a builder chain `teksu!` can't
 express inline (an UpperCamel constructor followed by method calls — `teksu!` reads an
@@ -852,9 +886,39 @@ primary accelerator (Control on Windows/Linux, ⌘ on macOS), which is what a sh
 *declared* `Ctrl+S` resolves to. `ctrl` stays literal Control everywhere — on macOS it
 injects a key that matches no binding **and still reports success**.
 
+Beyond mouse and keyboard, the catalog (34 tools) drives **touch and pen**:
+`inject_pointer` takes `kind` (`mouse` / `touch` / `pen`, with `pressure` and `tilt` for a
+stylus), and `inject_touch_sequence` runs a whole multi-touch gesture step by step, reporting
+the **arbitration** after each one — the frozen `touch_action`, every competitor with its role
+and state, and the winner. `pinch` / `fling` / `long_press` are shorthands for the three
+gestures whose timing is easy to get wrong; `query_pointers` and `cancel_pointer` inspect and
+revoke live contacts; `set_density` switches the target density, **which rebuilds every widget
+and invalidates every node id**.
+
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides through the snapshot → act → settle →
 assert loop. Full reference: `docs/automation-mcp.md` in the framework repo.
+
+## Breaking changes 0.9 → 0.12
+
+Each of these fails to resolve at the call site, so the compiler names them — this list is
+only so you recognise the fix instead of hunting for it.
+
+- `Checkbox::labels_hidden(bool)` → **`Checkbox::labelled_externally()`** (no argument;
+  `Toggle` already spelled it this way). Use it when a row or label column owns the
+  accessible name — the a11y contract then sits on that ancestor.
+- `StandardTreeItem::on_toggle` / `on_toggle_rc` → **`on_chevron_toggle`** /
+  **`on_chevron_toggle_rc`**. That callback is the expand/collapse chevron; the embedded
+  checkbox is `on_checkbox_toggle`.
+- **`TabWidget::tab_id` and `ToolBox::item_id` are gone.** `tab` and `item` take
+  `impl IntoTeksiChild`, which already accepts a `WidgetId`. The same purge removed ~80
+  other `*_id` slot twins. `Breadcrumb::item_id` survives because it is *not* a twin — its
+  `item` takes a `BreadcrumbItem` datum, and an id-carrying crumb never collapses into the
+  overflow menu.
+- **The `.dim_when_inactive(..)` builder method is gone.** Wrap the subtree in the
+  `DimWhenInactive` widget instead: `DimWhenInactive::new().factor(0.7).child(w)`.
+- **New, not breaking:** `.on_change(|value, ctx| …)` on `Checkbox` / `Toggle` /
+  `RadioButton` / `Slider` — see *Widget catalog* above.
 
 ## Conventions when writing Teksilo code
 
@@ -869,5 +933,5 @@ assert loop. Full reference: `docs/automation-mcp.md` in the framework repo.
 ---
 
 *This guide is abridged from Teksilo's internal `CLAUDE.md` and targets app developers
-consuming `teksilo` 0.9. For framework internals, source layout, and implementation
+consuming `teksilo` 0.12. For framework internals, source layout, and implementation
 status, see the Teksilo repository's own docs (`docs/SUMMARY.md`) and `CLAUDE.md`.*

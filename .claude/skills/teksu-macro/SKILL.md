@@ -10,6 +10,17 @@ The `teksu!` macro is a block-structured DSL that desugars one-to-one to
 Teksilo V2 builder calls. This skill covers reading, writing, and
 translating between the two forms.
 
+> **Where to run this.** The repo-relative paths below (`docs/…`, `crates/…`, `tools/…`) are
+> relative to the root of a **Teksilo framework checkout** — the workspace containing
+> `crates/teksilo-macros/`. Locate it with `git rev-parse --show-toplevel` from anywhere inside
+> it, confirm that marker is there, and `cd` to that root; if the working directory is not in
+> such a checkout, ask the user where it is rather than guessing.
+>
+> The `../../../` links resolve only when this file is read from inside the checkout. Installed
+> elsewhere (a user-level skills directory) they are dead links, though everything the skill
+> *teaches* about the DSL still applies — `teksu!` is written the same way in a consumer app,
+> where the reference docs are on docs.rs instead.
+
 ## Primary references (read these before writing non-trivial `teksu!`)
 
 - [docs/teksu-macro-reference.md](../../../docs/teksu-macro-reference.md)
@@ -18,9 +29,11 @@ translating between the two forms.
 - [docs/teksu-language-spec-v3.md](../../../docs/teksu-language-spec-v3.md)
   — design spec with worked translations of 9 widget-catalog examples
   (`§7`). Consult this for canonical patterns.
-- [crates/teksilo/tests/teksu/pass/](../../../crates/teksilo/tests/teksu/pass/)
-  — runnable trybuild fixtures, one per DSL feature. Consult these
-  when you need a minimal self-contained example.
+- [crates/teksilo/tests/teksi/pass/](../../../crates/teksilo/tests/teksi/pass/)
+  — 28 runnable trybuild fixtures, one per DSL feature (plus 4 under
+  `fail/` with expected-stderr files). Consult these when you need a
+  minimal self-contained example. Note the directory is spelled
+  `teksi`, not `teksu` — a leftover from an earlier name for the macro.
 
 ## Mental model
 
@@ -60,13 +73,36 @@ When the user asks about `teksu!`, match against these situations:
 
 ## Important routing rules (get these right or it won't compile)
 
-1. **One method per slot, and it takes either.** Every widget-accepting slot
-   method takes `impl IntoTeksiChild`, implemented for `WidgetId` (attach the
-   node that already exists) and for every `Widget` (insert a new one). So
-   `.child(w)` and `.child(id)` are both fine, and so are `.content(id)`,
-   `.header(id)`, `.pane(id)`. There are no `add_child` / `child_id` /
-   `*_id` twins: they were removed. Two containers take a widget only,
-   `Cycle` and `RadioGroup`, because neither has anywhere to put an id.
+1. **One method per slot — but check whether that slot takes an id.** The
+   structural slots (`child`, `content`, `header`, `pane`, `tab`, `item` on the
+   id-carrying containers, …) take `impl IntoTeksiChild`, implemented for
+   `WidgetId` (attach the node that already exists) and for every `Widget`
+   (insert a new one), so `.child(w)` and `.child(id)` are both fine. The
+   redundant `add_child` / `child_id` / `*_id` twins for those were removed.
+
+   **This is not universal — the slot name does not tell you.** 65 slot
+   declarations still take `impl Widget + 'static` and will **not** accept a
+   `WidgetId` (18 distinct names; `composite_tooltip` accounts for 31 of them,
+   one per widget). The ones that bite:
+
+   - **`PopoverWidget::content`** — a Category B slot that nonetheless rejects
+     an id, so `content: some_id` fails inside the widget you would most expect
+     it to work in.
+   - `TextInput::leading_slot` / `trailing_slot`; every `StandardListItem` /
+     `StandardTreeItem` slot (`leading_slot`, `center_slot`, `trailing_slot`,
+     `label_slot`, `subtitle_*_slot`).
+   - `MenuList::item` / `header`, `Banner::action`,
+     `CompositeTooltipWidget::content`, and the whole `composite_tooltip` family.
+   - `Cycle::child` and `RadioGroup::child` — neither has anywhere to put an id.
+
+   Twelve `*_boxed` twins survive for `Box<dyn Widget>`, and
+   `Breadcrumb::item_id` survives as a genuinely *different* slot (its `item`
+   takes a `BreadcrumbItem` datum, and an id-carrying crumb never collapses into
+   the overflow menu) — not a twin.
+
+   When a slot rejects an id the error is a trait-bound failure on
+   `IntoTeksiChild` or `Widget`. Confirm the real signature with
+   `python3 tools/extract_widget_api.py <Widget>` rather than guessing.
 
 2. **A helper call is a child.** A lowercase identifier that continues into a
    call, a method chain or an index at body position lowers to `.child(expr)`:
@@ -79,10 +115,18 @@ When the user asks about `teksu!`, match against these situations:
    and Rust would read them as continuing the item before: `(` (a call),
    `*` (a multiplication) and `&` (a bitwise and). Write `child: (expr)`.
 
-4. **Category B widgets** (Card, Accordion, TitleBar, DialogContent,
-   Breadcrumb, TabWidget, Popover, Snackbar, Dialog, Wizard) have no
-   `.child()`. Content goes through named slots. A bare child element inside
-   one produces a targeted compile-time error naming the right slot.
+4. **Category B widgets** have no `.child()` — content goes through named
+   slots, and a bare child element inside one produces a targeted compile-time
+   error naming the right slot. The list the macro actually checks
+   (`teksilo_parse::diag::is_category_b_widget`) is: `Card`, `Accordion`,
+   `TitleBar`, `DialogContent`, `Breadcrumb`, `TabWidget`, `PopoverWidget`,
+   `PopoverButton`, `PopoverIconButton`, `PopoverCustom`, `Snackbar`, `Dialog`,
+   `Wizard`. Note the **four** popover names: the type is `PopoverWidget<T>`
+   and its aliases, and none of them is spelled `Popover` — a bare child in a
+   real popover used to fall through to the generic error for exactly that
+   reason. Default slot hints: `content` for Card / Accordion / the popovers /
+   Snackbar / Dialog, `leading` for TitleBar, `body` for DialogContent, `item`
+   for Breadcrumb, `tab` for TabWidget, `step` for Wizard.
 
 5. **`#{ expr }` is the Rust escape**, and it carries a widget value as well as
    a `WidgetId`. It is how a Rust struct literal is passed at body position,
@@ -138,19 +182,26 @@ chains — see the limitations section):
 
 ```rust
 teksu!(ctx =>
-    Menu {
+    MenuList {
         item: MenuItem::new(lit!("Run")) {
             on_activate_fn: |ctx| ctx.send_intent(AppIntent::Run)
-            tooltip_literal: "Runs the thing"
+            tooltip: lit!("Runs the thing")
         }
     }
 )
-// emits .item(MenuItem::new(lit!("Run")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run)).tooltip(lit!("...")))
+// emits .item(MenuItem::new(lit!("Run"))
+//              .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Run))
+//              .tooltip(lit!("Runs the thing")))
 ```
 
 The body reads uniformly with top-level elements — same `name: value`
 shape, no mental switch to Rust's method-chain syntax. Prefer this
 over `item: (MenuItem::new(lit!("Run")).on_activate_fn(...).tooltip(...))`.
+
+A body item is the widget's **real** builder method, spelled exactly as the
+widget declares it — `tooltip: lit!("…")`, not an invented `tooltip_literal:`.
+When unsure, dump the surface with
+`python3 tools/extract_widget_api.py MenuItem`.
 
 ## Reading `teksu!` — translation shortcuts
 
@@ -217,6 +268,26 @@ kicks in.
   hoist to the outermost block, so the widget is created
   unconditionally. Gate construction with `rust { ... }` if it matters.
 
+## If you add a `WidgetBuilder` method (framework repo only)
+
+Adding a method to `WidgetBuilder` obliges you to add its **name** to
+[`teksilo_parse::diag::is_widget_builder_method`](../../../crates/teksilo-parse/src/diag.rs).
+
+The lowering pass moves every property whose name is a `WidgetBuilder` method to
+the **end** of the emitted chain, because those methods return
+`WidgetWithHandlers<T>`, which exposes none of the wrapped widget's own setters.
+A method missing from the list is not moved — it stays where the user wrote it,
+and the next `.child(..)` / `.spacing(..)` resolves against `WidgetWithHandlers<T>`
+instead of the widget. What the user sees is `no method named child found for
+struct WidgetWithHandlers`, pointing at a `.child` they did not write, inside a
+macro expansion: a diagnostic naming neither the cause nor the file to edit. Two
+shipped methods were absent this way for several releases.
+
+`crates/teksilo-teksu-guard` now fails the build on the divergence — it parses
+`widget_builder.rs` with `syn`, collects every method returning
+`WidgetWithHandlers<Self>`, and compares both directions. So the obligation is
+enforced, but read the error as "update the predicate", not "the guard is wrong".
+
 ## Formatting
 
 After writing or editing a `teksu!` block, run the dedicated formatter
@@ -241,8 +312,9 @@ syntactically broken block can mask the original error.
 - `cargo test -p widget-catalog` — existing structural assertions (e.g.
   `scroll_area_fills_remaining_space`) catch tree-shape regressions
   after a migration.
-- `cargo test -p teksilo --test teksilo_trybuild` — only needed when
+- `cargo test -p teksilo --test teksi_trybuild` — only needed when
   editing the macro crate itself; exercises every pass/fail fixture.
+  (The target is `teksi_trybuild`, matching the fixture directory.)
 - `cargo test --workspace` — full regression after non-trivial changes.
 
 Do not claim a `teksu!` block "works" unless it compiles. The macro's

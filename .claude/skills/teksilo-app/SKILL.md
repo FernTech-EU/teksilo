@@ -21,7 +21,7 @@ part they need help with. If they name a widget (`/teksilo-app ComboBox`), go st
 2. **Live API extraction** — `scripts/teksilo-api.sh`, `cargo doc`, or docs.rs, all read
    from the version the app actually pins.
 3. **The bundled guide prose** — `reference/teksilo_app_guide.md`. A *map*, not the
-   territory: verified against teksilo **0.9**, and it MAY lag the version this app pins.
+   territory: verified against teksilo **0.12**, and it MAY lag the version this app pins.
    Never let it override the compiler or live extraction.
 
 ## Workflow
@@ -79,7 +79,7 @@ a bug, debug layout, or let an agent exercise the running app.
 
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides the **snapshot → find node → act → settle
-→ assert** loop. The full tool set (27), by job:
+→ assert** loop. The full tool set (34), by job:
 
 - **Observe:** `snapshot_tree` / `find_node` / `read_node` — semantics: role, label, value,
   toggled/expanded/**selected**, **`bounds {x,y,width,height}`** (widget size lives here),
@@ -101,6 +101,29 @@ schema per tool, so a capable agent self-guides the **snapshot → find node →
   primary accelerator (Control on Windows/Linux, ⌘ on macOS), and a shortcut *declared*
   `Ctrl+S` resolves to ⌘S there, so `ctrl` injects a key that matches no binding **and still
   reports success**. Keep `ctrl` for chords that really are Control everywhere (Ctrl+Tab).
+  `inject_pointer` takes `kind` (`mouse` default / `touch` / `pen`) — the kind reaches the
+  hit test, the slop, the hover rules and the arbitration, so a touch is a real touch, not a
+  mouse at a point. `pen` carries `pressure` (0..1) and `tilt` ([x, y] degrees). Unknown
+  fields are refused rather than defaulted (including `pressure` on a mouse).
+- **Touch, pen & multi-pointer:** `inject_touch_sequence` drives a whole multi-touch gesture
+  in one call — steps naming a finger **slot**, a phase (`down`/`move`/`up`/`cancel`), a
+  point, and how many simulated ms to advance first — and reports the **arbitration after
+  every step**: the frozen `touch_action`, every competitor with its role and state, and the
+  winner. Identities are minted by the framework, so the reply says which id each slot got.
+  A sequence that stops short of its `up` leaves the finger down, which is how a live
+  arbitration stays observable. Gesture shorthands: `pinch` (two fingers, span to span — both
+  land before either moves, because the recogniser's reference span is the distance between
+  the landings), `fling` (one finger released **while still moving**, handing a velocity to
+  the scroller — a drag latches on distance, so the duration is the whole difference),
+  `long_press` (holds exactly the device's threshold, read off the active input profile, so
+  the script needn't know the number). `query_pointers` lists every live pointer with id,
+  kind, position, pressure/tilt, capture, frozen `touch_action`, competitors and winner — the
+  way to learn the id of a contact left down by anything but `inject_touch_sequence`.
+  `cancel_pointer {id}` revokes a pointer the way the system does (a compositor grab, a lost
+  capture): **not** an up — no tap completes and every widget working on it is told.
+  `set_density {compact | comfortable | touch}` switches the target density; **it rebuilds
+  every widget, so every node id captured before it is dead** — re-snapshot afterwards
+  (setting the density it already has is a no-op and keeps the ids).
 - **Timing (determinism — prefer over `sleep`):** mutating tools auto-settle, but for timed UI
   (tooltips, debounced reactivity, animations) drive the **simulated** clock: `settle.clock_millis`
   on any mutating call, `advance_clock {millis}`, `settle`, or poll with `wait_for_condition`
@@ -122,7 +145,7 @@ change, `Switcher` swap, `Rebuild`-level binding) allocates a new id — **re-`f
 tree structure changes**, never reuse a cached id. Full reference: `docs/automation-mcp.md` in the
 framework repo.
 
-## High-leverage gotchas (verified against 0.9 source — re-verify via step 2 if newer)
+## High-leverage gotchas (verified against 0.12 source — re-verify via step 2 if newer)
 
 - **No `Theme::default()`** — pick a preset: `intui::light()` / `intui::dark()`.
 - **Charts and Scene are separate crates** (`teksilo-charts`, `teksilo-scene`) NOT
@@ -144,6 +167,29 @@ framework repo.
 - **Testing is headless:** `teksilo::core::{WidgetTree, LayoutContext::for_testing}` +
   `teksilo::canvas::MockTextBackend` — `MockTextBackend` is under `canvas`, not `core`.
   (For agent/CI-driven testing of the running app, see *Driving & testing the app* above.)
+- **A value-bound control now has a callback, and it is not the signal.** `Checkbox`,
+  `Toggle`, `RadioButton` and `Slider` take `.on_change(|value, ctx| …)` — `bool`, `bool`,
+  `usize` (the index) and `f32` respectively, each with an `&mut EventContext`. Use it only
+  when the change has to reach the ambient context (`ctx.send_intent`, `ctx.set_theme`,
+  open a window); the bound `Signal` is still the state and still the notification. It fires
+  on **user activation only**, never on a programmatic write to the signal — observe the
+  signal for that direction. A radio reports a *real* change (re-activating the selected
+  button says nothing); a slider is continuous through a drag and has no commit-on-release.
+- **Slot methods: id-taking is common, not universal, and the name doesn't tell you.** Most
+  structural slots (`child`, `content`, `header`, `pane`, `tab`) take `impl IntoTeksiChild`,
+  so a `WidgetId` or a widget both work, and the old `*_id` twins are gone (including
+  `TabWidget::tab_id` and `ToolBox::item_id`). But 65 slot declarations still take
+  `impl Widget + 'static` and reject an id — including **`PopoverWidget::content`**, which is
+  a named slot on a widget you'd expect to take one. Also `TextInput::leading_slot`/
+  `trailing_slot`, every `StandardListItem`/`StandardTreeItem` slot, `MenuList::item`/`header`,
+  `Banner::action`, `Cycle::child`, `RadioGroup::child`, the `composite_tooltip` family.
+  Extract the signature (step 2) rather than assuming.
+- **Renames since 0.9** (a stale call site fails to resolve, so the compiler will tell you —
+  but these are the ones to expect): `Checkbox::labels_hidden(bool)` → `labelled_externally()`
+  (no argument, and `Toggle` already spelled it that way); `StandardTreeItem::on_toggle` /
+  `on_toggle_rc` → `on_chevron_toggle` / `on_chevron_toggle_rc` (the chevron, not the
+  checkbox — `on_checkbox_toggle` is the box); the `.dim_when_inactive(..)` builder method is
+  gone, wrap the subtree in the `DimWhenInactive` widget instead.
 
 ## Maintenance (skill owner only)
 
