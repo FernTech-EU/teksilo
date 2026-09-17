@@ -11,6 +11,45 @@ though pre-1.0, so breaking changes can land in a minor bump. `release.toml`
 keeps every workspace crate on one shared version; entries below are grouped
 by crate for clarity, not because crates version independently.
 
+## [Unreleased]
+
+### Fixed
+
+#### Platform
+
+- **A compositor that exits no longer takes the application down as a crash.**
+  When the display server goes away, the window surface stops answering for the
+  adapter it was matched against, and the next `Surface::configure` failed
+  inside wgpu's default error handler, which panics. What the user saw was
+  `wgpu error: Validation Error / In Surface::configure / Surface does not
+  support the adapter's queue family`, and what that reads like is a GPU
+  mismatch. It is not one: `request_adapter` filters candidates on the very
+  query that fails there, so the adapter had answered yes to the same question
+  moments earlier. The message cost a real investigation, and a bug report
+  aimed at the renderer for a compositor crash.
+  Every `Surface::configure` now runs inside an error scope, so the failure is
+  returned rather than thrown. A surface with no formats left for the adapter
+  it was matched against is reported as a lost display server, in those words;
+  anything else keeps wgpu's own message, so a genuine mistake is not
+  relabelled as a dead compositor.
+- The same event reaching winit first is no longer a panic either. Both Linux
+  backends report a failed dispatch or flush as `ExitFailure(errno)`, and
+  `run` treated every error alike. A lost display connection now exits
+  cleanly with one line naming the cause; `NotSupported`, `Os` and
+  `RecreationAttempt` stay fatal, since those are genuine startup faults where
+  a backtrace is the useful answer.
+
+### Changed
+
+#### Platform
+
+- `PlatformWindow::reconfigure_surface` answers `bool` rather than `()`:
+  `false` means the display server is gone and the caller should wind down
+  instead of asking for another frame, which would return to the same place.
+- `FrameOutcome` gains `DisplayLost`, distinct from `Error` and
+  `NeedsReconfigure` because it is terminal: reconfiguring or redrawing after
+  it spins the loop.
+
 ## [0.11.0] - 2026-09-16
 
 The `teksu!` DSL reaches the code applications are actually made of: a call to

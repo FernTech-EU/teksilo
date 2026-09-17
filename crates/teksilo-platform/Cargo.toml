@@ -22,6 +22,11 @@ teksilo-canvas = { workspace = true }
 teksilo-render = { workspace = true }
 winit = { workspace = true }
 wgpu = { workspace = true }
+# `Surface::configure` reports through wgpu's uncaptured-error handler, so the
+# only way to catch its failure instead of panicking is an error scope, whose
+# `pop` is a future. wgpu answers it ready on native; this drives it. Already
+# in the tree via `teksilo-render` and `rfd`.
+pollster = { workspace = true }
 accesskit = { workspace = true }
 accesskit_winit = "0.34.0"
 arboard = { workspace = true, optional = true }
