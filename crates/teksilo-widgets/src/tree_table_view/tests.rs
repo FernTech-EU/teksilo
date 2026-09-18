@@ -2614,6 +2614,132 @@ fn tree_column_cells_mirror_the_rows_level_and_other_columns_do_not() {
 }
 
 #[test]
+fn the_tree_column_cell_carries_the_expand_state_and_answers_the_pair() {
+    // A level is only half of what the row publishes and the cell needed. The
+    // expand state fails an extra way: toggling a row with ArrowRight moves
+    // the AT cursor nowhere, so no focus event follows and a property change
+    // is all the user gets — and `accesskit_windows` raises that on the node
+    // whose property changed, which was the row, not the focused cell. And
+    // because `accesskit_consumer` derives the ExpandCollapse pattern from the
+    // property rather than the action list, declaring the state on the cell
+    // obliges the cell to answer Expand/Collapse — or it is advertised and
+    // inert, the bug the row's own call site fixed — so the second half here
+    // pins that Expand on a *cell* opens the branch. It does, without new
+    // handlers: an `AccessAction` bubbles and the row's pair is on the cell's
+    // path to the root. See `CellA11y::with_expanded`.
+    use teksilo_core::accesskit::Action;
+
+    let proxy = SortFilterTreeModel::new(sample_tree());
+    let docs = proxy.tree().root(0);
+    proxy.expand(docs);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TreeTableView::from_projection(proxy.clone())
+            .add_column(name_col())
+            .add_column(size_col())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(400.0),
+    });
+    // docs(expanded) readme(leaf) guide(leaf) src(collapsed branch).
+    assert_eq!(proxy.visible_count(), 4);
+
+    let cells = |tree: &WidgetTree| -> Vec<WidgetId> {
+        let mut out: Vec<WidgetId> = Vec::new();
+        let mut q = vec![id];
+        while let Some(n) = q.pop() {
+            if matches!(
+                tree.accessibility_node(n).role(),
+                Role::Cell | Role::GridCell
+            ) {
+                out.push(n);
+            }
+            for c in tree.children(n) {
+                q.push(c);
+            }
+        }
+        out.sort_by(|a, b| {
+            let (ba, bb) = (tree.bounds(*a), tree.bounds(*b));
+            ba.y.partial_cmp(&bb.y)
+                .unwrap()
+                .then(ba.x.partial_cmp(&bb.x).unwrap())
+        });
+        out
+    };
+    let ordered = cells(&tree);
+    assert_eq!(ordered.len(), 8, "four visible rows x two columns");
+
+    let update = tree.sync_accessibility();
+    let node = |wid: WidgetId| {
+        let nid = widget_id_to_node_id(wid);
+        update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .map(|(_, n)| n)
+            .expect("cell must be in the a11y tree")
+    };
+    let name_cells: Vec<WidgetId> = ordered.iter().copied().step_by(2).collect();
+    let expanded: Vec<Option<bool>> = name_cells.iter().map(|&c| node(c).is_expanded()).collect();
+    assert_eq!(
+        expanded,
+        vec![Some(true), None, None, Some(false)],
+        "docs is open, readme and guide are leaves, src is a closed branch"
+    );
+    // A leaf that declared a state would advertise ExpandCollapse with
+    // nothing to open, which is why the state is `Option<bool>` and not a
+    // `bool` defaulting to false.
+    let size_cells: Vec<Option<bool>> = ordered
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .map(|&c| node(c).is_expanded())
+        .collect();
+    assert_eq!(
+        size_cells,
+        vec![None; 4],
+        "a non-tree column says nothing about the subtree"
+    );
+
+    // And the pattern is answered where it is advertised: `src` opens from
+    // its own cell, not only from the row.
+    let src_cell = name_cells[3];
+    let mut ops = teksilo_core::window::NoopWindowOps;
+    tree.dispatch_access_action(
+        widget_id_to_node_id(src_cell),
+        Action::Expand,
+        None,
+        &mut ops,
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(400.0),
+    });
+    assert_eq!(
+        proxy.visible_count(),
+        5,
+        "Expand on the tree column's cell must open the branch"
+    );
+
+    // Collapse the same way, from whichever cell now holds `src`.
+    let reopened = cells(&tree);
+    let src_cell = reopened[6];
+    tree.dispatch_access_action(
+        widget_id_to_node_id(src_cell),
+        Action::Collapse,
+        None,
+        &mut ops,
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(400.0),
+    });
+    assert_eq!(proxy.visible_count(), 4, "and Collapse must close it again");
+}
+
+#[test]
 fn row_count_in_a11y_includes_header() {
     let proxy = SortFilterTreeModel::new(sample_tree());
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());

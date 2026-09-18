@@ -469,7 +469,21 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                         // from (`CellA11y::with_level`). A loading row omits it
                         // rather than claiming the depth-0 fallback, exactly as
                         // `CellContext::depth` above does.
-                        .with_level((is_tree_column && !loading).then_some(depth + 1));
+                        .with_level((is_tree_column && !loading).then_some(depth + 1))
+                        // A leaf declares no state, so it advertises no
+                        // ExpandCollapse pattern and gets no handlers below.
+                        .with_expanded(
+                            (is_tree_column && !loading && has_children).then_some(is_expanded),
+                        );
+                // The state obliges an answer — `accesskit_consumer` derives
+                // UIA's ExpandCollapse pattern from the property, not from the
+                // action list, so a cell that declares `expanded` will be sent
+                // Expand and Collapse regardless. It already has one: an
+                // `AccessAction` bubbles, and the row's own pair (a few lines
+                // down) is on the cell's path to the root. Repeating the
+                // handlers here would just run `set_expanded_at` twice.
+                // `the_tree_column_cell_carries_the_expand_state_and_answers_the_pair`
+                // pins that the action arrives, whichever node takes it.
                 let cell_id = ctx.add(cell_a11y);
 
                 // Click-to-edit, from this column's `EditTriggers`. Per cell,

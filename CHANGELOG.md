@@ -45,6 +45,14 @@ by crate for clarity, not because crates version independently.
   tree column's cell now carries the level too. Windows only, because it is the
   only platform whose AccessKit adapter exposes a level at all; elsewhere the
   indent is what carries depth, as before.
+- **Opening or closing a `TreeTableView` branch is announced.** The expand
+  state was published on the row, and a row is not the node the view puts the
+  accessibility cursor on. Toggling a branch moves that cursor nowhere, so
+  there was no focus change to carry the news and the property change was
+  raised on an element the screen reader was not on: opening and closing a
+  branch was silent. The tree column's cell now carries the state, so the
+  change lands on the node the user is actually on. Expand and collapse from
+  assistive software keep working as before, on the cell as well as the row.
 - **A `TreeView` row that is still loading no longer claims to be at the top
   of the outline.** A row whose data had not arrived published "level 1,
   item 1" as fact, so a placeholder four levels down announced itself as a

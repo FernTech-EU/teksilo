@@ -52,6 +52,10 @@ pub(crate) struct CellA11y {
     /// `None` on a flat table, and on every column of a tree table but the
     /// one that draws the indent. See `with_level`.
     level_1based: Option<usize>,
+    /// Expand state of the row this cell belongs to: `Some(true|false)` on a
+    /// branch, `None` on a leaf and on every cell that is not the tree
+    /// column's. See `with_expanded`.
+    expanded: Option<bool>,
 }
 
 impl CellA11y {
@@ -70,6 +74,7 @@ impl CellA11y {
             is_grid_cell: false,
             name: None,
             level_1based: None,
+            expanded: None,
         }
     }
 
@@ -125,6 +130,31 @@ impl CellA11y {
         self.level_1based = level_1based;
         self
     }
+
+    /// Mirror the row's expand state onto this cell — same reason as
+    /// `with_level`, and one more.
+    ///
+    /// Announcing it is the first reason: "expanded" is a *state*, and a
+    /// screen reader reads the states of the node it is on, which here is the
+    /// cell. But a state on an ancestor fails a second way that a level does
+    /// not. Toggling a row with ArrowRight moves nothing, so no focus event
+    /// follows; all the user has to go on is a property change, and
+    /// `accesskit_windows` raises that on the node whose property changed —
+    /// the row, which is not the focused element, so NVDA drops it. Opening
+    /// and closing a branch was silent.
+    ///
+    /// The state owes an answer, and already has one. `accesskit_consumer`
+    /// derives UIA's ExpandCollapse pattern from the *property*, not from the
+    /// action list, so a cell that declares a state will be sent `Expand` and
+    /// `Collapse` whether or not anything handles them — the
+    /// advertised-and-inert bug the row's own call site fixed. Nothing new is
+    /// needed for the cell: an `AccessAction` bubbles, and the row carrying
+    /// that pair is on the cell's path to the root. Handlers on the cell as
+    /// well would only run `set_expanded_at` twice.
+    pub(crate) fn with_expanded(mut self, expanded: Option<bool>) -> Self {
+        self.expanded = expanded;
+        self
+    }
 }
 
 impl Widget for CellA11y {
@@ -169,6 +199,12 @@ impl Widget for CellA11y {
         // 0 lands on the root level, not one above it.
         if let Some(level) = self.level_1based {
             builder.set_level(level.max(1));
+        }
+        // A leaf declares nothing, which UIA reads as `LeafNode` — the state
+        // a cell with no subtree should report, and the reason this is not a
+        // plain `bool`.
+        if let Some(expanded) = self.expanded {
+            builder.set_expanded(expanded);
         }
     }
 
