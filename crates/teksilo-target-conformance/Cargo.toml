@@ -28,7 +28,7 @@ jiff = { workspace = true, features = ["serde"] }
 # re-exports from here. `default-features = false` for the same reason
 # teksilo-widgets sets it: font selection is an app-level decision, and a
 # fixture list has no business embedding fallback bundles.
-teksilo-text = { path = "../teksilo-text", version = "0.12.0", default-features = false }
+teksilo-text = { path = "../teksilo-text", version = "0.12.1", default-features = false }
 
 [dev-dependencies]
 teksilo-theme-macos = { workspace = true }
