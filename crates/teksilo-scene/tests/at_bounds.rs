@@ -467,3 +467,307 @@ fn the_published_tree_survives_the_consumers_validation_under_any_camera() {
         }
     }
 }
+
+// ──────────────────────── synthetic children inside a heavyweight card
+
+/// Where a *rich-text* card says its own sub-structure is.
+///
+/// Everything above is about a card's own rectangle. A card holding a real
+/// editor also publishes synthetic descendants — a text run per visual line,
+/// and for a table a `Role::Table` / `Role::Row` / `Role::Cell` each with a box
+/// of their own. Those are emitted through `set_child_bounds_local`, which the
+/// framework walker resolves as `owner_origin + local` — and inside a scene
+/// `owner_origin` is a *scene* coordinate, not a window one.
+///
+/// So the claim under test is that a cell's box composes the same way the
+/// card's does: published in scene coordinates, carried to the screen by the
+/// one declared camera transform. If the walker were projecting these to
+/// window space instead, they would be right at pan zero and wrong everywhere
+/// else — and a magnifier following a caret into a table would jump.
+mod rich_text_in_a_card {
+    use super::*;
+    use accesskit::Role;
+    use teksilo_text::text_document::{MoveMode, TextDocument};
+    use teksilo_widgets::rich_text::RichTextEditor;
+
+    const CARD_X: f32 = 100.0;
+    const CARD_Y: f32 = 100.0;
+    const CARD_SIZE: f32 = 260.0;
+
+    /// A scene holding one card whose content is an editor with a filled 2x2
+    /// table, plus the view id to drive the camera with.
+    fn scene_with_a_table_card() -> (WidgetTree, WidgetId, ItemId) {
+        let doc = TextDocument::new();
+        doc.set_plain_text("Intro").unwrap();
+        {
+            let c = doc.cursor_at(0);
+            c.set_position(5, MoveMode::MoveAnchor);
+            c.insert_table(2, 2).unwrap();
+        }
+        for text in ["Alpha", "Beta", "Gamma", "Delta"] {
+            let Some(pos) = first_empty_cell_end(&doc) else {
+                break;
+            };
+            let c = doc.cursor_at(0);
+            c.set_position(pos, MoveMode::MoveAnchor);
+            c.insert_text(text).unwrap();
+        }
+
+        let mut scene = Scene::new();
+        let card = scene.add_widget(
+            RichTextEditor::editor(doc),
+            Rect::new(CARD_X, CARD_Y, CARD_SIZE, CARD_SIZE),
+        );
+        let mut tree = WidgetTree::new();
+        let view_id = tree.add(SceneView::new(scene));
+        // The editor lays its document out in a debounced frame loop, not in
+        // `layout`. Without a tick it publishes zero-width runs and no table
+        // geometry at all — which looks exactly like the bug this is hunting.
+        tree.layout(VIEWPORT);
+        tree.request_frame();
+        tree.tick_animations(std::time::Duration::from_millis(200));
+        tree.layout(VIEWPORT);
+        let _ = tree.render();
+        (tree, view_id, card)
+    }
+
+    /// End of the first cell that is still empty, so successive calls fill the
+    /// cells left to right without having to track shifting positions.
+    fn first_empty_cell_end(doc: &TextDocument) -> Option<usize> {
+        use teksilo_text::text_document::FlowElementSnapshot;
+        for el in &doc.snapshot_flow().elements {
+            if let FlowElementSnapshot::Table(t) = el {
+                for cell in &t.cells {
+                    let b = cell.blocks.first()?;
+                    if b.text.is_empty() {
+                        return Some(b.position);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// The first `Role::Cell` in the published tree, by node id.
+    fn a_cell(update: &TreeUpdate) -> NodeId {
+        let consumer = Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        let mut found = Vec::new();
+        while let Some(n) = stack.pop() {
+            if n.role() == Role::Cell {
+                found.push(n.id());
+            }
+            for child in n.children() {
+                stack.push(child);
+            }
+        }
+        found.sort();
+        let id = *found.first().expect("the card's table publishes cells");
+        let consumer = Tree::new(update.clone(), false);
+        consumer
+            .state()
+            .locate_node(id)
+            .map(|(local, _)| local)
+            .expect("the cell is in this tree")
+    }
+
+    /// The card's own rectangle at rest, and the check that a descendant's box
+    /// lies inside it.
+    ///
+    /// The camera tests compare a box against itself, so a constant offset
+    /// would survive both of them. This is the absolute half of the claim: at
+    /// rest the card is drawn where the model puts it, and a cell of it
+    /// belongs within that rectangle.
+    fn assert_inside_the_card(r: Rect) {
+        let card = Rect::new(CARD_X, CARD_Y, CARD_SIZE, CARD_SIZE);
+        assert!(
+            r.x >= card.x
+                && r.y >= card.y
+                && r.x + r.width <= card.x + card.width
+                && r.y + r.height <= card.y + card.height,
+            "a cell sits inside the card that holds it: cell {r:?} vs card \
+             {card:?}"
+        );
+    }
+
+    #[test]
+    fn a_table_cell_inside_a_card_tracks_a_pan() {
+        let (mut tree, view_id, _card) = scene_with_a_table_card();
+
+        let before = published(&mut tree);
+        let cell = a_cell(&before);
+        let at_rest = screen_rect(&before, cell);
+        assert!(
+            at_rest.width > 0.0 && at_rest.height > 0.0,
+            "the cell must advertise a real box to begin with: {at_rest:?}"
+        );
+        assert_inside_the_card(at_rest);
+
+        let pan = Vec2::new(-90.0, -40.0);
+        view_handle(&tree, view_id).set_pan(pan);
+        let after = published(&mut tree);
+        let moved = screen_rect(&after, a_cell(&after));
+
+        let expected = Rect::new(
+            at_rest.x + pan.x,
+            at_rest.y + pan.y,
+            at_rest.width,
+            at_rest.height,
+        );
+        assert!(
+            close(moved, expected),
+            "a cell inside a card has to move with the camera exactly as the \
+             card does: expected {expected:?}, got {moved:?}"
+        );
+    }
+
+    #[test]
+    fn a_table_cell_inside_a_card_tracks_a_zoom() {
+        let (mut tree, view_id, _card) = scene_with_a_table_card();
+
+        let before = published(&mut tree);
+        let at_rest = screen_rect(&before, a_cell(&before));
+        assert_inside_the_card(at_rest);
+
+        view_handle(&tree, view_id).set_zoom(2.0);
+        let after = published(&mut tree);
+        let zoomed = screen_rect(&after, a_cell(&after));
+
+        let expected = Rect::new(
+            at_rest.x * 2.0,
+            at_rest.y * 2.0,
+            at_rest.width * 2.0,
+            at_rest.height * 2.0,
+        );
+        assert!(
+            close(zoomed, expected),
+            "a zoomed cell is twice the size and twice as far out, like every \
+             other rectangle in the scene: expected {expected:?}, got {zoomed:?}"
+        );
+    }
+
+    #[test]
+    fn a_table_cell_inside_a_card_tracks_a_rotation() {
+        // The case a pre-projected rectangle cannot get right. A `Rect` is
+        // axis-aligned, so a walk that projected these boxes by hand would
+        // publish the bounding box of the turned cell and lose the shape.
+        // Declaring the camera once hands AccessKit the exact rectangle and
+        // the exact mapping, and the consumer takes the bounding box last —
+        // so a rotated cell grows in both axes rather than staying put.
+        let (mut tree, view_id, _card) = scene_with_a_table_card();
+
+        let before = published(&mut tree);
+        let upright = screen_rect(&before, a_cell(&before));
+        assert_inside_the_card(upright);
+
+        view_handle(&tree, view_id).set_rotation(0.3);
+        let after = published(&mut tree);
+        let turned = screen_rect(&after, a_cell(&after));
+
+        assert_ne!(
+            turned, upright,
+            "a rotated camera must move the cell's published box"
+        );
+
+        // The exact bounding box of the turned rectangle. Note the width
+        // *shrinks*: a cell is far wider than it is tall, so `w·cos + h·sin`
+        // comes out under `w`. That asymmetry is the point — it is what a
+        // hand-projected axis-aligned rectangle could not reproduce, and what
+        // makes this a check of the mapping rather than of "something moved".
+        let (sin, cos) = (0.3_f32.sin().abs(), 0.3_f32.cos().abs());
+        let expected = Rect::new(
+            turned.x,
+            turned.y,
+            upright.width * cos + upright.height * sin,
+            upright.width * sin + upright.height * cos,
+        );
+        assert!(
+            (turned.width - expected.width).abs() < 0.01
+                && (turned.height - expected.height).abs() < 0.01,
+            "the turned box must be the exact bounding box of the rotated \
+             cell: expected {}x{}, got {}x{}",
+            expected.width,
+            expected.height,
+            turned.width,
+            turned.height
+        );
+    }
+
+    #[test]
+    fn a_table_cell_follows_the_card_it_is_dragged_with() {
+        // Moving a card is the one path that recomputes a descendant's box
+        // *outside* a full walk: `patch_accessibility_bounds` re-places every
+        // synthetic child of a widget the arena reports as moved, as
+        // `owner_origin + local`. It is also what a scene does constantly, so
+        // a cell that did not follow its card would be wrong most of the time.
+        let (mut tree, view_id, card) = scene_with_a_table_card();
+
+        let before = published(&mut tree);
+        let at_rest = screen_rect(&before, a_cell(&before));
+        assert_inside_the_card(at_rest);
+
+        let delta = Vec2::new(40.0, 25.0);
+        view_handle(&tree, view_id)
+            .model()
+            .set_local_pos(card, Point::new(CARD_X + delta.x, CARD_Y + delta.y));
+        let after = published(&mut tree);
+        let moved = screen_rect(&after, a_cell(&after));
+
+        let expected = Rect::new(
+            at_rest.x + delta.x,
+            at_rest.y + delta.y,
+            at_rest.width,
+            at_rest.height,
+        );
+        assert!(
+            close(moved, expected),
+            "a cell moves with the card that holds it: expected {expected:?}, \
+             got {moved:?}"
+        );
+    }
+
+    #[test]
+    fn a_text_run_inside_a_card_tracks_the_camera() {
+        // The same question for the geometry every text surface publishes, not
+        // just the table one. If this is wrong it predates tables.
+        let (mut tree, view_id, _card) = scene_with_a_table_card();
+
+        let run_of = |update: &TreeUpdate| -> NodeId {
+            let consumer = Tree::new(update.clone(), false);
+            let state = consumer.state();
+            let mut stack = vec![state.root()];
+            while let Some(n) = stack.pop() {
+                if n.role() == Role::TextRun && n.data().value() == Some("Intro") {
+                    return state
+                        .locate_node(n.id())
+                        .map(|(local, _)| local)
+                        .expect("in this tree");
+                }
+                for child in n.children() {
+                    stack.push(child);
+                }
+            }
+            panic!("the editor's prose run must be published");
+        };
+
+        let before = published(&mut tree);
+        let at_rest = screen_rect(&before, run_of(&before));
+
+        view_handle(&tree, view_id).set_zoom(2.0);
+        let after = published(&mut tree);
+        let zoomed = screen_rect(&after, run_of(&after));
+
+        let expected = Rect::new(
+            at_rest.x * 2.0,
+            at_rest.y * 2.0,
+            at_rest.width * 2.0,
+            at_rest.height * 2.0,
+        );
+        assert!(
+            close(zoomed, expected),
+            "a text run inside a card scales with the camera: expected \
+             {expected:?}, got {zoomed:?}"
+        );
+    }
+}

@@ -673,6 +673,40 @@ impl RichTextEngine {
         self.flow.block_visual_info(block_id)
     }
 
+    /// Visual geometry of a laid-out table — the table box plus its row and
+    /// column tracks — in document space.
+    ///
+    /// Answers for a table at the top level or inside a frame at any depth.
+    /// The accessibility walk sizes its `Role::Table` / `Role::Row` /
+    /// `Role::Cell` nodes from this.
+    pub fn table_visual_info(&self, table_id: usize) -> Option<text_typeset::TableVisualInfo> {
+        self.flow.table_visual_info(table_id)
+    }
+
+    /// A block's visual geometry and its per-line geometry in one lookup.
+    ///
+    /// A block nested in a table cell or a frame has to be *found* before
+    /// either can be answered, and that search is a walk rather than a hash
+    /// lookup — so the accessibility walk, which wants both for every block it
+    /// emits, asks once instead of twice.
+    pub fn block_geometry(
+        &self,
+        block_id: usize,
+        text: &str,
+    ) -> Option<(
+        text_typeset::BlockVisualInfo,
+        Vec<teksilo_canvas::text_backend::TextLine>,
+    )> {
+        let (info, lines) = self.flow.block_geometry(block_id, text)?;
+        Some((
+            info,
+            lines
+                .iter()
+                .map(crate::typesetter_bridge::to_canvas_line)
+                .collect(),
+        ))
+    }
+
     /// Whether `block_id` is laid out inside a table cell rather than in the
     /// document's own column.
     ///

@@ -221,11 +221,20 @@ fn emit_block(
     // information no run carries. Every other block hangs its runs straight off
     // the body, where a text-change event can reach a parent that supports text
     // ranges.
+    //
+    // A heading's runs need one more level for that same reason.
+    // `Role::Heading` is not text-range capable, and the platform adapters
+    // reroute a changed run's event to its filtered parent and drop it unless
+    // that node supports text ranges — so runs hung straight off the heading
+    // left every edit inside a heading unannounced. The `Role::Label` between
+    // them answers yes. Same rule, and the same fix, as the rich-text walk.
     let parent = match block.block_format.heading_level {
         Some(level) if !builder.emits_no_children() => {
             let id = builder.push_paragraph_child(block.block_id as u64);
             builder.set_paragraph_as_heading(id, level);
-            Some(id)
+            builder
+                .push_block_text_child(id, block.block_id as u64)
+                .or(Some(id))
         }
         _ => None,
     };

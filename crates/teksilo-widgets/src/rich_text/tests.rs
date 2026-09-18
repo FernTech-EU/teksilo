@@ -2983,6 +2983,14 @@ fn accessibility_emits_text_run_children_directly_under_the_root() {
 /// A heading block keeps its `Role::Heading` node, with its runs beneath it: a
 /// heading is content structure a reader navigates by, unlike the paragraph
 /// wrapper that used to sit under every block.
+///
+/// The runs sit under a `Role::Label` inside the heading rather than directly
+/// on it. `Role::Heading` is not text-range capable, and the platform adapters
+/// reroute a changed run's text-change event to its filtered parent and ask
+/// *that* node whether it supports text ranges — so runs hung straight off the
+/// heading had every edit inside a heading dropped before it reached a screen
+/// reader. `a_heading_edit_reaches_a_text_range_capable_parent` is the test
+/// that pins the consequence; this one pins the shape.
 #[test]
 fn a_heading_block_keeps_its_heading_node() {
     use teksilo_core::accesskit::Role;
@@ -3011,9 +3019,28 @@ fn a_heading_block_keeps_its_heading_node() {
         .map(|(node_id, _)| *node_id)
         .collect();
     assert!(!runs.is_empty(), "the heading must still carry its runs");
+
+    // The heading holds one text container, and the runs hang off that.
+    let containers: Vec<_> = heading.1.children().to_vec();
+    assert_eq!(
+        containers.len(),
+        1,
+        "a heading carries exactly one text container"
+    );
+    let container = update
+        .nodes
+        .iter()
+        .find(|(node_id, _)| *node_id == containers[0])
+        .expect("the heading's text container must be in the update");
+    assert_eq!(
+        container.1.role(),
+        Role::Label,
+        "the container has to be a role that supports text ranges, or the \
+         heading swallows its runs' text-change events"
+    );
     assert!(
-        runs.iter().all(|run| heading.1.children().contains(run)),
-        "a heading's runs belong under the heading node"
+        runs.iter().all(|run| container.1.children().contains(run)),
+        "a heading's runs belong under its text container"
     );
 }
 
@@ -10340,5 +10367,69 @@ fn a_stored_handler_holding_a_weak_handle_does_not_keep_the_editor_alive() {
         ran.get(),
         0,
         "the handler never ran; only the ring is tested"
+    );
+}
+
+/// A table's accessibility boxes follow the scroll offset.
+///
+/// The walk anchors every box it emits on the document's own coordinates less
+/// the scroll, so a table that has been scrolled past reports boxes that moved
+/// by exactly as much. A box left at the unscrolled position sends a screen
+/// reader's pointer — and a magnifier's viewport — to where the table used to
+/// be.
+///
+/// The re-walk is forced here rather than left to the scroll itself, because
+/// `scroll_x` / `scroll_y` are bound at `RepaintOnly` only (see
+/// `RichTextEditorBody::build`) — so a scroll marks the widget for paint but
+/// never flips `a11y_dirty`, and `sync_accessibility` hands back the cached
+/// tree with its boxes where the document used to be. That gap predates
+/// tables and applies to every text run the walk emits, not just to these
+/// boxes; it is not this test's subject. What this test owns is the
+/// arithmetic: given a walk that does run, the boxes are anchored correctly.
+#[test]
+fn table_accessibility_boxes_follow_the_scroll_offset() {
+    use teksilo_core::accesskit::Role;
+    use teksilo_text::text_document::MoveMode;
+
+    let doc = TextDocument::new();
+    doc.set_plain_text("Intro").unwrap();
+    {
+        let c = doc.cursor_at(0);
+        c.set_position(5, MoveMode::MoveAnchor);
+        let _ = c.insert_table(2, 2);
+    }
+    let editor = RichTextEditor::editor(doc.clone());
+    let state = editor.state_handle();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    tick_past_debounce(&mut tree);
+    let _ = tree.render();
+
+    let table_top = |tree: &mut WidgetTree| -> f64 {
+        let update = tree.sync_accessibility();
+        update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == Role::Table)
+            .and_then(|(_, n)| n.bounds())
+            .expect("the table must carry a box")
+            .y0
+    };
+
+    let before = table_top(&mut tree);
+
+    const SHIFT: f32 = 20.0;
+    state.borrow().scroll_y.set(SHIFT);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    tree.request_accessibility_update();
+
+    let after = table_top(&mut tree);
+    assert!(
+        ((before - after) as f32 - SHIFT).abs() < 0.5,
+        "scrolling by {SHIFT} must move the table's box by the same amount \
+         (before {before}, after {after})"
     );
 }

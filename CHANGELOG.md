@@ -21,6 +21,23 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- **A screen reader can read the tables and blockquotes in a rich-text
+  document.** Neither reached the accessibility tree at all: the walk over the
+  document flow handled only ordinary blocks, so a table's cells and a
+  blockquote's paragraphs contributed no text — the characters were simply
+  absent from what a screen reader could read, with or without structure
+  around them. A table is now exposed as `Role::Table` / `Role::Row` /
+  `Role::Cell` carrying its dimensions, each cell's coordinates and any spans,
+  and a box per cell — over every row and column track a merged cell covers. A
+  blockquote is announced as `Role::Blockquote`.
+- **Typing inside a table cell, a heading or a blockquote is announced.** A
+  text run's text-change event is routed by the platform adapters to its
+  filtered parent, and dropped unless that node supports text ranges — which
+  none of `Role::Cell`, `Role::Heading` and `Role::Blockquote` does. Runs
+  beneath all three now sit under a text container that does, so edits there
+  reach the platform instead of going silent. Each keeps its own node, so
+  heading navigation and quote announcement are unaffected. The same fix
+  applies to `CodeEditor` and `PlainTextEditor`, whose headings had it too.
 - **An app starts on a machine whose Vulkan driver cannot build wgpu's
   indirect-call validation pipelines.** It died inside `request_device` with
   "buckets are not empty, at least one BGL has not been unregistered" —

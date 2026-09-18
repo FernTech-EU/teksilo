@@ -240,6 +240,48 @@ pub enum SyntheticKind {
     /// are a paint pass, never scene items, so they add nothing to the item
     /// walk, to `items_in_rect`, or to a marquee's result.
     SceneHandle = 11,
+    /// A table inside a rich-text document, emitted by the rich-text
+    /// accessibility walk from a `FlowElementSnapshot::Table`. Keyed by the
+    /// document's own `table_id`, so the node survives every edit that does
+    /// not destroy the table.
+    RichTextTable = 12,
+    /// One row of a [`SyntheticKind::RichTextTable`], keyed by the table and
+    /// the row index together.
+    RichTextTableRow = 13,
+    /// One cell of a [`SyntheticKind::RichTextTable`], keyed by the table and
+    /// the cell's row and column together.
+    RichTextTableCell = 14,
+    /// The text container inside a [`SyntheticKind::RichTextTableCell`].
+    ///
+    /// A cell's text runs cannot hang off the cell directly. The platform
+    /// adapters route a changed run's text-change event to its *filtered*
+    /// parent, and `accesskit_consumer`'s `common_filter` makes only
+    /// `GenericContainer` and `TextRun` transparent — so a `Role::Cell`
+    /// parent is asked whether it `supports_text_ranges()`, answers no, and
+    /// every keystroke typed into the cell is dropped before it reaches a
+    /// screen reader. This node is the `Role::Label` between the two: it is
+    /// text-range capable, so the event survives, and it is what a reader
+    /// announces as the cell's content.
+    RichTextCellText = 15,
+    /// The text container inside a structural block-level node — a
+    /// `Role::Heading`, or a `Role::Blockquote`.
+    ///
+    /// Exactly the problem [`SyntheticKind::RichTextCellText`] solves, in the
+    /// other places a structural node sits between the editor and its runs:
+    /// neither role is text-range capable, so runs parented straight onto one
+    /// had every edit beneath it dropped before it reached a screen reader.
+    /// Keyed by the **block's** own id — one per block, so a heading inside a
+    /// blockquote still has exactly one — which is a different id space from a
+    /// cell's packed `(table, row, column)`, so the two kinds stay distinct
+    /// rather than relying on those spaces never colliding.
+    RichTextBlockText = 16,
+    /// A blockquote in a rich-text document, emitted from a
+    /// `FlowElementSnapshot::Frame` whose `FrameFormat::is_blockquote` is set.
+    ///
+    /// Only a blockquote earns a node. A frame is otherwise a layout box — a
+    /// positioned or floating text frame — with no role to announce, and
+    /// wrapping one in a node a reader stops on would be AT noise.
+    RichTextBlockquote = 17,
 }
 
 /// A captured live-region announcement — the text a screen reader would
@@ -1465,6 +1507,179 @@ impl AccessNodeBuilder {
             self.with_collected_node(a, |node| node.set_next_on_line(b));
             self.with_collected_node(b, |node| node.set_previous_on_line(a));
         }
+    }
+
+    /// Attach an already-built synthetic child under `parent` (another
+    /// collected child) or under the widget's own node.
+    ///
+    /// Returns `None` when `node_id` was already pushed: a duplicate child id
+    /// panics `accesskit_consumer`'s tree builder, so it is dropped here with
+    /// a diagnostic instead — the rule [`Self::push_text_run`] follows. The
+    /// owner check belongs to the callers, which need it to derive `node_id`
+    /// in the first place.
+    fn push_collected_child(
+        &mut self,
+        parent: Option<NodeId>,
+        node_id: NodeId,
+        node: Node,
+    ) -> Option<NodeId> {
+        if self.children_collected.iter().any(|(id, _)| *id == node_id) {
+            debug_assert!(
+                false,
+                "Teksilo bug: two accessibility children of widget {:?} derived \
+                 the same node id {node_id:?}. Please file a bug report.",
+                self.owner
+            );
+            // Paired with an `eprintln!` for the same reason `push_text_run`
+            // has one: the `debug_assert!` compiles out, and a silent drop
+            // here loses a whole subtree — a table row and every character in
+            // it — with nothing to show for it in a shipped build.
+            eprintln!(
+                "Teksilo bug: two accessibility children of widget {:?} derived \
+                 the same node id {node_id:?}; the second was dropped. Please \
+                 file a bug report.",
+                self.owner
+            );
+            return None;
+        }
+        self.children_collected.push((node_id, node));
+        match parent {
+            Some(parent_node) => {
+                for (id, collected) in self.children_collected.iter_mut() {
+                    if *id == parent_node {
+                        collected.push_child(node_id);
+                        return Some(node_id);
+                    }
+                }
+                // Parent not found — attach to the widget's own node rather
+                // than orphaning the child. Caller misused the API.
+                self.inner.push_child(node_id);
+            }
+            None => self.inner.push_child(node_id),
+        }
+        Some(node_id)
+    }
+
+    /// Push a `Role::Table` child carrying its dimensions, under `parent`
+    /// when given and under the widget's own node otherwise.
+    ///
+    /// `element_id` must be the document's own durable table id, so the node
+    /// keeps its `NodeId` across edits and a screen reader's cursor is not
+    /// thrown out of the table by an unrelated change elsewhere.
+    pub fn push_table_child(
+        &mut self,
+        parent: Option<NodeId>,
+        element_id: u64,
+        rows: usize,
+        columns: usize,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextTable);
+        let mut node = Node::new(Role::Table);
+        node.set_row_count(rows);
+        node.set_column_count(columns);
+        self.push_collected_child(parent, node_id, node)
+    }
+
+    /// Push a `Role::Row` child under a table pushed by
+    /// [`Self::push_table_child`].
+    ///
+    /// **1-based** `row_index`, the ARIA `aria-rowindex` convention this
+    /// builder's whole public surface uses — so the first row is 1, exactly as
+    /// for [`Self::set_row_index`]. The conversion to the zero-based number
+    /// AccessKit stores happens here, at the same boundary every other ordinal
+    /// on this builder is converted at.
+    pub fn push_table_row_child(
+        &mut self,
+        parent: NodeId,
+        element_id: u64,
+        row_index: usize,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextTableRow);
+        let mut node = Node::new(Role::Row);
+        node.set_row_index(to_accesskit_ordinal(row_index));
+        self.push_collected_child(Some(parent), node_id, node)
+    }
+
+    /// Push a `Role::Cell` child under a row pushed by
+    /// [`Self::push_table_row_child`].
+    ///
+    /// **1-based** `row_index` / `column_index` (see
+    /// [`Self::push_table_row_child`]); the spans are plain counts and are
+    /// written only when they exceed 1, so an ordinary cell carries no
+    /// span properties at all.
+    pub fn push_table_cell_child(
+        &mut self,
+        parent: NodeId,
+        element_id: u64,
+        row_index: usize,
+        column_index: usize,
+        row_span: usize,
+        column_span: usize,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextTableCell);
+        let mut node = Node::new(Role::Cell);
+        node.set_row_index(to_accesskit_ordinal(row_index));
+        node.set_column_index(to_accesskit_ordinal(column_index));
+        if row_span > 1 {
+            node.set_row_span(row_span);
+        }
+        if column_span > 1 {
+            node.set_column_span(column_span);
+        }
+        self.push_collected_child(Some(parent), node_id, node)
+    }
+
+    /// Push the `Role::Label` text container inside a cell, and return it so
+    /// the cell's text runs can be pushed under it.
+    ///
+    /// See [`SyntheticKind::RichTextCellText`] for why the runs may not hang
+    /// off the `Role::Cell` directly.
+    ///
+    /// The container is deliberately given no value of its own: the text is
+    /// carried by the runs beneath it, which is how every other text surface
+    /// in the framework exposes its content, and duplicating it here would
+    /// have a reader announce the cell twice.
+    pub fn push_cell_text_child(&mut self, parent: NodeId, element_id: u64) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextCellText);
+        let node = Node::new(Role::Label);
+        self.push_collected_child(Some(parent), node_id, node)
+    }
+
+    /// Push the `Role::Label` text container inside a structural block-level
+    /// node, and return it so that block's text runs can be pushed under it.
+    ///
+    /// See [`SyntheticKind::RichTextBlockText`]. A heading keeps its own
+    /// `Role::Heading` node — it is how a reader jumps through a document —
+    /// and a blockquote keeps its `Role::Blockquote`; this sits between either
+    /// and the runs so the text changes beneath still reach the platform.
+    ///
+    /// `element_id` is the **block's** id, so a heading nested in a blockquote
+    /// still produces exactly one container.
+    pub fn push_block_text_child(&mut self, parent: NodeId, element_id: u64) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextBlockText);
+        let node = Node::new(Role::Label);
+        self.push_collected_child(Some(parent), node_id, node)
+    }
+
+    /// Push a `Role::Blockquote` child, under `parent` when given and under
+    /// the widget's own node otherwise.
+    ///
+    /// `element_id` must be the document's own frame id, so the node keeps its
+    /// `NodeId` across edits.
+    pub fn push_blockquote_child(
+        &mut self,
+        parent: Option<NodeId>,
+        element_id: u64,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::RichTextBlockquote);
+        let node = Node::new(Role::Blockquote);
+        self.push_collected_child(parent, node_id, node)
     }
 
     /// Push one `Role::TextRun` child, under `parent` when given and
