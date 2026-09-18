@@ -225,7 +225,9 @@ pub fn install_display_handle(handle: winit::event_loop::OwnedDisplayHandle) {
 /// whose preferred backend has a broken driver, and it is worth having
 /// precisely where the default choice is the thing under suspicion.
 ///
-/// One flag is cleared afterwards — see [`drop_unused_indirect_validation`].
+/// Its flags come from [`teksilo_render::instance_flags`] rather than from
+/// `_from_env` alone, so this instance and the offscreen one
+/// [`teksilo_render::test_support`] opens agree about them.
 fn shared_instance() -> &'static wgpu::Instance {
     static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
     INSTANCE.get_or_init(|| {
@@ -238,51 +240,9 @@ fn shared_instance() -> &'static wgpu::Instance {
             // window needs the handle.
             None => wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
         };
-        drop_unused_indirect_validation(&mut descriptor.flags);
+        descriptor.flags = teksilo_render::instance_flags();
         wgpu::Instance::new(descriptor)
     })
-}
-
-/// Stop validating a GPU feature this renderer never uses.
-///
-/// `InstanceFlags::VALIDATION_INDIRECT_CALL` is set in **release** builds too:
-/// `InstanceFlags::from_build_config` returns it from its non-debug branch, so
-/// it is not a debug-only cost. It makes `Device::new` build a set of compute
-/// and render pipelines that check the arguments of indirect draws. This
-/// renderer issues no indirect draws at all — not one `draw_indirect`,
-/// `dispatch_indirect` or `multi_draw_*` anywhere in the workspace — so those
-/// pipelines validate nothing we will ever submit.
-///
-/// That alone would only be wasted startup work. The reason it is cleared is
-/// that building them is also a way for device creation to *fail*, and failing
-/// there is not survivable. `wgpu_core::device::resource::Device::new` creates
-/// the hal device, then its `empty_bgl` — which registers a bind-group layout
-/// with the Vulkan backend's `DescriptorAllocator` — and only then calls
-/// `IndirectValidation::new(..)?`. A driver that cannot build those pipelines
-/// takes that `?`, and the early return drops the hal device *without*
-/// unregistering `empty_bgl`, because hal objects are not RAII and need an
-/// explicit destroy. `Drop for DescriptorAllocator` then finds a non-empty
-/// bucket and panics — "buckets are not empty, at least one BGL has not been
-/// unregistered" — from an ordinary, non-unwinding drop, so its own
-/// `thread::panicking()` guard does not suppress it.
-///
-/// The process therefore dies *inside* `request_device`, before
-/// [`open_gpu_for`] can fall through to the next adapter: a backend search
-/// cannot search past a panic. Reported from the field on an older Windows 10
-/// machine where the app never opened a window, and confirmed there by setting
-/// `WGPU_VALIDATION_INDIRECT_CALL=0`, which let the window open. D3D12 has no
-/// `DescriptorAllocator` and never runs the assertion, which is why forcing
-/// `WGPU_BACKEND=dx12` looked like a graphics fix when it was really a way of
-/// not reaching this code.
-///
-/// An explicit `WGPU_VALIDATION_INDIRECT_CALL` is honoured, so the flag stays
-/// reachable for anyone debugging wgpu itself. That is why this tests the
-/// environment variable rather than the resulting bit: after `_from_env` the
-/// flag wgpu defaulted to and the flag a developer asked for are identical.
-fn drop_unused_indirect_validation(flags: &mut wgpu::InstanceFlags) {
-    if std::env::var_os("WGPU_VALIDATION_INDIRECT_CALL").is_none() {
-        flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
-    }
 }
 
 /// The adapter, device and queue every window shares.
@@ -385,7 +345,7 @@ async fn open_device(
 /// enumerates an adapter it cannot really drive. The field report that prompted
 /// this is one of those: a Windows 10 machine whose Vulkan ICD cannot build
 /// wgpu's own indirect-validation pipelines (see
-/// [`drop_unused_indirect_validation`]) and, past that, cannot present at all,
+/// [`teksilo_render::instance_flags`]) and, past that, cannot present at all,
 /// while D3D12 on the same machine works.
 ///
 /// Elsewhere the order simply writes down what wgpu already did, so this is a

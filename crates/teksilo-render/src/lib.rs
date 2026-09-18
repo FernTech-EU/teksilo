@@ -3,6 +3,7 @@
 
 pub(crate) mod blur;
 pub mod image_manager;
+pub mod instance;
 pub(crate) mod mipmap;
 pub mod path_atlas;
 pub mod renderer;
@@ -11,6 +12,7 @@ pub mod test_support;
 pub mod vertex;
 
 pub use image_manager::ImageManager;
+pub use instance::instance_flags;
 pub use path_atlas::PathAtlas;
 pub use renderer::Renderer;
 pub use vertex::{QuadVertex, RectVertex, SdfVertex, ShadowVertex};

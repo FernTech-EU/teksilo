@@ -56,7 +56,15 @@ static SHARED_DEVICE: OnceLock<Option<(wgpu::Device, wgpu::Queue)>> = OnceLock::
 async fn open_shared_device(label: &'static str) -> Option<(wgpu::Device, wgpu::Queue)> {
     #[cfg(test)]
     DEVICE_OPENS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    // Same flags the window path uses — see `crate::instance::instance_flags`.
+    // Not a tidiness point: without it this instance keeps
+    // `VALIDATION_INDIRECT_CALL`, and on a driver that cannot build wgpu's
+    // indirect-validation pipelines `request_device` panics rather than
+    // returning the error the search below is written to survive.
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        flags: crate::instance_flags(),
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
 
     for force_fallback_adapter in [false, true] {
         let Ok(adapter) = instance
