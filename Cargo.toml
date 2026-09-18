@@ -127,7 +127,7 @@ jiff = "0.2"
 # `.cargo/config.toml` — see README, "Development environment". Bump the
 # version here when the sibling publishes; the patch has no version to bump.
 text-document = "1.12.2"
-text-typeset = "1.11.1"
+text-typeset = "1.12.0"
 
 # Terminal engine (consumed only by the opt-in `teksilo-terminal` crate,
 # feature-gated so a default workspace build never pulls them). `portable-pty`
