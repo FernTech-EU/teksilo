@@ -2527,6 +2527,91 @@ fn rows_report_sibling_position_and_size_among_siblings() {
         );
     }
 }
+#[test]
+fn tree_column_cells_mirror_the_rows_level_and_other_columns_do_not() {
+    // The depth is published on the row, and the row is an *ancestor* of the
+    // node this view nominates as `active_descendant` — which is the one
+    // place NVDA refuses to read a level from (it clears
+    // `positionInfo_level` for `OutputReason.FOCUSENTERED`). So a correct
+    // row level reached no screen reader until the tree column's cell
+    // carried it too. See `CellA11y::with_level`.
+    let proxy = SortFilterTreeModel::new(sample_tree());
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TreeTableView::from_projection(proxy.clone())
+            .add_column(name_col())
+            .add_column(size_col())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(400.0),
+    });
+    {
+        let any = tree.widget_as_any(id).unwrap();
+        any.downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap()
+            .expand_all();
+    }
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(400.0),
+    });
+    assert_eq!(proxy.visible_count(), 5);
+
+    // Every body cell, in reading order. The header carries
+    // `Role::ColumnHeader`, so it never lands in here.
+    let mut cells: Vec<WidgetId> = Vec::new();
+    let mut q = vec![id];
+    while let Some(n) = q.pop() {
+        if matches!(
+            tree.accessibility_node(n).role(),
+            Role::Cell | Role::GridCell
+        ) {
+            cells.push(n);
+        }
+        for c in tree.children(n) {
+            q.push(c);
+        }
+    }
+    cells.sort_by(|a, b| {
+        let (ba, bb) = (tree.bounds(*a), tree.bounds(*b));
+        ba.y.partial_cmp(&bb.y)
+            .unwrap()
+            .then(ba.x.partial_cmp(&bb.x).unwrap())
+    });
+    assert_eq!(cells.len(), 10, "five visible rows x two columns");
+
+    // `level` isn't on the summarized `AccessibilityInfo` — read it off the
+    // real accesskit node, as the sibling-position test above does.
+    let update = tree.sync_accessibility();
+    let level = |wid: WidgetId| -> Option<usize> {
+        let nid = widget_id_to_node_id(wid);
+        update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .map(|(_, n)| n)
+            .expect("cell must be in the a11y tree")
+            .level()
+    };
+
+    // docs(root) -> readme, guide; src(root) -> main.rs. AccessKit stores a
+    // level zero-based and the Windows adapter adds the 1 back, so a root
+    // row reads 0 here and "level 1" to the user.
+    let name_levels: Vec<Option<usize>> = cells.iter().step_by(2).map(|&c| level(c)).collect();
+    assert_eq!(
+        name_levels,
+        vec![Some(0), Some(1), Some(1), Some(0), Some(1)],
+        "the tree column announces its row's depth"
+    );
+
+    // The size column draws no indent, so it says nothing about depth rather
+    // than repeating it on every horizontal move within one row.
+    let size_levels: Vec<Option<usize>> =
+        cells.iter().skip(1).step_by(2).map(|&c| level(c)).collect();
+    assert_eq!(size_levels, vec![None; 5], "a non-tree column carries none");
+}
 
 #[test]
 fn row_count_in_a11y_includes_header() {

@@ -38,6 +38,13 @@ by crate for clarity, not because crates version independently.
   reach the platform instead of going silent. Each keeps its own node, so
   heading navigation and quote announcement are unaffected. The same fix
   applies to `CodeEditor` and `PlainTextEditor`, whose headings had it too.
+- **A screen reader announces which level of the outline a `TreeTableView` row
+  is on.** The depth was published on the row — but the row is an ancestor of
+  the cell the view puts the accessibility cursor on, and an ancestor is the
+  one place NVDA will not read a level from, so the number reached nobody. The
+  tree column's cell now carries the level too. Windows only, because it is the
+  only platform whose AccessKit adapter exposes a level at all; elsewhere the
+  indent is what carries depth, as before.
 - **An app starts on a machine whose Vulkan driver cannot build wgpu's
   indirect-call validation pipelines.** It died inside `request_device` with
   "buckets are not empty, at least one BGL has not been unregistered" —

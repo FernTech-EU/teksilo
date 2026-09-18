@@ -10,9 +10,10 @@
 //! semantics by itself, so the body wraps each cell in a thin
 //! `CellA11y` node. `TableView`'s row containers themselves
 //! (`BodyRow`) carry `Role::Row` and
-//! row-index metadata directly. `TreeTableView` adds an extra
-//! `TreeRowA11y` wrapper around the tree column to declare `set_level`
-//! and `set_expanded` for the row.
+//! row-index metadata directly. `TreeTableView` wraps each row in a
+//! `TreeRowA11y` instead, to declare `set_level` and `set_expanded`, and
+//! mirrors the level onto the tree column's cell as well — `CellA11y::
+//! with_level` says why the row alone is not heard.
 //!
 //! These wrappers do not paint or affect layout: they pass the proposed
 //! size straight through to their single child and forward all bounds.
@@ -46,6 +47,11 @@ pub(crate) struct CellA11y {
     is_grid_cell: bool,
     /// Optional name override (when the cell content isn't textual).
     name: Option<String>,
+    /// 1-based hierarchy level, mirrored from the row this cell belongs to.
+    ///
+    /// `None` on a flat table, and on every column of a tree table but the
+    /// one that draws the indent. See `with_level`.
+    level_1based: Option<usize>,
 }
 
 impl CellA11y {
@@ -63,6 +69,7 @@ impl CellA11y {
             is_row_header: false,
             is_grid_cell: false,
             name: None,
+            level_1based: None,
         }
     }
 
@@ -85,6 +92,37 @@ impl CellA11y {
     #[allow(dead_code)]
     pub(crate) fn with_name(mut self, name: Option<String>) -> Self {
         self.name = name;
+        self
+    }
+
+    /// Mirror the row's 1-based hierarchy level onto this cell.
+    ///
+    /// The depth belongs to the *row*, and `TreeRowA11y` publishes it there.
+    /// But `TreeTableView` navigates by cell: it nominates the focused *cell*
+    /// as the container's `active_descendant`, which leaves the row an
+    /// ancestor of the focused node — and NVDA drops `positionInfo_level`
+    /// from an ancestor it announces on the way in (`speech.py` clears
+    /// `allowProperties["positionInfo_level"]` for
+    /// `OutputReason.FOCUSENTERED`). So the depth was published correctly on
+    /// the row and spoken nowhere. `TreeView` does not have this problem: its
+    /// rows *are* the focused nodes.
+    ///
+    /// Only the tree column asks for this. It is the column that draws the
+    /// indent and the chevron, so it is the one whose announcement matches
+    /// what is on screen, and repeating "level 3" on all seven columns of one
+    /// row is noise. The price is that arrowing *down* a non-tree column
+    /// announces no depth change; the tree column is one arrow away, and
+    /// mirroring everywhere to close that gap would charge every horizontal
+    /// move for it.
+    ///
+    /// Windows-only in effect, and not because of this decision: `level` is
+    /// the one positional property `accesskit_macos-0.27.0` and
+    /// `accesskit_atspi_common-0.20.0` do not expose at all (the latter
+    /// publishes `posinset` / `setsize` and no `level`). VoiceOver and Orca
+    /// heard nothing from the row either — for them the indent is what
+    /// carries depth.
+    pub(crate) fn with_level(mut self, level_1based: Option<usize>) -> Self {
+        self.level_1based = level_1based;
         self
     }
 }
@@ -127,6 +165,11 @@ impl Widget for CellA11y {
         builder.set_selected(self.selected);
         builder.set_row_index(self.row_index_1based);
         builder.set_column_index(self.col_index_1based);
+        // The floor matches `TreeRowA11y`: a caller that computed a depth of
+        // 0 lands on the root level, not one above it.
+        if let Some(level) = self.level_1based {
+            builder.set_level(level.max(1));
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

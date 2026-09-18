@@ -462,7 +462,14 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
 
                 let cell_a11y =
                     CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected)
-                        .with_grid_cell_role(selection_mode.is_cell_mode());
+                        .with_grid_cell_role(selection_mode.is_cell_mode())
+                        // The row publishes the level too, but the row is an
+                        // ancestor of the node this view puts the AT cursor on,
+                        // and that is the one place NVDA will not read a level
+                        // from (`CellA11y::with_level`). A loading row omits it
+                        // rather than claiming the depth-0 fallback, exactly as
+                        // `CellContext::depth` above does.
+                        .with_level((is_tree_column && !loading).then_some(depth + 1));
                 let cell_id = ctx.add(cell_a11y);
 
                 // Click-to-edit, from this column's `EditTriggers`. Per cell,
