@@ -208,8 +208,19 @@ impl Widget for ListItemWrapper {
 #[derive(Debug)]
 pub(crate) struct TreeItemWrapper {
     child: WidgetId,
-    level: usize,           // 1-based
-    position: usize,        // 1-based within sibling group
+    /// 1-based depth, or `None` when the row's metadata has not resolved.
+    ///
+    /// A lazy `TreeDataSource` hands back no metadata for a row still
+    /// loading, and a placeholder has no knowable depth or sibling position.
+    /// Both are `Option` rather than a defaulted 1 because a screen reader
+    /// repeats whatever is published as fact: a row four levels down that
+    /// announced "level 1, 1 of …" while its window loaded was not degrading,
+    /// it was lying. Absent, they are simply not announced — and the row that
+    /// replaces the placeholder announces the truth. The same reasoning the
+    /// tree table applies to `CellContext::depth`.
+    level: Option<usize>,
+    /// 1-based position within the sibling group, or `None` — see `level`.
+    position: Option<usize>,
     expanded: Option<bool>, // None if leaf
     selected: bool,
 }
@@ -217,8 +228,8 @@ pub(crate) struct TreeItemWrapper {
 impl TreeItemWrapper {
     pub fn new(
         child: WidgetId,
-        level_1based: usize,
-        position_1based: usize,
+        level_1based: Option<usize>,
+        position_1based: Option<usize>,
         expanded: Option<bool>,
         selected: bool,
     ) -> Self {
@@ -258,8 +269,12 @@ impl Widget for TreeItemWrapper {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::TreeItem);
-        builder.set_level(self.level);
-        builder.set_position_in_set(self.position);
+        if let Some(level) = self.level {
+            builder.set_level(level);
+        }
+        if let Some(position) = self.position {
+            builder.set_position_in_set(position);
+        }
         // No `size_of_set` here, and none on the container either.
         //
         // AccessKit resolves an item's set size by walking *up* from it

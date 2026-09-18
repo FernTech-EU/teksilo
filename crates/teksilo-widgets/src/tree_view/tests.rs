@@ -2705,6 +2705,134 @@ fn lazy_loading_tree_rows_render_placeholders_and_request_the_window() {
 }
 
 #[test]
+fn a_loading_row_publishes_no_level_and_no_sibling_position() {
+    // The placeholder for a row whose metadata has not arrived used to
+    // publish level 1 and position 1 — a row four levels down announced
+    // "level 1" as fact while its window loaded, and a screen reader has no
+    // way to hear the difference between an unknown and a root. It now
+    // publishes neither, and the row that replaces the placeholder announces
+    // the truth. See `TreeItemWrapper::level`.
+    use teksilo_core::accessibility::widget_id_to_node_id;
+
+    struct WindowedTree {
+        version: Signal<u64>,
+    }
+    impl TreeDataSource for WindowedTree {
+        type Item = String;
+        type Key = usize;
+        fn visible_count(&self) -> usize {
+            50
+        }
+        fn with_entry<R>(
+            &self,
+            _flat_index: usize,
+            _f: impl FnOnce(&String, &FlatEntry<usize>) -> R,
+        ) -> Option<R> {
+            None // nothing resident yet
+        }
+        fn key_at(&self, i: usize) -> Option<usize> {
+            (i < 50).then_some(i)
+        }
+        fn flat_index_of(&self, key: &usize) -> Option<usize> {
+            (*key < 50).then_some(*key)
+        }
+        fn parent(&self, _key: &usize) -> Option<usize> {
+            None
+        }
+        fn child_keys(&self, _key: &usize) -> Vec<usize> {
+            Vec::new()
+        }
+        fn version_signal(&self) -> Signal<u64> {
+            self.version.clone()
+        }
+        fn is_expanded(&self, _key: &usize) -> bool {
+            false
+        }
+        fn set_expanded(&self, _key: &usize, _expanded: bool) {}
+        fn row_state(&self, _flat_index: usize) -> RowState {
+            RowState::Loading
+        }
+    }
+
+    let mut t = WidgetTree::new();
+    let v = t.add(
+        TreeView::from_source(
+            WindowedTree {
+                version: Signal::new(0),
+            },
+            |_l: &String, _r: &TreeRow, _s| Box::new(FixedLeaf(120.0, 28.0)) as Box<dyn Widget>,
+        )
+        .item_height(28.0),
+    );
+    t.layout(SizeProposal::exact(400.0, 300.0));
+
+    let rows = row_ids(&t, v);
+    assert!(
+        !rows.is_empty(),
+        "loading rows are realized as placeholders"
+    );
+    let update = t.sync_accessibility();
+    let node = |wid: WidgetId| {
+        let nid = widget_id_to_node_id(wid);
+        update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .map(|(_, n)| n)
+            .expect("row must be in the a11y tree")
+    };
+    for &r in &rows {
+        assert_eq!(node(r).level(), None, "an unknown depth is not level 1");
+        assert_eq!(
+            node(r).position_in_set(),
+            None,
+            "an unknown sibling position is not the first"
+        );
+    }
+}
+
+#[test]
+fn a_resident_row_still_publishes_its_level_and_sibling_position() {
+    // The other half of the pair above: making both optional must not have
+    // turned the ordinary path silent.
+    use teksilo_core::accessibility::widget_id_to_node_id;
+
+    let (mut t, v) = make_tree_view(sample_tree());
+    t.layout(SizeProposal::exact(400.0, 300.0));
+    // Open root A with its own chevron (depth 0, so the chevron column is
+    // x in [0, 16]) — the idiom `chevron_press_toggles_without_selecting_the_row`
+    // uses, and the only expand route this fixture exposes.
+    press_at(&mut t, 8.0, 14.0);
+    t.layout(SizeProposal::exact(400.0, 300.0));
+
+    let rows = row_ids(&t, v);
+    assert!(rows.len() >= 2, "root A and its first child are realized");
+    let update = t.sync_accessibility();
+    let node = |wid: WidgetId| {
+        let nid = widget_id_to_node_id(wid);
+        update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .map(|(_, n)| n)
+            .expect("row must be in the a11y tree")
+    };
+    // AccessKit stores both zero-based; the adapters add the 1 back, so a
+    // root row reads 0 here and "level 1" to the user.
+    assert_eq!(
+        node(rows[0]).level(),
+        Some(0),
+        "root A is at the root level"
+    );
+    assert_eq!(
+        node(rows[0]).position_in_set(),
+        Some(0),
+        "A is the first root"
+    );
+    assert_eq!(node(rows[1]).level(), Some(1), "A's child is one level in");
+}
+
+#[test]
 fn treeview_exportable_row_drops_on_foreign_sink_with_items() {
     use crate::primitives::{FixedSize, VStack};
     use teksilo_core::widget_builder::WidgetBuilder as _;

@@ -277,9 +277,15 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     } else {
                         None
                     };
-                    (m.depth + 1, self.source.sibling_pos(i).0, exp)
+                    (Some(m.depth + 1), Some(self.source.sibling_pos(i).0), exp)
                 } else {
-                    (1, 1, None)
+                    // A row whose metadata has not resolved yet publishes no
+                    // depth and no sibling position, rather than the level 1 /
+                    // position 1 it used to claim: a placeholder four levels
+                    // down announced "level 1" as fact, and a screen reader has
+                    // no way to tell an unknown from a root. See
+                    // `TreeItemWrapper::level`.
+                    (None, None, None)
                 };
                 let child_id = ctx.add(crate::list_item_a11y::TreeItemWrapper::new(
                     inner_id,

@@ -45,6 +45,11 @@ by crate for clarity, not because crates version independently.
   tree column's cell now carries the level too. Windows only, because it is the
   only platform whose AccessKit adapter exposes a level at all; elsewhere the
   indent is what carries depth, as before.
+- **A `TreeView` row that is still loading no longer claims to be at the top
+  of the outline.** A row whose data had not arrived published "level 1,
+  item 1" as fact, so a placeholder four levels down announced itself as a
+  root. It now publishes neither until its metadata resolves, and then
+  announces the truth.
 - **An app starts on a machine whose Vulkan driver cannot build wgpu's
   indirect-call validation pipelines.** It died inside `request_device` with
   "buckets are not empty, at least one BGL has not been unregistered" —
