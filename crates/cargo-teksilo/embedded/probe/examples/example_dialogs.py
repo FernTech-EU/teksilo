@@ -144,6 +144,84 @@ def button(session, label: str, *, window_id: int | None = None) -> dict:
     return found
 
 
+def modal_scope(
+    session, report: Report, before: set[int], what: str
+) -> tuple[int, bool] | None:
+    """Where a just-opened modal actually lives, asserted in whichever shape it took.
+
+    `ModalPresentation::Auto` is resolved at runtime against the window
+    system: a real OS child window where one can be made input-blocking
+    (macOS, Windows), an in-tree overlay where none can — Linux and the BSDs,
+    where no client can make another surface block input. Both are correct,
+    and which one arrives is a property of the host, not of the source. So
+    this asserts the invariant that *distinguishes* the two in whichever
+    direction it went, rather than demanding one and calling the other a
+    failure.
+
+    Returns `(scope, native)` — the window id every later read in the leg must
+    address, and which shape it got. `None` means neither shape appeared,
+    which is the only real failure here.
+    """
+    opened = sorted(window_ids(session) - before)
+    overlays = session.call("get_overlays").get("count") or 0
+
+    report.check(
+        len(opened) == 1 or overlays > 0,
+        f"the {what} opened (native window ids: {opened or 'none'}; "
+        f"in-tree overlays: {overlays})",
+    )
+
+    if opened:
+        report.check(
+            len(opened) == 1 and overlays == 0,
+            "…as a native modal child WINDOW, and `get_overlays` is empty "
+            f"because a window is not an overlay (overlays={overlays}). This "
+            "is the trap: a probe that looks in `get_overlays` here sees zero "
+            "and reports a modal that is plainly on screen as never opened",
+        )
+        return opened[0], True
+
+    if overlays:
+        # A note, not a check: the branch condition *is* the assertion, and the
+        # one above already established that a modal appeared. Re-asserting
+        # `overlays > 0` inside `if overlays` would read as evidence while
+        # testing nothing. The count is not `== 1` because a modal overlay is a
+        # scrim *and* a panel — it counts layers, not modals.
+        report.note(
+            f"…as an in-tree modal overlay ({overlays} layers — scrim and "
+            "panel), because this backend has no input-blocking child window "
+            "for `Auto` to resolve to. Every read below addresses the parent "
+            "tree instead of a modal window"
+        )
+        return MAIN, False
+
+    return None
+
+
+def dismissed(session, report: Report, scope: int, native: bool, how: str) -> None:
+    """Assert the modal is gone, in the terms its own shape is counted in."""
+    if native:
+        report.check(scope not in window_ids(session), f"{how} closed the modal window")
+    else:
+        report.check(
+            (session.call("get_overlays").get("count") or 0) == 0,
+            f"{how} closed the modal overlay",
+        )
+
+
+def modal_opened(session, before: set[int]) -> bool:
+    """Did a modal appear, in whichever shape this backend gives one?
+
+    "A new window appeared" is not the question — it is the answer on macOS
+    and Windows only. Asking it directly on Linux makes *did not activate*
+    and *activated an overlay* look identical, which is a check that passes
+    for the wrong reason rather than one that fails.
+    """
+    return bool(window_ids(session) - before) or bool(
+        session.call("get_overlays").get("count") or 0
+    )
+
+
 def result_readout(session) -> str | None:
     """The demo's own "Last result:" line, once a MessageBox has answered.
 
@@ -169,24 +247,10 @@ def dialog_leg(session, report: Report) -> None:
     before = window_ids(session)
     press(session, trigger)
 
-    opened = sorted(window_ids(session) - before)
-    report.check(
-        len(opened) == 1,
-        f"the Dialog opened a native modal child WINDOW (new ids: {opened or 'none'}) — "
-        "not an in-tree overlay, which is what `ModalPresentation::Auto` "
-        "resolves to on a backend that supports one",
-    )
-    if not opened:
+    resolved = modal_scope(session, report, before, "Dialog")
+    if resolved is None:
         return
-    modal = opened[0]
-
-    # Stated as a check rather than a comment because it is the trap: a probe
-    # that asserts on `get_overlays` here sees zero and reports a dialog that
-    # is plainly on screen as never opened.
-    report.check(
-        session.call("get_overlays").get("count") == 0,
-        "…and `get_overlays` is empty, because a window is not an overlay",
-    )
+    modal, native = resolved
 
     panel = tree.find(session, role="Dialog", window_id=modal)
     report.check(
@@ -222,10 +286,7 @@ def dialog_leg(session, report: Report) -> None:
         time.sleep(OVERLAY_PAUSE)
         session.settle()
 
-    report.check(
-        modal not in window_ids(session),
-        "dismissing through the dialog's own action closed the modal window",
-    )
+    dismissed(session, report, modal, native, "dismissing through the dialog's own action")
 
     # Focus lands on the trigger — or on a node inside it. The trigger here is a
     # custom widget wrapped by an `OverlayTrigger`, so the focusable node is the
@@ -250,11 +311,10 @@ def message_box_leg(session, report: Report) -> None:
     time.sleep(OVERLAY_PAUSE)
     session.settle()
 
-    opened = sorted(window_ids(session) - before)
-    report.check(len(opened) == 1, f"the MessageBox opened a modal window (ids: {opened})")
-    if not opened:
+    resolved = modal_scope(session, report, before, "MessageBox")
+    if resolved is None:
         return
-    modal = opened[0]
+    modal, native = resolved
 
     focused = focused_ids(session, window_id=modal)
     save = tree.find(session, role="Button", label="Save", window_id=modal)
@@ -272,7 +332,7 @@ def message_box_leg(session, report: Report) -> None:
     time.sleep(OVERLAY_PAUSE)
     session.settle()
 
-    report.check(modal not in window_ids(session), "Escape dismissed the MessageBox")
+    dismissed(session, report, modal, native, "Escape")
     answer = result_readout(session)
     report.check(
         answer is not None and "escape=true" in answer,
@@ -340,33 +400,41 @@ def two_press_leg(session, report: Report) -> None:
         raise RuntimeError("the popover did not reopen for the two-press check")
 
     # A control outside the popover's bounds, underneath it in z-order, whose
-    # activation is unmistakable: it opens a window.
+    # activation is unmistakable: it opens a modal — a window or an in-tree
+    # overlay, whichever this backend resolves `Auto` to.
     underneath = button(session, "Welcome")
     before = window_ids(session)
 
     press(session, underneath, kind="touch")
     report.check(
-        session.call("get_overlays").get("count") == 0,
+        (session.call("get_overlays").get("count") or 0) == 0,
         "press 1 (touch, outside the popover) dismissed it",
     )
     report.check(
-        window_ids(session) == before,
+        not modal_opened(session, before),
         "…and did NOT reach the button underneath — the press that dismissed is "
         "spent on the dismissal",
     )
 
     press(session, underneath, kind="touch")
-    opened = sorted(window_ids(session) - before)
     report.check(
-        len(opened) == 1,
-        f"press 2 activated the control underneath (new window: {opened or 'none'})",
+        modal_opened(session, before),
+        "press 2 activated the control underneath (new windows: "
+        f"{sorted(window_ids(session) - before) or 'none'}; overlays: "
+        f"{session.call('get_overlays').get('count')})",
     )
+    opened = sorted(window_ids(session) - before)
     # Leave nothing open behind us: the next reader of this file will copy it.
     # `try_call`, because a window that closed on its own between the check and
     # this line is fine — and a tidy-up that can fail the probe would turn a
     # clean run into an exit 1 for no reason anyone could act on.
     for extra in opened:
         session.try_call("inject_key", key="Escape", window_id=extra)
+        session.settle()
+    if not opened:
+        # The in-tree arm: no window to address, so Escape goes to the tree
+        # the overlay is in.
+        session.try_call("inject_key", key="Escape", window_id=MAIN)
         session.settle()
 
 
