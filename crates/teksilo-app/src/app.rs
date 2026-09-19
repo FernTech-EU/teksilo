@@ -113,6 +113,45 @@ fn modal_close_behavior_to_overlay_dismiss(behavior: ModalCloseBehavior) -> Dism
     }
 }
 
+/// Whether a modal presented as a **native OS window** dismisses on Escape.
+///
+/// The native presentation can honour only the Escape half of
+/// [`ModalCloseBehavior`]: while the modal is up the parent window is
+/// input-blocked by the OS, so there is no "outside" left to click. So
+/// `ClickOutside` resolves to `false` here — the same answer as `Manual` —
+/// rather than to a silently different second route.
+fn native_modal_escape_dismisses(behavior: ModalCloseBehavior) -> bool {
+    match behavior {
+        ModalCloseBehavior::EscapeKey | ModalCloseBehavior::EscapeOrClickOutside => true,
+        ModalCloseBehavior::ClickOutside | ModalCloseBehavior::Manual => false,
+    }
+}
+
+/// Splice the Escape route around a native modal's root and return the new root.
+///
+/// Bubble, not preview: a focused descendant — and any overlay it owns, which
+/// the tree dismisses before dispatch even begins — gets first refusal on
+/// Escape, exactly as it does inside an in-tree modal. Only an unclaimed
+/// Escape reaches this wrapper, which asks the window manager to close the
+/// modal window.
+fn wrap_native_modal_in_escape_route(tree: &mut WidgetTree, content_id: WidgetId) -> WidgetId {
+    use teksilo_core::widget_builder::WidgetBuilder as _;
+    tree.add(
+        teksilo_widgets::ZStack::new()
+            .child(content_id)
+            .on_key(|event, ctx| match event {
+                teksilo_core::event::WidgetEvent::KeyDown {
+                    key: teksilo_core::event::Key::Escape,
+                    ..
+                } => {
+                    ctx.dismiss_modal();
+                    teksilo_core::event::EventResponse::Handled
+                }
+                _ => teksilo_core::event::EventResponse::Ignored,
+            }),
+    )
+}
+
 fn present_in_tree_modal_request(
     tree: &mut WidgetTree,
     source_widget: WidgetId,
@@ -684,6 +723,7 @@ impl TeksiloAppHandler {
                             title,
                             size,
                             focus_target,
+                            close_behavior,
                             ..
                         } = queued.request;
 
@@ -715,8 +755,28 @@ impl TeksiloAppHandler {
                                 .min_size(width, height)
                                 .size_to_content(SizeToContent::Height);
                         }
+                        // Honour the request's `ModalCloseBehavior`. Only the
+                        // Escape half of it is expressible for a native
+                        // window: there is no "outside" to click, because the
+                        // parent window is input-blocked for as long as the
+                        // modal is up — which is what the OS does with a click
+                        // there, and is why `ClickOutside` resolves to
+                        // "nothing dismisses this but the app" here rather
+                        // than to a second route. Before this the whole field
+                        // fell into the struct's `..` and was never read, so a
+                        // `Dialog` taking BOTH defaults (`Auto` presentation,
+                        // `EscapeOrClickOutside`) got neither behaviour on
+                        // every platform that hosts a native modal.
+                        let escape_dismisses = native_modal_escape_dismisses(close_behavior);
                         self.wm.create_window(
-                            config.root(move |tree, _state| builder(tree)),
+                            config.root(move |tree, _state| {
+                                let content_id = builder(tree);
+                                if escape_dismisses {
+                                    wrap_native_modal_in_escape_route(tree, content_id)
+                                } else {
+                                    content_id
+                                }
+                            }),
                             event_loop,
                         );
                     }
@@ -4631,6 +4691,46 @@ mod tests {
         assert_eq!(
             resolve_modal_presentation(request.presentation, &request.content, true),
             ResolvedModalPresentation::NativeWindow
+        );
+    }
+
+    #[test]
+    fn a_native_modal_honours_the_escape_half_of_its_close_behavior() {
+        // The whole point of finding 1: `close_behavior` used to fall into the
+        // `ModalRequest` destructure's `..` in the NativeWindow arm and was
+        // never read, so the DEFAULT behaviour on the DEFAULT presentation did
+        // nothing. This is the table that arm now consults.
+        assert!(native_modal_escape_dismisses(
+            ModalCloseBehavior::EscapeOrClickOutside
+        ));
+        assert!(native_modal_escape_dismisses(ModalCloseBehavior::EscapeKey));
+        // No "outside" exists while the OS blocks the parent, so these two
+        // agree — deliberately, and not by omission.
+        assert!(!native_modal_escape_dismisses(
+            ModalCloseBehavior::ClickOutside
+        ));
+        assert!(!native_modal_escape_dismisses(ModalCloseBehavior::Manual));
+    }
+
+    #[test]
+    fn the_native_modal_escape_wrapper_asks_to_dismiss_the_window() {
+        // The wrapper the NativeWindow arm splices around the modal's root:
+        // an unclaimed Escape reaching it must request the window's dismissal.
+        let mut tree = WidgetTree::new();
+        let content = tree.add(Button::new(lit!("Inside")));
+        let _root = wrap_native_modal_in_escape_route(&mut tree, content);
+        tree.layout(teksilo_canvas::SizeProposal::exact(300.0, 200.0));
+        tree.focus(content);
+        assert!(!tree.has_pending_modal_dismissal());
+
+        tree.press_key(
+            teksilo_core::event::Key::Escape,
+            teksilo_core::event::Modifiers::NONE,
+        );
+
+        assert!(
+            tree.has_pending_modal_dismissal(),
+            "an unclaimed Escape inside a native modal must ask to close its window"
         );
     }
 

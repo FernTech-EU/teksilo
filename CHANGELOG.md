@@ -214,6 +214,14 @@ by crate for clarity, not because crates version independently.
   `Dialog::new(label)`, not only an explicitly hand-built trigger, and the same
   shape affected `Snackbar` and a `PopoverWidget` over a custom trigger. The
   node now advertises `Action::Click` and acts on it.
+- **A modal presented as a native OS window honours its `ModalCloseBehavior`.**
+  Escape did nothing to it on macOS and Windows — including in the default
+  configuration, where `Dialog` asks for `EscapeOrClickOutside` and the
+  presentation resolves to a real window. The click-outside half stays
+  unavailable there, deliberately: the OS blocks the parent window while the
+  modal is up, so there is no outside to click, and `ClickOutside` now means
+  the same as `Manual` for that presentation. Linux and the BSDs were never
+  affected — they present modals in-tree, where Escape already worked.
 - **A screen reader can read the tables and blockquotes in a rich-text
   document.** Neither reached the accessibility tree at all: the walk over the
   document flow handled only ordinary blocks, so a table's cells and a
