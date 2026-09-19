@@ -308,26 +308,55 @@ pub fn find_project_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-/// The agents configured in this project.
-pub fn project_targets(root: &Path) -> Vec<Target> {
+/// One project-scope agent, with the marker that decides whether it is here.
+///
+/// Every project vendor, found or not, in the table's order — so the install
+/// list, the "nothing was written for these" report and `status` all read one
+/// list and cannot disagree about either the order or the detection rule.
+pub struct ProjectCandidate {
+    pub target: Target,
+    /// The path whose existence means "this agent is configured here".
+    pub marker_path: PathBuf,
+}
+
+impl ProjectCandidate {
+    /// `exists`, not `is_dir`: one marker (`AGENTS.md`) is a file.
+    pub fn detected(&self) -> bool {
+        self.marker_path.exists()
+    }
+}
+
+/// Every project vendor, detected or not.
+pub fn project_candidates(root: &Path) -> Vec<ProjectCandidate> {
     VENDORS
         .iter()
-        .filter(|(_, marker, _, _)| root.join(marker.trim_end_matches('/')).exists())
-        .map(|(agent, marker, path, form)| Target {
-            agent,
-            marker,
-            path: root.join(path),
-            form: *form,
+        .map(|(agent, marker, path, form)| ProjectCandidate {
+            target: Target {
+                agent,
+                marker,
+                path: root.join(path),
+                form: *form,
+            },
+            marker_path: root.join(marker.trim_end_matches('/')),
         })
+        .collect()
+}
+
+/// The agents configured in this project.
+pub fn project_targets(root: &Path) -> Vec<Target> {
+    project_candidates(root)
+        .into_iter()
+        .filter(ProjectCandidate::detected)
+        .map(|c| c.target)
         .collect()
 }
 
 /// The project-scope agents that were *not* found, for the closing report.
 pub fn project_undetected(root: &Path) -> Vec<(&'static str, &'static str)> {
-    VENDORS
-        .iter()
-        .filter(|(_, marker, _, _)| !root.join(marker.trim_end_matches('/')).exists())
-        .map(|(agent, marker, _, _)| (*agent, *marker))
+    project_candidates(root)
+        .into_iter()
+        .filter(|c| !c.detected())
+        .map(|c| (c.target.agent, c.target.marker))
         .collect()
 }
 
@@ -363,9 +392,15 @@ pub fn opencode_config(home: &Path) -> PathBuf {
 
 /// One user-scope agent, with the directory whose existence is the evidence
 /// that this agent is configured on this machine.
-struct UserCandidate {
-    target: Target,
-    dir: PathBuf,
+pub struct UserCandidate {
+    pub target: Target,
+    pub dir: PathBuf,
+}
+
+impl UserCandidate {
+    pub fn detected(&self) -> bool {
+        self.dir.is_dir()
+    }
 }
 
 /// Every user-scope agent this tool knows how to write for, found or not.
@@ -374,7 +409,7 @@ struct UserCandidate {
 /// pin them to a temporary directory instead of mutating process-wide
 /// environment variables, which two tests running concurrently in one process
 /// cannot do safely.
-fn user_candidates(home: &Path, vibe: &Path, opencode: &Path) -> Vec<UserCandidate> {
+pub fn user_candidates(home: &Path, vibe: &Path, opencode: &Path) -> Vec<UserCandidate> {
     vec![
         UserCandidate {
             target: Target {
@@ -425,7 +460,7 @@ pub fn user_targets(home: &Path) -> Vec<Target> {
 pub fn user_targets_in(home: &Path, vibe: &Path, opencode: &Path) -> Vec<Target> {
     user_candidates(home, vibe, opencode)
         .into_iter()
-        .filter(|c| c.dir.is_dir())
+        .filter(UserCandidate::detected)
         .map(|c| c.target)
         .collect()
 }
@@ -447,24 +482,70 @@ pub fn user_undetected_in(
 ) -> Vec<(&'static str, PathBuf)> {
     user_candidates(home, vibe, opencode)
         .into_iter()
-        .filter(|c| !c.dir.is_dir())
+        .filter(|c| !c.detected())
         .map(|c| (c.target.agent, c.dir))
         .collect()
 }
 
-/// Why `--user` reaches three agents and not eight.
+/// The agents with no user-level file this tool writes, and why not.
+///
+/// Data rather than prose because two commands need it: `setup --user` prints
+/// it as a closing note, and `status` renders each entry as an `n/a` row. A
+/// second hand-written copy is a second thing to forget.
+///
+/// Windsurf is the awkward member and is listed deliberately: it *does* keep a
+/// global file, and this tool still does not write it — one shared file with
+/// no delimiter convention is not somewhere to append unasked. Saying "n/a"
+/// without the reason would read as "Windsurf has nothing", which is false.
+pub const USER_NOT_APPLICABLE: &[(&str, &str)] = &[
+    (
+        "Cursor",
+        "user rules are edited in Customize → Rules, not stored as a file",
+    ),
+    (
+        "GitHub Copilot",
+        "personal instructions live in your github.com settings",
+    ),
+    (
+        "Windsurf",
+        "one global file, ~/.codeium/windsurf/memories/global_rules.md — paste the brief there by hand",
+    ),
+    (
+        "Codex / AGENTS.md",
+        "a repository-root AGENTS.md is per-repository by definition",
+    ),
+];
+
+/// Why `--user` reaches three agents and not seven.
 ///
 /// Printed rather than silently skipped, because "Cursor was not installed for
 /// you" and "Cursor has nowhere for this to go" are different facts and a user
 /// with Cursor open deserves the second one.
-pub const USER_SCOPE_NOTE: &str = "\
-The rest keep no user-level file this tool can write:
-  Cursor          user rules are edited in Customize → Rules, not stored as a file.
-  GitHub Copilot  personal instructions live in your github.com settings.
-  Windsurf        global rules are one file, ~/.codeium/windsurf/memories/global_rules.md
-                  — paste the project brief there by hand if you want it everywhere.
-  AGENTS.md       at a repository root is per-repository by definition.
-Run `cargo teksilo setup` inside each project for those four.";
+pub fn user_scope_note() -> String {
+    let mut out = String::from("The rest keep no user-level file this tool can write:\n");
+    for (agent, why) in USER_NOT_APPLICABLE {
+        out.push_str(&format!("  {agent:<18}{why}.\n"));
+    }
+    // Counted, not spelled: the last time a number in prose was typed by hand
+    // here it went stale the moment the list grew.
+    out.push_str(&format!(
+        "Run `cargo teksilo setup` inside each project for those {}.",
+        USER_NOT_APPLICABLE.len()
+    ));
+    out
+}
+
+/// What a written file is, and is not.
+///
+/// Shared by `setup` and `status` so the two cannot come to promise different
+/// things. Every line either command prints reports a file **on disk**;
+/// whether an agent then reads it is that agent's decision, and at least one
+/// will not straight away — Grok Build wants the folder trusted first, and any
+/// of them skips a gitignored instruction file without saying so.
+pub const ACTIVATION_CAVEAT: &str = "\
+These are files on disk. An agent picks them up on its own terms —\n\
+some ask you to trust the folder first, and a gitignored instruction\n\
+file is skipped silently.";
 
 /// Where the home directory is, if the platform will say.
 pub fn home_dir() -> Result<PathBuf, SetupError> {
@@ -504,18 +585,26 @@ pub struct Outcome {
     pub files: usize,
 }
 
+/// The whole contents of a file this tool owns outright.
+///
+/// A function rather than an inline `format!` so [`apply`] and [`inspect`]
+/// cannot drift about what "installed and current" means.
+fn own_file(frontmatter: &str) -> String {
+    format!("{frontmatter}\n{BRIEF}")
+}
+
 /// Read a file this tool shares with the project, for [`Form::Region`].
 ///
 /// A missing file is the empty one — `upsert_region` then appends, and
 /// `write_if_changed` reports it as created. Every *other* failure is an
-/// error, which is the whole reason this function exists.
+/// error, which is the whole point of this function existing.
 ///
-/// It replaced `read_to_string(..).unwrap_or_default()`, which mapped a decode
-/// failure onto "the file is empty" and so rewrote a project's `AGENTS.md`
-/// down to nothing but our own region. One byte of Latin-1 in a file this tool
-/// does not own was enough to destroy it, silently, while reporting success —
-/// against a module whose stated promise is that "a run after someone edits
-/// the rest of the file must leave their edit alone".
+/// It replaced `read_to_string(..).unwrap_or_default()`, which mapped a
+/// decode failure onto "the file is empty" and so rewrote a project's
+/// `AGENTS.md` down to nothing but our own region. One byte of Latin-1 in a
+/// file this tool does not own was enough to destroy it, silently, while
+/// reporting success — against a module whose stated promise is that "a run
+/// after someone edits the rest of the file must leave their edit alone".
 fn read_shared(path: &Path) -> Result<String, SetupError> {
     match std::fs::read(path) {
         Ok(bytes) => String::from_utf8(bytes).map_err(|_| SetupError::NotUtf8(path.to_path_buf())),
@@ -529,8 +618,7 @@ pub fn apply(target: &Target) -> Result<Outcome, SetupError> {
     let (change, files) = match target.form {
         Form::Skill => install_skill(&target.path)?,
         Form::OwnFile { frontmatter } => {
-            let content = format!("{frontmatter}\n{BRIEF}");
-            (write_if_changed(&target.path, &content)?, 1)
+            (write_if_changed(&target.path, &own_file(frontmatter))?, 1)
         }
         Form::Region => {
             let existing = read_shared(&target.path)?;
@@ -544,6 +632,159 @@ pub fn apply(target: &Target) -> Result<Outcome, SetupError> {
         change,
         files,
     })
+}
+
+/// Whether this tool's own content is at a target, and whether it is current.
+///
+/// The contract, which the `inspect_matches_apply` test pins for every form:
+/// **`inspect` returns [`Current`](Presence::Current) exactly when `apply`
+/// would return [`Change::Unchanged`]**. That equivalence is the whole point
+/// of the type — `status` is the dry run of `setup`, and a status that
+/// computed "installed" its own way would eventually disagree with the
+/// command it claims to predict.
+///
+/// The other two are not symmetrical with `Change`, and deliberately so:
+/// [`Absent`](Presence::Absent) becomes `Created` for a file that does not
+/// exist but `Updated` for one that exists without our region. `Presence`
+/// describes *our* content; `Change` describes the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presence {
+    /// Byte-for-byte what this build writes.
+    Current,
+    /// Ours, but not this build's — an older release wrote it.
+    Stale,
+    /// Nothing of ours is here.
+    Absent,
+    /// `apply` would fail here rather than install: the reason, in a phrase.
+    ///
+    /// Distinct from `Absent` because the two lead somewhere different. An
+    /// absent brief is installed by running `setup`; a blocked one is not, and
+    /// reporting it as merely missing would send a reader to a command that
+    /// will refuse — the same "advice that does nothing" this type exists to
+    /// prevent.
+    Blocked(&'static str),
+}
+
+/// What [`apply`] would find, without writing anything.
+///
+/// Every arm mirrors the corresponding arm of `apply` and shares its content
+/// computation, so the two are one decision expressed twice rather than two
+/// decisions that happen to agree today.
+pub fn inspect(target: &Target) -> Presence {
+    match target.form {
+        Form::Skill => inspect_skill(&target.path),
+        Form::OwnFile { frontmatter } => match std::fs::read(&target.path) {
+            Ok(current) if current == own_file(frontmatter).as_bytes() => Presence::Current,
+            // A file at our exclusive path that is not what we write is ours
+            // from an older release. Nothing else puts a file there.
+            Ok(_) => Presence::Stale,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Presence::Absent,
+            // A directory at the path, or no permission: `apply` errors here,
+            // so claiming "not installed, run setup" would be false advice.
+            Err(_) => Presence::Blocked("cannot be read"),
+        },
+        Form::Region => {
+            let existing = match read_shared(&target.path) {
+                Ok(text) => text,
+                Err(SetupError::NotUtf8(_)) => return Presence::Blocked("is not valid UTF-8"),
+                Err(_) => return Presence::Blocked("cannot be read"),
+            };
+            // The marker, not the file, is the evidence: this file belongs to
+            // the project and usually exists without us having written a word.
+            if !existing.contains(BEGIN) {
+                return Presence::Absent;
+            }
+            if existing == upsert_region(&existing, &region_block()) {
+                Presence::Current
+            } else {
+                Presence::Stale
+            }
+        }
+    }
+}
+
+/// [`inspect`] for a skill tree: current iff every file matches and no strays.
+fn inspect_skill(dest: &Path) -> Presence {
+    if !dest.exists() {
+        return Presence::Absent;
+    }
+    let mut wanted = Vec::new();
+    collect(&SKILL, Path::new(""), &mut wanted);
+
+    let mut any = false;
+    let mut all = true;
+    for (relative, bytes) in &wanted {
+        match std::fs::read(dest.join(relative)) {
+            Ok(current) if current == *bytes => any = true,
+            _ => all = false,
+        }
+    }
+    if !any {
+        // A directory of this name holding none of our files is not a stale
+        // install — it is somebody else's directory, and saying "installed,
+        // outdated" about it would be a claim we have no evidence for.
+        return Presence::Absent;
+    }
+
+    let keep: Vec<&Path> = wanted.iter().map(|(p, _)| p.as_path()).collect();
+    if all && !has_strays(dest, dest, &keep) {
+        Presence::Current
+    } else {
+        Presence::Stale
+    }
+}
+
+/// The read-only twin of [`remove_strays`]: is there a file we would delete?
+///
+/// Files only, matching `remove_strays`, which prunes an emptied directory but
+/// does not count it as a change — so an empty leftover directory must not
+/// make this report `Stale` either, or `status` would advertise work that
+/// `setup` would then report as `unchanged`.
+fn has_strays(root: &Path, dir: &Path, keep: &[&Path]) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        // Cannot look, so cannot claim there is nothing. `Current` means
+        // "verified identical"; an unreadable subtree is not that.
+        return true;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if has_strays(root, &path, keep) {
+                return true;
+            }
+        } else if let Ok(relative) = path.strip_prefix(root)
+            && !is_wanted(relative, keep)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether a file found on disk is one the embedded skill ships.
+///
+/// Case-**insensitive**, which is the safe direction rather than the tidy one.
+///
+/// The skill is written with `fs::write(dest.join("SKILL.md"))` and audited
+/// with `read_dir`. On a case-insensitive filesystem — APFS and NTFS, so most
+/// desktops — those two disagree: the write resolves onto an existing
+/// `skill.md`, while `read_dir` still reports the entry under the case stored
+/// on disk. An exact `Path` comparison therefore classified a file we had
+/// *just written* as a leftover and deleted it, leaving the skill with no
+/// `SKILL.md` while `apply` reported `Updated`, and `status` had sent the user
+/// there by calling the install stale.
+///
+/// Folding can only err the other way, and only on a case-sensitive
+/// filesystem: a genuine leftover whose name differs from a shipped file's by
+/// case alone survives a reinstall. A stale file kept is recoverable. A live
+/// file deleted is not.
+///
+/// ASCII folding is enough because every shipped path is ASCII, and a fold
+/// that guessed at non-ASCII case would be a second way to be wrong.
+fn is_wanted(relative: &Path, keep: &[&Path]) -> bool {
+    let found = relative.as_os_str().to_string_lossy();
+    keep.iter()
+        .any(|k| k.as_os_str().to_string_lossy().eq_ignore_ascii_case(&found))
 }
 
 /// Write `content` only when it differs, so a re-run is a genuine no-op.
@@ -616,31 +857,6 @@ fn collect<'a>(dir: &Dir<'a>, prefix: &Path, out: &mut Vec<(PathBuf, &'a [u8])>)
         let name = sub.path().file_name().unwrap_or_default();
         collect(sub, &prefix.join(name), out);
     }
-}
-
-/// Whether a file found on disk is one the embedded skill ships.
-///
-/// Case-**insensitive**, which is the safe direction rather than the tidy one.
-///
-/// The skill is written with `fs::write(dest.join("SKILL.md"))` and audited
-/// with `read_dir`. On a case-insensitive filesystem — APFS and NTFS, so most
-/// desktops — those two disagree: the write resolves onto an existing
-/// `skill.md`, while `read_dir` still reports the entry under the case stored
-/// on disk. An exact `Path` comparison therefore classified a file we had
-/// *just written* as a leftover and deleted it, leaving the skill with no
-/// `SKILL.md` while `apply` reported `Updated`.
-///
-/// Folding can only err the other way, and only on a case-sensitive
-/// filesystem: a genuine leftover whose name differs from a shipped file's by
-/// case alone survives a reinstall. A stale file kept is recoverable. A live
-/// file deleted is not.
-///
-/// ASCII folding is enough because every shipped path is ASCII, and a fold
-/// that guessed at non-ASCII case would be a second way to be wrong.
-fn is_wanted(relative: &Path, keep: &[&Path]) -> bool {
-    let found = relative.as_os_str().to_string_lossy();
-    keep.iter()
-        .any(|k| k.as_os_str().to_string_lossy().eq_ignore_ascii_case(&found))
 }
 
 /// Delete anything under `dir` the embedded skill no longer ships.
@@ -960,6 +1176,10 @@ mod tests {
             .unwrap();
 
         assert!(
+            matches!(inspect(&target), Presence::Blocked(_)),
+            "an undecodable shared file is not `Absent` — setup cannot install here"
+        );
+        assert!(
             matches!(apply(&target), Err(SetupError::NotUtf8(_))),
             "setup must refuse rather than rewrite a file it cannot read whole"
         );
@@ -982,13 +1202,16 @@ mod tests {
             .unwrap();
         std::fs::remove_file(&target.path).unwrap();
 
+        assert_eq!(inspect(&target), Presence::Absent);
         assert_eq!(apply(&target).unwrap().change, Change::Created);
+        assert_eq!(inspect(&target), Presence::Current);
     }
 
     #[test]
     fn a_differently_cased_skill_file_is_not_deleted() {
-        // Found by review and reproduced against the real binary on APFS: a
-        // reinstall DELETED SKILL.md and reported success. The write resolves
+        // Found by review and reproduced against the real binary on APFS:
+        // `status` called the install stale, and the `setup` it recommended
+        // then DELETED SKILL.md and reported success. The write resolves
         // case-insensitively onto the existing entry; `read_dir` reports the
         // case on disk; an exact comparison called it a stray.
         let t = temp();
@@ -1022,8 +1245,177 @@ mod tests {
 
         let stray = target.path.join("reference/from_an_older_release.md");
         std::fs::write(&stray, b"x").unwrap();
+        assert_eq!(inspect(&target), Presence::Stale);
         assert_eq!(apply(&target).unwrap().change, Change::Updated);
         assert!(!stray.exists(), "a genuine leftover is still pruned");
+    }
+
+    // --- inspect is the dry run of apply -----------------------------------
+
+    /// Every project form, for the equivalence test below.
+    fn one_of_each_form(root: &Path) -> Vec<Target> {
+        std::fs::create_dir_all(root.join(".claude")).unwrap();
+        std::fs::create_dir_all(root.join(".cursor")).unwrap();
+        std::fs::write(root.join("AGENTS.md"), "# Ours\n\nKeep this.\n").unwrap();
+        let targets = project_targets(root);
+        let forms: Vec<Form> = targets.iter().map(|t| t.form).collect();
+        assert!(forms.contains(&Form::Skill), "need a Skill target");
+        assert!(forms.contains(&Form::Region), "need a Region target");
+        assert!(
+            forms.iter().any(|f| matches!(f, Form::OwnFile { .. })),
+            "need an OwnFile target"
+        );
+        targets
+    }
+
+    #[test]
+    fn inspect_matches_apply() {
+        // The contract `Presence` exists for: `status` predicts `setup`.
+        // Checked for every form, in all three of the states a target can be
+        // in — nothing there, an older release's content, and current.
+        let t = temp();
+        let targets = one_of_each_form(t.path());
+
+        for target in &targets {
+            assert_eq!(
+                inspect(target),
+                Presence::Absent,
+                "{}: nothing of ours is installed yet",
+                target.agent
+            );
+        }
+
+        for target in &targets {
+            let change = apply(target).unwrap().change;
+            assert_ne!(change, Change::Unchanged, "{}: first write", target.agent);
+            assert_eq!(
+                inspect(target),
+                Presence::Current,
+                "{}: current immediately after apply",
+                target.agent
+            );
+            // The equivalence, stated directly.
+            assert_eq!(
+                apply(target).unwrap().change,
+                Change::Unchanged,
+                "{}: apply agrees it is current",
+                target.agent
+            );
+        }
+    }
+
+    #[test]
+    fn an_older_releases_content_inspects_as_stale_for_every_form() {
+        let t = temp();
+        let targets = one_of_each_form(t.path());
+        for target in &targets {
+            apply(target).unwrap();
+        }
+
+        for target in &targets {
+            match target.form {
+                Form::Skill => {
+                    std::fs::write(target.path.join("SKILL.md"), b"from 0.9").unwrap();
+                }
+                Form::OwnFile { .. } => {
+                    std::fs::write(&target.path, b"from 0.9").unwrap();
+                }
+                Form::Region => {
+                    let stale = format!("# Ours\n\n{BEGIN}\nfrom 0.9\n{END}\n");
+                    std::fs::write(&target.path, stale).unwrap();
+                }
+            }
+            assert_eq!(
+                inspect(target),
+                Presence::Stale,
+                "{}: an older release's content",
+                target.agent
+            );
+            // And `apply` calls the same situation a change, not a no-op.
+            assert_eq!(
+                apply(target).unwrap().change,
+                Change::Updated,
+                "{}: apply rewrites it",
+                target.agent
+            );
+        }
+    }
+
+    #[test]
+    fn a_stray_file_makes_the_skill_stale_but_an_empty_directory_does_not() {
+        // `remove_strays` prunes an emptied directory WITHOUT counting it as a
+        // change, so `has_strays` must ignore one too — otherwise `status`
+        // advertises work that `setup` then reports as `unchanged`.
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".claude")).unwrap();
+        let target = project_targets(t.path()).remove(0);
+        apply(&target).unwrap();
+        assert_eq!(inspect(&target), Presence::Current);
+
+        std::fs::create_dir_all(target.path.join("leftover")).unwrap();
+        assert_eq!(
+            inspect(&target),
+            Presence::Current,
+            "an empty leftover directory is not a change apply would report"
+        );
+        assert_eq!(apply(&target).unwrap().change, Change::Unchanged);
+
+        std::fs::write(target.path.join("from_0_9.md"), b"x").unwrap();
+        assert_eq!(inspect(&target), Presence::Stale);
+        assert_eq!(apply(&target).unwrap().change, Change::Updated);
+    }
+
+    #[test]
+    fn a_shared_file_without_our_markers_is_absent_not_stale() {
+        // AGENTS.md usually exists before this tool ever runs. Calling that
+        // "an outdated teksilo install" would be a claim with no evidence.
+        let t = temp();
+        std::fs::write(t.path().join("AGENTS.md"), "# Someone else's\n").unwrap();
+        let target = project_targets(t.path())
+            .into_iter()
+            .find(|t| t.form == Form::Region)
+            .unwrap();
+        assert_eq!(inspect(&target), Presence::Absent);
+    }
+
+    #[test]
+    fn a_foreign_directory_at_the_skill_path_is_absent_not_stale() {
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".claude/skills/teksilo")).unwrap();
+        std::fs::write(
+            t.path().join(".claude/skills/teksilo/unrelated.md"),
+            b"not ours",
+        )
+        .unwrap();
+        let target = project_targets(t.path()).remove(0);
+        assert_eq!(inspect(&target), Presence::Absent);
+    }
+
+    #[test]
+    fn inspect_writes_nothing() {
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".cursor")).unwrap();
+        let target = project_targets(t.path()).remove(0);
+        assert_eq!(inspect(&target), Presence::Absent);
+        assert!(
+            !t.path().join(".cursor/rules").exists(),
+            "inspecting must not create the directory apply would"
+        );
+    }
+
+    #[test]
+    fn the_user_scope_note_lists_every_not_applicable_agent() {
+        // The note is rendered from the table `status` renders its n/a rows
+        // from, so the two can never list different agents.
+        let note = user_scope_note();
+        for (agent, why) in USER_NOT_APPLICABLE {
+            assert!(note.contains(agent), "note omits {agent}");
+            assert!(note.contains(why), "note omits why for {agent}");
+        }
+        assert!(
+            note.contains(&format!("those {}", USER_NOT_APPLICABLE.len())),
+            "the count must be derived, not typed: {note}"
+        );
     }
 
     // --- writing -----------------------------------------------------------

@@ -89,6 +89,7 @@ cargo teksilo probe                  # write the probe harness into scripts/teks
 cargo teksilo setup                  # probe + brief every agent configured in the project
 cargo teksilo setup -y --no-model    # …without the prompt, without the encoder download
 cargo teksilo setup --user           # …into $HOME instead — the ONLY mode that writes it
+cargo teksilo status                 # what is installed, both scopes + the search model (read-only)
 cargo teksilo build-vectors          # MAINTAINER ONLY: re-encode the corpus (see below)
 ```
 

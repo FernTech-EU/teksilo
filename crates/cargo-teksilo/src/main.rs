@@ -16,6 +16,7 @@ mod resolve;
 mod search;
 mod setup;
 mod show;
+mod status;
 mod symbol;
 mod vectors;
 
@@ -170,6 +171,14 @@ enum Command {
         no_model: bool,
     },
 
+    /// Report what is installed — this project, this user, the search model.
+    ///
+    /// The dry run of `setup`: every agent row is computed by the same code
+    /// that decides whether a write is needed, so the two cannot come to
+    /// disagree about what "installed" means. Writes nothing, and its exit
+    /// code does not depend on what it finds.
+    Status,
+
     /// Print this tool's version and the app's resolved teksilo.
     ///
     /// Use it when a command refuses: it shows the versions being compared.
@@ -206,6 +215,10 @@ fn main() -> ExitCode {
     };
 
     match cli.command {
+        Command::Status => {
+            status::report(&dir);
+            ExitCode::SUCCESS
+        }
         Command::Version => cmd_version(&dir),
         Command::Symbol { args } => cmd_symbol(&dir, &args),
         Command::Search {
@@ -644,7 +657,7 @@ fn cmd_setup(dir: &Path, force: bool, yes: bool, user: bool, no_model: bool) -> 
                 }
                 println!("Run the agent once so it creates that directory, then re-run this.");
             }
-            println!("\n{}", setup::USER_SCOPE_NOTE);
+            println!("\n{}", setup::user_scope_note());
         }
     }
 
@@ -670,6 +683,7 @@ fn cmd_setup(dir: &Path, force: bool, yes: bool, user: bool, no_model: bool) -> 
          \x20 cargo teksilo symbol <Name>      exact public API of a type, at the pinned version\n\
          \x20 cargo teksilo search \"<query>\"   the guides and worked examples\n\
          \x20 cargo teksilo show <path>        one of them in full, offline — not from GitHub\n\
+         \x20 cargo teksilo status             what is installed, here and for you\n\
          \x20 cargo teksilo probe              rewrite the automation harness\n\
          \x20 cargo teksilo setup              this command"
     );

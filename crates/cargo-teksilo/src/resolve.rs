@@ -123,16 +123,34 @@ pub enum ResolveError {
 /// `dir` is normally the current directory; it is a parameter so tests can
 /// point at a fixture app without changing the process's working directory.
 pub fn resolve(dir: &Path) -> Result<Resolution, ResolveError> {
-    let metadata = run_cargo_metadata(dir)?;
+    let metadata = run_cargo_metadata(dir, false)?;
     resolution_from_metadata(&metadata)
 }
 
-fn run_cargo_metadata(dir: &Path) -> Result<serde_json::Value, ResolveError> {
+/// [`resolve`], guaranteed not to write.
+///
+/// `cargo metadata` **resolves**, and resolving writes: with no `Cargo.lock`
+/// it creates one, and with a stale one it rewrites it. That is right for
+/// `symbol` and `search`, which are about to answer a question that needs a
+/// resolved graph — but `status` promises to report without touching
+/// anything, and a command that silently created a lockfile in someone's
+/// repository would be breaking its own headline claim.
+///
+/// `--locked` is the whole fix: cargo refuses rather than writes. A project
+/// with no lockfile therefore gets an honest "unknown" instead of a lockfile
+/// it did not ask for.
+pub fn resolve_locked(dir: &Path) -> Result<Resolution, ResolveError> {
+    let metadata = run_cargo_metadata(dir, true)?;
+    resolution_from_metadata(&metadata)
+}
+
+fn run_cargo_metadata(dir: &Path, locked: bool) -> Result<serde_json::Value, ResolveError> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let out = Command::new(cargo)
-        .args(["metadata", "--format-version", "1", "--quiet"])
-        .current_dir(dir)
-        .output()?;
+    let mut args = vec!["metadata", "--format-version", "1", "--quiet"];
+    if locked {
+        args.push("--locked");
+    }
+    let out = Command::new(cargo).args(&args).current_dir(dir).output()?;
     if !out.status.success() {
         return Err(ResolveError::Metadata(
             String::from_utf8_lossy(&out.stderr).trim().to_string(),

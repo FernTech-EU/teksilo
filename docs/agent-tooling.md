@@ -37,6 +37,7 @@ cargo teksilo search "<query>"   # the guides and worked examples
 cargo teksilo show <path>        # one of them in full, offline
 cargo teksilo probe [--force]    # write the automation harness into the project
 cargo teksilo setup [-y] [--user] # probe + brief every agent configured here
+cargo teksilo status             # what is installed — both scopes, and the model
 cargo teksilo version            # this tool, and the app's resolved Teksilo
 ```
 
@@ -200,6 +201,64 @@ Four properties worth relying on:
 If the encoder fetch fails — offline, proxy, unsupported target — that is a
 **warning** and setup still succeeds: `search` degrades to BM25 by design (§5).
 Under `--no-default-features` there is no encoder to fetch and it says so.
+
+### `status`
+
+What is installed, in **both** scopes, plus the search model. Reads only, and
+its exit code never depends on what it finds.
+
+```console
+$ cargo teksilo status
+cargo-teksilo 0.12.1
+app resolved teksilo 0.12.1
+
+Project  /Users/me/myapp
+  Claude Code        here      .claude/skills/teksilo/
+  Cursor             not here  no .cursor/
+  GitHub Copilot     not here  .github/ is here, brief is not
+  Codex / AGENTS.md  here      AGENTS.md — from another release, re-run setup
+
+User  /Users/me
+  Claude Code        here      .claude/skills/teksilo/
+  Mistral Vibe       not here  no .vibe/
+  Cursor             n/a       user rules are edited in Customize → Rules, not stored as a file
+
+Search encoder  BAAI/bge-small-en-v1.5 (384 dimensions)
+  model              here      /Users/me/Library/Caches/teksilo/fastembed (127.6 MB on disk)
+```
+
+Three things it is built to get right:
+
+- **It is the dry run of `setup`, not a second opinion.** Every agent row comes
+  from `setup::inspect`, the read-only twin of the function that decides whether
+  a write is needed; they share their content computation, and a test pins the
+  equivalence *`inspect` says current ⟺ `setup` would report `unchanged`* for
+  every form. A status that computed "installed" its own way would eventually
+  disagree with the command it claims to predict.
+- **The state is one column and the reason is another.** Three words cannot
+  carry the difference between *Cursor is not used in this project* and *Cursor
+  is used here and has no brief* — and that difference is the whole of what to
+  do next. So `not here` is followed by either `no .cursor/` or `.cursor/ is
+  here, brief is not`. For the same reason an install from an older release
+  still reads **`here`**: it is being read right now. It just is not what this
+  build writes, and the detail column says so.
+- **`n/a` always says why.** A bare `n/a` beside Windsurf would read as
+  "Windsurf has nothing", which is false — it keeps a global file this tool
+  declines to write, and the row says that. The reasons come from the same
+  table `setup --user` prints its closing note from, so the two can never come
+  to list different agents.
+
+"Reads only" is enforced, not asserted: it asks cargo for the resolved version
+with `--locked`, because plain `cargo metadata` *resolves*, and resolving
+writes — it creates a missing `Cargo.lock` and rewrites a stale one. A project
+without an up-to-date lockfile gets an honest `unknown` instead.
+
+It is its own command rather than `setup --status` because it reports on both
+scopes at once while `setup` is scope-*selected* (`--user` xor the project) —
+a flag that changed which scopes the command considers would be a second
+command wearing the first one's name. Keeping the read-only thing out of a
+writing command's flag space also means there is no `--status -y` to reason
+about, and no way for a mistyped status invocation to edit `$HOME`.
 
 ---
 

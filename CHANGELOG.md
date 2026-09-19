@@ -72,6 +72,21 @@ by crate for clarity, not because crates version independently.
     are idempotent: a second run reports `unchanged` and leaves the shared files
     byte for byte, including whatever the project wrote outside the markers.
 
+    Two things it refuses to do, both found by adversarially reviewing the
+    command against itself and reproduced before being fixed. It **will not
+    rewrite a shared file it cannot read whole**: `AGENTS.md` and
+    `copilot-instructions.md` belong to the project, and reading them with
+    `read_to_string(..).unwrap_or_default()` turned "cannot decode" into "the
+    file is empty" — one Latin-1 byte was enough for `setup -y` to replace a
+    project's rules with nothing but its own region, silently, reporting
+    success. It now stops and names the file. And its stray-pruning compares
+    filenames **case-insensitively**: the skill is written through
+    `fs::write` but audited through `read_dir`, and on APFS or NTFS those
+    disagree about case, so an exact comparison classified a file it had just
+    written as a leftover and deleted it — leaving a skill with no `SKILL.md`
+    while reporting `updated`. Folding can only err towards keeping a stale
+    file, which is recoverable; deleting a live one is not.
+
     In user scope it reaches three agents — Claude Code (`~/.claude/skills/`),
     Mistral Vibe (`~/.vibe/AGENTS.md`, or `$VIBE_HOME`) and opencode
     (`~/.config/opencode/AGENTS.md`, or `$XDG_CONFIG_HOME`) — each **gated on
@@ -87,6 +102,43 @@ by crate for clarity, not because crates version independently.
     global rules are one file at
     `~/.codeium/windsurf/memories/global_rules.md`, and a repository-root
     `AGENTS.md` is per-repository by definition.
+
+  **`cargo teksilo status`** reports what is actually installed — every agent, in
+    both the project and the user scope, plus the search model and where it sits
+    on disk. It reads only, and its exit code never depends on what it finds.
+
+    It is the **dry run of `setup`**, not a second opinion: every agent row comes
+    from `setup::inspect`, the read-only twin of the function that decides
+    whether a write is needed, and the two share their content computation. A
+    test pins the equivalence for every form — *`inspect` reports current exactly
+    when `setup` would report `unchanged`* — because a status that computed
+    "installed" its own way would eventually disagree with the command it claims
+    to predict, and the disagreement would surface as a user following advice
+    that does nothing.
+
+    Three words (`here` / `not here` / `n/a`) and a reason beside each, because
+    three words cannot carry the difference between *Cursor is not used in this
+    project* and *Cursor is used here and has no brief*, and that difference is
+    the whole of what to do next. An install from an older release reads `here`,
+    since it is being read right now, with "from another release" in the detail —
+    calling it anything else would be false. And `n/a` always says why: a bare
+    one beside Windsurf would read as "Windsurf has nothing", when in fact it
+    keeps a global file this tool declines to write.
+
+    Its own command rather than `setup --status`: it reports on both scopes while
+    `setup` is scope-selected, so the flag would have to mean something the
+    unflagged command does not. Keeping the read-only thing out of a writing
+    command's flag space also leaves no `--status -y` to reason about.
+
+    "Reads only" is enforced rather than asserted. It asks cargo for the
+    resolved version through `--locked`, because plain `cargo metadata`
+    *resolves* — it creates a missing `Cargo.lock` and rewrites a stale one,
+    which a command whose headline claim is that it touches nothing must not
+    do. A project without an up-to-date lockfile therefore gets an honest
+    "unknown" rather than a lockfile it never asked for. Paths reaching the
+    report from `$VIBE_HOME`, `$XDG_CONFIG_HOME` or the working directory have
+    their control characters escaped, so a newline in one cannot split a row
+    and let its tail pose as another agent's line.
 
   Version binding is the design constraint, not a detail. The tool reads the
   app's `Cargo.lock`, and a minor or major mismatch **refuses** with the exact
