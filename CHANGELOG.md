@@ -45,8 +45,48 @@ by crate for clarity, not because crates version independently.
     on it. Generated files are checksummed: a local edit is reported rather
     than silently overwritten, and your own probes live outside the generated
     tree and are never touched.
-  - `cargo teksilo setup` — the above, plus installing the Teksilo skill
-    wherever the agents on this machine already look for one.
+  - `cargo teksilo setup` — the above, plus the Teksilo briefing for **every
+    coding agent this project already configures, each in that agent's own
+    format**: the full four-file skill into `.claude/skills/teksilo/` where it
+    is native, and a self-contained ~40-line brief into
+    `.cursor/rules/teksilo.mdc` (MDC frontmatter), `.windsurf/rules/teksilo.md`
+    (`trigger:` frontmatter), `.github/copilot-instructions.md` and `AGENTS.md`
+    (each a `<!-- BEGIN teksilo -->` region) where it is not. These tools share no
+    format, so copying the skill directory into `.cursor/` would accomplish
+    nothing; the brief never refers to the skill, which on those machines is
+    not installed. It also pre-fetches the search encoder (~129 MB, into the
+    per-user cache, `--no-model` to skip), so the first `search` does not stall
+    on a download — and a failed fetch is a warning, because `search` degrades
+    to BM25 by design.
+
+    Three things it now refuses to do. It **never writes `$HOME` from project
+    scope** — the previous version silently installed into `~/.claude/skills/`
+    when the project had no `.claude/` of its own, a machine-wide change from a
+    project-scoped command; `--user` is now the only path that reaches the home
+    directory. It **never prompts where nobody can answer**: with no terminal on
+    stdin the question is an error naming the flag that would have skipped it
+    (`-y`, or `--user` when there is no `Cargo.toml` anywhere above the working
+    directory), because CI and agents run this and a hang is worse than a
+    failure. And it **never writes before showing the plan** — every path, every
+    detected vendor, and the download with its size, then a confirmation. Runs
+    are idempotent: a second run reports `unchanged` and leaves the shared files
+    byte for byte, including whatever the project wrote outside the markers.
+
+    In user scope it reaches three agents — Claude Code (`~/.claude/skills/`),
+    Mistral Vibe (`~/.vibe/AGENTS.md`, or `$VIBE_HOME`) and opencode
+    (`~/.config/opencode/AGENTS.md`, or `$XDG_CONFIG_HOME`) — each **gated on
+    its directory already existing**, so a home directory gains no config
+    directory for a tool that was never run. Both environment overrides are
+    honoured: Vibe relocates its entire state directory through `VIBE_HOME`, so
+    writing the default path for a user who moved theirs would leave a file
+    nothing reads. What was not found is reported with the path that was
+    checked, not with a label that would send a relocated install looking in
+    the wrong place. The rest have nowhere to go, which is likewise reported
+    rather than silently narrowed: Cursor's user rules are edited in its
+    settings UI, Copilot's personal instructions live on github.com, Windsurf's
+    global rules are one file at
+    `~/.codeium/windsurf/memories/global_rules.md`, and a repository-root
+    `AGENTS.md` is per-repository by definition.
 
   Version binding is the design constraint, not a detail. The tool reads the
   app's `Cargo.lock`, and a minor or major mismatch **refuses** with the exact

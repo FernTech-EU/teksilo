@@ -302,6 +302,74 @@ impl Encoder {
 }
 
 // ---------------------------------------------------------------------------
+// Warming the cache
+// ---------------------------------------------------------------------------
+
+/// Roughly what the weights cost to fetch, for a plan that offers to do it.
+///
+/// A number in a plan is a promise, so it is stated once here rather than
+/// retyped wherever a prompt needs it.
+pub const ENCODER_DOWNLOAD_MB: u32 = 129;
+
+/// Fetch the encoder now, so the first `search` does not stall on it.
+///
+/// Loading **is** the download: fastembed pulls the ONNX weights into
+/// [`model_cache_dir`] while constructing the model, so building one and
+/// dropping it leaves exactly the cache a later query wants. A separate
+/// "download" entry point would be a second route to the same bytes, free to
+/// disagree with the one `search` actually takes.
+///
+/// Progress is shown: this is an interactive one-off that moves ~129 MB, and a
+/// silent two-minute pause reads as a hang.
+#[cfg(feature = "semantic")]
+pub fn prefetch_encoder() -> Result<std::path::PathBuf, EncoderError> {
+    drop(Encoder::load(true)?);
+    Ok(model_cache_dir())
+}
+
+/// The no-encoder build's pre-fetch: nothing to fetch, and it says so.
+#[cfg(not(feature = "semantic"))]
+pub fn prefetch_encoder() -> Result<std::path::PathBuf, EncoderError> {
+    Err(EncoderError::NotCompiledIn)
+}
+
+/// Where the weights would land — `None` when this build has no encoder.
+#[cfg(feature = "semantic")]
+pub fn encoder_cache_dir() -> Option<std::path::PathBuf> {
+    Some(model_cache_dir())
+}
+
+#[cfg(not(feature = "semantic"))]
+pub fn encoder_cache_dir() -> Option<std::path::PathBuf> {
+    None
+}
+
+/// Whether the weights are already on disk.
+///
+/// A plan must not offer to download 129 MB that is already there. The probe
+/// is "any `.onnx` under the cache directory" rather than a guess at
+/// fastembed's internal directory layout, which is its own to change: a false
+/// negative costs one no-op re-check, a false positive would be a lie in a
+/// plan.
+pub fn encoder_is_cached() -> bool {
+    fn has_onnx(dir: &std::path::Path) -> bool {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        entries.flatten().any(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                has_onnx(&path)
+            } else {
+                path.extension().is_some_and(|ext| ext == "onnx")
+            }
+        })
+    }
+
+    encoder_cache_dir().is_some_and(|dir| has_onnx(&dir))
+}
+
+// ---------------------------------------------------------------------------
 // `cargo teksilo build-vectors`
 // ---------------------------------------------------------------------------
 

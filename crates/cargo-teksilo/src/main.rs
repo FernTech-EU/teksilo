@@ -132,15 +132,42 @@ enum Command {
         force: bool,
     },
 
-    /// Probe, plus install the teksilo skill where agents look for one.
+    /// Set this project up for the coding agents configured in it.
     ///
-    /// Only directories that already exist are used: installing a skill where
-    /// nothing reads it is indistinguishable from not installing it, except
-    /// that it reports success.
+    /// Writes the probe harness, hands every detected agent the teksilo
+    /// briefing in *that agent's own format* — the full skill where it is
+    /// native, a self-contained condensed brief everywhere else — and fetches
+    /// the search encoder so the first `search` does not stall on it.
+    ///
+    /// Only directories that already exist are used: instructions installed
+    /// where nothing reads them are indistinguishable from none, except that
+    /// they report success. The plan is printed before anything is written.
     Setup {
-        /// Passed through to `probe`.
+        /// Overwrite generated probe files you have edited.
         #[arg(long)]
         force: bool,
+
+        /// Write the plan without asking first.
+        ///
+        /// Required non-interactively: with no terminal on stdin there is
+        /// nobody to answer, and blocking on input that cannot come is worse
+        /// than failing.
+        #[arg(short = 'y', long)]
+        yes: bool,
+
+        /// Install for this user instead of this project.
+        ///
+        /// The only mode that writes `$HOME`. Project scope never does, not
+        /// even as a fallback when the project has no agent directory.
+        #[arg(long)]
+        user: bool,
+
+        /// Skip the one-off encoder download.
+        ///
+        /// `search` still answers without it — it degrades to BM25, which is
+        /// the same thing that happens when the download fails.
+        #[arg(long)]
+        no_model: bool,
     },
 
     /// Print this tool's version and the app's resolved teksilo.
@@ -208,8 +235,13 @@ fn main() -> ExitCode {
         Command::Show { path, lines, list } => {
             cmd_show(&dir, &show::ShowRequest { path, lines, list })
         }
-        Command::Probe { force } => cmd_probe(&dir, force, false),
-        Command::Setup { force } => cmd_probe(&dir, force, true),
+        Command::Probe { force } => cmd_probe(&dir, force),
+        Command::Setup {
+            force,
+            yes,
+            user,
+            no_model,
+        } => cmd_setup(&dir, force, yes, user, no_model),
         Command::BuildVectors { corpus } => {
             let mut argv = Vec::new();
             if let Some(path) = corpus {
@@ -303,86 +335,357 @@ fn cmd_build_vectors(dir: &Path, args: &[String]) -> ExitCode {
     }
 }
 
-/// `probe`, and with `also_skill` the rest of `setup`.
+/// `probe` — the automation harness, version-matched to the app.
 ///
-/// Both refuse on a version mismatch for the same reason `symbol` does: a
-/// harness written for a teksilo the app did not resolve drives a bridge whose
-/// protocol it may not speak, and fails with a symptom naming neither version.
-fn cmd_probe(dir: &Path, force: bool, also_skill: bool) -> ExitCode {
-    let resolution = match resolve::resolve(dir) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("{e}");
+/// Refuses on a version mismatch for the same reason `symbol` does: a harness
+/// written for a teksilo the app did not resolve drives a bridge whose protocol
+/// it may not speak, and fails with a symptom naming neither version.
+fn cmd_probe(dir: &Path, force: bool) -> ExitCode {
+    let version = match resolved_for_probe(dir) {
+        Ok(v) => v,
+        Err(ProbeBlock::Refused(message) | ProbeBlock::Unresolved(message)) => {
+            eprintln!("{message}");
             return ExitCode::FAILURE;
         }
     };
-
-    let verdict = guard::check(&resolution.version);
-    if !verdict.may_answer() {
-        let guard::Verdict::Refuse { app, tool } = &verdict else {
-            unreachable!()
-        };
-        eprintln!("{}", guard::refusal_text(app, tool, "the probe harness"));
-        return ExitCode::FAILURE;
+    match write_probe(dir, &version, force) {
+        Ok(summary) => println!("{summary}"),
+        Err(message) => {
+            eprintln!("{message}");
+            return ExitCode::FAILURE;
+        }
     }
-    if let Some(note) = verdict.note() {
-        eprintln!("{note}");
-    }
+    println!("\nNext: read scripts/teksilo_probe/ and copy the example closest to your case.");
+    ExitCode::SUCCESS
+}
 
-    if let Some(recorded) = probe::recorded_provenance(dir)
-        && recorded != resolution.version
+/// Why no harness can be written here.
+///
+/// Two reasons that read alike and must not be treated alike. `probe` fails on
+/// either — writing a harness is the whole command. `setup` fails only on
+/// `Refused`, because a version this tool must not answer for is a version it
+/// must not hand an agent instructions about either; `Unresolved` merely means
+/// there is nothing here to stamp a harness with, which is no reason to
+/// withhold the agent scaffolding.
+enum ProbeBlock {
+    /// The app resolved a teksilo whose minor or major this tool cannot serve.
+    Refused(String),
+    /// There is no resolved teksilo at all — not a teksilo app, or no lockfile.
+    Unresolved(String),
+}
+
+/// The app's resolved teksilo, or why the harness cannot be written.
+fn resolved_for_probe(project: &Path) -> Result<String, ProbeBlock> {
+    let resolution =
+        resolve::resolve(project).map_err(|e| ProbeBlock::Unresolved(e.to_string()))?;
+    match guard::check(&resolution.version) {
+        guard::Verdict::Refuse { app, tool } => Err(ProbeBlock::Refused(guard::refusal_text(
+            &app,
+            &tool,
+            "the probe harness",
+        ))),
+        verdict => {
+            if let Some(note) = verdict.note() {
+                eprintln!("{note}");
+            }
+            Ok(resolution.version)
+        }
+    }
+}
+
+/// Materialise the harness and stamp it with the version it was written for.
+fn write_probe(project: &Path, version: &str, force: bool) -> Result<String, String> {
+    if let Some(recorded) = probe::recorded_provenance(project)
+        && recorded != version
     {
         println!(
             "note: the harness here was written for teksilo {recorded}, this app now \
-             resolves {}. Rewriting it.",
-            resolution.version
+             resolves {version}. Rewriting it."
         );
     }
 
-    let written = match probe::materialise(dir, force) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    if let Err(e) = probe::record_provenance(dir, &resolution.version) {
-        eprintln!("{e}");
-        return ExitCode::FAILURE;
-    }
-    println!(
+    let written = probe::materialise(project, force).map_err(|e| e.to_string())?;
+    probe::record_provenance(project, version).map_err(|e| e.to_string())?;
+    Ok(format!(
         "probe harness: {} files in scripts/teksilo_probe/ \
-         ({} created, {} updated, {} unchanged) for teksilo {}",
+         ({} created, {} updated, {} unchanged) for teksilo {version}",
         written.total(),
         written.created.len(),
         written.updated.len(),
         written.unchanged.len(),
-        resolution.version
-    );
+    ))
+}
 
-    if also_skill {
-        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-        let homes = setup::skill_homes(dir, home.as_deref());
-        if homes.is_empty() {
-            println!(
-                "skill: no agent skill directory found (looked for .claude/ here and in $HOME).\n\
-                 Create one and re-run `cargo teksilo setup` to install it."
+/// `setup` — the harness, the agent instructions, and a warm encoder cache.
+///
+/// Plan, confirm, write, report. The plan comes first because the alternative
+/// — finding out afterwards that one command rewrote five files and pulled
+/// 129 MB — is how a tool loses the benefit of the doubt. And the plan is
+/// exhaustive: every path that will be written appears in it.
+fn cmd_setup(dir: &Path, force: bool, yes: bool, user: bool, no_model: bool) -> ExitCode {
+    let project = setup::find_project_root(dir);
+
+    // No manifest anywhere up the tree. Neither failing nor quietly writing the
+    // home directory instead is right — the second is precisely the surprise
+    // this rewrite removes — so say what is missing and ask. `-y` does not
+    // answer this one: it suppresses a confirmation, not the choice of which
+    // machine-wide directory to write.
+    let scope = if user {
+        setup::Scope::User
+    } else if project.is_some() {
+        setup::Scope::Project
+    } else {
+        println!(
+            "No Cargo.toml in {} or any directory above it, so there is no project here\n\
+             to set up. The agent instructions can still be installed for your user account.",
+            dir.display()
+        );
+        if yes {
+            eprintln!(
+                "\nerror: -y suppresses a confirmation, not this choice. Pass --user to install\n\
+                 under $HOME, or run this from inside your app."
             );
-        } else {
-            match setup::install_skill(&homes) {
-                Ok(done) => {
-                    for (where_, count) in done.homes {
-                        println!("skill: {count} files -> {where_}");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{e}");
-                    return ExitCode::FAILURE;
-                }
+            return ExitCode::FAILURE;
+        }
+        match setup::confirm("\nInstall for this user instead, under $HOME?", "--user") {
+            Ok(true) => setup::Scope::User,
+            Ok(false) => {
+                println!("Nothing written.");
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    };
+
+    let root = match scope {
+        setup::Scope::Project => project.clone().expect("project scope implies a manifest"),
+        setup::Scope::User => match setup::home_dir() {
+            Ok(home) => home,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+
+    let targets = match scope {
+        setup::Scope::Project => setup::project_targets(&root),
+        setup::Scope::User => setup::user_targets(&root),
+    };
+
+    // The harness is project code — it lands in `scripts/teksilo_probe/` — so
+    // it follows the project, not the scope. `--user` run from inside an app
+    // still gets it, and the plan says so rather than leaving it a surprise.
+    let mut probe_version = None;
+    let probe_skipped = match &project {
+        None => Some("no Cargo.toml here — the harness is project code".to_string()),
+        Some(p) => match resolved_for_probe(p) {
+            Ok(version) => {
+                probe_version = Some(version);
+                None
+            }
+            // A version this tool must not answer for is one it must not write
+            // agent instructions about either: stop, with the install command.
+            Err(ProbeBlock::Refused(message)) => {
+                eprintln!("{message}");
+                return ExitCode::FAILURE;
+            }
+            Err(ProbeBlock::Unresolved(message)) => Some(message),
+        },
+    };
+
+    let fetch_model =
+        !no_model && !vectors::encoder_is_cached() && vectors::encoder_cache_dir().is_some();
+
+    // --- the plan ---------------------------------------------------------
+
+    match scope {
+        setup::Scope::Project => println!("Plan — project {}", root.display()),
+        setup::Scope::User => {
+            println!("Plan — user account {}", root.display());
+            // The harness is the one thing `--user` still writes into the
+            // project, so the project is named rather than left to be inferred
+            // from a path in the table.
+            if let Some(p) = &project {
+                println!("       project      {} (harness only)", p.display());
+            }
+        }
+    }
+    println!();
+    if let (Some(p), Some(version)) = (&project, &probe_version) {
+        println!(
+            "  {:<18} {:<40} for teksilo {version}",
+            "probe harness",
+            // Always project-relative: it is project code wherever the rest of
+            // the plan is aimed.
+            relative(&p.join("scripts/teksilo_probe"), p, true)
+        );
+    }
+    for target in &targets {
+        println!(
+            "  {:<18} {:<40} {}",
+            target.agent,
+            relative(&target.path, &root, target.form == setup::Form::Skill),
+            target.form.describe()
+        );
+    }
+    if fetch_model {
+        println!(
+            "  {:<18} {:<40} download ~{} MB, once",
+            "search encoder",
+            vectors::encoder_cache_dir().unwrap_or_default().display(),
+            vectors::ENCODER_DOWNLOAD_MB
+        );
+    }
+    if targets.is_empty() && probe_version.is_none() && !fetch_model {
+        println!("  (nothing to do)");
+    }
+    if let Some(reason) = &probe_skipped {
+        println!("\nThe probe harness is skipped: {reason}");
+    }
+    println!("\nNothing outside those paths is written.");
+
+    if !yes {
+        match setup::confirm("Proceed?", "-y / --yes") {
+            Ok(true) => {}
+            Ok(false) => {
+                println!("Nothing written.");
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
             }
         }
     }
 
-    println!("\nNext: read scripts/teksilo_probe/ and copy the example closest to your case.");
+    // --- doing it ---------------------------------------------------------
+
+    println!();
+    if let (Some(p), Some(version)) = (&project, &probe_version) {
+        match write_probe(p, version, force) {
+            Ok(summary) => println!("{summary}"),
+            Err(message) => {
+                eprintln!("{message}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    for target in &targets {
+        match setup::apply(target) {
+            Ok(done) => println!(
+                "{:<18} {:<40} {} ({} file{})",
+                done.agent,
+                relative(&done.path, &root, target.form == setup::Form::Skill),
+                done.change.describe(),
+                done.files,
+                if done.files == 1 { "" } else { "s" }
+            ),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    // A failed download is a warning, never a failure: everything else
+    // succeeded, and `search` degrades to BM25 by design rather than breaking.
+    if fetch_model {
+        println!(
+            "\nFetching the search encoder (~{} MB, once)…",
+            vectors::ENCODER_DOWNLOAD_MB
+        );
+        match vectors::prefetch_encoder() {
+            Ok(dir) => println!("search encoder: cached in {}", dir.display()),
+            Err(e) => println!(
+                "warning: could not fetch the search encoder: {e}\n\
+                 `cargo teksilo search` still works — it degrades to BM25 (lexical) ranking,\n\
+                 and will retry the download on its next run."
+            ),
+        }
+    } else if no_model {
+        println!("\nsearch encoder: skipped (--no-model). The first `search` will fetch it.");
+    } else if vectors::encoder_cache_dir().is_none() {
+        println!(
+            "\nsearch encoder: skipped — this build has none (compiled with \
+             `--no-default-features`).\n`search` uses BM25 only."
+        );
+    } else {
+        println!("\nsearch encoder: already cached.");
+    }
+
+    // --- what was skipped, and why ----------------------------------------
+
+    match scope {
+        setup::Scope::Project => {
+            let missing = setup::project_undetected(&root);
+            if !missing.is_empty() {
+                println!("\nNot configured in this project, so nothing was written for them:");
+                for (agent, marker) in missing {
+                    println!("  {agent:<18} no {marker}");
+                }
+                println!("Create the marker it looks for and re-run to install.");
+            }
+        }
+        setup::Scope::User => {
+            // Symmetric with project scope, and load-bearing for the two
+            // agents whose directory is env-relocatable: "no ~/.vibe/" would
+            // send a user with `VIBE_HOME` set to look in the wrong place, so
+            // the path this actually checked is the one printed.
+            let missing = setup::user_undetected(&root);
+            if !missing.is_empty() {
+                println!("\nNot configured for your user, so nothing was written for them:");
+                for (agent, dir) in missing {
+                    println!("  {agent:<18} no {}/", dir.display());
+                }
+                println!("Run the agent once so it creates that directory, then re-run this.");
+            }
+            println!("\n{}", setup::USER_SCOPE_NOTE);
+        }
+    }
+
+    // --- what was written is not the same as what is active ---------------
+    //
+    // Every line above reports a file this command WROTE. Whether an agent
+    // then reads it is that agent's business, and at least one will not
+    // straight away: Grok Build requires folder trust before it loads project
+    // instructions at all (`--trust`, or an interactive grant), and any of
+    // them silently skips an instruction file that happens to be gitignored.
+    // Saying "installed" would claim an effect this command cannot verify —
+    // the same reason it refuses to write where nothing reads.
+    println!(
+        "\nThese are files on disk. An agent picks them up on its own terms —\n\
+         some ask you to trust the folder first, and a gitignored instruction\n\
+         file is skipped silently."
+    );
+
+    // --- the surface the user now has -------------------------------------
+
+    println!(
+        "\nWhat you can run now:\n\
+         \x20 cargo teksilo symbol <Name>      exact public API of a type, at the pinned version\n\
+         \x20 cargo teksilo search \"<query>\"   the guides and worked examples\n\
+         \x20 cargo teksilo show <path>        one of them in full, offline — not from GitHub\n\
+         \x20 cargo teksilo probe              rewrite the automation harness\n\
+         \x20 cargo teksilo setup              this command"
+    );
     ExitCode::SUCCESS
+}
+
+/// A path as the user would type it, relative to what the plan is about.
+///
+/// Absolute paths in a plan make the interesting part — which file — the
+/// hardest thing to read. Directories keep a trailing slash, so a line naming
+/// four files does not read as one.
+fn relative(path: &Path, root: &Path, directory: bool) -> String {
+    let shown = path.strip_prefix(root).unwrap_or(path).display();
+    if directory {
+        format!("{shown}/")
+    } else {
+        shown.to_string()
+    }
 }

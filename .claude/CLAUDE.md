@@ -86,9 +86,30 @@ cargo teksilo symbol Button          # exact public API, for the version they pi
 cargo teksilo search "<question>"    # hybrid BM25 + vector over guides + examples
 cargo teksilo show <corpus path>     # a hit's document in full, offline (--lines A-B, --list)
 cargo teksilo probe                  # write the probe harness into scripts/teksilo_probe/
-cargo teksilo setup                  # probe + install the skill where agents look
+cargo teksilo setup                  # probe + brief every agent configured in the project
+cargo teksilo setup -y --no-model    # …without the prompt, without the encoder download
+cargo teksilo setup --user           # …into $HOME instead — the ONLY mode that writes it
 cargo teksilo build-vectors          # MAINTAINER ONLY: re-encode the corpus (see below)
 ```
+
+**`setup` installs per agent, in that agent's own format**, because these tools
+share none: `.claude/skills/teksilo/` gets the full four-file skill (its native
+shape), and `.cursor/rules/teksilo.mdc`, `.windsurf/rules/teksilo.md`,
+`.github/copilot-instructions.md` and `AGENTS.md` each get a self-contained
+~40-line brief wearing that vendor's own frontmatter — copying the skill
+directory into `.cursor/` would accomplish nothing. The two shared files are
+edited through a `<!-- BEGIN teksilo -->` / `<!-- END teksilo -->` region, so a
+re-run is a byte-for-byte no-op and nothing outside the markers moves. Detection
+is by marker-already-exists (never created on spec), the plan is printed and
+confirmed before anything is written, and **a prompt with no terminal on stdin
+is an error naming the flag that would have skipped it** (`-y`, or `--user`) —
+never a blocking read, because CI and agents run this. `--user` reaches Claude
+Code only, which is a finding rather than an omission: Cursor's user rules are
+UI-only, Copilot's personal instructions live on github.com, and `AGENTS.md` is
+per-repository by definition; `setup --user` prints that list. `setup` also
+pre-fetches the search encoder (≈129 MB, once, into the per-user cache
+`vectors.rs` resolves) so the first `search` does not stall on it; a failed
+fetch is a **warning**, since `search` degrades to BM25 by design.
 
 Three things to know when changing it:
 
@@ -1417,8 +1438,12 @@ Slash command `/teksilo` loads the skill for read / write / explain /
 translate / debug workflows; its `reference/teksu.md` is the `teksu!` half.
 That skill merges the former `teksilo-app` and `teksu-macro` skills and is
 **written for a consumer app**, so it is also what `cargo teksilo setup`
-installs into someone else's project. Inside this repository, prefer the
-in-repo `extract-widget-api` skill for a single type's public surface.
+installs into someone else's project — verbatim into `.claude/skills/teksilo/`,
+and as the condensed brief in `crates/cargo-teksilo/src/setup.rs` for the
+agents that cannot load a skill. Editing this skill therefore obliges you to
+`cp -r` it over `crates/cargo-teksilo/embedded/skill/` (CI asserts `diff -r`),
+and to ask whether the brief still says the same thing. Inside this repository,
+prefer the in-repo `extract-widget-api` skill for a single type's public surface.
 
 ## App Entry Point Pattern
 

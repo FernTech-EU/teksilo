@@ -22,7 +22,7 @@ matched to the Teksilo version *that app* resolved.
 
 ```bash
 cargo install cargo-teksilo
-cargo teksilo setup        # in the app: harness + skill, version-matched
+cargo teksilo setup        # in the app: harness + a brief for every agent it finds
 ```
 
 Verified against teksilo 0.12.1.
@@ -36,7 +36,7 @@ cargo teksilo symbol <Name>...   # exact public API of a type
 cargo teksilo search "<query>"   # the guides and worked examples
 cargo teksilo show <path>        # one of them in full, offline
 cargo teksilo probe [--force]    # write the automation harness into the project
-cargo teksilo setup [--force]    # probe + install the skill
+cargo teksilo setup [-y] [--user] # probe + brief every agent configured here
 cargo teksilo version            # this tool, and the app's resolved Teksilo
 ```
 
@@ -129,6 +129,77 @@ spellings plus the two commands that always work.
 
 Writes the automation harness into `scripts/teksilo_probe/`, so an agent can
 drive the running app and assert on it. See §4.
+
+### `setup`
+
+The harness, plus the teksilo briefing for **every coding agent this project
+already configures** — each in that agent's own format — plus a one-off fetch of
+the search encoder so the first `search` does not stall on a 129 MB download.
+
+```bash
+cargo teksilo setup              # plan, confirm, install
+cargo teksilo setup -y           # skip the confirmation (required in CI)
+cargo teksilo setup --no-model   # …and leave the encoder to download lazily
+cargo teksilo setup --user       # install into $HOME instead of this project
+```
+
+**Per agent, in that agent's format.** These tools share no format, so copying
+one directory into all of them accomplishes nothing:
+
+| Agent | Detected by | Written |
+| --- | --- | --- |
+| Claude Code | `.claude/` | `.claude/skills/teksilo/` — the full four-file skill |
+| Cursor | `.cursor/` | `.cursor/rules/teksilo.mdc` — MDC frontmatter (`description` / `globs` / `alwaysApply`) + brief |
+| Windsurf | `.windsurf/` | `.windsurf/rules/teksilo.md` — `trigger: glob` frontmatter + brief |
+| GitHub Copilot | `.github/` | `.github/copilot-instructions.md` — a delimited section |
+| Codex and the rest | `AGENTS.md` | `AGENTS.md` — a delimited section |
+
+The **brief** is a self-contained ~40 lines: what Teksilo is, the five commands,
+that every answer is pinned to the version this app resolved, and the rule that
+matters most — *read a search hit with `cargo teksilo show <path>`, never from
+GitHub, because `blob/main` tracks `main` and not what this app pinned*. It
+never refers to the skill, which on most of those machines is not installed.
+
+Four properties worth relying on:
+
+- **Detection is marker-already-exists.** `.cursor/` is never created on the
+  chance you might use Cursor. Instructions written where nothing reads them are
+  indistinguishable from none, except that they report success. Whatever was
+  *not* found is listed at the end, with the marker that would have found it.
+- **The shared files are edited through a region.** `AGENTS.md` and
+  `copilot-instructions.md` belong to the project; `setup` owns only what lies
+  between `<!-- BEGIN teksilo -->` and `<!-- END teksilo -->`. A second run is a
+  byte-for-byte no-op, and your own text above or below is never touched.
+- **Nothing is written before you see the plan.** Every path, every vendor, and
+  the download with its size, then a confirmation. `-y` skips the question; with
+  **no terminal on stdin the prompt is an error naming the flag that would have
+  skipped it**, never a blocking read — CI and agents run this, and a hang is
+  worse than a failure.
+- **`--user` is the only mode that writes `$HOME`.** Project scope never falls
+  back to it. Three agents keep a user-level file this can write:
+
+  | Agent | Detected by | Written |
+  | --- | --- | --- |
+  | Claude Code | `~/.claude/` | `~/.claude/skills/teksilo/` — the full skill |
+  | Mistral Vibe | `~/.vibe/` (or `$VIBE_HOME`) | `AGENTS.md` — a delimited section |
+  | opencode | `~/.config/opencode/` (or `$XDG_CONFIG_HOME`) | `AGENTS.md` — a delimited section |
+
+  Both env vars are honoured, because Vibe relocates its whole state directory
+  through `VIBE_HOME` and opencode follows the XDG base directories — writing
+  `~/.vibe/AGENTS.md` for someone who moved theirs is a file nothing reads.
+  Each is gated on **the directory already existing**: this does not create a
+  config directory in your home for a tool you may never have run, and it says
+  which path it checked rather than only that it found nothing. The rest have
+  nowhere to go, which is a finding rather than an omission: Cursor's user
+  rules are edited in its settings UI, Copilot's personal instructions live in
+  your github.com account, Windsurf's global rules are one file at
+  `~/.codeium/windsurf/memories/global_rules.md`, and a repository-root
+  `AGENTS.md` is per-repository by definition. `setup --user` prints that list
+  rather than silently installing three of eight.
+
+If the encoder fetch fails — offline, proxy, unsupported target — that is a
+**warning** and setup still succeeds: `search` degrades to BM25 by design (§5).
+Under `--no-default-features` there is no encoder to fetch and it says so.
 
 ---
 
@@ -290,10 +361,12 @@ Hybrid retrieval is supported on `ubuntu-latest`, `windows-latest` and
 `macos-latest`. musl/Alpine, BSD, 32-bit and air-gapped machines get the lexical
 path — documented up front rather than discovered on failure.
 
-The encoder weights (~128 MB) download once, into a per-user cache
+The encoder weights (~129 MB) download once, into a per-user cache
 (`~/Library/Caches/teksilo/fastembed`, `$XDG_CACHE_HOME` on Linux,
 `%LOCALAPPDATA%` on Windows), overridable with `FASTEMBED_CACHE_DIR`. They are
-never written into your project.
+never written into your project. `cargo teksilo setup` pulls them **eagerly**,
+so the cost lands on the command that announced it rather than on whichever
+`search` happens to be first; `--no-model` opts out and leaves it lazy.
 
 **Encoder identity is checked on every query.** Two different encoders at the
 same dimension produce numerically valid, semantically meaningless similarities —

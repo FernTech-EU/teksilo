@@ -52,7 +52,7 @@ cargo teksilo search "how do I persist window size"
 cargo teksilo show docs/scroll-area.md      # read a search result in full, offline
 cargo teksilo show docs/scroll-area.md --lines 166-172
 cargo teksilo probe                         # materialise the Python automation harness
-cargo teksilo setup                         # the harness plus the rest of the agent scaffolding
+cargo teksilo setup                         # the harness, plus a teksilo brief for every agent here
 ```
 
 - **`symbol`** replaces reading the widget source by hand. It emits the type's
@@ -74,9 +74,17 @@ cargo teksilo setup                         # the harness plus the rest of the a
   `main`, which is a different Teksilo from the one this app pinned — which is
   the exact confusion this tool exists to prevent. `show` is offline and
   version-matched. `cargo teksilo show --list` prints every available path.
-- **`probe` / `setup`** write a Python automation harness into
-  `scripts/teksilo_probe/` for driving and asserting on the running GUI. See
-  `reference/automation.md`.
+- **`probe`** writes a Python automation harness into `scripts/teksilo_probe/`
+  for driving and asserting on the running GUI. See `reference/automation.md`.
+- **`setup`** is `probe` plus the teksilo briefing for every coding agent this
+  project already configures — this skill where Claude Code looks for one, and a
+  self-contained condensed brief in `.cursor/rules/`, `.windsurf/rules/`,
+  `.github/copilot-instructions.md` or `AGENTS.md` where the format is not a
+  skill — plus a one-off fetch of the search encoder. It prints a plan and asks
+  first; `-y` skips the question (needed in CI, where a prompt is an error rather
+  than a wait), `--no-model` skips the download, and `--user` is the only mode
+  that writes `$HOME`. It only writes where a marker already exists, and lists
+  what it skipped.
 
 `cargo teksilo --help` and `cargo teksilo <command> --help` are authoritative for
 flags; this file names the commands, not their whole flag surface.
