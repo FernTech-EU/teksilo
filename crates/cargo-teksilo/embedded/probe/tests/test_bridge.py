@@ -141,20 +141,51 @@ class AnnounceFallbackTests(unittest.TestCase):
 class RuntimeDirTests(unittest.TestCase):
     def test_linux_prefers_xdg_runtime_dir(self):
         with mock.patch.object(bridge.sys, "platform", "linux"), \
-                mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"}):
+                mock.patch.dict(os.environ,
+                                {"XDG_RUNTIME_DIR": "/run/user/1000"},
+                                clear=True):
             self.assertEqual(bridge.runtime_dir(), Path("/run/user/1000"))
 
-    def test_macos_uses_tmpdir_not_xdg(self):
-        """macOS never sets XDG_RUNTIME_DIR; honouring it would land in /tmp."""
+    def test_macos_without_xdg_uses_the_per_user_tmpdir(self):
+        """Darwin sets no XDG_RUNTIME_DIR, so the fallback is what runs there.
+
+        `clear=True` is load-bearing: `patch.dict` *adds* to the environment
+        rather than replacing it, so without it this inherits the host's real
+        XDG_RUNTIME_DIR and stops testing the fallback at all. It passed on
+        macOS (where nothing sets that variable) and failed on Linux CI (where
+        systemd does) — the test was reading the host, not the code.
+        """
         with mock.patch.object(bridge.sys, "platform", "darwin"), \
-                mock.patch.dict(os.environ, {"TMPDIR": "/var/folders/ab/T/"}), \
+                mock.patch.dict(os.environ, {"TMPDIR": "/var/folders/ab/T/"},
+                                clear=True), \
                 mock.patch.object(bridge.tempfile, "gettempdir",
                                   return_value="/var/folders/ab/T"):
             self.assertEqual(bridge.runtime_dir(), Path("/var/folders/ab/T"))
 
+    def test_xdg_wins_on_every_unix_including_darwin(self):
+        """Pins the agreement with the Rust side, which has no darwin branch.
+
+        `wire::runtime_dir` consults XDG_RUNTIME_DIR on *every* non-Windows
+        platform and only then falls back to the temp directory. This mirror
+        must do the same, because the one property that matters is that the
+        harness looks where the app writes. Giving Python a darwin-specific
+        branch would read as a tidy-up and would break exactly that: on a Mac
+        whose environment does set XDG_RUNTIME_DIR — some toolchains and
+        dotfiles do — the app would publish its descriptor there while the
+        harness searched $TMPDIR, and attach would fail with nothing to point
+        at. Hence a test, rather than a comment asking nicely.
+        """
+        with mock.patch.object(bridge.sys, "platform", "darwin"), \
+                mock.patch.dict(os.environ,
+                                {"XDG_RUNTIME_DIR": "/run/user/501",
+                                 "TMPDIR": "/var/folders/ab/T/"}, clear=True):
+            self.assertEqual(bridge.runtime_dir(), Path("/run/user/501"))
+
     def test_windows_uses_localappdata_teksilo(self):
         with mock.patch.object(bridge.sys, "platform", "win32"), \
-                mock.patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\x\AppData\Local"}):
+                mock.patch.dict(os.environ,
+                                {"LOCALAPPDATA": r"C:\Users\x\AppData\Local"},
+                                clear=True):
             self.assertEqual(bridge.runtime_dir().name, "Teksilo")
 
     def test_descriptor_path_is_named_after_the_pid(self):

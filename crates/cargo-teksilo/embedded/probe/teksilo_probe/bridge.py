@@ -94,12 +94,17 @@ def runtime_dir() -> Path:
     """The per-user runtime directory, matching `wire::runtime_dir`.
 
     - **Windows** — `%LOCALAPPDATA%\\Teksilo`, per-user by ACL inheritance.
-    - **Linux** — `$XDG_RUNTIME_DIR`, which is per-user `0700` by spec.
-    - **macOS / any Unix without XDG** — `$TMPDIR`, which on Darwin is the
-      per-user per-boot `/var/folders/…/T/`. macOS never sets
-      `$XDG_RUNTIME_DIR`, so consulting it there would land in the shared
-      `/tmp` — which is precisely the bug the Rust side fixed, and reproducing
-      it here would make this module look in a directory the app never writes.
+    - **Every other platform** — `$XDG_RUNTIME_DIR` when set (per-user `0700`
+      by spec), otherwise the temp directory, which on Darwin is the per-user
+      per-boot `/var/folders/…/T/`.
+
+    Note that the XDG lookup is **not** conditional on Linux, and must not
+    become so. `wire::runtime_dir` has no darwin branch either, and the one
+    property that matters here is that this mirror looks where the app writes:
+    a Mac whose environment happens to set `$XDG_RUNTIME_DIR` — some
+    toolchains and dotfiles do — must have both sides agree on it. In practice
+    Darwin sets no such variable, so the fallback is what runs there; that is
+    an observation about the platform, not a branch in the code.
     """
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA")
