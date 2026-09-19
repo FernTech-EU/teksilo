@@ -178,6 +178,14 @@ pub enum SetupError {
 
     #[error("could not find a home directory (neither $HOME nor %USERPROFILE% is set)")]
     NoHome,
+
+    #[error(
+        "{0} exists but is not valid UTF-8, so its teksilo section cannot be edited \
+         without discarding the rest of the file.\n\
+         This tool owns only the text between its markers; fix the file's encoding \
+         and re-run."
+    )]
+    NotUtf8(PathBuf),
 }
 
 /// Whose configuration is being written.
@@ -496,6 +504,26 @@ pub struct Outcome {
     pub files: usize,
 }
 
+/// Read a file this tool shares with the project, for [`Form::Region`].
+///
+/// A missing file is the empty one — `upsert_region` then appends, and
+/// `write_if_changed` reports it as created. Every *other* failure is an
+/// error, which is the whole reason this function exists.
+///
+/// It replaced `read_to_string(..).unwrap_or_default()`, which mapped a decode
+/// failure onto "the file is empty" and so rewrote a project's `AGENTS.md`
+/// down to nothing but our own region. One byte of Latin-1 in a file this tool
+/// does not own was enough to destroy it, silently, while reporting success —
+/// against a module whose stated promise is that "a run after someone edits
+/// the rest of the file must leave their edit alone".
+fn read_shared(path: &Path) -> Result<String, SetupError> {
+    match std::fs::read(path) {
+        Ok(bytes) => String::from_utf8(bytes).map_err(|_| SetupError::NotUtf8(path.to_path_buf())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Write one target, reporting whether anything actually moved.
 pub fn apply(target: &Target) -> Result<Outcome, SetupError> {
     let (change, files) = match target.form {
@@ -505,9 +533,7 @@ pub fn apply(target: &Target) -> Result<Outcome, SetupError> {
             (write_if_changed(&target.path, &content)?, 1)
         }
         Form::Region => {
-            // A missing file is the empty one: `upsert_region` then appends,
-            // and `write_if_changed` reports it as created.
-            let existing = std::fs::read_to_string(&target.path).unwrap_or_default();
+            let existing = read_shared(&target.path)?;
             let updated = upsert_region(&existing, &region_block());
             (write_if_changed(&target.path, &updated)?, 1)
         }
@@ -592,6 +618,31 @@ fn collect<'a>(dir: &Dir<'a>, prefix: &Path, out: &mut Vec<(PathBuf, &'a [u8])>)
     }
 }
 
+/// Whether a file found on disk is one the embedded skill ships.
+///
+/// Case-**insensitive**, which is the safe direction rather than the tidy one.
+///
+/// The skill is written with `fs::write(dest.join("SKILL.md"))` and audited
+/// with `read_dir`. On a case-insensitive filesystem — APFS and NTFS, so most
+/// desktops — those two disagree: the write resolves onto an existing
+/// `skill.md`, while `read_dir` still reports the entry under the case stored
+/// on disk. An exact `Path` comparison therefore classified a file we had
+/// *just written* as a leftover and deleted it, leaving the skill with no
+/// `SKILL.md` while `apply` reported `Updated`.
+///
+/// Folding can only err the other way, and only on a case-sensitive
+/// filesystem: a genuine leftover whose name differs from a shipped file's by
+/// case alone survives a reinstall. A stale file kept is recoverable. A live
+/// file deleted is not.
+///
+/// ASCII folding is enough because every shipped path is ASCII, and a fold
+/// that guessed at non-ASCII case would be a second way to be wrong.
+fn is_wanted(relative: &Path, keep: &[&Path]) -> bool {
+    let found = relative.as_os_str().to_string_lossy();
+    keep.iter()
+        .any(|k| k.as_os_str().to_string_lossy().eq_ignore_ascii_case(&found))
+}
+
 /// Delete anything under `dir` the embedded skill no longer ships.
 fn remove_strays(root: &Path, dir: &Path, keep: &[&Path]) -> Result<bool, SetupError> {
     let mut removed = false;
@@ -604,7 +655,7 @@ fn remove_strays(root: &Path, dir: &Path, keep: &[&Path]) -> Result<bool, SetupE
                 std::fs::remove_dir(&path)?;
             }
         } else if let Ok(relative) = path.strip_prefix(root)
-            && !keep.contains(&relative)
+            && !is_wanted(relative, keep)
         {
             std::fs::remove_file(&path)?;
             removed = true;
@@ -888,6 +939,91 @@ mod tests {
     fn an_empty_file_gets_no_leading_blank_line() {
         let out = upsert_region("", &region_block());
         assert!(out.starts_with(BEGIN));
+    }
+
+    // --- data loss, found by review and reproduced ------------------------
+
+    #[test]
+    fn a_shared_file_that_is_not_utf8_stops_setup_instead_of_being_destroyed() {
+        // Found by review and reproduced against the real binary: one Latin-1
+        // byte in a project's AGENTS.md and `setup -y` replaced the whole file
+        // with nothing but our region. `read_to_string(..).unwrap_or_default()`
+        // read "cannot decode" as "the file is empty".
+        let t = temp();
+        let path = t.path().join("AGENTS.md");
+        let original = b"# My project rules\n\nNever delete this. \xff\n";
+        std::fs::write(&path, original).unwrap();
+
+        let target = project_targets(t.path())
+            .into_iter()
+            .find(|t| t.form == Form::Region)
+            .unwrap();
+
+        assert!(
+            matches!(apply(&target), Err(SetupError::NotUtf8(_))),
+            "setup must refuse rather than rewrite a file it cannot read whole"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            original,
+            "the project's own bytes must survive untouched"
+        );
+    }
+
+    #[test]
+    fn a_missing_shared_file_is_still_created() {
+        // The other half of the same change: `read_shared` must keep treating
+        // "not found" as the empty file, or Region targets stop installing.
+        let t = temp();
+        std::fs::write(t.path().join("AGENTS.md"), "seed").unwrap();
+        let target = project_targets(t.path())
+            .into_iter()
+            .find(|t| t.form == Form::Region)
+            .unwrap();
+        std::fs::remove_file(&target.path).unwrap();
+
+        assert_eq!(apply(&target).unwrap().change, Change::Created);
+    }
+
+    #[test]
+    fn a_differently_cased_skill_file_is_not_deleted() {
+        // Found by review and reproduced against the real binary on APFS: a
+        // reinstall DELETED SKILL.md and reported success. The write resolves
+        // case-insensitively onto the existing entry; `read_dir` reports the
+        // case on disk; an exact comparison called it a stray.
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".claude")).unwrap();
+        let target = project_targets(t.path()).remove(0);
+        apply(&target).unwrap();
+
+        let upper = target.path.join("SKILL.md");
+        let body = std::fs::read(&upper).unwrap();
+        std::fs::remove_file(&upper).unwrap();
+        std::fs::write(target.path.join("skill.md"), &body).unwrap();
+
+        // On a case-insensitive filesystem this is the same file under another
+        // name, so nothing is stale and nothing may be removed. On a
+        // case-sensitive one it is a genuinely separate file — also not to be
+        // deleted, since folding errs only towards keeping.
+        apply(&target).unwrap();
+        assert!(
+            std::fs::read(target.path.join("SKILL.md")).is_ok(),
+            "the skill's own SKILL.md must survive a reinstall"
+        );
+    }
+
+    #[test]
+    fn a_real_stray_is_still_removed() {
+        // The case fold must not turn `remove_strays` into a no-op.
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".claude")).unwrap();
+        let target = project_targets(t.path()).remove(0);
+        apply(&target).unwrap();
+
+        let stray = target.path.join("reference/from_an_older_release.md");
+        std::fs::write(&stray, b"x").unwrap();
+        assert_eq!(apply(&target).unwrap().change, Change::Updated);
+        assert!(!stray.exists(), "a genuine leftover is still pruned");
     }
 
     // --- writing -----------------------------------------------------------
