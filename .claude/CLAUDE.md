@@ -69,6 +69,7 @@ python3 tools/extract_widget_api.py --all --md-dir docs/widgets  # Regenerate th
 python3 tools/bench_examples.py                          # Run benchmarks with report generation
 python3 tools/build_corpus.py                            # Regenerate the teksilo-corpus data (committed)
 python3 tools/build_corpus.py --check                    # CI staleness guard for it
+python3 tools/build_corpus.py --check-vectors            # CI guard: pass 2 was not skipped
 ```
 
 ### `cargo teksilo` — the tooling consumers get

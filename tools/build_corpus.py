@@ -846,6 +846,71 @@ def format_summary(index: Dict, out_dir: Path, verified: int) -> str:
     return "\n".join(lines)
 
 
+def check_vectors(index_path: Path, *, quiet: bool = False) -> int:
+    """Assert the committed index is fully vectorised, without an encoder.
+
+    This is the cheap half of the two-pass build's safety net, and it is
+    complete rather than approximate — which is worth explaining, because the
+    obvious CI step (re-run `build-vectors` and diff) costs a 128 MB model
+    download and an ONNX Runtime build on every run.
+
+    `build_corpus.py` carries embeddings forward keyed on each chunk's **text
+    hash**, so a chunk whose text changed finds no prior vector and is written
+    with ``embedding: null``. Therefore "every chunk has a vector" is not merely
+    a completeness check — it is a *freshness* check: a stale vector cannot
+    survive a regeneration, and a missing one is exactly what a forgotten
+    second pass leaves behind. Verified by experiment: editing one guide and
+    regenerating nulls exactly that guide's changed chunk and nothing else.
+
+    What it does not cover is a corpus re-encoded by a *different* model. That
+    is caught at query time instead, where the index's recorded encoder is
+    compared against the one the binary was built with — two encoders at one
+    dimension produce arithmetically valid, semantically meaningless
+    similarities, so it has to be refused rather than detected here.
+    """
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        print(f"teksilo-corpus: cannot read {index_path}: {e}", file=sys.stderr)
+        return 1
+
+    chunks = index.get("chunks", [])
+    missing = [c for c in chunks if not c.get("embedding")]
+    encoder = index.get("encoder")
+    dim = index.get("encoder_dim")
+
+    if not encoder or not dim:
+        print(
+            "teksilo-corpus has NO vectors: the index names no encoder.\n"
+            "The corpus is built in two passes; the second was not run:\n"
+            "    cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors\n"
+            "Without it `cargo teksilo search` silently falls back to lexical.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if missing:
+        shown = sorted({c["path"] for c in missing})[:10]
+        print(
+            f"teksilo-corpus is PARTIALLY vectorised: {len(missing)} of {len(chunks)} "
+            f"chunks have no embedding.\n"
+            "Their sources changed since the last encode, so the carry-forward "
+            "dropped their vectors. Re-run the second pass:\n"
+            "    cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors\n"
+            "Affected sources:",
+            file=sys.stderr,
+        )
+        for path in shown:
+            print(f"  {path}", file=sys.stderr)
+        if len({c["path"] for c in missing}) > len(shown):
+            print("  …", file=sys.stderr)
+        return 1
+
+    if not quiet:
+        print(f"teksilo-corpus: {len(chunks)} chunks, all vectorised with {encoder} ({dim}).")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Build the teksilo-corpus retrieval corpus.")
     parser.add_argument(
@@ -859,8 +924,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="write the generated corpus into this directory instead of crates/teksilo-corpus/corpus",
     )
+    parser.add_argument(
+        "--check-vectors",
+        action="store_true",
+        help="verify every chunk carries an embedding and the encoder is named; exit 1 otherwise",
+    )
     parser.add_argument("--quiet", action="store_true", help="suppress the summary print")
     args = parser.parse_args(argv)
+
+    if args.check_vectors:
+        return check_vectors(DEFAULT_OUT_DIR / "index.json", quiet=args.quiet)
 
     if args.check:
         import tempfile

@@ -541,6 +541,23 @@ jobs:
         if: matrix.name == 'debug'
         run: python3 tools/build_corpus.py --check
 
+      # The corpus is built in two passes: build_corpus.py chunks the sources,
+      # then `cargo teksilo build-vectors` encodes them. The guard above catches
+      # a stale *index*; this one catches a forgotten *second pass*, which is
+      # otherwise silent — `cargo teksilo search` just falls back to lexical and
+      # says so, and nobody reads that line in CI.
+      #
+      # It does NOT re-encode. Re-running build-vectors here would download a
+      # 128 MB model and build ONNX Runtime on every push, and it would not
+      # catch anything this does not: build_corpus.py carries embeddings forward
+      # keyed on each chunk's text hash, so a chunk whose source changed is
+      # written with `embedding: null`. "Every chunk has a vector" is therefore
+      # a freshness check, not just a completeness one — a stale vector cannot
+      # survive a regeneration.
+      - name: teksilo-corpus vector guard
+        if: matrix.name == 'debug'
+        run: python3 tools/build_corpus.py --check-vectors
+
       # crates.io enforces a 10 MB package limit, and teksilo-corpus carries
       # committed generated data (the retrieval corpus) — the one thing in
       # this workspace that could grow past that limit without anyone

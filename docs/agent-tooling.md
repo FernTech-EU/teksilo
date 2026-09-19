@@ -269,7 +269,18 @@ that changed. `--check` is the CI staleness guard and compares the index
 ignoring the vector fields, which is what lets the two passes compose.
 
 Adding or editing a guide under `docs/` therefore means regenerating the corpus
-and committing the result. CI will tell you if you forget.
+**and re-running the second pass**, then committing the result. Two CI guards
+cover the two ways to get it wrong:
+
+```bash
+python3 tools/build_corpus.py --check          # the index matches the sources
+python3 tools/build_corpus.py --check-vectors  # every chunk is still vectorised
+```
+
+The second is the one that catches a forgotten `build-vectors`, and it needs no
+encoder: because the carry-forward is keyed on each chunk's text hash, a chunk
+whose source changed is written with `embedding: null`. "Every chunk has a
+vector" is therefore a freshness check, not merely a completeness one.
 
 **The corpus is one file.** `crates/teksilo-corpus/corpus/` contains
 `index.json` and nothing else: each chunk stores its own `text`, and its `path`
