@@ -5,17 +5,42 @@
 """
 Extract public API and inline documentation from a Teksilo crate's source files.
 
-Four crates are documentable, selected with `--crate` (default `widgets`) and
-listed in `CRATE_SPECS`:
+Every crate under `crates/` with a meaningful public Rust API is queryable
+through this tool, selected with `--crate` (default `widgets`) and listed in
+`CRATE_SPECS`. Each entry carries a `catalog: bool` that splits the table into
+two tiers:
 
-    widgets   teksilo-widgets   -> docs/widgets/           "Widget Catalog"
-    data      teksilo-data      -> docs/data-collections/  "Data Collections"
-    settings  teksilo-settings  -> docs/settings/          "Settings"
-    scene     teksilo-scene     -> docs/scene/             "Scene"
+  * `catalog=True` — the crate ALSO gets a generated mdBook catalog (one
+    Markdown page per public type, plus an index), written by `--md-dir` /
+    `--catalog-all` under `docs/<md_subdir>/`. Exactly four crates are
+    cataloged:
+
+        widgets   teksilo-widgets   -> docs/widgets/           "Widget Catalog"
+        data      teksilo-data      -> docs/data-collections/  "Data Collections"
+        settings  teksilo-settings  -> docs/settings/          "Settings"
+        scene     teksilo-scene     -> docs/scene/             "Scene"
+
+    `--catalog-all` iterates ONLY these four, so `docs/` output stays
+    byte-identical no matter how many more crates join the table below;
+    `--md-dir` against a `catalog=False` crate refuses outright rather than
+    silently writing pages nobody wired into the book.
+
+  * `catalog=False` — every other entry (the framework core, tokens, canvas,
+    the sibling theme presets, i18n, telemetry, the analytics adapters, the
+    teksu! tooling, …). Fully queryable — `--crate <key>`, `--list`, `--all`,
+    and a plain `<Name>` lookup all behave exactly like a cataloged crate —
+    it just has no mdBook pages yet. Flipping the flag is the only step a
+    later change needs to give one of these its own catalog.
 
 Only `widgets` gets the widget-specific behaviour (the impl-Widget entry filter
-and the `widgets-overview.md` categories); the others surface their re-exported
-public types and group by directory.
+and the `widgets-overview.md` categories); every other crate surfaces its
+re-exported public types and groups by directory.
+
+A hand-maintained `UMBRELLA_REEXPORTS` table additionally lets a bare `<Name>`
+lookup that isn't in the active `--crate` fall through to the crate that
+actually owns it, when that name is reachable through `teksilo::prelude::*`
+(e.g. `Theme` lives in teksilo-core, not the default `widgets` crate, but
+`teksilo::prelude::Theme` is how an app actually sees it).
 
 Walks the selected crate's `src/` recursively (top-level files plus submodule
 directories like `notification/`, `tab_widget/`, `primitives/`, `animations/`),
@@ -44,14 +69,17 @@ Usage:
     python tools/extract_widget_api.py Button --format json
     python tools/extract_widget_api.py Button -o out.md
     python tools/extract_widget_api.py --crate scene --list
+    python tools/extract_widget_api.py --crate core Theme      # queryable, not cataloged
     python tools/extract_widget_api.py --md-dir docs/widgets   # one crate
     python tools/extract_widget_api.py --catalog-all --api-dir target/doc
 
 `--md-dir DIR` regenerates the active crate's mdBook catalog: one Markdown page
 per type (deep-linking to its rustdoc module page), a grouped `index.md`, and an
 in-place patch of that crate's `<!-- BEGIN/END GENERATED <DIR> -->` region of
-`docs/SUMMARY.md`. `--catalog-all` does the same for all four crates, each into
-its own default directory. This is what the docs workflow runs.
+`docs/SUMMARY.md`. Refused when the active crate has `catalog=False`.
+`--catalog-all` does the same for all four `catalog=True` crates, each into its
+own default directory, and ignores every `catalog=False` entry. This is what
+the docs workflow runs.
 
 The generated pages ARE committed, unlike `book/` — see the note in
 `.gitignore` — so the book builds with its sidebar and pictures on any
@@ -101,11 +129,16 @@ REPO_ROOT = SCRIPT_DIR.parent
 
 @dataclass(frozen=True)
 class CrateSpec:
-    """A crate the catalog generator can document.
+    """A crate this tool can extract public API from.
 
     `is_widget` selects the widget-specific behaviour (impl-Widget entry filter +
     widgets-overview.md categories); other crates surface their re-exported public
     types and group by directory.
+
+    `catalog` gates mdBook catalog generation ONLY (`--md-dir` / `--catalog-all`).
+    It has no bearing on `--crate` / `--list` / `--all` / a positional `<Name>`
+    lookup, which work identically for every entry regardless of this flag —
+    see the module docstring's two-tier explanation.
     """
 
     crate: str  # cargo package name, e.g. "teksilo-widgets"
@@ -114,6 +147,7 @@ class CrateSpec:
     title: str  # SUMMARY part / index title, e.g. "Widget Catalog"
     group: str  # top-level group label in the index for non-widget crates
     is_widget: bool
+    catalog: bool  # True: also gets a committed mdBook catalog under docs/<md_subdir>/
 
     @property
     def src(self) -> Path:
@@ -139,11 +173,100 @@ class CrateSpec:
         return f"<!-- END GENERATED {self.md_subdir.upper()} -->"
 
 
+# Crates under crates/ deliberately left OUT of CRATE_SPECS below. This tool
+# parses inherent impls and top-level pub items out of a library's src/ tree,
+# so a crate whose public surface is a binary or a proc-macro yields nothing
+# useful. Each exclusion here was verified against the crate's own Cargo.toml
+# (`[[bin]]` / `proc-macro = true` / `publish = false`), not guessed from its
+# name.
+#
+# Binaries — `[[bin]]` in Cargo.toml and no src/lib.rs, so there is no library
+# API to walk:
+#   cargo-teksilo, cargo-teksilo-fmt, cargo-teksilo-telemetry-lint,
+#   teksilo-automation-mcp, teksilo-fmt-lsp, teksilo-widgets-previewer
+#
+# Proc-macro crates — `[lib]` / `proc-macro = true` in Cargo.toml. Their public
+# surface is macro-invocation syntax (documented in prose elsewhere), not
+# struct/enum/fn declarations this tool's regexes target:
+#   teksilo-i18n-macros, teksilo-macros, teksilo-telemetry-codegen
+#   teksilo-resources — despite its name suggesting a plain library, its
+#   Cargo.toml declares `[lib]\nproc-macro = true` (it is the `res!` macro
+#   crate); verified, not assumed from the name.
+#
+# Internal build-time gates — `publish = false`, and each Cargo.toml says
+# outright it exists only to fail this workspace's own build (drift guards /
+# fixture lists), so there is no public surface meant for a downstream reader:
+#   teksilo-teksu-guard, teksilo-target-conformance
+#
+# Architectural limitation, verified per-crate — `SKIP_FILES` (below) treats
+# every crate's src/lib.rs as a pure aggregator (mod declarations + `pub use`
+# re-exports) and never scans it for locally-defined pub items; that rule is
+# applied uniformly, including to the four cataloged crates. teksilo-tokio and
+# teksilo-async-std define their ENTIRE public surface (`TokioHandle`,
+# `TeksiloAppBuilderTokioExt`, `TeksiloAppBuilderAsyncStdExt`) directly inside
+# lib.rs, and neither has any other .rs file in src/ — so for these two
+# specifically, nothing is left to discover:
+#   teksilo-async-std, teksilo-tokio
+#
+# Explicitly out of scope for this step — another agent is creating it
+# concurrently and it is pure data, not a documentable API surface:
+#   teksilo-corpus
 CRATE_SPECS: dict[str, CrateSpec] = {
-    "widgets": CrateSpec("teksilo-widgets", "teksilo_widgets", "widgets", "Widget Catalog", "Widgets", True),
-    "data": CrateSpec("teksilo-data", "teksilo_data", "data-collections", "Data Collections", "Models", False),
-    "settings": CrateSpec("teksilo-settings", "teksilo_settings", "settings", "Settings", "Stores & services", False),
-    "scene": CrateSpec("teksilo-scene", "teksilo_scene", "scene", "Scene", "Scene", False),
+    # --- Cataloged (catalog=True): also get committed mdBook pages under
+    #     docs/<md_subdir>/ via --md-dir / --catalog-all. Unchanged from
+    #     before this table grew — --catalog-all only ever visits these four.
+    "widgets": CrateSpec("teksilo-widgets", "teksilo_widgets", "widgets", "Widget Catalog", "Widgets", True, True),
+    "data": CrateSpec("teksilo-data", "teksilo_data", "data-collections", "Data Collections", "Models", False, True),
+    "settings": CrateSpec("teksilo-settings", "teksilo_settings", "settings", "Settings", "Stores & services", False, True),
+    "scene": CrateSpec("teksilo-scene", "teksilo_scene", "scene", "Scene", "Scene", False, True),
+
+    # --- Queryable only (catalog=False): --crate / --list / --all / <Name> all
+    #     work; --md-dir refuses (see main()). title/md_subdir/group below are
+    #     placeholders — correct if a later step flips catalog=True, unused
+    #     until then.
+
+    # Framework core & foundational layers
+    "core": CrateSpec("teksilo-core", "teksilo_core", "core", "Core Framework", "Framework", False, False),
+    "tokens": CrateSpec("teksilo-tokens", "teksilo_tokens", "tokens", "Design Tokens", "Tokens", False, False),
+    "canvas": CrateSpec("teksilo-canvas", "teksilo_canvas", "canvas", "Canvas API", "Canvas", False, False),
+    "render": CrateSpec("teksilo-render", "teksilo_render", "render", "Renderer", "Rendering", False, False),
+    "platform": CrateSpec("teksilo-platform", "teksilo_platform", "platform", "Platform Integration", "Platform", False, False),
+    "app": CrateSpec("teksilo-app", "teksilo_app", "app", "App Runtime", "App", False, False),
+    "text": CrateSpec("teksilo-text", "teksilo_text", "text", "Text Backend", "Text", False, False),
+
+    # Feature crates built on the core
+    "charts": CrateSpec("teksilo-charts", "teksilo_charts", "charts", "Charts", "Charts", False, False),
+    "i18n": CrateSpec("teksilo-i18n", "teksilo_i18n", "i18n", "Internationalization", "I18n", False, False),
+    "telemetry": CrateSpec("teksilo-telemetry", "teksilo_telemetry", "telemetry", "Telemetry", "Telemetry", False, False),
+    "automation": CrateSpec("teksilo-automation", "teksilo_automation", "automation", "Automation Toolkit", "Automation", False, False),
+    "webview": CrateSpec("teksilo-webview", "teksilo_webview", "webview", "WebView", "WebView", False, False),
+    "terminal": CrateSpec("teksilo-terminal", "teksilo_terminal", "terminal", "Terminal", "Terminal", False, False),
+    "inspector": CrateSpec("teksilo-inspector", "teksilo_inspector", "inspector", "Inspector", "Tooling", False, False),
+    "async": CrateSpec("teksilo-async", "teksilo_async", "async", "Async Executor", "Async", False, False),
+
+    # Analytics adapters (teksilo-telemetry consumers)
+    "analytics-native": CrateSpec("teksilo-analytics-native", "teksilo_analytics_native", "analytics-native", "Analytics: Native", "Analytics", False, False),
+    "analytics-otlp": CrateSpec("teksilo-analytics-otlp", "teksilo_analytics_otlp", "analytics-otlp", "Analytics: OTLP", "Analytics", False, False),
+    "analytics-plausible": CrateSpec("teksilo-analytics-plausible", "teksilo_analytics_plausible", "analytics-plausible", "Analytics: Plausible", "Analytics", False, False),
+
+    # Sibling design-language presets (tokens + Tier-3 chrome)
+    "theme-fluent": CrateSpec("teksilo-theme-fluent", "teksilo_theme_fluent", "theme-fluent", "Fluent Theme", "Themes", False, False),
+    "theme-macos": CrateSpec("teksilo-theme-macos", "teksilo_theme_macos", "theme-macos", "macOS Theme", "Themes", False, False),
+    "theme-material3": CrateSpec("teksilo-theme-material3", "teksilo_theme_material3", "theme-material3", "Material 3 Theme", "Themes", False, False),
+
+    # Storybook-equivalent previewer: trait/registry crate + reusable GUI library
+    "preview": CrateSpec("teksilo-preview", "teksilo_preview", "preview", "Widget Previewer Core", "Preview", False, False),
+    "preview-ui": CrateSpec("teksilo-preview-ui", "teksilo_preview_ui", "preview-ui", "Previewer UI", "Preview", False, False),
+
+    # teksu! DSL tooling shared by the proc macro and the formatter
+    "fmt": CrateSpec("teksilo-fmt", "teksilo_fmt", "fmt", "teksu! Formatter", "Tooling", False, False),
+    "parse": CrateSpec("teksilo-parse", "teksilo_parse", "parse", "teksu! Parser", "Tooling", False, False),
+
+    # The umbrella crate's OWN files (its toast/webview install-hook extension
+    # traits — automation_install.rs only re-exports teksilo-app's, so it does
+    # not add anything new here) — distinct from the crates it merely
+    # re-exports, each of which already has its own entry above.
+    "teksilo": CrateSpec("teksilo", "teksilo", "umbrella", "Umbrella Crate", "Umbrella", False, False),
 }
 
 # The active crate, set by `main()` from `--crate` (default: widgets).
@@ -156,6 +279,245 @@ ANIMATIONS_DIR = WIDGETS_SRC / "animations"
 
 # Aggregator files we never treat as a catalog entry.
 SKIP_FILES = {"lib.rs", "primitives.rs", "animations.rs", "layout_integration_tests.rs", "mod.rs"}
+
+
+# ----------------------------------------------------------------------------
+# Umbrella re-export map
+# ----------------------------------------------------------------------------
+#
+# `_parse_public_exports()` (below) only reads the ACTIVE crate's own lib.rs
+# `pub use ...;` statements — no glob resolution, no transitive chains. So a
+# name an app actually sees via `use teksilo::prelude::*;` (e.g. `Button`,
+# `Theme`, `ListModel`) does not resolve as such: `Button` only works today
+# because the default `--crate` happens to be `widgets`, and `Theme` (owned by
+# teksilo-core) fails outright against that default with "unknown widget".
+#
+# This table is the fix: name -> the CRATE_SPECS key that actually owns it.
+# When a positional lookup misses in the active crate, main() consults this
+# map and retries against the owning crate's own registry (see
+# `_resolve_across_crates`). It is HAND-MAINTAINED, built by reading
+# `crates/teksilo/src/lib.rs`'s `pub mod prelude { ... }` block name by name —
+# not derived programmatically, because that would require the very glob/
+# transitive-`pub use` resolution `_parse_public_exports()` deliberately
+# doesn't do.
+#
+# What breaks if this goes stale: nothing crashes. A name added to (or moved
+# within) `teksilo::prelude` later, and not mirrored here, simply isn't
+# redirected — a plain `<Name>` lookup against an unrelated default crate
+# reports "unknown widget" for a name that is in fact real and reachable
+# through the umbrella, same as before this table existed. `run_self_tests()`
+# only guards the OTHER direction: every value here must still be a live
+# CRATE_SPECS key, so a renamed/removed table row is caught immediately rather
+# than failing silently later.
+#
+# Pointing at the right CRATE_SPECS key is necessary but not always
+# sufficient: a small number of prelude names are re-exports of a *different*
+# crate than the one that ships them to the umbrella (`ToastPriority` and
+# `WebViewStyle` are Tier-3 style types actually declared in teksilo-core, not
+# in teksilo-widgets / teksilo-webview which merely forward them — see those
+# entries below), and `WebView` itself is declared directly in
+# teksilo-webview's own lib.rs, which this tool never scans for content (the
+# same SKIP_FILES rule documented above CRATE_SPECS) — so it maps to the
+# right crate but the underlying lookup still fails there, exactly as it
+# would for any other type defined straight in a crate's lib.rs.
+#
+# Two names from `teksilo::prelude` are intentionally left OUT: `TokioHandle`
+# and `TeksiloAppBuilderTokioExt` (owned by teksilo-tokio) and
+# `TeksiloAppBuilderAsyncStdExt` (owned by teksilo-async-std) — both source
+# crates are excluded from CRATE_SPECS (see the comment above the table: their
+# entire public surface lives directly in lib.rs, which this tool never scans
+# for content), so there is no crate key to redirect to.
+UMBRELLA_REEXPORTS: dict[str, str] = {
+    # teksilo-core — widget trait, events, layout, actions/intents/shortcuts,
+    # theming types, multi-window API (teksilo::prelude's two `teksilo_core::{…}`
+    # blocks + the standalone dim_when_inactive / color_prop / window re-exports).
+    "AccessNodeBuilder": "core",
+    "AccessSubtreeMode": "core",
+    "AccessibilityOverrides": "core",
+    "Action": "core",
+    "AnimationSpec": "core",
+    "BuildContext": "core",
+    "ButtonMask": "core",
+    "CloseResponse": "core",
+    "ColorProp": "core",
+    "CursorIcon": "core",
+    "DecorationsMode": "core",
+    "DimWhenInactive": "core",
+    "EventContext": "core",
+    "EventResponse": "core",
+    "ImeContext": "core",
+    "ImePurpose": "core",
+    "Intent": "core",
+    "IntentKind": "core",
+    "IntentResponse": "core",
+    "IntoTeksiChild": "core",
+    "IntoTeksiCondition": "core",
+    "Key": "core",
+    "KeyStroke": "core",
+    "LayoutContext": "core",
+    "LayoutResponse": "core",
+    "ModalCloseBehavior": "core",
+    "ModalConfig": "core",
+    "ModalPresentation": "core",
+    "Modifiers": "core",
+    "OverscrollBehavior": "core",
+    "PaintContext": "core",
+    "PointerButton": "core",
+    "Politeness": "core",
+    "Prop": "core",
+    "Shortcut": "core",
+    "ShortcutRegistry": "core",
+    "ShortcutScope": "core",
+    "Signal": "core",
+    "SizeToContent": "core",
+    "TapEvent": "core",
+    "TeksiBranch": "core",
+    "TeksiBranch3": "core",
+    "TeksiBranch4": "core",
+    "TeksiloWindowId": "core",
+    "TextStyleProp": "core",
+    "Theme": "core",
+    "ThemeAppearance": "core",
+    "ThemeExtensions": "core",
+    "ThemeId": "core",
+    "TraversalScopePolicy": "core",
+    "UserAttentionKind": "core",
+    "Widget": "core",
+    "WidgetBuilder": "core",
+    "WidgetEvent": "core",
+    "WidgetId": "core",
+    "WindowCommand": "core",
+    "WindowConfig": "core",
+    "WindowPlacement": "core",
+    "WindowRemovedCallback": "core",
+    "WindowRemovedEvent": "core",
+    "WindowState": "core",
+
+    # teksilo-canvas — geometry + Canvas API
+    "Canvas": "canvas",
+    "EllipsisMode": "canvas",
+    "Paint": "canvas",
+    "Path": "canvas",
+    "Point": "canvas",
+    "Rect": "canvas",
+    "RenderFrame": "canvas",
+    "Size": "canvas",
+    "SizeProposal": "canvas",
+    "TextOverflow": "canvas",
+    "Vec2": "canvas",
+
+    # teksilo-tokens — color/typography tokens
+    "BorderRole": "tokens",
+    "Color": "tokens",
+    "CornerRadius": "tokens",
+    "SurfaceRole": "tokens",
+    "TextRole": "tokens",
+    "TextStyleRole": "tokens",
+
+    # teksilo-app
+    "TeksiloAppBuilder": "app",
+    "ThemeMode": "app",
+
+    # teksilo-settings
+    "AppPaths": "settings",
+    "MruEntry": "settings",
+    "MruList": "settings",
+    "PerWindowState": "settings",
+    "SettingsBundle": "settings",
+    "SettingsExt": "settings",
+    "SettingsFile": "settings",
+    "SettingsKey": "settings",
+    "SettingsStore": "settings",
+    "TEXT_SCALE_KEY": "settings",
+    "WindowStateService": "settings",
+
+    # teksilo-i18n
+    "I18nConfig": "i18n",
+    "LocalizedString": "i18n",
+    # `LanguageIdentifier` is deliberately absent: it is `pub use
+    # unic_langid::LanguageIdentifier;` — an external crate's type, not one
+    # any teksilo-* crate defines, so there is no CRATE_SPECS key to point at.
+
+    # teksilo-inspector
+    "TeksiloAppBuilderInspectorExt": "inspector",
+
+    # The umbrella crate's OWN files (toast_install.rs / webview_install.rs) —
+    # these two extension traits are teksilo's own code, not a re-export of
+    # another crate. `TeksiloAppBuilderAutomationExt`, by contrast, is genuinely
+    # defined in teksilo-app (automation_bridge.rs) and merely re-exported
+    # through automation_install.rs — see the "teksilo-app" group below.
+    "TeksiloAppBuilderToastExt": "teksilo",
+    "TeksiloAppBuilderWebViewExt": "teksilo",
+
+    # teksilo-widgets — the toast/notification surface re-exported in prelude
+    "EventContextToastExt": "widgets",
+    "NotificationArchive": "widgets",
+    "NotificationArchiveModel": "widgets",
+    "NotificationCenterButton": "widgets",
+    "NotificationEntry": "widgets",
+    "NotificationLog": "widgets",
+    "NotificationLogDialog": "widgets",
+    "Toast": "widgets",
+    "ToastAction": "widgets",
+    "ToastActionStyle": "widgets",
+    "ToastAudience": "widgets",
+    "ToastDismissCause": "widgets",
+    "ToastHandle": "widgets",
+    "ToastHost": "widgets",
+    "ToastInstallOptions": "widgets",
+    "ToastRegistry": "widgets",
+    "ToastRoute": "widgets",
+    # `ToastPriority` is a Tier-3 style-config enum actually declared in
+    # teksilo-core (styles/toast_style.rs) and merely re-exported through
+    # teksilo-widgets — see the "teksilo-core" group above.
+    "ToastPriority": "core",
+    # `ToastSeverity` is deliberately absent: teksilo-widgets defines it as
+    # `pub use teksilo_core::styles::BannerSeverity as ToastSeverity;` — a
+    # renamed re-export. Neither crate's registry has a declaration under the
+    # name `ToastSeverity` (`_parse_public_exports`/`type_re` don't resolve
+    # `pub use X as Y` renames), so no crate key here would actually resolve;
+    # the real, extractable name is `BannerSeverity` in teksilo-core.
+
+    # teksilo-app — includes automation_bridge.rs's extension trait, which the
+    # umbrella only forwards through automation_install.rs (see above).
+    "TeksiloAppBuilderAutomationExt": "app",
+
+    # teksilo-webview
+    "WebSource": "webview",
+    "WebView": "webview",
+    "WebViewBackend": "webview",
+    "WebViewEvent": "webview",
+    "WebViewHandle": "webview",
+    "WebViewId": "webview",
+    "WebViewRegistry": "webview",
+    # `WebViewStyle` is the Tier-3 style trait, declared in teksilo-core
+    # (styles/web_view_style.rs) like every other `*Style` protocol, and
+    # merely re-exported through teksilo-webview — see "teksilo-core" above.
+    "WebViewStyle": "core",
+
+    # teksilo-terminal
+    "BellStyle": "terminal",
+    "ColorScheme": "terminal",
+    "CursorStyle": "terminal",
+    "Terminal": "terminal",
+    "TerminalClosePolicy": "terminal",
+    "TerminalCommand": "terminal",
+    "TerminalController": "terminal",
+    "TerminalStyle": "terminal",
+
+    # teksilo-platform (file_dialog submodule)
+    "EventContextFileDialogExt": "platform",
+    "FileDialogHandle": "platform",
+    "FileDialogRequest": "platform",
+    "FileDialogResult": "platform",
+
+    # teksilo-async
+    "AsyncRuntimeHandle": "async",
+    "BlockingError": "async",
+    "EventContextAsyncExt": "async",
+    "TaskHandle": "async",
+    "TeksiloAppBuilderAsyncExt": "async",
+}
 
 
 # ----------------------------------------------------------------------------
@@ -1136,6 +1498,56 @@ def resolve_name(reg: Registry, name: str) -> Path | None:
     if key in reg.module_to_file:
         return reg.module_to_file[key]
     return None
+
+
+_registry_cache: dict[str, Registry] = {}
+
+
+def _registry_for(key: str) -> Registry:
+    """Build (and memoize) the `Registry` for a `CRATE_SPECS` key without
+    disturbing the caller's module-global `SPEC`.
+
+    `build_registry()` reads `SPEC` for the crate's `src/` path, its
+    `is_widget` flag and its aggregator files, so building a second crate's
+    registry means swapping `SPEC` in and back out again — the same
+    save/restore dance `run_self_tests()` already does around the `data`
+    crate check.
+    """
+    if key in _registry_cache:
+        return _registry_cache[key]
+    global SPEC
+    prev = SPEC
+    try:
+        SPEC = CRATE_SPECS[key]
+        reg = build_registry()
+    finally:
+        SPEC = prev
+    _registry_cache[key] = reg
+    return reg
+
+
+def _resolve_across_crates(
+    reg: Registry, current_key: str, name: str
+) -> tuple[Path | None, str, Registry]:
+    """Resolve `name` against the active crate's registry first; on a miss,
+    consult `UMBRELLA_REEXPORTS` for a name reachable through
+    `teksilo::prelude` and retry against its owning crate's own registry.
+
+    Returns `(file, crate_key_used, registry_used)`. The caller needs
+    `registry_used` (not just `reg`) to look up the resolved file's cfg gates
+    — a file resolved in another crate's registry has its `cfg_by_file` entry
+    recorded there, not in `reg`.
+    """
+    fp = resolve_name(reg, name)
+    if fp is not None:
+        return fp, current_key, reg
+    owner = UMBRELLA_REEXPORTS.get(name)
+    if owner is not None and owner != current_key:
+        other_reg = _registry_for(owner)
+        fp = resolve_name(other_reg, name)
+        if fp is not None:
+            return fp, owner, other_reg
+    return None, current_key, reg
 
 
 # ----------------------------------------------------------------------------
@@ -2129,6 +2541,44 @@ def run_self_tests() -> int:
     finally:
         SPEC = _prev
 
+    # Step 9: a queryable-but-not-cataloged crate, end to end. `core` has
+    # catalog=False (it is not one of the four mdBook-catalogued crates) but
+    # must still resolve/build/extract exactly like a cataloged one.
+    _prev = SPEC
+    try:
+        SPEC = CRATE_SPECS["core"]
+        assert not SPEC.catalog, "'core' must stay catalog=False for this to test the right thing"
+        creg = build_registry()
+        cfp = creg.type_to_file.get("theme")
+        assert cfp is not None, "Theme should be resolvable by name in teksilo-core"
+        cpf = parse_file(cfp, cfp.stem, creg.cfg_by_file.get(cfp.resolve(), []))
+        assert any(item.name == "Theme" for item in cpf.items), (
+            "Theme struct not extracted from teksilo-core"
+        )
+    finally:
+        SPEC = _prev
+
+    # `--catalog-all` must keep iterating exactly the four originally-cataloged
+    # crates — every crate added to CRATE_SPECS above must never grow docs/ output.
+    catalog_keys = {k for k, s in CRATE_SPECS.items() if s.catalog}
+    assert catalog_keys == {"widgets", "data", "settings", "scene"}, (
+        f"--catalog-all must visit exactly the four cataloged crates, got {catalog_keys}"
+    )
+
+    # UMBRELLA_REEXPORTS must only ever point at a live CRATE_SPECS key — a
+    # renamed/removed table row would otherwise silently stop redirecting.
+    for _name, _key in UMBRELLA_REEXPORTS.items():
+        assert _key in CRATE_SPECS, f"UMBRELLA_REEXPORTS[{_name!r}] -> unknown crate key {_key!r}"
+
+    # End-to-end umbrella redirect: `Theme` isn't in teksilo-widgets, but is
+    # reachable via `teksilo::prelude::Theme` (owned by teksilo-core). A
+    # lookup against the default 'widgets' registry should fall through.
+    assert "theme" not in reg.type_to_file, "test assumption: Theme is not itself in teksilo-widgets"
+    redirected_fp, used_key, _ = _resolve_across_crates(reg, "widgets", "Theme")
+    assert used_key == "core" and redirected_fp is not None, (
+        "umbrella redirect for 'Theme' should land on teksilo-core"
+    )
+
     print("extract_widget_api.py self-tests passed.", file=sys.stderr)
     return 0
 
@@ -2253,6 +2703,8 @@ def main(argv: list[str]) -> int:
     if args.catalog_all:
         rc = 0
         for key, spec in CRATE_SPECS.items():
+            if not spec.catalog:
+                continue
             SPEC = spec
             reg = build_registry()
             out = REPO_ROOT / "docs" / spec.md_subdir
@@ -2266,15 +2718,28 @@ def main(argv: list[str]) -> int:
         return cmd_list(reg)
 
     if args.md_dir:
+        if not SPEC.catalog:
+            print(
+                f"error: '{args.crate}' ({SPEC.crate}) is queryable via "
+                "--list / --all / <Name> but is not part of the mdBook "
+                "catalog — CRATE_SPECS marks it catalog=False. Refusing to "
+                "write pages for it; flip `catalog=True` in CRATE_SPECS "
+                "first if this crate should join the book.",
+                file=sys.stderr,
+            )
+            return 2
         return cmd_md_dir(reg, args.md_dir, args.api_base, _api_dir())
 
+    file_cfg: dict[Path, list[str]] = {}
     if args.all:
         target_files = list(reg.files)
+        for fp in target_files:
+            file_cfg[fp] = reg.cfg_by_file.get(fp.resolve(), [])
     elif args.widgets:
         target_files = []
         seen: set[Path] = set()
         for name in args.widgets:
-            fp = resolve_name(reg, name)
+            fp, used_key, used_reg = _resolve_across_crates(reg, args.crate, name)
             if fp is None:
                 known = sorted(set(reg.type_to_file) | set(reg.module_to_file))
                 hints = difflib.get_close_matches(name.lower(), known, n=3)
@@ -2285,9 +2750,17 @@ def main(argv: list[str]) -> int:
                     f"error: unknown widget '{name}'.{hint_str}", file=sys.stderr
                 )
                 return 2
+            if used_key != args.crate:
+                print(
+                    f"note: '{name}' isn't in {SPEC.crate}; resolved via the "
+                    f"teksilo umbrella prelude to {CRATE_SPECS[used_key].crate} "
+                    f"(--crate {used_key}).",
+                    file=sys.stderr,
+                )
             if fp not in seen:
                 seen.add(fp)
                 target_files.append(fp)
+                file_cfg[fp] = used_reg.cfg_by_file.get(fp.resolve(), [])
     else:
         parser.print_help(sys.stderr)
         print(
@@ -2298,8 +2771,7 @@ def main(argv: list[str]) -> int:
 
     parsed: list[ParsedFile] = []
     for fp in target_files:
-        cfg = reg.cfg_by_file.get(fp.resolve(), [])
-        pf = parse_file(fp, fp.stem, cfg)
+        pf = parse_file(fp, fp.stem, file_cfg.get(fp, []))
         parsed.append(pf)
 
     if args.format == "json":

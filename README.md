@@ -182,7 +182,42 @@ cd my-app
 cargo add teksilo
 ```
 
-Then read the examples:
+### Tooling — `cargo teksilo`
+
+Four things Teksilo relies on do not travel with the crate: the guides under
+`docs/`, the 56 worked examples (every one is `publish = false`), the agent
+skill, and the harness for driving a running app. That leaves anyone building
+*with* Teksilo — and any AI assistant helping them — working from less than the
+framework actually documents.
+
+One install fixes it, and everything it answers is matched to the Teksilo
+version **your** `Cargo.lock` resolved:
+
+```sh
+cargo install cargo-teksilo
+cargo teksilo setup             # run inside your app
+```
+
+```sh
+cargo teksilo symbol Button                  # exact public API, for your version
+cargo teksilo symbol --crate data ListModel  # 30 crates are queryable
+cargo teksilo search "make a list scrollable"
+cargo teksilo probe                          # automation harness -> scripts/
+```
+
+`setup` writes the probe harness into `scripts/teksilo_probe/` and installs the
+skill wherever the coding agents on your machine already look for one. It never
+touches your own files, and it refuses outright rather than answering for a
+version you do not have — a wrong answer about a framework reads exactly like a
+right one.
+
+If ONNX Runtime will not build on your platform, `cargo install cargo-teksilo
+--no-default-features` gives the same tool with lexical search instead of hybrid;
+everything else is unchanged.
+
+Full reference: [docs/agent-tooling.md](docs/agent-tooling.md).
+
+### Running the demos
 
 ```sh
 git clone https://github.com/ferntech-eu/teksilo
@@ -192,7 +227,8 @@ cargo run -p widget-catalog     # browse every widget
 cargo run -p file-dialogs       # native file dialogs
 ```
 
-For a tour of every public widget API:
+Inside a checkout, the extractor `cargo teksilo symbol` wraps is also directly
+available:
 
 ```sh
 python3 tools/extract_widget_api.py --list

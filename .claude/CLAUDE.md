@@ -67,7 +67,78 @@ python3 tools/extract_widget_api.py --all                  # Every widget
 python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tooling
 python3 tools/extract_widget_api.py --all --md-dir docs/widgets  # Regenerate the mdBook Widget Catalog
 python3 tools/bench_examples.py                          # Run benchmarks with report generation
+python3 tools/build_corpus.py                            # Regenerate the teksilo-corpus data (committed)
+python3 tools/build_corpus.py --check                    # CI staleness guard for it
+python3 tools/build_corpus.py --check-vectors            # CI guard: pass 2 was not skipped
 ```
+
+### `cargo teksilo` — the tooling consumers get
+
+`crates/cargo-teksilo` is what an app developer installs (`cargo install
+cargo-teksilo`). It exists because four things never leave this repository:
+`docs/` ships in no crate, every `examples/*` crate is `publish = false`, the
+skill lives in `.claude/`, and the automation probe harness lived only in one
+app's repo. Everything it answers is matched to the teksilo the *consumer's*
+app resolved, read from their `Cargo.lock`.
+
+```bash
+cargo teksilo symbol Button          # exact public API, for the version they pin
+cargo teksilo search "<question>"    # hybrid BM25 + vector over guides + examples
+cargo teksilo show <corpus path>     # a hit's document in full, offline (--lines A-B, --list)
+cargo teksilo probe                  # write the probe harness into scripts/teksilo_probe/
+cargo teksilo setup                  # probe + brief every agent configured in the project
+cargo teksilo setup -y --no-model    # …without the prompt, without the encoder download
+cargo teksilo setup --user           # …into $HOME instead — the ONLY mode that writes it
+cargo teksilo status                 # what is installed, both scopes + the search model (read-only)
+cargo teksilo build-vectors          # MAINTAINER ONLY: re-encode the corpus (see below)
+```
+
+**`setup` installs per agent, in that agent's own format**, because these tools
+share none: `.claude/skills/teksilo/` gets the full four-file skill (its native
+shape), and `.cursor/rules/teksilo.mdc`, `.windsurf/rules/teksilo.md`,
+`.github/copilot-instructions.md` and `AGENTS.md` each get a self-contained
+~40-line brief wearing that vendor's own frontmatter — copying the skill
+directory into `.cursor/` would accomplish nothing. The two shared files are
+edited through a `<!-- BEGIN teksilo -->` / `<!-- END teksilo -->` region, so a
+re-run is a byte-for-byte no-op and nothing outside the markers moves. Detection
+is by marker-already-exists (never created on spec), the plan is printed and
+confirmed before anything is written, and **a prompt with no terminal on stdin
+is an error naming the flag that would have skipped it** (`-y`, or `--user`) —
+never a blocking read, because CI and agents run this. `--user` reaches Claude
+Code only, which is a finding rather than an omission: Cursor's user rules are
+UI-only, Copilot's personal instructions live on github.com, and `AGENTS.md` is
+per-repository by definition; `setup --user` prints that list. `setup` also
+pre-fetches the search encoder (≈129 MB, once, into the per-user cache
+`vectors.rs` resolves) so the first `search` does not stall on it; a failed
+fetch is a **warning**, since `search` degrades to BM25 by design.
+
+Three things to know when changing it:
+
+- **The corpus is generated and committed, and it is one file.**
+  `tools/build_corpus.py` writes `crates/teksilo-corpus/corpus/index.json` —
+  nothing else lives in that directory; `cargo teksilo build-vectors` then fills
+  in the embeddings. Run them **in that order** — the generator carries existing
+  vectors forward by chunk-text hash, so re-encoding is incremental, but only
+  `build-vectors` can create them in the first place. Each chunk stores its own
+  `text` and its `path` names the **original** file (`docs/scroll-area.md`,
+  `examples/simple_button/src/main.rs`), so a search result cites a path that
+  exists. Do not reintroduce copies of `docs/` or `examples/` under `corpus/`:
+  that duplication is what this layout removed, and an edit landing in the copy
+  was discarded silently by the next regeneration. The chunk key order in
+  `build_corpus.py` and the field order of `Chunk` in
+  `crates/teksilo-corpus/src/lib.rs` must stay identical — `build-vectors`
+  refuses to run (`NotRoundTrippable`) when serde does not reproduce the
+  generator's bytes.
+- **Three payloads are embedded and CI guards their identity**:
+  `embedded/extract_widget_api.py` against `tools/`, `embedded/skill/` against
+  `.claude/skills/teksilo/`, and `embedded/probe/` (whose `tools.py` is
+  generated from `TOOL_CATALOG` and conformance-tested). `build.rs` declares
+  every embedded file so `include_dir!` actually rebuilds — without it cargo
+  reports "0 crates compiled" after a real change and ships a stale payload.
+- **`semantic` is default-on but must stay optional.** It pulls `fastembed` →
+  ONNX Runtime plus two other C/C++ sys crates. `--no-default-features` is a
+  fully working tool (symbol, probe, setup, BM25 search) and CI builds both on
+  all three OSes, so the escape hatch is proven rather than hoped for.
 
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/teksilo-widgets/src/](crates/teksilo-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 
@@ -1364,8 +1435,16 @@ releases. `crates/teksilo-teksu-guard` now fails the build on the divergence: it
 `widget_builder.rs` with `syn`, collects every method returning `WidgetWithHandlers<Self>`, and
 compares that set against the predicate in both directions.
 
-Slash command `/teksu-macro` loads the skill for read/write/explain/
-translate/debug workflows.
+Slash command `/teksilo` loads the skill for read / write / explain /
+translate / debug workflows; its `reference/teksu.md` is the `teksu!` half.
+That skill merges the former `teksilo-app` and `teksu-macro` skills and is
+**written for a consumer app**, so it is also what `cargo teksilo setup`
+installs into someone else's project — verbatim into `.claude/skills/teksilo/`,
+and as the condensed brief in `crates/cargo-teksilo/src/setup.rs` for the
+agents that cannot load a skill. Editing this skill therefore obliges you to
+`cp -r` it over `crates/cargo-teksilo/embedded/skill/` (CI asserts `diff -r`),
+and to ask whether the brief still says the same thing. Inside this repository,
+prefer the in-repo `extract-widget-api` skill for a single type's public surface.
 
 ## App Entry Point Pattern
 

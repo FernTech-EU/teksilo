@@ -27,6 +27,10 @@ teksilo-preview = { workspace = true }
 teksilo-render = { workspace = true }
 teksilo-platform = { workspace = true }
 teksilo-text = { workspace = true }
+# This crate owns `PreviewerArgs`, the clap fragment a previewer binary
+# flattens into its own parser — so the CLI dependency belongs here with
+# it, not re-declared once per downstream binary.
+clap = { workspace = true }
 png = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }

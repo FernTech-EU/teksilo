@@ -20,6 +20,7 @@ name = "cargo-teksilo-fmt"
 path = "src/main.rs"
 
 [dependencies]
+clap = { workspace = true }
 teksilo-fmt = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }

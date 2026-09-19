@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+[package]
+name = "teksilo-corpus"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Version-matched Teksilo documentation corpus and retrieval index"
+documentation = "https://docs.rs/teksilo-corpus"
+keywords = ["teksilo", "documentation", "corpus", "search", "gui"]
+categories = ["development-tools", "gui"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

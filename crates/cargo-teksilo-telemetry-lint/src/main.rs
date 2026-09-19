@@ -18,123 +18,150 @@
 //! 7. **`expires` in the past** (warning, configurable with `--fail-on-warnings`).
 //! 8. **Unused events** — declared in manifest but no call site in `src/`.
 //!
-//! # Usage
-//!
-//! ```text
-//! cargo teksilo-telemetry-lint [OPTIONS]
-//!
-//! Options:
-//!   --manifest <PATH>         Path to the events.yaml manifest
-//!                             [default: telemetry/events.yaml]
-//!   --src <DIR>               Source directory to scan for emit_* calls
-//!                             (can be repeated; default: src)
-//!   --fail-on-warnings        Exit with non-zero when warnings are present
-//!   --json                    Output findings as JSON (one object per line)
-//!   --quiet                   Suppress summary line
-//! ```
+//! The command line itself is declared by [`Cli`], so
+//! `cargo teksilo-telemetry-lint --help` is generated from the same place the
+//! program reads its options — there is no second copy to drift.
 
 use std::path::{Path, PathBuf};
 use std::process;
 
+use clap::Parser;
+
 mod checks;
 mod manifest;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+/// Keeps the uppercase section headings this tool has always printed.
+///
+/// clap 4 renders `Usage:` / `Options:` in sentence case; the linter's output
+/// is read in CI logs beside its sibling `cargo teksilo-fmt`, so both pin the
+/// established shape rather than changing it as a side effect of a parser swap.
+const HELP_TEMPLATE: &str = "\
+{about-with-newline}
+USAGE:
+    {usage}
 
-    // When invoked as `cargo teksilo-telemetry-lint`, Cargo passes the
-    // subcommand name as the first arg. Skip it.
-    let args = skip_cargo_subcommand(&args);
+OPTIONS:
+{options}{after-help}";
 
-    let config = match Config::parse(args) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            eprintln!("Run with --help for usage.");
-            process::exit(2);
-        }
-    };
+/// The checks and worked invocations, kept out of the flag list.
+///
+/// The numbered list is the linter's contract with a manifest author: it says
+/// what a clean run has actually established, which no per-flag help text can.
+const AFTER_HELP: &str = "\
+CHECKS:
+    1. YAML parse + schema-version coherence
+    2. Required fields: expires, bug, description, category
+    3. Valid category (intent|lifecycle|navigation|census|custom)
+    4. Duplicate event / prop names
+    5. Unknown prop types
+    6. enum props without values list
+    7. expires past today (warning)
+    8. Declared events with no emit_* call sites in src/ (warning)
 
-    if config.help {
-        print_help();
-        return;
-    }
+EXAMPLES:
+    cargo teksilo-telemetry-lint
+    cargo teksilo-telemetry-lint --manifest telemetry/app_events.yaml --src src --src lib
+    cargo teksilo-telemetry-lint --fail-on-warnings   # for CI";
 
-    run(config);
-}
+const LONG_ABOUT: &str = "\
+cargo teksilo-telemetry-lint — Teksilo telemetry schema drift linter
 
-fn skip_cargo_subcommand(args: &[String]) -> &[String] {
-    // `cargo teksilo-telemetry-lint` → argv[0]=binary, argv[1]="teksilo-telemetry-lint"
-    if args
-        .get(1)
-        .map(|s| s == "teksilo-telemetry-lint")
-        .unwrap_or(false)
-    {
-        &args[2..]
-    } else if args.len() > 1 {
-        &args[1..]
-    } else {
-        &[]
-    }
-}
+Reads an events.yaml manifest and the sources that emit against it, and reports
+where the two have drifted apart: a manifest that no longer parses, an event
+missing a field the codegen requires, a prop type nothing can encode, an expiry
+date that has passed, an event nobody emits any more.
 
-#[derive(Debug, Default)]
-struct Config {
-    manifest_path: Option<PathBuf>,
-    src_dirs: Vec<PathBuf>,
+Errors always fail the run. Warnings — an expired event, an unused one — do not,
+unless --fail-on-warnings is given.";
+
+/// The whole command line.
+///
+/// A single-level command rather than the `Cargo { Teksilo(..) }` enum
+/// `cargo teksilo` uses: that idiom makes the subcommand word mandatory, and
+/// this binary has always run directly as `cargo-teksilo-telemetry-lint …`
+/// too. [`strip_cargo_subcommand`] removes the word when cargo supplies it;
+/// `bin_name` keeps the generated help reading `cargo teksilo-telemetry-lint …`
+/// either way.
+#[derive(Debug, Parser)]
+#[command(
+    name = "cargo-teksilo-telemetry-lint",
+    bin_name = "cargo teksilo-telemetry-lint",
+    about = "cargo teksilo-telemetry-lint — Teksilo telemetry schema drift linter",
+    long_about = LONG_ABOUT,
+    help_template = HELP_TEMPLATE,
+    after_help = AFTER_HELP
+)]
+struct Cli {
+    /// Path to the events.yaml manifest.
+    ///
+    /// Relative to the current directory, so the linter is normally run from
+    /// the crate that owns the manifest.
+    #[arg(long, value_name = "PATH", default_value = "telemetry/events.yaml")]
+    manifest: PathBuf,
+
+    /// Source dir to scan for `emit_*` call sites (repeatable).
+    ///
+    /// Only the unused-event check reads these. Repeat the flag for a crate
+    /// whose emitters are split across roots — `--src src --src lib` — or an
+    /// event emitted from the second root is reported as emitted from nowhere.
+    #[arg(long, value_name = "DIR", default_value = "src")]
+    src: Vec<PathBuf>,
+
+    /// Exit 1 when warnings are present (CI mode).
+    ///
+    /// Warnings are the drift that has not broken anything yet: an expiry date
+    /// that has passed, an event with no call site left. They are worth failing
+    /// a pipeline over and not worth failing a local run over, which is why
+    /// this is a flag rather than the default.
+    #[arg(long)]
     fail_on_warnings: bool,
-    json_output: bool,
+
+    /// Output findings as newline-delimited JSON.
+    ///
+    /// One object per finding — `severity`, `location`, `message` — with the
+    /// summary line suppressed, for a tool reading this instead of a human.
+    #[arg(long)]
+    json: bool,
+
+    /// Suppress the summary line.
+    ///
+    /// The per-finding lines are still printed, and the exit code is unchanged.
+    #[arg(long, short)]
     quiet: bool,
-    help: bool,
 }
 
-impl Config {
-    fn parse(args: &[String]) -> Result<Self, String> {
-        let mut cfg = Config::default();
-        let mut iter = args.iter();
-        while let Some(arg) = iter.next() {
-            match arg.as_str() {
-                "--help" | "-h" => cfg.help = true,
-                "--fail-on-warnings" => cfg.fail_on_warnings = true,
-                "--json" => cfg.json_output = true,
-                "--quiet" | "-q" => cfg.quiet = true,
-                "--manifest" => {
-                    let path = iter.next().ok_or("--manifest requires a path")?;
-                    cfg.manifest_path = Some(PathBuf::from(path));
-                }
-                "--src" => {
-                    let dir = iter.next().ok_or("--src requires a directory")?;
-                    cfg.src_dirs.push(PathBuf::from(dir));
-                }
-                other if other.starts_with("--") => {
-                    return Err(format!("unknown option: {other}"));
-                }
-                _ => {} // ignore positional args
-            }
-        }
-        Ok(cfg)
+fn main() {
+    let cli = Cli::parse_from(strip_cargo_subcommand(std::env::args().collect()));
+    run(cli);
+}
+
+/// Drop the `teksilo-telemetry-lint` word cargo passes as `argv[1]`.
+///
+/// `cargo teksilo-telemetry-lint --json` reaches this binary as
+/// `[cargo-teksilo-telemetry-lint, teksilo-telemetry-lint, --json]`; run
+/// directly it is `[cargo-teksilo-telemetry-lint, --json]`. Both forms work,
+/// so the word is removed only when it is actually the first argument.
+/// `argv[0]` stays: clap reads the whole vector, program name included.
+fn strip_cargo_subcommand(mut argv: Vec<String>) -> Vec<String> {
+    if argv
+        .get(1)
+        .is_some_and(|arg| arg == "teksilo-telemetry-lint")
+    {
+        argv.remove(1);
     }
+    argv
 }
 
-fn run(config: Config) {
-    // Resolve manifest path.
-    let manifest_path = config
-        .manifest_path
-        .unwrap_or_else(|| PathBuf::from("telemetry/events.yaml"));
-
-    // Resolve source directories.
-    let src_dirs: Vec<PathBuf> = if config.src_dirs.is_empty() {
-        vec![PathBuf::from("src")]
-    } else {
-        config.src_dirs
-    };
+fn run(config: Cli) {
+    let manifest_path = config.manifest;
+    let src_dirs = config.src;
 
     // Read manifest.
     let content = match std::fs::read_to_string(&manifest_path) {
         Ok(s) => s,
         Err(e) => {
             emit_error_line(
-                config.json_output,
+                config.json,
                 &format!("{}", manifest_path.display()),
                 &format!("cannot read manifest: {e}"),
             );
@@ -146,7 +173,7 @@ fn run(config: Config) {
     let schema = match manifest::parse_schema(&content) {
         Ok(s) => s,
         Err(e) => {
-            emit_error_line(config.json_output, &manifest_path.display().to_string(), &e);
+            emit_error_line(config.json, &manifest_path.display().to_string(), &e);
             process::exit(1);
         }
     };
@@ -166,7 +193,7 @@ fn run(config: Config) {
         .count();
 
     for issue in &issues {
-        if config.json_output {
+        if config.json {
             println!(
                 "{{\"severity\":\"{}\",\"location\":\"{}\",\"message\":\"{}\"}}",
                 if issue.severity == checks::Severity::Error {
@@ -214,35 +241,73 @@ fn emit_error_line(json: bool, location: &str, message: &str) {
     }
 }
 
-fn print_help() {
-    println!(
-        r#"cargo teksilo-telemetry-lint — Teksilo telemetry schema drift linter
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    use clap::CommandFactory;
 
-USAGE:
-    cargo teksilo-telemetry-lint [OPTIONS]
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| (*s).to_string()).collect()
+    }
 
-OPTIONS:
-    --manifest <PATH>       Path to events.yaml [default: telemetry/events.yaml]
-    --src <DIR>             Source dir to scan (repeatable) [default: src]
-    --fail-on-warnings      Exit 1 when warnings are present (CI mode)
-    --json                  Output findings as newline-delimited JSON
-    --quiet, -q             Suppress summary line
-    --help, -h              Print this help
+    #[test]
+    fn command_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
 
-CHECKS:
-    1. YAML parse + schema-version coherence
-    2. Required fields: expires, bug, description, category
-    3. Valid category (intent|lifecycle|navigation|census|custom)
-    4. Duplicate event / prop names
-    5. Unknown prop types
-    6. enum props without values list
-    7. expires past today (warning)
-    8. Declared events with no emit_* call sites in src/ (warning)
+    #[test]
+    fn strips_the_cargo_subcommand_word() {
+        assert_eq!(
+            strip_cargo_subcommand(argv(&[
+                "cargo-teksilo-telemetry-lint",
+                "teksilo-telemetry-lint",
+                "--json"
+            ])),
+            argv(&["cargo-teksilo-telemetry-lint", "--json"])
+        );
+        assert_eq!(
+            strip_cargo_subcommand(argv(&["cargo-teksilo-telemetry-lint", "--json"])),
+            argv(&["cargo-teksilo-telemetry-lint", "--json"])
+        );
+    }
 
-EXAMPLES:
-    cargo teksilo-telemetry-lint
-    cargo teksilo-telemetry-lint --manifest telemetry/app_events.yaml --src src --src lib
-    cargo teksilo-telemetry-lint --fail-on-warnings   # for CI
-"#
-    );
+    #[test]
+    fn defaults_match_the_documented_ones() {
+        let cli = Cli::try_parse_from(argv(&["cargo-teksilo-telemetry-lint"])).unwrap();
+        assert_eq!(cli.manifest, PathBuf::from("telemetry/events.yaml"));
+        assert_eq!(cli.src, vec![PathBuf::from("src")]);
+        assert!(!cli.fail_on_warnings && !cli.json && !cli.quiet);
+    }
+
+    #[test]
+    fn src_is_repeatable_and_replaces_the_default() {
+        let cli = Cli::try_parse_from(argv(&[
+            "cargo-teksilo-telemetry-lint",
+            "--src",
+            "src",
+            "--src",
+            "lib",
+        ]))
+        .unwrap();
+        assert_eq!(cli.src, vec![PathBuf::from("src"), PathBuf::from("lib")]);
+    }
+
+    #[test]
+    fn a_typo_for_a_flag_is_rejected_rather_than_silently_ignored() {
+        // The hand-rolled parser dropped stray positionals, so
+        // `cargo teksilo-telemetry-lint fail-on-warnings` — the flag with its
+        // dashes forgotten — printed "no issues found" and exited 0. In CI that
+        // reads as a gate that passed, when it is a gate that never ran. That is
+        // exactly the failure this lint exists to catch, so it is now an error.
+        let err = Cli::try_parse_from(argv(&["cargo-teksilo-telemetry-lint", "fail-on-warnings"]))
+            .expect_err("a stray positional must not be accepted");
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+        // Note what clap does *not* do here: a bare word gets no "did you mean"
+        // suggestion, because clap only offers one for `--typo` forms. The value
+        // is the refusal itself — the run stops instead of reporting success.
+        assert!(
+            err.to_string().contains("fail-on-warnings"),
+            "the error should name the offending argument, got: {err}"
+        );
+    }
 }

@@ -30,15 +30,94 @@
 //! Downstream applications create their own analogous thin binary that
 //! links their own widget set with the `preview` feature.
 
-fn main() {
-    let argv: Vec<String> = std::env::args().collect();
-    if argv
-        .iter()
-        .any(|a| a == "--export-docs" || a.starts_with("--export-docs="))
-    {
-        std::process::exit(run_doc_export(&argv[1..]));
+use std::path::PathBuf;
+
+use clap::Parser;
+use teksilo_preview_ui::PreviewerArgs;
+
+/// Browse mode's flags come from the library fragment; the three modes —
+/// browse, `--list` and `--export-docs` — are declared mutually exclusive
+/// rather than resolved by precedence, so asking for two is a message instead
+/// of a silent win for whichever branch `main` happened to test first.
+///
+/// The export sub-flags all `requires` the batch they configure, because a
+/// `--dark` with no `--export-docs` used to be reported as an unrecognised
+/// argument and should still be reported as something.
+#[derive(Parser)]
+#[command(
+    name = "teksilo-widgets-previewer",
+    version,
+    about = "Teksilo Widget Previewer",
+    long_about = "Browse the stock Teksilo widget catalog — navigator, live canvas and knob \
+                  form — or run the headless batch that renders the mdBook catalog's images."
+)]
+struct Cli {
+    #[command(flatten)]
+    preview: PreviewerArgs,
+
+    /// Print every registered catalog entry (group, id, name, source file) and exit.
+    #[arg(long, conflicts_with = "export_docs")]
+    list: bool,
+
+    /// Render the catalog's documentation images into OUT_DIR (docs/widgets/img).
+    ///
+    /// Needs a wgpu adapter, but no display server. One pass per --density:
+    /// compact is canonical and writes `img/<slug>.png`, every other density
+    /// is additive and writes `img/<slug>-<density>.png` beside it.
+    #[arg(
+        long,
+        value_name = "OUT_DIR",
+        num_args = 0..=1,
+        require_equals = true,
+        conflicts_with_all = ["widget", "variant", "file", "window", "title"]
+    )]
+    export_docs: Option<Option<PathBuf>>,
+
+    /// Catalog pages to check against (default: docs/widgets).
+    ///
+    /// A subject with no `<slug>.md` there is reported and skipped, so an
+    /// image is never written with no page to appear on.
+    #[arg(long, value_name = "DIR", requires = "export_docs")]
+    pages: Option<PathBuf>,
+
+    /// Write images even for slugs with no catalog page.
+    #[arg(long, requires = "export_docs", conflicts_with = "pages")]
+    all_subjects: bool,
+
+    /// Render the dark theme instead of light.
+    #[arg(long, requires = "export_docs")]
+    dark: bool,
+
+    /// HiDPI factor (default 2).
+    #[arg(long, value_name = "N", requires = "export_docs", value_parser = positive_scale)]
+    scale: Option<f32>,
+
+    /// Restrict the batch to these slugs.
+    #[arg(
+        long,
+        value_name = "SLUG",
+        value_delimiter = ',',
+        requires = "export_docs"
+    )]
+    only: Vec<String>,
+}
+
+/// `--scale` is a multiplier, so zero and negatives are not small values —
+/// they are a canvas with no pixels in it.
+fn positive_scale(raw: &str) -> Result<f32, String> {
+    match raw.parse::<f32>() {
+        Ok(s) if s > 0.0 => Ok(s),
+        _ => Err(format!("invalid scale '{raw}' (expected a number above 0)")),
     }
-    if argv.iter().any(|a| a == "--list") {
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    if let Some(out_dir) = cli.export_docs.clone() {
+        std::process::exit(run_doc_export(&cli, out_dir));
+    }
+    if cli.list {
         for entry in teksilo_preview::iter_entries() {
             println!(
                 "{}\t{}\t{}\t{}",
@@ -50,71 +129,37 @@ fn main() {
         }
         return;
     }
-    let opts = teksilo_preview_ui::PreviewerOptions::from_args();
+    let opts = teksilo_preview_ui::PreviewerOptions::from_parsed(cli.preview);
     teksilo_preview_ui::run_previewer(opts);
 }
 
 /// Headless documentation-image export.
 ///
-/// ```text
-/// --export-docs[=OUT_DIR]   default: docs/widgets/img
-/// --pages=DIR               catalog pages to check against (default: docs/widgets)
-/// --all-subjects            write images even for slugs with no catalog page
-/// --dark                    render the dark theme instead of light
-/// --scale=N                 HiDPI factor (default 2)
-/// --only=slug[,slug...]     restrict the batch
-/// --density=NAME[,NAME...]  compact | comfortable | touch (default compact)
-/// ```
-///
 /// Each density is a separate pass over the whole catalog. `compact` is the
 /// canonical one and writes `img/<slug>.png`; the others are additive and
 /// write `img/<slug>-<density>.png`, so `--density=compact,touch`
 /// regenerates the committed images and adds the Touch variants in one run.
-fn run_doc_export(args: &[String]) -> i32 {
+///
+/// The returned code is the bitwise-or of every pass's, so a run that renders
+/// three densities and fails one still says so.
+fn run_doc_export(cli: &Cli, out_dir: Option<PathBuf>) -> i32 {
     let mut opts = teksilo_preview_ui::DocExportOptions::default();
-    let mut passes = Vec::new();
-    for arg in args {
-        if let Some(dir) = arg.strip_prefix("--export-docs=") {
-            opts.out_dir = std::path::PathBuf::from(dir);
-        } else if let Some(dir) = arg.strip_prefix("--pages=") {
-            opts.pages_dir = Some(std::path::PathBuf::from(dir));
-        } else if arg == "--all-subjects" {
-            opts.pages_dir = None;
-        } else if arg == "--dark" {
-            opts.dark = true;
-        } else if let Some(scale) = arg.strip_prefix("--scale=") {
-            match scale.parse::<f32>() {
-                Ok(s) if s > 0.0 => opts.scale = s,
-                _ => {
-                    eprintln!("teksilo-previewer: invalid --scale '{}'", scale);
-                    return 2;
-                }
-            }
-        } else if let Some(list) = arg.strip_prefix("--only=") {
-            opts.only = list.split(',').map(str::to_string).collect();
-        } else if let Some(list) = arg.strip_prefix("--density=") {
-            for name in list.split(',') {
-                match teksilo_preview::PreviewPass::from_name(name) {
-                    Some(p) => passes.push(p),
-                    None => {
-                        eprintln!(
-                            "teksilo-previewer: unknown --density '{}' \
-                             (compact | comfortable | touch)",
-                            name
-                        );
-                        return 2;
-                    }
-                }
-            }
-        } else if arg != "--export-docs" {
-            eprintln!(
-                "teksilo-previewer: unrecognised argument '{}' for --export-docs",
-                arg
-            );
-            return 2;
-        }
+    if let Some(dir) = out_dir {
+        opts.out_dir = dir;
     }
+    if let Some(dir) = cli.pages.clone() {
+        opts.pages_dir = Some(dir);
+    }
+    if cli.all_subjects {
+        opts.pages_dir = None;
+    }
+    opts.dark = cli.dark;
+    if let Some(scale) = cli.scale {
+        opts.scale = scale;
+    }
+    opts.only = cli.only.clone();
 
+    let mut passes = cli.preview.density.clone();
     if passes.is_empty() {
         passes.push(teksilo_preview::PreviewPass::compact());
     }

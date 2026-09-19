@@ -58,7 +58,17 @@ fn unknown_option_errors() {
     assert!(!out.status.success());
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("unknown option"));
+    // clap's wording, not this tool's historical "unknown option". The contract
+    // is that an unrecognised flag is refused with exit 2 and named in the
+    // error — not the exact sentence it is refused in.
+    assert!(
+        stderr.contains("unexpected argument"),
+        "expected clap's unrecognised-flag error, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("--bogus"),
+        "the error must name the flag: {stderr}"
+    );
 }
 
 #[test]

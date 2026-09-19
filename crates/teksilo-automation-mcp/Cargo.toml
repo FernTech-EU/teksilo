@@ -43,6 +43,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 base64 = "0.22"
 anyhow = "1"
 
+# The CLI. Every teksilo binary parses its arguments with clap; `env` is
+# what lets `--token` document and read $TEKSILO_AUTOMATION_TOKEN in the
+# generated help rather than in a hand-rolled fallback.
+clap = { workspace = true, features = ["env"] }
+
 # Workspace deps for the offscreen screenshot path.
 pollster = { workspace = true }
 wgpu = { workspace = true }

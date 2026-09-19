@@ -13,6 +13,192 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+- **`cargo teksilo` — agent tooling for apps that depend on Teksilo.** An agent
+  working inside this repository has the guides, the worked examples, the skill
+  and the automation harness. An agent working in someone's Teksilo *app* had
+  none of them: `docs/` ships in no crate, every example crate is
+  `publish = false`, and the only probe harness lived in one app's repository.
+  `cargo install cargo-teksilo` closes that gap, and every answer is matched to
+  the Teksilo the app actually resolved.
+
+  - `cargo teksilo symbol <Name>` — the exact public API of a type, read from
+    the resolved sources. Works with a crates.io, git or path dependency and
+    needs no checkout: where one is reachable it runs that checkout's own
+    extractor, otherwise it stages a throwaway repository shaped like this one
+    around the registry sources. A name reached through the `teksilo` umbrella
+    prelude resolves to its owning crate rather than reporting "not found".
+  - `cargo teksilo search "<question>"` — retrieval over the 69 hand-written
+    guides and 56 worked example crates, which reach no consumer today.
+  - `cargo teksilo show <path>` — the document behind a search hit, in full,
+    offline: `cargo teksilo show docs/scroll-area.md`, or just the lines the hit
+    cited (`--lines 166-172`, 1-based and inclusive, as `search` prints them).
+    Nothing is re-fetched — a chunk already carries its own text and the line
+    range it occupied, so the document is *reassembled* from the corpus, byte
+    for byte. It closes the last version-binding hole in the tool: the path a
+    hit cites exists in no consumer's project, and fetching it from `blob/main/`
+    or the published book serves `main` rather than the version the app pinned.
+    `search` now says so in a footer line, and `--list` prints every path.
+  - `cargo teksilo probe` — writes the automation probe harness into
+    `scripts/teksilo_probe/`, so an agent can drive the running app and assert
+    on it. Generated files are checksummed: a local edit is reported rather
+    than silently overwritten, and your own probes live outside the generated
+    tree and are never touched.
+  - `cargo teksilo setup` — the above, plus the Teksilo briefing for **every
+    coding agent this project already configures, each in that agent's own
+    format**: the full four-file skill into `.claude/skills/teksilo/` where it
+    is native, and a self-contained ~40-line brief into
+    `.cursor/rules/teksilo.mdc` (MDC frontmatter), `.windsurf/rules/teksilo.md`
+    (`trigger:` frontmatter), `.github/copilot-instructions.md` and `AGENTS.md`
+    (each a `<!-- BEGIN teksilo -->` region) where it is not. These tools share no
+    format, so copying the skill directory into `.cursor/` would accomplish
+    nothing; the brief never refers to the skill, which on those machines is
+    not installed. It also pre-fetches the search encoder (~129 MB, into the
+    per-user cache, `--no-model` to skip), so the first `search` does not stall
+    on a download — and a failed fetch is a warning, because `search` degrades
+    to BM25 by design.
+
+    Three things it now refuses to do. It **never writes `$HOME` from project
+    scope** — the previous version silently installed into `~/.claude/skills/`
+    when the project had no `.claude/` of its own, a machine-wide change from a
+    project-scoped command; `--user` is now the only path that reaches the home
+    directory. It **never prompts where nobody can answer**: with no terminal on
+    stdin the question is an error naming the flag that would have skipped it
+    (`-y`, or `--user` when there is no `Cargo.toml` anywhere above the working
+    directory), because CI and agents run this and a hang is worse than a
+    failure. And it **never writes before showing the plan** — every path, every
+    detected vendor, and the download with its size, then a confirmation. Runs
+    are idempotent: a second run reports `unchanged` and leaves the shared files
+    byte for byte, including whatever the project wrote outside the markers.
+
+    **Cline** is served too, and is the one vendor whose path is read off the
+    disk rather than fixed: `.clinerules/teksilo.md` where that directory
+    exists, a marker region where `.clinerules` is a plain file — which it may
+    be, and which has nowhere to put a file of our own — and
+    `.cline/rules/teksilo.md` where that is the only layout present.
+
+    The order is deliberately **not** newest-first. Cline's source calls
+    `.cline` `CLINE_CONFIG_DIR` and `.clinerules` `DEPRECATED_CONFIG_DIR`, so
+    the newer path looks like the obvious target; but the VS Code extension was
+    hardcoded to `.clinerules` and ignored `.cline/rules/` outright
+    (cline/cline#14186), the cross-surface fix reached `main` only in September
+    2026 and is in no released build, and Cline's own docs still say its Rules
+    panel creates new workspace rules in `.clinerules/`. Preferring the modern
+    name would install, in the most-used Cline surface, a file nothing reads —
+    which this tool holds to be worse than installing nothing, because it
+    reports success. Reachability beats recency, and a test says so, so that a
+    later tidy-up does not quietly invert it.
+
+    No frontmatter in any layout: Cline's docs say a rule without one is always
+    active, so its absence is what keeps the brief unconditional.
+
+    Two things it refuses to do, both found by adversarially reviewing the
+    command against itself and reproduced before being fixed. It **will not
+    rewrite a shared file it cannot read whole**: `AGENTS.md` and
+    `copilot-instructions.md` belong to the project, and reading them with
+    `read_to_string(..).unwrap_or_default()` turned "cannot decode" into "the
+    file is empty" — one Latin-1 byte was enough for `setup -y` to replace a
+    project's rules with nothing but its own region, silently, reporting
+    success. It now stops and names the file. And its stray-pruning compares
+    filenames **case-insensitively**: the skill is written through
+    `fs::write` but audited through `read_dir`, and on APFS or NTFS those
+    disagree about case, so an exact comparison classified a file it had just
+    written as a leftover and deleted it — leaving a skill with no `SKILL.md`
+    while reporting `updated`. Folding can only err towards keeping a stale
+    file, which is recoverable; deleting a live one is not.
+
+    In user scope it reaches three agents — Claude Code (`~/.claude/skills/`),
+    Mistral Vibe (`~/.vibe/AGENTS.md`, or `$VIBE_HOME`) and opencode
+    (`~/.config/opencode/AGENTS.md`, or `$XDG_CONFIG_HOME`) — each **gated on
+    its directory already existing**, so a home directory gains no config
+    directory for a tool that was never run. Both environment overrides are
+    honoured: Vibe relocates its entire state directory through `VIBE_HOME`, so
+    writing the default path for a user who moved theirs would leave a file
+    nothing reads. What was not found is reported with the path that was
+    checked, not with a label that would send a relocated install looking in
+    the wrong place. The rest have nowhere to go, which is likewise reported
+    rather than silently narrowed: Cursor's user rules are edited in its
+    settings UI, Copilot's personal instructions live on github.com, Windsurf's
+    global rules are one file at
+    `~/.codeium/windsurf/memories/global_rules.md`, and a repository-root
+    `AGENTS.md` is per-repository by definition.
+
+  **`cargo teksilo status`** reports what is actually installed — every agent, in
+    both the project and the user scope, plus the search model and where it sits
+    on disk. It reads only, and its exit code never depends on what it finds.
+
+    It is the **dry run of `setup`**, not a second opinion: every agent row comes
+    from `setup::inspect`, the read-only twin of the function that decides
+    whether a write is needed, and the two share their content computation. A
+    test pins the equivalence for every form — *`inspect` reports current exactly
+    when `setup` would report `unchanged`* — because a status that computed
+    "installed" its own way would eventually disagree with the command it claims
+    to predict, and the disagreement would surface as a user following advice
+    that does nothing.
+
+    Three words (`here` / `not here` / `n/a`) and a reason beside each, because
+    three words cannot carry the difference between *Cursor is not used in this
+    project* and *Cursor is used here and has no brief*, and that difference is
+    the whole of what to do next. An install from an older release reads `here`,
+    since it is being read right now, with "from another release" in the detail —
+    calling it anything else would be false. And `n/a` always says why: a bare
+    one beside Windsurf would read as "Windsurf has nothing", when in fact it
+    keeps a global file this tool declines to write.
+
+    Its own command rather than `setup --status`: it reports on both scopes while
+    `setup` is scope-selected, so the flag would have to mean something the
+    unflagged command does not. Keeping the read-only thing out of a writing
+    command's flag space also leaves no `--status -y` to reason about.
+
+    "Reads only" is enforced rather than asserted. It asks cargo for the
+    resolved version through `--locked`, because plain `cargo metadata`
+    *resolves* — it creates a missing `Cargo.lock` and rewrites a stale one,
+    which a command whose headline claim is that it touches nothing must not
+    do. A project without an up-to-date lockfile therefore gets an honest
+    "unknown" rather than a lockfile it never asked for. Paths reaching the
+    report from `$VIBE_HOME`, `$XDG_CONFIG_HOME` or the working directory have
+    their control characters escaped, so a newline in one cannot split a row
+    and let its tail pose as another agent's line.
+
+  Version binding is the design constraint, not a detail. The tool reads the
+  app's `Cargo.lock`, and a minor or major mismatch **refuses** with the exact
+  install command instead of answering — serving 0.12 answers to an app on 0.9
+  is worse than serving nothing, because `SplitView` was deleted outright in
+  favour of `Splitter` between them and the wrong answer reads exactly like the
+  right one. A patch-level difference warns and proceeds.
+
+- **`teksilo-corpus`** — the guides and the worked examples, chunked into a
+  retrieval index and published per release so `cargo` resolves the corpus
+  matching an app's Teksilo. It is one file: a chunk carries its own text, and
+  its `path` names the original in this repository (`docs/scroll-area.md`,
+  `examples/simple_button/src/main.rs`), so a search result cites something that
+  opens. Data only; it carries no ML dependency.
+
+- **The automation probe harness**, written into a consumer's project by
+  `cargo teksilo probe`. Python, stdlib only, embedded in the binary rather than
+  published to an index — so it is version-matched by construction, lands in the
+  repository where an agent reading that repository can see it, and needs no pip
+  or virtualenv. It supplies the JSON-RPC client every probe previously
+  hand-rolled, a tool surface generated from `TOOL_CATALOG` (so it cannot drift
+  from the bridge), and the virtualized-view navigation rules that are otherwise
+  rediscovered one misdiagnosis at a time: an off-screen row has no AT node, a
+  row scrolled back into view is a new widget with a new id, and clicking a row's
+  reported bounds below the viewport hits empty chrome. Three worked examples
+  ship with it and run against this repository's own example apps in CI.
+
+- **Two new guides**: [Agent tooling](docs/agent-tooling.md) documents the above,
+  and [Scroll areas](docs/scroll-area.md) is the reference the docs did not have
+  — scrolling was covered only by an architecture chapter and the kinetic-scroll
+  physics, so an ordinary "how do I make this scrollable?" had nothing to land
+  on. That gap was found by running a retrieval test over the corpus, not by
+  reading the table of contents.
+
+- **`tools/extract_widget_api.py` now covers every crate with a public API**
+  (30, up from 4). mdBook catalog generation stays scoped to the four cataloged
+  crates, so `docs/` is unchanged; the rest are queryable through `--crate`,
+  `--list`, `--all` and by name.
+
 ### Changed
 
 - **Behaviour change.** On Windows, Direct3D 12 is tried before Vulkan and

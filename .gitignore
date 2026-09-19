@@ -202,3 +202,9 @@ tested_project
 .claude/worktrees/
 
 docs/plans
+
+# The embedding model `cargo teksilo build-vectors` downloads on first use.
+# ~129 MB of ONNX weights, fetched from HuggingFace and cached — a build
+# artifact, not source. `build-vectors` honours FASTEMBED_CACHE_DIR if you
+# would rather it lived outside the repository entirely.
+.fastembed_cache/

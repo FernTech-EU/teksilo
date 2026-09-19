@@ -123,6 +123,27 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # cargo-teksilo's `semantic` feature (search embeddings) pulls in
+      # fastembed -> ort (ONNX Runtime) plus the onig_sys / esaxx-rs C/C++ sys
+      # crates. If that build ever breaks on some platform, `cargo install
+      # cargo-teksilo --no-default-features` must still produce a working
+      # tool — so that escape hatch is built and tested here rather than
+      # merely assumed to work. `cargo test --workspace` above already
+      # exercises the default (`semantic`-on) build; the two steps below are
+      # kept explicit anyway so that guarantee doesn't rely on inferring it
+      # from a workspace-wide run.
+      - name: Build cargo-teksilo (--no-default-features)
+        run: cargo build -p cargo-teksilo --no-default-features
+
+      - name: Test cargo-teksilo (--no-default-features)
+        run: cargo test -p cargo-teksilo --no-default-features
+
+      - name: Build cargo-teksilo (semantic feature)
+        run: cargo build -p cargo-teksilo
+
+      - name: Test cargo-teksilo (semantic feature)
+        run: cargo test -p cargo-teksilo
+
   # The X11 backends (XDND drag-and-drop, the EWMH title-bar probe) can only be
   # exercised against a real X server: there is no in-process X server or
   # protocol double for Rust, so their `#[ignore]`d tests are invisible to the
@@ -258,6 +279,21 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # Same escape-hatch guard as test-linux, on the other two OSes — see the
+      # comment there for why both configurations are built and tested
+      # explicitly rather than just the workspace-wide default.
+      - name: Build cargo-teksilo (--no-default-features)
+        run: cargo build -p cargo-teksilo --no-default-features
+
+      - name: Test cargo-teksilo (--no-default-features)
+        run: cargo test -p cargo-teksilo --no-default-features
+
+      - name: Build cargo-teksilo (semantic feature)
+        run: cargo build -p cargo-teksilo
+
+      - name: Test cargo-teksilo (semantic feature)
+        run: cargo test -p cargo-teksilo
+
   # The automation bridge is the one subsystem whose *transport* differs per OS
   # — a Unix socket on Linux/macOS, a named pipe on Windows — so it is the one
   # that most needs to be *run* on each of them rather than merely compiled.
@@ -362,6 +398,66 @@ jobs:
           fi
           cargo run -p automation_bridge_smoke
 
+      # The curated probe examples drive real teksilo demo apps end to end
+      # through the harness (`cargo teksilo probe`'s worked examples), so —
+      # like the Live-bridge smoke step above — they need a live display.
+      # Unlike that step, some of what they exercise depends on window-manager
+      # behaviour (e.g. modal-window focus return), so this mirrors test-x11's
+      # Xvfb + openbox setup rather than the bare Xvfb the smoke step uses; it
+      # runs on its own display (:98) so it can't race whatever the smoke step
+      # above left running on :99.
+      - name: Probe harness curated examples (Xvfb + openbox)
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 25
+        run: |
+          examples_dir=crates/cargo-teksilo/embedded/probe/examples
+          # Not a "skip if missing" guard: these examples are committed, and a
+          # checkout without them is a broken checkout, not a reason to pass.
+          if [ ! -d "$examples_dir" ]; then
+            echo "::error::$examples_dir is missing — the curated probe examples are committed and must be present"
+            exit 1
+          fi
+
+          # The probes drive these three demo apps' own debug binaries — the
+          # automation bridge is `#[cfg(debug_assertions)]`, so it must be a
+          # `cargo build`, not `cargo test`'s hashed test-binary output, which
+          # `teksilo_probe.resolve.app_binary` does not look under.
+          cargo build -p data-collections -p dialogs-and-popovers -p rich-text-editor
+
+          sudo apt-get install --no-install-recommends -y openbox
+
+          export DISPLAY=:98
+          Xvfb :98 -screen 0 1280x1024x24 &
+          for _ in $(seq 1 50); do xdpyinfo -display :98 >/dev/null 2>&1 && break; sleep 0.2; done
+          openbox &
+          sleep 1
+
+          # `teksilo_probe.resolve.mcp_binary` checks $TEKSILO_MCP_BIN before
+          # $PATH; the client built above ("Build the bridge smoke and the MCP
+          # server") isn't on $PATH, so this is what lets the probes find it
+          # without triggering a `cargo install`.
+          export TEKSILO_MCP_BIN="$PWD/target/debug/teksilo-automation-mcp"
+
+          # Each probe's own `report.error` path prints the tail of the
+          # launched app's log before exiting (see examples/README.md — a
+          # probe never swallows why the app it launched didn't behave), so a
+          # failing example's own stdout already carries the app log; no
+          # separate dump is needed beyond letting that output reach the step
+          # log. Exit 1 means the probe itself couldn't run; exit 2 means it
+          # ran and a check came back false — both fail this step.
+          status=0
+          for example in "$examples_dir"/example_*.py; do
+            echo "::group::$(basename "$example")"
+            timeout 300 python3 "$example"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::$example failed (exit $rc)"
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$status"
+
       - name: Live-bridge smoke (named pipe)
         if: matrix.os == 'windows-latest'
         env:
@@ -436,6 +532,99 @@ jobs:
           shared-key: check-${{ matrix.name }}
       - name: Check
         run: cargo check --workspace --all-targets ${{ matrix.flags }}
+
+      # The guards below are profile-independent (they don't touch debug vs
+      # release at all), so they run once — on the `debug` leg — rather than
+      # duplicating identical work across both matrix legs.
+
+      - name: teksilo-corpus staleness guard
+        if: matrix.name == 'debug'
+        run: python3 tools/build_corpus.py --check
+
+      # The corpus is built in two passes: build_corpus.py chunks the sources,
+      # then `cargo teksilo build-vectors` encodes them. The guard above catches
+      # a stale *index*; this one catches a forgotten *second pass*, which is
+      # otherwise silent — `cargo teksilo search` just falls back to lexical and
+      # says so, and nobody reads that line in CI.
+      #
+      # It does NOT re-encode. Re-running build-vectors here would download a
+      # 128 MB model and build ONNX Runtime on every push, and it would not
+      # catch anything this does not: build_corpus.py carries embeddings forward
+      # keyed on each chunk's text hash, so a chunk whose source changed is
+      # written with `embedding: null`. "Every chunk has a vector" is therefore
+      # a freshness check, not just a completeness one — a stale vector cannot
+      # survive a regeneration.
+      - name: teksilo-corpus vector guard
+        if: matrix.name == 'debug'
+        run: python3 tools/build_corpus.py --check-vectors
+
+      # crates.io enforces a 10 MB package limit, and teksilo-corpus carries
+      # committed generated data (the retrieval corpus) — the one thing in
+      # this workspace that could grow past that limit without anyone
+      # noticing at review time. `--no-verify` skips packaging's own
+      # build-to-verify step (redundant: `cargo check`/test-linux already
+      # build this crate) and just measures the tarball; `--allow-dirty`
+      # because a CI checkout can have gitignored build artifacts sitting
+      # next to tracked files.
+      #
+      # NOTE: a `cargo teksilo build-vectors` step (added in a concurrent
+      # change) writes dense embeddings INTO
+      # crates/teksilo-corpus/corpus/index.json, growing it further. If that
+      # ever pushes this guard's number close to the ceiling, widen the
+      # margin rather than deleting the guard.
+      - name: teksilo-corpus package size guard
+        if: matrix.name == 'debug'
+        run: |
+          out=$(cargo package -p teksilo-corpus --no-verify --allow-dirty 2>&1)
+          echo "$out"
+          size=$(echo "$out" | grep -oE 'Packaged [0-9]+ files, [0-9.]+[KMG]iB' | grep -oE '[0-9.]+[KMG]iB$')
+          if [ -z "$size" ]; then
+            echo "::error::could not find the 'Packaged N files, X.YMiB' line in cargo package output"
+            exit 1
+          fi
+          mib=$(echo "$size" | awk '
+            { s = $0
+              if (s ~ /KiB$/) { v = s; sub(/KiB$/, "", v); printf "%.4f", v / 1024 }
+              else if (s ~ /MiB$/) { v = s; sub(/MiB$/, "", v); printf "%.4f", v }
+              else if (s ~ /GiB$/) { v = s; sub(/GiB$/, "", v); printf "%.4f", v * 1024 }
+            }')
+          echo "teksilo-corpus package size: ${mib} MiB (guard: 9 MiB; crates.io limit is 10 MB)"
+          awk -v m="$mib" 'BEGIN { exit !(m > 9) }' && {
+            echo "::error::teksilo-corpus package size ${mib} MiB exceeds the 9 MiB guard"
+            exit 1
+          }
+          echo "package size within guard"
+
+      # cargo-teksilo embeds two copies of files that also live elsewhere in
+      # the repo, so an app that only depends on the `teksilo` crate — not
+      # this checkout — still gets them. Nothing else enforces the copies
+      # stay identical; this replaces a hand-run `cp` a previous skill
+      # depended on.
+      - name: Embedded-copy identity — extract_widget_api.py
+        if: matrix.name == 'debug'
+        run: |
+          diff -q tools/extract_widget_api.py crates/cargo-teksilo/embedded/extract_widget_api.py || {
+            echo "::error::crates/cargo-teksilo/embedded/extract_widget_api.py has drifted from tools/extract_widget_api.py — fix with: cp tools/extract_widget_api.py crates/cargo-teksilo/embedded/extract_widget_api.py"
+            exit 1
+          }
+
+      - name: Embedded-copy identity — teksilo skill
+        if: matrix.name == 'debug'
+        run: |
+          diff -r .claude/skills/teksilo crates/cargo-teksilo/embedded/skill || {
+            echo "::error::crates/cargo-teksilo/embedded/skill has drifted from .claude/skills/teksilo — fix with: cp -r .claude/skills/teksilo/. crates/cargo-teksilo/embedded/skill/"
+            exit 1
+          }
+
+      # Stdlib-only unit tests for the probe harness's Python library — no
+      # display and no running app needed. The three curated examples that DO
+      # drive a real app live in test-automation (Linux only, which already
+      # has a display set up).
+      - name: Probe harness unit tests
+        if: matrix.name == 'debug'
+        run: |
+          cd crates/cargo-teksilo/embedded/probe
+          python3 -m unittest discover -s tests -t .
 
   docs:
     name: Documentation

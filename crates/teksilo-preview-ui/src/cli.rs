@@ -14,11 +14,94 @@
 //! my-previewer --density=touch                      # preview at Touch density
 //! ```
 //!
-//! Parsing is intentionally hand-rolled (no `clap`) — six flags, no
-//! sub-commands, no external dependency. `--help` prints the usage and
-//! exits.
+//! Two types, because a previewer binary is rarely *only* a previewer: this
+//! crate's own has `--list` and `--export-docs` beside these flags.
+//! [`PreviewerArgs`] is the clap fragment — `#[command(flatten)]` it into a
+//! binary's own `Parser` — and [`PreviewerOptions`] is the resolved
+//! configuration [`crate::run_previewer`] takes. A binary with nothing to add
+//! skips the fragment and calls [`PreviewerOptions::from_args`].
+//!
+//! Resolution is deliberately *not* in the value parsers: `--file` and
+//! `--widget` are checked against the live `inventory` registry, which a unit
+//! test parsing arguments has not linked. That check lives in
+//! [`PreviewerOptions::from_parsed`], where it can be skipped when there is no
+//! catalog to check against.
+
+use clap::{Args, Parser};
 
 use teksilo_preview::find_by_file;
+
+/// The previewer's own flags, as a clap fragment.
+///
+/// Field types are the *parsed* values, not strings, so a malformed
+/// `--window` or `--density` is reported by clap with the rest of the usage
+/// error rather than by a hand-written `eprintln` halfway through the loop.
+#[derive(Debug, Clone, Args)]
+pub struct PreviewerArgs {
+    /// Focus the named widget at startup.
+    #[arg(long, value_name = "ID", conflicts_with = "file")]
+    pub widget: Option<String>,
+
+    /// Combine with --widget to focus one of its variants.
+    #[arg(long, value_name = "NAME")]
+    pub variant: Option<String>,
+
+    /// Focus whichever widget registered a catalog entry from this source
+    /// file (suffix match).
+    #[arg(long, value_name = "PATH")]
+    pub file: Option<String>,
+
+    /// Override the initial window size (default 1400x900).
+    #[arg(long, value_name = "WxH", value_parser = parse_window_size)]
+    pub window: Option<(u32, u32)>,
+
+    /// Override the window title.
+    #[arg(long, value_name = "TEXT")]
+    pub title: Option<String>,
+
+    /// Start at compact | comfortable | touch (default compact).
+    ///
+    /// A comma-separated list is accepted for the sake of a batch export that
+    /// runs one pass per density; the previewer window itself starts at one,
+    /// and says so rather than silently picking.
+    #[arg(long, value_name = "NAME", value_delimiter = ',', value_parser = parse_density)]
+    pub density: Vec<teksilo_preview::PreviewPass>,
+}
+
+/// `WIDTHxHEIGHT`, as `--window` spells it.
+fn parse_window_size(raw: &str) -> Result<(u32, u32), String> {
+    let (w, h) = raw
+        .split_once('x')
+        .ok_or_else(|| format!("'{raw}' must be WIDTHxHEIGHT (e.g. 1600x900)"))?;
+    let w: u32 = w
+        .parse()
+        .map_err(|_| format!("invalid width '{w}' in '{raw}'"))?;
+    let h: u32 = h
+        .parse()
+        .map_err(|_| format!("invalid height '{h}' in '{raw}'"))?;
+    Ok((w, h))
+}
+
+/// One density name. The table lives in `PreviewPass`, so `--density` and the
+/// image suffixes it decides cannot drift apart.
+fn parse_density(raw: &str) -> Result<teksilo_preview::PreviewPass, String> {
+    teksilo_preview::PreviewPass::from_name(raw)
+        .ok_or_else(|| format!("unknown density '{raw}' (compact | comfortable | touch)"))
+}
+
+/// A previewer binary that adds no flags of its own.
+///
+/// Private: a binary that wants more flags flattens [`PreviewerArgs`] into its
+/// own `Parser` instead, which is what `teksilo-widgets-previewer` does.
+#[derive(Parser)]
+#[command(
+    about = "Teksilo Widget Previewer",
+    long_about = "Browse a Teksilo widget catalog: navigator, live canvas and knob form."
+)]
+struct StandaloneCli {
+    #[command(flatten)]
+    args: PreviewerArgs,
+}
 
 /// Configured options for [`crate::run_previewer`].
 #[derive(Debug, Clone)]
@@ -79,72 +162,70 @@ impl PreviewerOptions {
     /// Parse from `std::env::args`. Exits the process on `--help` or on
     /// any malformed argument (after printing a brief usage block).
     pub fn from_args() -> Self {
-        Self::from_iter(std::env::args().skip(1))
+        Self::from_parsed(StandaloneCli::parse().args)
     }
 
     /// Parse from any iterator of `String`-like tokens. Used by tests
     /// and by `from_args`.
+    ///
+    /// The tokens are the arguments *after* the program name — clap wants
+    /// `argv[0]` too, so one is supplied here rather than at every call site.
     #[allow(clippy::should_implement_trait)]
     pub fn from_iter<I, S>(iter: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let mut opts = Self::default();
-        for arg in iter {
-            let arg: String = arg.into();
-            if let Some(value) = arg.strip_prefix("--widget=") {
-                opts.initial_widget = Some(value.to_string());
-            } else if let Some(value) = arg.strip_prefix("--variant=") {
-                opts.initial_variant = Some(value.to_string());
-            } else if let Some(value) = arg.strip_prefix("--file=") {
-                match find_by_file(value) {
-                    Some(entry) => opts.initial_widget = Some(entry.id().to_string()),
-                    None => {
-                        eprintln!(
-                            "teksilo-previewer: no widget catalog entry registered \
-                             from file matching '{}'",
-                            value
-                        );
-                        std::process::exit(2);
-                    }
-                }
-            } else if let Some(value) = arg.strip_prefix("--window=") {
-                if let Some((w, h)) = value.split_once('x') {
-                    let w = w.parse::<u32>().unwrap_or_else(|_| {
-                        eprintln!("teksilo-previewer: invalid --window width '{}'", w);
-                        std::process::exit(2);
-                    });
-                    let h = h.parse::<u32>().unwrap_or_else(|_| {
-                        eprintln!("teksilo-previewer: invalid --window height '{}'", h);
-                        std::process::exit(2);
-                    });
-                    opts.window_size = (w, h);
-                } else {
-                    eprintln!("teksilo-previewer: --window must be WIDTHxHEIGHT (e.g. 1600x900)");
+        let argv = std::iter::once("previewer".to_string()).chain(iter.into_iter().map(Into::into));
+        Self::from_parsed(StandaloneCli::parse_from(argv).args)
+    }
+
+    /// Resolve already-parsed flags into options, against the live registry.
+    ///
+    /// Separate from parsing because a binary with extra flags of its own
+    /// parses once, for everything, and hands the fragment here.
+    pub fn from_parsed(args: PreviewerArgs) -> Self {
+        let mut opts = Self {
+            initial_widget: args.widget,
+            initial_variant: args.variant,
+            ..Self::default()
+        };
+        if let Some(path) = args.file {
+            match find_by_file(&path) {
+                Some(entry) => opts.initial_widget = Some(entry.id().to_string()),
+                None => {
+                    eprintln!(
+                        "teksilo-previewer: no widget catalog entry registered \
+                         from file matching '{}'",
+                        path
+                    );
                     std::process::exit(2);
                 }
-            } else if let Some(value) = arg.strip_prefix("--density=") {
-                opts.density = match value.to_ascii_lowercase().as_str() {
-                    "compact" => teksilo_tokens::TargetDensity::Compact,
-                    "comfortable" => teksilo_tokens::TargetDensity::Comfortable,
-                    "touch" => teksilo_tokens::TargetDensity::Touch,
-                    other => {
-                        eprintln!(
-                            "teksilo-previewer: unknown --density '{}'                              (compact | comfortable | touch)",
-                            other
-                        );
-                        std::process::exit(2);
-                    }
-                };
-            } else if let Some(value) = arg.strip_prefix("--title=") {
-                opts.window_title = value.to_string();
-            } else if arg == "--help" || arg == "-h" {
-                print_usage();
-                std::process::exit(0);
-            } else {
-                eprintln!("teksilo-previewer: unrecognised argument '{}'", arg);
-                print_usage();
+            }
+        }
+        if let Some((w, h)) = args.window {
+            opts.window_size = (w, h);
+        }
+        if let Some(title) = args.title {
+            opts.window_title = title;
+        }
+        match args.density.as_slice() {
+            [] => {}
+            [pass] => opts.density = pass.density(),
+            many => {
+                // A list is meaningful for a batch that renders one pass per
+                // density; a window can only be at one of them, and picking
+                // silently would make `--density=compact,touch` look like it
+                // had done something it had not.
+                eprintln!(
+                    "teksilo-previewer: --density names {} densities ({}); the previewer \
+                     window starts at exactly one.",
+                    many.len(),
+                    many.iter()
+                        .map(|p| p.label())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 std::process::exit(2);
             }
         }
@@ -248,25 +329,6 @@ fn closest_match<'a>(query: &str, options: &[&'a str]) -> Option<&'a str> {
         .copied()
 }
 
-fn print_usage() {
-    eprintln!(
-        "Teksilo Widget Previewer\n\
-         \n\
-         USAGE:\n    \
-             <previewer-binary> [OPTIONS]\n\
-         \n\
-         OPTIONS:\n    \
-             --widget=<ID>          Focus the named widget at startup.\n    \
-             --variant=<NAME>       Combine with --widget to focus a variant.\n    \
-             --file=<PATH>          Focus whichever widget registered a catalog entry\n                            \
-                                from the given source file (suffix match).\n    \
-             --window=<WxH>         Override the initial window size (default 1400x900).\n    \
-             --title=<TEXT>         Override the window title.\n    \
-             --density=<NAME>       Start at compact | comfortable | touch.\n    \
-             -h, --help             Print this help text and exit.\n"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +363,44 @@ mod tests {
         assert_eq!(opts.density, teksilo_tokens::TargetDensity::Touch);
         let opts = PreviewerOptions::from_iter(["--density=Comfortable"]);
         assert_eq!(opts.density, teksilo_tokens::TargetDensity::Comfortable);
+    }
+
+    /// The flag surface is the fragment's, so the gate is clap's own
+    /// consistency check over it — which catches a duplicated id or a
+    /// `conflicts_with` naming an argument that does not exist, neither of
+    /// which is a compile error.
+    #[test]
+    fn the_flag_surface_is_internally_consistent() {
+        use clap::CommandFactory;
+        StandaloneCli::command().debug_assert();
+    }
+
+    /// A malformed value is a usage error rather than a value silently
+    /// standing in for the default.
+    #[test]
+    fn malformed_values_are_rejected_by_the_parser() {
+        use clap::Parser;
+        for bad in [
+            "--window=1600",
+            "--window=axb",
+            "--window=1600x",
+            "--density=dense",
+        ] {
+            assert!(
+                StandaloneCli::try_parse_from(["previewer", bad]).is_err(),
+                "'{bad}' should not parse"
+            );
+        }
+    }
+
+    /// `--widget` and `--file` are two ways to name one widget, so asking
+    /// with both is a question the previewer cannot answer.
+    #[test]
+    fn widget_and_file_are_mutually_exclusive() {
+        use clap::Parser;
+        assert!(
+            StandaloneCli::try_parse_from(["previewer", "--widget=button", "--file=button.rs"])
+                .is_err()
+        );
     }
 }

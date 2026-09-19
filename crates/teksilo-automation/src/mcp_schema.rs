@@ -205,3 +205,221 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
 
 /// The number of tools in the catalog (34).
 pub const TOOL_COUNT: usize = TOOL_CATALOG.len();
+
+#[cfg(test)]
+mod tests {
+    //! The catalog against the Python probe library's generated tool surface.
+    //!
+    //! `cargo-teksilo` embeds a Python library (`embedded/probe/teksilo_probe`)
+    //! that an agent drives a live app with, and its `tools.py` is **generated**
+    //! from this catalog. A generated file is only as good as the thing that
+    //! notices it has gone stale, so that is what this is: add a tool here
+    //! without regenerating, and this test names the script to run.
+    //!
+    //! This is the same class of bug as the 0.9.3 announce rename, which
+    //! silently broke every probe in the harness this library generalises —
+    //! a contract changed on one side of a seam that nothing was watching.
+
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    /// Where the generated module lives, relative to this crate.
+    const TOOLS_PY: &str = "cargo-teksilo/embedded/probe/teksilo_probe/tools.py";
+
+    /// The command that rebuilds it.
+    const GENERATOR: &str = "python3 crates/cargo-teksilo/embedded/probe/generate_tools.py";
+
+    fn tools_py_path() -> PathBuf {
+        // `CARGO_MANIFEST_DIR` is `<repo>/crates/teksilo-automation`; its parent
+        // is `<repo>/crates`, which is where the sibling crate is. Derived
+        // rather than walked up to a marker file, so a checkout nested inside
+        // another repository cannot resolve the wrong one.
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the manifest dir always has a parent")
+            .join(TOOLS_PY)
+    }
+
+    fn tools_py() -> String {
+        let path = tools_py_path();
+        std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "cannot read the generated probe tool surface at {}: {e}\n\
+                 Generate it with:\n  {GENERATOR}\n\
+                 It is committed, so an absent file means either a partial \
+                 checkout or a generator that has never been run here.",
+                path.display()
+            )
+        })
+    }
+
+    /// Every module-level `def` that is not a private helper.
+    ///
+    /// The generator emits one per tool, and its only other module-level
+    /// function is `_present`; the leading underscore is the discriminator, and
+    /// the `session`-first convention is asserted separately below.
+    fn defined_functions(src: &str) -> Vec<String> {
+        src.lines()
+            .filter_map(|line| line.strip_prefix("def "))
+            .filter_map(|rest| rest.split('(').next())
+            .filter(|name| !name.starts_with('_'))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The string literals inside a `NAME = (` … `)` block at column zero.
+    fn tuple_literals(src: &str, binding: &str) -> Vec<String> {
+        let needle = format!("\n{binding} = (\n");
+        let start = src
+            .find(&needle)
+            .unwrap_or_else(|| panic!("no `{binding} = (` in the generated module"))
+            + needle.len();
+        let body = &src[start..];
+        let end = body
+            .find("\n)")
+            .unwrap_or_else(|| panic!("unterminated `{binding}` tuple"));
+        quoted(&body[..end])
+    }
+
+    /// Every `"…"` in a chunk of Python, in order. The generator never emits an
+    /// escaped quote inside one of these, so a plain split is exact.
+    fn quoted(chunk: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = chunk;
+        while let Some(open) = rest.find('"') {
+            rest = &rest[open + 1..];
+            match rest.find('"') {
+                Some(close) => {
+                    out.push(rest[..close].to_owned());
+                    rest = &rest[close + 1..];
+                }
+                None => break,
+            }
+        }
+        out
+    }
+
+    /// The `("name", True|False),` pairs feeding the `MUTATING` frozenset.
+    fn mutating_pairs(src: &str) -> Vec<(String, bool)> {
+        src.lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("(\"") && line.ends_with("),"))
+            .filter_map(|line| {
+                let name = quoted(line).into_iter().next()?;
+                let flag = if line.contains("True") {
+                    true
+                } else if line.contains("False") {
+                    false
+                } else {
+                    return None;
+                };
+                Some((name, flag))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_probe_library_defines_a_function_per_catalog_tool() {
+        let src = tools_py();
+        let generated = defined_functions(&src);
+        let expected: Vec<&str> = TOOL_CATALOG.iter().map(|t| t.name).collect();
+
+        let missing: Vec<&&str> = expected
+            .iter()
+            .filter(|name| !generated.iter().any(|g| g == **name))
+            .collect();
+        let extra: Vec<&String> = generated
+            .iter()
+            .filter(|name| !expected.contains(&name.as_str()))
+            .collect();
+
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "the probe library's tool surface has drifted from TOOL_CATALOG.\n\
+             missing (in the catalog, no wrapper): {missing:?}\n\
+             extra   (a wrapper for no catalog entry): {extra:?}\n\
+             Regenerate with:\n  {GENERATOR}"
+        );
+        assert_eq!(
+            generated.len(),
+            TOOL_COUNT,
+            "{} wrappers for {TOOL_COUNT} catalog tools — a duplicate `def`?\n\
+             Regenerate with:\n  {GENERATOR}",
+            generated.len()
+        );
+    }
+
+    #[test]
+    fn the_probe_library_tool_names_match_the_catalog_in_order() {
+        let src = tools_py();
+        let listed = tuple_literals(&src, "TOOL_NAMES");
+        let expected: Vec<String> = TOOL_CATALOG.iter().map(|t| t.name.to_owned()).collect();
+        assert_eq!(
+            listed, expected,
+            "`TOOL_NAMES` in the generated module is not TOOL_CATALOG, in order.\n\
+             Regenerate with:\n  {GENERATOR}"
+        );
+    }
+
+    #[test]
+    fn the_probe_library_agrees_about_which_tools_mutate() {
+        // A flipped `mutating` flag is invisible to a name comparison, and it is
+        // what decides whether a wrapper offers a `settle` at all.
+        let src = tools_py();
+        let pairs = mutating_pairs(&src);
+        let expected: Vec<(String, bool)> = TOOL_CATALOG
+            .iter()
+            .map(|t| (t.name.to_owned(), t.mutating))
+            .collect();
+        assert_eq!(
+            pairs, expected,
+            "the generated module's `mutating` flags differ from TOOL_CATALOG.\n\
+             Regenerate with:\n  {GENERATOR}"
+        );
+    }
+
+    #[test]
+    fn every_generated_wrapper_takes_the_session_first() {
+        // The calling convention the whole library is written against. A
+        // wrapper that lost it would still pass the name comparison and fail at
+        // every call site.
+        let src = tools_py();
+        for tool in TOOL_CATALOG {
+            let one_line = format!("\ndef {}(session", tool.name);
+            let wrapped = format!("\ndef {}(\n    session,", tool.name);
+            assert!(
+                src.contains(&one_line) || src.contains(&wrapped),
+                "`{}`'s wrapper does not take `session` first.\n\
+                 Regenerate with:\n  {GENERATOR}",
+                tool.name
+            );
+        }
+    }
+
+    #[test]
+    fn the_catalog_itself_is_well_formed() {
+        // Cheap invariants the generator relies on: unique snake_case names and
+        // a description that can serve as a docstring.
+        let mut seen = std::collections::BTreeSet::new();
+        for tool in TOOL_CATALOG {
+            assert!(
+                seen.insert(tool.name),
+                "duplicate tool name in TOOL_CATALOG: {}",
+                tool.name
+            );
+            assert!(
+                tool.name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "tool name is not snake_case: {}",
+                tool.name
+            );
+            assert!(
+                !tool.description.trim().is_empty(),
+                "tool `{}` has no description to document",
+                tool.name
+            );
+        }
+        assert_eq!(seen.len(), TOOL_COUNT);
+    }
+}

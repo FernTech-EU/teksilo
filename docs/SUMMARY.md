@@ -39,6 +39,7 @@
 # Input, navigation, chrome
 
 - [Shortcuts, intents & actions](shortcut-intent-action.md)
+- [Scrolling](scroll-area.md)
 - [Data-view keyboard navigation](data-view-keyboard.md)
 - [Bounded-scalar keyboard navigation](range-keyboard.md)
 - [Data views under a finger](data-view-touch.md)
@@ -98,6 +99,7 @@
 
 - [Debug inspector](inspector.md)
 - [Automation MCP](automation-mcp.md)
+- [Agent tooling (cargo teksilo)](agent-tooling.md)
 
 # Widget Catalog
 
