@@ -17,9 +17,10 @@ Proves five things about a virtualized data view, against a live
    after it.
 4. **Holding an id across a scroll is the bug that follows from 3.** The stale
    id answers `NOT_FOUND` for a row sitting right there on screen.
-5. **Keyboard navigation reaches rows the wheel cannot.** One `End` puts
-   `Item 200` on screen and selects it — a row this app's wheel scrolling
-   never realises at all (see the note in `scroll_leg`).
+5. **Keyboard navigation is the exact route to a distant row.** One `End` puts
+   `Item 200` on screen *and selects it* — one call, no direction discovery
+   and no animation to wait out, where the wheel takes eight notches to get
+   there and selects nothing.
 
 Why this needs a live app: none of it is observable from a unit test. The
 realization window is decided by the viewport the compositor gives the widget,
@@ -166,11 +167,14 @@ def scroll_leg(session, report: Report) -> None:
       Priming it here means `scroll_until`'s direction discovery is reading real
       movement rather than that artefact, which is the difference between it
       finding the row and giving up after two iterations.
-    * **This list's wheel scrolling bottoms out at `Item 194`.** Rows 195-200
-      are never realised by wheeling, however many notches you send. So this
-      leg looks for a row in the middle, and `keyboard_leg` is what reaches the
-      end. Asking the wheel for `Item 200` here would report a working feature
-      as missing.
+    The target is a row in the middle rather than the last one. Not because the
+    wheel cannot reach the end — measured, it does: nine `dy = +1200` notches
+    put `Item 188..Item 200` on screen and further notches are clamped no-ops.
+    It is that `scroll_until`'s "has anything changed?" signature cannot tell
+    *arrived at the end* from *this direction is wrong*, so a target at the very
+    last row is decided by whether the sweep happened to reach it before the
+    flip. A mid-list target exercises the same machinery without depending on
+    that; `keyboard_leg` covers the end exactly.
     """
     container = list_container(session)
     for _ in range(2):
@@ -246,9 +250,9 @@ def keyboard_leg(session, report: Report) -> None:
     Clicking a node's reported bounds does not work for a row laid out below
     the viewport: the bounds are perfectly real, nothing is painted at them, and
     the click lands on empty chrome. Teksilo scrolls the *focused* row into
-    view, so moving focus makes the view do the scrolling — which is both more
-    reliable than a wheel and the only thing that reaches the last six rows of
-    this list.
+    view, so moving focus makes the view do the scrolling — one call, landing on
+    a named row, where a wheel is a sweep whose stopping point you then have to
+    read back.
     """
     container = list_container(session)
     session.call("invoke_action", node=container["id"], action="focus")
@@ -261,7 +265,7 @@ def keyboard_leg(session, report: Report) -> None:
     last = tree.find(session, role="ListBoxOption", label="Item 200")
     report.check(
         last is not None,
-        "one `End` realised 'Item 200' — the row the wheel never reaches",
+        "one `End` realised 'Item 200' — exactly, and in one call",
     )
     if last is not None:
         report.check(

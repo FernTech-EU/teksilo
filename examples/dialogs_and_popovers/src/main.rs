@@ -9,10 +9,15 @@
 //! severity forbids it; popovers anchor to the control that opened them and
 //! reposition when they would leave the viewport.
 //!
-//! One thing worth knowing about an outside press: it dismisses on the
-//! **release**, and the press that dismissed does not also reach whatever is
-//! beneath it. So dismissing an overlay and activating the control under it are
-//! two presses, on every pointer kind.
+//! One thing worth knowing about an outside press: what it costs to dismiss
+//! depends on the pointer. A **direct** pointer — a finger, a pen — arms on the
+//! press and commits on the release, and the press that dismissed does not
+//! reach whatever is beneath it: dismissing an overlay and activating the
+//! control under it are two presses. An **indirect** pointer — a mouse —
+//! dismisses on the press and *falls through*, so one click does both. That is
+//! deliberate, not an inconsistency: a cursor names one pixel the user could
+//! see the whole time they were aiming at it, while a finger covers the control
+//! it is about to actuate. See `docs/events-and-gestures.md`.
 
 use std::time::Duration;
 

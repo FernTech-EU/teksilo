@@ -204,15 +204,18 @@ def dialog_leg(session, report: Report) -> None:
         "default last still gets it focused",
     )
 
-    # Dismiss through the dialog's own Cancel, which calls `ctx.dismiss_modal()`.
+    # Dismiss through the dialog's own Cancel, which calls `ctx.dismiss_modal()`
+    # — the route an app author writes, and the one this leg is about.
     #
-    # NOT through Escape, and that is a finding rather than a preference: this
-    # Dialog declares `ModalCloseBehavior::EscapeOrClickOutside`, and an
-    # injected Escape does not close it. `teksilo-app`'s NativeWindow branch
-    # destructures the `ModalRequest` without binding `close_behavior`, so for a
-    # natively-presented modal that behaviour is dropped on the floor. Escape
-    # *does* work for a `MessageBox` — see `message_box_leg` — because
-    # MessageBox implements its own escape button inside the modal's content.
+    # Escape is the other route and is checked in `message_box_leg` instead, on
+    # a surface that has it on every platform. It is deliberately not asserted
+    # here: which presentation this Dialog gets is decided at runtime by
+    # `supports_native_modal_windows()` — a real OS window on macOS and
+    # Windows, an in-tree overlay on Linux and the BSDs, where no client can
+    # make another surface input-blocking. Both honour Escape (the native arm
+    # gained it when finding 1 was fixed), but they reach it by different
+    # machinery, so a probe that asserted it here would be asserting a
+    # different thing depending on where it ran.
     if default_button is not None:
         session.call("invoke_action", node=default_button["id"], action="click", window_id=modal)
         session.settle()

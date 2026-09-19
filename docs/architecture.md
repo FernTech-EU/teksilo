@@ -129,7 +129,9 @@ After `focus_with_origin` sets focus to a widget, the framework walks up the anc
 
 ### 3.6 The ScrollBar Widget
 
-The scroll bar is a standalone Level 2 widget in `teksilo-widgets`, not a rendering detail inside ScrollArea. A standalone widget participates in the framework's hit testing, event dispatch, focus, and accessibility systems. Its thumb is a region within its bounds that the framework's existing pointer routing handles. Its accessibility node declares `Role::ScrollBar` with `set_numeric_value`, `set_min_numeric_value`, `set_max_numeric_value`, and `Action::SetValue`.
+The scroll bar is a standalone Level 2 widget in `teksilo-widgets`, not a rendering detail inside ScrollArea. A standalone widget participates in the framework's hit testing and event dispatch. Its thumb is a region within its bounds that the framework's existing pointer routing handles.
+
+**It publishes no accessibility node.** This paragraph used to describe one — `Role::ScrollBar` with `set_numeric_value`, `set_min_numeric_value`, `set_max_numeric_value` and `Action::SetValue` — and that design was not built. `ScrollBar::accessibility` calls `set_hidden()`: a scroll bar is pointer chrome, assistive technology scrolls through the parent's `ScrollUp`/`ScrollDown`/`ScrollLeft`/`ScrollRight`, and a visible bar node would add a Tab stop and a second way to say the same thing. The scroll system therefore produces **one** node, not two. See [`scroll-area.md`](scroll-area.md) for what 0.12.1 actually emits.
 
 The ScrollBar stores the current scroll position and the content-to-viewport ratio (both provided by the ScrollArea via shared `Signal<f32>`). It computes thumb position and size from these values. It handles `PointerDown` on the thumb (start drag), `PointerMove` during drag (update position), `PointerUp` (end drag), and `PointerDown` on the track (page-scroll toward click position). It supports both vertical and horizontal orientations.
 
@@ -139,7 +141,9 @@ The ScrollArea owns the scroll state (`Signal<f32>` for each axis). The ScrollBa
 
 The ScrollArea supports two scroll bar display modes via `ScrollBarStyle`.
 
-**Overlay mode** (default, matching macOS and modern Linux). The ScrollArea's viewport occupies the full available width — the scroll bar does not reduce the content area. A thin passive scroll indicator (a few semi-transparent pixels at the trailing edge) is painted directly by the ScrollArea during scrolling as a visual hint. When the pointer enters the scroll bar activation zone (a region at the trailing edge wider than the thin indicator), the ScrollArea shows the full interactive ScrollBar widget as an overlay using the existing overlay system (`OverlayPlacement::NearAnchor`, `DismissBehavior::PointerLeave`). The overlay ScrollBar appears on top of the content, receives pointer events for thumb drag and track click, and dismisses when the pointer leaves. The viewport width never changes. The transition from thin indicator to full scroll bar can be animated using the animation scheduler.
+**Overlay mode** (default, matching macOS and modern Linux). The ScrollArea's viewport occupies the full available width — the scroll bar does not reduce the content area. The bar floats over the content, thin while idle and widening when the pointer approaches the trailing edge; the viewport width never changes, and the transition can be animated through the animation scheduler.
+
+The word "overlay" here names what the *user* sees, not a mechanism. It is **not** routed through the overlay system: this paragraph once said the bar was shown via `OverlayPlacement::NearAnchor` / `DismissBehavior::PointerLeave`, and that is not what shipped. In 0.12.1 both bars are ordinary layout children in every visibility mode — `build()` adds them with `ctx.add` and `place_children` positions them. The modes differ only in whether the bar reserves thickness in the layout.
 
 **Permanent mode** (matching traditional Windows/GTK style, or when the user's accessibility preferences request always-visible scroll bars). The ScrollBar is a layout sibling of the content viewport. The ScrollArea's internal structure becomes an HStack of `[clipping viewport]` + `[ScrollBar]`. The viewport is narrower by the scroll bar's width. The scroll bar is always visible and always interactive. The viewport width is constant (reduced by the scroll bar width but never changing dynamically).
 
@@ -155,7 +159,7 @@ The ScrollArea creates and manages a ScrollBar widget according to the active `S
 
 The ScrollArea handles `WidgetEvent::ScrollIntoView` to support focus-driven scrolling (Section 3.5) — it adjusts the `Signal<f32>` offset to bring the target bounds into view.
 
-For accessibility, the ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges) and page-level scroll actions (`Action::ScrollDown`, `Action::ScrollUp`, `Action::ScrollLeft`, `Action::ScrollRight`). The ScrollBar declares its own `Role::ScrollBar` with `set_numeric_value`, `set_orientation`, and `Action::SetValue` for direct position control. These are two separate AccessKit nodes with complementary roles.
+For accessibility, the ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges) and page-level scroll actions (`Action::ScrollDown`, `Action::ScrollUp`, `Action::ScrollLeft`, `Action::ScrollRight`) — advertised per axis, and only for a direction that axis can actually still travel. That is the whole of it: the ScrollBar is hidden from the tree (§3.6), so there is one node, not two.
 
 ### 3.9 Interaction with Virtualized Lists
 
@@ -165,7 +169,11 @@ The `ListView` does not need a general-purpose "scroll area wrapper" — it impl
 
 ### 3.10 Accessibility for Scroll Areas and Lists
 
-The scroll system produces two AccessKit nodes with complementary roles. The ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges), `set_clips_children(true)`, and page-level scroll actions (`Action::ScrollUp`, `Action::ScrollDown`, `Action::ScrollLeft`, `Action::ScrollRight`). The ScrollBar declares `Role::ScrollBar` with `set_numeric_value` (the current scroll position), `set_min_numeric_value`, `set_max_numeric_value`, `set_orientation`, and `Action::SetValue` for direct position control by assistive technologies. Screen readers use the ScrollView node to announce the scrollable region and the ScrollBar node to present the scroll position as an adjustable value.
+The scroll system produces **one** AccessKit node. The ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges), `set_clips_children(true)`, and page-level scroll actions (`Action::ScrollUp`, `Action::ScrollDown`, `Action::ScrollLeft`, `Action::ScrollRight`) — each advertised only while that direction has somewhere left to go. Screen readers use it both to announce the scrollable region and to move it.
+
+The `ScrollBar` is `set_hidden()` (§3.6). An earlier design gave it a second node with `Role::ScrollBar`, `set_numeric_value` and `Action::SetValue`; it was not built, because a scroll bar is pointer chrome and a node for it buys a Tab stop and a duplicate announcement rather than a capability.
+
+One gap is worth stating here rather than leaving to be rediscovered: **a `ScrollArea` has no keyboard handler**, so PageUp/PageDown/Home/End/arrows do nothing to it. A keyboard user moves it only indirectly, by Tabbing to a focusable descendant and letting the reveal walk follow (§3.5). Content with no focusable descendants is keyboard-unreachable inside one. The data views (`ListView`, `TableView`, `GridView`) and the editors bind these keys themselves and are unaffected. See [`scroll-area.md`](scroll-area.md) and [`touch-and-pen.md`](touch-and-pen.md) §10.2.
 
 For lists, AccessKit provides `Role::List` with `Role::ListItem` for static lists, and `Role::ListBox` with `Role::ListBoxOption` for interactive selectable lists. The critical properties for virtualized lists are `set_position_in_set(index)` on each visible item and `set_size_of_set(total_count)` on the list container. These tell screen readers the logical position of each item ("item 5 of 200") even when the AccessKit tree only contains the items currently visible in the viewport. Items outside the viewport do not exist in the arena and therefore do not appear in the AccessKit tree — no special mechanism is needed to exclude them.
 
