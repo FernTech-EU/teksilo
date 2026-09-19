@@ -72,6 +72,27 @@ by crate for clarity, not because crates version independently.
     are idempotent: a second run reports `unchanged` and leaves the shared files
     byte for byte, including whatever the project wrote outside the markers.
 
+    **Cline** is served too, and is the one vendor whose path is read off the
+    disk rather than fixed: `.clinerules/teksilo.md` where that directory
+    exists, a marker region where `.clinerules` is a plain file — which it may
+    be, and which has nowhere to put a file of our own — and
+    `.cline/rules/teksilo.md` where that is the only layout present.
+
+    The order is deliberately **not** newest-first. Cline's source calls
+    `.cline` `CLINE_CONFIG_DIR` and `.clinerules` `DEPRECATED_CONFIG_DIR`, so
+    the newer path looks like the obvious target; but the VS Code extension was
+    hardcoded to `.clinerules` and ignored `.cline/rules/` outright
+    (cline/cline#14186), the cross-surface fix reached `main` only in September
+    2026 and is in no released build, and Cline's own docs still say its Rules
+    panel creates new workspace rules in `.clinerules/`. Preferring the modern
+    name would install, in the most-used Cline surface, a file nothing reads —
+    which this tool holds to be worse than installing nothing, because it
+    reports success. Reachability beats recency, and a test says so, so that a
+    later tidy-up does not quietly invert it.
+
+    No frontmatter in any layout: Cline's docs say a rule without one is always
+    active, so its absence is what keeps the brief unconditional.
+
     Two things it refuses to do, both found by adversarially reviewing the
     command against itself and reproduced before being fixed. It **will not
     rewrite a shared file it cannot read whole**: `AGENTS.md` and

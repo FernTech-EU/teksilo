@@ -253,43 +253,141 @@ description: Teksilo GUI framework — use `cargo teksilo` for version-matched A
 ---
 ";
 
+/// Where a vendor's brief goes, and in what shape.
+///
+/// Most vendors know both at compile time. One does not: Cline reads two
+/// different directories plus a legacy file, and which of them a project has
+/// decides the path *and* the form — so the table has to be able to ask the
+/// disk rather than only state a constant.
+enum Shape {
+    /// One path, one form, decided here.
+    Fixed { path: &'static str, form: Form },
+    /// Resolved from the project, by [`cline_layout`].
+    Cline,
+}
+
 /// Every project-scope agent this tool knows how to write for.
 ///
-/// `(agent, marker, relative path, form)`. The marker is what must already
-/// exist; the path is what gets written. Ordered as the plan prints them.
-type Vendor = (&'static str, &'static str, &'static str, Form);
+/// `marker` is what must already exist for the agent to count as configured
+/// here, and is also the label printed when it is missing. Ordered as the plan
+/// prints them.
+struct Vendor {
+    agent: &'static str,
+    marker: &'static str,
+    shape: Shape,
+}
 
 const VENDORS: &[Vendor] = &[
-    (
-        "Claude Code",
-        ".claude/",
-        ".claude/skills/teksilo",
-        Form::Skill,
-    ),
-    (
-        "Cursor",
-        ".cursor/",
-        ".cursor/rules/teksilo.mdc",
-        Form::OwnFile {
-            frontmatter: CURSOR_FRONTMATTER,
+    Vendor {
+        agent: "Claude Code",
+        marker: ".claude/",
+        shape: Shape::Fixed {
+            path: ".claude/skills/teksilo",
+            form: Form::Skill,
         },
-    ),
-    (
-        "Windsurf",
-        ".windsurf/",
-        ".windsurf/rules/teksilo.md",
-        Form::OwnFile {
-            frontmatter: WINDSURF_FRONTMATTER,
+    },
+    Vendor {
+        agent: "Cursor",
+        marker: ".cursor/",
+        shape: Shape::Fixed {
+            path: ".cursor/rules/teksilo.mdc",
+            form: Form::OwnFile {
+                frontmatter: CURSOR_FRONTMATTER,
+            },
         },
-    ),
-    (
-        "GitHub Copilot",
-        ".github/",
-        ".github/copilot-instructions.md",
-        Form::Region,
-    ),
-    ("Codex / AGENTS.md", "AGENTS.md", "AGENTS.md", Form::Region),
+    },
+    Vendor {
+        agent: "Windsurf",
+        marker: ".windsurf/",
+        shape: Shape::Fixed {
+            path: ".windsurf/rules/teksilo.md",
+            form: Form::OwnFile {
+                frontmatter: WINDSURF_FRONTMATTER,
+            },
+        },
+    },
+    Vendor {
+        agent: "Cline",
+        // The label names the CURRENT directory, because it is the one to
+        // create; detection accepts the older two as well.
+        // The label names the directory every Cline surface reads today, and
+        // the one Cline's own UI creates — not the newest one.
+        marker: ".clinerules/",
+        shape: Shape::Cline,
+    },
+    Vendor {
+        agent: "GitHub Copilot",
+        marker: ".github/",
+        shape: Shape::Fixed {
+            path: ".github/copilot-instructions.md",
+            form: Form::Region,
+        },
+    },
+    Vendor {
+        agent: "Codex / AGENTS.md",
+        marker: "AGENTS.md",
+        shape: Shape::Fixed {
+            path: "AGENTS.md",
+            form: Form::Region,
+        },
+    },
 ];
+
+/// Where one project keeps its Cline rules, if it keeps any.
+///
+/// Returns `(marker label, marker path, target path, form)`.
+///
+/// Cline has three project layouts, and the order they are tried in is the
+/// one decision in this function worth arguing about.
+///
+/// `.clinerules/` comes **first**, even though Cline's own source binds it to
+/// a constant named `DEPRECATED_CONFIG_DIR` while `.cline` is
+/// `CLINE_CONFIG_DIR`. Deprecated names the direction of travel, not what is
+/// read today: the VS Code extension was hardcoded to `.clinerules` and
+/// ignored `.cline/rules/` entirely (cline/cline#14186), the cross-surface fix
+/// landed on `main` only in September 2026 and is in no released build yet,
+/// and Cline's own documentation still says the VS Code Rules panel *creates*
+/// new workspace rules in `.clinerules/`.
+///
+/// So preferring the modern path would install, in the most widely used Cline
+/// surface, a file nothing reads — which this module holds to be worse than
+/// installing nothing, because it reports success. Reachability beats recency.
+/// When `.cline/` is the only layout present the project has clearly chosen
+/// it, and it is honoured rather than second-guessed with a top-level
+/// directory it did not ask for; that case is the one to revisit once the
+/// extension fix ships.
+///
+/// The legacy form may be a plain **file** rather than a directory, in which
+/// case there is nowhere to put a file of our own and the brief goes into a
+/// marker region — the same treatment `AGENTS.md` gets, and for the same
+/// reason: the file is the project's, not ours. Cline reads such a file in
+/// place; if its UI later folds it into a directory it carries our region
+/// along with the rest of the content.
+///
+/// No frontmatter in any case. Cline's rules are plain markdown, and its docs
+/// state that a rule without frontmatter is always active; adding one would
+/// make the brief conditional for no gain.
+fn cline_layout(root: &Path) -> Option<(&'static str, PathBuf, PathBuf, Form)> {
+    let legacy = root.join(".clinerules");
+    if legacy.is_dir() {
+        let target = legacy.join("teksilo.md");
+        return Some((
+            ".clinerules/",
+            legacy,
+            target,
+            Form::OwnFile { frontmatter: "" },
+        ));
+    }
+    if legacy.is_file() {
+        return Some((".clinerules", legacy.clone(), legacy, Form::Region));
+    }
+    let modern = root.join(".cline");
+    if modern.is_dir() {
+        let target = modern.join("rules").join("teksilo.md");
+        return Some((".cline/", modern, target, Form::OwnFile { frontmatter: "" }));
+    }
+    None
+}
 
 /// The nearest ancestor of `start` (inclusive) holding a `Cargo.toml`.
 ///
@@ -330,14 +428,40 @@ impl ProjectCandidate {
 pub fn project_candidates(root: &Path) -> Vec<ProjectCandidate> {
     VENDORS
         .iter()
-        .map(|(agent, marker, path, form)| ProjectCandidate {
-            target: Target {
-                agent,
-                marker,
-                path: root.join(path),
-                form: *form,
+        .map(|vendor| match &vendor.shape {
+            Shape::Fixed { path, form } => ProjectCandidate {
+                target: Target {
+                    agent: vendor.agent,
+                    marker: vendor.marker,
+                    path: root.join(path),
+                    form: *form,
+                },
+                marker_path: root.join(vendor.marker.trim_end_matches('/')),
             },
-            marker_path: root.join(marker.trim_end_matches('/')),
+            Shape::Cline => match cline_layout(root) {
+                Some((marker, marker_path, path, form)) => ProjectCandidate {
+                    target: Target {
+                        agent: vendor.agent,
+                        marker,
+                        path,
+                        form,
+                    },
+                    marker_path,
+                },
+                // Nothing on disk: the candidate still exists so the closing
+                // report can name what to create, and `marker_path` points at
+                // the modern directory precisely because it does NOT exist —
+                // which is what makes `detected()` false.
+                None => ProjectCandidate {
+                    target: Target {
+                        agent: vendor.agent,
+                        marker: vendor.marker,
+                        path: root.join(".clinerules/teksilo.md"),
+                        form: Form::OwnFile { frontmatter: "" },
+                    },
+                    marker_path: root.join(".clinerules"),
+                },
+            },
         })
         .collect()
 }
@@ -590,7 +714,15 @@ pub struct Outcome {
 /// A function rather than an inline `format!` so [`apply`] and [`inspect`]
 /// cannot drift about what "installed and current" means.
 fn own_file(frontmatter: &str) -> String {
-    format!("{frontmatter}\n{BRIEF}")
+    // An empty frontmatter means the vendor wants none, not that it wants a
+    // blank first line. Cline is the case: its rules are plain markdown, and
+    // its own docs say a rule *without* frontmatter is always active — so the
+    // absence is what keeps the brief unconditional.
+    if frontmatter.is_empty() {
+        BRIEF.to_string()
+    } else {
+        format!("{frontmatter}\n{BRIEF}")
+    }
 }
 
 /// Read a file this tool shares with the project, for [`Form::Region`].
@@ -944,6 +1076,7 @@ mod tests {
         std::fs::create_dir_all(t.path().join(".claude")).unwrap();
         std::fs::create_dir_all(t.path().join(".cursor")).unwrap();
         std::fs::create_dir_all(t.path().join(".windsurf")).unwrap();
+        std::fs::create_dir_all(t.path().join(".cline")).unwrap();
         std::fs::create_dir_all(t.path().join(".github")).unwrap();
         std::fs::write(t.path().join("AGENTS.md"), "# Agents\n").unwrap();
 
@@ -955,6 +1088,7 @@ mod tests {
                 "Claude Code",
                 "Cursor",
                 "Windsurf",
+                "Cline",
                 "GitHub Copilot",
                 "Codex / AGENTS.md"
             ]
@@ -976,7 +1110,7 @@ mod tests {
                 .iter()
                 .map(|(a, _)| *a)
                 .collect::<Vec<_>>(),
-            ["Cursor", "Windsurf", "Codex / AGENTS.md"]
+            ["Cursor", "Windsurf", "Cline", "Codex / AGENTS.md"]
         );
     }
 
@@ -1155,6 +1289,101 @@ mod tests {
     fn an_empty_file_gets_no_leading_blank_line() {
         let out = upsert_region("", &region_block());
         assert!(out.starts_with(BEGIN));
+    }
+
+    // --- Cline's three layouts --------------------------------------------
+
+    fn cline_target(root: &Path) -> Option<Target> {
+        project_targets(root)
+            .into_iter()
+            .find(|t| t.agent == "Cline")
+    }
+
+    #[test]
+    fn clinerules_wins_over_cline_because_it_is_the_one_that_is_read() {
+        // The order is the point, and it is deliberately NOT newest-first.
+        // Cline's source calls `.clinerules` DEPRECATED_CONFIG_DIR, but the VS
+        // Code extension was hardcoded to it and ignored `.cline/rules/`
+        // entirely (cline/cline#14186); the cross-surface fix is not in a
+        // released build, and Cline's docs still say its Rules panel creates
+        // new workspace rules in `.clinerules/`. Choosing the newer path would
+        // install a file the most-used Cline surface does not read — worse
+        // than installing nothing, because it reports success.
+        //
+        // If this test is failing because someone "modernised" the order,
+        // check whether the extension fix has shipped before changing it.
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".clinerules")).unwrap();
+        std::fs::create_dir_all(t.path().join(".cline")).unwrap();
+
+        let target = cline_target(t.path()).expect("detected");
+        assert_eq!(
+            target.path,
+            t.path().join(".clinerules/teksilo.md"),
+            "with both present, write the one every surface reads"
+        );
+        apply(&target).unwrap();
+        assert!(
+            !t.path().join(".cline/rules").exists(),
+            "and do not also write the one that may be ignored"
+        );
+    }
+
+    #[test]
+    fn a_cline_only_project_is_honoured_rather_than_given_a_new_directory() {
+        // `.cline/` alone is a deliberate choice by that project. Respect it
+        // instead of creating a top-level `.clinerules/` it did not ask for.
+        let t = temp();
+        std::fs::create_dir_all(t.path().join(".cline")).unwrap();
+        let target = cline_target(t.path()).expect("detected");
+        assert_eq!(target.path, t.path().join(".cline/rules/teksilo.md"));
+        assert_eq!(target.form, Form::OwnFile { frontmatter: "" });
+
+        apply(&target).unwrap();
+        let written = std::fs::read_to_string(&target.path).unwrap();
+        assert!(
+            written.starts_with("# Teksilo"),
+            "no frontmatter: a Cline rule without one is always active"
+        );
+        assert_eq!(inspect(&target), Presence::Current);
+        assert!(
+            !t.path().join(".clinerules").exists(),
+            "must not invent the other layout beside the one in use"
+        );
+    }
+
+    #[test]
+    fn a_legacy_clinerules_file_gets_a_region_not_a_child_path() {
+        // The legacy form can be a plain FILE. Treating it as a directory
+        // would make `create_dir_all` fail with NotADirectory; treating it as
+        // ours would discard the user's rules.
+        let t = temp();
+        let path = t.path().join(".clinerules");
+        std::fs::write(&path, "# My own rules\n\nAlways use tabs.\n").unwrap();
+
+        let target = cline_target(t.path()).expect("detected");
+        assert_eq!(target.path, path);
+        assert_eq!(target.form, Form::Region);
+
+        apply(&target).unwrap();
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("Always use tabs."), "their rules survive");
+        assert!(after.contains(BEGIN), "and ours is appended in a region");
+        assert_eq!(apply(&target).unwrap().change, Change::Unchanged);
+    }
+
+    #[test]
+    fn a_project_with_no_cline_anything_is_not_detected_and_names_the_modern_dir() {
+        let t = temp();
+        assert!(cline_target(t.path()).is_none());
+        let missing = project_undetected(t.path());
+        assert!(
+            missing.contains(&("Cline", ".clinerules/")),
+            "the label must name the directory every Cline surface reads, and \
+             the one Cline's own UI creates: {missing:?}"
+        );
+        assert!(!t.path().join(".cline").exists());
+        assert!(!t.path().join(".clinerules").exists());
     }
 
     // --- data loss, found by review and reproduced ------------------------

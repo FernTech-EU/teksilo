@@ -316,8 +316,9 @@ pub fn report(dir: &Path) {
             println!("\nProject  {}", show_safe(&root));
             print_rows(&project_rows(&root));
             println!(
-                "\n  Mistral Vibe, opencode and Grok Build read a project's AGENTS.md, so\n  \
-                 the AGENTS.md row above is their project-scope integration too."
+                "\n  Mistral Vibe, opencode, Grok Build and Cline all read a project's\n  \
+                 AGENTS.md, so the AGENTS.md row above serves them too — Cline has a\n  \
+                 row of its own because it also reads a directory this can write."
             );
         }
         None => {

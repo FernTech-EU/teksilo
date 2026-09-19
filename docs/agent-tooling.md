@@ -152,8 +152,44 @@ one directory into all of them accomplishes nothing:
 | Claude Code | `.claude/` | `.claude/skills/teksilo/` — the full four-file skill |
 | Cursor | `.cursor/` | `.cursor/rules/teksilo.mdc` — MDC frontmatter (`description` / `globs` / `alwaysApply`) + brief |
 | Windsurf | `.windsurf/` | `.windsurf/rules/teksilo.md` — `trigger: glob` frontmatter + brief |
+| Cline | `.clinerules/`, `.clinerules` or `.cline/` | whichever the project has — see below |
 | GitHub Copilot | `.github/` | `.github/copilot-instructions.md` — a delimited section |
 | Codex and the rest | `AGENTS.md` | `AGENTS.md` — a delimited section |
+
+**Cline is the one vendor whose path is read off the disk rather than fixed.**
+It has three project layouts, tried in this order:
+
+| On disk | Written |
+| --- | --- |
+| `.clinerules/` | `.clinerules/teksilo.md` |
+| `.clinerules` (a file) | a delimited section inside it |
+| `.cline/` | `.cline/rules/teksilo.md` |
+
+**That order is deliberately not newest-first**, which is the one thing worth
+knowing here. In Cline's own source `.cline` is `CLINE_CONFIG_DIR` and
+`.clinerules` is bound to a constant named `DEPRECATED_CONFIG_DIR` — so the
+newer path looks like the obvious choice. It is not: the VS Code extension was
+hardcoded to `.clinerules` and ignored `.cline/rules/` outright
+([cline/cline#14186](https://github.com/cline/cline/issues/14186)), the
+cross-surface fix reached `main` only in September 2026 and is in no released
+build, and Cline's own documentation still says its Rules panel *creates* new
+workspace rules in `.clinerules/`.
+
+Preferring the modern path would therefore install, in the most widely used
+Cline surface, a file that nothing reads — which this tool holds to be worse
+than installing nothing, because it reports success. Reachability beats
+recency. A project where `.cline/` is the *only* layout has clearly chosen it
+and is honoured rather than handed a top-level directory it never asked for;
+that is the case to revisit once the extension fix ships.
+
+The legacy form may be a plain *file*, which has nowhere to put a file of our
+own — so it gets a marker region, exactly as `AGENTS.md` does, and for the same
+reason: the file is the project's. Cline reads such a file in place.
+
+No frontmatter, deliberately. Cline's rules are plain markdown and its docs
+state that a rule *without* frontmatter is always active; adding one would make
+the brief conditional for no gain. Cline also reads a project's `AGENTS.md`, so
+a project with one is already served before any of these exist.
 
 The **brief** is a self-contained ~40 lines: what Teksilo is, the five commands,
 that every answer is pinned to the version this app resolved, and the rule that
