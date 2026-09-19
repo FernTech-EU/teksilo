@@ -4811,6 +4811,225 @@ mod tests {
         assert_eq!(stack[1], content, "modal content sits above scrim");
     }
 
+    // ─── A dismissal must report its result ────────────────────────
+    //
+    // These drive a modal through the REAL in-tree path —
+    // `ctx.present_modal` → `drain_pending_modal_requests` →
+    // `present_in_tree_modal_request` — because that is the path that is
+    // broken and the one nothing covered.
+    //
+    // Every existing test of this behaviour builds the modal's content
+    // straight into the tree and never calls `show_overlay`
+    // (`message_box.rs`'s `present_and_lay_out`, and the `InputDialog`
+    // tests). With no overlay on the stack, `pointer_router`'s Escape arm
+    // is skipped and the widget's own Escape shortcut resolves — which is
+    // the NATIVE topology. So the suite has been testing the arm this
+    // machine cannot execute, and is green while a Linux user loses their
+    // answer: `supports_native_modal_windows()` is false on every unix but
+    // macOS, so `Auto` resolves here to the overlay these tests omit.
+    //
+    // Measured against the live `dialogs-and-popovers` demo: clicking a
+    // button reports, Escape does not, clicking outside does not.
+
+    /// Present `mb` the way an app does, dismiss it with `dismiss`, and
+    /// return whatever `on_result` was handed — `None` if it never ran.
+    fn message_box_dismissed_by(
+        mb: teksilo_widgets::MessageBox,
+        dismiss: impl FnOnce(&mut WidgetTree),
+    ) -> Option<teksilo_widgets::MessageBoxResult> {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let seen: Rc<RefCell<Option<teksilo_widgets::MessageBoxResult>>> =
+            Rc::new(RefCell::new(None));
+        let sink = seen.clone();
+        let pending = Rc::new(RefCell::new(Some(mb.on_result(move |r, _ctx| {
+            *sink.borrow_mut() = Some(r);
+        }))));
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let trigger = tree.add(Button::new(lit!("Open")).on_activate_fn(move |ctx| {
+            if let Some(mb) = pending.borrow_mut().take() {
+                mb.present(ctx);
+            }
+        }));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+            action: teksilo_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: teksilo_core::accessibility::root_node_id(),
+            data: None,
+        });
+        let queued = tree
+            .drain_pending_modal_requests()
+            .pop()
+            .expect("MessageBox::present must queue a modal request");
+        present_in_tree_modal_request(&mut tree, queued.source_widget, queued.request);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "precondition: the in-tree arm ran (scrim + panel)"
+        );
+
+        dismiss(&mut tree);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(
+            tree.active_overlays().len(),
+            0,
+            "precondition: the modal actually closed — otherwise a missing result \
+             would mean 'still open', which is a different bug"
+        );
+        *seen.borrow()
+    }
+
+    /// A point well outside the centred 460×140 panel in an 800×600
+    /// viewport, so a press there lands on the scrim.
+    fn click_outside(tree: &mut WidgetTree) {
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        let at = teksilo_canvas::Point::new(8.0, 8.0);
+        tree.pointer_move(at);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::default(),
+        ));
+    }
+
+    fn a_question() -> teksilo_widgets::MessageBox {
+        use teksilo_widgets::{MessageBox, MessageBoxButtons, StandardButton};
+        MessageBox::question(lit!("Save changes?"))
+            .buttons(MessageBoxButtons::SaveDiscardCancel)
+            .escape_button(StandardButton::Cancel)
+    }
+
+    /// The positive control, and the reason the three failures below can be
+    /// read as a framework defect rather than a broken rig: identical
+    /// harness, identical presentation, identical sink — the only thing
+    /// that differs is the route out. This one passes today.
+    #[test]
+    fn clicking_a_button_on_an_in_tree_message_box_reports_its_result() {
+        let seen = message_box_dismissed_by(a_question(), |tree| {
+            let cancel = tree
+                .find_by_label("Cancel")
+                .expect("the Cancel button is in the modal's content");
+            tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+                action: teksilo_core::accesskit::Action::Click,
+                target: Some(cancel),
+                target_node: teksilo_core::accessibility::root_node_id(),
+                data: None,
+            });
+        })
+        .expect("clicking a button reports its result");
+
+        assert_eq!(seen.button, teksilo_widgets::StandardButton::Cancel);
+        assert!(
+            !seen.dismissed_by_escape,
+            "a deliberate button press is a choice, not a dismissal"
+        );
+    }
+
+    #[test]
+    fn escape_on_an_in_tree_message_box_reports_its_result() {
+        let seen = message_box_dismissed_by(a_question(), |tree| {
+            tree.press_key(
+                teksilo_core::event::Key::Escape,
+                teksilo_core::event::Modifiers::NONE,
+            );
+        });
+
+        let seen = seen.expect(
+            "Escape closed the modal but `on_result` never ran, so the app cannot \
+             learn the user's answer. `pointer_router`'s overlay Escape arm consumes \
+             the key and returns before shortcut resolution, so MessageBox's own \
+             Escape shortcut never fires on the in-tree arm",
+        );
+        assert_eq!(
+            seen.button,
+            teksilo_widgets::StandardButton::Cancel,
+            "Escape must resolve to the declared escape button"
+        );
+        assert!(
+            seen.dismissed_by_escape,
+            "and must be reported as a dismissal rather than a choice"
+        );
+    }
+
+    #[test]
+    fn clicking_outside_an_in_tree_message_box_reports_its_result() {
+        let seen = message_box_dismissed_by(a_question(), click_outside);
+
+        let seen = seen.expect(
+            "a click outside closed the modal but `on_result` never ran. \
+             `MessageBoxResult::dismissed_by_escape` is documented as covering \
+             scrim-click, and no code path can currently produce it",
+        );
+        assert_eq!(seen.button, teksilo_widgets::StandardButton::Cancel);
+        assert!(seen.dismissed_by_escape);
+    }
+
+    /// `InputDialog` is the worse case: `None` *is* its cancellation
+    /// payload, so a dismissal that reports nothing is indistinguishable
+    /// from a dialog still sitting open — and unlike `MessageBox` it
+    /// registers no Escape route of its own, so this fails on the native
+    /// arm too.
+    #[test]
+    fn escape_on_an_in_tree_input_dialog_reports_its_cancellation() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let seen: Rc<RefCell<Option<Option<String>>>> = Rc::new(RefCell::new(None));
+        let sink = seen.clone();
+        let pending = Rc::new(RefCell::new(Some(
+            teksilo_widgets::InputDialog::new(lit!("Rename")).on_result(move |v, _ctx| {
+                *sink.borrow_mut() = Some(v);
+            }),
+        )));
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let trigger = tree.add(Button::new(lit!("Open")).on_activate_fn(move |ctx| {
+            if let Some(d) = pending.borrow_mut().take() {
+                d.present(ctx);
+            }
+        }));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+            action: teksilo_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: teksilo_core::accessibility::root_node_id(),
+            data: None,
+        });
+        let queued = tree
+            .drain_pending_modal_requests()
+            .pop()
+            .expect("InputDialog::present must queue a modal request");
+        present_in_tree_modal_request(&mut tree, queued.source_widget, queued.request);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.press_key(
+            teksilo_core::event::Key::Escape,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let reported = seen.borrow().clone().expect(
+            "Escape closed the InputDialog but `on_result` never ran. Its own rustdoc \
+             says it is 'invoked exactly once when the user accepts (Some) or cancels \
+             (None)' — a dismissal is a cancellation, and the caller is left unable to \
+             tell it from a dialog that is still open",
+        );
+        assert!(
+            reported.is_none(),
+            "a dismissal is a cancellation, so the payload must be None"
+        );
+    }
+
     #[test]
     fn dismissing_modal_cascades_to_scrim() {
         // The scrim's `parent_overlay` is patched to the modal id
