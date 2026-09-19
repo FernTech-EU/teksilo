@@ -227,3 +227,17 @@ tempfile = { workspace = true }
 # WebKitGTK / Servo system libraries docs.rs does not have.
 features = ["automation", "async", "terminal", "theme-fluent",
             "theme-macos", "theme-material3", "web-view-headless"]
+
+# The workspace has ONE changelog, at the repository root, so these run from
+# the umbrella crate rather than from `release.toml`: a root-level
+# `pre-release-replacements` is inherited by all 42 publishable crates and
+# would be applied 42 times, against a `CHANGELOG.md` beside each crate's own
+# manifest. Paths here are relative to THIS manifest's directory.
+[package.metadata.release]
+pre-release-replacements = [
+  # Open a dated section for the version being cut, and leave `[Unreleased]`
+  # in place as the landing spot for the next change.
+  { file = "../../CHANGELOG.md", search = "## \\[Unreleased\\]", replace = "## [Unreleased]\n\n## [{{version}}] - {{date}}", exactly = 1 },
+  # Re-point the `[Unreleased]` compare link and add this version's own.
+  { file = "../../CHANGELOG.md", search = "\\[Unreleased\\]: (.*/compare)/v(.*)\\.\\.\\.HEAD", replace = "[Unreleased]: ${1}/v{{version}}...HEAD\n[{{version}}]: ${1}/v${2}...v{{version}}", exactly = 1 },
+]

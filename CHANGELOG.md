@@ -199,12 +199,6 @@ by crate for clarity, not because crates version independently.
   crates, so `docs/` is unchanged; the rest are queryable through `--crate`,
   `--list`, `--all` and by name.
 
-### Changed
-
-- **Behaviour change.** On Windows, Direct3D 12 is tried before Vulkan and
-  OpenGL. Other platforms keep the order they already had: Metal first on macOS
-  and iOS, Vulkan first elsewhere. `WGPU_BACKEND` still overrides all of it.
-
 ### Fixed
 
 - **A screen reader can open a `Dialog` that has a custom trigger.** The
@@ -222,6 +216,25 @@ by crate for clarity, not because crates version independently.
   modal is up, so there is no outside to click, and `ClickOutside` now means
   the same as `Manual` for that presentation. Linux and the BSDs were never
   affected — they present modals in-tree, where Escape already worked.
+
+## [0.12.1] - 2026-09-18
+
+Five assistive-technology fixes and a Windows start-up fix. In a rich-text
+document, tables and blockquotes reached the accessibility tree as nothing at
+all, and text typed inside a cell, a heading or a blockquote was never
+announced; a `TreeTableView` row reported neither its outline level nor whether
+its branch was open; a `TreeView` row that was still loading claimed to be at
+the top level. On Windows, an app whose Vulkan driver cannot build wgpu's
+device now starts, and Direct3D 12 is tried before Vulkan.
+
+### Changed
+
+- **Behaviour change.** On Windows, Direct3D 12 is tried before Vulkan and
+  OpenGL. Other platforms keep the order they already had: Metal first on macOS
+  and iOS, Vulkan first elsewhere. `WGPU_BACKEND` still overrides all of it.
+
+### Fixed
+
 - **A screen reader can read the tables and blockquotes in a rich-text
   document.** Neither reached the accessibility tree at all: the walk over the
   document flow handled only ordinary blocks, so a table's cells and a
@@ -2552,7 +2565,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/FernTech-EU/teksilo/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/FernTech-EU/teksilo/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/FernTech-EU/teksilo/compare/v0.9.5...v0.10.0
