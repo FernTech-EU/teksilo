@@ -13,6 +13,8 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-19
+
 ### Added
 
 - **`cargo teksilo` — agent tooling for apps that depend on Teksilo.** An agent
@@ -2565,7 +2567,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/FernTech-EU/teksilo/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/FernTech-EU/teksilo/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/FernTech-EU/teksilo/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/FernTech-EU/teksilo/compare/v0.10.0...v0.11.0
