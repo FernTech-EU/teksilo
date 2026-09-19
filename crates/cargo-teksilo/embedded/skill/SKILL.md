@@ -49,6 +49,8 @@ cargo teksilo symbol Button HStack Dialog   # exact public API + docs for the pi
 cargo teksilo symbol ListModel              # data / settings / scene types too
 cargo teksilo search "virtualized table with sortable columns"
 cargo teksilo search "how do I persist window size"
+cargo teksilo show docs/scroll-area.md      # read a search result in full, offline
+cargo teksilo show docs/scroll-area.md --lines 166-172
 cargo teksilo probe                         # materialise the Python automation harness
 cargo teksilo setup                         # the harness plus the rest of the agent scaffolding
 ```
@@ -58,11 +60,20 @@ cargo teksilo setup                         # the harness plus the rest of the a
   builder methods from its inherent `impl` blocks — skipping trait plumbing and
   `pub(crate)` items. Names may be a type (`Button`) or a module (`button`).
 - **`search`** is hybrid BM25 + semantic retrieval over the framework's
-  hand-written guides (65 of them) and worked examples (56). Neither reaches a
+  hand-written guides (69 of them) and worked examples (56 crates). Neither reaches a
   consumer app any other way: the guides live in no crate, and every example is
   `publish = false`. Reach for it whenever the question is conceptual ("which
   data model do I want?", "how does drag-and-drop escalate to the OS?") rather
   than "what is this method's signature?".
+- **`show`** prints one of those documents in full — the whole file, or just the
+  lines a hit cited (`--lines 166-172`, 1-based and inclusive, exactly as
+  `search` prints them). **Read a search result this way, and do not fetch the
+  file from GitHub.** The path a hit prints is real in the *framework*
+  repository and absent here, so the two tempting moves are both wrong: opening
+  it locally finds nothing, and `blob/main/` (or the published book) serves
+  `main`, which is a different Teksilo from the one this app pinned — which is
+  the exact confusion this tool exists to prevent. `show` is offline and
+  version-matched. `cargo teksilo show --list` prints every available path.
 - **`probe` / `setup`** write a Python automation harness into
   `scripts/teksilo_probe/` for driving and asserting on the running GUI. See
   `reference/automation.md`.
@@ -81,7 +92,9 @@ slower and the second is version-approximate — say so rather than guessing.
    point, Widget trait, layout, Signal/Prop, events, theming, settings, i18n,
    widget catalog, testing. Treat it as directional, not authoritative on exact
    signatures. For a conceptual question, `cargo teksilo search "<question>"`
-   first — it reaches material this skill does not carry.
+   first — it reaches material this skill does not carry — then
+   `cargo teksilo show <path>` to read the hit in full rather than working from
+   its snippet or fetching it from GitHub.
 2. **Extract the exact API before using a type** — never invent builder methods.
    `cargo teksilo symbol <Name>`. For full generics and trait bounds, or if the
    tool is unavailable, use `cargo doc` / docs.rs at the pinned version.
@@ -104,6 +117,7 @@ slower and the second is version-approximate — say so rather than guessing.
 | Driving, screenshotting or testing the running app | `reference/automation.md` |
 | A compile error you have already tried once | Re-extract the API (step 2) before the next attempt |
 | Framework internals, why something is built this way | `cargo teksilo search` — the guides are the only place that answers it |
+| Reading a guide or example a search cited | `cargo teksilo show <path>` — **not** GitHub, which tracks `main` rather than the pinned version |
 
 ## Version & imports
 

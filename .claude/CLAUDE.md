@@ -84,6 +84,7 @@ app resolved, read from their `Cargo.lock`.
 ```bash
 cargo teksilo symbol Button          # exact public API, for the version they pin
 cargo teksilo search "<question>"    # hybrid BM25 + vector over guides + examples
+cargo teksilo show <corpus path>     # a hit's document in full, offline (--lines A-B, --list)
 cargo teksilo probe                  # write the probe harness into scripts/teksilo_probe/
 cargo teksilo setup                  # probe + install the skill where agents look
 cargo teksilo build-vectors          # MAINTAINER ONLY: re-encode the corpus (see below)

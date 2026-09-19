@@ -34,6 +34,7 @@ Verified against teksilo 0.12.1.
 ```bash
 cargo teksilo symbol <Name>...   # exact public API of a type
 cargo teksilo search "<query>"   # the guides and worked examples
+cargo teksilo show <path>        # one of them in full, offline
 cargo teksilo probe [--force]    # write the automation harness into the project
 cargo teksilo setup [--force]    # probe + install the skill
 cargo teksilo version            # this tool, and the app's resolved Teksilo
@@ -62,7 +63,7 @@ resolves to its owning crate rather than reporting "not found".
 
 ### `search`
 
-Retrieval over the 68 hand-written guides and the worked examples — the material
+Retrieval over the 69 hand-written guides and the 56 worked example crates — the material
 that reaches no consumer today.
 
 ```console
@@ -74,6 +75,55 @@ $ cargo teksilo search "focus ring" --lexical      # BM25 only
 Hybrid by default: BM25 fused with vector similarity by reciprocal-rank fusion.
 The header line always says which mode ran, so lexical results are never
 presented as semantic.
+
+A hit cites a path — `docs/scroll-area.md` — and that path does not exist in the
+consumer's project, which is the whole reason the corpus ships. Left bare it
+invites the two wrong moves: opening it locally, where it is absent, or fetching
+it from `blob/main/` or the published book, both of which track `main` rather
+than the version the app pinned. So a non-empty result ends with one footer line
+naming the door that is offline *and* version-matched:
+
+```
+Read any of these in full: cargo teksilo show <path>   (offline, teksilo 0.12.1 — not GitHub, which tracks main)
+```
+
+### `show`
+
+The document behind a hit, in full, reassembled from the corpus — no network, no
+checkout, and matched to the pinned version by construction.
+
+```console
+$ cargo teksilo show docs/scroll-area.md
+$ cargo teksilo show docs/scroll-area.md --lines 166-172   # the lines a hit cited
+$ cargo teksilo show examples/simple_button/src/main.rs
+$ cargo teksilo show --list                                # every path, one per line
+```
+
+Nothing is re-fetched and nothing is re-embedded: every chunk already carries its
+own text and the 0-based inclusive line range it occupied in the original file,
+and the generator's chunking covers every non-blank line of all 158 documents.
+Laying the chunks back at their offsets leaves gaps exactly where the chunker
+dropped a blank separator line, so the gaps come back as blank lines and the
+result is the original **byte for byte** — checked for all 158 by
+`every_document_reconstructs_byte_exactly`, which reads the real files whenever
+the tests run inside a checkout.
+
+`--lines` is **1-based and inclusive**, which is what `search` prints under a hit
+(`(lines 166-172)`) and what an editor's gutter shows; the index stores 0-based
+offsets, so the conversion happens exactly once, in `show::slice`. A range that
+ends past the end clamps; one that *starts* past it is an error naming the real
+length, because printing nothing would read as "this document is empty".
+
+**stdout is the document and nothing else** — the version line, a rewritten path
+and a version-mismatch warning all go to stderr — so the output can be
+redirected, diffed or piped into a reader without a banner corrupting it.
+
+An unknown path answers with help rather than "not found", since a model that
+reads a bare "not found" falls back on its own memory of the guide: a bare
+basename or a trailing fragment that names exactly one document is accepted
+(`scroll-area.md` → `docs/scroll-area.md`), an ambiguous one lists the
+candidates, a directory lists what is under it, and a typo gets its near
+spellings plus the two commands that always work.
 
 ### `probe`
 

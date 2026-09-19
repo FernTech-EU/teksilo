@@ -523,6 +523,25 @@ fn print_results(
         );
         println!("    {}", snippet(chunk.text()));
     }
+
+    println!();
+    println!("{}", read_in_full_footer(&index.teksilo_version));
+}
+
+/// The line printed under a non-empty result list.
+///
+/// A hit cites `docs/scroll-area.md`, which is a path the reader does not have:
+/// `docs/` ships in no crate and every example crate is `publish = false`. Left
+/// bare, that invites the two wrong moves — opening it locally, where it is
+/// absent, or fetching it from GitHub, which serves `main` rather than the
+/// version this app pinned. So the footer names the one door that is both
+/// offline and version-matched. One line, once, after the hits rather than
+/// under each of them.
+fn read_in_full_footer(version: &str) -> String {
+    format!(
+        "Read any of these in full: cargo teksilo show <path>   \
+         (offline, teksilo {version} — not GitHub, which tracks main)"
+    )
 }
 
 /// One line of chunk text, collapsed and cut at a character boundary.
@@ -848,5 +867,17 @@ mod tests {
         let cut = snippet(&long);
         assert!(cut.ends_with('…'));
         assert_eq!(cut.chars().count(), SNIPPET_CHARS + 1);
+    }
+
+    #[test]
+    fn the_footer_names_the_offline_door_and_rules_out_the_wrong_one() {
+        // Both halves are the point: a path with no instruction gets fetched
+        // from `blob/main/`, which is a different teksilo than the one this
+        // corpus answers for.
+        let footer = read_in_full_footer("0.12.1");
+        assert!(footer.contains("cargo teksilo show <path>"), "{footer}");
+        assert!(footer.contains("0.12.1"), "{footer}");
+        assert!(footer.contains("GitHub"), "{footer}");
+        assert_eq!(footer.lines().count(), 1, "the footer must stay one line");
     }
 }

@@ -15,6 +15,7 @@ mod probe;
 mod resolve;
 mod search;
 mod setup;
+mod show;
 mod symbol;
 mod vectors;
 
@@ -83,6 +84,38 @@ enum Command {
         /// BM25 only — skip the vector path.
         #[arg(long)]
         lexical: bool,
+    },
+
+    /// Print a corpus document in full — offline, at the pinned version.
+    ///
+    /// The companion to `search`, which cites a path the app does not have:
+    /// `docs/` ships in no crate and every example is `publish = false`, so the
+    /// only other ways to read one are GitHub (which tracks `main`, not the
+    /// version this app pins) and guessing from the snippet. The text is
+    /// already in the corpus; this reassembles it.
+    ///
+    /// The document goes to stdout and nothing else does, so it can be
+    /// redirected or piped; the version line goes to stderr.
+    Show {
+        /// A corpus path, exactly as `search` prints it.
+        ///
+        /// `docs/scroll-area.md`, `examples/simple_button/src/main.rs`. A bare
+        /// filename or a trailing fragment is accepted when it names one
+        /// document; anything else is answered with the near spellings.
+        #[arg(value_name = "PATH", required_unless_present = "list")]
+        path: Option<String>,
+
+        /// Just these lines — `A-B`, or `A` for one.
+        ///
+        /// 1-based and inclusive, matching the `(lines A-B)` that `search`
+        /// prints under a hit and the numbers in an editor's gutter. So
+        /// `--lines 1-1` is the first line.
+        #[arg(long, value_name = "A-B")]
+        lines: Option<String>,
+
+        /// Every path in the corpus, one per line (counts on stderr).
+        #[arg(long, conflicts_with = "lines")]
+        list: bool,
     },
 
     /// Write the automation probe harness into scripts/teksilo_probe/.
@@ -172,6 +205,9 @@ fn main() -> ExitCode {
             }
             cmd_search(&dir, &argv)
         }
+        Command::Show { path, lines, list } => {
+            cmd_show(&dir, &show::ShowRequest { path, lines, list })
+        }
         Command::Probe { force } => cmd_probe(&dir, force, false),
         Command::Setup { force } => cmd_probe(&dir, force, true),
         Command::BuildVectors { corpus } => {
@@ -224,6 +260,23 @@ fn cmd_symbol(dir: &Path, args: &[String]) -> ExitCode {
 
 fn cmd_search(dir: &Path, args: &[String]) -> ExitCode {
     match search::run(dir, args) {
+        Ok(0) => ExitCode::SUCCESS,
+        Ok(_) => ExitCode::FAILURE,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `show` — a corpus document, in full, from the corpus itself.
+///
+/// The document is the only thing on stdout: an agent is expected to redirect
+/// it, and a version banner mixed into a Markdown guide or a Rust source file
+/// is a corrupted document rather than a helpful note. Everything else — the
+/// version line, a rewritten path, a version-mismatch warning — goes to stderr.
+fn cmd_show(dir: &Path, request: &show::ShowRequest) -> ExitCode {
+    match show::run(dir, request) {
         Ok(0) => ExitCode::SUCCESS,
         Ok(_) => ExitCode::FAILURE,
         Err(e) => {

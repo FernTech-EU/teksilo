@@ -29,8 +29,17 @@ by crate for clarity, not because crates version independently.
     extractor, otherwise it stages a throwaway repository shaped like this one
     around the registry sources. A name reached through the `teksilo` umbrella
     prelude resolves to its owning crate rather than reporting "not found".
-  - `cargo teksilo search "<question>"` — retrieval over the 65 hand-written
-    guides and 56 worked examples, which reach no consumer today.
+  - `cargo teksilo search "<question>"` — retrieval over the 69 hand-written
+    guides and 56 worked example crates, which reach no consumer today.
+  - `cargo teksilo show <path>` — the document behind a search hit, in full,
+    offline: `cargo teksilo show docs/scroll-area.md`, or just the lines the hit
+    cited (`--lines 166-172`, 1-based and inclusive, as `search` prints them).
+    Nothing is re-fetched — a chunk already carries its own text and the line
+    range it occupied, so the document is *reassembled* from the corpus, byte
+    for byte. It closes the last version-binding hole in the tool: the path a
+    hit cites exists in no consumer's project, and fetching it from `blob/main/`
+    or the published book serves `main` rather than the version the app pinned.
+    `search` now says so in a footer line, and `--list` prints every path.
   - `cargo teksilo probe` — writes the automation probe harness into
     `scripts/teksilo_probe/`, so an agent can drive the running app and assert
     on it. Generated files are checksummed: a local edit is reported rather
