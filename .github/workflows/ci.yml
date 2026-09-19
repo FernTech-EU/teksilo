@@ -558,41 +558,58 @@ jobs:
         if: matrix.name == 'debug'
         run: python3 tools/build_corpus.py --check-vectors
 
-      # crates.io enforces a 10 MB package limit, and teksilo-corpus carries
-      # committed generated data (the retrieval corpus) — the one thing in
-      # this workspace that could grow past that limit without anyone
-      # noticing at review time. `--no-verify` skips packaging's own
-      # build-to-verify step (redundant: `cargo check`/test-linux already
-      # build this crate) and just measures the tarball; `--allow-dirty`
-      # because a CI checkout can have gitignored build artifacts sitting
-      # next to tracked files.
+      # crates.io enforces a 10 MB limit on the uploaded `.crate`, and
+      # teksilo-corpus carries committed generated data (the retrieval corpus,
+      # plus the embeddings `cargo teksilo build-vectors` writes into it) —
+      # the one thing in this workspace that could grow past that limit
+      # without anyone noticing at review time.
       #
-      # NOTE: a `cargo teksilo build-vectors` step (added in a concurrent
-      # change) writes dense embeddings INTO
-      # crates/teksilo-corpus/corpus/index.json, growing it further. If that
-      # ever pushes this guard's number close to the ceiling, widen the
-      # margin rather than deleting the guard.
+      # This measures the `.crate` FILE, not cargo's human-readable summary.
+      # The previous version parsed `Packaged N files, X.YMiB` out of stdout,
+      # which was wrong twice over. That figure is the UNCOMPRESSED total
+      # (8.0 MiB here) while the limit applies to the gzipped artifact
+      # (3.0 MiB) — so it reported ~89% of budget against a real ~30%, and
+      # would eventually have failed the build over a package less than a
+      # third of the way to the ceiling. And under `bash -e`, which is what
+      # Actions runs, `size=$(... | grep ...)` exits the step the moment grep
+      # matches nothing, so the `if [ -z "$size" ]` meant to explain that was
+      # unreachable: the failure surfaced as exit 1 with no message at all.
+      #
+      # `--no-verify` skips packaging's own build-to-verify step (redundant:
+      # `cargo check`/test-linux already build this crate); `--allow-dirty`
+      # because a CI checkout can have gitignored build artifacts beside
+      # tracked files. Stale artifacts are removed first so the glob cannot
+      # pick up a previous version's file and measure the wrong release.
       - name: teksilo-corpus package size guard
         if: matrix.name == 'debug'
         run: |
-          out=$(cargo package -p teksilo-corpus --no-verify --allow-dirty 2>&1)
-          echo "$out"
-          size=$(echo "$out" | grep -oE 'Packaged [0-9]+ files, [0-9.]+[KMG]iB' | grep -oE '[0-9.]+[KMG]iB$')
-          if [ -z "$size" ]; then
-            echo "::error::could not find the 'Packaged N files, X.YMiB' line in cargo package output"
+          rm -f target/package/teksilo-corpus-*.crate
+          cargo package -p teksilo-corpus --no-verify --allow-dirty
+
+          shopt -s nullglob
+          crates=(target/package/teksilo-corpus-*.crate)
+          if [ "${#crates[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one teksilo-corpus .crate, found ${#crates[@]}: ${crates[*]}"
+            ls -la target/package/ || true
             exit 1
           fi
-          mib=$(echo "$size" | awk '
-            { s = $0
-              if (s ~ /KiB$/) { v = s; sub(/KiB$/, "", v); printf "%.4f", v / 1024 }
-              else if (s ~ /MiB$/) { v = s; sub(/MiB$/, "", v); printf "%.4f", v }
-              else if (s ~ /GiB$/) { v = s; sub(/GiB$/, "", v); printf "%.4f", v * 1024 }
-            }')
-          echo "teksilo-corpus package size: ${mib} MiB (guard: 9 MiB; crates.io limit is 10 MB)"
-          awk -v m="$mib" 'BEGIN { exit !(m > 9) }' && {
-            echo "::error::teksilo-corpus package size ${mib} MiB exceeds the 9 MiB guard"
+
+          crate="${crates[0]}"
+          # Arithmetic expansion strips the leading whitespace some `wc`
+          # implementations emit, so the value is clean for both the
+          # comparison and the message.
+          bytes=$(( $(wc -c < "$crate") ))
+          guard_mib=9
+          guard=$((guard_mib * 1024 * 1024))
+          mib=$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1048576 }')
+          echo "$crate is ${bytes} bytes (${mib} MiB); guard ${guard_mib} MiB, crates.io limit 10 MB"
+
+          # Integer comparison on the byte count: no float parsing, and no
+          # branch that `set -e` can skip past before it reports anything.
+          if [ "$bytes" -gt "$guard" ]; then
+            echo "::error::teksilo-corpus .crate is ${mib} MiB, over the ${guard_mib} MiB guard"
             exit 1
-          }
+          fi
           echo "package size within guard"
 
       # cargo-teksilo embeds two copies of files that also live elsewhere in
