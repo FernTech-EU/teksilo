@@ -213,6 +213,13 @@ fn the_controller_does_not_add_the_per_move_dispatch_cost() {
 /// 19 000 items nobody is dragging. A 3× ceiling is the same shape
 /// `pan_scaling_probe` uses and for the same reason: far enough above the floor
 /// to be quiet, far enough below a per-sample O(N) rebuild to be unambiguous.
+///
+/// The exact, timing-free half of this claim lives in
+/// `view::tests::hit_snapshot_cache::a_transform_sample_reuses_the_snapshots_and_the_commit_patches_once`,
+/// which asserts in *branches taken* that a sample reuses the snapshots and
+/// that the commit is the one write. Read that one first: this is a quotient of
+/// two wall-clock medians, and on a loaded runner the large arm is the noisier
+/// of the two, so a failure here is a question rather than a verdict.
 #[test]
 fn a_transform_sample_does_not_cost_the_unselected_scene() {
     let (_, small) = time_one_transform_sample(10, 990);

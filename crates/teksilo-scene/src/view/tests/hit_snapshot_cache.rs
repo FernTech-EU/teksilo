@@ -21,12 +21,16 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Point, Rect, SizeProposal, Transform2D};
 use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
 
+use crate::flags::ItemFlags;
 use crate::item::ItemId;
 use crate::items::RectItem;
 use crate::scene::Scene;
 use crate::scene_model::SceneModel;
+use crate::selection::{SceneSelection, SceneSelectionMode};
+use crate::transform_session::TransformConfig;
 use crate::view::SceneView;
 use crate::view::hit_snapshot::{HitSnapshotSync, PlanTally};
 
@@ -74,26 +78,50 @@ struct Rig {
     sync: Rc<std::cell::RefCell<HitSnapshotSync>>,
     pan_x: teksilo_core::signal::Signal<f32>,
     zoom: teksilo_core::signal::Signal<f32>,
+    view_id: WidgetId,
 }
 
 impl Rig {
     fn mount(scene: Scene) -> Self {
+        Self::mount_view(scene, |view| view)
+    }
+
+    /// The same rig with a selection and a transform controller installed —
+    /// the arrangement a live move of a selected item runs through.
+    fn mount_transforming(scene: Scene, selection: SceneSelection) -> Self {
+        Self::mount_view(scene, |view| {
+            view.selection_model(selection)
+                .transform_controller(TransformConfig::new())
+        })
+    }
+
+    fn mount_view(scene: Scene, configure: impl FnOnce(SceneView) -> SceneView) -> Self {
         let model = SceneModel::from_scene(scene);
-        let view = SceneView::with_model(model.clone());
+        let view = configure(SceneView::with_model(model.clone()));
         let sync = view.hit_sync.clone();
         let pan_x = view.pan_x_signal();
         let zoom = view.zoom_signal();
         let mut tree = WidgetTree::new();
-        tree.add(view);
+        let view_id = tree.add(view);
         let mut rig = Self {
             tree,
             model,
             sync,
             pan_x,
             zoom,
+            view_id,
         };
         rig.layout();
         rig
+    }
+
+    /// Apply whatever a finished gesture committed — the drain `build()` runs.
+    fn flush_transform(&mut self) -> bool {
+        self.tree
+            .widget_as_any_mut(self.view_id)
+            .and_then(|a| a.downcast_mut::<SceneView>())
+            .expect("downcast")
+            .flush_pending_transform()
     }
 
     fn layout(&mut self) {
@@ -179,6 +207,99 @@ fn a_zoom_reuses_the_snapshots_and_they_still_answer() {
     // (200,200)–(280,280).
     click(&mut rig.tree, Point::new(240.0, 240.0));
     assert_eq!(taps.get(), 1, "the zoomed item must still take its tap");
+}
+
+// -------------------------------------------------------- the transform case
+
+/// A live group move is the pan argument one step further in. A transform
+/// sample previews an affine and writes no item, so — like a pan — it must
+/// reuse the snapshots; and the row it is previewing must be patched exactly
+/// once when the gesture finally commits.
+///
+/// `tests/transform_scaling_probe.rs` makes the first half of that claim in
+/// nanoseconds. This is its exact half, which the pan and zoom cases above
+/// each already have: without it the wall-clock gate is the only thing
+/// standing between a per-sample O(N) rebuild and a release, and it is a
+/// quotient of two medians taken on a shared CI runner.
+#[test]
+fn a_transform_sample_reuses_the_snapshots_and_the_commit_patches_once() {
+    let taps = counter();
+    let mut scene = Scene::new();
+    let id = tile(&mut scene, Point::new(100.0, 100.0), &taps);
+    scene.set_flag(id, ItemFlags::IS_DRAGGABLE, true);
+    let selection = SceneSelection::new(SceneSelectionMode::Multi);
+    selection.replace([id]);
+    let mut rig = Rig::mount_transforming(scene, selection);
+
+    // Latch the move: press inside the tile, then travel past the slop.
+    rig.tree.pointer_move(Point::new(120.0, 120.0));
+    rig.tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(120.0, 120.0),
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
+    rig.tree
+        .dispatch_event(WidgetEvent::pointer_move(Point::new(150.0, 120.0)));
+    rig.layout();
+
+    let before = rig.tally();
+    for i in 1..=5 {
+        rig.tree
+            .dispatch_event(WidgetEvent::pointer_move(Point::new(
+                150.0 + i as f32 * 10.0,
+                120.0,
+            )));
+        rig.layout();
+    }
+    assert_eq!(
+        rig.tally_delta(before),
+        PlanTally {
+            reused: 5,
+            patched: 0,
+            rebuilt: 0
+        },
+        "five samples of a live move must reuse the snapshots five times and \
+         write nothing — the preview is an affine, not an edit",
+    );
+
+    // The commit is the one write, and it is a patch: a move changes no
+    // membership and no paint order.
+    let before = rig.tally();
+    rig.tree.dispatch_event(WidgetEvent::pointer_up(
+        Point::new(200.0, 120.0),
+        PointerButton::Primary,
+        Modifiers::default(),
+    ));
+    assert!(rig.flush_transform(), "the release must post a commit");
+    rig.layout();
+    assert_eq!(
+        rig.tally_delta(before),
+        PlanTally {
+            reused: 0,
+            patched: 1,
+            rebuilt: 0
+        },
+        "the release is the one write, and a move changes no membership and no \
+         paint order, so it must patch rather than rebuild",
+    );
+
+    // …and the row followed. The press travelled +80, so the tile's scene rect
+    // went from (100,100)-(140,140) to (180,100)-(220,140).
+    let r = rig.model.scene_rect(id).expect("resolves");
+    assert!(
+        (r.x - 180.0).abs() < 1e-3,
+        "precondition for the tap below: the commit must have moved the tile, \
+         got {r:?}"
+    );
+    let base = taps.get();
+    click(&mut rig.tree, Point::new(120.0, 120.0));
+    assert_eq!(
+        taps.get(),
+        base,
+        "the point the tile used to occupy must now miss",
+    );
+    click(&mut rig.tree, Point::new(200.0, 120.0));
+    assert_eq!(taps.get(), base + 1, "and the moved tile must take its tap");
 }
 
 // ------------------------------------------------------------ the patch case
