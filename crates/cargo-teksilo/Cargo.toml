@@ -24,6 +24,7 @@ default = ["semantic"]
 semantic = ["dep:fastembed"]
 
 [dependencies]
+clap = { workspace = true }
 teksilo-corpus = { workspace = true }
 include_dir = { workspace = true }
 serde = { workspace = true }

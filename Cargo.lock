@@ -1290,6 +1290,7 @@ dependencies = [
 name = "cargo-teksilo"
 version = "0.12.1"
 dependencies = [
+ "clap",
  "fastembed",
  "include_dir",
  "serde",
@@ -1305,6 +1306,7 @@ dependencies = [
 name = "cargo-teksilo-fmt"
 version = "0.12.1"
 dependencies = [
+ "clap",
  "teksilo-fmt",
  "tempfile",
  "thiserror 2.0.20",
@@ -1314,6 +1316,7 @@ dependencies = [
 name = "cargo-teksilo-telemetry-lint"
 version = "0.12.1"
 dependencies = [
+ "clap",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1542,6 +1545,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "473c7e07f409a8d772161724aa8db6a765a2532a70f9667eeb7b49d3d02fbdca"
 dependencies = [
  "clap_builder",
+ "clap_derive",
 ]
 
 [[package]]
@@ -1550,8 +1554,22 @@ version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b48fea5a88e9ae728a2dcbedbfc0e730f7d60da42e1cb049a83c9fb8b789889"
 dependencies = [
+ "anstream",
  "anstyle",
  "clap_lex",
+ "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d012d2b9d65aca7f18f4d9878a045bc17899bba951561ba5ec3c2ba1eed9a061"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -11590,6 +11608,7 @@ version = "0.12.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "clap",
  "png",
  "pollster 1.0.1",
  "rmcp",
@@ -11803,6 +11822,7 @@ dependencies = [
 name = "teksilo-preview-ui"
 version = "0.12.1"
 dependencies = [
+ "clap",
  "png",
  "pollster 1.0.1",
  "teksilo-app",
@@ -12059,6 +12079,7 @@ name = "teksilo-widgets-previewer"
 version = "0.12.1"
 dependencies = [
  "accesskit_consumer",
+ "clap",
  "teksilo-canvas",
  "teksilo-core",
  "teksilo-preview",

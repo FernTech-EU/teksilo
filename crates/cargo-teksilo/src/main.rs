@@ -9,9 +9,6 @@
 //! example crate is `publish = false`, and the probe harness lives in one
 //! app's repository. This binary closes that gap, version-matched to whatever
 //! teksilo the app actually resolved.
-//!
-//! Invoked as a cargo subcommand (`cargo teksilo …`), cargo passes its own
-//! name as `argv[1]`, so that is stripped before parsing.
 
 mod guard;
 mod probe;
@@ -24,45 +21,121 @@ mod vectors;
 use std::path::Path;
 use std::process::ExitCode;
 
-const USAGE: &str = "\
-cargo-teksilo — agent tooling for teksilo apps
+use clap::{Args, Parser, Subcommand};
 
-USAGE:
-    cargo teksilo <COMMAND> [ARGS...]
+/// Invoked as a cargo subcommand, cargo passes its own name as `argv[1]`.
+///
+/// Wrapping the real CLI in a one-variant enum is clap's own idiom for this:
+/// the `teksilo` word is consumed as a subcommand name, and `bin_name` makes
+/// generated help read `cargo teksilo …` rather than `cargo-teksilo …`.
+#[derive(Parser)]
+#[command(name = "cargo", bin_name = "cargo")]
+enum Cargo {
+    Teksilo(Cli),
+}
 
-COMMANDS:
-    symbol <Name>...    Exact public API of a type, for the teksilo version
-                        this app pins. Accepts the extractor's own flags:
-                        --list, --all, -f json, --crate <key>.
-    search <QUERY>      Search the version-matched guides and worked examples.
-                        --limit N, --kind guide|example, --lexical (BM25 only,
-                        skipping the vector path).
-    probe [--force]     Write the automation probe harness into
-                        scripts/teksilo_probe/ so an agent can drive and assert
-                        on the running app. --force overwrites local edits.
-    setup [--force]     probe, plus install the teksilo skill wherever the
-                        agents on this machine look for one.
-    version             Print this tool's version and the app's resolved teksilo.
-    help                Show this message.
+#[derive(Args)]
+#[command(
+    version,
+    about = "Agent tooling for teksilo apps",
+    long_about = "Agent tooling for apps that depend on the teksilo GUI framework.\n\n\
+                  Run from inside your app's crate or workspace — every answer is \
+                  resolved from its Cargo.lock, so it always matches the teksilo you \
+                  actually depend on.",
+    subcommand_required = true,
+    arg_required_else_help = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
 
-MAINTAINER COMMANDS (only meaningful inside a teksilo checkout):
+#[derive(Subcommand)]
+enum Command {
+    /// Exact public API of a type, for the teksilo version this app pins.
+    ///
+    /// Accepts the API extractor's own flags — `--list`, `--all`, `-f json`,
+    /// `--crate <key>` — which are forwarded verbatim.
+    Symbol {
+        /// Type or module names, plus any extractor flag.
+        ///
+        /// Collected raw rather than modelled: this command is a front end for
+        /// `extract_widget_api.py`, whose flag surface is that script's to
+        /// change. Re-declaring it here would mean a second place to update and
+        /// a new way for the two to disagree.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 
-    build-vectors       Encode the corpus and write the dense vectors back into
-                        crates/teksilo-corpus/corpus/index.json. Run it AFTER
-                        `python3 tools/build_corpus.py`, which regenerates that
-                        file from scratch and therefore drops them.
-                        --corpus <path to index.json> to point it elsewhere.
+    /// Search the version-matched guides and worked examples.
+    Search {
+        /// What to look for.
+        query: Vec<String>,
 
-Run from inside your app's crate or workspace — the answer is resolved from
-its Cargo.lock, so it always matches the teksilo you actually depend on.
-";
+        /// Results to show.
+        #[arg(long, default_value_t = 8, value_name = "N")]
+        limit: usize,
+
+        /// Restrict to one half of the corpus.
+        #[arg(long, value_name = "KIND")]
+        kind: Option<SearchKind>,
+
+        /// BM25 only — skip the vector path.
+        #[arg(long)]
+        lexical: bool,
+    },
+
+    /// Write the automation probe harness into scripts/teksilo_probe/.
+    ///
+    /// So an agent can drive the running app through the automation bridge and
+    /// assert on it. Your own probes belong in scripts/, one level up; this
+    /// never reads or writes them.
+    Probe {
+        /// Overwrite generated files you have edited.
+        ///
+        /// Without it a local edit is reported and kept: the harness records a
+        /// checksum of everything it wrote, so it can tell its output from yours.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Probe, plus install the teksilo skill where agents look for one.
+    ///
+    /// Only directories that already exist are used: installing a skill where
+    /// nothing reads it is indistinguishable from not installing it, except
+    /// that it reports success.
+    Setup {
+        /// Passed through to `probe`.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Print this tool's version and the app's resolved teksilo.
+    ///
+    /// Use it when a command refuses: it shows the versions being compared.
+    Version,
+
+    /// Encode the corpus and write its vectors back (maintainer only).
+    ///
+    /// Run AFTER `python3 tools/build_corpus.py`, which regenerates
+    /// `index.json` from scratch and therefore drops them. Requires the
+    /// `semantic` feature.
+    #[command(hide = true)]
+    BuildVectors {
+        /// The index.json to vectorise.
+        #[arg(long, value_name = "PATH")]
+        corpus: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum SearchKind {
+    Guide,
+    Example,
+}
 
 fn main() -> ExitCode {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
-    // `cargo teksilo foo` execs us as `cargo-teksilo teksilo foo`.
-    if args.first().map(String::as_str) == Some("teksilo") {
-        args.remove(0);
-    }
+    let Cargo::Teksilo(cli) = Cargo::parse();
 
     let dir = match std::env::current_dir() {
         Ok(d) => d,
@@ -72,37 +145,42 @@ fn main() -> ExitCode {
         }
     };
 
-    match args.first().map(String::as_str) {
-        None | Some("help") | Some("-h") | Some("--help") => {
-            print!("{USAGE}");
-            ExitCode::SUCCESS
+    match cli.command {
+        Command::Version => cmd_version(&dir),
+        Command::Symbol { args } => cmd_symbol(&dir, &args),
+        Command::Search {
+            query,
+            limit,
+            kind,
+            lexical,
+        } => {
+            // `search` still takes a flat argv because its parser is a pure,
+            // unit-tested function over one; rebuilding that vector keeps the
+            // tests meaningful rather than testing clap.
+            let mut argv: Vec<String> = query;
+            argv.push("--limit".into());
+            argv.push(limit.to_string());
+            if let Some(k) = kind {
+                argv.push("--kind".into());
+                argv.push(match k {
+                    SearchKind::Guide => "guide".into(),
+                    SearchKind::Example => "example".into(),
+                });
+            }
+            if lexical {
+                argv.push("--lexical".into());
+            }
+            cmd_search(&dir, &argv)
         }
-        Some("-V") | Some("--version") => {
-            println!("cargo-teksilo {}", guard::TOOL_VERSION);
-            ExitCode::SUCCESS
-        }
-        Some("version") if wants_help(&args) => {
-            print!("{VERSION_USAGE}");
-            ExitCode::SUCCESS
-        }
-        Some("version") => cmd_version(&dir),
-        Some("symbol") => cmd_symbol(&dir, &args[1..]),
-        Some("search") => cmd_search(&dir, &args[1..]),
-        Some("build-vectors") => cmd_build_vectors(&dir, &args[1..]),
-        Some("probe") if wants_help(&args) => {
-            print!("{PROBE_USAGE}");
-            ExitCode::SUCCESS
-        }
-        Some("setup") if wants_help(&args) => {
-            print!("{SETUP_USAGE}");
-            ExitCode::SUCCESS
-        }
-        Some("probe") => cmd_probe(&dir, has_flag(&args, "--force"), false),
-        Some("setup") => cmd_probe(&dir, has_flag(&args, "--force"), true),
-        Some(other) => {
-            eprintln!("error: unknown command `{other}`\n");
-            print!("{USAGE}");
-            ExitCode::FAILURE
+        Command::Probe { force } => cmd_probe(&dir, force, false),
+        Command::Setup { force } => cmd_probe(&dir, force, true),
+        Command::BuildVectors { corpus } => {
+            let mut argv = Vec::new();
+            if let Some(path) = corpus {
+                argv.push("--corpus".into());
+                argv.push(path);
+            }
+            cmd_build_vectors(&dir, &argv)
         }
     }
 }
@@ -171,72 +249,6 @@ fn cmd_build_vectors(dir: &Path, args: &[String]) -> ExitCode {
         }
     }
 }
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|a| a == flag)
-}
-
-/// Whether this invocation is asking for the command's usage.
-///
-/// `symbol` and `search` answer `--help` themselves (one forwards it to the
-/// extractor, the other parses it), so only the three commands that take no
-/// query need this. Without it they read `--help` as an unrecognised argument
-/// and do the work anyway — which for `setup` means writing files at someone
-/// who was asking what it would do.
-fn wants_help(args: &[String]) -> bool {
-    args.iter().skip(1).any(|a| a == "--help" || a == "-h")
-}
-
-const PROBE_USAGE: &str = "\
-cargo teksilo probe — write the automation probe harness into this project
-
-USAGE:
-    cargo teksilo probe [--force]
-
-Writes a stdlib-only Python package to scripts/teksilo_probe/ so an agent can
-drive the running app through the automation bridge and assert on it, plus three
-worked examples to copy from. Your own probes belong in scripts/, one level up —
-this command never reads or writes them.
-
-OPTIONS:
-    --force    Overwrite generated files you have edited. Without it, a local
-               edit is reported and kept: the harness records a checksum of
-               everything it wrote, so it can tell its own output from yours.
-    -h, --help Show this message.
-
-The harness is matched to the teksilo this app resolved, and the version it was
-written for is recorded in Cargo.toml under [package.metadata.teksilo]. A later
-run warns when that has drifted.
-";
-
-const SETUP_USAGE: &str = "\
-cargo teksilo setup — make an agent effective in this project
-
-USAGE:
-    cargo teksilo setup [--force]
-
-Runs `probe`, then installs the teksilo skill wherever the agents on this
-machine already look for one. Only directories that already exist are used:
-installing a skill where nothing reads it is indistinguishable from not
-installing it, except that it reports success.
-
-OPTIONS:
-    --force    Passed through to `probe` — overwrite generated files you edited.
-    -h, --help Show this message.
-";
-
-const VERSION_USAGE: &str = "\
-cargo teksilo version — what this tool is, and what this app resolved
-
-USAGE:
-    cargo teksilo version
-
-Prints this tool's version, every teksilo crate in the app's resolved dependency
-graph with the path it resolved to, and whether the two match. Use it when a
-command refuses: it shows the versions the refusal is comparing.
-
-`cargo teksilo --version` prints just this tool's version.
-";
 
 /// `probe`, and with `also_skill` the rest of `setup`.
 ///

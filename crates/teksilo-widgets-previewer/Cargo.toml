@@ -25,6 +25,9 @@ categories = ["gui", "development-tools"]
 teksilo-widgets = { workspace = true, features = ["preview"] }
 teksilo-preview-ui = { workspace = true }
 teksilo-preview = { workspace = true }
+# The CLI: browse-mode flags come flattened from teksilo-preview-ui, this
+# binary adds --list and the --export-docs batch around them.
+clap = { workspace = true }
 
 [dev-dependencies]
 # Tests exercise a few signal-chain corner cases directly,

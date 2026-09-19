@@ -138,6 +138,10 @@ text-typeset = "1.12.0"
 portable-pty = "0.9"
 alacritty_terminal = "0.26"
 
+# Derive-based CLI parsing. Every binary in this workspace uses it, so the
+# argument surface is declared once per command rather than hand-matched — and
+# `--help` is generated rather than a string constant that drifts from the code.
+clap = { version = "4", features = ["derive"] }
 include_dir = "0.7"
 # Format-preserving TOML editing. `toml` would round-trip a consumer's
 # Cargo.toml through a serializer and hand it back reformatted; recording one

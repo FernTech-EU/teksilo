@@ -99,9 +99,18 @@ teksilo-automation-mcp --version             # the binary's version
 
 `--token` may be omitted when `$TEKSILO_AUTOMATION_TOKEN` holds it — which is
 the form the startup banner prints it in, so the line above can be exported
-verbatim. A value-taking flag whose value is missing is an error, not a shrug:
-`--connect` with nothing after it used to fall through and start the *demo*
-server while the caller believed it was driving their app.
+verbatim, and which `--help` names beside the flag. A value-taking flag whose
+value is missing is an error, not a shrug: `--connect` with nothing after it
+used to fall through and start the *demo* server while the caller believed it
+was driving their app.
+
+The five modes above are **mutually exclusive**, declared as one clap argument
+group rather than resolved by precedence — `--attach --list` is a usage error
+naming both flags, not a silent win for whichever branch the dispatch happened
+to test first. A usage error (an unknown flag, a missing value, two modes, a
+`--attach-pid` that is not a number) exits **2** and prints to stderr; a mode
+that parses and then fails — no bridge behind a pid, `--connect` with no token
+anywhere — exits **1**. `--help` and `--version` print to stdout and exit 0.
 
 `--attach` reads the descriptor, so the same command works on all three
 platforms and there is nothing to copy out of stderr. It and `--list` probe

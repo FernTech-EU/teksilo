@@ -23,7 +23,7 @@ mod toolbar;
 #[cfg(test)]
 mod touch_tests;
 
-pub use cli::PreviewerOptions;
+pub use cli::{PreviewerArgs, PreviewerOptions};
 pub use doc_export::{
     DocExportOptions, DocExportReport, SubjectOutcome, export_doc_images, print_report,
 };

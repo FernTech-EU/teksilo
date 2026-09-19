@@ -25,51 +25,117 @@ mod server;
 mod tests;
 
 use anyhow::{Context, Result, bail};
+use clap::{ArgGroup, Parser};
 use rmcp::ServiceExt;
 use rmcp::transport::stdio;
 use teksilo_automation::wire::{Endpoint, EndpointFile};
 use teksilo_platform::automation_transport;
 
+/// The flag surface, declared rather than resolved by precedence.
+///
+/// The five modes go in one [`ArgGroup`] so that asking for two at once is a
+/// message instead of a silent win for whichever branch the dispatch happened
+/// to test first — the same reasoning that made a value-less `--connect` an
+/// error: a caller who believes they are driving their app must not end up
+/// talking to the built-in demo.
+#[derive(Parser, Debug)]
+#[command(
+    version,
+    about = "MCP server for Teksilo app automation",
+    long_about = "Model Context Protocol server for Teksilo app automation, spoken over stdio.\n\n\
+                  A live app publishes a bridge when a debug build calls \
+                  `install_automation_bridge_in_debug()`. With no mode flag at all the \
+                  server owns a built-in demo app in-process instead, which needs no \
+                  display and no GPU."
+)]
+#[command(group(
+    ArgGroup::new("mode")
+        .args(["headless", "attach", "attach_pid", "connect", "list"])
+        .multiple(false)
+))]
+struct Cli {
+    /// Own a demo app in-process (no display, no GPU needed). The default.
+    #[arg(long)]
+    headless: bool,
+
+    /// Drive the newest live app that published a bridge.
+    #[arg(long)]
+    attach: bool,
+
+    /// …or the bridge published by one specific process.
+    #[arg(long, value_name = "PID")]
+    attach_pid: Option<u32>,
+
+    /// …or an endpoint named by hand, when discovery is not an option.
+    ///
+    /// Requires --token, or $TEKSILO_AUTOMATION_TOKEN.
+    #[arg(long, value_name = "ENDPOINT")]
+    connect: Option<String>,
+
+    /// Show the live bridges and exit.
+    #[arg(long)]
+    list: bool,
+
+    /// The shared secret a hand-named endpoint is opened with.
+    ///
+    /// A bridge's startup banner prints it as a `TEKSILO_AUTOMATION_TOKEN=…`
+    /// line, so exporting that line verbatim says the same thing as passing
+    /// this flag.
+    //
+    // Deliberately NOT `requires = "connect"`: the variable is meant to be
+    // left exported, and clap counts an env-sourced value as present — so a
+    // `requires` would turn every ordinary `--headless` run in that shell into
+    // an error.
+    #[arg(
+        long,
+        value_name = "UUID",
+        env = "TEKSILO_AUTOMATION_TOKEN",
+        hide_env_values = true
+    )]
+    token: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cli = Cli::parse();
 
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        print_usage();
-        return Ok(());
-    }
-    if args.iter().any(|a| a == "--list") {
+    // The group's guarantee, stated once. It is why the dispatch below can be
+    // a chain of `if`s whose order carries no meaning, and why `--headless`
+    // needs no branch of its own: it and a bare invocation are one request.
+    debug_assert!(
+        [
+            cli.headless,
+            cli.attach,
+            cli.attach_pid.is_some(),
+            cli.connect.is_some(),
+            cli.list,
+        ]
+        .iter()
+        .filter(|asked| **asked)
+        .count()
+            <= 1,
+        "the `mode` group should have rejected two modes at once"
+    );
+
+    if cli.list {
         return list_bridges();
     }
-    if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("teksilo-automation-mcp {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-    // A value-taking flag with its value missing must be an error, not a
-    // shrug: `flag_value` returns `None` either way, and falling through to
-    // the default would quietly start the *demo* server while the caller
-    // believes it is driving their app.
-    for flag in ["--connect", "--attach-pid", "--token"] {
-        if args.iter().any(|a| a == flag) && flag_value(&args, flag).is_none() {
-            bail!("{flag} needs a value (see --help)");
-        }
-    }
-    if let Some(addr) = flag_value(&args, "--connect") {
-        let token = flag_value(&args, "--token")
-            .or_else(|| std::env::var("TEKSILO_AUTOMATION_TOKEN").ok())
-            .ok_or_else(|| {
-                anyhow::anyhow!("--connect requires --token <uuid> (or $TEKSILO_AUTOMATION_TOKEN)")
-            })?;
+    if let Some(addr) = cli.connect {
+        // `token` already carries the environment fallback (clap reads the
+        // variable when the flag is absent), so the absence reported here is
+        // the absence of both.
+        let token = cli.token.ok_or_else(|| {
+            anyhow::anyhow!("--connect requires --token <uuid> (or $TEKSILO_AUTOMATION_TOKEN)")
+        })?;
         return run_attached(Endpoint::from_address(&addr), token).await;
     }
-    if let Some(pid) = flag_value(&args, "--attach-pid") {
-        let pid: u32 = pid.parse().context("--attach-pid expects a process id")?;
+    if let Some(pid) = cli.attach_pid {
         let found = EndpointFile::read(&EndpointFile::path_for_pid(pid)).with_context(|| {
             format!("no automation bridge published by process {pid} (is it a debug build with `install_automation_bridge_in_debug()`?)")
         })?;
         return run_attached(found.endpoint, found.token).await;
     }
-    if args.iter().any(|a| a == "--attach") {
+    if cli.attach {
         let mut live = live_bridges();
         if live.is_empty() {
             bail!(
@@ -169,25 +235,4 @@ async fn run_attached(endpoint: Endpoint, token: String) -> Result<()> {
         .inspect_err(|e| eprintln!("teksilo-automation-mcp serve error: {e:?}"))?;
     service.waiting().await?;
     Ok(())
-}
-
-/// Return the value following `flag` in `args`, if present.
-fn flag_value(args: &[String], flag: &str) -> Option<String> {
-    args.iter()
-        .position(|a| a == flag)
-        .and_then(|i| args.get(i + 1).cloned())
-}
-
-fn print_usage() {
-    eprintln!(
-        "teksilo-automation-mcp — MCP server for Teksilo app automation\n\n\
-         USAGE:\n\
-         \x20 teksilo-automation-mcp [--headless]      own a demo app in-process (no display, no GPU needed)\n\
-         \x20 teksilo-automation-mcp --attach          drive the newest live app that published a bridge\n\
-         \x20 teksilo-automation-mcp --attach-pid <pid>   …or one specific process\n\
-         \x20 teksilo-automation-mcp --connect <endpoint> --token <uuid>   …or an endpoint named by hand\n\
-         \x20 teksilo-automation-mcp --list            show the live bridges and exit\n\n\
-         A live app publishes a bridge when a debug build calls\n\
-         `install_automation_bridge_in_debug()`. Speaks the Model Context Protocol over stdio."
-    );
 }
