@@ -138,10 +138,25 @@ text-typeset = "1.12.0"
 portable-pty = "0.9"
 alacritty_terminal = "0.26"
 
+include_dir = "0.7"
+# Format-preserving TOML editing. `toml` would round-trip a consumer's
+# Cargo.toml through a serializer and hand it back reformatted; recording one
+# provenance key is not a licence to restyle someone else's manifest.
+toml_edit = "0.23"
+# fastembed pulls ONNX Runtime (an rc-stage native dep). Taken WITHOUT default
+# features so Linux gains no OpenSSL requirement: the crate's defaults are the
+# `native-tls` variants. Only `cargo-teksilo`'s optional `semantic` feature uses
+# it, and `--no-default-features` there yields a fully working pure-Rust tool.
+fastembed = { version = "7.0.1", default-features = false, features = [
+    "ort-download-binaries-rustls-tls",
+    "hf-hub-rustls-tls",
+] }
+
 # Internal crates
 teksilo-tokens = { path = "crates/teksilo-tokens", version = "0.12.1" }
 teksilo-canvas = { path = "crates/teksilo-canvas", version = "0.12.1" }
 teksilo-core = { path = "crates/teksilo-core", version = "0.12.1" }
+teksilo-corpus = { path = "crates/teksilo-corpus", version = "0.12.1" }
 teksilo-data = { path = "crates/teksilo-data", version = "0.12.1" }
 teksilo-settings = { path = "crates/teksilo-settings", version = "0.12.1" }
 teksilo-telemetry = { path = "crates/teksilo-telemetry", version = "0.12.1" }

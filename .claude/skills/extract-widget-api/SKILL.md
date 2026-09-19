@@ -1,6 +1,6 @@
 ---
 name: extract-widget-api
-description: Extract the public API and inline documentation of a type from teksilo-widgets, teksilo-data, teksilo-settings or teksilo-scene. Use when the user wants to see a type's public surface (struct, builder methods, enums, module doc) without opening the file, or asks things like "show me Button's API", "what are HStack's builder methods", "what's on ListModel", "list teksilo-widgets", or "/extract-widget-api <Name>". Also use when packing widget docs into context for a downstream task, or when regenerating the mdBook catalog pages.
+description: Extract the public API and inline documentation of a type from any teksilo crate with a public API (30 of them, including teksilo-core, teksilo-tokens, teksilo-canvas and teksilo-charts; four are also mdBook-cataloged). Use when the user wants to see a type's public surface (struct, builder methods, enums, module doc) without opening the file, or asks things like "show me Button's API", "what are HStack's builder methods", "what's on ListModel", "list teksilo-widgets", or "/extract-widget-api <Name>". Also use when packing widget docs into context for a downstream task, or when regenerating the mdBook catalog pages.
 user_invocable: true
 ---
 
@@ -44,9 +44,18 @@ python3 tools/extract_widget_api.py Button -o /tmp/button.md      # Write to fil
 python3 tools/extract_widget_api.py Button -f text                # Plain text, no markdown
 ```
 
-## It covers four crates, not just widgets
+## It covers every crate with a public API, not just widgets
 
-`--crate` selects the source tree. **The default is `widgets`, so a lookup for a
+`--crate` selects the source tree. **30 crates are queryable**; the four in the
+table below are additionally *cataloged* — only they generate mdBook pages under
+`docs/`, which is what `--catalog-all` and `--md-dir` act on. `--md-dir` on a
+queryable-but-not-cataloged crate refuses rather than writing pages.
+
+A name reached through the `teksilo` umbrella prelude resolves to its owning
+crate automatically: `Theme` looked up with the default `--crate widgets` prints
+a note and answers from `teksilo-core`, rather than reporting "not found".
+
+**The default is `widgets`, so a lookup for a
 non-widget type fails with "did you mean" noise until you pass the right crate** —
 check the table before concluding a type doesn't exist.
 
@@ -60,6 +69,9 @@ check the table before concluding a type doesn't exist.
 ```bash
 python3 tools/extract_widget_api.py --crate data ListModel        # a data model
 python3 tools/extract_widget_api.py --crate data --list           # everything in teksilo-data
+python3 tools/extract_widget_api.py --crate core Theme            # a queryable-only crate
+python3 tools/extract_widget_api.py --crate tokens Color          # …and another
+python3 tools/extract_widget_api.py --crate core --list           # what teksilo-core exposes
 python3 tools/extract_widget_api.py --crate scene SceneModel      # a scene type
 python3 tools/extract_widget_api.py --crate settings MruList      # a settings service
 ```

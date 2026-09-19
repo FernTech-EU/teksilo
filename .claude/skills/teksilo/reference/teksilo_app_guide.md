@@ -501,7 +501,8 @@ and `Duration::ZERO` debounce.
 A GUI-agnostic peer layer (the `teksilo-data` crate). Concrete generic typing throughout (no
 `QVariant`, no role integers); all handles are `Rc<RefCell<…>>` so `.clone()` = share-by-handle.
 Mutations notify observers **after** dropping the borrow (no reactive deadlock). Full reference:
-`docs/data-models.md` + `docs/data-source.md` in the framework repo.
+the framework's `data-models` and `data-source` guides — `cargo teksilo search "list data source"`
+serves them for the version this app pins.
 
 **Decide the ownership shape first** — this is the main design choice, not just "which model":
 
@@ -593,8 +594,9 @@ event in flight to carry then. `SegmentedControl::on_change` has the same contra
 > `teksilo-charts` / `teksilo-scene` as direct dependencies (version them alongside `teksilo`)
 > and import from those crates — they are *not* reachable via a `teksilo::` path.
 
-To inspect a widget's exact public surface, ask Claude to read the widget source in the
-Teksilo repo, or use the framework's `tools/extract_widget_api.py` if you have the checkout.
+To inspect a widget's exact public surface, run `cargo teksilo symbol <Name>` from inside
+your app — it reads the source of the version this app resolved, whether that is a
+crates.io, git or path dependency, and needs no framework checkout.
 
 ## Toasts & notifications
 
@@ -807,11 +809,13 @@ teksu!(ctx =>
 - No method chains in property-arg position: write `item: MenuItem::new(lit!("x")) { on_activate_fn: cb }`
   (body form), not `item: MenuItem::new(lit!("x")).on_activate(cb)`.
 
-The best way to learn `teksu!` is to read real trees: the framework ships large, runnable
-`teksu!` examples (`cargo run -p widget-catalog` is the densest; `simple_button` /
-`text-and-layout` are the gentle ones). The `/teksu-macro` skill (in the framework repo)
-handles read/write/translate/debug requests; the full grammar and desugaring cheat sheet
-live in `docs/teksu-macro-reference.md` and `docs/teksu-language-spec-v3.md` there.
+The best way to learn `teksu!` is to read real trees. `cargo teksilo search "teksu widget
+tree"` pulls the framework's own runnable `teksu!` examples (the widget catalog is the
+densest; `simple_button` / `text_and_layout` are the gentle ones) out of the version-matched
+corpus. **`reference/teksu.md` in this skill is the working reference** — routing rules,
+slot arity, diagnostics and limitations; read it before writing a non-trivial block. The
+full grammar and desugaring cheat sheet are the framework's `teksu-macro-reference` and
+`teksu-language-spec-v3` guides, also reachable through `cargo teksilo search`.
 
 ## EventContext capabilities
 
@@ -897,7 +901,9 @@ and invalidates every node id**.
 
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides through the snapshot → act → settle →
-assert loop. Full reference: `docs/automation-mcp.md` in the framework repo.
+assert loop. **`reference/automation.md` in this skill** carries the tool catalog by job, the
+error codes worth branching on, and the probe-harness workflow (`cargo teksilo probe`); the
+framework's `automation-mcp` guide is reachable with `cargo teksilo search "automation mcp"`.
 
 ## Breaking changes 0.9 → 0.12
 
@@ -933,5 +939,8 @@ only so you recognise the fix instead of hunting for it.
 ---
 
 *This guide is abridged from Teksilo's internal `CLAUDE.md` and targets app developers
-consuming `teksilo` 0.12. For framework internals, source layout, and implementation
-status, see the Teksilo repository's own docs (`docs/SUMMARY.md`) and `CLAUDE.md`.*
+consuming `teksilo`. It was verified against **teksilo 0.12.1** and is a map, not the
+territory: where it disagrees with `cargo check` or with `cargo teksilo symbol`, they win.
+For framework internals, source layout and implementation status, search the version-matched
+guides with `cargo teksilo search`, or read the Teksilo repository's own `docs/` and
+`CLAUDE.md`.*

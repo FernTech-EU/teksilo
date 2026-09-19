@@ -28,6 +28,12 @@ extend-exclude = [
   "examples/rich_text_editor/src/main.rs",
   # Language spec documents an intentional `Buton` typo to illustrate an error.
   "docs/teksu-language-spec-v3.md",
+  # Generated corpus: one index.json holding every chunk's text verbatim, plus
+  # an interned `terms` array that is every token in the corpus. Its sources are
+  # already spell-checked where they actually live, so scanning it reports the
+  # same typo twice and flags real tokens (`untill`, `wich`) that exist only as
+  # index entries — there is nothing to fix in a generated file.
+  "crates/teksilo-corpus/corpus/",
 ]
 
 [default.extend-words]
@@ -66,6 +72,7 @@ nd = "nd"          # tool script variable
 ba = "ba"          # appears inside commit hash substrings in docs
 caf = "caf"        # appears inside `percent_decode("caf%C3%A9")` test input
 optin = "optin"    # `opt-in` written as one word in a test fn name
+abd = "abd"        # test fixture: the one-character variation of "abc"
 
 # Win32 API constants
 TME = "TME"

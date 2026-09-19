@@ -109,6 +109,13 @@ SKIP_BASENAMES: set[str] = {
     "COPYING",
     "NOTICE",
     "CHANGELOG.md",
+    # A SKILL.md opens with YAML frontmatter that must be the very first line,
+    # so a header inserted above it breaks parsing — the same reason `.claude/`
+    # is skipped below. This basename entry covers the copies that live outside
+    # `.claude/`: `cargo-teksilo` embeds the skill so it can install it into a
+    # consumer's project, and CI asserts that copy stays byte-identical to the
+    # original, which a header on only one side would break.
+    "SKILL.md",
 }
 
 # Path prefix substrings (relative to repo root) that mark vendored or

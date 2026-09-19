@@ -13,6 +13,70 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+- **`cargo teksilo` — agent tooling for apps that depend on Teksilo.** An agent
+  working inside this repository has the guides, the worked examples, the skill
+  and the automation harness. An agent working in someone's Teksilo *app* had
+  none of them: `docs/` ships in no crate, every example crate is
+  `publish = false`, and the only probe harness lived in one app's repository.
+  `cargo install cargo-teksilo` closes that gap, and every answer is matched to
+  the Teksilo the app actually resolved.
+
+  - `cargo teksilo symbol <Name>` — the exact public API of a type, read from
+    the resolved sources. Works with a crates.io, git or path dependency and
+    needs no checkout: where one is reachable it runs that checkout's own
+    extractor, otherwise it stages a throwaway repository shaped like this one
+    around the registry sources. A name reached through the `teksilo` umbrella
+    prelude resolves to its owning crate rather than reporting "not found".
+  - `cargo teksilo search "<question>"` — retrieval over the 65 hand-written
+    guides and 56 worked examples, which reach no consumer today.
+  - `cargo teksilo probe` — writes the automation probe harness into
+    `scripts/teksilo_probe/`, so an agent can drive the running app and assert
+    on it. Generated files are checksummed: a local edit is reported rather
+    than silently overwritten, and your own probes live outside the generated
+    tree and are never touched.
+  - `cargo teksilo setup` — the above, plus installing the Teksilo skill
+    wherever the agents on this machine already look for one.
+
+  Version binding is the design constraint, not a detail. The tool reads the
+  app's `Cargo.lock`, and a minor or major mismatch **refuses** with the exact
+  install command instead of answering — serving 0.12 answers to an app on 0.9
+  is worse than serving nothing, because `SplitView` was deleted outright in
+  favour of `Splitter` between them and the wrong answer reads exactly like the
+  right one. A patch-level difference warns and proceeds.
+
+- **`teksilo-corpus`** — the guides and the worked examples, chunked into a
+  retrieval index and published per release so `cargo` resolves the corpus
+  matching an app's Teksilo. It is one file: a chunk carries its own text, and
+  its `path` names the original in this repository (`docs/scroll-area.md`,
+  `examples/simple_button/src/main.rs`), so a search result cites something that
+  opens. Data only; it carries no ML dependency.
+
+- **The automation probe harness**, written into a consumer's project by
+  `cargo teksilo probe`. Python, stdlib only, embedded in the binary rather than
+  published to an index — so it is version-matched by construction, lands in the
+  repository where an agent reading that repository can see it, and needs no pip
+  or virtualenv. It supplies the JSON-RPC client every probe previously
+  hand-rolled, a tool surface generated from `TOOL_CATALOG` (so it cannot drift
+  from the bridge), and the virtualized-view navigation rules that are otherwise
+  rediscovered one misdiagnosis at a time: an off-screen row has no AT node, a
+  row scrolled back into view is a new widget with a new id, and clicking a row's
+  reported bounds below the viewport hits empty chrome. Three worked examples
+  ship with it and run against this repository's own example apps in CI.
+
+- **Two new guides**: [Agent tooling](docs/agent-tooling.md) documents the above,
+  and [Scroll areas](docs/scroll-area.md) is the reference the docs did not have
+  — scrolling was covered only by an architecture chapter and the kinetic-scroll
+  physics, so an ordinary "how do I make this scrollable?" had nothing to land
+  on. That gap was found by running a retrieval test over the corpus, not by
+  reading the table of contents.
+
+- **`tools/extract_widget_api.py` now covers every crate with a public API**
+  (30, up from 4). mdBook catalog generation stays scoped to the four cataloged
+  crates, so `docs/` is unchanged; the rest are queryable through `--crate`,
+  `--list`, `--all` and by name.
+
 ### Changed
 
 - **Behaviour change.** On Windows, Direct3D 12 is tried before Vulkan and

@@ -67,7 +67,54 @@ python3 tools/extract_widget_api.py --all                  # Every widget
 python3 tools/extract_widget_api.py Button -f json -o out.json   # JSON for tooling
 python3 tools/extract_widget_api.py --all --md-dir docs/widgets  # Regenerate the mdBook Widget Catalog
 python3 tools/bench_examples.py                          # Run benchmarks with report generation
+python3 tools/build_corpus.py                            # Regenerate the teksilo-corpus data (committed)
+python3 tools/build_corpus.py --check                    # CI staleness guard for it
 ```
+
+### `cargo teksilo` — the tooling consumers get
+
+`crates/cargo-teksilo` is what an app developer installs (`cargo install
+cargo-teksilo`). It exists because four things never leave this repository:
+`docs/` ships in no crate, every `examples/*` crate is `publish = false`, the
+skill lives in `.claude/`, and the automation probe harness lived only in one
+app's repo. Everything it answers is matched to the teksilo the *consumer's*
+app resolved, read from their `Cargo.lock`.
+
+```bash
+cargo teksilo symbol Button          # exact public API, for the version they pin
+cargo teksilo search "<question>"    # hybrid BM25 + vector over guides + examples
+cargo teksilo probe                  # write the probe harness into scripts/teksilo_probe/
+cargo teksilo setup                  # probe + install the skill where agents look
+cargo teksilo build-vectors          # MAINTAINER ONLY: re-encode the corpus (see below)
+```
+
+Three things to know when changing it:
+
+- **The corpus is generated and committed, and it is one file.**
+  `tools/build_corpus.py` writes `crates/teksilo-corpus/corpus/index.json` —
+  nothing else lives in that directory; `cargo teksilo build-vectors` then fills
+  in the embeddings. Run them **in that order** — the generator carries existing
+  vectors forward by chunk-text hash, so re-encoding is incremental, but only
+  `build-vectors` can create them in the first place. Each chunk stores its own
+  `text` and its `path` names the **original** file (`docs/scroll-area.md`,
+  `examples/simple_button/src/main.rs`), so a search result cites a path that
+  exists. Do not reintroduce copies of `docs/` or `examples/` under `corpus/`:
+  that duplication is what this layout removed, and an edit landing in the copy
+  was discarded silently by the next regeneration. The chunk key order in
+  `build_corpus.py` and the field order of `Chunk` in
+  `crates/teksilo-corpus/src/lib.rs` must stay identical — `build-vectors`
+  refuses to run (`NotRoundTrippable`) when serde does not reproduce the
+  generator's bytes.
+- **Three payloads are embedded and CI guards their identity**:
+  `embedded/extract_widget_api.py` against `tools/`, `embedded/skill/` against
+  `.claude/skills/teksilo/`, and `embedded/probe/` (whose `tools.py` is
+  generated from `TOOL_CATALOG` and conformance-tested). `build.rs` declares
+  every embedded file so `include_dir!` actually rebuilds — without it cargo
+  reports "0 crates compiled" after a real change and ships a stale payload.
+- **`semantic` is default-on but must stay optional.** It pulls `fastembed` →
+  ONNX Runtime plus two other C/C++ sys crates. `--no-default-features` is a
+  fully working tool (symbol, probe, setup, BM25 search) and CI builds both on
+  all three OSes, so the escape hatch is proven rather than hoped for.
 
 [tools/extract_widget_api.py](tools/extract_widget_api.py) parses widget source files in [crates/teksilo-widgets/src/](crates/teksilo-widgets/src/) and emits their `//!` module header, `pub struct`/`enum`/`type`/`const` declarations with `///` docs, and `pub fn` builder methods from inherent `impl Foo { ... }` blocks. Skips `impl Widget for Foo` trait plumbing and `pub(crate)` items. Accepts type names (`Button`) or module names (`button`); flags `#[doc(hidden)]` and `#[cfg(...)]`. Use when reading a widget's public surface without opening the file, packing widget docs into LLM context, or auditing API coverage.
 
@@ -1364,8 +1411,12 @@ releases. `crates/teksilo-teksu-guard` now fails the build on the divergence: it
 `widget_builder.rs` with `syn`, collects every method returning `WidgetWithHandlers<Self>`, and
 compares that set against the predicate in both directions.
 
-Slash command `/teksu-macro` loads the skill for read/write/explain/
-translate/debug workflows.
+Slash command `/teksilo` loads the skill for read / write / explain /
+translate / debug workflows; its `reference/teksu.md` is the `teksu!` half.
+That skill merges the former `teksilo-app` and `teksu-macro` skills and is
+**written for a consumer app**, so it is also what `cargo teksilo setup`
+installs into someone else's project. Inside this repository, prefer the
+in-repo `extract-widget-api` skill for a single type's public surface.
 
 ## App Entry Point Pattern
 
