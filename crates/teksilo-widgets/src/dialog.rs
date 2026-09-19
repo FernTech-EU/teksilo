@@ -787,32 +787,37 @@ impl Widget for Dialog {
                         }
                         _ => EventResponse::Ignored,
                     }
-                })
-                .on_access_action({
-                    let label = label.clone();
-                    let content_factory = content_factory.clone();
-                    let enabled = enabled.clone();
-                    move |action, ctx| {
-                        if action == teksilo_core::accesskit::Action::Click && enabled.get() {
-                            action_open.set(true);
-                            queue_dialog_request(
-                                ctx,
-                                &content_factory,
-                                presentation,
-                                close_behavior,
-                                &label.resolve_now(),
-                                Some(action_dismiss.clone()),
-                            );
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
-                        }
-                    }
                 });
+            // The AT route goes on the OverlayTrigger's OWN node rather than
+            // into the set above, which is applied to the child. The trigger
+            // node is the one carrying `Role::Button`, and an `AccessAction`
+            // bubbles from the node it was invoked on towards the root — so a
+            // handler on the child sat off that path and this button, named
+            // and correctly roled, could not be activated by a screen reader.
+            let on_access_activate = {
+                let label = label.clone();
+                let content_factory = content_factory.clone();
+                let enabled = enabled.clone();
+                move |ctx: &mut teksilo_core::widget::EventContext| {
+                    if !enabled.get() {
+                        return;
+                    }
+                    action_open.set(true);
+                    queue_dialog_request(
+                        ctx,
+                        &content_factory,
+                        presentation,
+                        close_behavior,
+                        &label.resolve_now(),
+                        Some(action_dismiss.clone()),
+                    );
+                }
+            };
             let overlay_trigger = match trigger {
                 PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
                 PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
             }
+            .on_access_activate(on_access_activate)
             .enabled(self.enabled.clone())
             .name(label)
             .has_popup(teksilo_core::accesskit::HasPopup::Dialog)
@@ -1225,6 +1230,74 @@ mod tests {
         let trigger = tree.find_by_label("Open dialog").unwrap();
         tree.click(trigger);
 
+        assert_eq!(tree.drain_pending_modal_requests().len(), 1);
+    }
+
+    #[test]
+    fn a_custom_trigger_advertises_and_answers_the_at_click() {
+        // Finding 2. The handler existed and worked when hand-invoked, but it
+        // sat on the child while `Role::Button` sat on the wrapper, and the
+        // wrapper advertised no actions at all: a node that reads as a
+        // well-formed, named button and that no screen reader can press.
+        // Both halves are asserted, because either alone still leaves it
+        // unusable.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(
+            Dialog::new(lit!("Open dialog"))
+                .content(|| FixedLeaf(220.0, 120.0))
+                .trigger(FixedLeaf(140.0, 40.0)),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Open dialog").unwrap();
+        assert_eq!(
+            tree.accessibility_node(trigger).role(),
+            teksilo_core::accesskit::Role::Button
+        );
+        assert!(
+            tree.accessibility_node(trigger)
+                .actions()
+                .contains(&teksilo_core::accesskit::Action::Click),
+            "the node carrying Role::Button must advertise Click"
+        );
+
+        // …and invoking it on THAT node — the one an adapter would target —
+        // must actually open the dialog. Dispatched through the same entry
+        // point the platform adapters use.
+        let handled = tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(trigger),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+        assert!(handled, "the AT Click must be reported as handled");
+        assert_eq!(tree.drain_pending_modal_requests().len(), 1);
+    }
+
+    #[test]
+    fn rebuilding_a_custom_trigger_does_not_stack_its_at_handler() {
+        // `OverlayTrigger` installs the AT route on itself on every build,
+        // and `EventHandlers` MERGES access handlers rather than replacing
+        // them — so a trigger rebuilt three times could plausibly open three
+        // dialogs from one AT click. It does not; this is what says so.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let d = tree.add(
+            Dialog::new(lit!("Open dialog"))
+                .content(|| FixedLeaf(220.0, 120.0))
+                .trigger(FixedLeaf(140.0, 40.0)),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        for _ in 0..3 {
+            tree.arena_mark_needs_rebuild_for_testing(d);
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+        }
+        let trigger = tree.find_by_label("Open dialog").unwrap();
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(trigger),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
         assert_eq!(tree.drain_pending_modal_requests().len(), 1);
     }
 

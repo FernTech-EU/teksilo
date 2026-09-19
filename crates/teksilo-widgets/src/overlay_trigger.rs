@@ -55,9 +55,22 @@ pub struct OverlayTrigger {
     /// `Prop::Static(true)`.
     enabled: Prop<bool>,
     /// Installed by [`crate::popover_widget::PopoverTrigger::with_on_activate`]. Routed onto the child
-    /// in `build` as pointer-tap, Enter/Space and the AT `Click` action, so a
-    /// custom trigger is reachable exactly the ways a `Button` trigger is.
+    /// in `build` as pointer-tap and Enter/Space, and onto *this* node as the
+    /// AT `Click` action, so a custom trigger is reachable exactly the ways a
+    /// `Button` trigger is.
     on_activate: Option<std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>,
+    /// The AT `Click` route for a presenter that builds its own
+    /// [`HandlerSet`] (`Dialog`, `Snackbar`) rather than going through
+    /// [`on_activate`](Self::on_activate).
+    ///
+    /// It has to be a *separate* setter, and it has to land on this node
+    /// rather than on the child, because this is the node that carries
+    /// `Role::Button`: an AT action dispatches to the node it was invoked on
+    /// and then bubbles towards the root, so a handler parked on the child —
+    /// a descendant — is never on its path. A presenter that put its AT
+    /// handler in the child's `HandlerSet` therefore published a named,
+    /// correctly-roled button that no screen reader could activate.
+    on_access_activate: Option<std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>,
 }
 
 impl OverlayTrigger {
@@ -79,6 +92,7 @@ impl OverlayTrigger {
             expanded_signal: None,
             enabled: Prop::Static(true),
             on_activate: None,
+            on_access_activate: None,
         }
     }
 
@@ -106,12 +120,29 @@ impl OverlayTrigger {
     }
 
     /// Install the popover's open/close handler. Routed onto the wrapped widget
-    /// as pointer-tap, Enter/Space and the AT `Click` action.
+    /// as pointer-tap and Enter/Space, and onto this trigger's own node as the
+    /// AT `Click` action.
     pub fn on_activate(
         mut self,
         f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static,
     ) -> Self {
         self.on_activate = Some(std::rc::Rc::new(f));
+        self
+    }
+
+    /// Install *only* the AT `Click` route, on this trigger's own node.
+    ///
+    /// For a presenter that hands the pointer and keyboard routes over in its
+    /// own [`HandlerSet`] (which is applied to the child, so the child's
+    /// gesture arena cannot swallow them first) but still needs the AT action
+    /// on the node that carries `Role::Button`. See
+    /// [`on_access_activate`](Self::on_access_activate)'s field docs for why
+    /// the two cannot share a destination.
+    pub(crate) fn on_access_activate(
+        mut self,
+        f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static,
+    ) -> Self {
+        self.on_access_activate = Some(std::rc::Rc::new(f));
         self
     }
 
@@ -179,7 +210,6 @@ impl Widget for OverlayTrigger {
             let set = handlers.take().unwrap_or_default();
             let tap = activate.clone();
             let key = activate.clone();
-            let act = activate;
             handlers = Some(
                 set.on_tap(move |_pos, ctx| tap(ctx))
                     .on_key(move |event, ctx| match event {
@@ -191,16 +221,17 @@ impl Widget for OverlayTrigger {
                             teksilo_core::event::EventResponse::Handled
                         }
                         _ => teksilo_core::event::EventResponse::Ignored,
-                    })
-                    .on_access_action(move |action, ctx| {
-                        if action == teksilo_core::accesskit::Action::Click {
-                            act(ctx);
-                            teksilo_core::event::EventResponse::Handled
-                        } else {
-                            teksilo_core::event::EventResponse::Ignored
-                        }
                     }),
             );
+            // The AT route splits off here and lands on SELF: an
+            // `AccessAction` dispatches to the node it was invoked on — this
+            // one, the node `accessibility` gives `Role::Button` — and then
+            // bubbles rootwards, so the child never sees it. There is no
+            // gesture arena to lose it to either, which is the whole reason
+            // tap and key go the other way.
+            if self.on_access_activate.is_none() {
+                self.on_access_activate = Some(activate);
+            }
         }
         if let Some(handlers) = handlers {
             if let Some(child_id) = self.child_id {
@@ -209,6 +240,16 @@ impl Widget for OverlayTrigger {
                 // No child — keep handlers on self so they aren't lost.
                 ctx.apply_self_handlers(handlers);
             }
+        }
+        if let Some(activate) = self.on_access_activate.clone() {
+            ctx.apply_self_handlers(HandlerSet::new().on_access_action(move |action, ctx| {
+                if action == teksilo_core::accesskit::Action::Click {
+                    activate(ctx);
+                    teksilo_core::event::EventResponse::Handled
+                } else {
+                    teksilo_core::event::EventResponse::Ignored
+                }
+            }));
         }
         // Register the expanded_signal so flips trigger an a11y
         // refresh on this trigger node.
@@ -257,6 +298,16 @@ impl Widget for OverlayTrigger {
         }
         if let Some(ref signal) = self.expanded_signal {
             builder.set_expanded(signal.get());
+        }
+        // Advertise what this node can actually do. The handler alone is not
+        // enough: AccessKit consumers read the action list, `accesskit`'s own
+        // platform adapters refuse an unadvertised action, and an audit that
+        // only checks names and roles passes a button no screen reader can
+        // press. Only claimed when there is a route to claim — a bare
+        // `OverlayTrigger::around(w)` that no presenter has wired up yet
+        // advertises nothing, which is the truth about it.
+        if self.on_access_activate.is_some() {
+            builder.add_action(teksilo_core::accesskit::Action::Click);
         }
     }
 

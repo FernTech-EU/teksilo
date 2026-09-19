@@ -470,30 +470,33 @@ impl Widget for Snackbar {
                         }
                         _ => EventResponse::Ignored,
                     }
-                })
-                .on_access_action({
-                    let shown = shown.clone();
-                    move |action, ctx| {
-                        if action == teksilo_core::accesskit::Action::Click && enabled {
-                            present_snackbar(
-                                ctx,
-                                self_id,
-                                content_id,
-                                &shown,
-                                dismiss.clone(),
-                                auto_dismiss_after,
-                                fade_duration,
-                            );
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
-                        }
-                    }
                 });
+            // On the trigger's OWN node, not in the set above (which goes to
+            // the child): the trigger node is the one with `Role::Button`,
+            // and an `AccessAction` bubbles from there rootwards, so a
+            // handler on the child was never on its path.
+            let on_access_activate = {
+                let shown = shown.clone();
+                move |ctx: &mut teksilo_core::widget::EventContext| {
+                    if !enabled {
+                        return;
+                    }
+                    present_snackbar(
+                        ctx,
+                        self_id,
+                        content_id,
+                        &shown,
+                        dismiss.clone(),
+                        auto_dismiss_after,
+                        fade_duration,
+                    );
+                }
+            };
             let overlay_trigger = match trigger {
                 PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
                 PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
             }
+            .on_access_activate(on_access_activate)
             .enabled(self.enabled.clone())
             .name(label);
             ctx.add(overlay_trigger)

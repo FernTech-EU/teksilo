@@ -207,6 +207,13 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- **A screen reader can open a `Dialog` that has a custom trigger.** The
+  trigger published a named `Role::Button` node that advertised no actions at
+  all and answered none, so assistive technology could see the control and not
+  press it — while a mouse worked. This reached the ordinary
+  `Dialog::new(label)`, not only an explicitly hand-built trigger, and the same
+  shape affected `Snackbar` and a `PopoverWidget` over a custom trigger. The
+  node now advertises `Action::Click` and acts on it.
 - **A screen reader can read the tables and blockquotes in a rich-text
   document.** Neither reached the accessibility tree at all: the walk over the
   document flow handled only ordinary blocks, so a table's cells and a

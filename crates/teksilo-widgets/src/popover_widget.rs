@@ -966,6 +966,42 @@ mod tests {
         MinSize::new(40.0, 40.0).child(RectWidget::new())
     }
 
+    // ── Custom trigger (OverlayTrigger) ─────────────────────────────
+
+    #[test]
+    fn custom_trigger_advertises_and_answers_the_at_click() {
+        // The trigger node is the one carrying `Role::Button`, so it is the
+        // one an adapter invokes — and the pointer/key handlers deliberately
+        // live on the child, out of reach of that dispatch. Both halves are
+        // asserted: an advertised action nothing answers and an answered
+        // action nothing advertises are equally unusable.
+        let mut tree = light_tree();
+        tree.add(
+            PopoverWidget::new(OverlayTrigger::around(dummy_content()).named("Show popover"))
+                .content(dummy_content()),
+        );
+        tree.layout(SizeProposal::exact(300.0, 120.0));
+
+        let trigger = tree.find_by_label("Show popover").unwrap();
+        assert_eq!(tree.accessibility_node(trigger).role(), Role::Button);
+        assert!(
+            tree.accessibility_node(trigger)
+                .actions()
+                .contains(&teksilo_core::accesskit::Action::Click)
+        );
+
+        assert!(tree.active_overlays().is_empty());
+        let handled = tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(trigger),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+        assert!(handled, "the AT Click must be reported as handled");
+        tree.layout(SizeProposal::exact(300.0, 120.0));
+        assert_eq!(tree.active_overlays().len(), 1);
+    }
+
     // ── PopoverButton (text trigger) ────────────────────────────────
 
     #[test]
