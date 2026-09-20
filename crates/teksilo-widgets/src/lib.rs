@@ -145,7 +145,15 @@ pub use combo_box::ComboBox;
 pub use command_link_button::CommandLinkButton;
 pub use command_palette::{CommandPalette, PaletteCommand};
 pub use common::scroll::OverscrollBehavior;
-pub use date_edit::DateEdit;
+// `WidthPolicy` rides along because it is a configuration knob the caller
+// names at the call site (`.width_policy(WidthPolicy::Fill)`), shared by
+// `DateEdit` / `TimeEdit` / `DateRangeEdit` / `DateTimeEdit`. `spin_box`
+// declares a same-named enum that is deliberately NOT re-exported here:
+// its own docs call it storage rather than a public configuration API
+// (a `SpinBox` is sized with `.width()` / `.width_chars()` / `.fill_width()`,
+// never by naming the enum), so the flat name can belong to this one
+// without ambiguity.
+pub use date_edit::{DateEdit, WidthPolicy};
 pub use date_range_edit::DateRangeEdit;
 pub use date_time_edit::DateTimeEdit;
 pub use dialog::{Dialog, DialogContent, ModalContainer, ModalScrim};
