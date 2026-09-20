@@ -12,8 +12,13 @@ cargo install cargo-teksilo
 ```
 
 Install the version your app resolved, not the newest — the tool refuses to
-answer across a minor. If your app pins teksilo by `path` or `git`, that version
-was never published, so install from the framework checkout instead:
+answer across a minor. Note that this tool is younger than the framework it
+serves: its first release is 0.13.0, so an app on teksilo 0.12 or older has no
+version-matched tool and no way to install one — move the app to 0.13 first.
+
+If your app pins teksilo by `path` or `git`, that version was never published,
+so install from the framework checkout instead — a checkout at 0.13.0 or later,
+since no earlier tag has a `crates/cargo-teksilo` directory:
 
 ```bash
 cargo install --path <teksilo checkout>/crates/cargo-teksilo --locked

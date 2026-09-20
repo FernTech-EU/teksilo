@@ -288,9 +288,15 @@ fn cmd_version(dir: &Path) -> ExitCode {
                 guard::Verdict::Degraded { app, tool } => {
                     println!("{}", guard::degraded_text(&app, &tool))
                 }
-                guard::Verdict::Refuse { app, tool } => {
-                    println!("\n{}", guard::refusal_text(&app, &tool, "symbol lookup"))
-                }
+                guard::Verdict::Refuse { app, tool } => println!(
+                    "\n{}",
+                    guard::refusal_text(
+                        &app,
+                        &tool,
+                        "symbol lookup",
+                        guard::readable_sources(&r).as_deref(),
+                    )
+                ),
             }
             ExitCode::SUCCESS
         }
@@ -405,6 +411,7 @@ fn resolved_for_probe(project: &Path) -> Result<String, ProbeBlock> {
             &app,
             &tool,
             "the probe harness",
+            guard::readable_sources(&resolution).as_deref(),
         ))),
         verdict => {
             if let Some(note) = verdict.note() {

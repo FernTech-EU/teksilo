@@ -304,7 +304,12 @@ pub fn report(dir: &Path) {
                         }
                         guard::Verdict::Refuse { app, tool } => println!(
                             "\n{}",
-                            guard::refusal_text(&app, &tool, "symbol and search")
+                            guard::refusal_text(
+                                &app,
+                                &tool,
+                                "symbol and search",
+                                guard::readable_sources(&r).as_deref(),
+                            )
                         ),
                     }
                 }

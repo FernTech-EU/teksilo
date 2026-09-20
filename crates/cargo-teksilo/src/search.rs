@@ -221,6 +221,229 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The NLTK English stopword list, verbatim.
+///
+/// Verbatim is the whole point, and it is why the list is pasted rather than
+/// curated. It was chosen before the queries it would be measured on, and it
+/// happens to contain `how`, `do`, `i`, `can` and `what` while containing none
+/// of `make`, `add`, `show`, `set` or `use` — so no Teksilo verb is touched.
+/// A hand-picked list that came out the same way would be fitting to the ten
+/// questions that motivated it, and would not survive the eleventh.
+///
+/// Two classes of entry can never match anything here, and both stay in: the
+/// single letters (`i`, `a`, `s`, `t`, `d`, `ll`, …), because [`tokenize`]
+/// drops length-1 tokens before this ever sees them, and the contractions
+/// (`don't`, `you've`), because the apostrophe is a token boundary. Trimming
+/// them would be the first step of curating.
+const QUERY_STOPWORDS: &[&str] = &[
+    "i",
+    "me",
+    "my",
+    "myself",
+    "we",
+    "our",
+    "ours",
+    "ourselves",
+    "you",
+    "you're",
+    "you've",
+    "you'll",
+    "you'd",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
+    "he",
+    "him",
+    "his",
+    "himself",
+    "she",
+    "she's",
+    "her",
+    "hers",
+    "herself",
+    "it",
+    "it's",
+    "its",
+    "itself",
+    "they",
+    "them",
+    "their",
+    "theirs",
+    "themselves",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "this",
+    "that",
+    "that'll",
+    "these",
+    "those",
+    "am",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "having",
+    "do",
+    "does",
+    "did",
+    "doing",
+    "a",
+    "an",
+    "the",
+    "and",
+    "but",
+    "if",
+    "or",
+    "because",
+    "as",
+    "until",
+    "while",
+    "of",
+    "at",
+    "by",
+    "for",
+    "with",
+    "about",
+    "against",
+    "between",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "to",
+    "from",
+    "up",
+    "down",
+    "in",
+    "out",
+    "on",
+    "off",
+    "over",
+    "under",
+    "again",
+    "further",
+    "then",
+    "once",
+    "here",
+    "there",
+    "when",
+    "where",
+    "why",
+    "how",
+    "all",
+    "any",
+    "both",
+    "each",
+    "few",
+    "more",
+    "most",
+    "other",
+    "some",
+    "such",
+    "no",
+    "nor",
+    "not",
+    "only",
+    "own",
+    "same",
+    "so",
+    "than",
+    "too",
+    "very",
+    "s",
+    "t",
+    "can",
+    "will",
+    "just",
+    "don",
+    "don't",
+    "should",
+    "should've",
+    "now",
+    "d",
+    "ll",
+    "m",
+    "o",
+    "re",
+    "ve",
+    "y",
+    "ain",
+    "aren",
+    "aren't",
+    "couldn",
+    "couldn't",
+    "didn",
+    "didn't",
+    "doesn",
+    "doesn't",
+    "hadn",
+    "hadn't",
+    "hasn",
+    "hasn't",
+    "haven",
+    "haven't",
+    "isn",
+    "isn't",
+    "ma",
+    "mightn",
+    "mightn't",
+    "mustn",
+    "mustn't",
+    "needn",
+    "needn't",
+    "shan",
+    "shan't",
+    "shouldn",
+    "shouldn't",
+    "wasn",
+    "wasn't",
+    "weren",
+    "weren't",
+    "won",
+    "won't",
+    "wouldn",
+    "wouldn't",
+];
+
+/// Drop English stopwords from a QUERY. Never from the corpus.
+///
+/// A natural question carries function words that BM25 has no way to discount:
+/// in this corpus `how` and `do` are *rarer* than `window`, because the guides
+/// are written in API voice and almost never ask a question, so IDF rewards
+/// them — `how` scores 2.87 against `window`'s 1.94 and the question's own
+/// grammar outranks its subject. That is why the same question answered
+/// correctly when the asker named the type: naming it removed the grammar.
+///
+/// The corpus side must NOT be filtered to match. The term table on disk was
+/// built by `tools/build_corpus.py`, and a filter here that the generator does
+/// not share would silently change what a chunk's length means, which is the
+/// denominator of every score.
+///
+/// The `>= 2` guard is what keeps this from being a new failure mode: a
+/// one-word lookup (`Splitter`), a `--kind`-narrowed query, or a question that
+/// is *entirely* function words all keep their tokens, so the filter can only
+/// ever discard context that had something left to stand on.
+fn strip_query_stopwords(tokens: Vec<String>) -> Vec<String> {
+    let kept: Vec<String> = tokens
+        .iter()
+        .filter(|t| !QUERY_STOPWORDS.contains(&t.as_str()))
+        .cloned()
+        .collect();
+    if kept.len() >= 2 { kept } else { tokens }
+}
+
 /// BM25 over the corpus, restricted to `kind`.
 ///
 /// Returns every chunk with a non-zero score, best first, ties broken by chunk
@@ -233,7 +456,7 @@ pub fn bm25(index: &Index, query: &str, kind: KindFilter) -> Vec<(usize, f64)> {
     // once: BM25 scores a term, not an occurrence of it in the query.
     let mut term_idf: Vec<(u32, f64)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for token in tokenize(query) {
+    for token in strip_query_stopwords(tokenize(query)) {
         let Some(term) = index.term_index(&token) else {
             continue;
         };
@@ -402,6 +625,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
             app,
             tool,
             "documentation search",
+            guard::readable_sources(&resolution).as_deref(),
         )));
     }
     if let Some(note) = verdict.note() {
@@ -732,6 +956,115 @@ mod tests {
         // The vocabulary gap, stated as a test: this query shares no token
         // with the chunk that answers it, so BM25 alone cannot find it.
         assert!(bm25(&index, "make a thing slide", KindFilter::Any).is_empty());
+    }
+
+    /// A corpus shaped like the real one on the axis that matters: the guides
+    /// are written in API voice, so `how` and `do` appear in ONE chunk out of
+    /// six while `window` appears in five. That inverts the IDF — the question
+    /// words are rarer, and therefore worth more, than its subject — which is
+    /// the whole defect, reproduced in six chunks instead of six thousand.
+    fn question_index() -> Index {
+        // Sorted: `term_index` binary-searches.
+        let terms: Vec<String> = ["do", "how", "persist", "size", "window"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let chunk = |id: usize, tokens: &[(u32, u32)]| Chunk {
+            id,
+            kind: "guide".to_string(),
+            path: format!("docs/{id}.md"),
+            heading_path: vec![format!("H{id}")],
+            text: format!("# H{id}"),
+            line_start: 0,
+            line_end: 0,
+            crate_name: None,
+            tokens: tokens.iter().copied().collect::<BTreeMap<u32, u32>>(),
+            len: tokens.iter().map(|(_, n)| n).sum(),
+            embedding: None,
+        };
+        let df = [(0, 1), (1, 1), (2, 4), (3, 4), (4, 5)]
+            .into_iter()
+            .collect::<BTreeMap<u32, u32>>();
+        Index {
+            schema: 1,
+            teksilo_version: "0.13.0".into(),
+            encoder: None,
+            encoder_dim: None,
+            chunk_count: 6,
+            avgdl: 8.0,
+            terms,
+            df,
+            chunks: vec![
+                // 0: the one chunk that speaks in questions.
+                chunk(0, &[(1, 3), (0, 3), (4, 1)]),
+                // 1: the chunk that actually answers.
+                chunk(1, &[(2, 3), (4, 3), (3, 3)]),
+                // 2..5: filler, so `window`/`size`/`persist` are ordinary words.
+                chunk(2, &[(4, 1), (2, 1), (3, 1)]),
+                chunk(3, &[(4, 1), (2, 1), (3, 1)]),
+                chunk(4, &[(4, 1), (2, 1), (3, 1)]),
+                chunk(5, &[(4, 1)]),
+            ],
+        }
+    }
+
+    #[test]
+    fn the_stopword_list_is_nltks_and_not_one_fitted_to_these_queries() {
+        assert_eq!(
+            QUERY_STOPWORDS.len(),
+            179,
+            "NLTK's English list is 179 long"
+        );
+        // The words that were costing the ranking...
+        for w in ["how", "do", "i", "can", "what", "is", "the", "to"] {
+            assert!(QUERY_STOPWORDS.contains(&w), "{w} should be a stopword");
+        }
+        // ...and the ones a hand-picked list would have been tempted to add.
+        for w in [
+            "make", "add", "show", "set", "use", "window", "size", "persist", "scroll", "list",
+        ] {
+            assert!(!QUERY_STOPWORDS.contains(&w), "{w} must survive");
+        }
+    }
+
+    #[test]
+    fn a_query_of_nothing_but_stopwords_still_returns_results() {
+        // The `>= 2` guard. Filtering this to nothing would turn a poor answer
+        // into no answer, which is a worse trade than the one being made.
+        let index = question_index();
+        let ranked = bm25(&index, "how do", KindFilter::Any);
+        assert!(!ranked.is_empty(), "filtered the query down to nothing");
+        assert_eq!(ranked[0].0, 0);
+
+        // Same for a single-word lookup, where there is nothing to spare.
+        // (`how` rather than `the`: a term the toy corpus never saw would
+        // return nothing for the vocabulary gap, not for the filter, and the
+        // test would pass while proving nothing.)
+        assert!(!bm25(&index, "how", KindFilter::Any).is_empty());
+    }
+
+    #[test]
+    fn asking_a_question_ranks_the_same_as_naming_the_subject() {
+        // The measured symptom: 3/10 top-3 for "how do I <task>" against 10/10
+        // when the asker names the API type. The grammar was outranking the
+        // subject, so the two phrasings retrieved different documents.
+        let index = question_index();
+        let asked = bm25(&index, "how do I persist window size", KindFilter::Any);
+        let named = bm25(&index, "persist window size", KindFilter::Any);
+        assert_eq!(asked[0].0, named[0].0, "phrasing changed the top hit");
+        assert_eq!(asked[0].0, 1, "the chunk that answers should win");
+    }
+
+    #[test]
+    fn stopwords_are_dropped_only_when_something_survives() {
+        let f = |q: &str| strip_query_stopwords(tokenize(q));
+        assert_eq!(
+            f("how do I persist window size"),
+            ["persist", "window", "size"]
+        );
+        // One survivor is not enough: keep the query whole.
+        assert_eq!(f("how do I scroll"), ["how", "do", "scroll"]);
+        assert_eq!(f("splitter"), ["splitter"]);
     }
 
     #[test]

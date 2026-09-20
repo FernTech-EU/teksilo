@@ -410,6 +410,7 @@ pub fn run(dir: &Path, request: &ShowRequest) -> Result<i32, ShowError> {
             app,
             tool,
             "corpus documents",
+            guard::readable_sources(&resolution).as_deref(),
         )));
     }
     if let Some(note) = verdict.note() {

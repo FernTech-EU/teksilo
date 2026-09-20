@@ -38,6 +38,14 @@ Install it at the version your app pins:
 cargo install cargo-teksilo --version <the teksilo version your app pins>
 ```
 
+**There is a floor: this tool's first release is 0.13.0.** It is newer than the
+framework it serves, so an app on teksilo 0.12 or older has no matching tool —
+that version of it was never published, and `--version 0.12.1` will not resolve.
+Such an app has to move to teksilo 0.13 before `cargo teksilo` can answer for
+it; until then, fall back to `cargo doc -p teksilo-widgets --no-deps --open`,
+docs.rs at the pinned version, and the compiler — and say the version is
+unserved rather than answering from memory.
+
 That version match is load-bearing and enforced: the tool **refuses** to answer
 when its minor or major differs from the app's resolved teksilo, and warns when
 only the patch differs. Serving 0.12 answers to an app on 0.9 is worse than

@@ -84,6 +84,7 @@
 - [Table & tree-table views](table-view.md)
 - [Code & plain-text editors](code-editor.md)
 - [Log view (streaming)](log-view.md)
+- [Terminal (console)](terminal.md)
 - [Tab widget](tab-widget.md)
 - [Segmented control](segmented-control.md)
 - [Font picker](font-picker.md)

@@ -8,11 +8,17 @@ Reads the hand-written guides under ``docs/`` (top-level ``*.md`` plus
 chunks them, and writes a single BM25-ready ``index.json`` into
 ``crates/teksilo-corpus/corpus/``.
 
-Deliberately excluded: ``docs/widgets/``, ``docs/data-collections/``,
-``docs/settings/`` and ``docs/scene/`` (generated Widget-Catalog pages — a
-separate symbol-lookup path already reads their source of truth, so
-indexing the generated pages too would duplicate that path and dilute BM25
-scores), and ``docs/SUMMARY.md`` (an mdBook table of contents, not prose).
+Deliberately excluded, for three different reasons:
+
+* ``docs/widgets/``, ``docs/data-collections/``, ``docs/settings/`` and
+  ``docs/scene/`` — generated Widget-Catalog pages. A separate
+  symbol-lookup path already reads their source of truth, so indexing the
+  generated pages too would duplicate that path and dilute BM25 scores.
+* ``docs/SUMMARY.md`` — an mdBook table of contents, not prose.
+* ``docs/docking-horizontal-rail.md`` — prose, and readable prose, but
+  written for a *contributor* ("delete these tests", "rewrite this
+  function") about work that has not been started. It is excluded for
+  audience, not for form: see ``EXCLUDED_TOP_LEVEL_DOCS``.
 
 **Nothing is copied.** ``corpus/`` holds ``index.json`` and nothing else.
 An earlier version mirrored all 158 source files into ``corpus/`` and
@@ -45,7 +51,9 @@ index.json schema (schema version 2)::
           "line_start": 41,              // inclusive, 0-based, into <path>
           "line_end": 68,                // inclusive, 0-based, into <path>
           "crate": null,                 // example crate name, else null
-          "tokens": {"0": 2, "17": 5},   // this chunk's term freqs, by term index
+          "tokens": {"0": 2, "17": 5},   // term freqs, by term index: this
+                                         // chunk's text PLUS its injected
+                                         // context (see "Chunking rules")
           "len": 143,                    // sum of this chunk's term freqs
           "embedding": null              // {"scale": f, "q": base64}; see "Vectors"
         }
@@ -132,6 +140,27 @@ corpus-wide ``df`` map): lowercase, split on runs of characters that are
 not ``[a-z0-9_]`` (so a Rust identifier like ``list_model`` stays one
 token), drop tokens of length 1, no stemming.
 
+On top of the chunk's own text, two things are **injected** into its
+``tokens`` at weight 1 — its **ancestor headings** and its source file's
+**stem**:
+
+* A chunk seeded by ``## Grow (positive slack)`` holds that heading and
+  nothing above it, so the enclosing ``# Layout Model`` is a word the
+  section does not contain. Every subsection of ``docs/settings.md`` had
+  ``settings`` at tf 0; ``how do I persist window size`` therefore could
+  not reach the sections that answer it, and the whole-document context a
+  human reader gets from the page they are scrolled into was simply
+  absent from the ranking.
+* The stem does the same job for the filename, which is often the
+  clearest single word a guide has (``scroll-area``, ``drag-and-drop``).
+
+Only the *ancestors* are injected, never ``heading_path[-1]``: a chunk's
+own heading is already the first line of its ``text``, and injecting it
+again would double its weight for no reason anyone chose. The injection
+changes ``tokens`` and ``len`` and deliberately does **not** change
+``text`` — ``build-vectors`` carries embeddings forward by text hash, so
+this is a lexical-only change and nothing needs re-encoding.
+
 CLI
 ---
 
@@ -168,7 +197,39 @@ DEFAULT_OUT_DIR = CORPUS_CRATE_DIR / "corpus"
 # Subdirectories of docs/ that are generated Widget-Catalog pages, not
 # hand-written prose. See the module docstring for why these are excluded.
 EXCLUDED_DOC_SUBDIRS = {"widgets", "data-collections", "settings", "scene"}
-EXCLUDED_TOP_LEVEL_DOCS = {"SUMMARY.md"}
+
+# Two entries, excluded for two unrelated reasons.
+#
+# `SUMMARY.md` is not prose — an mdBook table of contents, all links.
+#
+# `docs/docking-horizontal-rail.md` IS prose. It is excluded because it is
+# addressed to a different reader: it is an unstarted contributor backlog
+# ("delete these tests", "rewrite this function") for a docking feature that
+# `docs/docking.md` already documents as shipped. Measured against this
+# corpus, its 6 chunks took slots #1 AND #2 on `rail orientation` — pushing
+# `docs/docking.md › 5. Tabs or an activity rail`, the consumer guide's own
+# section on exactly that, to #3 — and it ranked #1 on four of five plausible
+# rail queries. The one consumer-actionable fact it carries is already in
+# `docs/docking.md:262-272`, said better. An agent that lands on it reads
+# planned work as though it were API.
+#
+# It keeps its book chapter and its link from `docs/docking.md`; it just
+# stops competing for a consumer agent's top slot.
+#
+# Why this is a skip-list entry and NOT a `kind: "backlog"` value, which is
+# the obvious alternative and the one the next reader will propose: the two
+# existing `kind` values are *derived*. "footer" falls out of a regex on the
+# heading conjoined with a link-density threshold on the body — mechanical,
+# test-enforced, and computed afresh from the file on every build. "Is this
+# document unstarted work?" is editorial judgement; no regex derives it, so a
+# `kind: "backlog"` would have to be hand-declared in a marker at the top of
+# each file. That rots the wrong way. A file whose marker was never added
+# ships as an ordinary guide, wearing the tool's blessing, and nothing ever
+# notices — the failure is silent and points at the agent. A skip-list rots
+# the safe way: forget to add an entry and a doc is merely indexed, which is
+# the status quo; the list is short, lives beside its reasons, and a reader
+# reviewing one file sees every judgement call at once.
+EXCLUDED_TOP_LEVEL_DOCS = {"SUMMARY.md", "docking-horizontal-rail.md"}
 
 # A guide's closing navigation footer — "See also", "Reference", "Code
 # references" — is a list of links, not prose, and it is not retrievable
@@ -692,8 +753,23 @@ def build_corpus(out_dir: Path) -> Tuple[Dict, int]:
     # is the one failure mode worse than having no vector at all — cosine
     # similarity against the wrong text is numerically valid and silently wrong.
     def add_chunks(raw_chunks: List[Dict], *, kind: str, path: str, crate: Optional[str]) -> None:
+        # Context tokens: the file's stem, plus each chunk's ANCESTOR headings.
+        # Both go through the same `tokenize` as the body, so a heading's
+        # backticks, punctuation and hyphens are stripped identically and
+        # `docking-horizontal-rail` arrives as three ordinary terms. Weight 1
+        # (each heading contributes its words once): weight 2 was measured and
+        # gained nothing over 1, and doubling a term a section never wrote is
+        # a thumb on the scale nobody can later account for.
+        stem_tokens = tokenize(Path(path).stem)
         for raw in raw_chunks:
             toks = tokenize(raw["text"])
+            # `heading_path[-1]` is this chunk's OWN heading and is already the
+            # first line of `text`; injecting it would silently double it.
+            for ancestor in raw["heading_path"][:-1]:
+                toks.extend(tokenize(ancestor))
+            toks.extend(stem_tokens)
+            # `len` is derived from `tf` below, so it follows the injection
+            # automatically and BM25's length normalisation stays honest.
             tf = Counter(toks)
             # Key order here is the JSON key order, and `cargo teksilo
             # build-vectors` refuses to run unless serde reproduces it exactly

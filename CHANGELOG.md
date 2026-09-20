@@ -171,17 +171,33 @@ by crate for clarity, not because crates version independently.
     and let its tail pose as another agent's line.
 
   Version binding is the design constraint, not a detail. The tool reads the
-  app's `Cargo.lock`, and a minor or major mismatch **refuses** with the exact
-  install command instead of answering — serving 0.12 answers to an app on 0.9
-  is worse than serving nothing, because `SplitView` was deleted outright in
-  favour of `Splitter` between them and the wrong answer reads exactly like the
-  right one. A patch-level difference warns and proceeds. The refusal prints
-  both install routes, because an app pinning teksilo by `path` or `git`
-  resolved a version that was never published and `cargo install --version`
-  for it cannot work: `--version <v> --locked` from the registry, or
-  `cargo install --path <checkout>/crates/cargo-teksilo --locked` from the
-  framework tree. It also names the two ways to keep apps on different minors
-  working at once — installing the second with `--root <dir>` and putting that
+  app's `Cargo.lock`, and a minor or major mismatch **refuses** instead of
+  answering — serving 0.12 answers to an app on 0.9 is worse than serving
+  nothing, because `SplitView` was deleted outright in favour of `Splitter`
+  between them and the wrong answer reads exactly like the right one. A
+  patch-level difference warns and proceeds.
+
+  **What a refusal can tell a model to run depends on which side of this
+  release the app sits on**, because `cargo-teksilo` is the first crate in this
+  workspace without version parity across the framework's history: it did not
+  exist before 0.13.0, and no tag before that carries a
+  `crates/cargo-teksilo` directory. `cargo-teksilo-fmt` is the contrast — it
+  has been published at every teksilo version since 0.9.0, which is exactly why
+  a `--version <app>` line can be emitted there unconditionally and cannot be
+  emitted here. So there are three regimes. **Below 0.13.0 no install command
+  exists at all**, and the refusal says so and says to move the app forward;
+  printing routes that cannot work is worse than printing none, because the
+  model spends its turn on them and then falls back on its own memory of the
+  API anyway, which is the single failure this tool exists to prevent. **At
+  0.13.0 or above both routes print unconditionally** — `--version <v>
+  --locked` from the registry, or `cargo install --path
+  <checkout>/crates/cargo-teksilo --locked` from the framework tree — because
+  whether a given version reached crates.io is not observable offline, and an
+  app pinning teksilo by `path` or `git` resolved a version that was never
+  published at all. **An unparseable version gets the checkout routes**, which
+  are the ones that do not depend on the registry. Where routes print, the
+  refusal also names the two ways to keep apps on different minors working at
+  once — installing the second with `--root <dir>` and putting that
   `<dir>/bin` first on PATH for that tree, or running the tool straight out of
   a checkout with `cargo run -p cargo-teksilo`.
 
@@ -217,7 +233,10 @@ by crate for clarity, not because crates version independently.
   design note written for reviewers rather than for users. Those gaps were found by
   running retrieval tests over the corpus, not by reading the table of contents.
   The design note is gone; its unstarted work is now
-  [Horizontal activity rail (backlog)](docs/docking-horizontal-rail.md).
+  [Horizontal activity rail (backlog)](docs/docking-horizontal-rail.md), which
+  the retrieval index leaves out — a proposal written in the instruction voice
+  reads as shipped API to whatever retrieves it, and this one outranked the
+  guide's own activity-rail section.
 
 - **`tools/extract_widget_api.py` now covers every crate with a public API**
   (30, up from 4), including the types a crate declares in its own `lib.rs`.

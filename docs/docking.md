@@ -280,8 +280,9 @@ region. It is **always** drawn, single activity or not, so a lone panel reads as
 a tab rather than as a bespoke title bar — which is also what lets a sole-pane
 dock go headerless in [§6](#6-dock-headers-and-view-actions).
 
-**Rail** is the VS Code activity bar: a vertical icon column outboard of the
-content, always visible. Clicking an inactive item selects it and shows the
+**Rail** is the VS Code activity bar — the
+[`DockActivityBar`](../crates/teksilo-widgets/src/docking/activity_bar.rs) widget: a
+vertical icon column outboard of the content, always visible. Clicking an inactive item selects it and shows the
 side; clicking the *active* item hides the side again. Switch a side into it by
 giving it a rail thickness:
 
@@ -746,4 +747,6 @@ calls working, which looks exactly like this.
   `AppPaths`.
 - [A horizontal activity rail for top and bottom](docking-horizontal-rail.md) —
   a backlog note: why a hidden top/bottom band takes its rail with it, and what
-  fixing that would cost.
+  fixing that would cost. Written for a contributor, so it is a chapter of this
+  book but is deliberately not in the retrieval corpus — `cargo teksilo show`
+  will not find it.

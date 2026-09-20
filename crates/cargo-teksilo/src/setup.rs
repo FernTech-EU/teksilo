@@ -69,6 +69,14 @@ whatever is newest. Install it at that version:
 cargo install cargo-teksilo --version <the teksilo version this app pins>
 ```
 
+**There is a floor: this tool's first release is 0.13.0.** It is newer than the
+framework it serves, so an app on teksilo 0.12 or older has no matching tool —
+that version of it was never published, and no `--version 0.12.x` will resolve.
+Such an app has to move to teksilo 0.13 first. Until it does, this briefing
+describes a command that cannot run here: use `cargo doc -p teksilo-widgets`
+and the compiler, and say the version is unserved rather than answering from
+memory.
+
 It refuses to answer when its own minor or major differs from the app's
 Teksilo, and warns when only the patch differs. That is deliberate:
 `SplitView` was deleted outright in favour of `Splitter` between two minors,

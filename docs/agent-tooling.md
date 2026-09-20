@@ -25,6 +25,9 @@ cargo install cargo-teksilo
 cargo teksilo setup        # in the app: harness + a brief for every agent it finds
 ```
 
+First released at **0.13.0** — it tracks Teksilo's version, so an app on teksilo
+0.12 or older has no matching tool and is refused; see §2.
+
 Verified against teksilo 0.12.1.
 
 ---
@@ -327,21 +330,77 @@ A patch difference warns rather than refuses because refusing `0.12.0`-vs-`0.12.
 would break the tool the day after any point release without preventing a single
 wrong answer.
 
-A refusal names the fix and, because a model is one of its two readers, tells it
-not to fall back on memory:
+### The floor
+
+This tool did not exist before teksilo 0.13.0, and its first release *is*
+0.13.0. So the version binding has a floor as well as a rule: for an app on
+teksilo **0.12 or older there is no matching tool**, because no such version of
+it was ever published: asking the registry for that version cannot resolve, and
+neither can a `--path` install from a checkout at `v0.12.1`, since that tag
+contains no `crates/cargo-teksilo`. The only route to a served answer is to
+move the app to teksilo 0.13.
+
+(`cargo-teksilo-fmt` is a different crate with a different history: it *is*
+published at every teksilo version from 0.9.0, so `--version <pinned>` is
+correct advice there and should not be "fixed" to match this.)
+
+A refusal therefore has two regimes, and the message distinguishes them. Inside
+the tool's own version range it names the fix and, because a model is one of its
+two readers, tells it not to fall back on memory:
 
 ```
-cargo-teksilo 0.12.1 cannot serve symbol lookup for an app on teksilo 0.9.2.
+cargo-teksilo 0.14.0 cannot serve symbol lookup for an app on teksilo 0.13.0.
 
 The public API changed between these versions, so answering would mean
 guessing. Install the matching tool:
 
-    cargo install cargo-teksilo --version 0.9.2 --locked
+    cargo install cargo-teksilo --version 0.13.0 --locked
+
+If that version was never published — the app pins teksilo by `path` or
+`git`, which is normal for an app developed alongside the framework —
+install from the checkout the app resolves instead:
+
+    cargo install --path <teksilo checkout>/crates/cargo-teksilo --locked
+
+Both routes install ONE binary per machine, so switching between two
+apps on different minors means reinstalling. To keep both, install the
+second with `--root <dir>` and put that `<dir>/bin` first on PATH for
+that tree, or skip installing and run the tool straight out of the
+framework checkout with `cargo run -p cargo-teksilo -- teksilo <args>`.
 
 DO NOT answer teksilo API questions from prior knowledge — the surface
-differs between these versions. Read the resolved source instead, or ask
-the user which version they intend.
+differs between these versions. Read the teksilo source this app
+resolved instead, or ask the user which version they intend.
 ```
+
+Below the floor there is no such command to name, so the message says so
+outright and closes the three routes a model would otherwise try in turn:
+
+```
+cargo-teksilo 0.13.0 cannot serve symbol lookup for an app on teksilo 0.12.1.
+
+The public API changed between these versions, so answering would mean
+guessing. There is no matching tool to install, and there will not be one.
+cargo-teksilo was first released as 0.13.0; no cargo-teksilo 0.12.1
+was ever published, and crates.io is append-only, so asking the registry
+for one cannot succeed now or later.
+
+The two checkout routes are dead at that tag for the same reason: a
+teksilo 0.12.1 checkout has no `crates/cargo-teksilo` directory in it,
+so neither `--path` nor `-p cargo-teksilo` has anything to build.
+Do not try them.
+
+A version-matched tool exists only for teksilo 0.13.0 and later.
+
+DO NOT answer teksilo API questions from prior knowledge — the surface
+differs between these versions. Read the teksilo source this app
+resolved instead, or ask the user which version they intend.
+```
+
+Three dead remedies would be worse than none: a model runs all three, loses the
+turn, and falls back on memory anyway — the exact outcome the refusal exists to
+prevent. The message closes with what *does* work — reading the resolved source,
+whose path it prints when it can find it.
 
 The same reasoning governs empty results: `search` prints
 `no match in the 0.12.1 corpus`, never "no results", so the absence is scoped to

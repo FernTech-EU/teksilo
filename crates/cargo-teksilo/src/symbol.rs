@@ -77,6 +77,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SymbolError> {
             app,
             tool,
             "symbol lookup",
+            guard::readable_sources(&resolution).as_deref(),
         )));
     }
     if let Some(note) = verdict.note() {
