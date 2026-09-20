@@ -46,9 +46,44 @@ thiserror = { workspace = true }
 # (≈129 MB, cached per-user), and a failure aborts the release on purpose: a
 # corpus shipped with missing vectors degrades `cargo teksilo search` to BM25
 # silently, which is worse than a release that stops and says so.
+#
+# The pre-commit gates run first, and the two that FORMAT run before everything
+# else — not for tidiness. The corpus ingests 978 chunks of `examples/*.rs` and
+# records a `line_start`/`line_end` per chunk, so reformatting those files after
+# the corpus is built leaves every example chunk pointing at the wrong lines and
+# reddens `--check` on the next push. Formatters first, corpus last, and the
+# read-only gates in between so the cheap ones fail fast.
+#
+# Two deliberate departures from the list in CLAUDE.md's "Pre-commit gates":
+# `cargo doc` is capped at `-j 4` (uncapped it fans out one rustdoc per crate
+# and peaks near 32 GiB), and `teksilo-fmt` runs through `cargo run -p` rather
+# than the installed subcommand, so it is the version in this tree rather than
+# whatever is on PATH — the same reason `build-vectors` does.
+#
+# On failure cargo-release aborts with `release of teksilo-corpus aborted by
+# non-zero return of prerelease hook`, and makes no commit and no tag — but the
+# version bump has already been written to every manifest by then, so the tree
+# is left dirty at the new version. Fix the gate and re-run, or `git checkout
+# -- .` to get back to where you started.
+#
+# NOT included, and each on purpose: `cargo test --workspace` (cargo-release
+# already runs `cargo publish --dry-run` per crate via `verify = true`, and a
+# full headless sweep here would double a release's wall time — run it before
+# releasing), `mdbook build` and `extract_widget_api.py --test` (neither gates
+# anything the release publishes), and the telemetry lint (it belongs to one
+# example crate, which is `publish = false`).
 [package.metadata.release]
 pre-release-hook = [
     "sh",
     "-c",
-    "cd ../.. && { python3 tools/build_corpus.py --check --quiet || python3 tools/build_corpus.py; } && { python3 tools/build_corpus.py --check-vectors --quiet || cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors; }",
+    """cd ../.. \
+&& cargo fmt --all \
+&& cargo run -q -p cargo-teksilo-fmt -- teksilo-fmt \
+&& typos --config _typos.toml \
+&& python3 tools/check_spdx_headers.py --check \
+&& cargo check --workspace \
+&& cargo clippy --workspace --all-targets -- -D warnings -A deprecated \
+&& RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items -j 4 \
+&& { python3 tools/build_corpus.py --check --quiet || python3 tools/build_corpus.py; } \
+&& { python3 tools/build_corpus.py --check-vectors --quiet || cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors; }""",
 ]
