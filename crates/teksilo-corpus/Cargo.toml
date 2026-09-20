@@ -19,3 +19,36 @@ categories = ["development-tools", "gui"]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+# Keep the committed corpus in step with the version being released.
+#
+# `build_corpus.py` writes the workspace version into `index.json`, so a bump
+# alone makes the committed corpus stale and the next CI run red — before any
+# doc has changed. These two lines are the `--check` gates from the pre-commit
+# set, each with its repair as the fallback: regenerate when the corpus drifted,
+# re-encode when that dropped a chunk's vector. When nothing but the version
+# moved, every chunk's text is unchanged, so the generator carries all vectors
+# forward, `--check-vectors` passes, and the expensive second pass is skipped.
+#
+# Four things about the hook, each verified against cargo-release 1.1.2 rather
+# than assumed, because all four have to hold for this to be correct:
+#   1. It lives HERE, not in `release.toml`, so it runs once — for this one
+#      crate — instead of once per workspace member.
+#   2. Its cwd is this crate's directory, hence the `cd ../..`.
+#   3. The workspace version is ALREADY bumped when it runs, so
+#      `read_workspace_version` sees the new one. Were it the other way round,
+#      this hook would confidently stamp the corpus with the OLD version.
+#   4. Files it writes land in the release commit — cargo-release commits the
+#      whole tree, not just the manifests it edited.
+#
+# `sh -c` means releases run from a Unix shell; that is where this workspace is
+# released from. The second pass needs the `semantic` feature and its encoder
+# (≈129 MB, cached per-user), and a failure aborts the release on purpose: a
+# corpus shipped with missing vectors degrades `cargo teksilo search` to BM25
+# silently, which is worse than a release that stops and says so.
+[package.metadata.release]
+pre-release-hook = [
+    "sh",
+    "-c",
+    "cd ../.. && { python3 tools/build_corpus.py --check --quiet || python3 tools/build_corpus.py; } && { python3 tools/build_corpus.py --check-vectors --quiet || cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors; }",
+]
