@@ -60,6 +60,18 @@ thiserror = { workspace = true }
 # than the installed subcommand, so it is the version in this tree rather than
 # whatever is on PATH — the same reason `build-vectors` does.
 #
+# The Widget Catalog is regenerated too, and its `--api-dir` build is the reason
+# two `cargo doc` runs sit next to each other rather than one. The catalog's deep
+# links point at docs.rs, which publishes PUBLIC items only, and `--api-dir`
+# emits the deepest link it can verify against the tree it is given. Handed the
+# gate's `--document-private-items` build it verifies module pages docs.rs will
+# never have: that is how `docs/scene/*.md` came to ship links to
+# `teksilo_scene/items/index.html`, a module that is not `pub`. So a public,
+# four-crate build — the set `--catalog-all` visits, and what the docs workflow
+# builds — goes first and owns `--api-dir`, then the private workspace build runs
+# as the gate. `rm -rf target/doc` between them is not housekeeping: it is what
+# stops a previous run's private pages from being verified against.
+#
 # On failure cargo-release aborts with `release of teksilo-corpus aborted by
 # non-zero return of prerelease hook`, and makes no commit and no tag — but the
 # version bump has already been written to every manifest by then, so the tree
@@ -83,6 +95,9 @@ pre-release-hook = [
 && python3 tools/check_spdx_headers.py --check \
 && cargo check --workspace \
 && cargo clippy --workspace --all-targets -- -D warnings -A deprecated \
+&& rm -rf target/doc \
+&& cargo doc -p teksilo-widgets -p teksilo-data -p teksilo-settings -p teksilo-scene --no-deps \
+&& python3 tools/extract_widget_api.py --catalog-all --api-dir target/doc \
 && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items -j 4 \
 && { python3 tools/build_corpus.py --check --quiet || python3 tools/build_corpus.py; } \
 && { python3 tools/build_corpus.py --check-vectors --quiet || cargo run -p cargo-teksilo --features semantic -- teksilo build-vectors; }""",
