@@ -173,8 +173,11 @@ A **dockless command button** in the activity rail: it looks and behaves
 like an activity item, but opens no panel — activating it just runs a
 closure.
 
-Declared on `DockRail::action`, so (like the rail's slots) it is per-view
-app config, reconstructed each run. A rail action is deliberately **more
+Declared on `DockRail::action` rather than on
+`DockingModel` because nothing about an action is
+user-mutable, which is `state.rs`'s own test for what is not persisted —
+so (like the rail's slots) it is per-view app config, reconstructed each
+run. A rail action is deliberately **more
 restricted** than a real activity: it is never draggable, never hidable, has
 no "Move to" menu, and is never overflow-parked — it is reserved space. That
 matches every surveyed precedent (VS Code's fixed Accounts / Manage cluster;

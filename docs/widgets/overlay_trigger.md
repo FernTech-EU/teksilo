@@ -66,4 +66,5 @@ Whether an activate handler is already installed.
 #### `pub fn on_activate( mut self, f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
 Install the popover's open/close handler. Routed onto the wrapped widget
-as pointer-tap, Enter/Space and the AT `Click` action.
+as pointer-tap and Enter/Space, and onto this trigger's own node as the
+AT `Click` action.

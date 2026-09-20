@@ -53,7 +53,7 @@ relations, which `remove` retains on either endpoint.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/salvage/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
 ## `pub struct ItemA11yDecorations`
 

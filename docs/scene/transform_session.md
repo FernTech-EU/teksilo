@@ -114,7 +114,7 @@ are `TransformLabels`, which takes `tr!`.
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/transform_session/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
 
 ## `pub enum TransformHandle`
 

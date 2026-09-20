@@ -246,6 +246,29 @@ pub enum MessageBoxButtons { /* variants */ }
 - **`RetryIgnoreAbort`** — The error-recovery triad: Retry + Ignore + Abort.
 - **`Custom`** — Explicit list. MessageBox preserves the order as the visual button order (leading Spacer pushes all buttons to the trailing edge; default button may appear anywhere).
 
+## `pub enum MessageBoxDismissal`
+
+How a `MessageBox` came to close.
+
+This replaced a `dismissed_by_escape: bool` whose own rustdoc claimed to
+cover scrim-click as well — a contract no code path could produce, because
+the only writer was the Escape action. One field that names the route
+cannot drift from its documentation the way two overlapping booleans can,
+and the caller can finally tell "the user chose Cancel" from "the user
+waved the dialog away", which for a Save/Discard/Cancel prompt are
+different answers.
+
+```rust
+pub enum MessageBoxDismissal { /* variants */ }
+```
+
+### Variants
+
+- **`Button`** — A button was chosen: clicked, or Enter on the default.
+- **`Escape`** — Escape, resolved to the escape button.
+- **`ClickOutside`** — A press outside the dialog, where its `ModalCloseBehavior` permits it.
+- **`Programmatic`** — It went away for another reason — the application dismissed it, or an enclosing surface closed and took it along. `button` still carries the escape-button resolution, because something has to be reported and that is the same answer Escape would have given.
+
 ## `pub struct MessageBoxResult`
 
 Report passed to `MessageBox::on_result` when the dialog closes.
@@ -253,6 +276,15 @@ Report passed to `MessageBox::on_result` when the dialog closes.
 ```rust
 pub struct MessageBoxResult { /* fields */ }
 ```
+
+### Methods
+
+#### `pub fn was_dismissed(&self) -> bool`
+
+Whether the dialog went away without the user choosing a button.
+
+The predicate the old `dismissed_by_escape` flag was reached for, minus
+the claim that Escape was the only way to get there.
 
 ## `pub struct MessageBox`
 
@@ -361,7 +393,7 @@ dialog lifetime (useful for "remember my choice" persistence).
 Register the result callback, invoked exactly once when a
 button fires (either by click or by Enter/Escape shortcut).
 
-#### `pub fn present(self, ctx: &mut EventContext)`
+#### `pub fn present(mut self, ctx: &mut EventContext)`
 
 Present the MessageBox as a modal on top of `ctx`'s current
 tree. Consumes `self`; callers who need to present multiple

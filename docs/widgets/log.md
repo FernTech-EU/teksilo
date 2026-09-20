@@ -67,7 +67,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/notification/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/notification/log/index.html)
 
 ## `pub struct NotificationLog`
 
