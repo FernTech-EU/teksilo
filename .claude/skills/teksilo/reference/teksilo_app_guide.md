@@ -27,7 +27,7 @@ directly.
 
 ```toml
 [dependencies]
-teksilo = "0.12"
+teksilo = "0.13"
 ```
 
 Then in code:
@@ -66,7 +66,7 @@ and opt-outs:
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
-For a Latin-only minimal build: `teksilo = { version = "0.12", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
+For a Latin-only minimal build: `teksilo = { version = "0.13", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
 
 ## App entry point
 
@@ -905,7 +905,7 @@ assert loop. **`reference/automation.md` in this skill** carries the tool catalo
 error codes worth branching on, and the probe-harness workflow (`cargo teksilo probe`); the
 framework's `automation-mcp` guide is reachable with `cargo teksilo search "automation mcp"`.
 
-## Breaking changes 0.9 → 0.12
+## Breaking changes 0.9 → 0.13
 
 Each of these fails to resolve at the call site, so the compiler names them — this list is
 only so you recognise the fix instead of hunting for it.
@@ -926,6 +926,26 @@ only so you recognise the fix instead of hunting for it.
 - **New, not breaking:** `.on_change(|value, ctx| …)` on `Checkbox` / `Toggle` /
   `RadioButton` / `Slider` — see *Widget catalog* above.
 
+### 0.12 → 0.13 — overlay dismissal
+
+All three are about *why* an overlay closed, which the old API could not report.
+
+- **`OverlayDismissCallback` is `Rc<dyn Fn(DismissReason, &mut EventContext)>`**, where it
+  was `Rc<dyn Fn()>`. A closure wanting neither gains two ignored parameters —
+  `Rc::new(move |_, _| …)`. `DismissReason` (`#[non_exhaustive]`) names the route:
+  `Escape`, `OutsidePress`, `PointerLeave`, `Cascade`, `Programmatic`. Both
+  `OverlayRequest::on_dismiss` and `ModalRequest::on_dismiss` take the new type.
+- **Dismissing through `OverlayManager` no longer runs `on_dismiss`.** Code reaching
+  through `WidgetTree::overlay_manager_mut()` calls `WidgetTree::dismiss_overlay` instead.
+  Ordering is unchanged: the callback still runs during dismissal, before focus returns to
+  the trigger. The five methods that name no reason report `Programmatic`; their
+  `*_because` twins take one.
+- **`MessageBoxResult::dismissed_by_escape` → `dismissal`.** `MessageBoxDismissal`
+  (`#[non_exhaustive]`) is `Button` / `Escape` / `ClickOutside` / `Programmatic`. Read
+  `result.dismissal == MessageBoxDismissal::Escape` for the old boolean, or
+  `result.was_dismissed()` where it meant "the user chose no button". `button` is
+  unchanged.
+
 ## Conventions when writing Teksilo code
 
 - **Builder pattern everywhere** — fluent `.child()`, `.spacing()`, `.style()`, `.on_tap()`.
@@ -939,8 +959,8 @@ only so you recognise the fix instead of hunting for it.
 ---
 
 *This guide is abridged from Teksilo's internal `CLAUDE.md` and targets app developers
-consuming `teksilo`. It was verified against **teksilo 0.12.1** and is a map, not the
+consuming `teksilo`. It was verified against **teksilo 0.13.0** and is a map, not the
 territory: where it disagrees with `cargo check` or with `cargo teksilo symbol`, they win.
 For framework internals, source layout and implementation status, search the version-matched
-guides with `cargo teksilo search`, or read the Teksilo repository's own `docs/` and
-`CLAUDE.md`.*
+guides with `cargo teksilo search` and read a hit in full with `cargo teksilo show <path>` —
+both answer for the version this app resolved, and neither needs a framework checkout.*

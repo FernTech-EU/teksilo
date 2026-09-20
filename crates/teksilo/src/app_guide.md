@@ -27,7 +27,7 @@ directly.
 
 ```toml
 [dependencies]
-teksilo = "0.12"
+teksilo = "0.13"
 ```
 
 Then in code:
@@ -66,7 +66,7 @@ and opt-outs:
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
-For a Latin-only minimal build: `teksilo = { version = "0.12", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
+For a Latin-only minimal build: `teksilo = { version = "0.13", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
 
 ## App entry point
 
@@ -501,7 +501,8 @@ and `Duration::ZERO` debounce.
 A GUI-agnostic peer layer (the `teksilo-data` crate). Concrete generic typing throughout (no
 `QVariant`, no role integers); all handles are `Rc<RefCell<…>>` so `.clone()` = share-by-handle.
 Mutations notify observers **after** dropping the borrow (no reactive deadlock). Full reference:
-`docs/data-models.md` + `docs/data-source.md` in the framework repo.
+the framework's `data-models` and `data-source` guides — `cargo teksilo search "list data source"`
+serves them for the version this app pins.
 
 **Decide the ownership shape first** — this is the main design choice, not just "which model":
 
@@ -593,8 +594,9 @@ event in flight to carry then. `SegmentedControl::on_change` has the same contra
 > `teksilo-charts` / `teksilo-scene` as direct dependencies (version them alongside `teksilo`)
 > and import from those crates — they are *not* reachable via a `teksilo::` path.
 
-To inspect a widget's exact public surface, ask Claude to read the widget source in the
-Teksilo repo, or use the framework's `tools/extract_widget_api.py` if you have the checkout.
+To inspect a widget's exact public surface, run `cargo teksilo symbol <Name>` from inside
+your app — it reads the source of the version this app resolved, whether that is a
+crates.io, git or path dependency, and needs no framework checkout.
 
 ## Toasts & notifications
 
@@ -807,11 +809,13 @@ teksu!(ctx =>
 - No method chains in property-arg position: write `item: MenuItem::new(lit!("x")) { on_activate_fn: cb }`
   (body form), not `item: MenuItem::new(lit!("x")).on_activate(cb)`.
 
-The best way to learn `teksu!` is to read real trees: the framework ships large, runnable
-`teksu!` examples (`cargo run -p widget-catalog` is the densest; `simple_button` /
-`text-and-layout` are the gentle ones). The `/teksu-macro` skill (in the framework repo)
-handles read/write/translate/debug requests; the full grammar and desugaring cheat sheet
-live in `docs/teksu-macro-reference.md` and `docs/teksu-language-spec-v3.md` there.
+The best way to learn `teksu!` is to read real trees. `cargo teksilo search "teksu widget
+tree"` pulls the framework's own runnable `teksu!` examples (the widget catalog is the
+densest; `simple_button` / `text_and_layout` are the gentle ones) out of the version-matched
+corpus. **`reference/teksu.md` in this skill is the working reference** — routing rules,
+slot arity, diagnostics and limitations; read it before writing a non-trivial block. The
+full grammar and desugaring cheat sheet are the framework's `teksu-macro-reference` and
+`teksu-language-spec-v3` guides, also reachable through `cargo teksilo search`.
 
 ## EventContext capabilities
 
@@ -897,9 +901,11 @@ and invalidates every node id**.
 
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides through the snapshot → act → settle →
-assert loop. Full reference: `docs/automation-mcp.md` in the framework repo.
+assert loop. **`reference/automation.md` in this skill** carries the tool catalog by job, the
+error codes worth branching on, and the probe-harness workflow (`cargo teksilo probe`); the
+framework's `automation-mcp` guide is reachable with `cargo teksilo search "automation mcp"`.
 
-## Breaking changes 0.9 → 0.12
+## Breaking changes 0.9 → 0.13
 
 Each of these fails to resolve at the call site, so the compiler names them — this list is
 only so you recognise the fix instead of hunting for it.
@@ -920,6 +926,26 @@ only so you recognise the fix instead of hunting for it.
 - **New, not breaking:** `.on_change(|value, ctx| …)` on `Checkbox` / `Toggle` /
   `RadioButton` / `Slider` — see *Widget catalog* above.
 
+### 0.12 → 0.13 — overlay dismissal
+
+All three are about *why* an overlay closed, which the old API could not report.
+
+- **`OverlayDismissCallback` is `Rc<dyn Fn(DismissReason, &mut EventContext)>`**, where it
+  was `Rc<dyn Fn()>`. A closure wanting neither gains two ignored parameters —
+  `Rc::new(move |_, _| …)`. `DismissReason` (`#[non_exhaustive]`) names the route:
+  `Escape`, `OutsidePress`, `PointerLeave`, `Cascade`, `Programmatic`. Both
+  `OverlayRequest::on_dismiss` and `ModalRequest::on_dismiss` take the new type.
+- **Dismissing through `OverlayManager` no longer runs `on_dismiss`.** Code reaching
+  through `WidgetTree::overlay_manager_mut()` calls `WidgetTree::dismiss_overlay` instead.
+  Ordering is unchanged: the callback still runs during dismissal, before focus returns to
+  the trigger. The five methods that name no reason report `Programmatic`; their
+  `*_because` twins take one.
+- **`MessageBoxResult::dismissed_by_escape` → `dismissal`.** `MessageBoxDismissal`
+  (`#[non_exhaustive]`) is `Button` / `Escape` / `ClickOutside` / `Programmatic`. Read
+  `result.dismissal == MessageBoxDismissal::Escape` for the old boolean, or
+  `result.was_dismissed()` where it meant "the user chose no button". `button` is
+  unchanged.
+
 ## Conventions when writing Teksilo code
 
 - **Builder pattern everywhere** — fluent `.child()`, `.spacing()`, `.style()`, `.on_tap()`.
@@ -933,5 +959,8 @@ only so you recognise the fix instead of hunting for it.
 ---
 
 *This guide is abridged from Teksilo's internal `CLAUDE.md` and targets app developers
-consuming `teksilo` 0.12. For framework internals, source layout, and implementation
-status, see the Teksilo repository's own docs (`docs/SUMMARY.md`) and `CLAUDE.md`.*
+consuming `teksilo`. It was verified against **teksilo 0.13.0** and is a map, not the
+territory: where it disagrees with `cargo check` or with `cargo teksilo symbol`, they win.
+For framework internals, source layout and implementation status, search the version-matched
+guides with `cargo teksilo search` and read a hit in full with `cargo teksilo show <path>` —
+both answer for the version this app resolved, and neither needs a framework checkout.*
