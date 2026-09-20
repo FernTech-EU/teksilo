@@ -232,7 +232,12 @@ pub struct Chunk {
     /// Position of this chunk in `Index::chunks`; stable within one
     /// generated corpus (i.e. one `teksilo_version`).
     pub id: usize,
-    /// `"guide"` or `"example"`.
+    /// `"guide"`, `"example"`, or `"footer"`.
+    ///
+    /// A `"footer"` is a guide's closing navigation list — "See also",
+    /// "Reference", "Code references". It is carried so that a document can be
+    /// reassembled from its chunks in full, and is excluded from retrieval:
+    /// being short and made of link paths, it outranks the prose it points at.
     pub kind: String,
     /// Path to the source file this chunk came from, **relative to the
     /// teksilo repository root** (e.g. `"docs/layout-primitives.md"` or
@@ -479,7 +484,7 @@ mod tests {
         let root = repo_root();
         for chunk in &idx.chunks {
             let expected_prefix = match chunk.kind.as_str() {
-                "guide" => "docs/",
+                "guide" | "footer" => "docs/",
                 "example" => "examples/",
                 other => panic!("chunk {} has an unknown kind {other:?}", chunk.id),
             };

@@ -64,14 +64,20 @@ resolves to its owning crate rather than reporting "not found".
 
 ### `search`
 
-Retrieval over the 69 hand-written guides and the 56 worked example crates — the material
+Retrieval over the 70 hand-written guides and the 56 worked example crates — the material
 that reaches no consumer today.
 
 ```console
-$ cargo teksilo search "make a list scrollable"
-$ cargo teksilo search "stop my window closing" --kind example
+$ cargo teksilo search "<your question, in your own words>"
+$ cargo teksilo search "<question>" --kind example
 $ cargo teksilo search "focus ring" --lexical      # BM25 only
 ```
+
+Ask it the way you would ask a colleague. The demo queries above are
+deliberately placeholders rather than realistic ones: this guide is itself in
+the corpus, and a plausible question quoted here verbatim becomes a strong BM25
+match *for this page*, ranking the tooling guide above the guide that actually
+answers it.
 
 Hybrid by default: BM25 fused with vector similarity by reciprocal-rank fusion.
 The header line always says which mode ran, so lexical results are never
@@ -523,4 +529,5 @@ folding the text into the index turned out size-neutral.
 
 - [Automation MCP](automation-mcp.md) — the bridge the probe harness drives
 - [Debug inspector](inspector.md) — the in-app introspection panel
-- [Scroll areas](scroll-area.md) — the guide `search` should rank first for "make this scrollable"
+- [Scroll areas](scroll-area.md) — the guide `search` should put first when asked about
+  scrolling content

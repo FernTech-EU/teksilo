@@ -34,7 +34,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{guard, resolve, setup, vectors};
+use crate::{guard, resolve, setup, symbol, vectors};
 
 // ---------------------------------------------------------------------------
 // Rows
@@ -378,6 +378,30 @@ pub fn report(dir: &Path) {
         println!("  `cargo teksilo setup` fetches it, or the next `search` will.");
         println!("  Until then `search` uses BM25 only.");
     }
+
+    // --- the symbol extractor's interpreter -------------------------------
+    //
+    // Reported for the same reason the encoder is: `symbol` is the one
+    // subcommand that needs something this binary cannot ship. The API
+    // extractor is a Python script (one source of truth, byte-identical to
+    // `tools/extract_widget_api.py` under a CI diff — which is exactly what a
+    // Rust rewrite would cost us), so `symbol` needs an interpreter that a
+    // Rust-only machine has no reason to have. Without this row the only way
+    // to find that out is to run `symbol` and read the failure.
+    println!("\nSymbol extractor  Python 3");
+    let (state, detail) = match symbol::find_python() {
+        Some(p) => (State::Here, show_safe(&p)),
+        None => (
+            State::NotHere,
+            "not on PATH — `symbol` needs it; every other subcommand works without it".to_string(),
+        ),
+    };
+    println!(
+        "  {:<AGENT_W$}{:<STATE_W$}{}",
+        "interpreter",
+        state.word(),
+        detail
+    );
 
     // What every `here` above does and does not mean. Shared with `setup`, so
     // the two commands cannot come to promise different things.

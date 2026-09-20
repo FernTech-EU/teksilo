@@ -108,6 +108,18 @@ pub fn refusal_text(app: &str, tool: &str, what: &str) -> String {
          \n\
          \x20   cargo install cargo-teksilo --version {app} --locked\n\
          \n\
+         If that version was never published — the app pins teksilo by `path` or\n\
+         `git`, which is normal for an app developed alongside the framework —\n\
+         install from the checkout the app resolves instead:\n\
+         \n\
+         \x20   cargo install --path <teksilo checkout>/crates/cargo-teksilo --locked\n\
+         \n\
+         Both routes install ONE binary per machine, so switching between two\n\
+         apps on different minors means reinstalling. To keep both, install the\n\
+         second with `--root <dir>` and put that `<dir>/bin` first on PATH for\n\
+         that tree, or skip installing and run the tool straight out of the\n\
+         framework checkout with `cargo run -p cargo-teksilo -- teksilo <args>`.\n\
+         \n\
          DO NOT answer teksilo API questions from prior knowledge — the surface\n\
          differs between these versions. Read the resolved source instead, or ask\n\
          the user which version they intend."
@@ -185,6 +197,26 @@ mod tests {
         let t = refusal_text("0.9.2", "0.12.1", "symbol lookup");
         assert!(t.contains("DO NOT answer teksilo API questions from prior knowledge"));
         assert!(t.contains("cargo install cargo-teksilo --version 0.9.2 --locked"));
+    }
+
+    #[test]
+    fn the_refusal_offers_a_route_for_an_unpublished_version() {
+        // The crates.io line is the remedy for an app that resolved teksilo
+        // from the registry. An app pinning the framework by `path` or `git`
+        // — the normal shape for one developed alongside it — resolves a
+        // version that was never published, so `cargo install --version` for
+        // it fails with "could not find `cargo-teksilo` in registry". A model
+        // reading a remedy that cannot work is back to guessing, which is the
+        // one thing this message exists to prevent. Publication is not
+        // observable offline, so both routes are printed unconditionally
+        // rather than branched on the resolved source: a path dep on a
+        // published tag and a private-registry dep each break the branch in
+        // opposite directions.
+        let t = refusal_text("0.14.0", "0.12.1", "search");
+        assert!(t.contains("cargo install --path"));
+        assert!(t.contains("crates/cargo-teksilo"));
+        // And a way to keep two trees working without reinstalling per tree.
+        assert!(t.contains("cargo run -p cargo-teksilo"));
     }
 
     #[test]

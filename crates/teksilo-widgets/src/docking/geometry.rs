@@ -204,6 +204,13 @@ impl SideLayout {
     /// band collapses **completely** (the vertical rail can't stand alone in a
     /// zero-depth band the way a leading/trailing rail can in a full-height
     /// column) — the app offers an external button to reveal it again.
+    ///
+    /// Folding the rail into the depth instead is not the missing fix:
+    /// [`SideLayout`] carries a single `rail_thickness` scalar, which on a
+    /// leading / trailing column is a width with a *free* height and here would
+    /// be a width with a *constrained* one. That is a model mismatch, not an
+    /// oversight — see the Top / Bottom arm of [`split_side`] for what paying
+    /// for it would cost.
     fn band_depth(&self) -> f32 {
         self.content_extent() + self.gutter_extent()
     }
@@ -450,6 +457,18 @@ fn split_side(
             };
             let content = layout.content_extent() * scale;
             let gutter = layout.gutter_extent() * scale;
+            // The rail rect takes `region.height` — and for a band that *is*
+            // the depth (`t` / `b` = `band_depth()` = content + gutter), so a
+            // hidden band hands the rail a zero-high rect. Relaxing
+            // `rail_only`'s `region.height > 0.0` guard to keep the rail alive
+            // here was proposed, accepted, and then retracted: the guard is a
+            // symptom, not the cause — past it the rect is still zero-high.
+            // Keeping a *vertical* rail visible across a hidden band means
+            // permanently reserving `N × item_extent` of band depth (three
+            // `Large` items ≈ 130 dp of always-present bottom band) purely to
+            // host a column of icons. The reopen affordance for Top / Bottom
+            // therefore needs a *horizontal* rail — a different widget — not a
+            // relaxed guard. `hidden_top_with_rail_fully_collapses` pins it.
             let rail = Rect::new(rail_x, region.y, rail_w, region.height);
             match side {
                 // Top: content on top, handle below it (inboard, toward centre).

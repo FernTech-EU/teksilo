@@ -176,7 +176,12 @@ fn exec_extractor(
 }
 
 /// A Python 3 interpreter, by the names it goes by on each platform.
-fn find_python() -> Option<PathBuf> {
+///
+/// `pub(crate)` so `status` can report the interpreter beside the search
+/// encoder. `symbol` is the one subcommand with an out-of-tree runtime
+/// dependency, and before `status` reported it the only way to discover
+/// that was to run `symbol` on a machine without Python and read the error.
+pub(crate) fn find_python() -> Option<PathBuf> {
     for name in ["python3", "python"] {
         if let Some(p) = which(name)
             && is_python3(&p)

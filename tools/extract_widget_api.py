@@ -280,6 +280,44 @@ ANIMATIONS_DIR = WIDGETS_SRC / "animations"
 # Aggregator files we never treat as a catalog entry.
 SKIP_FILES = {"lib.rs", "primitives.rs", "animations.rs", "layout_integration_tests.rs", "mod.rs"}
 
+# `lib.rs` is in SKIP_FILES because it is normally a pure aggregator — `mod`
+# declarations and `pub use` re-exports — and scanning it would list every
+# re-exported name a second time under the wrong file.
+#
+# For 9 of 39 crates that is simply false: they define public types directly in
+# `lib.rs`. teksilo-webview's `WebView` — the widget the whole crate exists for
+# — is one, and so are teksilo-fmt's `FmtConfig`/`FmtError`, both analytics
+# adapters, and teksilo-inspector's install extension. Skipped unconditionally,
+# those 14 types answered `unknown type`, which reads to an agent exactly like
+# "does not exist": the failure this tool is built against.
+#
+# So the rule checks itself rather than being asserted. A `lib.rs` that defines
+# nothing is still skipped, and the hijack the blanket skip was guarding
+# against cannot happen anyway: `build_registry`'s `type_re` matches `pub
+# struct|enum|type|trait` DECLARATIONS only, never `pub use`, so a scanned
+# `lib.rs` claims a name only when it is the file that declares it.
+LIB_RS_DEFINES_TYPES_RE = re.compile(
+    r"^\s*pub\s+(?:struct|enum|trait|union)\s+[A-Z]", re.MULTILINE
+)
+
+
+def _lib_rs_is_pure_aggregator(path: Path) -> bool:
+    """True when `path` (a crate's `lib.rs`) declares no public types of its
+    own, and so is the aggregator `SKIP_FILES` assumes it to be."""
+    try:
+        return LIB_RS_DEFINES_TYPES_RE.search(path.read_text(errors="ignore")) is None
+    except OSError:
+        return True
+
+
+def _is_scannable(p: Path) -> bool:
+    """Whether `build_registry` should read `p` for type declarations."""
+    if _is_test_file(p):
+        return False
+    if p.name == "lib.rs":
+        return not _lib_rs_is_pure_aggregator(p)
+    return p.name not in SKIP_FILES
+
 
 # ----------------------------------------------------------------------------
 # Umbrella re-export map
@@ -1425,7 +1463,7 @@ def build_registry() -> Registry:
         (
             p
             for p in src.rglob("*.rs")
-            if p.name not in SKIP_FILES and not _is_test_file(p)
+            if _is_scannable(p)
         ),
         key=lambda p: (len(p.relative_to(src).parts), str(p)),
     )
@@ -1526,17 +1564,85 @@ def _registry_for(key: str) -> Registry:
     return reg
 
 
+def _crate_owners(name: str) -> list[str]:
+    """Every `CRATE_SPECS` key whose registry resolves `name`, in declaration
+    order.
+
+    Used for the last-resort sweep in `_resolve_across_crates` and to report
+    the alternatives when more than one crate defines the name. Building 30
+    registries is only worth it on a miss, so every caller is on an error or
+    a cross-crate path; `_registry_for` memoizes, so the sweep is paid once.
+    """
+    owners: list[str] = []
+    for key in CRATE_SPECS:
+        try:
+            if resolve_name(_registry_for(key), name) is not None:
+                owners.append(key)
+        except Exception:
+            # A crate whose source is absent (a partial checkout, a
+            # feature-gated path) must not take the whole lookup down: it
+            # just cannot own the name.
+            continue
+    return owners
+
+
+def _cross_crate_hints(name: str, active_key: str, n: int = 5) -> list[str]:
+    """Close matches for `name` across *every* queryable crate, each tagged
+    with the `--crate` flag that reaches it.
+
+    Drawing hints from the active crate alone is how `symbol ListModel` used
+    to answer "Did you mean: splittermodel, model, list_source?" — three
+    teksilo-widgets names, none of them the teksilo-data type the user asked
+    for, and no mention that `--crate data` exists. A name that resolves
+    exactly in another crate never reaches here (the sweep in
+    `_resolve_across_crates` already returned it), so these really are typo
+    candidates.
+    """
+    pool: dict[str, str] = {}
+    for key in CRATE_SPECS:
+        try:
+            r = _registry_for(key)
+        except Exception:
+            continue
+        for candidate in set(r.type_to_file) | set(r.module_to_file):
+            pool.setdefault(candidate, key)
+    return [
+        m if pool[m] == active_key else f"{m} (--crate {pool[m]})"
+        for m in difflib.get_close_matches(name.lower(), list(pool), n=n)
+    ]
+
+
 def _resolve_across_crates(
     reg: Registry, current_key: str, name: str
 ) -> tuple[Path | None, str, Registry]:
     """Resolve `name` against the active crate's registry first; on a miss,
     consult `UMBRELLA_REEXPORTS` for a name reachable through
-    `teksilo::prelude` and retry against its owning crate's own registry.
+    `teksilo::prelude`; on a second miss, sweep every crate in `CRATE_SPECS`.
 
     Returns `(file, crate_key_used, registry_used)`. The caller needs
     `registry_used` (not just `reg`) to look up the resolved file's cfg gates
     — a file resolved in another crate's registry has its `cfg_by_file` entry
     recorded there, not in `reg`.
+
+    The sweep is the third step rather than the first because
+    `UMBRELLA_REEXPORTS` is *authoritative* where the two disagree: 81 names
+    (types and modules; 11 of them types)
+    are defined in more than one crate, and for those the hand-maintained
+    table names the one an app actually sees. `Theme` lives in teksilo-core,
+    teksilo-tokens and teksilo-inspector; only the table knows that
+    `teksilo::prelude::Theme` is teksilo-core's.
+
+    The sweep exists because the table's premise — "reachable through
+    `teksilo::prelude`" — is narrower than what a consumer can reach.
+    `teksilo` also re-exports its peer crates as modules (`pub use
+    teksilo_data as data;`), so `teksilo::data::ListModel` is perfectly
+    reachable while `ListModel` is in no prelude and so was in no table.
+    Asking for it printed `unknown widget 'ListModel'` with three unrelated
+    teksilo-widgets suggestions — for an agent, indistinguishable from "this
+    type does not exist", which is the failure mode this whole tool is built
+    against. The skill has always advertised `cargo teksilo symbol ListModel`;
+    the sweep is what makes that true, for 2247 names across 30 crates rather
+    than for the ~100 hand-listed ones.
     """
     fp = resolve_name(reg, name)
     if fp is not None:
@@ -1547,6 +1653,13 @@ def _resolve_across_crates(
         fp = resolve_name(other_reg, name)
         if fp is not None:
             return fp, owner, other_reg
+    for key in _crate_owners(name):
+        if key == current_key:
+            continue
+        other_reg = _registry_for(key)
+        fp = resolve_name(other_reg, name)
+        if fp is not None:
+            return fp, key, other_reg
     return None, current_key, reg
 
 
@@ -2579,6 +2692,54 @@ def run_self_tests() -> int:
         "umbrella redirect for 'Theme' should land on teksilo-core"
     )
 
+    # The umbrella table stays AUTHORITATIVE over the crate sweep. 'Theme' is
+    # defined in teksilo-core, teksilo-tokens and teksilo-inspector; only the
+    # table knows which one `teksilo::prelude::Theme` is. If the sweep ever
+    # runs first, this lands on whichever crate CRATE_SPECS declares earliest.
+    assert len(_crate_owners("Theme")) > 1, (
+        "test assumption: 'Theme' is defined in more than one crate"
+    )
+    assert UMBRELLA_REEXPORTS.get("Theme") == "core", (
+        "test assumption: the table pins Theme to teksilo-core"
+    )
+
+    # Cross-crate sweep: a peer-crate type reachable as `teksilo::data::…` but
+    # present in NO prelude, and therefore in no UMBRELLA_REEXPORTS row. The
+    # skill advertises `cargo teksilo symbol ListModel`; before the sweep that
+    # answered "unknown widget 'ListModel'" with three teksilo-widgets
+    # suggestions, which reads to an agent as "this type does not exist".
+    assert "ListModel" not in UMBRELLA_REEXPORTS, (
+        "test assumption: ListModel is not a prelude re-export"
+    )
+    swept_fp, swept_key, swept_reg = _resolve_across_crates(reg, "widgets", "ListModel")
+    assert swept_key == "data" and swept_fp is not None, (
+        f"crate sweep for 'ListModel' should land on teksilo-data, got {swept_key!r}"
+    )
+    assert swept_reg is not reg, "sweep must return the OWNING crate's registry, not the caller's"
+
+    # The other peer-crate types the skill names in the same breath.
+    for _name, _expect in (
+        ("TreeSlice", "data"),
+        ("SelectionModel", "data"),
+        ("MruList", "settings"),
+        ("SceneCard", "scene"),
+    ):
+        _fp, _key, _ = _resolve_across_crates(reg, "widgets", _name)
+        assert _fp is not None and _key == _expect, (
+            f"{_name} should resolve to --crate {_expect}, got {_key!r}"
+        )
+
+    # A genuine typo draws its hints from every crate, tagged with the flag
+    # that reaches each — the whole point is that the hint names `--crate`.
+    _hints = _cross_crate_hints("LstModel", "widgets")
+    assert any("--crate data" in h for h in _hints), (
+        f"typo hints should reach teksilo-data, got {_hints}"
+    )
+
+    # A name in no crate at all still fails, and fails loudly.
+    _none_fp, _, _ = _resolve_across_crates(reg, "widgets", "NoSuchTypeAnywhere")
+    assert _none_fp is None, "the sweep must not invent a resolution"
+
     print("extract_widget_api.py self-tests passed.", file=sys.stderr)
     return 0
 
@@ -2741,22 +2902,37 @@ def main(argv: list[str]) -> int:
         for name in args.widgets:
             fp, used_key, used_reg = _resolve_across_crates(reg, args.crate, name)
             if fp is None:
-                known = sorted(set(reg.type_to_file) | set(reg.module_to_file))
-                hints = difflib.get_close_matches(name.lower(), known, n=3)
+                hints = _cross_crate_hints(name, args.crate)
                 hint_str = (
                     f" Did you mean: {', '.join(hints)}?" if hints else ""
                 )
                 print(
-                    f"error: unknown widget '{name}'.{hint_str}", file=sys.stderr
+                    f"error: unknown type '{name}' in any teksilo crate."
+                    f"{hint_str}",
+                    file=sys.stderr,
                 )
                 return 2
             if used_key != args.crate:
-                print(
-                    f"note: '{name}' isn't in {SPEC.crate}; resolved via the "
-                    f"teksilo umbrella prelude to {CRATE_SPECS[used_key].crate} "
-                    f"(--crate {used_key}).",
-                    file=sys.stderr,
+                via = (
+                    "the teksilo umbrella prelude"
+                    if UMBRELLA_REEXPORTS.get(name) == used_key
+                    else "a crate sweep"
                 )
+                note = (
+                    f"note: '{name}' isn't in {SPEC.crate}; resolved via "
+                    f"{via} to {CRATE_SPECS[used_key].crate} "
+                    f"(--crate {used_key})."
+                )
+                others = [
+                    k
+                    for k in _crate_owners(name)
+                    if k not in (used_key, args.crate)
+                ]
+                if others:
+                    note += " Also defined in: " + ", ".join(
+                        f"{CRATE_SPECS[k].crate} (--crate {k})" for k in others
+                    ) + "."
+                print(note, file=sys.stderr)
             if fp not in seen:
                 seen.add(fp)
                 target_files.append(fp)

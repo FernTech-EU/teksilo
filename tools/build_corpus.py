@@ -38,7 +38,7 @@ index.json schema (schema version 2)::
       "chunks": [
         {
           "id": 0,
-          "kind": "guide",              // "guide" | "example"
+          "kind": "guide",              // "guide" | "example" | "footer"
           "path": "docs/layout-primitives.md",  // repo-relative, the ORIGINAL
           "heading_path": ["Layout Model", "Grow (positive slack)"],
           "text": "## Grow (positive slack)\\n...",   // this chunk, verbatim
@@ -169,6 +169,66 @@ DEFAULT_OUT_DIR = CORPUS_CRATE_DIR / "corpus"
 # hand-written prose. See the module docstring for why these are excluded.
 EXCLUDED_DOC_SUBDIRS = {"widgets", "data-collections", "settings", "scene"}
 EXCLUDED_TOP_LEVEL_DOCS = {"SUMMARY.md"}
+
+# A guide's closing navigation footer — "See also", "Reference", "Code
+# references" — is a list of links, not prose, and it is not retrievable
+# content: every target it names is either another corpus path (reachable on
+# its own merits) or a source file `cargo teksilo symbol` already answers for.
+#
+# Retrievable, it actively outranks the real answer. BM25 normalises by chunk
+# length, so a short footer whose link *paths* happen to carry the query's
+# words beats the long section that explains them. Measured against this
+# corpus, "how do I persist window size" ranked `docs/settings.md`'s 80-token
+# `## Reference` footer FIRST — a chunk that is six markdown links and no
+# sentences — while the section actually documenting `WindowStateService` came
+# sixth.
+#
+# So the chunk is TAGGED, not dropped. It stays in the index under
+# `kind == "footer"`, because `cargo teksilo show` reassembles a document from
+# its chunks and nothing else — dropping the tail chunk silently truncated
+# every guide that had one (28 of them at the time), which `show`'s own
+# `every_document_reconstructs_byte_exactly` caught. Retrieval filters the kind
+# out instead.
+#
+# The test is deliberately a CONJUNCTION of heading and body. Matching the
+# heading alone would drop a real "Reference" section that happens to carry
+# prose; matching link density alone drops prose sections that merely cite a
+# lot (a measured 32 chunks, including a paragraph of accessibility narrative
+# with one link per line). Together they select 30 chunks, all of them
+# genuine footers.
+FOOTER_HEADING_RE = re.compile(
+    r"^(\d+(\.\d+)*\.?\s+)?"
+    r"(see also|references?|related( references)?|code references?"
+    r"|files? references?|files? to know|where the code lives"
+    r"|further reading)$",
+    re.I,
+)
+MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
+FOOTER_LINK_DENSITY = 0.8
+
+
+def is_navigation_footer(heading_path: List[str], text: str) -> bool:
+    """True for a closing link-list footer, which is navigation rather than
+    content. See `FOOTER_HEADING_RE` for why both halves are required."""
+    if not heading_path or not FOOTER_HEADING_RE.match(heading_path[-1].strip()):
+        return False
+    # Fold continuation lines into the bullet they belong to before measuring.
+    # A footer bullet that happens to wrap would otherwise contribute a second,
+    # link-free line and dilute the density below the threshold — making the
+    # rule fire or not on where a line break landed, which is not a property
+    # anyone editing a guide should have to think about.
+    entries: List[str] = []
+    for ln in text.splitlines()[1:]:
+        if not ln.strip():
+            continue
+        if entries and (ln.startswith((" ", "\t")) and not ln.lstrip().startswith(("-", "*", "+"))):
+            entries[-1] += " " + ln.strip()
+        else:
+            entries.append(ln)
+    if not entries:
+        return False
+    linky = sum(1 for e in entries if MARKDOWN_LINK_RE.search(e))
+    return linky / len(entries) >= FOOTER_LINK_DENSITY
 
 TOKEN_RE = re.compile(r"[a-z0-9_]+")
 ATX_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
@@ -334,6 +394,7 @@ def chunk_markdown(text: str) -> List[Dict]:
                     "text": text_block,
                     "line_start": current_indices[lo],
                     "line_end": current_indices[hi - 1],
+                    "footer": is_navigation_footer(current_heading_path, text_block),
                 }
             )
         current_lines = []
@@ -640,7 +701,11 @@ def build_corpus(out_dir: Path) -> Tuple[Dict, int]:
             chunks.append(
                 {
                     "id": len(chunks),
-                    "kind": kind,
+                    # A navigation footer stays IN the corpus — `cargo teksilo
+                    # show` reassembles a document from its chunks, so dropping
+                    # one truncates the file it came from — but carries its own
+                    # kind so retrieval skips it. See `is_navigation_footer`.
+                    "kind": "footer" if raw.get("footer") else kind,
                     "path": path,
                     "heading_path": raw["heading_path"],
                     "text": raw["text"],

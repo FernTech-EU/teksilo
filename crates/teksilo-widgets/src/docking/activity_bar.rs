@@ -206,8 +206,11 @@ pub enum DockActionPlacement {
 /// like an activity item, but opens no panel — activating it just runs a
 /// closure.
 ///
-/// Declared on [`DockRail::action`], so (like the rail's slots) it is per-view
-/// app config, reconstructed each run. A rail action is deliberately **more
+/// Declared on [`DockRail::action`] rather than on
+/// [`DockingModel`] because nothing about an action is
+/// user-mutable, which is `state.rs`'s own test for what is not persisted —
+/// so (like the rail's slots) it is per-view app config, reconstructed each
+/// run. A rail action is deliberately **more
 /// restricted** than a real activity: it is never draggable, never hidable, has
 /// no "Move to" menu, and is never overflow-parked — it is reserved space. That
 /// matches every surveyed precedent (VS Code's fixed Accounts / Manage cluster;
@@ -775,6 +778,16 @@ impl Widget for DockActivityBar {
         // Right-click on empty rail space → the activities checklist + Activity
         // bar size (the affordance to restore a hidden activity once every item
         // is hidden, and to resize the rail).
+        //
+        // KNOWN DEFECT, live and unfiled: this menu goes on with no matching
+        // `.focusable(true)`, so the rail root is not a Tab stop and Shift+F10
+        // never reaches it. Once every activity on a Rail side is hidden it is
+        // the *only* restore path, and it is pointer-only — a keyboard-only
+        // user cannot get the side back. The Strip presentation has no such
+        // hole: its restore menu hangs off a real focusable `IconButton` in
+        // `bar_trailing_slot`. Fixing this means making the root focusable
+        // without adding a stray Tab stop in front of the tablist's own roving
+        // cycle, which is why it has never been a one-liner.
         let menu_model = self.model.clone();
         let menu_side = self.side;
         // Drag-and-drop: the rail accepts external activities (a whole tab
@@ -917,6 +930,17 @@ impl Widget for DockActivityBar {
         // stop the AT pass pruning it, and a screen reader would announce
         // "Leading activity bar, group" immediately followed by "Leading
         // activity bar, tab list".
+        //
+        // The one-line-looking alternative — keep `Role::TabList` here and
+        // narrow `Widget::accessibility_children()` to the item ids — is the
+        // wrong fix, and is the first thing anyone reaches for. That hook
+        // *restricts* the AT child set; it does not re-parent it. The slots,
+        // the overflow trigger and the action groups would not land under a
+        // valid parent, they would leave the AT tree entirely: an ARIA
+        // required-owned-elements violation traded for a WCAG 2.1.1 failure
+        // (operable controls with no accessible representation at all). The
+        // wrapper is correct because it gives the non-tab content a parent
+        // instead of deleting it.
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
@@ -940,7 +964,10 @@ struct RailCapacity {
     slots: usize,
     /// Declared [`DockAction`]s. Charged one stride each, which is **exact**:
     /// an action renders at the rail's own item extent, and the count is fixed
-    /// at build time because an action can never be hidden.
+    /// at build time because an action can never be hidden. Charged rather
+    /// than overflowed on purpose: VS Code's panel actions do overflow, and
+    /// its issue #46017 is trailing action icons silently vanishing under
+    /// space pressure with no menu to recover them.
     actions: usize,
     /// Non-hidden activity items competing for what's left.
     total: usize,

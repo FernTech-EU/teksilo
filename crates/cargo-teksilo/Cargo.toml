@@ -11,6 +11,7 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Agent tooling for apps built on the teksilo GUI framework: symbol lookup, doc search, and the automation probe harness"
+readme = "README.md"
 documentation = "https://docs.rs/cargo-teksilo"
 keywords = ["teksilo", "cargo-subcommand", "gui", "automation", "search"]
 categories = ["development-tools::cargo-plugins", "development-tools"]

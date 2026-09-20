@@ -58,6 +58,15 @@ enum Command {
     ///
     /// Accepts the API extractor's own flags — `--list`, `--all`, `-f json`,
     /// `--crate <key>` — which are forwarded verbatim.
+    ///
+    /// A bare name is resolved against every teksilo crate, so `symbol
+    /// ListModel` finds teksilo-data's without `--crate data`; the note on
+    /// stderr says which crate answered, and names the others when more than
+    /// one defines that name.
+    ///
+    /// Runs the Python 3 API extractor, so this one command needs `python3`
+    /// on PATH — `cargo teksilo status` reports whether it is there. Every
+    /// other subcommand works without it.
     Symbol {
         /// Type or module names, plus any extractor flag.
         ///

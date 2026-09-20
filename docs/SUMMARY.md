@@ -79,7 +79,8 @@
 
 # Specialized widgets
 
-  - [Rail actions & bar slots — design notes](docking-rail-actions-design.md)
+- [Docking layout](docking.md)
+  - [Horizontal activity rail (backlog)](docking-horizontal-rail.md)
 - [Table & tree-table views](table-view.md)
 - [Code & plain-text editors](code-editor.md)
 - [Log view (streaming)](log-view.md)

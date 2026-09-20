@@ -89,6 +89,12 @@ pub enum SearchError {
 // ---------------------------------------------------------------------------
 
 /// Which half of the corpus to search.
+///
+/// `Any` means either half — it does NOT mean every chunk. A guide's closing
+/// navigation footer is carried in the corpus under `kind == "footer"` so that
+/// `show` can reassemble a document in full, and no variant admits it: it is a
+/// list of links, and being short it outranks the prose it points at under
+/// BM25's length normalisation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KindFilter {
     Any,
@@ -99,7 +105,7 @@ pub enum KindFilter {
 impl KindFilter {
     fn admits(self, chunk: &Chunk) -> bool {
         match self {
-            KindFilter::Any => true,
+            KindFilter::Any => chunk.kind == "guide" || chunk.kind == "example",
             KindFilter::Guide => chunk.kind == "guide",
             KindFilter::Example => chunk.kind == "example",
         }
@@ -505,7 +511,27 @@ fn print_results(
         );
     }
 
-    for (rank, (id, score)) in ranked.iter().take(args.limit).enumerate() {
+    // The rank ordinal is printed; the score is NOT. The bracketed float this
+    // line used to carry was the tool's own "confidently wrong" artefact:
+    //
+    //  * It is unlabelled, so it reads as a confidence. Neither ranker has a
+    //    confidence to report — that is the whole reason fusion here is by
+    //    RANK and not by score (see `reciprocal_rank_fusion`), and an RRF
+    //    score is a monotone function of the ranks already printed, so the
+    //    number carried no decision-relevant signal a consumer could act on.
+    //  * Worse, the same bracket carried two incommensurable units. In
+    //    `Mode::Hybrid` it was an RRF score (~0.016 for one list, ~0.033 for
+    //    both); in `Mode::Lexical` — reached by `--lexical`, by a
+    //    `--no-default-features` build, and by all three vector-degradation
+    //    paths — it was a raw BM25 score (~8-11 against this corpus). Only
+    //    the header's mode label changed. An agent cross-checking a hybrid
+    //    query with `--lexical` saw the same document's "score" move by 300x
+    //    and had every reason to read that as relevance collapsing.
+    //
+    // Normalising to 0-1 instead would be worse still: it fabricates a
+    // calibration neither input has, which is exactly what the fusion
+    // docstring argues against.
+    for (rank, (id, _)) in ranked.iter().take(args.limit).enumerate() {
         let Some(chunk) = index.chunk(*id) else {
             continue;
         };
@@ -515,7 +541,7 @@ fn print_results(
             chunk.heading_path.join(" › ")
         };
         println!();
-        println!("{:>2}. [{:.4}] {}", rank + 1, score, chunk.path);
+        println!("{:>2}. {}", rank + 1, chunk.path);
         println!(
             "    {heading}  (lines {}-{})",
             chunk.line_start + 1,
@@ -715,6 +741,56 @@ mod tests {
         assert_eq!(bm25(&index, "list", KindFilter::Guide)[0].0, 0);
         assert_eq!(bm25(&index, "list", KindFilter::Example)[0].0, 1);
         assert_eq!(bm25(&index, "list", KindFilter::Any).len(), 2);
+    }
+
+    #[test]
+    fn a_navigation_footer_is_carried_but_never_retrieved() {
+        // Both halves matter, and they pull in opposite directions. The chunk
+        // must STAY in the corpus, because `show` reassembles a document from
+        // its chunks and nothing else — dropping it truncated at the tail,
+        // silently, every guide that had one (28 of them when this was found). And it must never be retrieved, because it is a list
+        // of link paths and BM25's length normalisation floats it above the
+        // prose it points at.
+        let mut index = toy_index(None, None);
+        let footer = Chunk {
+            id: 2,
+            kind: "footer".to_string(),
+            path: "docs/0.md".to_string(),
+            heading_path: vec!["See also".to_string()],
+            text: "## See also".to_string(),
+            line_start: 1,
+            line_end: 1,
+            crate_name: None,
+            // The same term the guide chunk carries, weighted far higher, so a
+            // filter that merely ranked it low would still surface it.
+            tokens: [(0u32, 99u32)].into_iter().collect::<BTreeMap<u32, u32>>(),
+            len: 99,
+            embedding: Some(ChunkEmbedding {
+                scale: 0.01,
+                values: vec![127, 0, 0],
+            }),
+        };
+        index.chunks.push(footer);
+
+        assert_eq!(index.chunks.len(), 3, "the footer is carried in the corpus");
+        for filter in [KindFilter::Any, KindFilter::Guide, KindFilter::Example] {
+            assert!(
+                bm25(&index, "list", filter).iter().all(|(id, _)| *id != 2),
+                "{filter:?} must not retrieve a footer",
+            );
+        }
+
+        let index = {
+            let mut i = toy_index(Some(ENCODER_ID), Some(ENCODER_DIM));
+            i.chunks.push(index.chunks[2].clone());
+            i
+        };
+        assert!(
+            vector_scores(&index, &[1.0, 0.0, 0.0], KindFilter::Any)
+                .iter()
+                .all(|(id, _)| *id != 2),
+            "the vector path must not retrieve a footer either",
+        );
     }
 
     #[test]

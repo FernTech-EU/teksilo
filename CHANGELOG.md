@@ -29,10 +29,16 @@ by crate for clarity, not because crates version independently.
     the resolved sources. Works with a crates.io, git or path dependency and
     needs no checkout: where one is reachable it runs that checkout's own
     extractor, otherwise it stages a throwaway repository shaped like this one
-    around the registry sources. A name reached through the `teksilo` umbrella
-    prelude resolves to its owning crate rather than reporting "not found".
-  - `cargo teksilo search "<question>"` — retrieval over the 69 hand-written
-    guides and 56 worked example crates, which reach no consumer today.
+    around the registry sources. A bare name resolves against **every** teksilo
+    crate, so `cargo teksilo symbol ListModel` answers with teksilo-data's
+    without `--crate data`; the note on stderr says which crate answered, and
+    names the others when more than one defines that name. Types declared
+    directly in a crate's `lib.rs` are included — teksilo-webview's `WebView`
+    among them. This is the one subcommand that needs `python3` on PATH.
+  - `cargo teksilo search "<question>"` — retrieval over the 70 hand-written
+    guides and 56 worked example crates, which reach no consumer today. Hits are
+    ranked and carry no score: neither ranker produces a confidence, and the
+    lexical and hybrid numbers are not in the same unit.
   - `cargo teksilo show <path>` — the document behind a search hit, in full,
     offline: `cargo teksilo show docs/scroll-area.md`, or just the lines the hit
     cited (`--lines 166-172`, 1-based and inclusive, as `search` prints them).
@@ -127,8 +133,9 @@ by crate for clarity, not because crates version independently.
     `AGENTS.md` is per-repository by definition.
 
   **`cargo teksilo status`** reports what is actually installed — every agent, in
-    both the project and the user scope, plus the search model and where it sits
-    on disk. It reads only, and its exit code never depends on what it finds.
+    both the project and the user scope, plus the search model, the Python 3
+    interpreter `symbol` needs, and where each sits on disk. It reads only, and
+    its exit code never depends on what it finds.
 
     It is the **dry run of `setup`**, not a second opinion: every agent row comes
     from `setup::inspect`, the read-only twin of the function that decides
@@ -168,14 +175,26 @@ by crate for clarity, not because crates version independently.
   install command instead of answering — serving 0.12 answers to an app on 0.9
   is worse than serving nothing, because `SplitView` was deleted outright in
   favour of `Splitter` between them and the wrong answer reads exactly like the
-  right one. A patch-level difference warns and proceeds.
+  right one. A patch-level difference warns and proceeds. The refusal prints
+  both install routes, because an app pinning teksilo by `path` or `git`
+  resolved a version that was never published and `cargo install --version`
+  for it cannot work: `--version <v> --locked` from the registry, or
+  `cargo install --path <checkout>/crates/cargo-teksilo --locked` from the
+  framework tree. It also names the two ways to keep apps on different minors
+  working at once — installing the second with `--root <dir>` and putting that
+  `<dir>/bin` first on PATH for that tree, or running the tool straight out of
+  a checkout with `cargo run -p cargo-teksilo`.
 
 - **`teksilo-corpus`** — the guides and the worked examples, chunked into a
   retrieval index and published per release so `cargo` resolves the corpus
   matching an app's Teksilo. It is one file: a chunk carries its own text, and
   its `path` names the original in this repository (`docs/scroll-area.md`,
   `examples/simple_button/src/main.rs`), so a search result cites something that
-  opens. Data only; it carries no ML dependency.
+  opens. Data only; it carries no ML dependency. A guide's closing navigation
+  footer — "See also", "Reference", "Code references" — is carried under its own
+  `kind` and excluded from retrieval rather than from the corpus: `show`
+  reassembles a document from its chunks, so dropping one truncates the file,
+  while indexing one lets a short list of links outrank the prose it points at.
 
 - **The automation probe harness**, written into a consumer's project by
   `cargo teksilo probe`. Python, stdlib only, embedded in the binary rather than
@@ -189,17 +208,27 @@ by crate for clarity, not because crates version independently.
   reported bounds below the viewport hits empty chrome. Three worked examples
   ship with it and run against this repository's own example apps in CI.
 
-- **Two new guides**: [Agent tooling](docs/agent-tooling.md) documents the above,
-  and [Scroll areas](docs/scroll-area.md) is the reference the docs did not have
-  — scrolling was covered only by an architecture chapter and the kinetic-scroll
-  physics, so an ordinary "how do I make this scrollable?" had nothing to land
-  on. That gap was found by running a retrieval test over the corpus, not by
-  reading the table of contents.
+- **Three new guides**: [Agent tooling](docs/agent-tooling.md) documents the
+  above; [Scroll areas](docs/scroll-area.md) is the reference the docs did not
+  have — scrolling was covered only by an architecture chapter and the
+  kinetic-scroll physics, so an ordinary "how do I make this scrollable?" had
+  nothing to land on; and [Docking layout](docs/docking.md) is the consumer
+  guide for `DockingLayout`, which had only a generated catalog page and a
+  design note written for reviewers rather than for users. Those gaps were found by
+  running retrieval tests over the corpus, not by reading the table of contents.
+  The design note is gone; its unstarted work is now
+  [Horizontal activity rail (backlog)](docs/docking-horizontal-rail.md).
 
 - **`tools/extract_widget_api.py` now covers every crate with a public API**
-  (30, up from 4). mdBook catalog generation stays scoped to the four cataloged
-  crates, so `docs/` is unchanged; the rest are queryable through `--crate`,
-  `--list`, `--all` and by name.
+  (30, up from 4), including the types a crate declares in its own `lib.rs`.
+  mdBook catalog generation stays scoped to the four cataloged crates, so
+  `docs/` is unchanged; the rest are queryable through `--crate`, `--list`,
+  `--all` and by name.
+
+- **`cargo-teksilo` ships a README**, so a crates.io reader learns what the
+  `semantic` default feature pulls in, that `--no-default-features` is a fully
+  working tool, where the model cache lives, and that `symbol` needs
+  `python3` — none of which was readable outside this repository.
 
 ### Changed
 

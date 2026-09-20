@@ -1662,6 +1662,17 @@ impl DockingModel {
                             panes.push(DockWidgetId::from_raw(*dock));
                         }
                     }
+                    // A tab whose panes were all pruned above (ids no longer
+                    // registered) and a tab that structurally never had any
+                    // arrive here identically — an empty `panes` — and this
+                    // guard drops both. That is why a dockless entry (a rail
+                    // action, say) is a structurally separate concept and not a
+                    // zero-pane `DockTab` variant: modelled that way it would be
+                    // indistinguishable from a dead tab and would be silently
+                    // deleted here on the first restart. Roughly ten call sites
+                    // also read `tab.panes.first()` as the tab's primary dock,
+                    // which a permanently-empty tab answers with a blank panel
+                    // rather than a compile error.
                     if !panes.is_empty() {
                         let splitter = SplitterModel::new(panes.len(), orientation);
                         // Best-effort: import sizes only when the pane count
