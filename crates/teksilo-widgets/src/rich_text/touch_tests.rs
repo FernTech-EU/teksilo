@@ -610,7 +610,9 @@ fn a_finger_tap_follows_a_link_in_an_editable_editor() {
     let followed = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
     let doc = TextDocument::new();
     doc.set_html(r#"<p><a href="https://example.invalid/">teksilo link text</a></p>"#)
-        .expect("a link");
+        .expect("a link")
+        .wait()
+        .expect("the import lands before the document is read");
     let sink = followed.clone();
     let mut h = Harness::new(
         RichTextEditor::editor(doc).on_link_activated(move |href, _ctx| {
@@ -635,7 +637,9 @@ fn a_plain_mouse_click_on_a_link_in_an_editable_editor_places_a_caret_instead() 
     let followed = Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
     let doc = TextDocument::new();
     doc.set_html(r#"<p><a href="https://example.invalid/">teksilo link text</a></p>"#)
-        .expect("a link");
+        .expect("a link")
+        .wait()
+        .expect("the import lands before the document is read");
     let sink = followed.clone();
     let mut h = Harness::new(
         RichTextEditor::editor(doc).on_link_activated(move |href, _ctx| {

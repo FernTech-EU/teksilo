@@ -4306,22 +4306,25 @@ fn editor_enter_then_enter_at_end_of_quote_exits_after_not_before() {
 
 #[test]
 fn link_click_callback_installs_without_panicking() {
-    // We can't reliably hit-test a link in a headless tree (no real
-    // typesetter layout means `HitRegion::Link` placement is
-    // non-deterministic under the mock backend). A behavioural test
-    // that actually clicks the link text would need integration-
-    // level infrastructure.
+    // The reason once given here — that `HitRegion::Link` placement is
+    // non-deterministic under the mock backend, so a link cannot be
+    // hit-tested headlessly — was a misreading, and `hrefs_after_click`
+    // below does exactly that, reliably. What was non-deterministic was the
+    // *document*: `set_html` is a long operation returning a handle, and
+    // dropping it joins nothing, so the click sometimes landed on a document
+    // the import had not reached yet. Every load here awaits now.
     //
-    // What we CAN lock in: installing the builder callback compiles,
-    // stores the closure on state, and dispatching a PointerDown on
-    // the widget doesn't panic even when the hit lands outside any
-    // link region. Regression guards the type signature + callback
-    // storage, not the dispatch itself.
+    // This test is still worth keeping for the narrower thing it locks in,
+    // which its neighbours do not: that installing the builder callback
+    // compiles, stores the closure on state, and that a PointerDown landing
+    // OUTSIDE any link region does not panic.
     use std::cell::RefCell;
     use std::rc::Rc;
 
     let doc = TextDocument::new();
     doc.set_html(r#"<p><a href="https://example.com/x">link</a></p>"#)
+        .unwrap()
+        .wait()
         .unwrap();
 
     let seen = Rc::new(RefCell::new(Vec::<String>::new()));
@@ -8807,6 +8810,8 @@ fn an_editor_with_no_callback_is_undisturbed() {
 fn link_only_doc() -> TextDocument {
     let doc = TextDocument::new();
     doc.set_html(r#"<p><a href="https://example.com/x">linklinklink</a></p>"#)
+        .unwrap()
+        .wait()
         .unwrap();
     doc
 }
