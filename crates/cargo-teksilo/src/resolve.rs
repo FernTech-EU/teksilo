@@ -205,10 +205,25 @@ pub fn resolution_from_metadata(meta: &serde_json::Value) -> Result<Resolution, 
     Ok(Resolution { crates, version })
 }
 
-/// `teksilo` itself, or any `teksilo-…` member — but not an unrelated package
-/// that merely starts with the same letters (`teksilonium`).
+/// The two external siblings whose types a consumer reaches through teksilo.
+///
+/// `teksilo-text` re-exports `text_document` wholesale — an app writes
+/// `teksilo::text_document::TextDocument` — and ~20 `text_typeset` types by
+/// name. They are ordinary crates.io dependencies on their own release
+/// cadence, so they are not `teksilo-…` and were filtered out of the
+/// resolution; the consequence was `symbol TextDocument` reporting that a
+/// public, documented type does not exist.
+///
+/// Admitting them here is enough: everything downstream is already generic
+/// over "a resolved crate with sources", and `extract_widget_api.py` carries a
+/// `CRATE_SPECS` entry for each.
+const EXTERNAL_SIBLINGS: [&str; 2] = ["text-document", "text-typeset"];
+
+/// `teksilo` itself, any `teksilo-…` member, or one of the two
+/// [`EXTERNAL_SIBLINGS`] — but not an unrelated package that merely starts
+/// with the same letters (`teksilonium`).
 fn is_teksilo_package(name: &str) -> bool {
-    name == "teksilo" || name.starts_with("teksilo-")
+    name == "teksilo" || name.starts_with("teksilo-") || EXTERNAL_SIBLINGS.contains(&name)
 }
 
 /// Which package's version *is* "the teksilo version".

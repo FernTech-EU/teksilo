@@ -267,6 +267,30 @@ CRATE_SPECS: dict[str, CrateSpec] = {
     # not add anything new here) — distinct from the crates it merely
     # re-exports, each of which already has its own entry above.
     "teksilo": CrateSpec("teksilo", "teksilo", "umbrella", "Umbrella Crate", "Umbrella", False, False),
+
+    # --- The two external siblings.
+    #
+    # Not teksilo crates and not in this workspace: `text-document` and
+    # `text-typeset` are ordinary crates.io dependencies, maintained alongside
+    # Teksilo and released on their own cadence. They are here because the
+    # question this tool answers is "what can the app I am writing reach?", and
+    # the answer includes them: `teksilo-text` re-exports `text_document`
+    # wholesale (so a consumer writes `teksilo::text_document::TextDocument`)
+    # plus ~20 `text_typeset` types by name (`CursorAffinity`, `HitTestResult`,
+    # `RenderFrame`, `FontFaceId`, …). Before these entries, `symbol
+    # TextDocument` answered "unknown type … Did you mean textwidget?" about a
+    # type that is public, documented and load-bearing for every text surface
+    # in the framework — the confidently-wrong answer this tool exists to stop.
+    #
+    # `src` resolves to `crates/<name>/src`, which does NOT exist in a
+    # framework checkout — these two live outside it. That is not a problem to
+    # fix but the normal case: `cargo teksilo symbol` stages the consumer's
+    # *resolved* sources into exactly that layout, so the entries are live
+    # where the question gets asked and inert (via `MissingCrateSource`) where
+    # it does not. `--list` / `--all` / the corpus build skip them in-repo for
+    # the same reason.
+    "text-document": CrateSpec("text-document", "text_document", "text-document", "Rich Text Document", "Text", False, False),
+    "text-typeset": CrateSpec("text-typeset", "text_typeset", "text-typeset", "Typesetter", "Text", False, False),
 }
 
 # The active crate, set by `main()` from `--crate` (default: widgets).
@@ -1538,6 +1562,24 @@ def resolve_name(reg: Registry, name: str) -> Path | None:
     return None
 
 
+class MissingCrateSource(Exception):
+    """A `CRATE_SPECS` entry whose `src/` is not on disk in this checkout.
+
+    Not every entry exists everywhere. The two external siblings are the
+    standing case — `text-document` / `text-typeset` are crates.io packages
+    that a consumer resolves and `cargo teksilo symbol` stages beside the
+    teksilo crates, while a framework checkout has no `crates/text-document/`
+    at all — and a partial or feature-gated checkout is the same shape.
+
+    This is a plain `Exception` on purpose. `build_registry()` raises
+    `SystemExit` for the *active* crate, which is right when the user named it
+    with `--crate`; but `SystemExit` derives from `BaseException`, so the
+    `except Exception` in `_crate_owners` never caught it and one absent crate
+    took down every cross-crate lookup — exactly the case its comment claimed
+    to tolerate.
+    """
+
+
 _registry_cache: dict[str, Registry] = {}
 
 
@@ -1553,6 +1595,8 @@ def _registry_for(key: str) -> Registry:
     """
     if key in _registry_cache:
         return _registry_cache[key]
+    if not CRATE_SPECS[key].src.exists():
+        raise MissingCrateSource(key)
     global SPEC
     prev = SPEC
     try:
