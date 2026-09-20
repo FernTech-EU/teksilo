@@ -2065,11 +2065,47 @@ impl WidgetTree {
         self.cancel_all_pointers(crate::pointer::CancelReason::ModalOpened, &mut noop);
     }
 
+    /// Run the dismissal callbacks the overlay manager parked.
+    ///
+    /// The manager cannot run them itself: they take an `EventContext` and it
+    /// has no tree. It is called from `dormant_dismissed_content`, which every
+    /// dismissal path reaches while still holding `ops` and *before* focus
+    /// returns to the trigger — so `on_dismiss` keeps the ordering its callers
+    /// document and depend on (`present_in_tree_modal_request` restores the
+    /// pre-modal `:focus-visible` modality in one, and the trigger must paint
+    /// with the restored value).
+    pub(super) fn run_pending_dismiss_callbacks(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        // A callback is allowed to dismiss another overlay, which parks more
+        // and re-enters here through that overlay's own teardown. Bail on the
+        // inner call and let the outer loop collect them: one level deep by
+        // construction, not by luck.
+        if self.draining_dismiss.replace(true) {
+            return;
+        }
+        // Bounded rather than `while`: a pair of callbacks that dismiss each
+        // other's overlay would otherwise spin. Eight is far above any real
+        // cascade and the excess stays parked rather than being lost.
+        for _ in 0..8 {
+            let pending = self.overlay_manager.take_pending_dismiss();
+            if pending.is_empty() {
+                break;
+            }
+            for (cb, reason) in pending {
+                self.run_with_event_context(&mut *ops, |ctx| cb(reason, ctx));
+            }
+        }
+        self.draining_dismiss.set(false);
+    }
+
     pub(super) fn dormant_dismissed_content(
         &mut self,
         content_ids: &[WidgetId],
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        // Before anything is parked: the callback may still want to read the
+        // content it is being told about, and its documented position is
+        // during dismissal, ahead of the focus restore below.
+        self.run_pending_dismiss_callbacks(&mut *ops);
         // Reset any tooltip entries that match a dismissed content
         // id so the next hover starts fresh — without this, sticky
         // tooltips dismissed via Escape/click-outside would keep

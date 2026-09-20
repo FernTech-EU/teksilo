@@ -225,13 +225,13 @@ def modal_opened(session, before: set[int]) -> bool:
 def result_readout(session) -> str | None:
     """The demo's own "Last result:" line, once a MessageBox has answered.
 
-    Matched on the `escape=` the app formats into it rather than on position:
-    the readout is one of ~20 labels in a `ScrollArea` and its index moves
-    whenever anything above it reflows.
+    Matched on the `dismissal=` the app formats into it rather than on
+    position: the readout is one of ~20 labels in a `ScrollArea` and its index
+    moves whenever anything above it reflows.
     """
     for node in tree.nodes(session, window_id=MAIN):
         value = str(node.get("value") or "")
-        if node.get("role") == "Label" and "escape=" in value:
+        if node.get("role") == "Label" and "dismissal=" in value:
             return value
     return None
 
@@ -335,9 +335,11 @@ def message_box_leg(session, report: Report) -> None:
     dismissed(session, report, modal, native, "Escape")
     answer = result_readout(session)
     report.check(
-        answer is not None and "escape=true" in answer,
+        answer is not None and "dismissal=Escape" in answer,
         f"…through its escape button, which the app recorded: {answer!r}. The "
-        "window vanishing is not on its own evidence that the right path ran",
+        "modal vanishing is not on its own evidence that the right path ran — "
+        "and the readout names the route, so a click-outside cannot pass as "
+        "an Escape",
     )
 
 

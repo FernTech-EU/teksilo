@@ -43,6 +43,34 @@ pub(crate) use safe_triangle::point_in_safe_triangle;
 /// user notices anything is stuck.
 pub(crate) const SAFE_REGION_BUDGET: Duration = Duration::from_millis(600);
 
+/// Why an overlay went away.
+///
+/// The dismissal routes were previously indistinguishable at the callback,
+/// which is what made a dismissed `MessageBox` unable to say whether the user
+/// had pressed Escape, clicked outside, or been closed out from under by an
+/// ancestor — three answers an application owes its caller and could not tell
+/// apart. Five of the manager's dismissal entry points already encode the
+/// reason in their own identity; this carries it the rest of the way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DismissReason {
+    /// The user pressed Escape.
+    Escape,
+    /// The user pressed outside the overlay's bounds — the scrim, or simply
+    /// the rest of the window.
+    OutsidePress,
+    /// The pointer left the overlay and its anchor, under
+    /// [`DismissBehavior::PointerLeave`].
+    PointerLeave,
+    /// An ancestor overlay was dismissed and took this one with it. The
+    /// ancestor's own callback receives the reason that actually happened;
+    /// only the descendants it drags along see this.
+    Cascade,
+    /// The application asked: an explicit `dismiss`, `ctx.dismiss_modal()`, a
+    /// widget closing its own overlay, or a sibling replacing it.
+    Programmatic,
+}
+
 /// Callback invoked by the framework when an overlay is dismissed —
 /// regardless of the dismiss path (Escape, click outside, pointer
 /// leave, explicit API call, cascade). The anchor widget uses this
@@ -54,7 +82,18 @@ pub(crate) const SAFE_REGION_BUDGET: Duration = Duration::from_millis(600);
 /// overlay is removed from the stack. `Fn` rather than `FnOnce`
 /// simply because it's easier to pass around by `Rc`; the
 /// framework only invokes it once.
-pub type OverlayDismissCallback = Rc<dyn Fn()>;
+///
+/// # Why it takes an `EventContext`
+///
+/// It did not, and that cost a dismissed modal its result: `MessageBox` and
+/// `InputDialog` both report through a `Fn(.., &mut EventContext)`, so a
+/// callback with no context could not deliver one and the user's answer was
+/// dropped on every route except a button press. The manager cannot mint a
+/// context — it has no tree — so it no longer invokes these itself: it parks
+/// them (`OverlayManager::take_pending_dismiss`, crate-private) and the tree
+/// runs them at the point it already holds a `WindowOps`, still before focus
+/// is restored to the trigger.
+pub type OverlayDismissCallback = Rc<dyn Fn(DismissReason, &mut crate::widget::EventContext)>;
 
 /// Unique identifier for an active overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -316,6 +355,10 @@ pub(crate) struct OverlayFadeState {
     /// considers the overlay ready for removal once
     /// `Instant::now() - start_real >= duration`.
     pub dismissing_started_real: Option<Instant>,
+    /// Why the dismissal that started this fade-out happened. Read when the
+    /// tween completes, so a faded overlay reports the reason the user
+    /// produced rather than the bookkeeping that removed it a frame later.
+    pub dismiss_reason: Option<DismissReason>,
     /// `Some(start_sim)` set in lockstep with `dismissing_started_real`
     /// using the tree's `sim_clock`. The sim-clock processor uses
     /// it for deterministic headless tests.
@@ -498,6 +541,13 @@ pub struct OverlayManager {
     /// has changed without polling. Mirrors the
     /// `ShortcutRegistry::version` pattern.
     version: Signal<u64>,
+    /// Callbacks whose overlays have already left the stack but which have
+    /// not run yet, because they need an `EventContext` this type cannot
+    /// build. Drained by `WidgetTree::run_pending_dismiss_callbacks`, which
+    /// is called before the dismissed content is parked — so the ordering
+    /// `on_dismiss` always had (fires during dismissal, before focus returns
+    /// to the trigger) is unchanged.
+    pending_dismiss: Vec<(OverlayDismissCallback, DismissReason)>,
 }
 
 impl OverlayManager {
@@ -508,6 +558,7 @@ impl OverlayManager {
             next_id: 1,
             sim_clock: Instant::now(),
             version: Signal::new(0),
+            pending_dismiss: Vec::new(),
         }
     }
 
@@ -629,6 +680,7 @@ impl OverlayManager {
                 opacity,
                 duration,
                 dismissing_started_real: None,
+                dismiss_reason: None,
                 dismissing_started_sim: None,
             });
         }
@@ -812,12 +864,22 @@ impl OverlayManager {
         &mut self,
         id: OverlayId,
     ) -> (Vec<WidgetId>, Option<WidgetId>) {
+        self.dismiss_with_focus_restore_because(id, DismissReason::Programmatic)
+    }
+
+    /// [`dismiss_with_focus_restore`](Self::dismiss_with_focus_restore),
+    /// saying why.
+    pub fn dismiss_with_focus_restore_because(
+        &mut self,
+        id: OverlayId,
+        reason: DismissReason,
+    ) -> (Vec<WidgetId>, Option<WidgetId>) {
         let focus_restore = self
             .stack
             .iter()
             .find(|overlay| overlay.id == id)
             .and_then(|overlay| overlay.focus_restore);
-        let dismissed = self.dismiss(id);
+        let dismissed = self.dismiss_because(id, reason);
         (dismissed, focus_restore)
     }
 
@@ -867,9 +929,10 @@ impl OverlayManager {
             .collect();
         self.stack
             .retain(|overlay| !to_dismiss.contains(&overlay.id));
-        for cb in callbacks {
-            cb();
-        }
+        // Everything here is, by construction, a descendant going away with
+        // its parent.
+        self.pending_dismiss
+            .extend(callbacks.into_iter().map(|cb| (cb, DismissReason::Cascade)));
 
         (dismissed_content, focus_restore)
     }
@@ -906,6 +969,12 @@ impl OverlayManager {
     /// typically submenus the user dismissed *via* the leaf, and a
     /// per-descendant tween would compete with the leaf's).
     pub fn dismiss(&mut self, id: OverlayId) -> Vec<WidgetId> {
+        self.dismiss_because(id, DismissReason::Programmatic)
+    }
+
+    /// [`dismiss`](Self::dismiss), saying why — which is what the overlay's
+    /// `on_dismiss` is handed.
+    pub fn dismiss_because(&mut self, id: OverlayId, reason: DismissReason) -> Vec<WidgetId> {
         // Fade gate: if the target overlay has fade and isn't
         // already fading out, kick off the fade-out and defer the
         // entire cascade. Stamps both real and sim start times in
@@ -935,9 +1004,10 @@ impl OverlayManager {
             let now_real = Instant::now();
             fade.dismissing_started_real = Some(now_real);
             fade.dismissing_started_sim = Some(sim_now);
+            fade.dismiss_reason = Some(reason);
             return Vec::new();
         }
-        self.dismiss_immediate(id)
+        self.dismiss_immediate(id, reason)
     }
 
     /// Internal: same shape as the original `dismiss`, but bypasses
@@ -946,7 +1016,11 @@ impl OverlayManager {
     /// when a fade-out tween has completed. Also used by the orphaned-
     /// overlay GC (`WidgetTree::gc_orphaned_overlays`), where fading is
     /// impossible because the content widget is already destroyed.
-    pub(crate) fn dismiss_immediate(&mut self, id: OverlayId) -> Vec<WidgetId> {
+    pub(crate) fn dismiss_immediate(
+        &mut self,
+        id: OverlayId,
+        reason: DismissReason,
+    ) -> Vec<WidgetId> {
         // Collect IDs to dismiss: the target + all descendants
         let mut to_dismiss = vec![id];
         let mut i = 0;
@@ -979,9 +1053,15 @@ impl OverlayManager {
         if !to_dismiss.is_empty() {
             self.bump_version();
         }
-        for cb in callbacks {
-            cb();
+        // The overlay that was actually asked to go gets the real reason; the
+        // descendants it drags with it get `Cascade`, which is the only thing
+        // that is true of them.
+        let mut callbacks = callbacks.into_iter();
+        if let Some(first) = callbacks.next() {
+            self.pending_dismiss.push((first, reason));
         }
+        self.pending_dismiss
+            .extend(callbacks.map(|cb| (cb, DismissReason::Cascade)));
         dismissed_content
     }
 
@@ -1020,13 +1100,13 @@ impl OverlayManager {
         &mut self,
         mut elapsed_done: impl FnMut(&OverlayFadeState) -> Option<bool>,
     ) -> Vec<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
-        let ready: Vec<(OverlayId, Option<WidgetId>)> = self
+        let ready: Vec<(OverlayId, Option<WidgetId>, Option<DismissReason>)> = self
             .stack
             .iter()
             .filter_map(|o| {
                 let fade = o.fade.as_ref()?;
                 if elapsed_done(fade)? {
-                    Some((o.id, o.focus_restore))
+                    Some((o.id, o.focus_restore, fade.dismiss_reason))
                 } else {
                     None
                 }
@@ -1034,8 +1114,9 @@ impl OverlayManager {
             .collect();
         ready
             .into_iter()
-            .map(|(id, focus_restore)| {
-                let dismissed = self.dismiss_immediate(id);
+            .map(|(id, focus_restore, reason)| {
+                let dismissed =
+                    self.dismiss_immediate(id, reason.unwrap_or(DismissReason::Programmatic));
                 (id, dismissed, focus_restore)
             })
             .collect()
@@ -1058,10 +1139,18 @@ impl OverlayManager {
     /// Dismiss the topmost overlay unconditionally (e.g., ArrowLeft for submenu cascading).
     /// Returns the overlay ID, content widget IDs, and focus_restore target.
     pub fn dismiss_top(&mut self) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
+        self.dismiss_top_because(DismissReason::Programmatic)
+    }
+
+    /// [`dismiss_top`](Self::dismiss_top), saying why.
+    pub fn dismiss_top_because(
+        &mut self,
+        reason: DismissReason,
+    ) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
         if let Some(overlay) = self.stack.last() {
             let id = overlay.id;
             let focus_restore = overlay.focus_restore;
-            let content_ids = self.dismiss(id);
+            let content_ids = self.dismiss_because(id, reason);
             Some((id, content_ids, focus_restore))
         } else {
             None
@@ -1110,7 +1199,7 @@ impl OverlayManager {
             .iter()
             .find(|o| o.id == target)
             .and_then(|o| o.focus_restore);
-        let content_ids = self.dismiss(target);
+        let content_ids = self.dismiss_because(target, DismissReason::Escape);
         Some((target, content_ids, focus_restore))
     }
 
@@ -1131,6 +1220,11 @@ impl OverlayManager {
     /// next click would observe stale-true and silently retoggle
     /// instead of reopening the menu.
     pub fn dismiss_all(&mut self) -> Vec<WidgetId> {
+        self.dismiss_all_because(DismissReason::Programmatic)
+    }
+
+    /// [`dismiss_all`](Self::dismiss_all), saying why.
+    pub fn dismiss_all_because(&mut self, reason: DismissReason) -> Vec<WidgetId> {
         let content_ids: Vec<WidgetId> = self.stack.iter().map(|o| o.content_id).collect();
         if content_ids.is_empty() {
             return content_ids;
@@ -1147,9 +1241,8 @@ impl OverlayManager {
             .collect();
         self.stack.clear();
         self.bump_version();
-        for cb in callbacks {
-            cb();
-        }
+        self.pending_dismiss
+            .extend(callbacks.into_iter().map(|cb| (cb, reason)));
         content_ids
     }
 
@@ -1158,6 +1251,15 @@ impl OverlayManager {
     /// overlay that *contains* the right-clicked widget (e.g. the modal the editor
     /// lives in) is kept, so the menu doesn't tear down its own host.
     pub fn dismiss_except(&mut self, keep: &std::collections::HashSet<WidgetId>) -> Vec<WidgetId> {
+        self.dismiss_except_because(keep, DismissReason::Programmatic)
+    }
+
+    /// [`dismiss_except`](Self::dismiss_except), saying why.
+    pub fn dismiss_except_because(
+        &mut self,
+        keep: &std::collections::HashSet<WidgetId>,
+        reason: DismissReason,
+    ) -> Vec<WidgetId> {
         let dismissed: Vec<WidgetId> = self
             .stack
             .iter()
@@ -1177,10 +1279,22 @@ impl OverlayManager {
             .collect();
         self.stack.retain(|o| keep.contains(&o.content_id));
         self.bump_version();
-        for cb in callbacks {
-            cb();
-        }
+        self.pending_dismiss
+            .extend(callbacks.into_iter().map(|cb| (cb, reason)));
         dismissed
+    }
+
+    /// Take the dismissal callbacks parked by the dismissal methods.
+    ///
+    /// The manager removes an overlay from the stack and collects its
+    /// `on_dismiss` before mutating (the re-entrancy discipline the collect
+    /// loops already had); it cannot *run* it, because the callback now needs
+    /// an `EventContext` and this type has no tree. So it parks it here and
+    /// `WidgetTree::run_pending_dismiss_callbacks` drains it.
+    ///
+    /// Draining is idempotent: a second call returns nothing.
+    pub(crate) fn take_pending_dismiss(&mut self) -> Vec<(OverlayDismissCallback, DismissReason)> {
+        std::mem::take(&mut self.pending_dismiss)
     }
 
     /// Whether there are any active overlays.
@@ -1426,7 +1540,7 @@ impl OverlayManager {
 
         let mut all_dismissed = Vec::new();
         for id in to_dismiss {
-            all_dismissed.extend(self.dismiss(id));
+            all_dismissed.extend(self.dismiss_because(id, DismissReason::OutsidePress));
         }
         (all_dismissed, focus_restore, toggle_anchors)
     }
@@ -1661,19 +1775,15 @@ mod tests {
         // (which flips `popover_open` back to `false`) must fire so
         // the next trigger click reopens the menu instead of
         // observing stale-true and silently retoggling.
-        use std::cell::Cell;
+        //
+        // The manager no longer *runs* these — a dismissal callback takes an
+        // `EventContext` and the manager has no tree — so what it owes is
+        // that every dismissed overlay's callback is parked for the tree to
+        // run. Losing one here loses it everywhere.
         use std::rc::Rc;
         let mut mgr = OverlayManager::new();
-        let fired_a = Rc::new(Cell::new(0_u32));
-        let fired_b = Rc::new(Cell::new(0_u32));
-        let cb_a: OverlayDismissCallback = {
-            let f = fired_a.clone();
-            Rc::new(move || f.set(f.get() + 1))
-        };
-        let cb_b: OverlayDismissCallback = {
-            let f = fired_b.clone();
-            Rc::new(move || f.set(f.get() + 1))
-        };
+        let cb_a: OverlayDismissCallback = Rc::new(|_, _| {});
+        let cb_b: OverlayDismissCallback = Rc::new(|_, _| {});
         mgr.show(OverlayRequest {
             content_id: fake_id(10),
             anchor: fake_id(1),
@@ -1697,15 +1807,22 @@ mod tests {
         let dismissed = mgr.dismiss_all();
         assert_eq!(dismissed.len(), 2);
         assert!(mgr.is_empty());
+        let parked = mgr.take_pending_dismiss();
         assert_eq!(
-            fired_a.get(),
-            1,
-            "first overlay's on_dismiss must fire exactly once",
+            parked.len(),
+            2,
+            "both overlays' on_dismiss must be parked for the tree to run",
         );
-        assert_eq!(
-            fired_b.get(),
-            1,
-            "second overlay's on_dismiss must fire exactly once",
+        assert!(
+            parked
+                .iter()
+                .all(|(_, reason)| *reason == DismissReason::Programmatic),
+            "`dismiss_all` is the application asking, so that is what the \
+             callbacks are told",
+        );
+        assert!(
+            mgr.take_pending_dismiss().is_empty(),
+            "draining is not repeatable — a second read must not re-run them",
         );
     }
 

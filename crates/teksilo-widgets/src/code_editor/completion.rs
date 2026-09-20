@@ -595,7 +595,7 @@ fn open_or_update(state: &SharedState, ctx: &mut EventContext, anchor: Point) {
 
     let on_dismiss: OverlayDismissCallback = {
         let open = open_sig.clone();
-        Rc::new(move || {
+        Rc::new(move |_, _| {
             if open.get() {
                 open.set(false);
             }

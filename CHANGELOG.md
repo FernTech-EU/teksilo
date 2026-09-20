@@ -201,6 +201,36 @@ by crate for clarity, not because crates version independently.
   crates, so `docs/` is unchanged; the rest are queryable through `--crate`,
   `--list`, `--all` and by name.
 
+### Changed
+
+#### Breaking changes
+
+- **`OverlayDismissCallback` is `Rc<dyn Fn(DismissReason, &mut EventContext)>`**,
+  where it was `Rc<dyn Fn()>`. A closure that wants neither gains two ignored
+  parameters — `Rc::new(move |_, _| …)`. The new `#[non_exhaustive]`
+  `teksilo_core::overlay::DismissReason` names the route that closed the
+  overlay: `Escape`, `OutsidePress`, `PointerLeave`, `Cascade` or
+  `Programmatic`. Both `OverlayRequest::on_dismiss` and
+  `ModalRequest::on_dismiss` carry the new type. The five `OverlayManager`
+  dismissal methods that do not name a reason — `dismiss`, `dismiss_top`,
+  `dismiss_all`, `dismiss_except` and `dismiss_with_focus_restore` — keep the
+  signatures they had and report `Programmatic`; their `dismiss_because`,
+  `dismiss_top_because`, `dismiss_all_because`, `dismiss_except_because` and
+  `dismiss_with_focus_restore_because` twins take the reason instead.
+- **Dismissing an overlay straight through `OverlayManager` no longer runs its
+  `on_dismiss`.** Code reaching through `WidgetTree::overlay_manager_mut()` to
+  dismiss calls `WidgetTree::dismiss_overlay` instead. The ordering is
+  unchanged — the callback still runs during dismissal, before focus returns to
+  the trigger.
+- **`MessageBoxResult::dismissed_by_escape` is replaced by `dismissal`.**
+  `MessageBoxDismissal` is `#[non_exhaustive]` and names the route — `Button`,
+  `Escape`, `ClickOutside` or `Programmatic` — where the boolean could only say
+  Escape or not, while its own rustdoc claimed to cover a click outside that no
+  code path could produce. `result.dismissed_by_escape` becomes
+  `result.dismissal == MessageBoxDismissal::Escape`; where the flag was read as
+  "the user did not choose a button", read `result.was_dismissed()`. `button`
+  is unchanged, and still carries the escape-button resolution on every route.
+
 ### Fixed
 
 - **A screen reader can open a `Dialog` that has a custom trigger.** The
@@ -218,6 +248,33 @@ by crate for clarity, not because crates version independently.
   modal is up, so there is no outside to click, and `ClickOutside` now means
   the same as `Manual` for that presentation. Linux and the BSDs were never
   affected — they present modals in-tree, where Escape already worked.
+- **A `MessageBox` dismissed with Escape or a press outside reports its
+  answer.** The dialog closed and the application was told nothing —
+  `on_result` ran only when a button was pressed, so a "Save changes?" prompt
+  could be waved away and leave the caller with no idea whether to save. This
+  is the in-tree presentation, which is what `ModalPresentation::Auto` resolves
+  to on Linux and the BSDs — every unix but macOS — and so was the default
+  behaviour there; `ModalPresentation::InTree` reaches it on any platform. Both
+  routes now resolve the escape button and report it, with
+  `MessageBoxResult::dismissal` naming which one closed the dialog, and a
+  button that has already answered is not reported over. Distinct from the
+  native-window fix above, which made Escape close such a window; this makes
+  the closing report.
+- **An `InputDialog` dismissed without a button press reports the
+  cancellation.** `None` is this dialog's cancellation payload, so a dismissal
+  that reported nothing was indistinguishable from a dialog still sitting open
+  — against the type's own contract, which promises the callback runs exactly
+  once when the user accepts or cancels. Escape, a press outside and an
+  application-driven dismissal now all deliver `None`. The in-tree presentation
+  only: a natively presented `InputDialog` — macOS and Windows — still reports
+  nothing when Escape closes it, and `MessageBox` reported correctly on that
+  presentation already.
+- **A `CommandPalette` runs its `on_dismiss` when the palette is dismissed.**
+  The hook fired only when a command was actually invoked, so a caller that
+  installed it to release whatever opening the palette reserved was never told
+  about the two commonest ways of closing the palette. `CommandPalette`
+  presents in-tree on every platform, so every platform was affected. It now
+  runs on every route, and once only.
 
 ## [0.12.1] - 2026-09-18
 

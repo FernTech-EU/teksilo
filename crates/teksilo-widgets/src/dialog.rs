@@ -731,7 +731,7 @@ impl Widget for Dialog {
         let is_open: Signal<bool> = ctx.signal(false);
         let dismiss_callback: OverlayDismissCallback = {
             let is_open = is_open.clone();
-            std::rc::Rc::new(move || {
+            std::rc::Rc::new(move |_, _| {
                 is_open.set(false);
             })
         };

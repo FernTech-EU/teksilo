@@ -82,8 +82,8 @@ impl OverlayDemo {
                         .escape_button(StandardButton::Cancel)
                         .on_result(move |r, _| {
                             record(format!(
-                                "Save changes? → {:?} (escape={})",
-                                r.button, r.dismissed_by_escape
+                                "Save changes? → {:?} (dismissal={:?})",
+                                r.button, r.dismissal
                             ));
                         }),
                 );
@@ -105,8 +105,8 @@ impl OverlayDemo {
                         .escape_button(StandardButton::No)
                         .on_result(move |r, _| {
                             record(format!(
-                                "Delete file? → {:?} (escape={})",
-                                r.button, r.dismissed_by_escape
+                                "Delete file? → {:?} (dismissal={:?})",
+                                r.button, r.dismissal
                             ));
                         }),
                 );
@@ -131,8 +131,8 @@ impl OverlayDemo {
                         .escape_button(StandardButton::Abort)
                         .on_result(move |r, _| {
                             record(format!(
-                                "Could not open → {:?} (escape={})",
-                                r.button, r.dismissed_by_escape
+                                "Could not open → {:?} (dismissal={:?})",
+                                r.button, r.dismissal
                             ));
                         }),
                 );
@@ -153,8 +153,8 @@ impl OverlayDemo {
                         .buttons(MessageBoxButtons::Ok)
                         .on_result(move |r, _| {
                             record(format!(
-                                "Welcome → {:?} (checkbox={}, escape={})",
-                                r.button, r.checkbox_checked, r.dismissed_by_escape
+                                "Welcome → {:?} (checkbox={}, dismissal={:?})",
+                                r.button, r.checkbox_checked, r.dismissal
                             ));
                         }),
                 );
@@ -177,8 +177,8 @@ impl OverlayDemo {
                         .escape_button(StandardButton::Ok)
                         .on_result(move |r, _| {
                             record(format!(
-                                "Custom buttons → {:?} (escape={})",
-                                r.button, r.dismissed_by_escape
+                                "Custom buttons → {:?} (dismissal={:?})",
+                                r.button, r.dismissal
                             ));
                         }),
                 );

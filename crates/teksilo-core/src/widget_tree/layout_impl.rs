@@ -152,9 +152,27 @@ impl WidgetTree {
                     .unwrap_or(false)
             })
             .collect();
-        for id in orphaned {
-            self.overlay_manager.dismiss_immediate(id);
+        if orphaned.is_empty() {
+            return;
         }
+        for id in orphaned {
+            // The content widget is already destroyed, so this is bookkeeping
+            // rather than anything the user did.
+            self.overlay_manager
+                .dismiss_immediate(id, crate::overlay::DismissReason::Programmatic);
+        }
+        // This is one of the two dismissal paths that does NOT park its
+        // content — the content is already gone — so it never reaches
+        // `dormant_dismissed_content`, where the dismissal callbacks are
+        // normally run. Draining here rather than leaving it to a later pass
+        // is what keeps an anchor's "is my overlay up?" state honest: the
+        // touch-selection handles re-raise on the next hold only because this
+        // tells the field its previous layer went away.
+        //
+        // `NoopWindowOps` because a GC runs from the layout pass, outside any
+        // dispatch — the same reason `dismiss_overlay` uses one.
+        let mut noop = crate::window::NoopWindowOps;
+        self.run_pending_dismiss_callbacks(&mut noop);
     }
 
     /// Every widget holding live interaction state a park would destroy:
@@ -853,6 +871,16 @@ impl WidgetTree {
         if self.arena.take_a11y_resized() {
             self.a11y_dirty = true;
         }
+
+        // Backstop. Every dismissal path is supposed to drain its callbacks
+        // itself — `dormant_dismissed_content` for the ones that park content,
+        // `gc_orphaned_overlays` for the one whose content is already gone —
+        // because draining *there* is what keeps the documented ordering
+        // (during dismissal, before focus returns to the trigger). This exists
+        // for the path nobody thought of: a parked callback that reaches the
+        // end of a frame has been stranded, and running it a frame late beats
+        // never. Costs a bool test when the queue is empty, which is always.
+        self.run_pending_dismiss_callbacks(&mut *ops);
     }
 }
 

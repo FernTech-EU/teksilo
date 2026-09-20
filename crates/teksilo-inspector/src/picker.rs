@@ -262,7 +262,7 @@ fn show_chain_menu(
         dismiss: DismissBehavior::EscapeOrClickOutside,
         layer: OverlayLayer::InTree,
         parent_overlay: None,
-        on_dismiss: Some(std::rc::Rc::new(move || {
+        on_dismiss: Some(std::rc::Rc::new(move |_, _| {
             // Click-outside / Escape: discard the chain and exit
             // picker mode. The Pick toolbar button can re-enter
             // the picker.

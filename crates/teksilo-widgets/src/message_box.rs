@@ -411,20 +411,67 @@ impl MessageBoxButtons {
 
 // ── Result ──────────────────────────────────────────────────────────
 
+/// How a [`MessageBox`] came to close.
+///
+/// This replaced a `dismissed_by_escape: bool` whose own rustdoc claimed to
+/// cover scrim-click as well — a contract no code path could produce, because
+/// the only writer was the Escape action. One field that names the route
+/// cannot drift from its documentation the way two overlapping booleans can,
+/// and the caller can finally tell "the user chose Cancel" from "the user
+/// waved the dialog away", which for a Save/Discard/Cancel prompt are
+/// different answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MessageBoxDismissal {
+    /// A button was chosen: clicked, or Enter on the default.
+    Button,
+    /// Escape, resolved to the escape button.
+    Escape,
+    /// A press outside the dialog, where its `ModalCloseBehavior` permits it.
+    ClickOutside,
+    /// It went away for another reason — the application dismissed it, or an
+    /// enclosing surface closed and took it along. `button` still carries the
+    /// escape-button resolution, because something has to be reported and
+    /// that is the same answer Escape would have given.
+    Programmatic,
+}
+
 /// Report passed to [`MessageBox::on_result`] when the dialog closes.
 #[derive(Debug, Clone, Copy)]
 pub struct MessageBoxResult {
     /// Which button fired — either by click, Enter (default button),
-    /// or Escape (escape button resolution).
+    /// or escape-button resolution for any of the dismissal routes.
     pub button: StandardButton,
     /// State of the "Don't show again" checkbox at dismiss time, when
     /// one was configured via [`MessageBox::show_again_checkbox`] or
     /// [`MessageBox::show_again_checkbox_state`]. `false` when no
     /// checkbox was attached.
     pub checkbox_checked: bool,
-    /// `true` when the user dismissed via Escape (or scrim-click, when
-    /// permitted) rather than clicking a button directly.
-    pub dismissed_by_escape: bool,
+    /// Which route closed the dialog.
+    pub dismissal: MessageBoxDismissal,
+}
+
+impl From<teksilo_core::overlay::DismissReason> for MessageBoxDismissal {
+    fn from(reason: teksilo_core::overlay::DismissReason) -> Self {
+        use teksilo_core::overlay::DismissReason as R;
+        match reason {
+            R::Escape => Self::Escape,
+            R::OutsidePress => Self::ClickOutside,
+            // A modal has no hover-out route, and the remaining reasons all
+            // mean "something other than the user's hand closed this".
+            _ => Self::Programmatic,
+        }
+    }
+}
+
+impl MessageBoxResult {
+    /// Whether the dialog went away without the user choosing a button.
+    ///
+    /// The predicate the old `dismissed_by_escape` flag was reached for, minus
+    /// the claim that Escape was the only way to get there.
+    pub fn was_dismissed(&self) -> bool {
+        self.dismissal != MessageBoxDismissal::Button
+    }
 }
 
 const SEVERITY_ICON_SIZE: f32 = 48.0;
@@ -505,19 +552,39 @@ impl State {
             .map(|(_, kind)| *kind)
     }
 
-    fn fire(&self, button: StandardButton, by_escape: bool, ctx: &mut EventContext) {
+    /// Report the answer and close the dialog. The path a button takes.
+    fn fire(&self, button: StandardButton, dismissal: MessageBoxDismissal, ctx: &mut EventContext) {
+        if self.report(button, dismissal, ctx) {
+            ctx.dismiss_modal();
+        }
+    }
+
+    /// Report the answer for a dialog that is **already being dismissed**, and
+    /// return whether this call is the one that reported.
+    ///
+    /// Split from [`fire`](Self::fire) for the `on_dismiss` path: the overlay
+    /// is mid-teardown there, and `ctx.dismiss_modal()` only sets a deferred
+    /// flag — asking again would spend it on whatever modal is topmost when it
+    /// is read, which for a dialog opened over another dialog means closing
+    /// the wrong one.
+    fn report(
+        &self,
+        button: StandardButton,
+        dismissal: MessageBoxDismissal,
+        ctx: &mut EventContext,
+    ) -> bool {
         if self.fired.replace(true) {
-            return;
+            return false;
         }
         let result = MessageBoxResult {
             button,
             checkbox_checked: self.checkbox.get(),
-            dismissed_by_escape: by_escape,
+            dismissal,
         };
         if let Some(handler) = self.on_result.borrow().as_ref() {
             handler(result, ctx);
         }
-        ctx.dismiss_modal();
+        true
     }
 
     fn resolve_escape_button(&self) -> Option<StandardButton> {
@@ -560,6 +627,11 @@ pub struct MessageBox {
     default_button_id: Cell<Option<WidgetId>>,
     root_child_id: Option<WidgetId>,
     state: Option<Rc<State>>,
+    /// Published by `build` so [`present`](Self::present)'s `on_dismiss` can
+    /// reach the state. `present` moves `self` into a deferred builder that
+    /// does not run until the modal is mounted, so the closure has to be
+    /// handed a slot rather than the `State` itself.
+    state_slot: Option<Rc<RefCell<Option<Rc<State>>>>>,
 }
 
 impl std::fmt::Debug for MessageBox {
@@ -595,6 +667,7 @@ impl MessageBox {
             default_button_id: Cell::new(None),
             root_child_id: None,
             state: None,
+            state_slot: None,
         }
     }
 
@@ -727,13 +800,35 @@ impl MessageBox {
     /// Present the MessageBox as a modal on top of `ctx`'s current
     /// tree. Consumes `self`; callers who need to present multiple
     /// dialogs with shared config should build a factory closure.
-    pub fn present(self, ctx: &mut EventContext) {
+    pub fn present(mut self, ctx: &mut EventContext) {
         let title = self.title.clone();
         let close_behavior = if self.severity == MessageBoxSeverity::Critical {
             ModalCloseBehavior::EscapeKey
         } else {
             ModalCloseBehavior::EscapeOrClickOutside
         };
+
+        // Report the answer however the dialog goes away, not only when a
+        // button is pressed. Escape and a press outside both close the modal
+        // through the overlay system, which never reached the button
+        // resolution below — so a dismissed dialog told its caller nothing,
+        // and a "Save changes?" prompt lost the user's answer outright. The
+        // `fired` latch makes this a no-op when a button already answered.
+        let slot: Rc<RefCell<Option<Rc<State>>>> = Rc::new(RefCell::new(None));
+        self.state_slot = Some(slot.clone());
+        let on_dismiss: teksilo_core::overlay::OverlayDismissCallback =
+            Rc::new(move |reason, ctx: &mut EventContext| {
+                let Some(state) = slot.borrow().clone() else {
+                    return;
+                };
+                let Some(button) = state.resolve_escape_button() else {
+                    return;
+                };
+                // `report`, not `fire`: the overlay is already being torn
+                // down, and `dismiss_modal` here would be spent on whatever
+                // modal is topmost when the deferred flag is read.
+                state.report(button, MessageBoxDismissal::from(reason), ctx);
+            });
 
         let dialog_title = self.title.clone();
         let mut inner = Some(self);
@@ -747,7 +842,8 @@ impl MessageBox {
             .presentation(ModalPresentation::Auto)
             .close_behavior(close_behavior)
             .title(title)
-            .size(460, 140),
+            .size(460, 140)
+            .on_dismiss(on_dismiss),
         );
     }
 
@@ -870,7 +966,7 @@ impl Widget for MessageBox {
                 Button::new(label)
                     .variant(variant)
                     .on_activate_fn(move |ctx| {
-                        state_for_btn.fire(kind, false, ctx);
+                        state_for_btn.fire(kind, MessageBoxDismissal::Button, ctx);
                     }),
             );
             if Some(kind) == self.default_button {
@@ -919,7 +1015,7 @@ impl Widget for MessageBox {
                     // making the button work.
                     let focused = ctx.focused().and_then(|id| state_enter.button_for(id));
                     if let Some(kind) = focused.or_else(|| state_enter.default_button.get()) {
-                        state_enter.fire(kind, false, ctx);
+                        state_enter.fire(kind, MessageBoxDismissal::Button, ctx);
                     }
                 }),
             );
@@ -934,7 +1030,7 @@ impl Widget for MessageBox {
             ctx.register_action(
                 Action::new(ESCAPE_INTENT_NAME).on_invoke(move |_intent, ctx| {
                     if let Some(kind) = state_escape.resolve_escape_button() {
-                        state_escape.fire(kind, true, ctx);
+                        state_escape.fire(kind, MessageBoxDismissal::Escape, ctx);
                     } else {
                         ctx.dismiss_modal();
                     }
@@ -947,6 +1043,9 @@ impl Widget for MessageBox {
             );
         }
 
+        if let Some(slot) = &self.state_slot {
+            *slot.borrow_mut() = Some(state.clone());
+        }
         self.state = Some(state);
         vec![root]
     }
@@ -1205,7 +1304,7 @@ mod tests {
         let result = captured.borrow().expect("result must be captured");
         assert_eq!(result.button, StandardButton::Ok);
         assert!(!result.checkbox_checked);
-        assert!(!result.dismissed_by_escape);
+        assert_eq!(result.dismissal, MessageBoxDismissal::Button);
     }
 
     #[test]
@@ -1280,7 +1379,7 @@ mod tests {
         tree.press_key(Key::Escape, Modifiers::NONE);
         let result = captured.borrow().expect("result must be captured");
         assert_eq!(result.button, StandardButton::Cancel);
-        assert!(result.dismissed_by_escape);
+        assert_eq!(result.dismissal, MessageBoxDismissal::Escape);
     }
 
     /// The override still works, and is how a box that asks something safe
@@ -1330,7 +1429,7 @@ mod tests {
             StandardButton::Cancel,
             "Enter must answer for the focused button, not for the default"
         );
-        assert!(!result.dismissed_by_escape);
+        assert_eq!(result.dismissal, MessageBoxDismissal::Button);
     }
 
     /// And the default still answers when the focus is not on a button.
@@ -1356,7 +1455,7 @@ mod tests {
         tree.press_key(Key::Enter, Modifiers::NONE);
         let result = captured.borrow().expect("result must be captured");
         assert_eq!(result.button, StandardButton::Ok);
-        assert!(!result.dismissed_by_escape);
+        assert_eq!(result.dismissal, MessageBoxDismissal::Button);
     }
 
     #[test]
@@ -1374,7 +1473,7 @@ mod tests {
         tree.press_key(Key::Escape, Modifiers::NONE);
         let result = captured.borrow().expect("result must be captured");
         assert_eq!(result.button, StandardButton::Cancel);
-        assert!(result.dismissed_by_escape);
+        assert_eq!(result.dismissal, MessageBoxDismissal::Escape);
     }
 
     #[test]

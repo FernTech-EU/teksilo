@@ -478,7 +478,7 @@ impl Widget for SearchField {
             let overlay_open = overlay_open.clone();
             let dismissed = dismissed.clone();
             let highlighted = highlighted.clone();
-            Rc::new(move || {
+            Rc::new(move |_, _| {
                 overlay_open.set(false);
                 // The dismiss arrived from the framework (Escape /
                 // outside click). Suppress re-opening until the user

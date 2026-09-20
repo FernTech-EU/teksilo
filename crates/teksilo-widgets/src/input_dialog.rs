@@ -170,17 +170,44 @@ impl InputDialog {
         let title = self.title.clone();
         let dialog_title = self.title.clone();
         let mut inner = Some(self);
+
+        // `None` is this dialog's cancellation payload, so a dismissal that
+        // reports nothing is indistinguishable from a dialog still sitting
+        // open. Escape and a press outside both close it through the overlay
+        // system and reached neither button, so the caller was told nothing —
+        // against this type's own contract, which promises the callback runs
+        // "exactly once when the user accepts or cancels". The `fired` latch
+        // makes this a no-op when a button already answered.
+        #[allow(clippy::type_complexity)]
+        let answered: Rc<
+            RefCell<
+                Option<(
+                    Rc<RefCell<Option<Box<dyn Fn(Option<String>, &mut EventContext)>>>>,
+                    Rc<std::cell::Cell<bool>>,
+                )>,
+            >,
+        > = Rc::new(RefCell::new(None));
+        let publish = answered.clone();
+
         ctx.present_modal(
             ModalRequest::deferred(move |tree| {
                 let dlg = inner
                     .take()
                     .expect("InputDialog present closure called twice");
-                tree.add(ModalContainer::new(InputDialogBody::new(dlg)).title(dialog_title.clone()))
+                let body = InputDialogBody::new(dlg);
+                *publish.borrow_mut() = Some((body.on_result.clone(), body.fired.clone()));
+                tree.add(ModalContainer::new(body).title(dialog_title.clone()))
             })
             .presentation(ModalPresentation::Auto)
             .close_behavior(ModalCloseBehavior::EscapeOrClickOutside)
             .title(title)
-            .size(420, 180),
+            .size(420, 180)
+            .on_dismiss(Rc::new(move |_reason, ctx: &mut EventContext| {
+                let Some((on_result, fired)) = answered.borrow().clone() else {
+                    return;
+                };
+                InputDialogBody::report(&on_result, &fired, None, ctx);
+            })),
         );
     }
 }
@@ -262,13 +289,30 @@ impl InputDialogBody {
         value: Option<String>,
         ctx: &mut EventContext,
     ) {
+        if Self::report(on_result, fired, value, ctx) {
+            ctx.dismiss_modal();
+        }
+    }
+
+    /// Report for a dialog that is **already being dismissed**, returning
+    /// whether this call is the one that reported.
+    ///
+    /// The `on_dismiss` path needs this: the overlay is mid-teardown, and
+    /// `ctx.dismiss_modal()` only sets a deferred flag, so asking again would
+    /// spend it on whatever modal is topmost when it is read.
+    fn report(
+        on_result: &Rc<RefCell<Option<Box<dyn Fn(Option<String>, &mut EventContext)>>>>,
+        fired: &Rc<std::cell::Cell<bool>>,
+        value: Option<String>,
+        ctx: &mut EventContext,
+    ) -> bool {
         if fired.replace(true) {
-            return;
+            return false;
         }
         if let Some(handler) = on_result.borrow().as_ref() {
             handler(value, ctx);
         }
-        ctx.dismiss_modal();
+        true
     }
 }
 

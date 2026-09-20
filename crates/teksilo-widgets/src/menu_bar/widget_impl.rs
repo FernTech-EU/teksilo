@@ -221,9 +221,9 @@ impl Widget for MenuBar {
                     revealed.set(true);
                     ctx.activate(bar_id);
                     let anchor = anchor_cell.get().unwrap_or(bar_id);
-                    let on_dismiss: Rc<dyn Fn()> = {
+                    let on_dismiss: teksilo_core::overlay::OverlayDismissCallback = {
                         let revealed = revealed.clone();
-                        Rc::new(move || revealed.set(false))
+                        Rc::new(move |_, _| revealed.set(false))
                     };
                     let request = OverlayRequest {
                         content_id: bar_id,

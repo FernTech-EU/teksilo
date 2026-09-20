@@ -728,7 +728,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
         let dismiss_cb: OverlayDismissCallback = {
             let popover_open = popover_open.clone();
             let on_close = on_close.clone();
-            Rc::new(move || {
+            Rc::new(move |_, _| {
                 popover_open.set(false);
                 if let Some(cb) = on_close.as_ref() {
                     cb();

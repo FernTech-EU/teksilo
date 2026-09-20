@@ -819,7 +819,7 @@ impl Widget for SplitButton {
                         dismiss: DismissBehavior::EscapeOrClickOutside,
                         layer: OverlayLayer::InTree,
                         parent_overlay: None,
-                        on_dismiss: Some(Rc::new(move || on_dismiss_open.set(false))),
+                        on_dismiss: Some(Rc::new(move |_, _| on_dismiss_open.set(false))),
                         fade_duration: None,
                     });
                     // The MenuList owns the keyboard-navigation handler
@@ -950,7 +950,7 @@ impl Widget for SplitButton {
                                 dismiss: DismissBehavior::EscapeOrClickOutside,
                                 layer: OverlayLayer::InTree,
                                 parent_overlay: None,
-                                on_dismiss: Some(Rc::new(move || on_dismiss_key.set(false))),
+                                on_dismiss: Some(Rc::new(move |_, _| on_dismiss_key.set(false))),
                                 fade_duration: None,
                             });
                             ctx.request_focus(menu_id);

@@ -175,6 +175,13 @@ struct PaletteState {
     /// to the best match without an effect that would fire mid-build.
     last_query: Rc<RefCell<String>>,
     on_dismiss: Rc<RefCell<Option<DismissFn>>>,
+    /// Whether the dismissal hook has already run.
+    ///
+    /// It is now reachable from two directions — the palette's own Escape /
+    /// activate path, and the modal's `on_dismiss` for the routes the overlay
+    /// system handles before the palette ever sees the key — and a caller
+    /// that installed it to release a resource must not be called twice.
+    dismissed: Rc<std::cell::Cell<bool>>,
 
     // ── Accessibility ───────────────────────────────────────────────────
     /// The result list's selection, mirroring [`Self::selected`].
@@ -203,6 +210,7 @@ impl PaletteState {
             top_index: Signal::new(0),
             last_query: Rc::new(RefCell::new(String::new())),
             on_dismiss: Rc::new(RefCell::new(None)),
+            dismissed: Rc::new(std::cell::Cell::new(false)),
             selection: SelectionModel::new(SelectionMode::Single),
             listbox_id: Signal::new(None),
             active_row: Signal::new(None),
@@ -277,13 +285,13 @@ impl PaletteState {
             return;
         }
         ctx.send_intent(Intent::new(cmd.intent));
-        let dismiss = self.on_dismiss.borrow().clone();
-        if let Some(dismiss) = dismiss {
-            dismiss(ctx);
-        }
+        self.dismiss(ctx);
     }
 
     fn dismiss(&self, ctx: &mut EventContext) {
+        if self.dismissed.replace(true) {
+            return;
+        }
         let dismiss = self.on_dismiss.borrow().clone();
         if let Some(dismiss) = dismiss {
             dismiss(ctx);
@@ -367,7 +375,20 @@ impl CommandPalette {
     /// Show the palette centered in the window, dismissed by Escape or a click
     /// outside. See the [module docs](self) on why this is window-level.
     pub fn present(self, ctx: &mut EventContext) {
-        let palette = if self.state.on_dismiss.borrow().is_none() {
+        // The palette's own Escape handler never runs for a presented palette:
+        // the overlay system claims Escape first and tears the modal down
+        // without it, and the same is true of a press outside. So a caller's
+        // `on_dismiss` — installed to release whatever opening the palette
+        // reserved — only ever fired when a command was actually run. Route
+        // the framework's dismissal into the same latched hook.
+        //
+        // Only the caller's own callback is carried here, never the default
+        // `ctx.dismiss_modal()` installed below: on this path the modal is
+        // already going away, and that call would set a deferred flag spent
+        // on whatever modal is topmost when it is read.
+        let user_dismiss = self.state.on_dismiss.borrow().clone();
+        let already_dismissed = self.state.dismissed.clone();
+        let palette = if user_dismiss.is_none() {
             self.on_dismiss(|ctx| ctx.dismiss_modal())
         } else {
             self
@@ -382,7 +403,15 @@ impl CommandPalette {
             })
             .presentation(ModalPresentation::InTree)
             .close_behavior(ModalCloseBehavior::EscapeOrClickOutside)
-            .size(PALETTE_WIDTH, PALETTE_HEIGHT),
+            .size(PALETTE_WIDTH, PALETTE_HEIGHT)
+            .on_dismiss(Rc::new(move |_reason, ctx: &mut EventContext| {
+                if already_dismissed.replace(true) {
+                    return;
+                }
+                if let Some(cb) = &user_dismiss {
+                    cb(ctx);
+                }
+            })),
         );
     }
 

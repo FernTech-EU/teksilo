@@ -633,7 +633,7 @@ impl Widget for DateTimeEdit {
             let self_ref = ctx.self_id();
             let dismiss_cb: OverlayDismissCallback = {
                 let popover_open = popover_open.clone();
-                Rc::new(move || {
+                Rc::new(move |_, _| {
                     popover_open.set(false);
                 })
             };

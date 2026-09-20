@@ -319,6 +319,11 @@ pub struct WidgetTree {
     sim_input_offset: std::time::Duration,
     /// Overlay manager for tooltips, menus, popovers.
     pub(crate) overlay_manager: crate::overlay::OverlayManager,
+    /// Re-entrancy guard for the dismissal-callback drain. A callback may
+    /// dismiss another overlay, whose teardown drains again; the inner drain
+    /// returns at once and the outer loop picks up whatever it parked, so the
+    /// recursion is one level deep by construction rather than by luck.
+    pub(crate) draining_dismiss: std::cell::Cell<bool>,
     /// Tooltip attachments: (anchor_id, content_id, text, delay, hover_start, overlay_id).
     tooltips: Vec<TooltipEntry>,
     /// Simulated-clock end of the tooltip "reshow session". While any tip is
@@ -931,6 +936,7 @@ impl WidgetTree {
             sim_input_offset: std::time::Duration::ZERO,
             focus_origin: None,
             overlay_manager: crate::overlay::OverlayManager::new(),
+            draining_dismiss: std::cell::Cell::new(false),
             tooltips: Vec::new(),
             tooltip_session_until_sim: None,
             tooltip_session_until_real: None,

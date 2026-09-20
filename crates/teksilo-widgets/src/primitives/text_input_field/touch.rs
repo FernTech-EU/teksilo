@@ -491,7 +491,7 @@ impl FieldTouch {
         what: DismissedOverlay,
     ) -> teksilo_core::overlay::OverlayDismissCallback {
         let weak = Rc::downgrade(self);
-        Rc::new(move || {
+        Rc::new(move |_, _| {
             if let Some(this) = weak.upgrade() {
                 match what {
                     DismissedOverlay::Toolbar => this.toolbar_wanted.set(false),

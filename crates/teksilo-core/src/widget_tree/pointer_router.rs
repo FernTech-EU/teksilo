@@ -599,7 +599,9 @@ impl WidgetTree {
             let top_id = self.overlay_manager.stack.last().map(|o| o.id);
             let top_is_back_navigable = top_id.is_some_and(|id| !self.overlay_is_host_surface(id));
             if nested_menu_overlays > 1 && top_is_back_navigable {
-                if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top()
+                if let Some((_id, content_ids, focus_restore)) = self
+                    .overlay_manager
+                    .dismiss_top_because(crate::overlay::DismissReason::Escape)
                 {
                     self.dormant_dismissed_content(&content_ids, &mut *ops);
                     if let Some(restore_id) = focus_restore

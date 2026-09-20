@@ -231,14 +231,16 @@ fn present_in_tree_modal_request(
     let restore_modality = focus_before_modal.is_some();
     let on_dismiss: Option<teksilo_core::overlay::OverlayDismissCallback> =
         if restore_modality || user_on_dismiss.is_some() {
-            Some(std::rc::Rc::new(move || {
-                if restore_modality {
-                    focus_visible_signal.set(focus_visible_before);
-                }
-                if let Some(cb) = &user_on_dismiss {
-                    cb();
-                }
-            }))
+            Some(std::rc::Rc::new(
+                move |reason, ctx: &mut teksilo_core::widget::EventContext| {
+                    if restore_modality {
+                        focus_visible_signal.set(focus_visible_before);
+                    }
+                    if let Some(cb) = &user_on_dismiss {
+                        cb(reason, ctx);
+                    }
+                },
+            ))
         } else {
             None
         };
@@ -4929,8 +4931,9 @@ mod tests {
         .expect("clicking a button reports its result");
 
         assert_eq!(seen.button, teksilo_widgets::StandardButton::Cancel);
-        assert!(
-            !seen.dismissed_by_escape,
+        assert_eq!(
+            seen.dismissal,
+            teksilo_widgets::MessageBoxDismissal::Button,
             "a deliberate button press is a choice, not a dismissal"
         );
     }
@@ -4955,9 +4958,10 @@ mod tests {
             teksilo_widgets::StandardButton::Cancel,
             "Escape must resolve to the declared escape button"
         );
-        assert!(
-            seen.dismissed_by_escape,
-            "and must be reported as a dismissal rather than a choice"
+        assert_eq!(
+            seen.dismissal,
+            teksilo_widgets::MessageBoxDismissal::Escape,
+            "and must name the route, not merely report that something happened"
         );
     }
 
@@ -4971,7 +4975,11 @@ mod tests {
              scrim-click, and no code path can currently produce it",
         );
         assert_eq!(seen.button, teksilo_widgets::StandardButton::Cancel);
-        assert!(seen.dismissed_by_escape);
+        assert_eq!(
+            seen.dismissal,
+            teksilo_widgets::MessageBoxDismissal::ClickOutside,
+            "a press outside is not Escape, and the caller can now tell"
+        );
     }
 
     /// `InputDialog` is the worse case: `None` *is* its cancellation
@@ -5386,8 +5394,11 @@ mod tests {
             .active_overlays()
             .last()
             .expect("modal overlay registered");
-        tree.overlay_manager_mut()
-            .dismiss_with_focus_restore(modal_overlay);
+        // Through the tree, not `overlay_manager_mut()`: the manager parks a
+        // dismissal callback rather than running it (it takes an
+        // `EventContext` and the manager has no tree), and `dismiss_overlay`
+        // is the door that drains it.
+        tree.dismiss_overlay(modal_overlay);
 
         assert!(
             !focus_visible.get(),
@@ -5427,8 +5438,11 @@ mod tests {
             .active_overlays()
             .last()
             .expect("modal overlay registered");
-        tree.overlay_manager_mut()
-            .dismiss_with_focus_restore(modal_overlay);
+        // Through the tree, not `overlay_manager_mut()`: the manager parks a
+        // dismissal callback rather than running it (it takes an
+        // `EventContext` and the manager has no tree), and `dismiss_overlay`
+        // is the door that drains it.
+        tree.dismiss_overlay(modal_overlay);
 
         assert!(
             focus_visible.get(),

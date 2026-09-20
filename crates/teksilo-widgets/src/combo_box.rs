@@ -811,7 +811,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // truthful about the popup state.
         let dismiss_callback: OverlayDismissCallback = {
             let is_open = self.is_open.clone();
-            Rc::new(move || {
+            Rc::new(move |_, _| {
                 if is_open.get() {
                     is_open.set(false);
                 }

@@ -193,7 +193,7 @@ pub use menu_item::MenuItem;
 pub use menu_list::{MenuList, MenuSeparator};
 pub use message_box::{
     ButtonRole, EventContextMessageBoxExt, MessageBox, MessageBoxButton, MessageBoxButtons,
-    MessageBoxResult, MessageBoxSeverity, StandardButton,
+    MessageBoxDismissal, MessageBoxResult, MessageBoxSeverity, StandardButton,
 };
 pub use notification::{
     ARCHIVE_FILE_NAME, ArchivedAction, ArchivedActionStyle, DEFAULT_ARCHIVE_LIMIT,

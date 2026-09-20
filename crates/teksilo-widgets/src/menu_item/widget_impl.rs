@@ -490,7 +490,7 @@ impl Widget for MenuItem {
         let safe_triangle_for_dismiss = self.safe_triangle.clone();
         let submenu_dismiss_callback: teksilo_core::overlay::OverlayDismissCallback = {
             let open = submenu_open_signal.clone();
-            std::rc::Rc::new(move || {
+            std::rc::Rc::new(move |_, _| {
                 open.set(false);
                 if let (Some(sub_id), Some(state_rc)) = (
                     submenu_content_id_for_dismiss,
