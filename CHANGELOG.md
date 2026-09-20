@@ -13,6 +13,24 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`cargo teksilo build-vectors` now runs on a Windows checkout.** Git for
+  Windows checks the tree out with CRLF, and `corpus/index.json` holds exactly
+  one raw newline — so the round-trip guard saw a one-byte difference and
+  refused to run, reporting that the Rust schema and `tools/build_corpus.py`
+  had diverged. They had not: the checkout had rewritten the file. The guard
+  now compares what the generator wrote rather than what Git handed the
+  platform. `cargo-teksilo`'s two corpus tests failed on Windows only for the
+  same reason and pass there now.
+- **Line endings are pinned to LF for everyone.** A new `.gitattributes`
+  normalises the working tree on every platform, so a Windows clone means the
+  same bytes as a Linux one. This is what the corpus depends on: `index.json`
+  is compared byte for byte, and every file the corpus quotes is reconstructed
+  line for line by `cargo teksilo show`. Existing Windows working trees keep
+  their CRLF files until refreshed — `git rm --cached -r . && git reset --hard`,
+  or a fresh clone.
+
 ## [0.13.0] - 2026-09-19
 
 ### Added

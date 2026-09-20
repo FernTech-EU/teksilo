@@ -717,8 +717,14 @@ mod tests {
         };
         let index = teksilo_corpus::index().unwrap();
         for (_, path) in documents(index) {
-            let original =
+            let on_disk =
                 std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+            // Corpus chunk text is stored with `\r` stripped — see
+            // `split_lines` in tools/build_corpus.py, which does that so a CRLF
+            // file yields the same lines in Python and in Rust. The oracle has
+            // to be normalised the same way, or on a Windows checkout this
+            // asserts `core.autocrlf` rather than the reconstruction.
+            let original = on_disk.replace("\r\n", "\n");
             let rebuilt = document_lines(index, path).unwrap().join("\n") + "\n";
             assert_eq!(rebuilt, original, "{path} did not reconstruct byte-exactly");
         }

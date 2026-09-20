@@ -40,6 +40,7 @@
 //! generator's line-slicing against the copied files next to `index.json`; the
 //! file now carries its own text, so the disk read is the whole of it.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use teksilo_corpus::{ChunkEmbedding, Index};
@@ -495,6 +496,34 @@ fn first_difference(a: &str, b: &str) -> Option<usize> {
         .or_else(|| (a.len() != b.len()).then(|| a.len().min(b.len())))
 }
 
+/// Undo a checkout's line-ending translation before the bytes are compared.
+///
+/// The round-trip guard asks whether the Rust schema still reproduces
+/// `tools/build_corpus.py`'s *structure* — key order, separators, escaping.
+/// A CRLF working tree is not an answer to that question, and answering it
+/// with one is actively misleading: the guard's error tells the reader the
+/// schema and the generator have diverged, which would send a maintainer
+/// looking for a field-order bug that does not exist.
+///
+/// Safe to apply unconditionally. [`serialize_index`] writes LF, and compact
+/// JSON holds exactly one raw newline — the trailing one. A raw CR cannot
+/// legally appear anywhere else, because JSON escapes control characters
+/// inside strings (`\r`, two characters, is what a carriage return in chunk
+/// text looks like here). So any CRLF in the file on disk was introduced by
+/// Git's `core.autocrlf` and nothing else, and on an LF checkout this borrows
+/// the input unchanged.
+///
+/// The repository's `.gitattributes` is what normally prevents this; this is
+/// the second line of defence, for a zip download, a `core.autocrlf` override
+/// or an editor that rewrote the file on save.
+fn untranslate_newlines(text: &str) -> Cow<'_, str> {
+    if text.contains("\r\n") {
+        Cow::Owned(text.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 /// Run `cargo teksilo build-vectors`.
 ///
 /// Returns the process exit code. Everything it prints is a summary; the
@@ -512,10 +541,13 @@ pub fn build(dir: &Path, args: &[String]) -> Result<i32, BuildError> {
             locate_index(dir).ok_or_else(|| BuildError::NoIndex(PathBuf::from(CORPUS_INDEX_REL)))?
         }
     };
-    let original = std::fs::read_to_string(&index_path).map_err(|source| BuildError::Read {
+    let on_disk = std::fs::read_to_string(&index_path).map_err(|source| BuildError::Read {
         path: index_path.clone(),
         source,
     })?;
+    // A CRLF working tree is a checkout artifact, not corpus content: compare
+    // what the generator wrote, not what Git handed this platform.
+    let original = untranslate_newlines(&on_disk);
     let mut index: Index = serde_json::from_str(&original)
         .map_err(|e| BuildError::Parse(index_path.clone(), e.to_string()))?;
 
@@ -822,7 +854,11 @@ mod tests {
         let Some(path) = locate_index(repo) else {
             return;
         };
-        let original = std::fs::read_to_string(&path).unwrap();
+        // `untranslate_newlines` because Git for Windows checks the tree out
+        // with CRLF: without it this asserts the checkout's newline policy
+        // rather than the schema, and fails on Windows only.
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        let original = untranslate_newlines(&on_disk);
         let index: Index = serde_json::from_str(&original).expect("committed index parses");
         let reserialized = serialize_index(&index).unwrap();
         assert_eq!(
@@ -830,5 +866,49 @@ mod tests {
             None,
             "the committed index.json does not round-trip through the Rust schema"
         );
+    }
+
+    #[test]
+    fn a_crlf_checkout_is_not_reported_as_schema_divergence() {
+        // The Windows failure this guards, reproduced on every platform: the
+        // committed index holds exactly one raw newline, so `core.autocrlf`
+        // moves exactly one byte — and the guard used to call that a diverged
+        // schema and refuse to build vectors.
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let Some(path) = locate_index(repo) else {
+            return;
+        };
+        let lf = std::fs::read_to_string(&path).unwrap();
+        let as_windows_checks_it_out = lf.replace('\n', "\r\n");
+        assert_ne!(lf, as_windows_checks_it_out, "the fixture must differ");
+
+        let index: Index = serde_json::from_str(&as_windows_checks_it_out).unwrap();
+        let reserialized = serialize_index(&index).unwrap();
+        assert_eq!(
+            first_difference(
+                &untranslate_newlines(&as_windows_checks_it_out),
+                &reserialized
+            ),
+            None,
+            "a CRLF checkout must round-trip like an LF one"
+        );
+    }
+
+    #[test]
+    fn untranslating_newlines_touches_crlf_and_nothing_else() {
+        assert_eq!(untranslate_newlines("{}\r\n"), "{}\n");
+        assert_eq!(untranslate_newlines("{}\n"), "{}\n");
+        // An escaped CR in chunk text is a backslash and an `r`, not a control
+        // byte, so it is not something this can reach.
+        assert_eq!(
+            untranslate_newlines(r#"{"t":"a\r\nb"}"#),
+            r#"{"t":"a\r\nb"}"#
+        );
+        // Borrowed, not copied, when there is nothing to undo.
+        assert!(matches!(untranslate_newlines("{}\n"), Cow::Borrowed(_)));
     }
 }

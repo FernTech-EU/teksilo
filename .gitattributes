@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+# Line endings are part of this repository's contract, not a local preference.
+#
+# Git for Windows checks out with `core.autocrlf=true` by default (so do the
+# GitHub Actions Windows runners), which rewrites every LF in the working tree
+# to CRLF. Two things here are byte-exact artifacts that a checkout must not
+# quietly rewrite:
+#
+#   * `crates/teksilo-corpus/corpus/index.json` — compact JSON holding exactly
+#     one raw newline, the trailing one. Reproducing its bytes through the Rust
+#     schema is a hard precondition of `cargo teksilo build-vectors`, which
+#     refuses to run when the round trip differs.
+#   * every file the corpus quotes — `cargo teksilo show` reconstructs those
+#     line for line from chunk text that `tools/build_corpus.py` stored with
+#     `\r` stripped (see its `split_lines`).
+#
+# Normalising the whole tree to LF is what makes a Windows checkout mean the
+# same bytes as a Linux one. Without it both of the above compare a translated
+# working tree against untranslated data and fail on Windows only.
+* text=auto eol=lf
+
+# Never newline-translate these, whatever the content heuristic decides.
+*.png  binary
+*.jpg  binary
+*.webp binary
+*.ttf  binary
