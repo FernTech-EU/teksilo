@@ -41,7 +41,7 @@ Feed it through the handle: `append("line")`, `append_line`, `append_lines(iter)
 
 A naive multi-line view over a growing document has two costs that grow without
 bound. `LogView` answers each; the numbers below are from
-[`text-typeset/docs/streaming-baseline.md`](../../text-typeset/docs/streaming-baseline.md)
+`text-typeset`'s own streaming baseline measurements
 (a 65-char log line, no-wrap, 16 px).
 
 ### Appending one line

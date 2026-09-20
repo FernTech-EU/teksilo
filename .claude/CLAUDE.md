@@ -458,7 +458,7 @@ teksilo-scene           Pannable/zoomable scene viewport (Qt QGraphicsScene equi
                      canvases, simple maps. Sits at the teksilo-widgets tier; depends on widgets so the
                      heavyweight tier can be any widget in the catalog. See docs/teksilo-scene.md +
                      docs/teksilo-scene-a11y.md.
-teksilo-text            TextBackend impl via text-typeset (external path dep)
+teksilo-text            TextBackend impl via text-typeset (external crates.io sibling)
 teksilo-i18n            Fluent-rs runtime: LocalizedString, I18nManager, locale resolution, file watcher.
                      Also locale-aware formatters: NumberFormatter / TeksiloDateTimeFormatter
                      (Signal<T> → Signal<String>), TeksiloDateTime, plus a custom DATETIME() Fluent
@@ -550,7 +550,7 @@ teksilo-fmt / cargo-teksilo-fmt / teksilo-fmt-lsp
 
 Dependency flow: `tokens → canvas → core → data → widgets`, `canvas → text`, `core + data → settings`, `canvas → render → platform → app`, `settings → app`, `i18n-macros → i18n`, `macros → teksilo` (the `teksu!` proc macro, re-exported by the umbrella), `core → preview`, `preview-ui → preview + widgets`, `widgets-previewer → (preview + preview-ui + widgets)`, `widgets → scene` (scene sits at the teksilo-widgets tier and reuses the full widget catalog as its heavyweight content), `core → webview` (webview sits at the teksilo-widgets tier but depends only on core; `teksilo-app` gains an optional dep on it under its `web-view` feature for event routing), `(app + core) → async → {tokio, async-std}` (optional executor; the `on_loop_tick` hook in app and the `AsyncCompletionHandle` types in core stay async-runtime-free, so teksilo-app never depends on teksilo-async), `(core + tokens + canvas + platform) → terminal` (renders into the wgpu surface, so unlike webview it needs no widgets dep either), `(core + canvas) → automation → automation-mcp` (GUI-free toolkit + its rmcp server binary; the core-only-peer shape teksilo-data has)
 
-External path dependencies (outside the workspace, both declared with `path` **and** `version` so the crates still publish): `text-typeset` at `../text-typeset` and `text-document` at `../text-document/crates/public_api`.
+External sibling crates (maintained alongside Teksilo, released on their own cadence): `text-typeset` and `text-document`. Both are **ordinary crates.io dependencies** pinned in `[workspace.dependencies]`, so a fresh clone, a `cargo publish` and every CI job resolve them with no preparation step. `text-document` is re-exported up to the umbrella as `teksilo::text_document` (feature `text`, on by default), so a consumer reaches `TextDocument` without adding a second direct dependency. Working against local checkouts is a `[patch.crates-io]` in a gitignored `.cargo/config.toml` — see README, "Development environment".
 
 ## Unified Widget Trait (V2)
 
@@ -1266,7 +1266,7 @@ Five things about that list that have each cost real time:
 
 ### Partial / In Progress
 
-- Text rendering quality is bounded by the external `text-typeset` crate (shaping, bidi, line-breaking, glyph atlas) — a sibling path-dep maintained alongside Teksilo, not a workspace member; the GPU glyph path is exercised by demos, not headless tests
+- Text rendering quality is bounded by the external `text-typeset` crate (shaping, bidi, line-breaking, glyph atlas) — an external crates.io sibling maintained alongside Teksilo, not a workspace member; the GPU glyph path is exercised by demos, not headless tests
 
 ### Not Started
 

@@ -19,8 +19,10 @@
 - License: MPL-2.0.
 - Rust edition: 2024 (resolver 3).
 - Workspace member globs: `crates/*` (libraries) and `examples/*` (runnable demos).
-- External path dependencies outside the workspace: `text-typeset` at `../text-typeset` and `text-document` at
-  `../text-document/crates/public_api`. Both are declared with `path` **and** `version`, so the crates publish.
+- External sibling crates outside the workspace: `text-typeset` and `text-document`, both **ordinary
+  crates.io dependencies** pinned in `[workspace.dependencies]`. `text-document` is re-exported up to the
+  umbrella as `teksilo::text_document` (feature `text`, on by default). Local checkouts are a
+  `[patch.crates-io]` in a gitignored `.cargo/config.toml` — see README, "Development environment".
 
 ---
 
@@ -107,7 +109,7 @@ cargo-teksilo-telemetry-lint   CLI schema-drift linter
 teksilo-widgets         Widgets + layout primitives
 teksilo-charts          BarChart, LineChart, PieChart; no dep on teksilo-widgets
 teksilo-scene           Pannable/zoomable scene viewport; depends on teksilo-widgets
-teksilo-text            TextBackend impl via text-typeset (external path dep)
+teksilo-text            TextBackend impl via text-typeset (external crates.io sibling)
 teksilo-i18n            Fluent-rs runtime + locale-aware formatters (ICU4X-backed)
 teksilo-i18n-macros     tr! / tr_widget! / tr_signal! proc macros
 teksilo-macros          teksu! DSL proc macro

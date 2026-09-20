@@ -140,6 +140,9 @@ The clean shapes lose information when you collapse them.
   does the right thing on inserts/removes/reorderings, and never sees
   a `DataChange::Reset` from a peer's write landing — see "Reconciling
   a live collection without losing the user's place" below).
+  **It does not persist a reorder** — the op set has no move. A
+  drag-reorderable list wants a different shape; see the note under
+  "Patches, not rendered strings" below.
 
 Don't shoehorn a list into `Signal<Vec<T>>`. A 100-row recents menu
 backed by a `Vec` would full-rebuild every `Repeater` on every add;
@@ -272,6 +275,23 @@ concurrent change to some *other* part of the document survives:
   (`UpsertFront` / `UpdateInPlace` / `Remove` / `Clear`, keyed by
   `Keyed::key` — see "`MruList<T: MruEntry>`" below) — never a
   re-derived `Vec<T>` — so a peer's concurrent insert or removal survives.
+
+  **Those four are the whole set: there is no move op, so a reorder does
+  not persist.** That is a consequence of the merge guarantee rather than
+  an omission — a positional move replayed against a document a peer has
+  since inserted into moves the wrong row, and the key-addressed ops are
+  exactly the ones that stay correct under replay. So `ListModel::move_item`
+  reorders the live model and the `ListView` follows it, and nothing
+  reaches disk.
+
+  **If the user can drag rows, persist the order yourself**: keep a
+  `SettingsFile<T>` holding the `Vec<T>` in its display order as the
+  durable copy, drive the UI from a plain `ListModel<T>`, and observe the
+  model (`observe_changes`, watching `DataChange::ItemsMoved`) to write the
+  new order back. You give up per-op merging — a whole-vector write is
+  last-writer-wins against a peer — which is the honest trade: order is
+  positional state, and two processes reordering one list concurrently have
+  no correct merge anyway.
 - `SettingsFile<T>::mutate`/`replace` apply the caller's closure directly
   to the freshly re-read, re-migrated value, under the same lock.
 

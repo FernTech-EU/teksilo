@@ -19,8 +19,8 @@ proptest generates hundreds of inputs per property and shrinks any failure to a 
 ```
 
 The convention below is not invented for Teksilo. It is carried over
-unchanged from the author's sibling repos `../text-typeset` and
-`../text-document`, which have run proptest for longer; this document
+unchanged from the sibling `text-typeset` and `text-document` crates,
+which have run proptest for longer; this document
 writes that convention down for this workspace so it applies uniformly
 here too, rather than living only as tribal knowledge.
 
@@ -180,7 +180,7 @@ It does **not** own exact pixel or glyph output. A rendered bitmap is
 font-version- and shaper-version-dependent, so pinning one down as a
 property assertion means the property breaks on every font update rather
 than on a real regression — that is `insta` snapshot territory in
-`../text-typeset`, which owns real shaping/bidi/line-break/raster coverage
+`text-typeset`, which owns real shaping/bidi/line-break/raster coverage
 against real fonts. Proptest here never touches a GPU, a display server, or
 real font shaping; every suite in this workspace runs against pure data
 (`Color`, `ListModel`, `TreeModel`, `GridHashIndex`, `PrefixSumOffsets`,
