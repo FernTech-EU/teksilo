@@ -84,25 +84,81 @@ fn is_executable_file(path: &Path) -> bool {
     path.metadata().is_ok_and(|meta| meta.is_file())
 }
 
+/// The version a client binary on disk reports, via `--version`.
+///
+/// `None` when it cannot be run or prints something unrecognisable — an
+/// unreadable answer must not become a *wrong* answer, so the caller then says
+/// nothing about staleness rather than guessing. Clap prints `<bin> <version>`,
+/// so the version is the last whitespace-separated token of the first line.
+pub fn client_version_of(path: &Path) -> Option<String> {
+    let out = std::process::Command::new(path)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_version_output(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The parsing half of [`client_version_of`], split out so it is testable
+/// without a binary to run.
+fn parse_version_output(text: &str) -> Option<String> {
+    let token = text.lines().next()?.split_whitespace().next_back()?;
+    // A version, not the tail of an error line that happens to have words.
+    token
+        .starts_with(|c: char| c.is_ascii_digit())
+        .then(|| token.to_string())
+}
+
+/// What to say about a client whose reported version is `found`.
+///
+/// `None` when there is nothing to report: the versions agree, or the client
+/// did not answer and [`client_version_of`] returned `None`.
+///
+/// This exists because of the failure named in [`CLIENT_VERSION`]'s own docs: a
+/// client older than the app fails at *connect* time with a symptom naming
+/// neither version. Stating it here, at the one moment both versions are known,
+/// turns a mystery into a diagnosis with a route out of it.
+pub fn version_note(found: Option<&str>) -> Option<String> {
+    let found = found?;
+    if found == CLIENT_VERSION {
+        return None;
+    }
+    Some(format!(
+        "the `{CLIENT_BIN}` on $PATH is {found}, but this app speaks {CLIENT_VERSION}. \
+         The framing is not frozen between versions, so attaching may fail at connect \
+         with an error naming neither. Match them with:\nteksilo-automation:     {}",
+        install_command()
+    ))
+}
+
 /// What to print after the bridge has announced its endpoint.
 ///
-/// One line when the client is installed, and when it is not, three more that
-/// answer the question the first line has just raised. The absence is stated
-/// where it is discovered, rather than left to surface later as a connection
-/// that never happens.
+/// One line when the client is installed and matches. When it is missing, three
+/// more that answer the question the first line has just raised; when it is
+/// present but a different version, a note saying so. Both are stated where
+/// they are discovered, rather than left to surface later as a connection that
+/// never happens.
 pub fn attach_hint(pid: u32, endpoint: &str, token: &str) -> String {
     let mut hint = format!(
         "attach with `{CLIENT_BIN} --attach-pid {pid}` \
          (or --connect {endpoint} --token {token})"
     );
-    if find_client().is_none() {
-        hint.push_str(&format!(
+    match find_client() {
+        None => hint.push_str(&format!(
             "\nteksilo-automation: …but `{CLIENT_BIN}` is not on $PATH. \
              This app needs nothing installed;\nteksilo-automation: \
              that binary is only the client an agent drives it through. \
              Install it with:\nteksilo-automation:     {}",
             install_command()
-        ));
+        )),
+        Some(path) => {
+            let found = client_version_of(&path);
+            if let Some(note) = version_note(found.as_deref()) {
+                hint.push_str(&format!("\nteksilo-automation: …but {note}"));
+            }
+        }
     }
     hint
 }
@@ -111,6 +167,41 @@ pub fn attach_hint(pid: u32, endpoint: &str, token: &str) -> String {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    /// A client at a different version is NAMED, not left to fail at connect.
+    /// Deleting the comparison in `version_note` reddens this.
+    #[test]
+    fn a_stale_client_is_reported_with_both_versions() {
+        let note = version_note(Some("0.12.0")).expect("a mismatch must be reported");
+        assert!(note.contains("0.12.0"), "{note}");
+        assert!(note.contains(CLIENT_VERSION), "{note}");
+        assert!(note.contains("cargo install"), "{note}");
+    }
+
+    /// The two cases with nothing to say stay silent. A matching client is not
+    /// worth a line, and a client that did not answer must not be guessed at —
+    /// an unreadable version becoming a confident "you are stale" is worse than
+    /// the silence it replaced.
+    #[test]
+    fn a_matching_or_unreadable_client_says_nothing() {
+        assert!(version_note(Some(CLIENT_VERSION)).is_none());
+        assert!(version_note(None).is_none());
+    }
+
+    /// Clap prints `<bin> <version>`; anything else yields `None` rather than a
+    /// stray token presented as a version.
+    #[test]
+    fn version_output_is_parsed_only_when_it_looks_like_one() {
+        assert_eq!(
+            parse_version_output("teksilo-automation-mcp 0.13.0\n").as_deref(),
+            Some("0.13.0")
+        );
+        assert_eq!(
+            parse_version_output("error: no such thing").as_deref(),
+            None
+        );
+        assert_eq!(parse_version_output("").as_deref(), None);
+    }
 
     #[test]
     fn install_command_names_this_workspace_version() {
