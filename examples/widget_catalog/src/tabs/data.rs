@@ -4,7 +4,7 @@
 //! Data tab — the full data-driven family, all live:
 //! Repeater, ListView, StandardListItem, StandardTreeItem, TreeView,
 //! TableView, TreeTableView, GridView. The heavyweights are cannibalized
-//! from the data_collections / data_grid / tree_table / grid_view
+//! from the data_collections / data_grid / tree_table_view / grid_view
 //! examples and shrunk to fit a scrolling catalog tab.
 
 use teksilo::canvas::EdgeInsets;
@@ -168,7 +168,7 @@ fn table_view_widget() -> impl Widget + 'static {
     table
 }
 
-// ── TreeTableView (tree_table) ────────────────────────────────────────────
+// ── TreeTableView (tree_table_view) ───────────────────────────────────────
 
 #[derive(Clone, Debug)]
 struct FsNode {

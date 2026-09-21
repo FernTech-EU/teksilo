@@ -99,7 +99,7 @@ fn main() {
                             ),
                         );
 
-                    // Wrap the body in `Expand::fills_stack()` so the inner VStack
+                    // Wrap the body in `Expand::new()` so the inner VStack
                     // sees it as a spacer and gives it all the leftover vertical
                     // space. Without this the body would collapse to its 16-px
                     // text intrinsic height and leave a huge unused area below

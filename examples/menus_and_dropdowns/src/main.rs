@@ -521,7 +521,7 @@ impl Widget for Root {
                     .content(
                         MenuList::new()
                             // Row of square, icon-only, flat IconButtons at
-                            // Toolbar (40 dp) size — stand-alone visual mode
+                            // Toolbar (30 dp) size — stand-alone visual mode
                             // (full-weight icons). The trailing one is bistate
                             // via `.toggle(pinned)` — clicking flips the
                             // signal and the surface reads as Selected while
@@ -896,7 +896,3 @@ fn main() {
         )
         .run();
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------

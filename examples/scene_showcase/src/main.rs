@@ -647,7 +647,7 @@ fn build_a11y_groups_section(scene: &mut Scene, scroll_area_id: ItemId) {
     scene.set_a11y_parent(A11yNode::Item(scroll_area_id), Some(A11yNode::Group(act1)));
     let _ = act2;
 
-    // Visual hint stripes (decoration only — not in the AT tree).
+    // Visual hint stripes (decoration only — not part of the Act structure).
     let stripe_w = (r.width - 32.0) / 3.0;
     for (i, color) in [pastel_red(), pastel_yellow(), pastel_green()]
         .iter()

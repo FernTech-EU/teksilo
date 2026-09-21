@@ -15,8 +15,7 @@
 //!   custom single/page step combo.
 //! - An "Auto" SpinBox whose minimum shows
 //!   `special_value_text`.
-//! - A scientific-notation adaptive-step SpinBox over six orders of
-//!   magnitude.
+//! - An adaptive-step SpinBox over six orders of magnitude.
 //! - A read-only SpinBox that mirrors one of the other values.
 //! - A **locale** section: a grouped large integer, an un-grouped
 //!   twin, and a `.localized(false)` port number.

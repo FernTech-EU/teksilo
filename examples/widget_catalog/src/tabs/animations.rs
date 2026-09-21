@@ -2,7 +2,8 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Animations tab — every wrapper widget under
-//! `teksilo::widgets::animations::*`.
+//! `teksilo::widgets::animations::*` except `Unroll` (the horizontal
+//! `Collapse`).
 
 use std::time::Duration;
 

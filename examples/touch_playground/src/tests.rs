@@ -357,7 +357,7 @@ fn two_fingers_on_the_pad_are_both_reported() {
     assert_eq!(
         rows.len(),
         2,
-        "the pad declares MultiContact::All, so the second finger is delivered \
+        "the pad's handler answers EventResponse::Ignored, so the second finger is delivered \
          rather than terminated at the node: {rows:?}"
     );
     assert_ne!(

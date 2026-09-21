@@ -89,7 +89,7 @@ pub fn classic(ctx: &mut BuildContext, _sigs: &Signals) -> WidgetId {
             .child(IconButton::expand().tooltip(tr!(demo_open()))),
     );
     // All five IconButtonSize steps, same glyph so the size delta reads
-    // clearly: Compact 22 · Default 24 · Toolbar 30 · Large 40 · Hero 50.
+    // clearly: Compact 24 · Default 24 · Toolbar 30 · Large 40 · Hero 50.
     let icon_sizes = section(
         ctx,
         lit!("IconButton — sizes"),

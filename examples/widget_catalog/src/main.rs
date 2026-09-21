@@ -274,10 +274,11 @@ fn build_title_bar(
         )
         .child(Spacer::new());
 
-    // Locale switch — two flat buttons. `EventContext::set_locale`
-    // requires an event handler, so the SegmentedControl pattern
-    // doesn't fit (its `Signal<usize>` mutates from inside the widget,
-    // not via a callback that hands you `&mut EventContext`).
+    // Locale switch — three flat buttons, one per supported locale.
+    // `EventContext::set_locale` requires an event handler; a
+    // `SegmentedControl` would also serve now that `.on_change` hands
+    // the callback a `SegmentId` and a `&mut EventContext` (its docs
+    // name `ctx.set_locale(...)` as the case it exists for).
     let en_btn = Button::new(tr!(locale_en()))
         .variant(ButtonVariant::Ghost)
         .on_activate_fn(|ctx| ctx.set_locale("en-US"));
@@ -487,10 +488,12 @@ impl Widget for ThemePersistenceSlot {
 /// press 'D' or 'A'). All labels carry `&`-markers so the
 /// underlines appear while Alt is held.
 ///
-/// On macOS the dispatcher install is skipped automatically — the
-/// menubar still renders and mouse-clicks work, but Alt-letter
-/// chords are left alone (Option+letter is reserved for accented
-/// character input on macOS keyboards).
+/// On macOS this bar passes `NativeMenuMode::Suppress`, so the menus
+/// live in the OS menu bar: the in-window strip renders only its
+/// leading/trailing slots and installs no F10/Alt dispatcher. Even
+/// without `Suppress` the dispatcher's Alt-letter branch is compiled
+/// out there (Option+letter is reserved for accented character input
+/// on macOS keyboards) while F10 and bare-Alt-tap keep firing.
 fn build_menu_bar() -> impl Widget + 'static {
     MenuBar::new()
         .collapse_policy(teksilo::widgets::CollapsePolicy::Always)
@@ -657,10 +660,12 @@ impl WidgetCatalog {
     }
 
     fn install_cycle(&self, ctx: &mut BuildContext, period: Duration) {
-        // Mirrors the per-frame timer pattern that `Cycle` / `Pulse`
-        // use: accumulate elapsed delta from `frame_tick`, advance the
+        // Accumulate elapsed delta from `frame_tick`, advance the
         // selected tab when the period elapses, and `frame_request.set(true)`
-        // each tick to keep the event loop pumping. `wake_at_handle` (the
+        // each tick to keep the event loop pumping. (`Cycle` / `Pulse` once
+        // re-armed this way; they now hold a `FrameTickSubscription` from
+        // `ctx.subscribe_frame_tick()`, which the framework re-arms only for
+        // a subscriber that painted.) `wake_at_handle` (the
         // sleep-mode deadline) is the wrong primitive here because nothing
         // else dirty-marks the tree — without `request_frame()` the loop
         // never wakes.
@@ -754,9 +759,10 @@ impl Widget for TabContent {
 
 /// Sample shortcut catalog so `ShortcutSettings` on the Settings tab
 /// has rows to display. Mirrors the shape of the `shortcuts_demo`
-/// example — Save / Open / Find / Bold / Italic / Help — without
-/// wiring the corresponding Actions, since the catalog isn't trying
-/// to *invoke* these commands, only to *exhibit* the rebind UI.
+/// example — Save / Open / Quit / Find / Bold / Italic / Help. Only
+/// `app.quit` has a matching Action (registered in
+/// `WidgetCatalog::build`); the rest are catalogued to *exhibit* the
+/// rebind UI, not to be *invoked*.
 fn demo_shortcuts() -> Vec<Shortcut> {
     vec![
         Shortcut::new("app.save")

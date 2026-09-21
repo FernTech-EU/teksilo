@@ -524,8 +524,10 @@ mod intent_kind_shapes {
 }
 
 // -------------------------------------------------------------------------
-// Integration tests: fire intents via ctx.send_intent and press keys, then
-// verify the right Action received the right typed payload.
+// Dispatch tests: press keys through the real shortcut → intent → Action
+// path and assert it does not panic, and round-trip the typed payloads
+// through `into_intent` / `from_intent` directly. What an Action received
+// cannot be checked here — the demo's handlers only `println!`.
 // -------------------------------------------------------------------------
 #[cfg(test)]
 mod dispatch_tests {

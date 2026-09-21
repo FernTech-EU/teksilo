@@ -44,7 +44,7 @@
 //!
 //! - Draw with the mouse or a stylus anywhere on the page.
 //! - `Backspace` removes the last stroke.
-//! - Pan with the middle button or a trackpad; `Ctrl` + wheel zooms.
+//! - Pan with the mouse wheel or a trackpad; `Ctrl` + wheel zooms.
 
 use std::cell::RefCell;
 use std::rc::Rc;

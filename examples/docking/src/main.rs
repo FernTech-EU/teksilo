@@ -9,9 +9,9 @@
 //!     item to switch / re-click the active one to hide the side) whose active
 //!     tab holds two DockWidgets, each in its own single-item **ToolBox**,
 //!     separated by a **Splitter**,
-//!   * a **bottom** side in **Strip** presentation with **two tabs**
-//!     (Terminal | Problems) — drag a panel's ToolBox header onto another
-//!     pane's edge to split, or onto its centre to stack,
+//!   * a **bottom** side in **Strip** presentation with **one tab** holding
+//!     Terminal + Problems as two panes — drag a panel's ToolBox header onto
+//!     another pane's edge to split, or onto its centre to stack,
 //!   * a **trailing** Properties panel,
 //!   * drag a panel out / between sides; hide / show sides from the rail or the
 //!     toolbar; flip a corner owner live; export → restore the layout.
@@ -32,7 +32,8 @@ struct DockingDemo {
     status: Signal<String>,
     bottom_corner_to_leading: Signal<bool>,
     root_child_id: Option<WidgetId>,
-    // Dock ids held so the toolbar can address sides.
+    // Dock ids held so `build()` can declare each DockWidget, open it on its
+    // side, and name the grouped leading activity.
     ids: DemoIds,
 }
 

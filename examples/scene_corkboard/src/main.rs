@@ -26,7 +26,7 @@
 //! `with_widget_mut` needed for the mutation); both panes rebuild via the shared
 //! change signal, and — because the AccessKit tree is *separate* from the visual
 //! scene — the new card is grafted under a fresh Act group announced by a
-//! `Live::Polite` region. Each pane's camera is app-owned via `bind_view_state`,
+//! `Live::Polite` region. Each pane's camera is app-owned via `view_state`,
 //! so the per-pane "Reset" buttons snap only their own viewport home.
 //!
 //! **List-driven pins (`SceneListAdapter`).** A small `ListModel<PinTag>` backs
@@ -76,7 +76,7 @@
 //! constraint is consulted *before* the change is applied, which is the whole
 //! point of it.
 //!
-//! Run with: `cargo run -p scene_corkboard`
+//! Run with: `cargo run -p scene-corkboard`
 
 use std::cell::RefCell;
 use std::rc::Rc;

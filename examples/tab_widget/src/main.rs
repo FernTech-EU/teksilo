@@ -17,14 +17,14 @@
 //!   theme built at `RevealPolicy::Always` (which the Touch density selects)
 //!   shows the button unconditionally instead.
 //! - Drag-to-reorder, with the insertion-line drop indicator.
-//! - Overflow dropdown — `PopoverButton` + `ListView` listing all
+//! - Overflow dropdown — `PopoverIconButton` + `ListView` listing all
 //!   tabs by stable `TabId`, click activates and dismisses.
 //! - Scroll arrows + mouse-wheel-to-horizontal mapping.
-//! - Theme toggle, locale toggle (live retitling), and orientation
-//!   toggle (Horizontal / Vertical) via toolbar buttons.
+//! - Theme toggle, sizing toggle (Shared / Independent / Fill), and
+//!   orientation toggle (Horizontal / Vertical) via toolbar buttons.
 //! - Per-tab tooltip via `TabInfo::tooltip(...)`.
-//! - Bar leading slot (mode toggle), trailing slot ("new tab"
-//!   button).
+//! - Bar leading slot (a "Showcase" label), trailing slot (mode
+//!   toggles + "new tab" button).
 //!
 //! Run with: `cargo run -p tab-widget`.
 
@@ -59,12 +59,12 @@ struct Root {
     settings_id: TabId,
     /// Active selection — stable across reorders / closes.
     selected: Signal<Option<TabId>>,
-    /// Live document tabs. Mutate via `model.push` to open, the
-    /// framework removes via the bar's default close handler.
+    /// Live document tabs. Mutate via `model.push` to open; the
+    /// `on_close` interceptor below removes on confirmation.
     model: ListModel<TabHandle>,
     /// Reactive UI state. The orientation and sizing signals are
-    /// bound into TabWidget via `.orientation_signal(...)` and
-    /// `.sizing_signal(...)` — toolbar buttons just `.set(...)`
+    /// bound into TabWidget via `.orientation(...)` and
+    /// `.sizing(...)` — toolbar buttons just `.set(...)`
     /// them and the framework rebuilds.
     orientation: Signal<TabBarOrientation>,
     sizing: Signal<TabSizing>,

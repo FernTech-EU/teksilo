@@ -240,8 +240,8 @@ pub fn teksu(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     // chained method calls are unavoidable. ToolBox::add takes
     // ToolBoxItem; chained .add() calls don't translate to one
     // property per call, so pre-register the whole ToolBox. Same for
-    // ScrollArea (loop body) and Splitter (multi-arg first/second
-    // wrapping a chained Panel).
+    // ScrollArea (loop body) and Splitter (repeated `.pane()` calls
+    // each wrapping a chained Panel).
     let card_widget = ctx.add(
         Card::new()
             .header(

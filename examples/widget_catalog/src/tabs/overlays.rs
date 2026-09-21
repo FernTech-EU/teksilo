@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Overlays tab — Tooltip (cascading 3-tier showcase), Popover, Dialog,
-//! MessageBox, Snackbar, Shadow.
+//! MessageBox, Snackbar, Toast + NotificationCenterButton, Shadow.
 
 use std::rc::Rc;
 use std::time::Duration;

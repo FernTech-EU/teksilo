@@ -19,9 +19,9 @@
 //!   `on_activate_fn` — no intent plumbing needed for ambient
 //!   framework mutations.
 //! - Arabic (`ar-SA`) triggers an RTL layout direction flip, so the
-//!   bottom row of `HStack(Leading, Trailing)` visibly swaps its
-//!   children. English and French are both LTR, so switching between
-//!   them only changes the text — no layout reshuffle.
+//!   leading/trailing `HStack` row below the language selectors visibly
+//!   swaps its children. English and French are both LTR, so switching
+//!   between them only changes the text — no layout reshuffle.
 //!
 //! Tree rebuild policy (§12.7, §Phase G): `WindowManager::set_locale`
 //! applies `tree.set_layout_direction(...)` before `tree.set_locale(...)`

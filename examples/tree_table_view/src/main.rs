@@ -3,7 +3,7 @@
 
 //! `tree_table` — hierarchical `TreeTableView` showcase.
 //!
-//! Run with: `cargo run -p tree-table`
+//! Run with: `cargo run -p tree-table-view`
 //!
 //! Demonstrates:
 //! - Mock filesystem in a `TreeModel<FsNode>` projected through

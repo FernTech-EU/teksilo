@@ -125,8 +125,9 @@ pub fn classic(ctx: &mut BuildContext, sigs: &Signals) -> WidgetId {
     );
     // ColumnFlow: the column count follows the width, and every card is
     // re-partitioned when a column is gained or lost. `column_count_signal`
-    // is bound at RepaintOnly (a label), which is the safe binding level —
-    // see the widget's docs.
+    // feeds a label, so it is bound at Relayout — safe here because the
+    // label never feeds back into the flow's own width; see the widget's
+    // binding contract.
     let flow = ColumnFlow::new()
         .min_column_width(90.0)
         .max_columns(4)

@@ -17,7 +17,7 @@
 //!   window.
 //! - A main-window button that fires the same shortcut's intent.
 //! - **Window-active appearance**: each window shows a status label, a
-//!   `TextInput`, and a `.dim_when_inactive(..)` panel. Click between the two
+//!   `TextInput`, and a `DimWhenInactive`-wrapped panel. Click between the two
 //!   windows to watch the *inactive* one hide its caret, mute its text
 //!   selection, dim its panel, and flip its status label — the modern
 //!   `appearsActive` / `:backdrop` behaviour, driven by the per-window
