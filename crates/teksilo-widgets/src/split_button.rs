@@ -488,7 +488,9 @@ impl std::fmt::Debug for SplitButton {
 // Only the default-action label and chevron icon colour are resolved here;
 // the frame background / border moved to `RecipeSplitButtonStyle`. Mirrors
 // `Button::resolve_text_role` so a Button and a SplitButton with the same
-// variant read identically — keep them in lockstep if Button's text table
+// variant read identically — except `Link`, which Button paints with
+// `TextRole::Link` and SplitButton folds into the Ghost family's
+// `TextRole::Primary`. Keep them in lockstep if Button's text table
 // changes.
 
 // SplitButton normalises the 7-value `ButtonVariant` down to the three
@@ -551,9 +553,10 @@ impl Widget for SplitButton {
 
         let mut labels_vec: Vec<LocalizedString> = Vec::new();
         let mut actions_vec: Vec<Option<Rc<dyn Fn(&mut EventContext)>>> = Vec::new();
-        // Split button menus always open Below the trigger (the chevron
-        // half lives at the bottom-right of the button), so the menu's
-        // top edge is attached to the trigger.
+        // Split button menus open Below the trigger whenever there is room
+        // (the chevron half lives at the bottom-right of the button), so the
+        // menu's top edge is normally the one attached to the trigger;
+        // `BelowPreferred` flips it above only when there is no room below.
         let mut menu = MenuList::new().attached_side(crate::shadow::AttachedSide::Top);
 
         // Create the `selected` signal early so the wrap closures can

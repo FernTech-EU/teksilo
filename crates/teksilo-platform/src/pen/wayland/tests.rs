@@ -201,7 +201,8 @@ fn buttons_are_the_barrel_and_nothing_else() {
             pressed: false,
         },
         frame(0),
-        // BTN_STYLUS3: no mapping, so no change and no packet.
+        // BTN_TOOL_DOUBLETAP (BTN_STYLUS3 is 0x149): no mapping, so no change
+        // and no packet.
         ToolEvent::Button {
             button: 0x14d,
             pressed: true,

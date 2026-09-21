@@ -386,9 +386,10 @@ impl SceneView {
         //
         // Emitted as synthetic children of the SceneView's **own** node, not of
         // any item: the frame belongs to the *selection*, and a multi-item
-        // selection has no owner. At most ten nodes per view, and none of them
-        // enter the per-item walk — which is the whole reason the chrome is a
-        // paint pass rather than `Over`-band items.
+        // selection has no owner. At most eleven nodes per view (the frame plus
+        // its ten handles), and none of them enter the per-item walk — which is
+        // the whole reason the chrome is a paint pass rather than `Over`-band
+        // items.
         self.emit_transform_nodes(builder, owner, view_transform);
 
         // Magnetism: in keyboard connect mode, point the SceneView's

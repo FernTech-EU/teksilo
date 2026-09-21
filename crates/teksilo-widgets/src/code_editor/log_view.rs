@@ -682,9 +682,11 @@ impl Widget for LogViewBody {
         // AT tree is whole-tree (no per-widget dirty tracking), so binding a
         // 100k-line streaming log's per-append version to it would re-walk the
         // entire app tree at frame rate. Instead the tree re-walks on the log's
-        // own `a11y_version`, bumped only when the *visible window* changes: a
-        // scroll crossing a row, a following-tail append, an eviction — never a
-        // pixel-scroll on the same rows or a tail append while scrolled away.
+        // own `a11y_version`, bumped immediately when the *visible window*
+        // changes: a scroll crossing a row, a following-tail append, an
+        // eviction — never on a pixel-scroll that stays on the same rows, and
+        // only on the `A11Y_TOTAL_REFRESH_SECS` throttle when an append or
+        // eviction while scrolled away moves nothing but the total.
         st.document_version
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
         if let Some(log) = st.log.as_ref() {

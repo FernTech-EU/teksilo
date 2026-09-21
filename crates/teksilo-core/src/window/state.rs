@@ -105,8 +105,9 @@ pub(crate) struct WindowStateInner {
     caps_lock: Signal<bool>,
 
     /// `true` while the Alt key is currently held down. OS-driven only —
-    /// no observer and no app→OS command. Set by the window manager on
-    /// `Key::Alt` `KeyDown`/`KeyUp`. Read by:
+    /// no observer and no app→OS command. Set by the window manager from
+    /// winit's `ModifiersChanged` — winit reports modifier keys there, not
+    /// through `KeyboardInput`, and our `Key` enum has no `Alt`. Read by:
     ///
     /// - `MenuLabel` to show / hide mnemonic underlines while Alt is held
     ///   (matches the Win32 `WM_CHANGEUISTATE` underlining convention).
@@ -116,8 +117,9 @@ pub(crate) struct WindowStateInner {
     alt_down: Signal<bool>,
 
     /// Sticky flag that records whether any non-Alt key was pressed
-    /// while Alt was held. Set to `false` by the window manager on
-    /// every `Key::Alt` `KeyDown`; flipped to `true` by the manager
+    /// while Alt was held. Cleared on every rising edge of `alt_down`
+    /// (which the manager drives from winit's `ModifiersChanged`);
+    /// flipped to `true` by the manager
     /// on any non-Alt `KeyDown` that arrives while `alt_down` is
     /// `true`. Read by `MenuBar` at the Alt → release moment to
     /// decide whether the user did a bare-Alt-tap (no other key
@@ -291,7 +293,8 @@ impl WindowState {
     }
 
     /// Whether the Alt key is currently held down. OS-driven only — the
-    /// window manager flips this on `Key::Alt` `KeyDown` / `KeyUp`. Read
+    /// window manager flips this from winit's `ModifiersChanged`, where
+    /// winit reports modifier keys. Read
     /// this to drive mnemonic-underline visibility on menus and menubars.
     /// See the menubar key-dispatch documentation for the full Alt-tap
     /// / Alt+letter / mnemonic-underline contract.
@@ -419,10 +422,12 @@ impl WindowState {
 
 // Framework-internal write-back API consumed by the app-level window
 // manager when a winit `WindowEvent` reports an OS-initiated state
-// change. Each method flips the re-entrancy guard before updating the
-// signal so the observers do not push the same change back out as a
+// change. Each method backing an observed signal flips the re-entrancy
+// guard before updating it so the observers do not push the same change
+// back out as a
 // [`WindowCommand`], which would at best duplicate work and at worst
-// cause OS↔app drift mid-animation (Compose Multiplatform #1489).
+// cause OS↔app drift mid-animation (Compose Multiplatform #1489). The
+// keyboard-state setters below have no observer, so they need no guard.
 //
 // These are `pub` rather than `pub(crate)` because teksilo-app lives in a
 // separate crate. Application code should never call them; they read

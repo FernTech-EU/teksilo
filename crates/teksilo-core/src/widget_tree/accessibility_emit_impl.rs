@@ -669,12 +669,7 @@ impl WidgetTree {
         false
     }
 
-    /// Build a builder representing the widget's full a11y state at this
-    /// instant — the inner widget's `accessibility(builder)` plus any
-    /// builder-level overrides (`access_label`, `access_role`, …) and,
-    /// when the widget has `access_subtree(Merge)`, the merged
-    /// descendant state. Centralized so `accessibility_node`,
-    /// `text_content`, and the recursive walker stay in sync.
+    /// Which tooltip's text this node should carry, if any.
     /// Which tooltip's text this node should carry, if any.
     ///
     /// Two ways a node can come to own a tooltip's description, tried in that
@@ -894,9 +889,9 @@ fn is_presentational_container(node: &accesskit::Node) -> bool {
 // These run when a widget's `access_subtree` is `Merge`. The walker
 // recurses through the descendants, applies each descendant's own
 // `accessibility() + override apply()` into a temp builder, and absorbs
-// the resulting label / description / value / actions / relationships
-// into a `MergeAccumulator`. After the walk finishes the accumulator
-// flushes its accumulated state onto the parent's builder.
+// the resulting label / value / actions into a `MergeAccumulator`.
+// After the walk finishes the accumulator flushes its accumulated state
+// onto the parent's builder.
 //
 // The accumulator deliberately discards descendant role and numeric
 // fields (parent's role wins for the merged element) and discards
@@ -904,10 +899,9 @@ fn is_presentational_container(node: &accesskit::Node) -> bool {
 // Action lists union with deduplication so two child Buttons each
 // emitting `Click` don't pollute the merged parent with two copies.
 
-/// Walk the descendants of `parent_id` and absorb their label /
-/// description / value / actions / relationships into `parent_builder`.
-/// Per-descendant subtree-mode handling lives in
-/// [`merge_collect_recursive`].
+/// Walk the descendants of `parent_id` and absorb their label / value /
+/// actions into `parent_builder`. Per-descendant subtree-mode handling
+/// lives in [`merge_collect_recursive`].
 fn merge_descendants_into(
     parent_builder: &mut AccessNodeBuilder,
     parent_id: WidgetId,

@@ -421,7 +421,7 @@ impl PartsRecorder {
     }
 }
 
-/// Format three probe values through `lang`'s own decimal formatter and
+/// Format four probe values through `lang`'s own decimal formatter and
 /// read the symbols back out of the part annotations.
 fn probe(lang: &LanguageIdentifier) -> Option<NumberSymbols> {
     let icu_locale = lang_to_icu_locale(lang);

@@ -67,7 +67,7 @@ pub(crate) struct Binding {
     /// Read the source signal's current change generation.
     pub generation: Rc<dyn Fn() -> u64>,
     /// Stable identity of the source signal — see
-    /// `Signal::source_id`.
+    /// `signal::DerivedSource::source_id`.
     /// Used by [`BindingRegistry::register`] to look up the matching
     /// [`BindingGroup`] in O(1).
     pub source_id: usize,

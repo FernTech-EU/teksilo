@@ -2264,10 +2264,12 @@ fn ancestor_chain_walk_skips_optout_intermediate() {
 #[test]
 fn non_interactive_ignores_scroll() {
     // When the outer SceneView is locked (chart chrome
-    // pattern), scroll events must not pan its view. The
-    // gesture handlers aren't registered, so the scroll is
-    // ignored at this widget — events bubble through to
-    // siblings / inner SceneViews that do handle them.
+    // pattern), scroll events must not pan its view. The scroll
+    // handler is still registered (its slot also carries the
+    // ScrollIntoView reveal arm a locked view still owes a focused
+    // descendant), but its camera-input arm returns `Ignored`, so
+    // the scroll is unhandled at this widget — events bubble
+    // through to siblings / inner SceneViews that do handle them.
     let scene = Scene::new();
     let mut tree = WidgetTree::new();
     let view_id = tree.add(SceneView::new(scene).interactive(false));
@@ -2275,9 +2277,9 @@ fn non_interactive_ignores_scroll() {
     let view = view_handle(&tree, view_id);
     let pan_before = view.pan();
 
-    // Send a scroll directly to the SceneView. Without an
-    // on_scroll handler registered, the event is unhandled
-    // here and pan stays put.
+    // Send a scroll directly to the SceneView. The handler's
+    // `if !interactive { return Ignored }` arm leaves the event
+    // unhandled here and pan stays put.
     tree.pointer_move(Point::new(100.0, 100.0));
     tree.dispatch_event(WidgetEvent::scroll(
         ScrollDelta::Pixels { x: 50.0, y: 50.0 },
@@ -2924,10 +2926,8 @@ fn drag_to_move_persists_via_rebuild_signal_no_snap_back() {
     use teksilo_canvas::Point;
 
     let mut scene = Scene::new();
-    // A heavyweight widget child so the SceneView's
-    // `has_built_children` flag flips to true — that's the
-    // gate guarding `collect_needs_rebuild` and the realistic
-    // shape of any showcase scene with cards.
+    // A heavyweight widget child — the realistic shape of any
+    // showcase scene with cards.
     scene.add_widget(FillWidget::new(), Rect::new(200.0, 200.0, 50.0, 50.0));
     let item_id = scene.add_item(
         RectItem::new(Rect::new(50.0, 50.0, 30.0, 30.0))
@@ -3030,7 +3030,7 @@ fn drag_cascades_to_declared_descendants() {
     use teksilo_canvas::Point;
 
     let mut scene = Scene::new();
-    // Heavyweight child to flip `has_built_children`.
+    // Heavyweight child — the realistic shape of a scene with cards.
     scene.add_widget(FillWidget::new(), Rect::new(300.0, 300.0, 50.0, 50.0));
     let parent_rect = scene.add_item(
         RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
@@ -3096,8 +3096,8 @@ fn parent_child_drag_persists_across_two_drags() {
     use teksilo_canvas::Point;
 
     let mut scene = Scene::new();
-    // Heavyweight child to flip `has_built_children` (matches
-    // realistic scenes with at least one widget tier).
+    // Heavyweight child (matches realistic scenes with at least
+    // one widget tier).
     scene.add_widget(FillWidget::new(), Rect::new(300.0, 300.0, 50.0, 50.0));
     let parent_rect = scene.add_item(
         RectItem::new(Rect::new(50.0, 50.0, 80.0, 60.0))
@@ -3205,9 +3205,9 @@ fn looping_item_animation_survives_drag_end_rebuild() {
     }
 
     let mut scene = Scene::new();
-    // Heavyweight child to flip `has_built_children` so the
-    // drag-end rebuild path actually runs (matches realistic
-    // showcase scenes with at least one widget tier).
+    // Heavyweight child so the drag-end rebuild path runs the way
+    // it does in a real app (matches realistic showcase scenes
+    // with at least one widget tier).
     scene.add_widget(FillWidget::new(), Rect::new(280.0, 200.0, 30.0, 30.0));
     // Five loopers — same shape as the showcase's PulsingDot row.
     let phases: Vec<Signal<f32>> = (0..5).map(|_| Signal::new_animated(0.0)).collect();
@@ -3823,7 +3823,7 @@ fn an_item_node_carries_a_scene_rect_and_the_camera_that_places_it() {
     // The construction the whole scene subtree rests on: the rectangle written
     // onto a node is the item's *scene* rect, and the view transform is
     // declared beside it as an AccessKit node transform. A consumer composes
-    // the two — `screen_rect_of` in `crates/teksilo-scene/tests/at_bounds.rs`
+    // the two — `screen_rect` in `crates/teksilo-scene/tests/at_bounds.rs`
     // checks the composed answer; this checks the two halves are what they are
     // said to be, which a composed assertion alone cannot distinguish from a
     // pre-projected rect with no transform.

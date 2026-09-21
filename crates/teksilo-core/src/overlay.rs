@@ -617,13 +617,10 @@ impl OverlayManager {
         let id = OverlayId::new(self.next_id);
         self.next_id += 1;
 
-        // Bound cascade depth — see `MAX_OVERLAY_NESTING_DEPTH`. If this
-        // overlay would nest deeper than the cap, drop it silently: don't
-        // push, and return the (now unused) id so callers' follow-ups
-        // (`set_shown_at_sim`, `set_top_focus_restore`) safely no-op on
-        // the absent overlay. This is reachable by degenerate-but-real
-        // user action (a cyclic tooltip `:key` cascade), so it must not
-        // panic — graceful drop is the whole point.
+        // push, and return the (now unused) id so an id-keyed follow-up
+        // (`set_shown_at_sim`, `attach_fade`) safely no-ops on the absent
+        // overlay — `set_top_focus_restore` takes no id, so it still lands
+        // on whatever is actually topmost. This is reachable by degenerate-but-real
         if self.ancestor_depth(request.parent_overlay) >= MAX_OVERLAY_NESTING_DEPTH {
             return id;
         }
@@ -958,13 +955,8 @@ impl OverlayManager {
     /// Dismiss an overlay and all its children (cascade).
     /// Returns the content widget IDs of all dismissed overlays.
     ///
-    /// **Fade-aware**: when an overlay was shown with
-    /// [`OverlayRequest::with_fade`] and is not yet fading out, this
-    /// method instead kicks off the fade-out tween on the framework-
-    /// owned opacity signal and marks `dismiss_at`, returning an
-    /// empty vec — the actual stack removal and content dormancy
-    /// happen later via
-    /// [`process_pending_fade_dismissals`](Self::process_pending_fade_dismissals).
+    /// owned opacity signal and stamps `dismissing_started_real` /
+    /// `dismissing_started_sim`, returning an
     /// Cascaded descendants vanish with the leaf's fade-out (they're
     /// typically submenus the user dismissed *via* the leaf, and a
     /// per-descendant tween would compete with the leaf's).
@@ -1246,10 +1238,9 @@ impl OverlayManager {
         content_ids
     }
 
-    /// Dismiss every overlay whose content is **not** in `keep`, running each
-    /// dismissed overlay's `on_dismiss`. Used when opening a context menu: any
-    /// overlay that *contains* the right-clicked widget (e.g. the modal the editor
-    /// lives in) is kept, so the menu doesn't tear down its own host.
+    /// Dismiss every overlay whose content is **not** in `keep`, parking each
+    /// dismissed overlay's `on_dismiss` for the tree to run. Used when opening a
+    /// context menu: any
     pub fn dismiss_except(&mut self, keep: &std::collections::HashSet<WidgetId>) -> Vec<WidgetId> {
         self.dismiss_except_because(keep, DismissReason::Programmatic)
     }

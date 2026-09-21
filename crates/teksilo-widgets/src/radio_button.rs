@@ -80,6 +80,8 @@ pub struct RadioButton {
 }
 
 impl RadioButton {
+    /// Run `f` when the **user** selects this button and it was not already
+    /// selected, with this button's value and an `EventContext`, so it can do
     /// Create a radio button with the given `value` and shared selection signal.
     /// Run `f` when the **user** selects this button and it was not already
     /// selected, with this button's value and an `EventContext`, so it can do

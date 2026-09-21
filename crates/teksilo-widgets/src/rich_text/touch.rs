@@ -340,7 +340,7 @@ fn magnifier_painter(state: SharedState) -> LensPainter {
     })
 }
 
-/// Mint the mount for one editor — called from `RichTextEditor::new`, so the
+/// Mint the mount for one editor — called from `RichTextEditor::construct`, so the
 /// handle (and the tests' view of it) exists before the widget enters the tree.
 pub(crate) fn mount_for(state: SharedState) -> Rc<EditorTouch> {
     EditorTouch::new(Rc::new(RichTextTouchSurface::new(state)))

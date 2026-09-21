@@ -816,8 +816,10 @@ impl Widget for HeaderCell {
                         //    explicitly reset to Default so the cursor shape
                         //    doesn't stay stuck on `ColResize` after the
                         //    pointer moves off the handle (PointerLeave alone
-                        //    can't rescue this — the cell has no node-level
-                        //    cursor for the framework to revert to).
+                        //    can't rescue this — it never fires while the
+                        //    pointer stays inside the same cell, and the
+                        //    node-level `Default` cursor installed below is
+                        //    only restored on leave).
                         // Only manage the cursor for moves that are
                         // genuinely over this cell. Moves bubbling up from
                         // the filter popover (out-of-cell y) must leave the

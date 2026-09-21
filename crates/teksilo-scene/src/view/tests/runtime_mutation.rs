@@ -218,11 +218,12 @@ fn view_state_uses_app_owned_signals() {
 
 #[test]
 fn with_widget_mut_rebuild_materialises_runtime_added_widget() {
-    // Drive the EXACT real-app handler path (the corkboard "Add Act" button):
+    // Drive the deferred handler path a scene mutation can take:
     // ctx.with_widget_mut::<SceneView>(id, Rebuild, |v| v.scene_mut().add_widget(...)).
     // This must (a) schedule a frame and (b) materialise the new card on the
-    // next layout. The headless add_act test mutates the scene directly, so it
-    // never exercised this deferred path.
+    // next layout. The headless add_act test mutates the shared model directly
+    // (as the corkboard's "Add Act" button now does), so it never exercised
+    // this deferred path.
     let mut scene = Scene::new();
     scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 100.0, 50.0));
     let mut tree = WidgetTree::new();

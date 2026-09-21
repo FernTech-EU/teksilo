@@ -44,9 +44,11 @@
 //!   before it is byte-for-byte identical between the previous and current
 //!   projection. (Over-reporting is wasteful, not incorrect, and is not
 //!   checked here.)
-//! - The three `TreeFilterMode` strategies each match their literal
-//!   set-theoretic definition (matches / matches ∪ ancestors / matches ∪
-//!   descendants) against a brute-force computation.
+//! - The two ancestor-preserving `TreeFilterMode` strategies each match their
+//!   literal set-theoretic definition (matches / matches ∪ ancestors) against
+//!   a brute-force computation. `KeepDescendants` is excluded: its literal
+//!   "matches ∪ descendants" set is not what `SortFilterTreeModel`'s
+//!   root-anchored flatten emits — see the comment on property 6.
 //! - `TreeRowFilter` and `SortFilterTreeModel` agree on the kept node set for
 //!   `HideNonMatching` and `KeepAncestors` — the equivalence the module doc
 //!   of `tree_row_filter.rs` explicitly claims (and explicitly does *not*

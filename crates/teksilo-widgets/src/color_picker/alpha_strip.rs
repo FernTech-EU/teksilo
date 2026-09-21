@@ -9,7 +9,7 @@
 //! foreground is a `Paint::LinearGradient` fading from
 //! `current_color.with_alpha(0.0)` to `current_color.with_alpha(1.0)`
 //! along the strip's primary axis. Vertical orientation reads
-//! transparent at the top (alpha=0) and opaque at the bottom (alpha=1);
+//! opaque at the top (alpha=1) and transparent at the bottom (alpha=0);
 //! horizontal reads transparent on the leading edge.
 //!
 //! Accessibility is `Role::Slider`, name "Opacity", `numeric_value =
@@ -284,9 +284,9 @@ impl Widget for AlphaStrip {
         let radius = CornerRadius::uniform(cp::STRIP_CORNER_RADIUS);
 
         // Checkerboard background — many small fill_rect calls. For a
-        // 14×192 strip with 6 px cells that's ~64 calls per paint, well
-        // within the Tier-1 budget. Drawn first; the gradient overlay
-        // handles transparency.
+        // 14×192 strip with 6 px cells that's ~96 calls per paint (3 cols ×
+        // 32 rows), well within the Tier-1 budget. Drawn first; the gradient
+        // overlay handles transparency.
         paint_checkerboard(
             canvas,
             bounds,

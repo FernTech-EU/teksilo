@@ -12,8 +12,10 @@
 //! distinct constraints and asserting they don't share state.
 //! True embedded-nesting (an inner SceneView added as a
 //! heavyweight item inside an outer Scene) requires the full
-//! heavyweight-item materialise path, which is tested indirectly
-//! through the existing arena machinery. Pure constraint
+//! heavyweight-item materialise path, and has its own coverage in
+//! `view/tests.rs` — `nested_scene_view_content_tracks_the_outer_zoom`,
+//! `nested_scene_view_geometry_after_paint`,
+//! `nested_scene_chart_pattern_smoke`. Pure constraint
 //! independence is the property we care about here.
 
 use crate::items::RectItem;
@@ -308,14 +310,14 @@ fn chart_shaped_outer_fixed_axis_inner_free_pan_data() {
 
 #[test]
 fn view_pan_bounds_override_is_per_view_even_with_same_scene() {
-    // Conceptually: if two views could share a Scene, each
-    // could apply its own pan_bounds_override and they'd pan
-    // independently within the same scene-declared range. The
-    // Scene type isn't Clone right now, so this test exercises
-    // the "two Scenes, same shape, different overrides" proxy
-    // — but the property under test is that pan_bounds_override
-    // is genuinely view-local and doesn't leak through the
-    // Scene's constraint signals.
+    // Conceptually: two views sharing one Scene (via a cloned
+    // `SceneModel` — see `view/tests/multi_view.rs`) each apply
+    // their own pan_bounds_override and pan independently within
+    // the same scene-declared range. A bare `Scene` isn't Clone,
+    // so this test exercises the "two Scenes, same shape,
+    // different overrides" proxy — but the property under test is
+    // that pan_bounds_override is genuinely view-local and
+    // doesn't leak through the Scene's constraint signals.
     let scene_a = Scene::new();
     let scene_b = Scene::new();
 

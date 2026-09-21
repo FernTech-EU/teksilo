@@ -3,15 +3,15 @@
 
 //! Coverage for the Scene-side a11y data model.
 //!
-//! The walker that builds AT nodes lives in `accessibility_impl.rs`
+//! The walker that builds AT nodes lives in `view/a11y_impl.rs`
 //! (driven by `SceneView::accessibility`); these tests focus on the
 //! mutators and invariants of the underlying logical structure —
 //! groups, parents, relations, live regions, landmarks, categories.
 //!
-//! Walker-end-to-end tests need an AccessNodeBuilder context that
-//! the unit framework doesn't expose easily; tests for that pipeline
-//! belong in a follow-up alongside a public `Scene::debug_a11y_tree()`
-//! introspection helper.
+//! Walker-end-to-end coverage — the same data reaching real AccessKit
+//! nodes — lives alongside, in `view/tests/text_runs.rs` and
+//! `tests/at_bounds.rs`, which walk a real `SceneView` in a
+//! `WidgetTree`.
 //!
 //! Added in Unit 9 to close the audit-flagged a11y coverage gap
 //! (the entire `a11y.rs` module had no test coverage before).

@@ -355,8 +355,9 @@ impl std::fmt::Debug for Checkbox {
 // Widget
 // ---------------------------------------------------------------------------
 
-/// Internal interaction state — local to this widget's handlers; the
-/// active `CheckboxStyle` only sees the four derived boolean signals
+// Interaction state is Button's shared `InteractionState` — local to this
+// widget's handlers; the active `CheckboxStyle` only sees the four derived
+// boolean signals (is_hovered, is_pressed, is_focused, is_disabled).
 impl Widget for Checkbox {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         use crate::styles::recipe_checkbox_style as cb_dims;

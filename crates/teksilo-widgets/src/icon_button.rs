@@ -43,7 +43,7 @@
 //! # let visible = Signal::new(false);
 //! let _w = IconButton::browse().embedded();           // 24 dp, dim — TextInput trailing
 //! let _w = IconButton::clear().embedded();            // 24 dp, dim — clear-X
-//! let _w = IconButton::search().toolbar();            // 40 dp, full weight — toolbar
+//! let _w = IconButton::search().toolbar();            // 30 dp, full weight — toolbar
 //! let _w = IconButton::visibility_toggle(visible);    // password-field eye toggle
 //! ```
 //!
@@ -178,8 +178,9 @@ pub struct IconButton {
     /// inheriting `idle_text_role`).
     icon_role_override: Option<teksilo_core::color_prop::ColorProp>,
 
-    /// Per-call style override. When `None`, falls back to the IntUI
-    /// default `RecipeIconButtonStyle`.
+    /// Per-call style override. When `None`, falls through to the theme
+    /// slot (`style_slots.icon_button`) or the IntUI default
+    /// `RecipeIconButtonStyle`.
     style_override: Option<SharedIconButtonStyle>,
 
     // Build state (set in build())
@@ -258,9 +259,10 @@ impl IconButton {
     /// whose disclosure caret needs to match the icon's color across
     /// hover / press / focus / disabled states.
     ///
-    /// The provided signal is reset to `Disabled` when `enabled == false`
-    /// during `build()` so the shared signal honors the button's
-    /// enabled state without the caller having to seed it.
+    /// The interaction signal never carries `Disabled`: the arena's
+    /// `enabled_state` is the single source of truth, so a wrapper that
+    /// also needs the disabled look reads
+    /// `ctx.effective_enabled_signal(..)` beside this signal.
     pub fn share_interaction(mut self, signal: Signal<InteractionState>) -> Self {
         self.shared_interaction = Some(signal);
         self
@@ -597,10 +599,10 @@ pub(crate) fn resolve_icon_role_standalone(state: InteractionState) -> TextRole 
     }
 }
 
-/// Per-size icon dimension. The two smallest buttons (Compact 22,
-/// Default 24) share the standard `icon_size` (16 dp); Toolbar / Large
-/// / Hero scale up via dedicated tokens so a 50 dp button doesn't
-/// carry a tiny 16 dp glyph.
+/// Per-size icon dimension. The two smallest buttons (Compact and
+/// Default, both 24 dp) share the standard `icon_size` (16 dp);
+/// Toolbar / Large / Hero scale up via dedicated tokens so a 50 dp
+/// button doesn't carry a tiny 16 dp glyph.
 fn resolve_icon_size(size: IconButtonSize) -> f32 {
     use crate::styles::recipe_icon_button_style as icon_dims;
     match size {
@@ -631,9 +633,7 @@ impl teksilo_core::widget::Widget for IconButton {
 
         // Reactive view of "is this widget effectively enabled?",
         // factoring this node and every ancestor's `enabled_state`.
-        // Used both to derive `is_disabled` for the style chrome and
-        // to flip the cursor between Pointer (enabled) / Default
-        // (disabled).
+        // Used to derive `is_disabled` for the style chrome.
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         // Interaction signal — caller-supplied via `share_interaction`
@@ -902,8 +902,8 @@ impl teksilo_core::widget::Widget for IconButton {
 
 // ── Overridable icon set ────────────────────────────────────────────────────
 //
-// Default icons are real SVGs embedded via `include_str!` and parsed once
-// via `LazyLock`. The `res!` macro cannot be used here because it emits
+// Default icons are real SVGs embedded via `include_str!` and parsed on
+// each call. The `res!` macro cannot be used here because it emits
 // `::teksilo::` paths and teksilo-widgets sits below teksilo in the
 // dependency graph.
 //

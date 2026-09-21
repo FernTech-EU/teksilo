@@ -7,7 +7,7 @@
 //! popover-style menus. It provides a themed surface (background, rounded
 //! border, drop shadow) and owns the full keyboard navigation stack:
 //! ArrowUp/Down moves focus, Enter activates, Escape bubbles to the
-//! enclosing overlay host, Home and End jump to the first/last enabled item.
+//! enclosing overlay host, Home and End jump to the first/last visible item.
 //! Type-ahead search jumps to the next item whose stripped label starts with
 //! the accumulated keystrokes (500 ms reset window by default).
 //!
@@ -18,8 +18,10 @@
 //! etc.) call `.max_visible_items(n)` to cap the panel height and wrap the
 //! content in a `ScrollArea`.
 //!
-//! **Safe-triangle hover gate.** When a submenu item opens its child overlay,
-//! `MenuList` stamps a shared anchor so sibling items can skip their
+//! **Safe-triangle hover gate.** When the pointer leaves a submenu trigger's
+//! row with the submenu still up, the trigger arms the safe region (the apex
+//! and the cone live in `teksilo_core::overlay`) and publishes that submenu's
+//! id on a `MenuList`-wide shared state, so sibling items can skip their
 //! hover-switch while the cursor travels diagonally toward the submenu.
 //!
 //! ## Accessibility
@@ -61,7 +63,7 @@ use teksilo_tokens::SurfaceRole;
 use crate::primitives::{MaxSize, Padding, RectWidget, VStack, ZStack};
 use crate::scroll_area::ScrollArea;
 
-/// Marker for whether a pending item is a menu item or a separator.
+/// Marker for whether a pending entry is a menu item, a separator, or a header.
 enum MenuEntry {
     /// A menu item with an optional reactive visibility gate. When the gate
     /// is `Some(false)` the item's row collapses to zero height (no gap) and
@@ -254,11 +256,11 @@ pub struct MenuList {
     item_visibility: Vec<Option<teksilo_core::signal::Prop<bool>>>,
     /// Whether each item (by index into item_widget_ids) is a submenu trigger.
     submenu_flags: Vec<bool>,
-    /// When set and the item count (counting every entry — items *and*
-    /// separators — against the row count, not pixels) exceeds the
-    /// limit, the content column is wrapped in a `ScrollArea` and the
-    /// panel height is capped to `n * item_height`. `None` (default)
-    /// lets the menu grow with its content.
+    /// When set and the item count (counting items only — separators and
+    /// headers contribute nothing — against the row count, not pixels)
+    /// exceeds the limit, the content column is wrapped in a `ScrollArea`
+    /// and the panel height is capped to `n * item_height`. `None`
+    /// (default) lets the menu grow with its content.
     max_visible_items: Option<usize>,
     /// Side of the menu panel that is visually attached to its trigger
     /// (e.g. a menu button or combo-box). When set, drop shadow
@@ -1661,9 +1663,8 @@ mod tests {
         assert_eq!(fired.get(), Some(1));
     }
 
-    // Silence the unused-variable warning on the unused `list_id`
-    // binding inside `menu_label`-style tests above, since each test
-    // uses its locals.
+    // Keeps the test module's `Signal` import referenced; nothing else in
+    // these tests names the type at module scope.
     #[allow(dead_code)]
     fn _ignore_unused() {
         let _: Option<Signal<bool>> = None;

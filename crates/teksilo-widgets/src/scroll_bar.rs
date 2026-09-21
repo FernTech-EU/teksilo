@@ -1159,8 +1159,9 @@ mod tests {
         tree.render();
 
         // Repeatedly click far below the thumb to page-scroll forward
-        // until we hit the maximum (500). Each page scroll adds 250,
-        // so after 3 clicks the position should be clamped at 500.
+        // until we hit the maximum (500). Each page scroll adds one
+        // viewport — `max * ratio / (1 - ratio)`, which is 500 here — so
+        // the first click already clamps the position at 500.
         for _ in 0..5 {
             tree.pointer_move(Point::new(6.0, 390.0));
             tree.dispatch_event(WidgetEvent::pointer_down(
@@ -1548,11 +1549,10 @@ mod touch_tests {
     }
 
     /// The bar's own reported regions, primed the way a layout pass primes
-    /// them. There is no tree-level accessor for `target_regions` yet — the
-    /// conformance walker that will grow one is a later package — so the widget
-    /// is asked directly, off the tree, which is also what makes the reported
-    /// geometry checkable against the arithmetic the painters use rather than
-    /// against itself.
+    /// them. The widget is asked directly rather than through
+    /// [`WidgetTree::widget_target_regions`], so the frame is the caller's to
+    /// choose, which is also what makes the reported geometry checkable
+    /// against the arithmetic the painters use rather than against itself.
     fn regions_of(bar: &ScrollBar, bounds: Rect) -> Vec<TargetRegion> {
         let theme = teksilo_core::presets::intui::light();
         let ctx = LayoutContext::for_testing(&theme);

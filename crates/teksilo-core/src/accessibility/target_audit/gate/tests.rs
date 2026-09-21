@@ -718,7 +718,7 @@ fn a_census_that_collapsed_is_reported_as_proving_less() {
 
 /// Each of the thirteen lints, seeded one at a time.
 ///
-/// A table rather than eleven functions because the shape is identical in every
+/// A table rather than thirteen functions because the shape is identical in every
 /// row — build the one defect, assert the lint names it — and because a table is
 /// what makes a missing row visible. The row count is asserted, so a lint added
 /// without a row here is a failure rather than a silence.

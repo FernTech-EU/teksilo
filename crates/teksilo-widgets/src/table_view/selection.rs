@@ -164,7 +164,6 @@ impl CellSelectionModel {
         }
     }
 
-    /// Select every cell in `0..row_count × 0..col_count`.
     /// Replace the selection with an arbitrary set of cells, committing it as
     /// the base a following Shift range extends around.
     ///

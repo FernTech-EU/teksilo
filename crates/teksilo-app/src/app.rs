@@ -1310,6 +1310,13 @@ impl TeksiloAppHandler {
         }
     }
 
+    /// Route a debug-bridge [`AutomationPayload`](crate::automation_bridge::AutomationPayload):
+    /// resolve the target window, then run the op against the live tree
+    /// (and, for screenshots, the live `PlatformWindow`). `list_windows` and
+    /// `screenshot` are served here (they need the window manager / platform
+    /// window); everything else goes through [`teksilo_automation::execute`]
+    /// with a real `WindowOps`. The settle runs synchronously on this (the
+    /// main) thread, never across a frame boundary.
     /// Run `f` against window `winit_id`'s tree with a real
     /// [`WindowOps`](teksilo_core::WindowOps) sink (so `open_window`,
     /// `parent_window_handle`, etc. work). Encapsulates the take-out /
@@ -3185,8 +3192,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
 /// host-initiated close back to the main event loop. The host's
 /// close callback boxes one of these through `AppEventProxy::send_external`;
 /// `TeksiloAppHandler::user_event` downcasts the payload and calls
-/// `WindowManager::queue_close` so the window tears down on the next tick
-/// (matching the `WindowEvent::CloseRequested` path).
+/// `WindowManager::request_close` so the window runs its close guard and
+/// tears down on the next tick (matching the `WindowEvent::CloseRequested`
+/// path).
 #[derive(Debug, Clone, Copy)]
 pub struct CloseWindowRequest {
     pub teksilo_id: TeksiloWindowId,
@@ -3479,11 +3487,14 @@ impl TeksiloAppBuilder {
     /// markup as `[label](:key)`) to a translatable body, an optional
     /// long-form "more" body revealed by the Accordion disclosure
     /// inside a sticky rich tooltip, and an optional keyboard shortcut
-    /// (literal label — registry-backed auto-lookup is a follow-up).
+    /// (a literal label, or a registered shortcut id via
+    /// [`TooltipContent::for_shortcut`](teksilo_widgets::tooltip::TooltipContent::for_shortcut),
+    /// which tracks user rebinds).
     ///
-    /// This is a **single-call registration**: the list is the
-    /// application's complete tooltip catalog. Call once at app boot,
-    /// before `run()`. Calling multiple times panics in debug builds.
+    /// The list is merged into the application's tooltip catalog. Register
+    /// at app boot, before `run()` — the accumulated catalog is frozen into
+    /// a read-only registry before the first frame builds, and installing it
+    /// twice panics in debug builds.
     ///
     /// ```ignore
     /// use teksilo_widgets::tooltip::TooltipContent;

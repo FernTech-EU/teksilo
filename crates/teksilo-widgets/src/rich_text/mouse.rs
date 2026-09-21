@@ -1040,6 +1040,16 @@ pub(super) fn reposition_caret_for_context_menu(state: &SharedState, window_posi
     sync_cursor_signals(state);
 }
 
+/// Move the caret to the drop point under a hovering drag, in the coordinate
+/// space the widget's own drag handlers receive (widget-local).
+///
+/// A drag with no caret under it asks the writer to aim at nothing: they can see
+/// the pointer but not where the text will land, and the two are never the same
+/// place because a caret snaps to a character boundary. So the caret follows the
+/// drag, and dropping puts the payload exactly where the caret already is.
+///
+/// Returns `false` when the pointer is not over any text, so the caller can
+/// decline the drop rather than insert somewhere arbitrary.
 /// Hit-test a **window**-space point to a document char offset — the primitive
 /// behind [`EditorHandle::offset_at_point`](super::EditorHandle::offset_at_point).
 /// `None` when the point resolves to no text.

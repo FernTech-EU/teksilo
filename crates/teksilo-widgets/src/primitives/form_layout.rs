@@ -236,8 +236,7 @@ impl Widget for FormLayout {
                         let f = resolve_pending(field, ctx);
                         // WCAG 3.3.2 / EN 301 549 11.5.2.7: name the field after
                         // its visible label so assistive tech reads "<label>,
-                        // edit text" instead of an unlabelled field. Serves both
-                        // `line()` (deferred) and `line_id()` (pre-registered).
+                        // `line()`'s two forms: a deferred widget and a pre-registered id.
                         ctx.access_labelled_by(f, l);
                         FormRow::Pair(l, f)
                     }
@@ -252,10 +251,7 @@ impl Widget for FormLayout {
 
     /// Reconcile: the rows are re-attached by id, not re-derived.
     ///
-    /// A form's children are handed in once — `line(..)` takes a
-    /// `Box<dyn Widget>` that can be added to the arena exactly once, and
-    /// `line_id(..)` names widgets the caller registered itself — so there
-    /// is no recipe to replay on a rebuild. Under the default
+    /// `line(..)` with an id names widgets the caller registered itself — so there Under the default
     /// tear-down-and-reconstruct semantics `build()` found `pending_rows`
     /// already drained, re-attached the previous generation's ids, and got a
     /// form of destroyed children: every row vanished and the widget measured

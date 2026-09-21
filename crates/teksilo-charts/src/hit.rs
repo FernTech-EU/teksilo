@@ -538,9 +538,12 @@ pub(crate) enum MarkStep {
 /// else.
 ///
 /// Both axes step the same single sequence — the paint-order mark vector,
-/// which is series-major and point-minor — because a chart's marks are
+/// in whatever order the chart kind builds it — because a chart's marks are
 /// not a grid: a pie has one ring, a grouped bar chart has one bar per
 /// (series, category) pair, and a line chart's points are per series. One
+/// sequence is the only ordering all three share, and it is the order the
+/// AT tree publishes its per-datum nodes in, so the keyboard and a screen
+/// reader's own review agree. One
 /// sequence is the only ordering all three share, and it is the order the
 /// AT tree publishes its per-datum nodes in, so the keyboard and a screen
 /// reader's own review agree.

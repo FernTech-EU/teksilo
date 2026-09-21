@@ -45,7 +45,10 @@ pub struct PaintContext<'a> {
     /// per-color bookkeeping. Static and bound color props are not
     /// substituted (caller's literal wins).
     pub effective_enabled: bool,
-    // TODO: Wire from platform accessibility settings (winit doesn't expose these yet)
+    // Fed by `teksilo-platform`'s `AccessibilityPreferences::query()` (winit
+    // exposes none of these, so the platform crate asks the OS directly) via
+    // `WidgetTree::set_accessibility_preferences`; `prefers_large_text` is
+    // derived from the OS text-scale factor being greater than 1.0.
     pub prefers_high_contrast: bool,
     pub prefers_reduced_motion: bool,
     pub prefers_large_text: bool,

@@ -526,8 +526,12 @@ pub(crate) struct EditorState {
     pub debounce: Debounce,
 
     /// Set whenever the document mutated this frame (insert, delete,
-    /// format). Drained and emitted as `on_text_changed` command once
-    /// the debounce timer crosses 150 ms. Distinct from
+    /// format). Drained once the debounce timer crosses 150 ms —
+    /// observers read the `document_version` signal `drain_events`
+    /// already bumped, since the typed `on_text_changed` emission is
+    /// still Phase B (see `frame_loop::tick`). Distinct from
+    /// `pending_format_changed` so a pure-format edit doesn't pretend
+    /// text changed. Distinct from
     /// `pending_format_changed` so a pure-format edit doesn't pretend
     /// text changed.
     pub pending_text_changed: bool,
@@ -1109,7 +1113,9 @@ impl EditorState {
                 // A programmatic repopulation (`set_plain_text` / `clear` /
                 // `set_djot` / `set_markdown` / `set_html`) is the ONLY thing
                 // that queues `DocumentReset` — text-document emits it from
-                // exactly three explicit sites, and never from an edit path.
+                // exactly four explicit sites, and never from an edit path.
+                // So it, alone, is the reliable "this was a load, stay quiet"
+                // signal for `on_change`.
                 // So it, alone, is the reliable "this was a load, stay quiet"
                 // signal for `on_change`.
                 DocumentEvent::DocumentReset => {
@@ -1226,7 +1232,7 @@ impl EditorState {
         // Drop the cached flow snapshot and synthetic-id lookup
         // whenever the document structure / content / formatting
         // changed. The next accessibility walk rebuilds both
-        // lazily from a fresh `document.snapshot_flow()`.
+        // lazily from a fresh `flow_snapshot_for_a11y()`.
         if a11y_snapshot_dirty {
             self.invalidate_accessibility_cache();
         }

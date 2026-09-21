@@ -133,9 +133,9 @@ impl SceneView {
 
         // Drain any pending marquee commit posted by the
         // on_drag closure on the previous `Ended`. We do it here
-        // (not in the closure) because `place_children` has direct
-        // access to `&self.scene` for the spatial-index query
-        // — keeping `Scene` plain instead of `Rc<RefCell<Scene>>`.
+        // (not in the closure) because `place_children` can take the
+        // shared `&Scene` borrow out of `self.model` for the
+        // spatial-index query.
         // After commit, clear the in-flight marquee so paint stops
         // overlaying the rect.
         // Take first: holding the `RefMut` across the commit would make any
@@ -153,15 +153,15 @@ impl SceneView {
         }
 
         // Drain any pending drag-to-move commit, applied
-        // via the public `flush_pending_mutations` helper to keep
+        // via the public `flush_pending_item_move` helper to keep
         // the borrow tractable (`place_children` takes `&self`,
         // and `Scene::set_local_pos` needs `&mut Scene`). The
         // framework calls layout from `&mut tree`, which gives
         // `&mut self` access elsewhere — but inside this trait
         // method we have only `&self`. Defer to a separate
-        // `flush_pending_mutations(&mut self)` step instead. For
+        // `flush_pending_item_move(&mut self)` step instead. For
         // headless tests that drive the closure directly, the
-        // public `flush_marquee_commit` / `flush_pending_mutations`
+        // public `flush_marquee_commit` / `flush_pending_item_move`
         // methods materialise the result.
 
         // (Lightweight-bounds snapshot is refreshed in
@@ -568,10 +568,9 @@ impl SceneView {
     /// The scene-coord region currently inside the viewport, given
     /// the view transform's current value. Used by `place_children`
     /// to decide which items to lay out at full size and which to
-    /// collapse to zero. Falls back to a degenerate-but-non-empty
-    /// rect at the SceneView's screen position when the view
+    /// collapse to zero. Falls back to [`Rect::ZERO`] when the view
     /// transform is singular (zoom = 0); zero zoom collapses
-    /// everything visually anyway, so the cull fallback is a
+    /// everything visually anyway, so culling everything is a
     /// safe-by-default choice.
     pub(super) fn visible_scene_region(&self, bounds: Rect) -> Rect {
         // The view transform now folds in `bounds.origin`, so to find

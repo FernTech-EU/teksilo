@@ -705,7 +705,7 @@ fn virtualization_creates_only_visible_items() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
     let children = row_ids(&tree, lv_id);
-    // children includes items + 1 scrollbar
+    // row_ids is the pane's rows only — the scrollbar is a sibling of the pane
     let item_count = children.len() - 1;
     assert!(
         item_count < 30,
@@ -1168,7 +1168,8 @@ fn list_item_has_a11y_role() {
     let (mut tree, lv_id, _model) = make_list_view(3, 30.0);
     tree.layout(SizeProposal::exact(400.0, 300.0));
 
-    // The direct children of ListView are ListItemWrappers (+ scrollbar)
+    // The body pane's children are the ListItemWrappers (the scrollbar is the
+    // ListView's own last child, one level up)
     let children = row_ids(&tree, lv_id);
     let info = tree.accessibility_node(children[0]);
     assert_eq!(
@@ -1311,7 +1312,7 @@ fn the_accelerator_moves_the_cursor_without_disturbing_the_selection() {
     tree.layout(p);
     assert_eq!(selection.selected_indices(), vec![40]);
 
-    // The cursor really did move, so a plain Home now selects where it is.
+    // And Ctrl/⌘+PageDown, the third navigation key, follows the same rule.
     tree.press_key(Key::PageDown, Modifiers::COMMAND);
     tree.layout(p);
     assert_eq!(selection.selected_indices(), vec![40]);

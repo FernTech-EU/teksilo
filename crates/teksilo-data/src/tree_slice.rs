@@ -16,7 +16,7 @@
 //! tree-change observer alive.
 //!
 //! `TreeSlice` implements [`TreeDataSource`] and is the
-//! built-in source for `TreeView` / `TreeTableView`.
+//! built-in source for `TreeView`.
 //!
 //! ## Example
 //!

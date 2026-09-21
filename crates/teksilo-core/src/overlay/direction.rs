@@ -10,9 +10,9 @@
 //! inline-start quadrant; a selection handle labelled `Start` sits on the left
 //! in English and on the right in Arabic; a swipe that means "go forward"
 //! travels left in one and right in the other. Deriving that answer three
-//! times is how two of them end up disagreeing, so it is derived once, here,
-//! and the placement code, the text-affordance layer and the swipe/auto-scroll
-//! consumers all read it.
+//! times is how two of them end up disagreeing, so it is derived once, here.
+//! The text-affordance layer reads it today; the placement code and the
+//! swipe/auto-scroll consumers are still to be moved onto it.
 //!
 //! What is deliberately **not** here: the pan axes. [`TouchAction::PAN_X`] and
 //! [`TouchAction::PAN_Y`] are axis-relative and stay that way — "this subtree

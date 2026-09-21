@@ -704,7 +704,7 @@ fn tooltip_appears_on_hover() {
 #[test]
 fn compact_toolbar_reports_the_button_height_not_the_panel_padding() {
     // Regression: the toolbar's surface `Panel` must add no padding, else a
-    // compact bar reports ~46 dp for a 22 dp button and spills a tight slot
+    // compact bar reports ~46 dp for a 24 dp button and spills a tight slot
     // (e.g. a dock header). A 2-action compact bar is exactly one button tall.
     #[derive(Debug)]
     struct HeightProbe {

@@ -89,7 +89,8 @@ impl LayoutCacheKey {
     }
 }
 
-// Only cache the metrics — glyphs are re-generated on demand during paint.
+// Only cache the metrics here — the glyph quads live in their own map,
+// keyed by `layout_key` and resolved by `ensure_glyphs` during paint.
 
 /// Bridge between teksilo-canvas's `TextBackend` trait and text-typeset.
 ///
@@ -120,8 +121,9 @@ pub struct TypesetterBridge {
     /// glyphs in text-typeset's internal `GlyphCache` so they aren't
     /// evicted while still being rendered via paint-cache hits.
     glyph_cache: HashMap<u64, (Vec<GlyphQuad>, Vec<GlyphCacheKey>)>,
-    /// Whether any text work (`layout_single_line`/`ensure_glyphs`)
-    /// happened since the last `atlas_info()` call. When false we
+    /// Whether any text work (a `layout_*` call, or a `service_mut()`
+    /// borrow) happened since the last `atlas_info()` call. Deliberately
+    /// NOT set by `ensure_glyphs` — see the note there. When false we
     /// skip advancing the eviction generation to avoid aging out
     /// idle-but-visible glyphs.
     had_text_activity: bool,

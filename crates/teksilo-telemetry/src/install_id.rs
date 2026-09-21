@@ -86,7 +86,7 @@ impl InstallId {
         delay: Duration,
         now: SystemTime,
     ) -> Result<Self, SettingsFileError> {
-        // `delay` is vestigial — see `ConsentStore::open_with_clock`. The install
+        // `delay` is vestigial — see `ConsentStore::open`. The install
         // id is written once and then rotated ~yearly; there is no burst to
         // debounce, and `SettingsFile` writes synchronously under a lock now.
         let _ = delay;

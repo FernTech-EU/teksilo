@@ -6,8 +6,9 @@
 //! The editor calls one of the typesetter's three render paths (full,
 //! block-only, cursor-only) and hands the resulting frame to
 //! [`paint_frame`] along with the Canvas it should draw into. The walker
-//! translates every rect and glyph into teksilo-canvas primitives, applying
-//! the scroll and zoom offset.
+//! translates every rect and glyph into teksilo-canvas primitives, offsetting
+//! them by the widget's origin — the typesetter has already applied the scroll
+//! and zoom (see [`PaintParams::origin`]).
 //!
 //! Pass order (matches the godot-rich-text reference):
 //!   1. Background decorations (Selection, CellSelection, Background,
@@ -63,8 +64,9 @@ pub struct PaintParams<'a> {
     /// The size a resize drag is currently proposing, drawn as an outline over
     /// the picture's own place in the text.
     pub resize_preview: Option<[f32; 4]>,
-    /// Whether to draw the caret this paint. The editor's frame loop
-    /// sets this from `caret_visible && has_focus && caret_policy != Hidden`.
+    /// Whether to draw the caret this paint. The editor's paint pass sets this
+    /// from the caret policy, `has_focus`, the blink state and `window_active`
+    /// — an inactive window hides the caret whatever the policy says.
     pub draw_caret: bool,
 }
 

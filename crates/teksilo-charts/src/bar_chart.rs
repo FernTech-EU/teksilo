@@ -227,7 +227,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
         self
     }
 
-    /// Draw a labelled horizontal line across the plot at `value` on the value axis.
+    /// Draw a labelled line across the plot at `value` on the value axis.
     ///
     /// For the comparison a chart is *about* — a median, a target, a budget. Without one, a
     /// chart that tints its bars by how they compare to something leaves the something
@@ -822,10 +822,10 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 
 impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     /// Memoized [`PlotGeometry`] for `bounds` — recomputed only when
-    /// `bounds` or `model.structure_version()` changed since the last
-    /// call. Shared by `paint()` and `accessibility()` so a mark's bounds
-    /// never disagree between the visual tree and the AT tree, even
-    /// without an intervening paint.
+    /// `bounds`, `model.structure_version()` or the target density changed
+    /// since the last call. Shared by `paint()` and `accessibility()` so a
+    /// mark's bounds never disagree between the visual tree and the AT
+    /// tree, even without an intervening paint.
     fn ensure_geometry(
         &self,
         bounds: Rect,
@@ -930,7 +930,7 @@ impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
     /// Compute every visible bar's geometry + identity. Pure — reads only
     /// the model and layout config, no theme/canvas — so it's shared
     /// verbatim by `paint()` (drives the actual bar fills), the pointer
-    /// hit-test (`hit::rect_hit`), and `accessibility()` (per-mark AT
+    /// hit-test (`hit::rect_hit_within`), and `accessibility()` (per-mark AT
     /// nodes).
     fn compute_marks(&self, geometry: &PlotGeometry) -> Vec<MarkGeometry> {
         use crate::style as cs;

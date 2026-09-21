@@ -134,6 +134,7 @@ impl CompositeTooltipWidget {
         self
     }
 
+    /// Whether the surface offers dwell-to-sticky promotion. Default `true`.
     /// Override the per-theme `composite_tooltip.max_width`.
     /// Whether the surface offers dwell-to-sticky promotion. Default `true`.
     ///
@@ -746,10 +747,10 @@ mod tests {
     /// Every painted descendant must sit inside the surface that paints the
     /// tooltip's background.
     ///
-    /// The dwell indicator is the last child of the root `VStack`, so anything
-    /// that makes the surface report a height shorter than the column actually
-    /// needs pushes the indicator out the bottom — painted on the window, over
-    /// whatever is behind, with no tooltip under it.
+    /// The dwell indicator is the last of the root's hand-placed children, so
+    /// anything that makes the surface report a height shorter than the column
+    /// actually needs pushes the indicator out the bottom — painted on the
+    /// window, over whatever is behind, with no tooltip under it.
     #[test]
     fn the_dwell_indicator_sits_inside_the_tooltip_surface() {
         let mut tree = WidgetTree::new()

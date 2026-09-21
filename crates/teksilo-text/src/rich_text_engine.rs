@@ -397,13 +397,14 @@ impl RichTextEngine {
     /// this engine — either we've never run one, or the HiDPI
     /// scale factor changed and the old advances are stale.
     ///
-    /// The structural `has_full_layout()` guard above makes the
-    /// underlying [`DocumentFlow::relayout_block`] error variants
-    /// unreachable from this entry point; the call site below
-    /// `.expect`s them as a soundness assertion — any failure
-    /// there would mean the two `DocumentFlow` invariant checks
-    /// and `RichTextEngine::has_full_layout` disagree, which is
-    /// a bug in one of them.
+    /// The structural `has_full_layout()` guard above rules out the
+    /// `NoLayout` / `ScaleDirty` variants of
+    /// [`DocumentFlow::relayout_block`]; either of those reaching the call
+    /// site below would mean the two `DocumentFlow` invariant checks and
+    /// `RichTextEngine::has_full_layout` disagree, which is a bug in one of
+    /// them. `UnknownBlock` is an ordinary miss, though, so the call site
+    /// reports every error as an `Err` and the caller falls back to a full
+    /// layout.
     ///
     /// `mask` selects which highlight sessions this view renders: an empty mask pulls a clean
     /// snapshot (no highlights), a full mask every session, a narrow one a chosen set — so two

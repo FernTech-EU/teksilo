@@ -210,9 +210,9 @@ impl ToolbarAction {
         self
     }
 
-    /// Plain-text tooltip shown after a hover delay (also the AT name
-    /// supplement in `IconOnly` mode). Overrides any previously set rich
-    /// tooltip — every setter clears the other so last-call wins.
+    /// Plain-text tooltip shown after a hover delay (the inline button is
+    /// icon-only; with none set, the label is used). Overrides any previously
+    /// set rich tooltip — every setter clears the other so last-call wins.
     pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self {
         self.tooltip = Some(text.into());
         self.rich_tooltip_source = None;
@@ -684,8 +684,10 @@ impl Toolbar {
         self
     }
 
-    /// Gap between consecutive toolbar items in logical pixels (default
-    /// [`TOOLBAR_SPACING`]).
+    /// The gap actually used: the app's override if it set one, else the
+    /// density's [`toolbar_spacing`].
+    /// Gap between consecutive toolbar items in logical pixels. Overrides the
+    /// density's [`toolbar_spacing`] ([`TOOLBAR_SPACING`] at Compact).
     /// The gap actually used: the app's override if it set one, else the
     /// density's [`toolbar_spacing`].
     fn resolved_spacing(&self, tokens: &InputTokens) -> f32 {
@@ -968,7 +970,7 @@ impl Widget for Toolbar {
         // toolbar sits directly on its host's surface (a dock header, a form
         // row): a themed `Panel` background/border would draw a spurious box, and
         // the default padding would inflate the bar by the theme inset on every
-        // side (a compact 22 dp button reading as ~46 dp) and spill a tight slot.
+        // side (a compact 24 dp button reading as ~48 dp) and spill a tight slot.
         // The toolbar owns only its `spacing`.
         let root = ctx.add(
             Panel::new()

@@ -619,9 +619,11 @@ pub(crate) fn build_key_handler(
             // "select the row you land on" behavior is opt-out only via
             // Ctrl, exactly like plain Arrow's select-follow is opt-in via
             // nothing (default) and Shift+Arrow's extend is opt-in via
-            // Shift. `Ctrl+Space` (below, `Key::Space`'s `toggle_selection`
-            // already ignores modifiers) then toggles just the cell the
-            // cursor moved to.
+            // Shift. `Ctrl+Space` (the `Key::Space` arms above, whose
+            // `toggle_selection` ignores modifiers) then toggles just the row
+            // or cell the cursor moved to — except in a `MultiCell` grid,
+            // where the ARIA grid pattern spends that chord on "select this
+            // column" instead.
             let is_arrow = matches!(
                 key,
                 Key::ArrowUp | Key::ArrowDown | Key::ArrowLeft | Key::ArrowRight

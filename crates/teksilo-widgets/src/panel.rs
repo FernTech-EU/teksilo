@@ -146,7 +146,8 @@ impl Panel {
         self
     }
 
-    /// Override the border width (default: 0 — no border).
+    /// Override the border width (default: the active `PanelStyle` recipe's own
+    /// border width — `RecipePanelStyle` uses 1 dp).
     /// Accepts a static `f32` or a reactive `Signal<f32>`.
     pub fn border_width(mut self, width: impl Into<Prop<f32>>) -> Self {
         self.border_width = Some(width.into());
@@ -160,7 +161,8 @@ impl Panel {
         self
     }
 
-    /// Override the padding (default: theme `components.panel.padding`).
+    /// Override the padding (default: the active `PanelStyle` recipe's own
+    /// padding — `RecipePanelStyle`'s 12 dp, density-scaled).
     /// Accepts a static `f32` or a reactive `Signal<f32>`.
     pub fn padding(mut self, padding: impl Into<Prop<f32>>) -> Self {
         self.padding = Some(padding.into());

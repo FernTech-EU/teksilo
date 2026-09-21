@@ -895,7 +895,7 @@ fn many_items_scroll_without_overflow_past_overlay() {
 
     let content_ids = tree.overlay_manager().active_content_ids();
     let panel_bounds = tree.bounds(content_ids[0]);
-    // 20 rows × 32px = 640px uncapped; expect well under that.
+    // 20 rows × 24px = 480px uncapped; expect well under that.
     assert!(
         panel_bounds.height < 400.0,
         "panel should be capped, was {}",
@@ -907,12 +907,11 @@ fn many_items_scroll_without_overflow_past_overlay() {
     );
 }
 
-/// Walk the subtree rooted at `root` and count materialized
-/// `DropdownItem` widgets. Uses `find_by_label` on each item's
-/// generated "Item {i}" label as the identity check — robust against
-/// the a11y wrapping ListView adds around each row (`ListItemWrapper`
-/// shares the `ListBoxOption` role, so a raw role scan would double-
-/// count).
+/// Count the materialized `DropdownItem` widgets among `labels`. Uses
+/// `find_by_label` on each item's generated "Item {i}" label as the
+/// identity check — robust against the a11y wrapping ListView adds
+/// around each row (`ListItemWrapper` shares the `ListBoxOption` role,
+/// so a raw role scan would double-count).
 fn count_materialized_items(tree: &WidgetTree, labels: &[String]) -> usize {
     labels
         .iter()
@@ -1229,7 +1228,9 @@ fn scrollbar_thumb_drag_scrolls_virtualized_combo() {
     // Regression: grabbing and dragging the scrollbar thumb in a
     // virtualized combo panel didn't move the scroll — the user could
     // only wheel or track-click. Under the hood this exercises the
-    // ListView's internal ScrollBar's `on_drag` handler.
+    // `on_drag` handler of the `ScrollBar` the panel mounts as a
+    // sibling of the ListView (the ListView's own is disabled with
+    // `show_scrollbar(false)`).
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let labels: Vec<String> = (0..500).map(|i| format!("Row {i}")).collect();
@@ -1237,8 +1238,9 @@ fn scrollbar_thumb_drag_scrolls_virtualized_combo() {
     tree.layout(SizeProposal::exact(300.0, 600.0));
     tree.click(cb);
     tree.layout(SizeProposal::exact(300.0, 600.0));
-    // A render pass is needed so the ScrollBar's paint caches its
-    // bounds — otherwise its thumb hit-test can't find the thumb.
+    // Run a frame as the real app does. The ScrollBar caches its
+    // bounds in `place_children` (it has no `paint` of its own) —
+    // without them its thumb hit-test can't find the thumb.
     tree.render();
 
     // Before drag: early rows visible.

@@ -14,9 +14,11 @@ impl WidgetTree {
         self.arena.bounds(id)
     }
 
-    /// Last known pointer position from a `PointerMove` event. Used
-    /// by the safe-triangle submenu hover gate to compare the
-    /// cursor trajectory against the open submenu's bounds without
+    /// Last known position of the **primary** pointer, refreshed by
+    /// every positioned event (`PointerDown` / `PointerMove` /
+    /// `PointerUp`) rather than by moves alone. Used by the
+    /// safe-triangle submenu hover gate to compare the cursor
+    /// trajectory against the open submenu's bounds without
     /// requiring the gate's evaluation site to receive a fresh
     /// `PointerMove` itself.
     pub fn last_pointer_position(&self) -> Option<teksilo_canvas::Point> {
@@ -213,8 +215,9 @@ impl WidgetTree {
     /// The widget currently under the pointer, if any. The framework
     /// updates this on `PointerMove` / hover routing; widgets that have
     /// captured the pointer or that opt out via `event_pass_through`
-    /// affect what shows up here. Mirrors the private `hovered` field
-    /// for read-only consumers (debug inspector, layout introspection).
+    /// affect what shows up here. Mirrors the hover owner's entry in the
+    /// private pointer table for read-only consumers (debug inspector,
+    /// layout introspection).
     pub fn hovered(&self) -> Option<WidgetId> {
         self.hovered_id()
     }

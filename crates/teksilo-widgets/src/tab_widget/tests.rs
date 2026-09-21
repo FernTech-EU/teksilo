@@ -363,9 +363,9 @@ fn static_tab_pane_survives_dynamic_model_push() {
 
 #[test]
 fn static_tab_id_survives_rebuild() {
-    // The DSL element-valued slot path: static_tab_id pre-registers
-    // the content in the arena, then memoization keeps the pane
-    // referring to that id across rebuilds.
+    // The DSL element-valued slot path: `static_tab` takes a
+    // WidgetId pre-registered in the arena, then memoization keeps
+    // the pane referring to that id across rebuilds.
     let selected: Signal<Option<TabId>> = Signal::new(None);
     let model: ListModel<TabHandle> = ListModel::new();
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());

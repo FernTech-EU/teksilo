@@ -721,8 +721,10 @@ impl<T: 'static> Widget for ListView<T> {
                 feedback_for_leave.set(None);
             });
 
-            // Per-frame auto-scroll when the pointer lingers within
-            // 32 px of the viewport top or bottom edge during a drag.
+            // Per-frame auto-scroll when the pointer lingers near the
+            // viewport top or bottom edge during a drag — the band is the
+            // pointer kind's, 32 dp for a mouse or pen and 64 dp for a finger
+            // (`common::drag_autoscroll`).
             // Linear ramp inside the edge zone, capped at ~12 px/frame
             // so fast-moving fingers still feel responsive but don't
             // rocket past the content.

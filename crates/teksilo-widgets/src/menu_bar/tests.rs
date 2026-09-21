@@ -241,8 +241,9 @@ impl teksilo_canvas::TextBackend for EvictingTextBackend {
 /// glyph cache and re-paints WITHOUT re-laying-out, so `MenuLabel`'s
 /// retained `TextLayout` no longer resolves and `draw_text_layout` draws
 /// nothing — the labels silently vanished until the next relayout (a
-/// theme switch). The fix re-shapes through `draw_text` when the cached
-/// draw produces no glyphs.
+/// theme switch). The fix re-shapes through `layout_single_line` and
+/// draws the FRESH layout when the cached draw produces no glyphs
+/// (`draw_text` stays only as a last resort).
 #[test]
 fn trigger_labels_survive_glyph_cache_eviction() {
     let evicted = std::rc::Rc::new(std::cell::Cell::new(false));

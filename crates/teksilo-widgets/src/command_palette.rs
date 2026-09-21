@@ -566,7 +566,7 @@ impl Widget for CommandPalette {
         // `ModalContainer` sizes to its content, and the result list lives under an
         // `Expand` — with no bounded height to fill, the list measures zero and the
         // palette collapses to just its search field, which is exactly what shipped
-        // the first time this was run. Same reason `AboutPanel` pins its card.
+        // the first time this was run.
         let column = VStack::new()
             .spacing(4.0)
             .child(Padding::symmetric(8.0, 8.0).child(field))

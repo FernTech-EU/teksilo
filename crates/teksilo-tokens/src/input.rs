@@ -464,22 +464,26 @@ impl GestureProfile {
     ///   recognizers, `gesture/multi_tap.rs:36` and `:217`.
     /// - `swipe_min_velocity = 200.0`, `swipe_min_distance = 30.0` —
     ///   `SwipeRecognizer::new`, `teksilo-core/src/gesture/swipe.rs:23-24`.
-    /// - `hit_slop = 0.0` — Teksilo has no slop pass today; a mouse hit is
-    ///   exact and stays exact.
+    /// - `hit_slop = 0.0` — the miss-only slop pass short-circuits on a zero
+    ///   radius, so a mouse hit is exact and stays exact.
     /// - `pan_slop = None` — a mouse scrolls with the wheel, never by dragging
     ///   the content, so there is no pan to arm.
     /// - `slop_precise = 2.0` — the shared precise-device jitter floor (see
     ///   [`Self::PEN`]); it is below every mouse slop, so it never bites.
     /// - `min_fling_velocity = 50.0`, `max_fling_velocity = 8000.0` — Android
     ///   `ViewConfiguration` `MINIMUM_FLING_VELOCITY` / `MAXIMUM_FLING_VELOCITY`
-    ///   (50 and 8000 dp/s). New: Teksilo has no fling today, so any value is
-    ///   a no-op until P12 lands the kinetic core.
+    ///   (50 and 8000 dp/s). New with the programme; the kinetic core reads
+    ///   both — a release under the minimum settles instead of flinging, and
+    ///   one over the maximum is scaled down to it.
     /// - `press_feedback_delay = 100 ms` — Flutter `kPressTimeout` /
-    ///   Android `ViewConfiguration.getTapTimeout()`, both 100 ms. New: no
-    ///   deferred press feedback exists yet.
+    ///   Android `ViewConfiguration.getTapTimeout()`, both 100 ms. New with the
+    ///   programme; the router spends it in `begin_press`, and only inside a
+    ///   pan claimant.
     /// - `max_hold = 250 ms` — a Teksilo choice between `kPressTimeout`
     ///   (100 ms) and `kLongPressTimeout` (500 ms); there is no upstream
-    ///   constant for it. New and currently unread.
+    ///   constant for it. New with the programme; it is how long a
+    ///   `PointerSequence` lets a member hold its peers before the arbitration
+    ///   releases the hold itself.
     /// - `drag_activation = Auto` — resolves to `Immediate` for an indirect
     ///   precise pointer, i.e. today's behaviour.
     pub const MOUSE: Self = Self {
@@ -622,8 +626,10 @@ impl Default for GestureTokens {
 
 /// Constants for the fling / settle / overscroll simulations.
 ///
-/// Nothing reads these yet — P12 lands the kinetic core. They are declared here
-/// so the whole input surface is one struct and a theme carries it.
+/// Read by the kinetic core (`teksilo-core/src/kinetic/`), which every
+/// scrollable reaches through `ctx.theme().input.scroll_physics`. They are
+/// declared here so the whole input surface is one struct and a theme carries
+/// it.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ScrollPhysicsTokens {
     /// Which simulation family to run.
@@ -724,9 +730,9 @@ pub struct InputTokens {
     /// Fling / settle / overscroll constants.
     pub scroll_physics: ScrollPhysicsTokens,
     /// Lines scrolled per wheel notch — 3.0, the Windows/GTK default.
-    /// Mirrors the `LINES_PER_NOTCH` constant at
-    /// `teksilo-platform/src/event_translation.rs:241`, which P15 replaces
-    /// with a read of this field.
+    /// `teksilo-platform/src/event_translation.rs` used to hardcode this as
+    /// `const LINES_PER_NOTCH: f32 = 3.0`; it now multiplies each notch by
+    /// this field instead.
     pub lines_per_notch: f32,
     /// The runtime kill switch. When `false`, the platform translator drops
     /// touch input and the router installs no touch-only recognizers, so an

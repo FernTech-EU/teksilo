@@ -381,9 +381,9 @@ pub struct WidgetNode {
     /// The animation scheduler uses this to pause looping animations
     /// for offscreen widgets: an animation whose
     /// `last_painted_epoch + 1 < tree.paint_epoch` is considered
-    /// off-screen and skipped. `0` means "not yet painted" — treated
-    /// as "always visible" to keep headless tests (no `render()` call)
-    /// from regressing.
+    /// off-screen and skipped. `0` means "not yet painted"; visibility is
+    /// waived wholesale while `tree.paint_epoch` is itself `0`, which keeps
+    /// headless tests (no `render()` call) from regressing.
     pub last_painted_epoch: u64,
 
     // --- V2 fields ---
@@ -399,7 +399,9 @@ pub struct WidgetNode {
     /// rebuilds: the widget didn't register them and shouldn't decide
     /// when they go away.
     pub(crate) external_handlers: EventHandlers,
-    /// Focusable override set via HandlerSet. Takes precedence over widget.is_focusable().
+    /// Focusable override set via HandlerSet. The only source of a node's
+    /// focusability — `WidgetTree::is_node_focusable` reads this field and
+    /// nothing else, so `None` means not focusable.
     pub(crate) node_focusable: Option<bool>,
     /// Tab index override set via HandlerSet.
     pub(crate) node_tab_index: Option<i32>,
@@ -449,7 +451,7 @@ pub struct WidgetNode {
     /// accessibility tree walker after the inner widget's
     /// `accessibility(&self, builder)` runs. Action callbacks
     /// (`actions`, `custom_actions` inside this struct) are dispatched
-    /// by `event_dispatch_impl.rs` when handling
+    /// by `pointer_router.rs` when handling
     /// `WidgetEvent::AccessAction`.
     pub(crate) access_overrides: Option<Box<crate::widget_builder::AccessibilityOverrides>>,
     /// Subtree visibility / merge mode (`access_exclude_subtree` /
@@ -1362,7 +1364,7 @@ impl WidgetArena {
     /// # Eligibility
     ///
     /// A node is a candidate only if all of the following hold. Each is pinned
-    /// by its own test in this module.
+    /// by its own test in `widget_tree::hit_targeting_tests`.
     ///
     /// * It earns a non-zero outset from its resolved [`HitSlop`] — which, by
     ///   the size formula, excludes anything already at least `up_to` on its
@@ -1562,7 +1564,8 @@ impl WidgetArena {
         // It is not confined to the coarse densities either: at Compact a
         // neighbour under 24 dp is already a candidate.
         //
-        // The two measurements this rests on are pinned in teksilo-widgets by
+        // The two measurements this rests on are pinned in
+        // teksilo-target-conformance by
         // `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`
         // (a SearchField's clear button at Compact, a TableView's scroll bar at
         // Touch), and the mechanism itself by
@@ -2248,7 +2251,7 @@ impl WidgetArena {
         // Fast path: if no widget has a theme override, borrow the base
         // theme — no clone. This is the per-widget hot path during layout
         // and paint, so avoiding `Theme::clone()` (which clones the
-        // typography token strings and bumps ~34 style-slot `Rc`s) here
+        // typography token strings and bumps ~42 style-slot `Rc`s) here
         // saves that work on every node, every pass, in the common case.
         if self.theme_override_count == 0 {
             return std::borrow::Cow::Borrowed(base);

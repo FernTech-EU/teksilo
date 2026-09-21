@@ -854,10 +854,11 @@ impl ScrollSimulation for BouncingSimulation {
 /// - Monotone non-decreasing in `offset`, and odd: `f(−x) == −f(x)`.
 /// - `|rubber_band(x, e)| < e` for every finite `x` — the content can never be
 ///   dragged a full viewport past the edge.
-/// - A non-finite `offset`, or a non-positive or non-finite `extent`, yields
-///   zero rather than a NaN. (A NaN here would propagate straight into a
-///   layout offset; the workspace has two recorded bugs of exactly that shape,
-///   see `docs/property-testing.md`.)
+/// - A NaN `offset`, or a non-positive or non-finite `extent`, yields zero
+///   rather than a NaN; an infinite `offset` yields the curve's limit,
+///   `±extent`. (A NaN here would propagate straight into a layout offset;
+///   the workspace has two recorded bugs of exactly that shape, see
+///   `docs/property-testing.md`.)
 pub fn rubber_band(offset: f32, extent: f32) -> f32 {
     rubber_band_with(
         offset,

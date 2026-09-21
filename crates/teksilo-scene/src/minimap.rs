@@ -471,8 +471,8 @@ pub struct SceneMinimap {
     /// Border around the minimap drawing area, drawn **inside** the
     /// widget (see the module docs). Default 1px black.
     border: Option<(Color, f32)>,
-    /// Color of the viewport overlay rectangle. Default semi-
-    /// transparent blue stroke + faint fill.
+    /// Color of the viewport overlay rectangle. Default solid blue,
+    /// drawn as a stroke.
     viewport_color: Color,
     /// Optional outline of the content extent (gives users a sense
     /// of "you're inside this much scene"). Default `None`.

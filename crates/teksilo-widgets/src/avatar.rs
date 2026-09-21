@@ -31,8 +31,11 @@
 //!     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.open-user-menu")));
 //! ```
 //!
-//! The widget reuses `ImageWidget` for the image path and draws bg /
-//! border / presence directly via `Canvas`. Hash-derived background
+//! The widget reuses `ImageWidget` for the image path and hands bg /
+//! border / focus ring / presence to the active `AvatarStyle`, whose
+//! default (`RecipeAvatarStyle`) draws them via `Canvas`. Hash-derived
+//! background tints come from `theme.colors.chart_palette` (Okabe-Ito),
+//! so they track the active theme automatically. Hash-derived background
 //! tints come from `theme.colors.chart_palette` (Okabe-Ito), so they
 //! track the active theme automatically.
 //!
@@ -357,7 +360,7 @@ impl Avatar {
     }
 
     /// Override the accessible name. When unset:
-    /// * image-mode → `alt` if set, else the initials, else "Avatar"
+    /// * image-mode → `alt` if set, else the initials (`"?"` when none)
     /// * initials-mode → the initials.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
@@ -974,9 +977,9 @@ impl Widget for Avatar {
 
 // ─── Initials sub-widget ───────────────────────────────────────────────────
 
-/// Crate-private leaf that draws the centred initials. The avatar's
-/// own `paint()` handles the background fill; this widget only emits
-/// glyphs so paint order is parent-bg → child-text.
+/// Crate-private leaf that draws the centred initials. The active
+/// `AvatarStyle`'s chrome handles the background fill; this widget only
+/// emits glyphs so paint order is chrome-bg → child-text.
 ///
 /// The leaf is constructed in [`Avatar::build`] with all the inputs
 /// it needs to resolve a correctly contrasted foreground at paint
@@ -996,8 +999,9 @@ struct InitialsLeaf {
 }
 
 impl InitialsLeaf {
-    /// Recompute the bg colour the parent Avatar will paint. Must
-    /// stay in lock-step with `Avatar::paint`'s bg branch.
+    /// Recompute the bg colour the avatar chrome will paint. Must
+    /// stay in lock-step with `AvatarChromeFrame::paint`'s bg branch
+    /// (`styles/recipe_avatar_style.rs`).
     fn resolve_bg(&self, theme: &teksilo_core::Theme, enabled: bool) -> Color {
         match &self.background {
             Some(prop) => prop.resolve(theme, enabled),
@@ -1670,8 +1674,9 @@ mod tests {
 
     #[test]
     fn focus_ring_only_paints_when_focused() {
-        // Synthesize the same bookkeeping as build() does for a
-        // clickable avatar, then drive the focus signal directly.
+        // Build a real clickable avatar, then drive focus through the
+        // tree — focus plus a key event, since the ring is
+        // `:focus-visible`.
 
         let mut tree = WidgetTree::new()
             .with_theme(teksilo_core::presets::intui::light())
@@ -1737,8 +1742,8 @@ mod tests {
     #[test]
     fn non_clickable_avatar_has_no_focus_ring() {
         // A pure Label avatar isn't focusable; it can't acquire focus,
-        // and even if focus_ring drawing tried to fire, the `focused`
-        // signal would be `None` and the branch is skipped.
+        // so the chrome's `is_focused` signal never flips and the
+        // focus-ring branch is skipped.
         let mut tree = WidgetTree::new()
             .with_theme(teksilo_core::presets::intui::light())
             .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(

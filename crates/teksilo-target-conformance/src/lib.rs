@@ -869,7 +869,7 @@ pub fn widget_fixtures() -> Vec<TargetFixture> {
             // for `on_entry_invoked` and `build_actions_row` its replay handlers
             // only for `on_action_invoked` (`notification/log.rs`), so a
             // callback-less log measures its toolbar and nothing else.
-            // `NotificationLogDialog` wires both.
+            // `NotificationLogDialog::show_with` is how an app wires them.
             on_a_page(
                 t,
                 NotificationLog::new(archive)

@@ -567,7 +567,7 @@ fn an_assistive_caret_move_reports_the_ime_area() {
 // Touch: the toolbar's contents
 // ---------------------------------------------------------------------------
 
-/// An editable surface with a selection offers all four commands.
+/// An editable surface with a selection offers Cut, Copy and Paste.
 #[test]
 fn a_hold_on_an_editable_editor_offers_cut_copy_and_paste() {
     let mut h = Harness::focused("hello world and a longer line of prose");

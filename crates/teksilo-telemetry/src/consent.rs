@@ -5,8 +5,8 @@
 //!
 //! [`ConsentStore`] wraps a [`SettingsFile<ConsentFile>`] from
 //! `teksilo-settings` and exposes a `Signal<ConsentState>` for widget
-//! binding. Atomic writes, debounced flush, migration, and OS-correct
-//! paths are all inherited from `SettingsFile`.
+//! binding. Atomic writes, synchronous locked read-modify-write,
+//! migration, and OS-correct paths are all inherited from `SettingsFile`.
 //!
 //! Two version fields are tracked:
 //!
@@ -201,9 +201,8 @@ impl ConsentStore {
 
     /// Attach a [`SettingsStore`] for one-way mirror of the per-scope
     /// toggles into the app's `general.toml`. Called by
-    /// `TelemetryBundle::open` once the store is available. Idempotent
-    /// — passing `None` is a no-op; calling twice replaces the
-    /// previously-attached store.
+    /// `TelemetryBundle::open` once the store is available. Calling
+    /// twice replaces the previously-attached store.
     pub fn with_settings_mirror(mut self, settings: SettingsStore) -> Self {
         self.settings_mirror = Some(settings);
         // Seed the mirror with the current state so the first read

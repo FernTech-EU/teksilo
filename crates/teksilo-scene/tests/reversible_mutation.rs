@@ -1333,8 +1333,8 @@ fn z_between_finds_room_and_says_when_there_is_none() {
     let z = scene.z_between(lower, upper).unwrap();
     assert!(z > 1.0 && z < 2.0);
 
-    // Same z: no room, and saying so is the point — `set_z` ignores a write
-    // within `f32::EPSILON` of the current value, so a caller that computed an
+    // Same z: no room, and saying so is the point — `set_z` ignores a write of
+    // the value the entry already holds, so a caller that computed an
     // exhausted midpoint itself would get a silent no-op.
     scene.set_z(upper, 1.0);
     assert_eq!(scene.z_between(lower, upper), None);

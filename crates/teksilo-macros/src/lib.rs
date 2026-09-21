@@ -89,10 +89,10 @@ pub fn teksu(input: TokenStream) -> TokenStream {
 /// app's intent enum and the runtime `Intent` dispatch type.
 ///
 /// Each variant must carry a `#[name = "..."]` attribute; the string
-/// is used as the runtime intent name. Unit variants are encoded as
-/// parameter-less intents; tuple variants up to 4 fields encode into
-/// `IntentParams::p1..p4` (primitives only — see the docs on the
-/// `IntentKind` trait in `teksilo-core::intent`).
+/// is used as the runtime intent name. The derive never inspects the
+/// fields — the whole variant (unit, tuple or struct, any field types)
+/// is stored as the intent's type-erased payload; see the docs on the
+/// `IntentKind` trait in `teksilo-core::intent`.
 #[proc_macro_derive(IntentKind, attributes(name))]
 pub fn derive_intent_kind(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

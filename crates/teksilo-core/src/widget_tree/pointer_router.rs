@@ -207,9 +207,7 @@ impl WidgetTree {
         self.dispatch_event_with_ops(event, &mut noop);
     }
 
-    // -----------------------------------------------------------------
-    // The two ingress doors
-    // -----------------------------------------------------------------
+    // The three ingress doors
 
     /// Deliver one pointer sample.
     ///
@@ -494,9 +492,9 @@ impl WidgetTree {
     /// One dispatch at depth zero, with `snapshot` installed as the tree's view
     /// of the in-flight sample and the previous value restored afterwards.
     ///
-    /// Save-and-restore rather than reset-to-default: the restore matters for
-    /// the paths that still call `dispatch_event_impl` directly (a drag move,
-    /// a scroll-into-view walk), which must not clear an outer snapshot.
+    /// Save-and-restore rather than reset-to-default: the restore is what stops
+    /// one queued dispatch's snapshot standing as the tree's view of the world
+    /// once it has returned, while the drain replays the next entry.
     fn run_one_dispatch(
         &mut self,
         event: WidgetEvent,

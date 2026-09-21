@@ -35,9 +35,11 @@ pub trait PlatformTitleBarHost {
     fn renders_custom_controls(&self) -> bool;
 
     /// Whether the application should install a `WindowFrame`-style overlay
-    /// with invisible edge / corner resize strips. `true` on Windows and
-    /// Wayland where the client draws the entire frame; `false` on macOS
-    /// where the native `NSWindow` frame still services edge resize.
+    /// with invisible edge / corner resize strips. `true` on Wayland and X11
+    /// where the client draws the entire frame; `false` on macOS where the
+    /// native `NSWindow` frame still services edge resize, and on Windows
+    /// where the OS resizes from our own `WM_NCHITTEST` answers and would
+    /// never dispatch a click to the overlay.
     fn needs_custom_resize_handles(&self) -> bool;
 
     /// Begin an interactive window move. Called on left-press inside a drag
@@ -49,7 +51,9 @@ pub trait PlatformTitleBarHost {
     fn begin_resize(&self, edge: ResizeEdge) -> Result<(), PlatformError>;
 
     /// Show the system window menu at the given client-area position. Wayland
-    /// only; other platforms return `Ok(())` and do nothing.
+    /// asks the compositor and Windows posts `WM_SYSCOMMAND` / `SC_KEYMENU`;
+    /// macOS returns `Ok(())` and does nothing, and X11 — which has no such
+    /// request — returns `PlatformError::Unsupported`.
     ///
     /// Only meaningful when [`Self::has_window_menu`] is `true`.
     fn show_window_menu(&self, at: Point) -> Result<(), PlatformError>;

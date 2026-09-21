@@ -274,8 +274,8 @@ events:
 
     #[test]
     fn days_to_ymd_known_date() {
-        // 2026-04-30: days since 1970-01-01
-        // 2026-04-30 = 56 years + leap years + …
+        // 2025-04-30: days since 1970-01-01
+        // 2025-04-30 = 55 years + leap years + …
         let d = unix_secs_to_date(1_746_000_000); // ~2025-04-30
         // Just verify it parses to YYYY-MM-DD
         let parts: Vec<&str> = d.split('-').collect();

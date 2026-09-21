@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Pointer / hover / capture / gesture-owner state: the per-node probes
-//! the router consults, the ancestor drag-observer bookkeeping, and the
-//! gesture-recognizer tick that drives them.
+//! the router consults, the per-pointer `PointerSequence` arbitration that
+//! enrols the competing ancestors, and the gesture-recognizer tick that
+//! drives them.
 
 use super::*;
 use crate::pointer::touch_action::{Axis, PanClaim, TouchAction};
@@ -1917,8 +1918,9 @@ mod tests {
 }
 
 /// The two path folds `effective_touch_action` / `pan_candidates` declare
-/// for the arbitration package (P08) — pure plumbing, exercised here in
-/// isolation since nothing dispatches through them yet.
+/// for the arbitration package (P08) — exercised here in isolation, apart
+/// from the dispatch paths that now read them (`begin_sequence`,
+/// `feed_pinch`, and the pan arbiter).
 #[cfg(test)]
 mod touch_action_tests {
     use super::*;
@@ -2990,9 +2992,8 @@ mod pointer_table_tests {
         let _ = target;
     }
 
-    /// A synthetic pen, since nothing produces a real one until the pen
-    /// package lands: a hovering-capable pointer *does* take the role, and the
-    /// mouse it displaces is told its widget is no longer hovered.
+    /// A synthetic pen: a hovering-capable pointer *does* take the role, and
+    /// the mouse it displaces is told its widget is no longer hovered.
     #[test]
     fn a_pen_takes_the_hover_owner_role_from_the_mouse() {
         let mut tree = WidgetTree::new();

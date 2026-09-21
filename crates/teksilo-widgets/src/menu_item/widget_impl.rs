@@ -250,8 +250,8 @@ impl Widget for MenuItem {
 
         // Trailing slot — combines (optional shortcut + fixed gap +
         // optional chevron column). The chevron column is always
-        // reserved at `item_padding_horizontal` so submenu and
-        // regular items share the same trailing edge.
+        // reserved at the style's `trailing_column_width` so submenu
+        // and regular items share the same trailing edge.
         let trailing = {
             let mut trailing_row = HStack::new().spacing(0.0);
             // Trailing accelerator. Present whenever this item references a
@@ -917,10 +917,10 @@ impl Widget for MenuItem {
         // Use the stripped form for the announced name — screen readers
         // say "Save", not "ampersand-Save". Re-parse from a fresh
         // `resolve_now()` every walk rather than reading the build-time
-        // `parsed_mnemonic` cache: a locale switch marks the tree dirty
-        // (re-walking AT) but does NOT rebuild the item, so the cache
         // would otherwise announce the stale-locale name. The cached
-        // mnemonic index is still used for the underline in `paint`.
+        // mnemonic index is still used for the access key below, and by
+        // `MenuList` for type-ahead and in-menu mnemonic activation —
+        // `MenuLabel` re-parses its own source for the underline.
         let parsed_name = parse_mnemonic(&self.label.resolve_now()).stripped;
         builder.set_name(parsed_name);
 

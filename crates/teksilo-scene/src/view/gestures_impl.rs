@@ -63,11 +63,22 @@ impl SceneView {
         // outer SceneView in a nested chart still benefits from
         // knowing where the mouse is.
         //
-        // Also flips the system cursor to `Move` whenever the
-        // pointer is over a draggable lightweight item, and back
-        // to `Default` otherwise. The visual hint matches the
-        // user's affordance check ("can I grab this?") without
-        // forcing app-side wiring.
+        // Track the latest pointer position so Ctrl+wheel can
+        // zoom-about-pointer (the scene point under the cursor
+        // stays put). Updated even when not interactive — the
+        // outer SceneView in a nested chart still benefits from
+        // knowing where the mouse is.
+        //
+        // Also flips the system cursor based on the standard
+        // grab/grabbing convention:
+        //   - Pointer over a draggable item, no active drag → `Grab`
+        //     (open hand, "you can pick this up")
+        //   - Active drag in progress                       → `Grabbing`
+        //     (closed fist, "you are holding it")
+        //   - Anywhere else                                 → `Default`
+        // Hover detection uses the same draggable-bounds snapshot
+        // the on_drag::Started path consults, so the cursor and
+        // the hit-test agree on what's draggable.
         // Track the latest pointer position so Ctrl+wheel can
         // zoom-about-pointer (the scene point under the cursor
         // stays put). Updated even when not interactive — the
@@ -806,7 +817,8 @@ impl SceneView {
                     );
                 }
                 let zoomable = zoomable_sig.get() && !adopt_scene_size;
-                // Ctrl+wheel = zoom about the viewport center.
+                // Ctrl+wheel = zoom about the pointer (viewport center only
+                // as a fallback, when no cursor position has been seen).
                 // Unmodified wheel / trackpad pan = pan the view.
                 if modifiers.ctrl() {
                     if !zoomable {
@@ -1449,7 +1461,7 @@ impl SceneView {
                     // item whose actual SHAPE (not just its AABB) contains the
                     // press, so a thin draggable item (e.g. a connector path)
                     // is grabbed only on its stroke. The snapshot is z-sorted
-                    // and refreshed each layout pass — see `place_children`.
+                    // and refreshed each layout pass — see `layout_response`.
                     // The floor the press recorded -- see
                     // `SceneView::press_floor`. A `SceneView` sees the press
                     // even when a card is the arena's target (press-release is

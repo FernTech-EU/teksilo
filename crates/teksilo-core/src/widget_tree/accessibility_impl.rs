@@ -344,7 +344,8 @@ impl WidgetTree {
         self.access_action_handled
     }
 
-    // (helper `is_presentational_container` is a module-level free fn below)
+    // (helper `is_presentational_container` is a module-level free fn in
+    // `accessibility_emit_impl.rs`)
 
     /// Look up the owning widget for a synthetic AccessKit `NodeId`
     /// emitted by `push_text_run_child` / `push_paragraph_child`.
@@ -355,6 +356,13 @@ impl WidgetTree {
         self.synthetic_parent_map.get(&node_id).copied()
     }
 
+    /// Resolve a tooltip's content node past a deferred host.
+    ///
+    /// A deferred tooltip body answers for itself while un-built (see
+    /// `DeferredSubtree::accessibility`), but once the user has hovered it the
+    /// host has handed its widget value to a real child and has nothing left to
+    /// say. Follow it, or a tooltip's description would be readable exactly
+    /// until the first time it was shown.
     /// The text a tooltip would announce, harvested from its (dormant)
     /// content widget so an anchor can carry it as a static AT description
     /// while the tooltip is not shown.

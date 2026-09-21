@@ -100,7 +100,7 @@ struct PendingRebind {
 ///
 /// Reads every `Shortcut` in the tree's `ShortcutRegistry`, groups rows
 /// by category, and renders primary + secondary keystroke slots with
-/// Rebind, Unbind, and Reset controls. See the module-level docs for the
+/// Rebind and Reset controls. See the module-level docs for the
 /// full feature list.
 pub struct ShortcutSettings {
     /// Target of the current capture (`None` when idle). Drives the
@@ -937,8 +937,8 @@ mod tests {
         let _h = tree.begin_key_capture(|ks, reg, _ctx| {
             reg.rebind_primary("app.save", Some(ks));
         });
-        // leak the handle through `_h = ManuallyDrop::new(...)` — actually
-        // we keep it alive by not dropping it explicitly at end of scope.
+        // Keep the capture handle alive across the key press — dropping it
+        // cancels the capture — then drop it explicitly, before the assert.
         let h = _h;
         tree.press_key(Key::B, Modifiers::COMMAND | Modifiers::SHIFT);
         drop(h);

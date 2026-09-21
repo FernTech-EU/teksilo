@@ -234,7 +234,7 @@ impl EditorTouch {
     /// Whether `pointer`'s release still names a character: it has to travel no
     /// further from where it landed than a tap of its own kind may.
     ///
-    /// `None` when nothing was recorded for this contact — a release with no
+    /// `false` when nothing was recorded for this contact — a release with no
     /// press of ours behind it, which is not a caret placement either.
     pub(crate) fn press_is_still_a_tap(
         &self,

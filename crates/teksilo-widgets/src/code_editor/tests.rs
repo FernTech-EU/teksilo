@@ -437,7 +437,7 @@ fn a_viewer_reports_a_text_range_capable_role_and_no_set_value() {
 }
 
 /// Build the body's accessibility subtree and return its collected children
-/// (the paragraph and text-run nodes).
+/// (the text-run nodes).
 fn a11y_children(
     st: &SharedState,
 ) -> Vec<(

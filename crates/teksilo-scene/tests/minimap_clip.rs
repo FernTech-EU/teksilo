@@ -499,9 +499,10 @@ fn thumbnails_from_a_real_scene_stay_inside_a_stale_content_bounds() {
 /// which makes this the test that reddens if `set_clip` is removed —
 /// every other case here is already inside once the extent has grown.
 ///
-/// (The widget's own 1 px *border* is deliberately drawn outside the
-/// clip: it marks the widget's edge and is meant to straddle it. The
-/// outline is projected scene content, and content does not escape.)
+/// (The widget's own 1 px *border* is inside this clip too, but it is
+/// not what this test pins: it is stroked on an inset rect, so it never
+/// straddles the frame in the first place — see the border tests below.
+/// The outline is projected scene content, and content does not escape.)
 #[test]
 fn a_thick_content_outline_cannot_bleed_past_the_frame() {
     let outline = Color::new(0.0, 0.6, 0.3, 1.0);

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Background worker holding the tonic Channel and the bidi Ingest
-//! stream. The UI thread sends [`WorkerCommand`]s via a tokio mpsc;
+//! Background worker holding the tonic Channel; each batch opens its
+//! own short-lived bidi Ingest stream (see `send_batch`). The UI
+//! thread sends [`WorkerCommand`]s via a tokio mpsc;
 //! the worker drains the [`EventQueue`], batches into `EventBatch`
 //! messages, forwards them through the gRPC stream, and reads acks
 //! back to update [`WorkerStats`].

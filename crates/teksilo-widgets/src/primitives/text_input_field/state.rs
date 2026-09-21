@@ -162,9 +162,10 @@ pub(crate) struct TextInputState {
     /// a host reading the signal here would parse the text from *before* this
     /// edit and revert.
     pub on_access_set_value: Option<AccessSetValue>,
-    /// Fired exactly once per focus-loss, AFTER the cursor/selection
-    /// have been cleared and scroll reset. Used by SpinBox-style
-    /// widgets to parse/clamp/reformat on blur.
+    /// Fired exactly once per focus-loss, AFTER the caret has been hidden
+    /// and scroll reset — the selection is deliberately **preserved**, so a
+    /// context menu opened over the field still has a range to act on. Used
+    /// by SpinBox-style widgets to parse/clamp/reformat on blur.
     pub on_blur: Option<Rc<CommandFactory>>,
     /// Per-character input-filter predicate. `None` admits every
     /// non-control character; `Some(f)` additionally requires `f(c)
@@ -422,13 +423,19 @@ impl TextInputState {
         !(self.echo_mode == EchoMode::NoEcho && self.should_mask())
     }
 
+    /// Apply the global accessibility text scale to the shaping engine(s).
+    ///
+    /// `scale` is `ctx.text_scale` (combined user×OS factor). When it changes,
+    /// the main engine's logical `font_scale` is updated so the value text grows
+    /// (advances + line height + content height), a full relayout is forced, and
+    /// the suffix engine is re-laid out at the new scale so its width stays
+    /// correct. Cheap no-op when the scale is unchanged.
     /// Run a full layout, applying secure masking. Installs the echo
     /// char on the engine (or clears it), and for `NoEcho` while masked
     /// lays out an empty source so nothing — not even length — is
     /// shown. The real `document` is never mutated: masking is
     /// display-only, so caret / selection / hit-test (all char-indexed)
     /// stay aligned because one echo char is emitted per source char.
-    /// Apply the global accessibility text scale to the shaping engine(s).
     ///
     /// `scale` is `ctx.text_scale` (combined user×OS factor). When it changes,
     /// the main engine's logical `font_scale` is updated so the value text grows

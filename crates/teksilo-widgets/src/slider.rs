@@ -176,6 +176,7 @@ impl Slider {
         }
     }
 
+    /// Run `f` for every value this control produces under the **user's**
     /// Set the discrete step size for keyboard arrows and accessibility
     /// Increment/Decrement actions. When unset, defaults to 1 % of the
     /// range.
@@ -1345,7 +1346,8 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let s = tree.add(Slider::new(value.clone(), 0.0, 100.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
-        // Render to trigger paint() which caches bounds for event handling
+        // `place_children` cached the bounds for event handling during the
+        // layout above; the render is what paints the body.
         tree.render();
 
         // Click at the widget center

@@ -5,8 +5,10 @@
 //!
 //! `teksilo-core` only owns the abstract surface: the [`UsageReporter`] trait,
 //! the [`Event`] / [`Prop`] / [`PropValue`] types, and the consent enums.
-//! All persistence, codegen, the SQLite queue, and the consent widget live
-//! in `teksilo-telemetry` (which depends on this module + `teksilo-settings`).
+//! All persistence and the redb-backed event queue live in
+//! `teksilo-telemetry` (which depends on this module + `teksilo-settings`);
+//! the schema codegen is `teksilo-telemetry-codegen` and the consent widget
+//! is `teksilo-widgets`' `PrivacySettings`.
 //!
 //! Why the split: `teksilo-settings` already depends on `teksilo-core` for
 //! `Signal<T>` etc. Putting `ConsentStore` here would create a cycle. The
@@ -15,7 +17,7 @@
 //!
 //! The framework's only insertion point is the dispatch tap in
 //! `crate::widget_tree::WidgetTree::dispatch_intent`, which calls
-//! `app_state::<dyn UsageReporter>()` if registered and emits an
+//! `app_state::<TelemetryContext>()` if registered and emits an
 //! `intent.dispatched` event with the intent's `name`. Apps that don't
 //! install a reporter pay nothing.
 

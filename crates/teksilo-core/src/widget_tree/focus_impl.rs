@@ -278,10 +278,10 @@ impl WidgetTree {
                     // walk already visits each clipping ancestor in turn, in
                     // its own space and after re-targeting by what the one
                     // inside it actually scrolled, so the preview pass was a
-                    // second, worse copy of the same job. `ScrollArea` is the
-                    // only widget in the framework that handles
-                    // `WidgetEvent::ScrollIntoView`, and it clips, so it is
-                    // reached by the walk itself either way.
+                    // second, worse copy of the same job. Every widget in the
+                    // framework that handles `WidgetEvent::ScrollIntoView` —
+                    // `ScrollArea` and `SceneView` — clips, so each is reached
+                    // by the walk itself either way.
                     self.dispatch_to_widget_direct(
                         ancestor_id,
                         &WidgetEvent::ScrollIntoView {

@@ -33,9 +33,9 @@ pub(crate) struct SwatchGrid {
     selected: Signal<Color>,
     columns: usize,
     on_select: Rc<dyn Fn(Color, &mut EventContext)>,
-    /// Currently focused cell index inside the grid. Used for the
-    /// roving-focus pattern (only one cell takes focus; arrow keys
-    /// move between cells).
+    /// Currently focused cell index inside the grid, moved by arrow
+    /// keys. (Each `ColorSwatch` cell remains independently
+    /// focusable via Tab; this index does not suppress that.)
     focused_index: Signal<usize>,
     /// Initial enabled-state; forwarded to the arena at build time.
     initial_enabled: bool,

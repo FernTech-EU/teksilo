@@ -195,8 +195,8 @@ pub enum NativeMenuNode {
         /// terminates.
         quit_item: Option<StandardRoutedItem>,
         /// App menu only: build a **Settings…** item under this id, placed where
-        /// the platform expects it (on macOS: after About, with the ⌘, key
-        /// equivalent).
+        /// the platform expects it (on macOS: after About), with the key
+        /// equivalent the widget layer resolved.
         ///
         /// Unlike Quit there is no `None` fallback that still does something —
         /// no platform ships a default action for opening an app's settings —
@@ -234,10 +234,9 @@ pub struct MenuItemDelta {
 // ============================================================
 
 /// What to do when a native menu item is chosen. Cloneable (the action is an
-/// A menu item's direct activation closure.
+/// `Rc`), so the router can pull a copy out of the handle and run it.
 pub type MenuActionFn = Rc<dyn Fn(&mut EventContext)>;
 
-/// `Rc`), so the router can pull a copy out of the handle and run it.
 #[derive(Clone, Default)]
 pub struct NativeMenuActivation {
     /// Fire this intent by name through the `Action`/`Intent` pipeline.
@@ -491,7 +490,7 @@ impl MemoryNativeMenuBackend {
     }
 
     /// The window whose menu is active (last `activate_window`, or the window
-    /// of the most recent `set_window_menu` if none was activated).
+    /// of the first `set_window_menu` if none was activated).
     pub fn active_window(&self) -> Option<TeksiloWindowId> {
         self.inner.borrow().active
     }

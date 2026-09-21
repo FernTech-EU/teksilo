@@ -169,7 +169,10 @@ pub(crate) struct ManagedWindow {
     /// only issued when the freshly-measured target differs from this.
     pub last_autosize_height: Option<u32>,
     /// Custom-chrome host, if the window opted in via
-    /// `WindowConfig::custom_chrome(true)` and the platform supports it.
+    /// `WindowConfig::decorations(DecorationsMode::CustomChrome)` and the
+    /// platform supports it.
+    /// The same `Rc` is also stored on the `WidgetTree` so the root-builder
+    /// closure can hand it to a `TitleBar` widget.
     /// The same `Rc` is also stored on the `WidgetTree` so the root-builder
     /// closure can hand it to a `TitleBar` widget.
     pub title_bar_host: Option<Rc<dyn PlatformTitleBarHost>>,
@@ -272,7 +275,9 @@ pub struct WindowManager {
     typesetter: Option<teksilo_text::SharedTypesetter>,
     /// Windows that are blocked by a modal child.
     modal_blocked: HashMap<TeksiloWindowId, TeksiloWindowId>,
-    /// OS-level accessibility preferences, queried once at startup.
+    /// OS-level accessibility preferences, queried at startup and re-queried
+    /// on every window focus gain by
+    /// [`refresh_accessibility_preferences`](Self::refresh_accessibility_preferences).
     a11y_prefs: AccessibilityPreferences,
     /// User-controlled global text-scale factor (`1.0` = 100 %). Seeded from
     /// `teksilo_settings::TEXT_SCALE_KEY` before the first window opens and
@@ -837,8 +842,9 @@ impl WindowManager {
         }
 
         // Construct the platform title bar host if custom chrome was
-        // requested. On unsupported platforms (X11, no host backend) the
-        // factory logs a warning and returns `Unsupported`; we silently
+        // requested. When the window system cannot support it (X11 under a WM
+        // without `_NET_WM_MOVERESIZE`, or a display handle that is neither
+        // X11 nor Wayland) the factory returns `Unsupported`; we silently
         // continue with native decorations and leave the host slot empty.
         let title_bar_host: Option<Rc<dyn PlatformTitleBarHost>> = if wants_custom_chrome {
             let callbacks = match self.event_proxy.clone() {
@@ -1686,9 +1692,10 @@ impl WindowManager {
         self.windows.values_mut()
     }
 
-    /// Iterate the `TeksiloWindowId` of every managed window. Feeds the
-    /// automation `list_windows` tool (debug-only `automation` feature),
-    /// which pairs each id with its `string_id` label and current title.
+    /// Iterate the `TeksiloWindowId` of every managed window. Currently
+    /// unused: the automation `list_windows` tool (debug-only `automation`
+    /// feature) is served from [`iter`](Self::iter) instead, because it also
+    /// needs each window's `string_id` label and current title.
     #[allow(dead_code)]
     pub(crate) fn teksilo_ids(&self) -> impl Iterator<Item = TeksiloWindowId> + '_ {
         self.windows.values().map(|m| m.teksilo_id)
@@ -1703,10 +1710,12 @@ impl WindowManager {
     }
 
     /// Get the platform title bar host for a window, if the window opted
-    /// into custom chrome via `WindowConfig::custom_chrome(true)` and the
+    /// into custom chrome via
+    /// `WindowConfig::decorations(DecorationsMode::CustomChrome)` and the
     /// platform supports it. Returns `None` for windows that use native
     /// decorations or run on a window system without custom chrome support
-    /// (currently X11).
+    /// (X11 under a window manager that does not implement
+    /// `_NET_WM_MOVERESIZE`).
     pub fn title_bar_host(
         &self,
         teksilo_id: TeksiloWindowId,
@@ -2104,8 +2113,10 @@ fn apply_window_command(win: &winit::window::Window, cmd: WindowCommand) {
 pub struct WindowOpsImpl<'a> {
     wm: &'a mut WindowManager,
     event_loop: &'a winit::event_loop::ActiveEventLoop,
-    /// Current (dispatching) window's id. Kept for diagnostics and
-    /// future modal-parent self-reference logic.
+    /// Current (dispatching) window's id. Names the window the outbound
+    /// OS-drag ops below (`begin_os_drag` / `cancel_os_drag` /
+    /// `set_drop_accepted`) route to, and is also available for diagnostics
+    /// and future modal-parent self-reference logic.
     current_id: TeksiloWindowId,
     /// Current window's raw handle, captured before removal so a
     /// modal whose parent is the current window can still attach.

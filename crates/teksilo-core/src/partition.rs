@@ -16,11 +16,10 @@
 //!
 //! [`Widget::target_regions`] is how such a widget says what it painted. It is
 //! **reporting only** — implementing it changes no layout and no hit test on
-//! its own. Three things read it: the router (routing a coarse press to the
-//! nearest region within its role's floor), the target-conformance audit, and
-//! the widget's own event handling, which can now ask one function where its
-//! parts are instead of re-deriving the split at press time and drifting from
-//! what it painted.
+//! its own. Two things read it: the target-conformance audit, and the widget's
+//! own event handling, which can now ask one function where its parts are
+//! instead of re-deriving the split at press time and drifting from what it
+//! painted.
 //!
 //! [`partition_targets`] is that one function for the common case — a
 //! horizontal split of a node into named zones with a minimum size each.

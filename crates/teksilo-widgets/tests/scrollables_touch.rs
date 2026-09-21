@@ -22,7 +22,7 @@
 //! rich-text test covers the helper but not those two build sites. Recorded in
 //! `docs/kinetic-scrolling.md` §9.
 //!
-//! Four questions, and which of the five each is asked of:
+//! Five questions, and which of the five views each is asked of:
 //!
 //! 1. **a wheel notch still scrolls it, by the same amount** — all five;
 //! 2. **a finger's pan scrolls it** — all five. The fling that keeps it going

@@ -130,9 +130,10 @@ pub(crate) struct TerminalMenu {
     /// screen reader follows arrow keys without a focus move per row.
     active: Signal<usize>,
     rows: Vec<WidgetId>,
-    /// Row height and label width, measured in `layout_response` and read by
-    /// `place_children`. `Cell`s because both methods take `&self` and both
-    /// need the same two numbers from one text measurement per pass.
+    /// Row height and label width, measured in `layout_response`; the row
+    /// height is read back by `place_children`. `Cell`s because both methods
+    /// take `&self` and both need the row height from one text measurement
+    /// per pass.
     row_height: Cell<f32>,
     width: Cell<f32>,
 }

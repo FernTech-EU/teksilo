@@ -90,8 +90,9 @@ pub struct PrivacySettings {
     /// Show the "Inspect data sent" accordion. When enabled, the
     /// widget peeks the last `inspect_event_count` events from the
     /// `recent_log` ring buffer and lists them. Default `true`.
-    /// Note: snapshot-at-build — opening and closing the
-    /// accordion refreshes the list to current state.
+    /// Note: snapshot-at-build — the list is rebuilt when the
+    /// widget is, which the `recent_log_revision` binding triggers
+    /// as events land.
     show_inspect: bool,
     /// How many recent events to show in the accordion. Default 50.
     inspect_event_count: usize,
@@ -766,8 +767,8 @@ fn sanitize_filename(s: &str) -> String {
 
 /// "Inspect data sent" accordion — shows up to `n` most-recent events
 /// from the recent-log ring buffer (newest first). Snapshot-at-build:
-/// expanding/collapsing the accordion refreshes the list to current
-/// state via the framework's rebuild-on-binding mechanism.
+/// the list refreshes when `PrivacySettings` rebuilds, which its
+/// `recent_log_revision` binding triggers as events land.
 fn build_inspect_accordion(telemetry: &OpenedTelemetry, n: usize) -> Accordion {
     use crate::primitives::Padding;
     use teksilo_telemetry::{EventQueue, OwnedPropValue};

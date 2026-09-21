@@ -3,7 +3,7 @@
 
 //! The panel / content layer of [`DockingLayout`](super::DockingLayout):
 //! the app-facing [`DockWidget`] declaration, the content-factory registry,
-//! and the widgets that render a side's tabs → Splitter/ToolBox arrangement →
+//! and the widgets that render a side's tabs → Splitter/Accordion arrangement →
 //! draggable dock panels (with five-zone drop targets).
 //!
 //! ## Touch and pen

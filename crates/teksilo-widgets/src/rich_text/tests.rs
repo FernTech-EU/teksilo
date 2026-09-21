@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Headless integration tests for the read-only `RichTextEditor`.
+//! Headless integration tests for the `RichTextEditor`, in both its
+//! editable and read-only presets.
 //!
 //! These tests drive the widget through its public surface: add it to a
 //! `WidgetTree`, poke a shared `TextDocument`, advance the simulated
@@ -1164,8 +1165,8 @@ fn editor_paste_inserts_system_clipboard_text() {
 fn editor_copy_paste_round_trip_uses_stored_fragment() {
     // Copy a selection, then paste at a different position. The
     // paste path uses the stored fragment because the system
-    // clipboard's plain text matches. Phase B's in-process rich
-    // preservation guarantee.
+    // clipboard's HTML payload carries this editor's own marker.
+    // Phase B's in-process rich preservation guarantee.
     let doc = TextDocument::new();
     doc.set_plain_text("one two three").unwrap();
     let editor = RichTextEditor::editor(doc.clone());
@@ -1458,7 +1459,7 @@ fn ctrl_a_reset_on_other_key() {
 
 // The old `accessibility_text_cache` was removed as part of the
 // AccessKit TextRun overhaul — `accessibility()` now walks the
-// document flow to emit per-paragraph / per-run children instead
+// document flow to emit per-run children instead
 // of stuffing the whole document into one `set_value` call. The
 // replacement tests live below under the "AccessKit TextRun
 // emission" section and cover flow snapshot caching, signal-
@@ -1558,8 +1559,9 @@ fn editor_paste_prefers_self_round_trip_over_html() {
         "copy stashes the fragment"
     );
 
-    // Paste at end — plain-text match kicks in the self-round-trip
-    // arm before the HTML arm even gets a chance.
+    // Paste at end — the marker on the clipboard's HTML payload kicks
+    // in the self-round-trip arm before the external-HTML arm even
+    // gets a chance.
     press_key(
         &mut tree,
         teksilo_core::event::Key::End,
@@ -4061,7 +4063,7 @@ fn editor_backspace_at_list_start_dedents_or_exits() {
 // ────────────────────────────────────────────────────────────────────────
 // Blockquote keyboard / toolbar behaviour (Phase C of the blockquote
 // management overhaul). The corresponding data-layer tests live in
-// /Users/cyril/Devel/text-document/crates/public_api/tests/blockquote_editing_tests.rs.
+// ../text-document/crates/public_api/tests/blockquote_editing_tests.rs.
 // ────────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -4614,8 +4616,8 @@ fn editor_wrapper_is_generic_container_in_a11y_tree() {
     // emit `Role::GenericContainer` in the AT tree so screen readers
     // don't get the `AccessNodeBuilder` default of `Role::Unknown`.
     // The inner `RichTextEditorBody` carries the real role
-    // (`MultilineTextInput` / `Document`) and the synthetic paragraph
-    // / text-run children — same pattern as `TextInput` wrapping
+    // (`MultilineTextInput` / `Document`) and the synthetic
+    // text-run children — same pattern as `TextInput` wrapping
     // `TextInputField`.
     use teksilo_core::accesskit::Role;
 
@@ -4942,7 +4944,7 @@ mod affinity_tests {
     use teksilo_text::CursorAffinity;
 
     /// Long single paragraph that definitely wraps at the test
-    /// viewport width of 400 px. NotoSans at 16px produces multiple
+    /// viewport width of 280 px. Inter at 16px produces multiple
     /// visual lines for this content.
     const WRAPPING_TEXT: &str = "The quick brown fox jumps over the lazy dog. \
          A long paragraph that absolutely positively must wrap across \
@@ -4977,7 +4979,7 @@ mod affinity_tests {
         let state = editor.state_handle();
         let mut tree = WidgetTree::new();
         let id = tree.add(editor);
-        // Narrow width forces wrapping at NotoSans 16px.
+        // Narrow width forces wrapping at Inter 16px.
         tree.layout(SizeProposal::exact(280.0, 400.0));
         focus_editor(&mut tree, id);
         // Drive a few frames so the editor's layout settles.

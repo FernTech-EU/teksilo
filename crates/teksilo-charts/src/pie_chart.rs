@@ -14,8 +14,9 @@
 //! Slot integration follows the existing `Option<PendingChild>` pattern
 //! used by [`Card`](https://docs.rs/teksilo-widgets) /
 //! [`DialogContent`](https://docs.rs/teksilo-widgets) / `GroupBox`: two
-//! fields (`pending_center` + `center_id`), two builders
-//! (`.center(impl Widget)` / `.center(WidgetId)`), and `build()`
+//! fields (`pending_center` + `center_id`), one builder
+//! (`.center(..)`, which takes a widget or a `WidgetId` through
+//! `IntoTeksiChild`), and `build()`
 //! resolves the pending child via `ctx.add_boxed`.
 
 use std::cell::{Cell, RefCell};
@@ -154,7 +155,9 @@ impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
     }
 
     /// Adapter: take a single `ChartSeries<T>` and use its data points as
-    /// pie slices (the series's name and color are ignored for the pie).
+    /// pie slices (the series's color is ignored for the pie; its name
+    /// still reaches every slice, as the `series_name` prefix of the AT
+    /// node name and the spoken readout).
     pub fn from_series(series: ChartSeries<T>) -> Self {
         Self::new(ChartModel::from_series_vec(vec![series]))
     }

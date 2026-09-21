@@ -14,8 +14,10 @@
 //!   therefore a press that *does* land on an eligible neighbour;
 //! * **a zone inside one node** — a `TableView` header cell's filter affordance
 //!   and a `DropTarget`'s edge bands are painted geometry, told apart by
-//!   coordinate at press time. They are floored by the same
-//!   clamp-and-redistribute rule and reported so an audit can see them;
+//!   coordinate at press time. Both are floored to the conformance target: the
+//!   header cell by `partition_targets`' clamp-and-redistribute, and reported
+//!   through `target_regions` so an audit can see it; the drop target's bands
+//!   by `band_depth`, which caps the floor at a third for the same reason;
 //! * **a press visual nothing reached** — three controls carried a pressed
 //!   appearance their theme painted and no pointer ever wrote. They are on the
 //!   framework press now, which is what makes them answer a finger *and* a
@@ -963,8 +965,10 @@ fn a_finger_dragging_an_accordion_header_moves_the_dock_instead() {
 /// **Measured, and it is why the row is a no-change row for the press visual.**
 ///
 /// A `StandardListItem` inside a `ListView` has no gesture arena of its own: the
-/// view's body pane owns the tap, the double tap and the reorder drag, and
-/// resolves which row they mean by coordinate. The press record belongs to the
+/// view's body pane installs the tap, the double tap and the reorder drag on the
+/// per-row nodes that enclose it — the `ListItemWrapper`, and for a drag source
+/// the `DragSurface` above that — and each closure resolves its row through an
+/// anchored index. The press record belongs to the
 /// node whose arena took the press, so the row's own
 /// `BuildContext::pressed_signal` is structurally always false — binding it in
 /// the row would have been a mechanism that could never fire.

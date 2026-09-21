@@ -196,7 +196,7 @@ fn section_header(text: &str) -> impl Widget {
 
 /// One row: name in a fixed-width column on the left, a 0..=1 slider on
 /// the right, with the current value rendered after the slider so the
-/// developer can read the exact alpha / density without dragging.
+/// developer can read the exact alpha without dragging.
 fn slider_row(name: &'static str, draft: Signal<f32>) -> impl Widget {
     let value_text = draft.map(|v| format!("{:.2}", v));
     let name_text = TextWidget::new(lit!(name))

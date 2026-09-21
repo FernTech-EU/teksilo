@@ -308,7 +308,7 @@ pub struct TreeTableView<T: 'static> {
     activate_on: crate::data_views::ActivateOn,
 
     /// `true` while this view — its root or any descendant — holds keyboard
-    /// focus. Captured at build from [`BuildContext::view_focus_active`], bound
+    /// focus. Captured at build from [`BuildContext::begin_view_focus`], bound
     /// `RepaintOnly`. Drives focus-aware selection: the band paints `Selected`
     /// while focused, muted `SelectedInactive` once focus leaves the view.
     view_focused: Signal<bool>,
@@ -714,10 +714,11 @@ impl<T: 'static> TreeTableView<T> {
     /// [`from_source`](Self::from_source); over an external source there is no
     /// `NodeId` to hand it, so it never fires. Prefer
     /// [`accept_foreign_rows`](Self::accept_foreign_rows) +
-    /// [`on_rows_received`](Self::on_rows_received), which are source-agnostic. Unlike `ListView` / `TableView`,
-    /// `TreeTableView` is backed by a concrete `SortFilterTreeModel<T>` rather
-    /// than a pluggable source, so it cannot express foreign-accept purely
-    /// through source capability closures (`can_accept` / `accept_drop`).
+    /// [`on_rows_received`](Self::on_rows_received), which are source-agnostic.
+    /// A source-backed view expresses foreign-accept through its source's own
+    /// capability closures (`can_accept` / `accept_drop`), like `ListView` /
+    /// `TableView`; this hook is what a **projection**-backed view has instead,
+    /// since a `SortFilterTreeModel` carries no such closures.
     /// This fires for **any** payload NOT recognized as this view's own row
     /// drag — a different view's [`RowDragData<T>`](crate::RowDragData), or a
     /// completely different payload type — dropped on a node: `(payload,
@@ -931,21 +932,21 @@ impl<T: 'static> TreeTableView<T> {
         self
     }
 
-    /// Set the keyboard Tab traversal direction inside the table (default `Cells`).
+    /// Set the keyboard Tab traversal direction inside the table (default `CellsThenRows`).
     pub fn tab_traversal(mut self, mode: TabTraversal) -> Self {
         self.tab_traversal = mode;
         self
     }
 
-    /// Set which user gesture starts an in-place cell edit (default
-    /// `DoubleClick`).
+    /// Set which user gestures open an in-place cell editor — a set, composed
+    /// with `|` (default `F2 | ANY_KEY | DOUBLE_CLICK`). See [`EditTriggers`].
     pub fn edit_triggers(mut self, trigger: EditTriggers) -> Self {
         self.edit_triggers = trigger;
         self
     }
 
     /// Callback invoked when the user requests an in-place cell edit (e.g.
-    /// double-click when `edit_triggers` is `DoubleClick`). Receives the flat row
+    /// double-click when `edit_triggers` contains `DOUBLE_CLICK`). Receives the flat row
     /// index, the column id, and a mutable `EventContext`.
     pub fn on_cell_edit_request(
         mut self,
@@ -1229,7 +1230,7 @@ impl<T: 'static> TreeTableView<T> {
     /// unflattened tree: a collapsed node's descendants have no index at all
     /// here. Checked on both sides of the read. `focused_cell` is clamped to
     /// `TreeNavigator::row_count()`, which returns `TreeSource::visible_count()`
-    /// (`tree_table_view.rs:129-131`), and the keyed selection facade builds
+    /// (`tree_table_view.rs:145-147`), and the keyed selection facade builds
     /// its indices by scanning `0..visible_count()` through
     /// `SortFilterTreeModel::visible_node_id` (`data_views.rs:545-552`). On the
     /// spending side, `RowMetrics` is sized by `place_children` from that same
@@ -1242,11 +1243,11 @@ impl<T: 'static> TreeTableView<T> {
     /// against a viewport that was never measured. It is the same
     /// `RowMetrics::scroll_for_ensure_visible` arithmetic the keyboard runs on
     /// every arrow press; what the keyboard's own wrapper
-    /// (`table_view/keyboard.rs:445`) adds on top is chasing the row into an
+    /// (`table_view/keyboard.rs:672`) adds on top is chasing the row into an
     /// *enclosing* scroll area, and that needs an `EventContext`, which an
     /// effect does not have. Nothing is lost: the same keyboard or programmatic
     /// focus change makes the framework reveal the newly focused widget in
-    /// every ancestor scroll area itself (`focus_impl.rs:95-96`,
+    /// every ancestor scroll area itself (`focus_impl.rs:109`,
     /// `WidgetTree::scroll_focused_into_view`), so the enclosing viewport is
     /// somebody else's job here.
     ///

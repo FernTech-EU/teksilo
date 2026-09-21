@@ -254,7 +254,14 @@ pub fn attach_composite_tooltip_boxed(
     )
 }
 
-/// [`attach_composite_tooltip_boxed`] with an explicit [`TooltipPlacement`].
+/// Attach an already-built [`CompositeTooltipWidget`], honouring its own
+/// [`sticky`](CompositeTooltipWidget::sticky) setting.
+///
+/// The general primitive the other composite helpers lower to. Reach for it
+/// when the body is read-only and should not offer dwell promotion, or when
+/// the surface needs an accessible label — both of which are settings on the
+/// widget, and neither of which a helper taking a bare `Box<dyn Widget>` can
+/// express.
 /// Attach an already-built [`CompositeTooltipWidget`], honouring its own
 /// [`sticky`](CompositeTooltipWidget::sticky) setting.
 ///

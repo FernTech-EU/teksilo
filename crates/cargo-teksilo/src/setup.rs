@@ -316,8 +316,8 @@ const VENDORS: &[Vendor] = &[
     },
     Vendor {
         agent: "Cline",
-        // The label names the CURRENT directory, because it is the one to
-        // create; detection accepts the older two as well.
+        // The label names the directory every Cline surface reads today, and
+        // the one Cline's own UI creates — not the newest one.
         // The label names the directory every Cline surface reads today, and
         // the one Cline's own UI creates — not the newest one.
         marker: ".clinerules/",
@@ -458,8 +458,9 @@ pub fn project_candidates(root: &Path) -> Vec<ProjectCandidate> {
                 },
                 // Nothing on disk: the candidate still exists so the closing
                 // report can name what to create, and `marker_path` points at
-                // the modern directory precisely because it does NOT exist —
-                // which is what makes `detected()` false.
+                // `.clinerules/` — the directory the label names — precisely
+                // because it does NOT exist, which is what makes `detected()`
+                // false.
                 None => ProjectCandidate {
                     target: Target {
                         agent: vendor.agent,

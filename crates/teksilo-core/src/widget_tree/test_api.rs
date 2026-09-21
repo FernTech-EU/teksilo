@@ -311,6 +311,9 @@ impl WidgetTree {
         self.tooltips.len()
     }
 
+    /// Every node inside `root` (inclusive) that Tab traversal would stop on:
+    /// focusable, and not suppressed by a `tab_stop` flag on itself or any
+    /// ancestor.
     /// Every widget the arena still holds — active, dormant and orphaned alike.
     ///
     /// The number a leak test must assert on. `active_widget_count` walks the

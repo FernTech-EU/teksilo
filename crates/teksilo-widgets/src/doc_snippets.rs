@@ -875,9 +875,9 @@ fn sample_notification(id: u64, title: &str, body: Option<&str>) -> crate::Notif
 
 /// A `LogView` with a few lines already in it.
 ///
-/// The view's append queue only exists once the widget is mounted (the
-/// handle is a no-op before then), so the sample lines are pushed from
-/// `build`, right after the child is inserted.
+/// The handle can only *wake* the view once the widget is mounted (its
+/// frame-request handle is installed in `build`), so the sample lines are
+/// pushed from `build`, right after the child is inserted.
 #[derive(Debug, Default)]
 struct SeededLogView {
     child: Option<teksilo_core::widget_id::WidgetId>,

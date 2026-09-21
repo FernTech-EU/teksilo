@@ -112,9 +112,10 @@ pub struct CalendarZoomCellConfig {
 
 /// Pre-built header components passed to `make_header`. All five slots
 /// are pre-built widgets; the recipe lays them out into a horizontal
-/// strip. When `show_navigation = false` on the calendar, every arrow
-/// slot is `None` and the recipe still returns a row containing just
-/// the title.
+/// strip. The arrow slots are `Option` so a recipe still returns a row
+/// containing just the title when one is absent; `Calendar` itself
+/// always fills all five, and when `show_navigation = false` it drops
+/// the header widget entirely rather than emptying its slots.
 pub struct CalendarHeaderConfig {
     /// Far-left "step coarser" arrow (« — prev year in Days mode, prev
     /// decade in Months mode, etc.).

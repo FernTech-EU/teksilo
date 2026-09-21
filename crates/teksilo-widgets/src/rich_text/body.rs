@@ -29,10 +29,11 @@ use self::flow_walk::FlowWalk;
 /// * each line is then given the **multiplied** height, and each block the space
 ///   above and below it that a body paragraph gets.
 ///
-/// The mean advance is taken as half the font's line height. That is roughly right
-/// for proportional Latin text at ordinary sizes and roughly wrong for everything
-/// else, which is acceptable for a number whose only competition is a constant and
-/// whose lifetime is one frame.
+/// The mean advance is taken as a measured fraction of the font's line height —
+/// [`MEAN_ADVANCE_OVER_LINE_HEIGHT`] below, which records how it was arrived at.
+/// That is roughly right for proportional Latin text at ordinary sizes and roughly
+/// wrong for everything else, which is acceptable for a number whose only
+/// competition is a constant and whose lifetime is one frame.
 /// Mean glyph advance as a fraction of the font's natural line height.
 ///
 /// **Measured, not derived.** Thirty-two real manuscript scenes were laid out in a
@@ -272,9 +273,13 @@ impl Widget for RichTextEditorBody {
         // settling: a margin lane gives each row a slice to match the claim, then
         // watches it grow tenfold the moment the row is reached.
         //
-        // The estimate is deliberately crude — a mean advance of half the line
-        // height, one extra line per block for the ragged last line of each — and
-        // being crude is the point. It is thrown away the instant a real layout
+        // The estimate is deliberately crude — a measured mean advance of about a
+        // third of the line height, half an extra line per block for the ragged last
+        // line of each — and being crude is the point. It is thrown away the instant
+        // a real layout exists, so its only job is to be closer than a constant,
+        // which is not a demanding standard. It is **not** a floor: an over-estimate
+        // corrects downwards when the layout lands, where a too-large `min_lines`
+        // would leave blank space under short text for the life of the widget. It is thrown away the instant a real layout
         // exists, so its only job is to be closer than a constant, which is not a
         // demanding standard. It is **not** a floor: an over-estimate corrects
         // downwards when the layout lands, where a too-large `min_lines` would
@@ -284,9 +289,14 @@ impl Widget for RichTextEditorBody {
         // for a proposal that carries none, which is fine for a width but ruinous
         // for a line count: `CenterColumnFlowing` measures its child width-only, and
         // estimating against the fallback made a scene wrap at a quarter of its real
-        // measure and claim nearly twice its real height. An unbounded measure gets
-        // the old answer — the floor — because without a measure there is genuinely
-        // no way to know how many lines the text takes.
+        // ⚠ **Only when the width is actually known.** `w` above falls back to 200
+        // for a proposal that carries none, which is fine for a width but ruinous
+        // for a line count: `CenterColumnFlowing` measures its child width-only, and
+        // estimating against the fallback made a scene wrap at a quarter of its real
+        // measure and claim nearly twice its real height. So the estimate never reads
+        // the proposal's width: it takes the viewport, or failing that the widest
+        // measure anything has asked for, and falls back to the floor only when
+        // neither is known yet.
         let content_h = match (st.engine.has_full_layout(), proposal.width) {
             (true, _) => st.engine.content_height(),
             // **At the width the text will actually wrap at**, which is the viewport
@@ -363,8 +373,9 @@ impl Widget for RichTextEditorBody {
         // so dark / light mode swaps reach the rendered glyphs. The
         // engine reads `text_color` fresh on every `render()` and
         // does not bake it into a glyph cache, so a per-paint write
-        // is cheap. Skipped when the app pinned a color via
-        // `RichTextEditor::text_color(...)`.
+        // is cheap. A color the app pinned via
+        // `RichTextEditor::text_color(...)` is written the same way,
+        // resolved against the theme each paint rather than skipping it.
         //
         // The render frame DOES cache colors baked into glyph quads,
         // though — the cursor-only and block-only render paths reuse

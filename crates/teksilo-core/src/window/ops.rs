@@ -8,10 +8,11 @@
 //! [`EventContext`](crate::widget::EventContext) during event
 //! dispatch. Handlers reach the multi-window API through it.
 //!
-//! All calls are **synchronous**: `open_window` creates the winit
-//! window and registers it before returning; the returned id is
-//! immediately usable for `focus_window`, `window_state`,
-//! `close_window_by_id`. The trait exists to keep teksilo-core
+//! Calls are **synchronous** except the two activation-token requests,
+//! which answer through a callback on a later event-loop tick:
+//! `open_window` creates the winit window and registers it before
+//! returning; the returned id is immediately usable for
+//! `focus_window`, `window_state`, `close_window_by_id`. The trait exists to keep teksilo-core
 //! independent of teksilo-app — teksilo-core defines the contract, teksilo-app
 //! provides the implementation.
 

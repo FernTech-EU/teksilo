@@ -44,8 +44,9 @@
 //!
 //! - Container — `Role::DateInput` with `set_value` formatted as
 //!   `YYYY-MM-DD/YYYY-MM-DD` (ISO range).
-//! - Each `TextInputField` keeps its own `Role::TextInput` AT node;
-//!   the wrapper's `Role::DateInput` provides the range semantics.
+//! - Each `TextInputField` carries its own AT node, re-roled to
+//!   `Role::DateInput` and named for its half; the wrapper's
+//!   `Role::DateInput` provides the range semantics.
 //!
 //! ```ignore
 //! // Requires ctx.signal() — shown as ignore per convention.
@@ -136,7 +137,7 @@ pub struct DateRangeEdit {
     /// unified frame border.
     focused: Signal<bool>,
     /// `true` while the calendar popover is open — drives the
-    /// trigger's AT `set_expanded` and the open/close toggle.
+    /// open/close toggle and gates the deferred calendar subtree.
     range_popover_open: Signal<bool>,
     on_value_changed: Option<OnRangeChanged>,
     style_override: Option<teksilo_core::styles::SharedDateEditStyle>,
@@ -676,8 +677,9 @@ impl Widget for DateRangeEdit {
             ctx.binding_registry(),
             teksilo_core::binding::BindingLevel::AccessibilityOnly,
         );
-        // Suppress unused-field warning until we surface the trigger
-        // a11y separately.
+        // The trigger's own AT node (`set_expanded` / `HasPopup`) is not
+        // surfaced separately yet; the button itself is already mounted in
+        // the row above.
         let _ = trigger_id;
 
         vec![root_with_strip]
@@ -768,9 +770,10 @@ enum HalfKind {
 impl DateRangeEdit {
     /// Build one half (start or end) as a bare `TextInputField` with
     /// mask + validator + segment-stepping wired against the
-    /// appropriate per-half text/date signals. Returns the WidgetId
-    /// wrapped in a fixed-width container so both halves visually
-    /// align inside the unified frame.
+    /// appropriate per-half text/date signals. Returns
+    /// `(layout wrapper, inner editable field)` — the wrapper is the
+    /// `ZStack` carrying the segment-stepping key preview, sized
+    /// according to `end_width_policy`.
     #[allow(clippy::too_many_arguments)]
     fn build_half(
         &self,

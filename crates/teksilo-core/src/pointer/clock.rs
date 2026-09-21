@@ -51,9 +51,12 @@ pub trait InputClock {
     /// clock that has one.
     ///
     /// `None` for a clock with no wall-clock anchor ([`ManualClock`]). The
-    /// framework reads it in exactly one place — to assert that the input
-    /// timeline and the tree's simulated clock share an origin — and a backend
-    /// may read it to convert an OS timestamp into an [`EventTime`].
+    /// framework reads it wherever the input timeline has to be converted to
+    /// or from a wall-clock `Instant` — `event_time_for`, `instant_for` and
+    /// `rearm_sim_input_origin` each branch on whether there is an anchor at
+    /// all — a test asserts through it that the input timeline and the tree's
+    /// simulated clock share an origin, and a backend may read it to convert
+    /// an OS timestamp into an [`EventTime`].
     fn epoch(&self) -> Option<Instant> {
         None
     }

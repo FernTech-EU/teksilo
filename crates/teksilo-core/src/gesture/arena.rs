@@ -12,8 +12,11 @@ use super::{GestureEvent, GestureRecognizer, GestureResult, RawPointerEvent, Rec
 
 /// Arbitrates among multiple gesture recognizers competing on the same event
 /// stream. All recognizers are fed each event in parallel. When one recognizes,
-/// the others are reset. Failed recognizers are excluded from future events
-/// until the next sequence (pointer up resets all).
+/// the others are reset — bar the peers that opt out via
+/// `resets_on_peer_recognition`, so an escalating tap → double tap → triple tap
+/// sequence can progress across winners. Failed recognizers are excluded from
+/// future events until the next sequence (pointer **down** clears every
+/// `failed` flag).
 ///
 /// One arena serves **one contact**. A node that can be touched by two fingers
 /// at once owns one arena per live [`PointerId`](crate::pointer::PointerId),

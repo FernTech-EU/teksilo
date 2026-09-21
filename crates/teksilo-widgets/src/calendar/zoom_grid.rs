@@ -200,8 +200,8 @@ impl YearsGrid {
         }
     }
 
-    /// Decade containing `year`. Returns `(decade_start, decade_end)`
-    /// where the 12-cell grid covers `decade_start - 1` (faint, last
+    /// Decade containing `year`. Returns `decade_start`, where the
+    /// 12-cell grid covers `decade_start - 1` (faint, last
     /// year of previous decade) through `decade_start + 10`. The
     /// faint-edge cells help orient the user — same convention as
     /// the day grid's leading/trailing out-of-month cells.

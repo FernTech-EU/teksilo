@@ -136,7 +136,7 @@ pub(crate) type DynamicContentFactory = Rc<dyn Fn(&TabHandle, &dyn Any) -> Box<d
 /// - `Factory`: a `Fn(&TabHandle) -> Box<dyn Widget>` from
 ///   `static_tab_factory`. Called once on the slot's first
 ///   registration.
-/// - `PreId`: a pre-registered `WidgetId` from `static_tab_id`,
+/// - `PreId`: a pre-registered `WidgetId` from `static_tab(info, id)`,
 ///   wrapped in an alias on first registration. Stable for the
 ///   widget's lifetime.
 enum StaticContentSource {
@@ -852,7 +852,7 @@ impl TabWidget {
     /// closed tab (not its index — indices are presentation-only)
     /// and the firing [`EventContext`]. The latter lets the handler
     /// open a confirmation dialog
-    /// (`ctx.present_modal(MessageBox::confirm(...))`), dispatch an
+    /// (`MessageBox::question(...).present(ctx)`), dispatch an
     /// intent, or otherwise route the close request before mutating
     /// the underlying model. To veto, do nothing in the handler; to
     /// confirm-then-close, only call the model mutator on accept.

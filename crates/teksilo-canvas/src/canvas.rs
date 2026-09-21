@@ -460,7 +460,7 @@ impl Canvas {
         let mut backend = backend.borrow_mut();
 
         // Add a small epsilon to the bounds width before using it as max_width.
-        // The same epsilon is applied in TextWidget::size_that_fits so that
+        // The same epsilon is applied in TextWidget::layout_response so that
         // both paths produce the same TypesetterBridge cache key, avoiding
         // duplicate cache entries and inconsistent truncation.
         let max_width = Some(position.width + 0.5);
@@ -484,7 +484,7 @@ impl Canvas {
 
     /// Draw a pre-measured text layout at the given position.
     /// Use this when measurement and painting are separated (e.g., layout measured
-    /// during `size_that_fits`, painted during `paint`).
+    /// during `layout_response`, painted during `paint`).
     pub fn draw_text_layout(
         &mut self,
         layout: &crate::text_backend::TextLayout,
@@ -1298,7 +1298,7 @@ mod tests {
             &TextStyle::default(),
             Color::BLACK,
         );
-        // MockTextBackend returns empty glyphs but valid size
+        // MockTextBackend returns one glyph quad per character plus a valid size
         let size = result.unwrap();
         assert_eq!(size.width, 40.0); // 5 chars × 8.0
         assert_eq!(size.height, 16.0);

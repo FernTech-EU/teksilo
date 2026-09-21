@@ -1242,8 +1242,8 @@ mod tests {
         assert_eq!(f.axes.y.get(), 40.0, "no claim, no pan");
     }
 
-    /// The `before` arm runs first for every event: `Handled` short-circuits,
-    /// `Ignored` observes and falls through.
+    /// The `before` arm runs first for every event: `Some` short-circuits
+    /// whatever the answer is, `None` observes and falls through.
     #[test]
     fn the_before_arm_observes_then_falls_through() {
         #[derive(Debug)]

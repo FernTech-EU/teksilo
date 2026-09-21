@@ -488,8 +488,10 @@ pub trait SceneItem: std::fmt::Debug + 'static {
     /// which gives a recognisable but neutral marker for any item.
     /// Built-in items override: [`RectItem`](crate::items::RectItem)
     /// returns its fill, [`PathItem`](crate::items::PathItem)
-    /// returns stroke or fill, [`ImageItem`](crate::items::ImageItem)
-    /// returns the image's dominant tint placeholder.
+    /// returns stroke or fill, [`GroupItem`](crate::items::GroupItem)
+    /// returns fill or stroke and paints a logical group fully
+    /// transparent. [`ImageItem`](crate::items::ImageItem) does not
+    /// override — it keeps the neutral grey.
     ///
     /// Consumed by [`Scene::item_thumbnails`](crate::Scene::item_thumbnails)
     /// — the typical minimap input. Apps with non-standard items

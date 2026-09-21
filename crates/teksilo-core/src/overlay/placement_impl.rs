@@ -51,7 +51,8 @@ const AVOID_GAP: f32 = 4.0;
 /// reading, and a toolbar 4 dp off the top of a line looks attached to it.
 const SELECTION_GAP: f32 = 8.0;
 
-/// Manages the overlay stack — creation, positioning, dismissal, cascading.
+/// Leading-edge-aligned x for a `Below` / `Above` overlay, clamped so the
+/// overlay stays inside the viewport.
 /// Leading-edge-aligned x for a `Below` / `Above` overlay, clamped so the
 /// overlay stays inside the viewport.
 ///
@@ -247,10 +248,11 @@ impl OverlayManager {
     ///
     /// `anchor_bounds_fn` returns `None` when the anchor widget is no
     /// longer in the arena (destroyed by a host's rebuild while the
-    /// overlay is still up). In that case the overlay's bounds are
-    /// left untouched — keeping it at its last valid position rather
-    /// than collapsing to the (0,0) origin from a `Rect::ZERO`
-    /// fallback.
+    /// overlay is still up). An anchor-relative placement then keeps its
+    /// bounds untouched — at its last valid position rather than
+    /// collapsing to the (0,0) origin from a `Rect::ZERO` fallback. An
+    /// anchor-independent one is still positioned, against a `Rect::ZERO`
+    /// anchor it does not read.
     pub fn position_overlays(
         &mut self,
         anchor_bounds_fn: impl Fn(WidgetId) -> Option<Rect>,

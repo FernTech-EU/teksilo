@@ -294,7 +294,7 @@ pub enum SwipeDirection {
 /// This is the public API for drag handlers — the raw `GestureEvent::Drag*`
 /// variants are an implementation detail of the recognizer pipeline. A
 /// handler only ever receives `Started` once, followed by zero or more
-/// `Moved`, then exactly one `Ended`.
+/// `Moved`, then exactly one `Ended` — or one `Cancelled` in its place.
 ///
 /// `#[non_exhaustive]`: [`Cancelled`](Self::Cancelled) joined the enum with the
 /// cancel funnel, and a phase carrying velocity is anticipated for the fling
@@ -327,9 +327,7 @@ pub enum DragPhase {
 }
 
 /// Phase of a pinch (or rotation) gesture, as delivered to an `on_pinch`
-/// handler. On desktop these are produced by OS trackpad gestures
-/// (`TouchpadMagnify` / `RotationGesture`); on touch they come from a
-/// dedicated recognizer ([`TouchPinchRecognizer`]). Both producers satisfy one
+/// (`PinchGesture` / `RotationGesture`); on touch they come from a Both producers satisfy one
 /// contract, stated on [`Changed`](Self::Changed).
 ///
 /// `#[non_exhaustive]` for the same reason as [`DragPhase`].

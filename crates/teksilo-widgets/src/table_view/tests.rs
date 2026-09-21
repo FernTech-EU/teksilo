@@ -8,12 +8,13 @@
 //! - Virtualization: visible-range math, rebuild-on-buffer-exit.
 //! - Selection: row-level click, Ctrl-toggle, Shift-extend, auto-adjust on
 //!   data mutation.
-//! - Accessibility: `Role::Table`, row/column counts, `Role::Row` per row,
-//!   `Role::Cell` per cell with row/column indices.
+//! - Accessibility: `Role::Grid` (`Role::Table` only when nothing is
+//!   selectable), row/column counts, `Role::Row` per row, `Role::Cell` per
+//!   cell with row/column indices.
 //! - Empty state: `empty_view` materialises when source is empty.
 //!
 //! Header / sort / filter / resize / reorder / pinning / cell-selection /
-//! editing tests arrive in their respective phase commits.
+//! editing are covered here too, in the sections below.
 
 use teksilo_canvas::SizeProposal;
 use teksilo_core::accesskit::Role;
@@ -174,7 +175,7 @@ fn virtualizes_visible_window() {
     // 1000 rows, viewport 200, row_height 20 — only the visible window
     // (plus a small buffer) should materialise. Don't pin the upper
     // bound too tightly: the *first* build runs with the table's
-    // default-viewport guess (600 px) before `size_that_fits` reports
+    // default-viewport guess (600 px) before `layout_response` reports
     // the real layout viewport, exactly like `ListView` does today.
     // The first scroll event reduces the window to the strict bound;
     // until then the count can be ~35.
@@ -603,8 +604,8 @@ fn header_row_carries_role_row_with_index_one() {
 fn declared_order_is_default_display_order() {
     let (tree, table, _) = build_table(3);
     let row_cells = first_visible_row_cells(&tree, table);
-    // first_visible_row_cells finds the LAST `Role::Row` walked,
-    // typically a body row. Its cells are in display order =
+    // first_visible_row_cells finds the FIRST `Role::Row` walked (the
+    // `best.is_none()` guard). Its cells are in display order =
     // declaration order: id (60 px) then name (rest).
     let id_cell = tree.bounds(row_cells[0]);
     let name_cell = tree.bounds(row_cells[1]);
@@ -1737,7 +1738,8 @@ fn taking_focus_reveals_the_focused_cells_row() {
 
     // Place the cursor far below the viewport WITHOUT giving the table focus.
     // `set_focused_cell` on its own never scrolls: only the key handler does
-    // (`table_view/keyboard.rs:445`), and no key was pressed.
+    // (`ensure_row_visible` in `table_view/keyboard.rs`), and no key was
+    // pressed.
     {
         let any = tree.widget_as_any(table).unwrap();
         any.downcast_ref::<TableView<Row>>()
@@ -3101,7 +3103,7 @@ fn resize_handle_hit_tests_correctly_under_scroll() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/// The first (lowest row_index) BODY `Role::Row` — distinguished from the
+/// The first BODY `Role::Row` the walk reaches — distinguished from the
 /// header (same `Role::Row`, but `Role::ColumnHeader` children once
 /// band-flattened) by having at least one cell child. Either cell role
 /// counts: a cell-selection table announces `Role::GridCell` so its selected

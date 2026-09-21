@@ -540,7 +540,9 @@ fn workspace() -> (WidgetTree, Vec<WidgetId>) {
     tree.layout(SizeProposal::exact(WINDOW.width, WINDOW.height));
 
     // The realized cells the contacts land on: one per row for the first ten
-    // rows, striding the columns so no two contacts share a column either.
+    // rows, striding the columns so the contacts spread across the body rather
+    // than stacking in one (ten contacts over eight columns must reuse two of
+    // them; it is the distinct rows that make every cell a distinct node).
     // All ten are inside the centre viewport, which clips below its own
     // height — a contact landing on a clipped row would be re-attributed to
     // the viewport, and ten contacts on one node is nine refusals under

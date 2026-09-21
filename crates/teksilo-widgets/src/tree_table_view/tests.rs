@@ -1824,7 +1824,7 @@ fn taking_focus_reveals_the_cursor_row() {
 
     // Place the cursor far below the viewport WITHOUT giving the view
     // focus. `set_focused_cell` never scrolls on its own: only the key
-    // handler does (`table_view/keyboard.rs:445`), and no key was pressed.
+    // handler does (`table_view/keyboard.rs:672`), and no key was pressed.
     {
         let any = tree.widget_as_any(id).unwrap();
         any.downcast_ref::<TreeTableView<&'static str>>()
@@ -1879,7 +1879,7 @@ fn taking_focus_reveals_the_cursor_row() {
 /// unrealized: no row node carrying `selected` for AT-SPI to announce
 /// either, and the next arrow press stepping from a row nobody saw. The
 /// fallback order is the keyboard handler's own
-/// (`table_view/keyboard.rs:134-139`).
+/// (`table_view/keyboard.rs:141-146`).
 #[test]
 fn taking_focus_reveals_the_selected_row_when_no_cell_has_been_navigated_to() {
     use teksilo_data::{SelectionMode, SelectionModel};
@@ -1944,7 +1944,7 @@ fn taking_focus_reveals_the_selected_row_when_no_cell_has_been_navigated_to() {
 ///
 /// The reveal is fed `focused_cell`, whose row the keyboard handler clamps
 /// against `TreeNavigator::row_count()` = `TreeSource::visible_count()`
-/// (`tree_table_view.rs:129-131`), and it spends that index on
+/// (`tree_table_view.rs:144-146`), and it spends that index on
 /// `RowMetrics`, which `place_children` sizes from the same
 /// `visible_count()`. Both ends are therefore the flat order this test
 /// reads through `SortFilterTreeModel::visible_node_id`.
@@ -4677,9 +4677,9 @@ fn click_probe(
 ///
 /// The leaf half is what [`TreeBodyPane`] used to get wrong. It wired
 /// `on_click` on every chevron, including the ones that paint nothing, and an
-/// `on_click` is exactly what makes a node a pointer target — a 12 dp one, two
-/// dp of it below the WCAG 2.2 SC 2.5.8 floor at every density, actuating
-/// `toggle_at` on a row with nothing to toggle. `StandardTreeItem::build` has
+/// `on_click` is exactly what makes a node a pointer target — a 12 dp one,
+/// twelve dp of it below the WCAG 2.2 SC 2.5.8 floor at every density,
+/// actuating `toggle_at` on a row with nothing to toggle. `StandardTreeItem::build` has
 /// always guarded the same wiring behind `has_children`, and
 /// `TwistArrow::hit_outset` returns [`EdgeInsets::ZERO`] for a leaf, so the node
 /// could not have grown to the floor even in principle.

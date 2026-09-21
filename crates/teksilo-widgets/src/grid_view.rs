@@ -11,10 +11,12 @@
 //! accessible (`Role::Grid` → `Role::GridCell`).
 //!
 //! The layout is pluggable via `GridLayoutStrategy`;
-//! the stock [`UniformGrid`] gives fixed tile size /
-//! fixed column count / adaptive min-width grids. (Variable-row-height and
-//! waterfall strategies, plus marquee selection, drag-reorder, sections and
-//! sticky headers, are layered on in later phases.)
+//! The layout is pluggable via `GridLayoutStrategy`: the stock
+//! [`UniformGrid`] gives fixed tile size / fixed column count /
+//! adaptive min-width grids, [`VariableRowGrid`] sizes each row to its
+//! tallest tile, and [`VirtualizedMasonry`] flows items into the
+//! currently-shortest column. Marquee selection, drag-reorder, sections
+//! and sticky headers are layered over whichever one is in force.
 //!
 //! ```ignore
 //! GridView::new(model, |tc| {
@@ -719,8 +721,8 @@ impl<T: 'static> GridView<T> {
     /// last layout settled on, and a waterfall strategy has no row formula at
     /// all, its items dropping into whichever column is shortest.
     /// `viewport_width` is the body width `place_children` published
-    /// (`grid_view.rs:1622`) and asked the strategy for its column count
-    /// (`:1624`), the scrollbar column already subtracted, so the reveal and
+    /// (`grid_view.rs:1789`) and asked the strategy for its column count
+    /// (`:1791`), the scrollbar column already subtracted, so the reveal and
     /// the layout wrap at the same place.
     ///
     /// The handles are cloned into the effect rather than reaching through
@@ -735,9 +737,9 @@ impl<T: 'static> GridView<T> {
         // Keyed on this grid's own id, not on the enclosing scope: a grid
         // nested inside another data view's rows would otherwise read that
         // view's focus, since `view_focus_active` prefers whatever scope is
-        // open on the build stack (`build_context.rs:543-552`). Begin/end
+        // open on the build stack (`build_context.rs:576-585`). Begin/end
         // around nothing leaves the stack as it was
-        // (`widget_tree/focus_impl.rs:663-672`).
+        // (`widget_tree/focus_impl.rs:751-760`).
         let view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
 
@@ -1081,8 +1083,9 @@ impl<T: 'static> std::fmt::Debug for GridView<T> {
 /// than a second copy of it: the effect outlives any borrow of `self` and
 /// holds cloned handles instead of the widget, so it cannot call the method.
 /// Takes the geometry by value for the same reason. The keyboard has its own
-/// call into `scroll_delta_to_reveal` (`grid_view/keyboard.rs:349-355`),
-/// because it applies the delta to an enclosing scroll area as well.
+/// call into `scroll_delta_to_reveal` (`grid_view/keyboard.rs:496-502`, in
+/// `reveal_tile`), because it applies the delta to an enclosing scroll area as
+/// well.
 fn scroll_for_ensure_visible(
     strategy: &dyn GridLayoutStrategy,
     index: usize,
@@ -1964,8 +1967,8 @@ impl<T: 'static> Widget for GridView<T> {
     }
 }
 
-/// A top-most, event-transparent leaf that paints the focus ring (and, in
-/// later phases, the marquee rectangle and drag-insertion feedback). Drawing
+/// A top-most, event-transparent leaf that paints the focus ring, the
+/// marquee rectangle and the drag-insertion bar. Drawing
 /// here rather than in the container sidesteps any parent-vs-child paint-order
 /// ambiguity — a last sibling always paints over the tiles.
 struct GridOverlay {
@@ -2307,8 +2310,8 @@ mod focus_reveal_tests {
     /// `position_in_set` reads 0-based here even though `TileA11y` writes the
     /// 1-based ARIA number (`grid_view/a11y.rs:88`):
     /// `AccessNodeBuilder::set_position_in_set`
-    /// (`teksilo-core/src/accessibility.rs:466-469`) subtracts the 1 through
-    /// `to_accesskit_ordinal` (`:171-178`), so the value in a snapshot is the
+    /// (`teksilo-core/src/accessibility.rs:726-729`) subtracts the 1 through
+    /// `to_accesskit_ordinal` (`:359-366`), so the value in a snapshot is the
     /// flat index itself.
     fn selected_positions(tree: &WidgetTree) -> Vec<usize> {
         tree.accessibility_tree_snapshot()
@@ -2346,7 +2349,7 @@ mod focus_reveal_tests {
 
     /// The window-space rect of a realized tile, read out of the same
     /// `tile_map` the body pane writes and `accessibility` nominates from
-    /// (`grid_view.rs:1737-1743`). `None` for a tile outside the
+    /// (`grid_view.rs:1904-1910`). `None` for a tile outside the
     /// virtualization window, which has no widget and so no rect.
     fn tile_bounds(tree: &WidgetTree, grid: WidgetId, index: usize) -> Option<Rect> {
         let tile = tree

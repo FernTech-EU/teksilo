@@ -90,12 +90,13 @@ pub use symbols::{NumberSymbols, delocalize_number};
 pub enum NumberStyle {
     #[default]
     Decimal,
-    /// Multiply by 100 and append `%`. The sign is locale-naive; see
-    /// the module-level note on percent coverage.
+    /// Multiply by 100; ICU renders the percent sign where the locale
+    /// puts it. See the module-level note on percent coverage.
     Percent,
-    /// Format as decimal and append the ISO-4217 currency code from
-    /// `NumberFormatter::currency(...)`. Locale-naive positioning; see
-    /// the module-level note on currency coverage.
+    /// Format as currency, from the ISO-4217 code given to
+    /// `NumberFormatter::currency(...)` — rendered as the locale's short
+    /// symbol, positioned by the locale; see the module-level note on
+    /// currency coverage.
     Currency,
 }
 
@@ -620,7 +621,7 @@ impl NumberFormatter {
         self
     }
 
-    /// Switch to currency style and set the ISO-4217 code to append.
+    /// Switch to currency style and set the ISO-4217 code to render.
     pub fn currency(mut self, code: impl Into<String>) -> Self {
         self.options.style = NumberStyle::Currency;
         self.options.currency = Some(code.into());

@@ -5,16 +5,21 @@
 //! item in a scene of N — the drag path — and does that cost scale with the
 //! viewport or with the whole scene?
 //!
-//! `SceneView::layout_response_impl` rebuilds two snapshots from `scene.ids()`
-//! on every layout pass: the draggable-item snapshot and the handler-dispatch
-//! snapshot. Both walk **every** item in the scene rather than the visible ones,
-//! and both allocate per item — a handler set is cloned and boxed. Each then
-//! sorts by z. So a pass is O(N log N) with an allocation per item that carries
-//! handlers. (Publishing the item's geometry used to cost two more: the old
+//! `SceneView::layout_response_impl` calls `refresh_hit_snapshots` on every layout
+//! pass, which brings two snapshots up to date: the draggable-item snapshot and
+//! the handler-dispatch snapshot. It does **not** rebuild them from `scene.ids()`
+//! every time — `hit_snapshot` plans `Reuse` (nothing was emitted, the pan case:
+//! one `u64` comparison), `Patch` (a geometry change: the named ids and their
+//! subtrees rewritten in place by binary search over the `PaintKey` sort), or
+//! `Rebuild` (a structural change: the walk over **every** item rather than the
+//! visible ones, an allocation per item that carries handlers — a handler set is
+//! cloned and boxed — and a sort by z, so O(N log N)). Moving one item, which is
+//! what this probe does, emits `LocalPosChanged` and therefore takes the `Patch`
+//! path; what the table below measures is the rest of the pass plus that patch,
+//! not a rebuild. (Publishing the item's geometry used to cost two more: the old
 //! `clone_shape_test()` boxed a closure and `.into()` re-allocated it into an
 //! `Rc`. `SceneItem::shape` returns a value whose default variant allocates
-//! nothing and whose path variant is a refcount bump, so those are gone — the
-//! O(N log N) scan and sort, which is what this probe measures, are not.)
+//! nothing and whose path variant is a refcount bump, so those are gone too.)
 //!
 //! Dragging one card across a scene relayouts on every pointer sample, so this
 //! is the per-sample cost. The `offscreen` column repeats the measurement with

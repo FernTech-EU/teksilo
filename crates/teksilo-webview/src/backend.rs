@@ -130,12 +130,20 @@ pub trait WebViewHandle: 'static {
     /// the OS delivers those events to the host window and Teksilo routes them
     /// — the engine half of [`WebViewInput::Transparent`].
     ///
-    /// Returns whether the engine honoured it. **Not every engine can**: the
-    /// call needs control over the native surface's hit region, which the
-    /// embedding API may simply not expose, and a backend that cannot do it
-    /// must answer `false` rather than pretend. The widget reports a declined
-    /// pass-through as a [`WebViewEvent::ConsoleMessage`] so the mode never
-    /// fails silently.
+    /// Ask the engine to stop taking pointer input over its own rectangle, so
+    /// the OS delivers those events to the host window and Teksilo routes them
+    /// — the engine half of [`WebViewInput::Transparent`].
+    ///
+    /// **Not every engine can do this** — the call needs control over the
+    /// native surface's hit region, which the embedding API may simply not
+    /// expose — and one that cannot must say so through
+    /// [`WebViewEvent::ConsoleMessage`] — the channel this crate
+    /// already reserves for reporting an unsupported operation — rather than
+    /// accept the call and change nothing. There is deliberately no return
+    /// value and no default implementation: an answer invented here would be
+    /// an answer for an engine nobody asked.
+    ///
+    /// [`WebViewInput::Transparent`]: crate::WebViewInput::Transparent
     ///
     /// **Not every engine can do this**, and one that cannot must say so
     /// through [`WebViewEvent::ConsoleMessage`] — the channel this crate

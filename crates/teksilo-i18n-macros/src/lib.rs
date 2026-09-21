@@ -13,16 +13,23 @@
 //! site.
 //!
 //! The runtime side of the i18n stack lives in `teksilo-i18n`. The macros
-//! emit code that calls `::teksilo::i18n::localized(...)` and
-//! `::teksilo::i18n::resolve_message[_widget](...)`, so any crate using
-//! these macros must depend on `teksilo` (with the `i18n` feature enabled).
+//! emit code that calls `localized(...)` and
+//! `resolve_message[_widget](...)` under one of two crate roots (see
+//! `SourceKind::i18n_root`): external crates route through
+//! `::teksilo::i18n`, so they only need `teksilo` in deps (with the
+//! `i18n` feature enabled); internal `teksilo-*` crates route through
+//! `::teksilo_i18n`, which they must depend on instead — they cannot
+//! depend on `teksilo` (circular).
 //!
 //! # Source file resolution
 //!
-//! `tr!` reads `$CARGO_MANIFEST_DIR/locales/en-US.ftl` by default. For
-//! tests that need a different fixture, set the `TEKSILO_I18N_SOURCE_PATH`
-//! environment variable at compile time to a path relative to
-//! `CARGO_MANIFEST_DIR` (or an absolute path).
+//! `tr!` reads `$CARGO_MANIFEST_DIR/locales/en-US/` as a directory of
+//! `.ftl` files when that directory exists, and otherwise the single
+//! `$CARGO_MANIFEST_DIR/locales/en-US.ftl` file. For tests that need a
+//! different fixture, set `TEKSILO_I18N_SOURCE_DIR` (directory) or
+//! `TEKSILO_I18N_SOURCE_PATH` (single file) at compile time to a path
+//! relative to `CARGO_MANIFEST_DIR` (or an absolute path); the directory
+//! variable wins over the file one.
 //!
 //! `tr_widget!` reads the same path. It is used inside teksilo-widgets
 //! where the crate's own manifest dir points at the framework's own
@@ -891,8 +898,9 @@ fn tr_impl(input: TokenStream, kind: SourceKind, signal: bool) -> TokenStream {
             {
                 #(#watch_stmts)*
 
-                // Bring `observe`, `attach_keepalive`, `downgrade` into
-                // scope as inherent methods on `Signal`.
+                // `observe`, `attach_keepalive` and `downgrade` are
+                // inherent methods on `Signal`, so the expansion needs
+                // no `use` import for them.
                 #(#arg_let_bindings)*
 
                 let __teksilo_resolver: ::std::rc::Rc<dyn ::std::ops::Fn() -> ::std::string::String> = {

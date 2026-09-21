@@ -514,7 +514,7 @@ impl<T: 'static> Signal<T> {
 }
 
 impl<T: Clone + 'static> Signal<T> {
-    /// Set a new value. Marks the signal as dirty and notifies observers.
+    /// Set a new value. Advances the signal's generation and notifies observers.
     /// Panics if called on a derived (read-only) signal.
     ///
     /// Observers may freely re-enter `set`/`try_set`/`observe`, or drop their
@@ -697,9 +697,9 @@ impl<T: Clone + 'static> Signal<T> {
     /// `pan_x.zip3(pan_y, zoom).zip(rotation)` view transform that
     /// flips all four sources on every animation tick — this collapses
     /// the per-tick binding work from O(N) to O(1) without changing
-    /// dirty-tracking semantics: the composite source is dirty when
-    /// any underlying source is, and clearing the composite clears
-    /// every underlying source.
+    /// dirty-tracking semantics: the composite source's generation
+    /// advances whenever any underlying source's does, and — like every
+    /// generation — reading it clears nothing.
     ///
     /// Use only when the derived signal's value depends on **all**
     /// upstream sources being read together (a compose function);
@@ -737,8 +737,8 @@ impl<T: Clone + 'static> Signal<T> {
     ///
     /// Unlike [`map`](Self::map), the result depends on an inner source
     /// that is chosen dynamically, so it exposes a **single composite
-    /// `DerivedSource`** whose dirty/clear evaluate the currently-selected
-    /// inner each time they are polled. Binding registration stays O(1)
+    /// `DerivedSource`** whose `generation` evaluates the currently-selected
+    /// inner each time it is polled. Binding registration stays O(1)
     /// regardless of how many distinct inner signals `f` may return.
     ///
     /// Typical use — track the *active* item's reactive flag out of a set:

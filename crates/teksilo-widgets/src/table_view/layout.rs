@@ -4,7 +4,7 @@
 //! Column-width resolution + per-pane horizontal layout.
 //!
 //! `ColumnSolver` resolves a list of `ColumnWidth` declarations against
-//! the available pane width, in three passes:
+//! the available pane width, in four passes:
 //!
 //! 1. `Fixed(px)` is clamped by `min_width` / `max_width`.
 //! 2. `Auto` evaluates to a fallback width (the table's
@@ -240,14 +240,18 @@ impl ColumnSolver {
         widths
     }
 
-    /// Sum of resolved widths. Used for pane partitioning.
+    /// Sum of resolved widths. Retained for pane partitioning — no production
+    /// caller today (`pane_widths` sums its own ranges), hence the
+    /// `allow(dead_code)`.
     #[allow(dead_code)]
     pub(crate) fn total_width(widths: &[f32]) -> f32 {
         widths.iter().sum()
     }
 
     /// X-offset of column `i` relative to the pane's leading edge.
-    /// Used for column-resize hit testing.
+    /// Retained for column-resize hit testing — no production caller today;
+    /// the header's grip works from its own cell bounds (`header.rs`,
+    /// `resize_grip`), hence the `allow(dead_code)`.
     #[allow(dead_code)]
     pub(crate) fn x_offset(widths: &[f32], i: usize) -> f32 {
         widths.iter().take(i).sum()

@@ -12,8 +12,8 @@
 //! - [`ComboBox::from_model`] — reactive [`ListModel<T>`].
 //! - [`ComboBox::from_source`] — external [`ListDataSource<Item = T>`].
 //!
-//! The dropdown panel is pre-created during `build()` and kept dormant until
-//! it is opened.
+//! The dropdown panel's node is created during `build()` and kept dormant, but
+//! its subtree is deferred — built the first time the combo is opened.
 //!
 //! # Keyboard
 //!
@@ -35,8 +35,8 @@
 //!   through to the application; `Shift` is, so a capital letter still types.
 //!
 //! The widget is split across four internal modules:
-//! - `state` holds the interaction-state enum, the `ItemSource` accessor,
-//!   and color/index helpers.
+//! - `state` holds the `ItemSource` accessor, the default
+//!   `max_visible_items` constant, and the index helpers.
 //! - `item` holds the single-row `DropdownItem` widget.
 //! - `panel` holds the `DropdownPanel` overlay content and the
 //!   `FilteredItemList` inner widget.
@@ -161,9 +161,9 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     selected_index_hint: Rc<Cell<Option<usize>>>,
     /// Tier-1 design-language variant. The active `ComboBoxStyle`
     /// decides how to paint each variant; IntUI's default ships
-    /// `Outlined` (bordered) and `Plain` (chrome-less) out of the box,
-    /// with `Filled` falling back to `Outlined` until per-variant
-    /// recipes land.
+    /// `Outlined` (bordered), `Filled` (tinted fill, no border) and
+    /// `Plain` (chrome-less) out of the box, with `Underline` still
+    /// painted as `Outlined`.
     variant: ComboBoxVariant,
     /// Per-call style override.
     style_override: Option<SharedComboBoxStyle>,
@@ -190,8 +190,9 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     // `ComboBoxState` enum. `is_open` survives until the dropdown
     // dismisses (overlay callback resets it); `is_focused` /
     // `is_hovered` flip on the corresponding handlers; `is_disabled`
-    // mirrors `!self.enabled` (snapshotted at build because
-    // `.enabled(bool)` is an immutable builder option).
+    // mirrors the arena's *effective* enabled state reactively (an
+    // effect on `ctx.effective_enabled_signal`, so an ancestor's
+    // disablement reaches it too).
     is_open: Signal<bool>,
     is_hovered: Signal<bool>,
     is_focused: Signal<bool>,
@@ -426,7 +427,8 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
 
     /// Override the active [`ComboBoxStyle`] for this widget instance
     /// only. The default IntUI chrome ([`crate::styles::RecipeComboBoxStyle`])
-    /// reads its tokens from `theme.components.combo_box`; custom impls
+    /// resolves its dimensions from `theme.input` (the density
+    /// `InputTokens`); custom impls
     /// can paint anything they want around the selected-label slot.
     pub fn style(mut self, style: impl ComboBoxStyle) -> Self {
         self.style_override = Some(Rc::new(style));
@@ -762,9 +764,10 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         };
 
         // Shared slot carrying the search `TextInput`'s widget id —
-        // populated by the panel during its own `build` so the open
-        // path below can `ctx.request_focus(..)` the search field as
-        // soon as the overlay activates.
+        // populated by the panel during its own `build`. The open path
+        // below does *not* read it: it asks for focus by panel id
+        // instead (see there for why the slot is empty on the very
+        // first open).
         let search_input_slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
         let dropdown_panel = DropdownPanel {
             source: self.source.clone(),

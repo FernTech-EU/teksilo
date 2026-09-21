@@ -632,8 +632,9 @@ impl SegmentedControl {
     }
 
     /// Inset-by-focus-ring-envelope bounds — the actual frame /
-    /// segment-grid area. Mirrors the recipe's compute_visual so
-    /// children land where the chrome paints.
+    /// segment-grid area. Published to the chrome as
+    /// `SegmentSlotGeometry::frame`, so children land where the chrome
+    /// paints.
     fn compute_visual(bounds: Rect, theme: &teksilo_core::Theme) -> Rect {
         let envelope = theme.shape.focus_ring_offset + theme.shape.focus_ring_width;
         Rect::new(

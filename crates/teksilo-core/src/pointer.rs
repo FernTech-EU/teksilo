@@ -287,8 +287,8 @@ pub struct PointerAxes {
 
 /// Everything that identifies and describes the pointer producing a sample.
 ///
-/// Carried by [`PointerSample`], [`ScrollSample`] and (from stage 1 of the
-/// event-shape landing) by the scroll and cancel `WidgetEvent`s.
+/// Carried by [`PointerSample`], [`ScrollSample`] and by every pointer-bearing
+/// `WidgetEvent` — the pointer, scroll and cancel variants alike.
 ///
 /// `#[non_exhaustive]`: construct one through [`mouse`](Self::mouse) /
 /// [`touch`](Self::touch) and adjust fields, so a later field cannot break a
@@ -680,8 +680,8 @@ pub enum CancelReason {
     Platform,
     /// The window lost focus mid-interaction.
     WindowDeactivated,
-    /// The window became fully occluded mid-interaction. Reserved for the
-    /// platform layer's occlusion path.
+    /// The window became fully occluded mid-interaction. Raised by the
+    /// platform layer's occlusion path (`WindowEvent::Occluded`).
     Occluded,
     /// A modal surface opened over the interaction.
     ModalOpened,
@@ -712,8 +712,12 @@ pub enum CancelReason {
     /// before any event exists, so no widget is told.
     ContactCapExceeded,
     /// The contact was classified as a palm rather than a deliberate touch.
-    /// Refused at [`PointerTable::begin`](crate::pointer::table::PointerTable::begin),
-    /// before any event exists, so no widget is told.
+    /// A contact the *backend* flags is refused at
+    /// [`PointerTable::begin`](crate::pointer::table::PointerTable::begin),
+    /// before any event exists, so no widget is told; one the `PalmWatch`
+    /// heuristic rejects on its release goes through the cancel funnel
+    /// instead, so its widget *is* told — which is the only way to guarantee
+    /// it fires no tap.
     PalmRejected,
     /// A catch-all for a deactivation that fits none of the above. Prefer a
     /// specific variant; this one exists so a caller is never forced to lie.

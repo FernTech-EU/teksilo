@@ -87,7 +87,7 @@ fn picker_click_populates_chain_with_button_ancestor() {
         "PickResolver should populate the chain after a pick click"
     );
     // The chain ends at (or includes) the user-root id (which IS the
-    // button — `Button::new_literal` registers Button as the root
+    // button — `Button::new` registers Button as the root
     // of this test tree). The deepest-hit is somewhere inside the
     // Button composite. Both endpoints belong to the button's
     // subtree.
@@ -129,7 +129,7 @@ fn picker_click_populates_chain_with_button_ancestor() {
     let row_ids = tree.children(vstack_id);
     assert!(!row_ids.is_empty(), "menu VStack should have row children");
     // Activate row 0 (the deepest entry) — that's what a click on the
-    // top menu row would do. `synthetic_click` dispatches a click
+    // top menu row would do. `WidgetTree::click` dispatches a click
     // event so the row's `on_activate_fn` fires.
     tree.click(row_ids[0]);
     tree.layout(SizeProposal::exact(400.0, 300.0));
@@ -180,8 +180,8 @@ fn panel_fills_window_width_when_open() {
     // the inspector chrome shows the user app instead of being
     // covered by the panel.
     // Walk shell → root child (VStack) → its last child (the panel
-    // slot, which is the FillWidthFixedHeight wrapping the panel
-    // switcher). Verify that slot fills the full window width.
+    // slot, which is the `Expand::horizontal` + `FixedSize` wrapping the
+    // panel switcher). Verify that slot fills the full window width.
     let shell_kids = tree.children(shell_id);
     assert_eq!(shell_kids.len(), 1, "InspectorShell wraps one child");
     let stack_id = shell_kids[0];
@@ -319,8 +319,8 @@ fn panel_resize_handle_tracks_cursor_one_to_one() {
     let shell_kids = tree.children(shell_id);
     let outer_vstack = shell_kids[0];
     let panel_slot = *tree.children(outer_vstack).last().unwrap();
-    // panel_slot → Expand → FixedSize → panel_switcher → ZStack →
-    // panel_block → VStack → first child = handle wrapper. Just walk
+    // panel_slot → FixedSize → PanelShortcutHost → Switcher →
+    // panel_block (VStack) → first child = handle wrapper. Just walk
     // first-children until we find a leaf with a small height.
     fn find_handle(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
         let bounds = tree.bounds(id);

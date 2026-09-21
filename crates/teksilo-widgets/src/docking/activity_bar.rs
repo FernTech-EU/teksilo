@@ -3,9 +3,14 @@
 
 //! `DockActivityBar` — the tailored VS Code-style **vertical** icon rail. One
 //! item per tab of a side; clicking an inactive item selects + shows the side,
-//! clicking the active item hides the side. Always visible (it lives in the
-//! layout chrome, outboard of the collapsible content), so it is the reopen
-//! affordance while the side is hidden.
+//! `DockActivityBar` — the tailored VS Code-style **vertical** icon rail. One
+//! item per tab of a side; clicking an inactive item selects + shows the side,
+//! clicking the active item hides the side. On a **leading / trailing** side it
+//! survives the side being hidden (it lives in the layout chrome, outboard of
+//! the collapsible content), so it is the reopen affordance there; a hidden
+//! **top / bottom** band collapses completely, rail included — a vertical rail
+//! can't stand in a zero-depth band (see `geometry.rs`) — so those are reopened
+//! from an external button.
 //!
 //! Features (configured via [`DockRail`]):
 //! - **Vertical only** — a column of items, pushed to the **top**.
@@ -582,8 +587,11 @@ impl DockActivityBar {
     /// The effective rail-item size: compact items shrink to the standard
     /// [`IconButtonSize::Default`] (not the extra-small `Compact` — a rail item
     /// is an identify target, so its glyph must stay legible); Default and
+    /// The effective rail-item size: compact items shrink to the standard
+    /// [`IconButtonSize::Default`] (not the extra-small `Compact` — a rail item
+    /// is an identify target, so its glyph must stay legible); Default and
     /// Labeled both keep the rail's configured icon size (Labeled just adds a
-    /// rotated title beneath).
+    /// rotated title above it).
     fn effective_item_size(&self) -> IconButtonSize {
         match self.model.side_rail_size(self.side) {
             DockRailItemSize::Compact => IconButtonSize::Default,
@@ -1780,9 +1788,10 @@ impl Widget for RailEdgeDivider {
 // DockOverflowMenu — the popover content listing the overflowed entries.
 // ───────────────────────────────────────────────────────────────────────
 
-/// A column of rows (one per tab), each shown only while that tab is
-/// overflowed (`index >= visible_count`). Selecting a row activates its tab
-/// and shows the side.
+/// A column of rows (one per non-hidden tab), each shown only while that tab is
+/// overflowed (`pos >= visible_count`, `pos` being its position among the
+/// side's non-hidden tabs). Selecting a row activates its tab and shows the
+/// side.
 #[derive(Debug)]
 struct DockOverflowMenu {
     side: DockSide,
@@ -1898,7 +1907,7 @@ struct DockRailItem {
     /// Glyph (icon) dimension drawn inside the `extent`-sized box — derived from
     /// the rail size so the icon scales with it (see [`item_glyph_size`]).
     glyph: f32,
-    /// Labeled mode: paint a 90°-rotated title under the icon (no tooltip).
+    /// Labeled mode: paint a 90°-rotated title above the icon (no tooltip).
     /// Icon-only modes attach the title as a hover tooltip instead.
     labeled: bool,
     selected: Signal<usize>,

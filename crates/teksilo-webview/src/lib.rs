@@ -1146,7 +1146,9 @@ impl Drop for WebView {
     fn drop(&mut self) {
         // Unregister the event callback so a late backend event can't route
         // into freed widget state. The engine handle tears down via its own
-        // Drop when `self.handle`'s last Rc clone (this + the effect) goes.
+        // Drop when `self.handle`'s last Rc clone goes — this, the focus / key
+        // / access-action handlers held by the arena node, the activation and
+        // navigation effects, and the post-mount open action.
         if let Some(registry) = self.registry.borrow().as_ref() {
             registry.unregister(self.web_view_id);
         }

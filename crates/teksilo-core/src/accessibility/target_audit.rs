@@ -1374,9 +1374,9 @@ impl<'a> Walker<'a> {
     ///
     /// Neighbour extents are the **inflated** rectangles computed in
     /// [`Walker::run`], so the test errs towards refusing the exception. The
-    /// target's own rectangle is excluded by an exact-equality check rather
-    /// than by identity, which also excludes a region that coincides with its
-    /// node.
+    /// target itself is excluded by its `(node, part)` identity rather than by
+    /// its rectangle, because inflating the rectangle makes a geometric
+    /// self-match impossible to spot.
     fn spacing_exception_applies(
         &self,
         painted: Rect,

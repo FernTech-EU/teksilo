@@ -128,7 +128,7 @@ struct SubclassData {
     last_hover: Cell<Option<ControlTarget>>,
     /// Per-button hover signals registered by `WindowControls` so the
     /// host can write them on synthetic-hover events. Look-up is by
-    /// `ControlTarget`. Empty until M5/C.3 wires the registration.
+    /// `ControlTarget`.
     hover_signals: Mutex<HashMap<ControlTarget, Signal<bool>>>,
 }
 

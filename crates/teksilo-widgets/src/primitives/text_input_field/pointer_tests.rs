@@ -32,7 +32,7 @@ use super::touch::FieldTouch;
 use super::*;
 use crate::button::press_test_support::{finger, touch};
 
-/// The field sits at (20, 20) so every coordinate assertion has to survive the
+/// The field sits at (20, 120) so every coordinate assertion has to survive the
 /// window→local conversion the router applies. A field at the origin cannot
 /// tell a correct conversion from a missing one.
 fn origin() -> Point {

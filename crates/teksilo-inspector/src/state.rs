@@ -42,8 +42,8 @@ pub struct PickChainEntry {
 }
 
 impl OverlayMode {
-    /// Cycle Off → Selection → All → Off. Used by the toolbar's
-    /// keyboard-friendly Tab cycle.
+    /// Cycle Off → Selection → All → Off. Used by the Ctrl+B
+    /// "Cycle Bounds Overlay" shortcut in `keyboard.rs`.
     pub fn next(self) -> Self {
         match self {
             OverlayMode::Off => OverlayMode::SelectionOnly,

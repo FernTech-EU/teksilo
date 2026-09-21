@@ -31,10 +31,11 @@
 //! The item emits a `Role::Label` carrying `Role::TextRun` children, so a
 //! screen reader can review it by character, word and line, braille can be
 //! routed into it, and a magnifier can follow it. The per-character extents
-//! are the layout the last paint drew, projected into window space — real
-//! when the item is upright under a pan/zoom view, degenerate (present but
-//! zero-width) when it is rotated, when the view advertises scene-space
-//! bounds, or before the first paint.
+//! are the layout the last paint drew, in scene coordinates — real when the
+//! item is upright under a pan/zoom view, degenerate (present but
+//! zero-width) when it is rotated, when a label override announces a
+//! different string from the one that was measured, or before the first
+//! paint.
 //!
 //! ## When to use
 //!
@@ -171,9 +172,9 @@ fn uniform_scale(transform: &Transform2D) -> Option<f32> {
 
 /// The same geometry with every coordinate multiplied by `scale`.
 ///
-/// Zoom never reflows scene text — the view paints one logical layout
-/// larger — so the window-space extents AT reads are the layout's own,
-/// scaled by the view.
+/// A scale never reflows scene text — one logical layout is painted
+/// larger — so the scene-space extents AT reads are the layout's own,
+/// scaled by the item's own `local_to_scene`.
 fn scale_geometry(geometry: &TextGeometry, scale: f32) -> TextGeometry {
     let scale_rect = |r: [f32; 4]| [r[0] * scale, r[1] * scale, r[2] * scale, r[3] * scale];
     TextGeometry {
@@ -250,9 +251,10 @@ pub struct TextItem {
 
 impl TextItem {
     /// A static-text item in local coordinates. The `text` is
-    /// resolved eagerly via `LocalizedString::resolve_now` at
-    /// construction; locale changes rebuild the composite parent,
-    /// which re-creates this `TextItem` with a fresh translation.
+    /// resolved against the active locale on each paint;
+    /// `register_bindings` ties the locale signal to the SceneView at
+    /// `BindingLevel::RepaintOnly`, so a locale switch repaints and
+    /// re-resolves without rebuilding the composite parent.
     pub fn new(text: impl Into<LocalizedString>, local_bounds: Rect) -> Self {
         let ls: LocalizedString = text.into();
         Self {

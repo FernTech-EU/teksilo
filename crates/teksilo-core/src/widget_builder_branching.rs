@@ -282,11 +282,18 @@ impl IntoTeksiChild for WidgetId {
 // IntoTeksiCondition — reactive/static dispatch for `if bare_ident { ... }`
 // ---------------------------------------------------------------------------
 
-/// Dispatch trait the `teksu!` macro uses for `if bare_ident { Element }`
-/// — the `teksu!` "reactive conditionals" pattern. The bare-identifier form
-/// lowers to a call on this trait; which impl fires (and thus whether
-/// the element is conditionally built or always built with bound
-/// visibility) is decided at monomorphization.
+/// Dispatch trait written for `teksu!`'s reactive conditional
+/// (`if bare_ident { Element }`): which impl fires — and thus whether the
+/// element is conditionally built or always built with bound visibility —
+/// is decided at monomorphization.
+///
+/// **The macro does not emit it.** That lowering rule was never shipped:
+/// an `if` at body position lowers to a plain Rust conditional
+/// (`.child_opt(if cond { Some(..) } else { None })`), so the condition
+/// must be a `bool` and a `Signal<bool>` there is a type error. The
+/// reactive form that does work is the `visible_when:` property. The
+/// trait stays public for hand-written builder chains — see
+/// `docs/teksu-language-spec-v3.md` §5.1.
 ///
 /// - `bool`: static — the element is built only when the flag is true.
 ///   Returns `Some(id)` if built, `None` if skipped.

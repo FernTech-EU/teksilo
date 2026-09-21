@@ -41,7 +41,7 @@ pub struct PopoverStyleConfig {
     pub show_caret: bool,
     /// Caret half-extent in logical pixels (the apex protrudes by
     /// this amount). Honoured only when `show_caret == true` AND the
-    /// placement is one of the cardinal Above/Below directions.
+    /// placement is `Above`, `Below`, `BelowPreferred` or `NearAnchor`.
     pub caret_size: f32,
 }
 

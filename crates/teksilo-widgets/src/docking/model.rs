@@ -82,7 +82,7 @@ impl DockTabId {
 /// an always-visible activity rail outboard of the collapsible content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TabPresentation {
-    /// In-side tab strip (hidden when a single tab is present).
+    /// In-side tab strip (always shown, even for a single tab).
     Strip,
     /// External always-visible activity rail; the in-side strip is suppressed.
     Rail,
@@ -91,7 +91,7 @@ pub enum TabPresentation {
 /// Placement mode for a programmatically-opened dock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DockOpenMode {
-    /// Stack into the side's currently-selected tab (as a ToolBox section).
+    /// Stack into the side's currently-selected tab (as an extra Splitter pane).
     Stack,
     /// Create a brand-new tab holding just this dock.
     NewTab,
@@ -255,7 +255,7 @@ pub(crate) struct DockWidgetMeta {
 
 /// One tab of a side's TabWidget: a `Splitter` arrangement of panes, each pane
 /// a single dock. Stacking two docks side-by-side adds a Splitter pane (each
-/// rendered as a single-item ToolBox) — there is no multi-section pane.
+/// rendered as its own Accordion) — there is no multi-section pane.
 #[derive(Clone)]
 pub(crate) struct DockTab {
     pub id: DockTabId,
@@ -285,8 +285,8 @@ pub(crate) struct SideState {
     pub visible_sig: Signal<bool>,
     pub selected_tab_sig: Signal<usize>,
     /// Activity-bar item size for this side's rail: `0` = the rail's configured
-    /// (default) size, `1` = compact. Reactive — the rail binds it at `Rebuild`
-    /// and re-reads the size when it flips.
+    /// (default) size, `1` = compact, `2` = icon + 90°-rotated label. Reactive —
+    /// the rail binds it at `Rebuild` and re-reads the size when it flips.
     pub rail_size_sig: Signal<usize>,
     /// How this side's dock tabs render: `0` = text only, `1` = icon only,
     /// `2` = icon + text. Reactive — the tab strip binds it at `Rebuild`.
@@ -749,8 +749,8 @@ impl DockingModel {
     // ─── per-side display prefs (rail item size / tab display) ─────────────
 
     /// The reactive rail-size selector for a side (`0` = configured size, `1` =
-    /// compact). The rail binds it at `Rebuild`; the context-menu radio writes
-    /// it.
+    /// compact, `2` = icon + rotated label). The rail binds it at `Rebuild`; the
+    /// context-menu radio writes it.
     pub(crate) fn rail_size_signal(&self, side: DockSide) -> Signal<usize> {
         self.0
             .borrow()
@@ -976,7 +976,7 @@ impl DockingModel {
                         st.selected_tab = 0;
                     } else {
                         // Stacking adds a Splitter pane to the selected tab
-                        // (each pane is its own single-item ToolBox), not a
+                        // (each pane is its own Accordion), not a
                         // multi-section pane.
                         let ti = st.selected_tab.min(st.tabs.len() - 1);
                         let tab = &mut st.tabs[ti];
@@ -1076,7 +1076,7 @@ impl DockingModel {
 
     /// Drop a dock into a tab as a new Splitter pane appended after its
     /// existing panes (the "centre" drop — join this group without choosing a
-    /// split direction). Each pane is its own single-item ToolBox.
+    /// split direction). Each pane is its own Accordion.
     pub fn stack_into_tab(&self, id: DockWidgetId, side: DockSide, tab_idx: usize) {
         {
             let mut inner = self.0.borrow_mut();

@@ -30,10 +30,11 @@ pub struct LocaleSwitchOutcome {
 /// - `app_bundles`: application strings, populated from `compile_in` /
 ///   `test_messages`.
 /// - `widget_bundles`: framework strings populated by
-///   `register_framework_locales` (Phase E will wire teksilo-widgets to this).
+///   `register_framework_locales` from `I18nConfig::framework_locales` —
+///   typically `teksilo_widgets::framework_locales()`.
 /// - `widget_overrides`: application-supplied overrides for framework
-///   strings (slot reserved; populated by `override_widget_strings` in a
-///   future phase).
+///   strings, populated from `I18nConfig::override_widget_strings` and
+///   consulted before `widget_bundles`.
 pub struct I18nManager {
     app_bundles: RefCell<HashMap<LanguageIdentifier, FluentBundle<FluentResource>>>,
     widget_bundles: RefCell<HashMap<LanguageIdentifier, FluentBundle<FluentResource>>>,

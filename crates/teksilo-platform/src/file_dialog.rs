@@ -422,7 +422,8 @@ impl std::fmt::Debug for FileDialogHandle {
 /// from app-state by hand.
 ///
 /// Apps `use teksilo_platform::file_dialog::EventContextFileDialogExt`
-/// (or `use teksilo::prelude::*` once the umbrella re-exports it).
+/// (or `use teksilo::prelude::*`, which re-exports it under the
+/// umbrella's `file-dialog` / `file-dialog-trait` features).
 ///
 /// All four methods perform the same internal sequence:
 ///

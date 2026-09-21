@@ -750,7 +750,7 @@ fn slop_never_escapes_a_clips_children_ancestor() {
     );
     tree.layout(SizeProposal::exact(200.0, 200.0));
     let finger = touch_pointer();
-    // Inside the clipper, 4 dp from the dot: re-attributed.
+    // Inside the clipper and inside the dot: the exact pass answers, as ever.
     assert_eq!(tree.hit_test_for(at(96.0, 100.0), &finger), Some(dot));
     // 4 dp PAST the clipper's edge and 4 dp from the dot — the clip stops it.
     assert_ne!(tree.hit_test_for(at(104.0, 100.0), &finger), Some(dot));
@@ -871,7 +871,7 @@ fn a_round_control_measures_to_its_disc() {
         square.hit_test_for(at(113.0, 100.0), &finger),
         Some(dot_square)
     );
-    // Diagonally past the corner: 7.07 dp from the box, ~12 dp from the disc.
+    // Diagonally past the corner: 7.07 dp from the box, ~10.4 dp from the disc.
     let corner = at(113.0, 113.0);
     assert_eq!(square.hit_test_for(corner, &finger), Some(dot_square));
     assert_ne!(round.hit_test_for(corner, &finger), Some(dot_round));

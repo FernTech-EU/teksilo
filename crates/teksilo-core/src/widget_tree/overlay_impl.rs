@@ -1657,7 +1657,7 @@ impl WidgetTree {
     /// Promote a shown tooltip from "ephemeral hover" to "sticky".
     ///
     /// - Flags the tooltip entry as sticky so
-    ///   `tooltip_pointer_leave`
+    ///   `tooltip_pointer_press`
     ///   no longer auto-dismisses it,
     /// - Swaps the overlay's dismiss behavior to
     ///   `EscapeOrClickOutside` so clicking anywhere off the tooltip
@@ -1668,8 +1668,9 @@ impl WidgetTree {
     /// entry back to its initial state so a future hover re-shows
     /// the tooltip from scratch.
     ///
-    /// Called from `RichTooltipWidget` (or by the auto-promote
-    /// sweep) once the dwell timer reaches its threshold.
+    /// Called by the auto-promote sweep in `process_tooltips_impl` once the
+    /// dwell timer reaches its threshold, and reachable from a widget through
+    /// `BuildContext::promote_tooltip_to_sticky`.
     pub fn promote_tooltip_to_sticky(&mut self, content_id: WidgetId) {
         let Some(entry) = self
             .tooltips
@@ -1723,7 +1724,11 @@ impl WidgetTree {
         }
     }
 
-    /// Returns the earliest deadline for a pending tooltip or delayed overlay (if any).
+    /// Returns the earliest of every deadline the tree owes the event loop —
+    /// pending tooltips and their dwell steps, delayed overlays, overlay
+    /// auto-dismiss / pointer-leave / fade removal, animations, animated
+    /// quads, input gestures, an explicit wake-at and the per-frame tick
+    /// (if any).
     pub fn next_timer_deadline(&self) -> Option<std::time::Instant> {
         let now = std::time::Instant::now();
         let session_active = self.tooltip_session_active_real(now);

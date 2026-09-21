@@ -10,15 +10,15 @@
 //!
 //! * Reads `selected_widget`, `selected_variant`, and `canvas_rebuild_tick`
 //!   at `BindingLevel::Rebuild`. Any change to those signals re-runs `build()`.
-//! * Reads `canvas_theme` and `background_mode` at `RepaintOnly` (theme
-//!   change does its own propagation through scoped theme; background
-//!   role swap is a property change).
+//! * Reads `background_mode` at `RepaintOnly` (a background role swap is
+//!   a property change). `canvas_theme` is not read here: the toolbar
+//!   applies it with `ctx.set_theme`, which dirty-marks the tree itself.
 //! * Inside `build()`, looks up the registry entry for the current
 //!   `(widget_id, variant_name)`, fetches the cached `KnobValues` from
 //!   `AppState::knobs_for`, and calls `entry.build(...)` to produce a
 //!   fresh widget instance.
 //! * Wraps the widget in a background rect and a footer strip showing
-//!   bounds + last frame time.
+//!   the selected widget · variant, the zoom, and the measured bounds.
 //!
 //! ## Zoom
 //!
@@ -119,8 +119,9 @@ impl std::fmt::Debug for PreviewCanvas {
 impl Widget for PreviewCanvas {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Rebuild on widget/variant/reset-tick change. Knob value
-        // mutations don't trigger this — they propagate through the
-        // child's `Prop::Bound` bindings at RepaintOnly / Relayout.
+        // mutations rebuild too — `build_inner_widget` binds every knob
+        // signal at Rebuild, because most widgets consume their knob
+        // values by value at construction.
         let registry = ctx.binding_registry().clone();
         let self_id = ctx.self_id();
         self.state

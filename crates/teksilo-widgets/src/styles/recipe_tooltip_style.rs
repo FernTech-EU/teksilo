@@ -6,8 +6,9 @@
 //! `RecipeTooltipStyle` paints the IntUI tooltip chrome — `shadow_xs`
 //! pair + dark `tooltip_bg` (intentionally dark even in light theme,
 //! the JetBrains house style). Used by all three tooltip tiers (plain,
-//! rich, composite — though composite ships its own larger-shadow
-//! variant via `RecipeCompositeTooltipStyle`).
+//! rich, composite — though composite paints its own larger-shadow
+//! variant directly, via `paint_composite_tooltip_shadows` and this
+//! module's `COMPOSITE_TOOLTIP_*` constants).
 //!
 //! Apps that want a different look (light tooltip, branded chrome,
 //! glassmorphism) write their own `impl TooltipStyle` block.

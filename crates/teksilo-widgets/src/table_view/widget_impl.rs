@@ -951,9 +951,6 @@ impl<T: 'static> Widget for TableView<T> {
         if let Some(id) = self.header_row_id {
             children.push(id);
         }
-        // Suppress the unused-binding warning on header_h while the
-        // value is consumed by `place_children` via the same helper.
-        let _ = header_h;
         children
     }
 
@@ -1356,9 +1353,11 @@ impl<T: 'static> Widget for TableView<T> {
                 let inset = cp::FOCUS_RING_INSET;
                 let stroke = cp::GRID_LINE_THICKNESS.max(1.5);
                 let ring_color = BorderRole::Focused.resolve(colors);
-                // `x_off` is the leading-side offset (sum of widths before
-                // the focused column). Under RTL that offset is measured
-                // from the right edge of the content band.
+                // `x_off` is the leading-side offset `column_logical_x`
+                // resolved for the column's own pane (Leading and Trailing
+                // anchored to the band's ends, Middle shifted by `-scroll_x`).
+                // Under RTL that offset is measured from the right edge of the
+                // content band.
                 let rx = if rtl {
                     content_left + body_width_for_paint - x_off - cell_w + inset
                 } else {

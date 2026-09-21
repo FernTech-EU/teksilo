@@ -266,8 +266,8 @@ pub enum Salvage {
 ///
 /// A [`Change`](Self::Change) here always satisfies
 /// [`ItemChange::is_edit`](crate::ItemChange::is_edit): the scene's derived
-/// notifications never reach a record. See the module header for the two and
-/// why.
+/// notifications never reach a record. See the module header for the three
+/// and why.
 ///
 /// `#[non_exhaustive]`: this crate has out-of-tree consumers.
 #[derive(Debug)]

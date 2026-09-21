@@ -217,18 +217,20 @@ struct Row {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Scenario {
     /// **A5 scenario 1 — a reorderable row in a vertical list.**
-    /// `teksilo-widgets/src/list_view/body_pane.rs:471` installs the row's
+    /// **A5 scenario 1 — a reorderable row in a vertical list.**
+    /// `teksilo-widgets/src/list_view/body_pane.rs:538` installs the row's
     /// drag; the enclosing scroll area declares the claim
-    /// (`common/scrollable.rs:610`).
+    /// (`common/scrollable.rs:741`).
     ListRow,
     /// **A5 scenario 2 — a slider thumb**, which declares
-    /// `TouchAction::NONE` (`teksilo-widgets/src/slider.rs:414`) inside a
+    /// **A5 scenario 2 — a slider thumb**, which declares
+    /// `TouchAction::NONE` (`teksilo-widgets/src/slider.rs:534`) inside a
     /// scroller.
     Slider,
     /// **A5 scenario 3 — text selection inside a `PAN_Y` scroller.** The
     /// editor answers `Ignored` on the press
     /// (`teksilo-widgets/src/rich_text/mouse.rs:12`) and owns an arena only
-    /// through its multi-tap handlers (`rich_text.rs:3870`), so it is the
+    /// through its multi-tap handlers (`rich_text.rs:3928`), so it is the
     /// implicit captor and **not** an explicit `RawDrag`.
     ///
     /// The scroller declares `TouchAction::PAN_Y` as well as a vertical claim,
@@ -254,10 +256,12 @@ enum Scenario {
     /// declaring a [`PanClaim`] *and* carrying `on_drag`, plus the `on_tap` its
     /// empty-space click needs.
     ///
-    /// `teksilo-scene/src/view/build_impl.rs:464` declares the claim and `:479`
-    /// the drag handlers, both onto the same `HandlerSet` inside the
-    /// `if self.interactive` block that opens at `:447` — so this is one node
-    /// wanting two roles, and no other row in this table has that shape. Its
+    /// `teksilo-scene/src/view/build_impl.rs:782` declares the claim, inside
+    /// the `if self.interactive` block that opens at `:772`; the drag handlers
+    /// go onto the same `HandlerSet` at `:797` (`register_drag_handlers`, whose
+    /// `on_drag` is `view/gestures_impl.rs:1319`), under a gate of their own —
+    /// selection enabled or magnetism configured — so this is one node
+    /// wanting two roles, and no other row in this table has that shape. Its Its
     /// absence is why the defect it pins shipped: the claim is enrolled by
     /// `begin_sequence` before any handler runs, so the drag's `enrol` was
     /// refused and its `DragActivation` never consulted.
@@ -274,13 +278,15 @@ enum Scenario {
     /// double-tap on the node the pointer lands on, no capture, no claim.
     DragRegion,
     /// **A5 scenario 6 — a `TabBar` strip against a tab drag**
-    /// (`teksilo-widgets/src/tab_widget/header.rs:920`), the horizontal twin of
+    /// **A5 scenario 6 — a `TabBar` strip against a tab drag**
+    /// (`teksilo-widgets/src/tab_widget/header.rs:1031`), the horizontal twin of
     /// [`Scenario::ListRow`]; the strip's claim comes from the `ScrollArea`
-    /// `TabBar` wraps its header row in (`tab_widget/bar.rs:1603` for the
-    /// horizontal strip, `:1609` for the vertical one).
+    /// `TabBar` wraps its header row in (`tab_widget/bar.rs:1591` for the
+    /// horizontal strip, `:1597` for the vertical one).
     TabStrip,
     /// **A5 scenario 7 — a `TableView` column grip**
-    /// (`teksilo-widgets/src/table_view/header.rs:751`): `capture_pointer()`
+    /// **A5 scenario 7 — a `TableView` column grip**
+    /// (`teksilo-widgets/src/table_view/header.rs:881`): `capture_pointer()`
     /// and `Handled` on the press, under the header strip's claim and a
     /// draggable ancestor.
     ColumnGrip,

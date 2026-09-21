@@ -70,9 +70,9 @@ impl TreeRow {
 /// root-sibling reorder fall back to scanning the WHOLE visible range for
 /// `depth == 0` rows — O(realized root rows × visible count) per rebuild for
 /// a flat-ish tree with many roots, since every realized root row repeats
-/// the full scan. Rebuilt once per version bump (shared by both call sites)
-/// instead, then answered by a binary search (`sibling_pos`) or a direct
-/// re-map (`keyboard_reorder`).
+/// the full scan. Rebuilt once per version bump (shared by all three call
+/// sites) instead, then answered by a binary search (`sibling_pos`) or a
+/// direct re-map (`sibling_move` / `reparent`).
 type RootIndexCache = RefCell<Option<(u64, Rc<Vec<usize>>)>>;
 
 /// The cached root indices for `source`'s current version, rescanning only
@@ -516,10 +516,9 @@ impl<T: 'static> TreeSource<T> {
         (self.sibling_pos_fn)(index)
     }
 
-    /// Move the row at `index` up (`down=false`) or down among its siblings,
-    /// routed through the source's own `accept_drop`. Returns the moved row's
-    /// new flat index, or `None` at an edge / if rejected.
-    /// Move the row at `index` among its siblings, returning its new flat index.
+    /// Move the row at `index` among its siblings as `mv` says, routed through
+    /// the source's own `accept_drop`. Returns the moved row's new flat index,
+    /// or `None` at an edge / if rejected.
     pub(crate) fn sibling_move(
         &self,
         index: usize,

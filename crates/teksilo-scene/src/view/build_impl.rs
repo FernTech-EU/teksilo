@@ -257,10 +257,16 @@ impl SceneView {
         // Wire the item-coordinate cache invalidation observer.
         // Cached frames are recorded in **local** coordinates, so
         // only changes that alter the local-coord paint output
-        // dirty an entry: `LocalBoundsChanged` (geometry redraw)
-        // and `Removed` (entry orphaned). Opacity, transform, z,
-        // local_pos, flags don't bake into the cached frame —
-        // they're applied as wrapping scopes at replay time.
+        // dirty an entry: `LocalBoundsChanged` (geometry redraw),
+        // `ItemReplaced`, `AppearanceChanged`, `MeasuredSizeChanged`,
+        // a flip of `IS_ENABLED` (it feeds `ColorProp::resolve`, so it
+        // bakes in like the geometry does), and `Removed` (entry
+        // orphaned). Opacity, transform, z, local_pos and the other
+        // flags don't bake into the cached frame — they're applied as
+        // wrapping scopes at replay time.
+        // The handle is held by `Self`; dropping the previous
+        // handle on rebuild un-installs the prior observer before
+        // re-installing.
         // The handle is held by `Self`; dropping the previous
         // handle on rebuild un-installs the prior observer before
         // re-installing.
@@ -279,8 +285,9 @@ impl SceneView {
                     use crate::scene::ItemChange;
                     // The view reconciles from the change itself; the envelope's
                     // transaction id, source and history are for the app's data
-                    // layer, and `ephemeral` is already accounted for by the
-                    // AT-re-walk gate's `structural_version`.
+                    // layer, and `ephemeral` is a record-side stamp the view has
+                    // no use for — the AT-re-walk gate above keys on
+                    // `Scene::mutation_version` and never reads the envelope.
                     let change = &scene_change.change;
                     // Hit-snapshot invalidation, recorded FIRST and for every
                     // variant — including the ones that return early below. It also
@@ -288,10 +295,12 @@ impl SceneView {
                     // pass that this view saw the whole change stream and may
                     // therefore patch its snapshots instead of rebuilding them.
                     hit_sync.borrow_mut().record(change);
-                    // The item cache holds *local-coordinate* paint output, so only
-                    // a geometry change or a removal can invalidate a cached frame;
-                    // pos / transform / opacity / z / layer / flags are re-applied
-                    // as wrapping scopes at replay and don't bake into the cache.
+                    // The item cache holds *local-coordinate* paint output, so a
+                    // geometry change, a removal, a replacement, a colour change
+                    // or an `IS_ENABLED` flip invalidates a cached frame;
+                    // pos / transform / opacity / z / layer / the other flags are
+                    // re-applied as wrapping scopes at replay and don't bake into
+                    // the cache.
                     match *change {
                     // An entry that is gone takes its measurement history with
                     // it: the per-view map is keyed by `ItemId`, and `ItemId`s

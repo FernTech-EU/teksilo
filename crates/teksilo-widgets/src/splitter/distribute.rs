@@ -27,8 +27,11 @@ const EPS: f32 = 0.01;
 /// - `progress[i]` ∈ `[0,1]` is pane `i`'s collapse tween (1 = expanded,
 ///   0 = fully collapsed); missing entries default to `1.0`.
 ///
-/// The returned sizes sum to `≤ available` (they fall short only when the
-/// container is larger than `Σ max`, i.e. nothing left to grow).
+/// The returned sizes sum to `≤ available` except where a pane's floor
+/// forbids it: they fall short when the container is larger than `Σ max`
+/// (nothing left to grow), and they overshoot when it is smaller than
+/// `Σ min` — the floors win and the container clips the overflow (see
+/// `shrink`).
 pub fn distribute(available: f32, panes: &[PaneSnapshot], progress: &[f32]) -> Vec<f32> {
     let n = panes.len();
     if n == 0 {
@@ -410,9 +413,10 @@ mod tests {
 /// 11. Given only non-negative pane fields (but still zero/negative
 ///     `available`, zero/negative `stretch`, and `min > max`
 ///     contradictions), every returned size stays finite and non-negative.
-/// 12. A pane whose `min_size`/`max_size` is itself non-finite (NaN or
-///     ±Infinity) is a **known risk** for a non-finite result or an outright
-///     panic in the current implementation — see that property's comment.
+/// 12. A pane whose `max_size` is non-finite (±Infinity) still yields a
+///     finite size; a non-finite `min_size`, and a NaN bound on either
+///     side, is a caller error `distribute` debug-asserts against and
+///     normalises before clamping — see that property's comment.
 ///
 /// **Generator cost**: every pane-list generator is bounded to at most 8
 /// panes (`prop::collection::vec(..., 1..=8)`), matching the ≤ 12-pane cap
@@ -1022,21 +1026,19 @@ mod proptests {
 
     // ── 12. sizes stay finite even when a pane's min or max bound is
     //       itself non-finite ──
-    // KNOWN RISK, not a softened assertion: `distribute`'s phase-0 clamp
-    // does `if lo > hi { lo } else { req.clamp(lo, hi) }` to defend against
-    // a contradictory-but-finite `[min, max]` (property 4). That guard
-    // cannot catch NaN — `NaN > hi` and `lo > NaN` are both `false` — so a
-    // NaN `min_size`/`max_size` falls through to `req.clamp(lo, hi)`, and
-    // `f32::clamp`'s documented contract is "Panics if min > max, min is
-    // NaN, or max is NaN" (core::num::f32, verified against the local
-    // rustc 1.96 sysroot source). A `min_size`/`max_size` of `f32::INFINITY`
-    // does *not* panic but is likely to produce a non-finite output size
-    // via that same clamp (e.g. `min_size = f32::INFINITY` with a
-    // contradictory guard hit sets the pane's size to `Infinity`). This
-    // property states the desired contract (finite output, no panic); if
-    // proptest reports a panic or a non-finite value here, that is real
-    // information about the current implementation, not a flaw in the
-    // property — see the report for why this one carries low confidence.
+    // `distribute`'s phase-0 clamp does `if lo > hi { lo } else {
+    // req.clamp(lo, hi) }` to defend against a contradictory-but-finite
+    // `[min, max]` (property 4). That guard cannot catch NaN — `NaN > hi`
+    // and `lo > NaN` are both `false` — and `f32::clamp`'s documented
+    // contract is "Panics if min > max, min is NaN, or max is NaN"
+    // (core::num::f32, verified against the local rustc 1.96 sysroot
+    // source), so a NaN `min_size`/`max_size` used to fall through to the
+    // clamp and abort the process. `distribute` now normalises both bounds
+    // first (non-finite floor -> 0.0, NaN ceiling -> INFINITY) behind a
+    // `debug_assert!`, so the contract this property states (finite output,
+    // no panic) holds: a `max_size` of `f32::INFINITY` — the ordinary way to
+    // spell "unbounded" — still yields a finite size, and a `NEG_INFINITY`
+    // ceiling resolves through the `lo > hi` guard to a finite `lo`.
 
     proptest! {
         // RESOLVED. This property used to panic: a NaN `min_size`/`max_size`

@@ -365,7 +365,7 @@ fn an_ancestor_dual_role_node_still_pans_without_a_hold() {
 // One hold means one thing
 // ---------------------------------------------------------------------------
 
-/// `has_deferred_grab` is what keeps a hold from meaning two things. The
+/// `has_deferred_grab_for` is what keeps a hold from meaning two things. The
 /// self-drag's deferral is a deferred grab too, so the long press on the same
 /// node must not fire — otherwise the hold that arms the drag *also* opens a
 /// context menu.
@@ -1251,7 +1251,9 @@ fn travel_inside_the_hold_slop_still_arms_the_grab() {
     fx.touch_to(p, 15.0);
     fx.tree.advance_time(LONG_PRESS);
 
-    // Now drag: from 15 dp the recognizer needs drag_slop (18) more.
+    // Now drag: the recognizer measures from the press it recorded on the
+    // `Down`, so it needs drag_slop (18) from there — the 15 dp of wander
+    // already counts toward it.
     fx.touch_to(p, 40.0);
     assert_eq!(
         fx.log.drag_started.get(),

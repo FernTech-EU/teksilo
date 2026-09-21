@@ -6,11 +6,11 @@
 //! `ChartModel<T>` owns an ordered collection of named series, each holding a
 //! `Vec<ChartDatum<T>>` (a `category: T` paired with a numeric `value: f32`),
 //! in a flat SlotMap arena — the same shape as [`crate::TreeModel`]. Every
-//! mutation (series add/remove/move/rename/recolor/show-hide, point
-//! push/insert/remove/update/replace) emits a [`ChartChange`] to all
+//! mutation (series add/remove/move/rename/recolor/repattern/show-hide,
+//! point push/insert/remove/update/replace) emits a [`ChartChange`] to all
 //! registered observers *and* bumps one of two reactive version signals:
-//! [`ChartModel::style_version`] (color changes only — a paint-only signal a
-//! chart can bind at `BindingLevel::RepaintOnly`) or
+//! [`ChartModel::style_version`] (color and pattern changes only — a
+//! paint-only signal a chart can bind at `BindingLevel::RepaintOnly`) or
 //! [`ChartModel::structure_version`] (everything else — series/point shape,
 //! bound at `BindingLevel::Relayout`/`Rebuild`). Series identity is a stable,
 //! versioned [`SeriesId`] (a SlotMap key) that is never reused after removal.
@@ -218,9 +218,11 @@ struct ChartModelInner<T> {
     order: Vec<SeriesId>,
     observers: Vec<ObserverEntry>,
     next_observer_id: u64,
-    /// Structural version — bumped by every mutation except a color change.
+    /// Structural version — bumped by every mutation except a color or
+    /// pattern change.
     structure_version: Signal<u64>,
-    /// Style version — bumped only by `SeriesColorChanged`.
+    /// Style version — bumped only by `SeriesColorChanged` /
+    /// `SeriesPatternChanged`.
     style_version: Signal<u64>,
     /// Strong handle to the debug-registry adapter for this model. Owned
     /// here so that the registration drops automatically when the inner is
@@ -732,8 +734,8 @@ impl<T: 'static> ChartModel<T> {
     // --- Reactivity ---
 
     /// Structural version signal — bumped by every mutation except a color
-    /// change (series add/remove/move/rename/show-hide, all point ops).
-    /// Bind at `BindingLevel::Relayout` or `Rebuild`.
+    /// or pattern change (series add/remove/move/rename/show-hide, all point
+    /// ops). Bind at `BindingLevel::Relayout` or `Rebuild`.
     ///
     /// Ordering: every mutator notifies the `ChartChange` observers
     /// registered via [`Self::observe_changes`] *before* bumping this
@@ -743,9 +745,10 @@ impl<T: 'static> ChartModel<T> {
         self.inner.borrow().structure_version.clone()
     }
 
-    /// Style version signal — bumped only by a series color change. Bind at
-    /// `BindingLevel::RepaintOnly`. Same notify-before-bump ordering as
-    /// [`Self::structure_version`] — see [`Self::observe_changes`].
+    /// Style version signal — bumped only by a series color or pattern
+    /// change. Bind at `BindingLevel::RepaintOnly`. Same notify-before-bump
+    /// ordering as [`Self::structure_version`] — see
+    /// [`Self::observe_changes`].
     pub fn style_version(&self) -> Signal<u64> {
         self.inner.borrow().style_version.clone()
     }

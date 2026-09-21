@@ -139,8 +139,9 @@ impl<T: 'static> Widget for TreeView<T> {
         // widget takes keyboard focus. Pop straight back; the real row scope
         // below resolves the same cached signal. `focus_visible` is the
         // keyboard/pointer modality. Bound `RepaintOnly` so focus-in/out
-        // redraws the ring. (Selection-emptiness changes already rebuild via
-        // `version`, so paint re-reads the selection without extra binding.)
+        // redraws the ring. (Selection-emptiness changes arrive on
+        // `paint_refresh`, so paint re-reads the selection without extra
+        // binding.)
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
@@ -1377,7 +1378,7 @@ impl<T: 'static> Widget for TreeView<T> {
         //
         // No `size_of_set` here, deliberately. A flattened tree cannot express
         // "the 2nd of 5 siblings" from a single container value, and the reason
-        // is argued in full at `list_item_a11y.rs:263-276`: AccessKit resolves
+        // is argued in full at `list_item_a11y.rs:278-291`: AccessKit resolves
         // an item's set size by walking *up* from it, so the only number this
         // node could carry is one shared by every row at every depth. Doing it
         // correctly needs a real `Role::Group` per expanded branch. Writing the

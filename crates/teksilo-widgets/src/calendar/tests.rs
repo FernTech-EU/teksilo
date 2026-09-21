@@ -677,7 +677,7 @@ fn a_finger_pan_over_the_calendar_scrolls_its_container() {
     assert_eq!(date.get(), before, "and it selected nothing on the way");
 }
 
-/// The nth `CalendarDayCell` in the grid, in layout order.
+/// The nth `DayCell` in the grid, in layout order.
 fn day_cell(
     tree: &WidgetTree,
     calendar: teksilo_core::widget_id::WidgetId,

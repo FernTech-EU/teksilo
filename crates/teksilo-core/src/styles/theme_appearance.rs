@@ -12,7 +12,7 @@
 //! - Asset variant selection (logos, icons that ship light/dark pairs).
 //!
 //! Independent of which preset built the theme: an `intui::light()`
-//! theme and a hypothetical `material3::light()` theme both report
+//! theme and a `material3::light()` theme both report
 //! [`ThemeAppearance::Light`].
 
 use serde::{Deserialize, Serialize};

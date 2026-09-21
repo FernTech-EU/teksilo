@@ -145,8 +145,10 @@ pub struct SvgFill {
 }
 
 /// A parsed SVG icon: geometry + viewBox, ready to be scaled and
-/// rendered. Original colors are stripped; filled and stroked geometry
-/// are kept separately so line-style icons render as outlines.
+/// rendered. In the *tinted* representation original colors are stripped,
+/// and filled and stroked geometry are kept separately so line-style icons
+/// render as outlines; the *full-color* representation keeps each shape's
+/// authored paint (see the module header).
 #[derive(Debug, Clone)]
 pub struct SvgIcon {
     /// Merged *default* fill (non-zero winding, fully opaque) in viewBox
@@ -269,15 +271,16 @@ impl SvgIcon {
     }
 
     /// Produce a [`Path`] scaled to fit within a square of the given size,
-    /// preserving aspect ratio and centering.
+    /// honouring the document's `preserveAspectRatio` (by default a uniform
+    /// fit, centered).
     pub fn to_path(&self, size: f32) -> Path {
         self.to_path_in_rect(Rect::new(0.0, 0.0, size, size))
     }
 
-    /// Produce the *filled* [`Path`] scaled to fit within `rect`,
-    /// preserving aspect ratio and centering. Empty for a pure
-    /// line-style icon (use [`stroked_paths_in_rect`](Self::stroked_paths_in_rect)
-    /// for its outlines).
+    /// Produce the *filled* [`Path`] scaled to fit within `rect`, honouring
+    /// the document's `preserveAspectRatio` (by default a uniform fit,
+    /// centered). Empty for a pure line-style icon (use
+    /// [`stroked_paths_in_rect`](Self::stroked_paths_in_rect) for its outlines).
     pub fn to_path_in_rect(&self, rect: Rect) -> Path {
         if self.path.is_empty() {
             return Path::new();
@@ -1802,7 +1805,7 @@ fn parse_transform(attr: &str) -> Result<Transform2D, SvgParseError> {
         // Reduce each token to a single matrix `op`. SVG applies the
         // leftmost token *outermost* (`transform="A B"` ⇒ matrix `A·B`,
         // a point transformed as `A·B·p` ⇒ B first), so each new token
-        // appends on the RIGHT of the running product: `result = op · result`,
+        // appends on the RIGHT of the running product: `result = result · op`,
         // which with `a.then(&b) == b·a` is `op.then(&result)`.
         let (op, rest) = if let Some(rest) = remaining.strip_prefix("translate") {
             let (args, rest) = parse_transform_args(rest)?;

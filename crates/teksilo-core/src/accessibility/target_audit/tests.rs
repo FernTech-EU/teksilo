@@ -33,8 +33,9 @@
 //! test does catch is the eighth, which is the one that had been missing — the
 //! shape where the gate goes quiet by calling every shortfall an exemption.
 //!
-//! The fixtures are built out of `crate::test_widgets`, so nothing here depends
-//! on teksilo-widgets: the walker must be testable in the crate that owns it.
+//! The fixtures are hand-written below out of nothing but the `Widget` trait, so
+//! nothing here depends on teksilo-widgets: the walker must be testable in the
+//! crate that owns it.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -54,7 +55,7 @@ use crate::widget_builder::WidgetBuilder;
 
 /// A leaf of a fixed size. `outset` is what it declares from
 /// [`Widget::hit_outset`] for a direct pointer; `regions` is what it reports
-/// from [`Widget::target_regions`], as fractions of its own rectangle.
+/// from [`Widget::target_regions`], as dp offsets inside its own rectangle.
 #[derive(Debug)]
 struct Leaf {
     size: Size,
@@ -542,7 +543,8 @@ fn a_region_sharing_its_nodes_edge_inherits_the_growth_confirmed_there() {
 /// the ring is strictly closer. The row below is 28 dp — flush against the grip
 /// and eligible — so it is at distance zero for every point in the ring.
 ///
-/// Guarded here because the fix lives in `arena.rs`, and in teksilo-widgets by
+/// Guarded here because the fix lives in `arena.rs`, and in
+/// teksilo-target-conformance by
 /// `an_outsets_claim_survives_the_slop_pass_in_the_shipped_controls`, which
 /// pins the same two subjects on real controls: with the fix reverted a
 /// `TableView`'s 12 dp scroll bar reaches **18 dp instead of 32** at Touch and a
@@ -729,9 +731,11 @@ fn the_conformance_floor_never_scales_and_the_recommendation_always_does() {
 /// visible without letting it into the gate.
 ///
 /// The control sits in a **tappable** row on purpose. Isolate it and the slop
-/// pass tops it up to the density's `target_size`, so the recommendation is
-/// satisfied for free and the test would assert nothing above Compact; the
-/// interaction is worth knowing, and it is why the fixture has a row.
+/// pass tops it up — to exactly the density's `target_size` at Comfortable, so
+/// the recommendation is satisfied for free and the test would assert nothing
+/// there, and to 40 dp at Touch, where the row is what keeps `expanded` the
+/// leaf's own 24; the interaction is worth knowing, and it is why the fixture
+/// has a row.
 #[test]
 fn a_conformant_control_still_reports_the_recommendation_above_compact() {
     for (density, expect) in [

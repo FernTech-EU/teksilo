@@ -403,8 +403,8 @@ impl Widget for BreadcrumbSegment {
 
         // Attach the tooltip carried over from `BreadcrumbItem`. The segment
         // paints itself and returns no children, so it is its own anchor.
-        // `Side` placement: crumbs sit in a horizontal strip, but the trail can
-        // wrap, and a `Below` tip would cover the row beneath.
+        // Default `Below` placement: the crumbs sit in one non-wrapping row, so
+        // a tip under one covers no sibling crumb.
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;
             crate::tooltip::attach_composite_tooltip_boxed(ctx, self_id, content, delay);

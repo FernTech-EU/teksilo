@@ -4,11 +4,12 @@
 //! What the arrow, page and edge keys mean on a control that holds one
 //! bounded number.
 //!
-//! Seven widgets publish `Role::Slider`, `SpinButton`, `Splitter` or
-//! `ScrollBar` over a numeric value — [`Slider`](crate::Slider),
+//! Seven widgets drive one bounded number from the keyboard — [`Slider`](crate::Slider),
 //! [`SpinBox`](crate::SpinBox), [`ScrollBar`](crate::ScrollBar), the colour
-//! picker's hue and alpha strips, a `Splitter` handle and a dock resize handle
-//! — and each hand-rolled the same eight-key match. They gave **four different
+//! picker's hue and alpha strips, a `Splitter` handle and a dock resize handle,
+//! publishing `Role::Slider`, `SpinButton` or `Splitter` where they face AT at
+//! all (a `ScrollBar` is deliberately `set_hidden`) — and each hand-rolled the
+//! same eight-key match. They gave **four different
 //! answers**: the slider had no paging, the spin box no `Home`/`End`, the
 //! strips both, the handles neither. Not one of them looked at the modifiers,
 //! so every one of them swallowed `Ctrl+Home` from the application.

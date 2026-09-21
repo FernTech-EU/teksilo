@@ -110,10 +110,12 @@ fn scroll_margin(tokens: &InputTokens) -> f32 {
 }
 
 /// Default text-area height when the caller does not override it
-/// via [`TextInputField::text_height`]. Picked to match the Int UI
-/// `text_field.height` token minus 2×border — the value the
-/// `TextInput` composite reports — so a bare `TextInputField`
-/// added to a tree without its composite still looks right.
+/// via [`TextInputField::text_height`]. Sits close to the Int UI
+/// `TEXT_FIELD_HEIGHT` recipe constant (in
+/// `crate::styles::recipe_text_input_style`) minus its border and
+/// vertical padding — the 18 dp the `TextInput` composite passes —
+/// so a bare `TextInputField` added to a tree without its composite
+/// still looks right.
 const DEFAULT_TEXT_HEIGHT: f32 = 20.0;
 
 /// The semantic purpose of a text field, surfaced to assistive technology as
@@ -224,8 +226,9 @@ pub struct TextInputField {
     /// the grammar.
     mask: Option<InputMask>,
     /// Visible char used for unfilled editable positions in the mask
-    /// template. Defaults to the theme's
-    /// `text_field.mask_placeholder_char` (typically `_`).
+    /// template. Defaults to the `TEXT_FIELD_MASK_PLACEHOLDER_CHAR`
+    /// recipe constant (in `crate::styles::recipe_text_input_style`,
+    /// `_`).
     mask_placeholder_override: Option<char>,
     /// Validator closure called on every commit (Enter, Tab-out,
     /// blur). Returns a [`ValidationOutcome`] that drives
@@ -282,14 +285,14 @@ pub struct TextInputField {
     /// survives a rebuild even though the controller inside it is replaced.
     /// See [`touch`].
     pub(crate) touch: Rc<touch::FieldTouch>,
-    /// Natural intrinsic width in logical pixels, cached at the end
-    /// of `build()`. When an [`InputMask`] is set, this measures the
-    /// mask's empty template (e.g. `__/__/____`) in the theme body
-    /// font and adds a small caret slack — so a date / time / phone
-    /// field reports a width that matches its content envelope
-    /// instead of the generic 200 dp fallback. Composing widgets
-    /// like `DateEdit` rely on this so their unconstrained natural
-    /// width tracks the format pattern.
+    /// Natural intrinsic width in logical pixels, cached during
+    /// `build()`. When an [`InputMask`] is set, this measures the
+    /// mask's worst-case filled template (e.g. `00/00/0000`, plus a
+    /// safety `M`) in the theme body font and adds a small caret
+    /// slack — so a date / time / phone field reports a width that
+    /// matches its content envelope instead of the generic 200 dp
+    /// fallback. Composing widgets like `DateEdit` rely on this so
+    /// their unconstrained natural width tracks the format pattern.
     natural_width: f32,
     /// What the field's text measured, kept for the accessibility pass.
     ///
@@ -464,7 +467,8 @@ impl TextInputField {
     /// Override the intrinsic text-area height. The field is a
     /// pure leaf with no theme lookup of its own; by default it
     /// reports `DEFAULT_TEXT_HEIGHT`. A wrapping composite like
-    /// `TextInput` passes its theme's `text_field.height` minus
+    /// `TextInput` passes the `TEXT_FIELD_HEIGHT` recipe constant
+    /// (in `crate::styles::recipe_text_input_style`) minus
     /// border + padding here so the visuals line up with the
     /// rest of the form.
     pub fn text_height(mut self, height: f32) -> Self {
@@ -506,8 +510,9 @@ impl TextInputField {
     }
 
     /// Override the visible character used for unfilled editable mask
-    /// positions. Default: the theme's
-    /// `text_field.mask_placeholder_char` (typically `_`).
+    /// positions. Default: the `TEXT_FIELD_MASK_PLACEHOLDER_CHAR`
+    /// recipe constant (in `crate::styles::recipe_text_input_style`,
+    /// `_`).
     pub fn mask_placeholder(mut self, c: char) -> Self {
         self.mask_placeholder_override = Some(c);
         self
@@ -530,7 +535,9 @@ impl TextInputField {
     /// glyph per source `char`), so the plaintext never reaches the
     /// shaper or glyph atlas while masked, and caret / selection /
     /// hit-test stay correct. Also defaults `allow_copy` to `false` and
-    /// opts the focused node out of OS IME composition. Pair with
+    /// declares the focused node an `ImePurpose::Password` surface — the
+    /// OS IME stays enabled so non-Latin passwords can still be composed,
+    /// with the preedit masked on screen and hidden from AT. Pair with
     /// [`revealed`](Self::revealed) for a reveal toggle.
     pub fn secure(mut self, echo_mode: EchoMode) -> Self {
         self.secure = true;
@@ -805,8 +812,9 @@ fn relayout_suffix(state: &SharedState, new_text: &str) {
     }
     let Some(engine) = st.suffix_engine.as_mut() else {
         // No engine allocated (pure-static path that started
-        // empty and never became non-empty). Allocate lazily so
-        // late signal flips still render.
+        // empty and never became non-empty). Nothing to lay out —
+        // `build()` allocates the engine eagerly for every bound
+        // suffix, so a late signal flip never reaches this branch.
         return;
     };
     let doc = TextDocument::new();
@@ -899,9 +907,9 @@ fn tick(state: &mut TextInputState, delta: f32) -> bool {
     let had_events = state.drain_events();
 
     // Blink only when focused AND the host window is active — the caret hides
-    // in an inactive window (the universal desktop convention). The else-branch
-    // below then turns it off, since `!blinking_active` now also covers the
-    // window-inactive case.
+    // in an inactive window (the universal desktop convention). The shared
+    // blink machine's inactive arm then turns it off, since `!caret_active`
+    // now also covers the window-inactive case.
     let caret_active = state.has_focus && state.window_active;
     let caret_visible = state.caret_visible.clone();
     let wake = state.frame_wake_at.clone();

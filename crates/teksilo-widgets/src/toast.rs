@@ -20,10 +20,10 @@
 //! or `toast.present(ctx)`. A [`ToastHost`]
 //! installed via `TeksiloAppBuilder.install_toast(opts)` from the `teksilo`
 //! umbrella accepts the request, picks a free slot from its pool, and
-//! mounts a [`ToastSurface`] at the
-//! configured viewport corner using the
-//! [`OverlayPlacement::ViewportCorner`](teksilo_core::overlay::OverlayPlacement)
-//! variant.
+//! mounts a [`ToastSurface`] as one of its own children, placed at
+//! the configured viewport corner by the host's `place_children`. No
+//! overlay system involvement — toasts are regular widgets in the
+//! arena.
 //!
 //! ```ignore
 //! ctx.show_toast(
@@ -245,9 +245,10 @@ impl ToastAction {
         self
     }
 
-    /// Associate the action with a registered `Shortcut` id. Two
-    /// effects: the keystroke label is shown as a chip on the action,
-    /// and the archived form of this action (in
+    /// Associate the action with a registered `Shortcut` id. The live
+    /// toast renders nothing extra for it — the action's own callback
+    /// is the source of truth there. The id is carried so the archived
+    /// form of this action (in
     /// [`NotificationLog`](crate::notification::log::NotificationLog))
     /// is re-invokable by name through the existing Intent
     /// dispatcher.
@@ -323,10 +324,12 @@ pub struct ToastHandle {
 
 pub(crate) struct ToastHandleInner {
     pub(crate) entry_id: u64,
-    /// Marked when the host has dropped the entry (overflow at enqueue
-    /// time, or any dismiss path). Cheap short-circuit for the
-    /// `dismiss` / `is_alive` handle methods so they don't have to
-    /// walk the registry to know "this toast is gone".
+    /// Set at construction for a handle that never named a live entry
+    /// (slot-pool overflow at enqueue time, or `show_toast` with no
+    /// registry installed). Cheap short-circuit for the
+    /// `dismiss` / `is_alive` handle methods in that case so they don't
+    /// have to walk the registry to know "this toast is gone"; every
+    /// other dismiss path is observed through the registry instead.
     pub(crate) dismissed: Cell<bool>,
     /// Back-reference to the registry so the handle can fire dismiss
     /// requests and check liveness.
@@ -487,8 +490,6 @@ impl Toast {
             .leading(crate::spinner::Spinner::new(16.0))
     }
 
-    // ----- _literal shims (permanent grep markers for untranslated strings) -----
-
     // ----- Body content -----
 
     /// Optional secondary line below the title.
@@ -604,7 +605,7 @@ impl Toast {
     }
     /// Notification of dismissal. Fires exactly once per toast on any
     /// dismiss path (timer, action invocation, close click, escape,
-    /// programmatic, host shutdown, slot-pool overflow).
+    /// swipe, programmatic, host shutdown, slot-pool overflow).
     pub fn on_dismiss(
         mut self,
         f: impl Fn(ToastDismissCause, &mut EventContext) + 'static,
@@ -1271,7 +1272,7 @@ mod tests {
 
     /// Build an `AccessNodeBuilder` directly from a `ToastSurface` so
     /// we can probe `role` AND `live` (the public `accessibility_node`
-    /// helper only surfaces `role` + `name` + `actions`).
+    /// helper does not surface `live`).
     fn surface_node(
         severity: ToastSeverity,
         priority: ToastPriority,
@@ -1420,7 +1421,7 @@ mod tests {
         // Pre-populate the registry with a toast BEFORE the host is
         // added, so the host's first build sees the entry. (The
         // version-binding rebuild path requires a fresh dirty-flush
-        // pass which is exercised in `dismiss_clears_surface` below.)
+        // pass, which this test deliberately does not exercise.)
         let opts = host::ToastInstallOptions::default();
         let registry = ToastRegistry::new(opts.clone());
         let _h = registry.enqueue(Toast::success(lit!("Saved")));

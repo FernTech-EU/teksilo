@@ -750,7 +750,8 @@ impl<T: 'static> ListView<T> {
     /// selection to the next row whose label starts with the accumulated
     /// search term, wrapping around (Qt `keyboardSearch` / macOS &
     /// Windows type-select). `label(&item)` yields the searchable text for
-    /// a row; matching is ASCII-case-insensitive. A pause longer than the
+    /// a row; matching is case-insensitive (a Unicode fold, so an accented
+    /// label is reachable). A pause longer than the
     /// [`type_ahead_timeout`](Self::type_ahead_timeout) starts a fresh term.
     /// Whether a composite row tooltip offers dwell-to-sticky promotion.
     /// Default `true`.

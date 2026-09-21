@@ -157,8 +157,10 @@
 //! });
 //! ```
 //!
-//! `constraint_capturing_the_scene_strongly_leaks_it` (in
-//! `tests/constraint_lifetime.rs`) pins both halves with a `Drop` sentinel.
+//! `a_constraint_capturing_a_strong_handle_leaks_the_scene` (in
+//! `tests/constraint_lifetime.rs`, beside
+//! `a_constraint_capturing_a_weak_handle_lets_the_scene_drop`) pins both halves
+//! with a `Drop` sentinel.
 //!
 //! # What it may hand back
 //!
@@ -385,8 +387,8 @@ impl<'a> ConstraintCall<'a> {
 /// and a negative extent inverts its AABB.
 ///
 /// A zero extent is *allowed*: the resize path clamps at `min_size` rather than
-/// mirroring, and a default `min_size` of zero makes a zero-extent frame a
-/// legitimate end of a drag.
+/// mirroring, so a zero-extent frame is one a policy closure asked for — and
+/// unlike a negative one it does not invert the item's AABB.
 fn frame_is_applicable(f: &TransformFrame) -> bool {
     f.rect.x.is_finite()
         && f.rect.y.is_finite()

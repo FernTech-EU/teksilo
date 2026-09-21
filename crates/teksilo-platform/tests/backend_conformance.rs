@@ -613,8 +613,9 @@ impl Conformance {
                     }
                     PointerPhase::Move => {
                         // A move for a pointer with no buttons is a hover, and
-                        // only an indirect pointer may hover. A move for a
-                        // *down* pointer must belong to a live stream.
+                        // only a non-coarse pointer may hover — a pen is direct
+                        // and hovers, a finger has nothing to hover with. A move
+                        // for a *down* pointer must belong to a live stream.
                         if !p.pointer.buttons.is_empty() {
                             assert!(
                                 self.live.contains_key(&p.pointer.id),

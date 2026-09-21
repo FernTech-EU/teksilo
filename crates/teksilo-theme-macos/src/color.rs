@@ -532,10 +532,7 @@ mod tests {
 
     #[test]
     fn the_focus_ring_clears_the_non_text_contrast_floor() {
-        // WCAG SC 1.4.11 — a focus indicator needs >= 3:1 against the
-        // surface it is drawn on. This is why `MacOsChrome` paints the
-        // ring's inner band at full alpha and reserves the translucency
-        // for the halo outside it.
+        // surface it is drawn on. This is why `MacOsControlChrome` paints the
         for c in [light(), dark()] {
             for surface in [c.surface_main, c.surface_content, c.surface_raised] {
                 assert!(

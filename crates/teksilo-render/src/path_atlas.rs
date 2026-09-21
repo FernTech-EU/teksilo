@@ -90,7 +90,8 @@ pub struct PathPlacement {
 /// [`Path::stamp`] is a rolling 64-bit fold of the command list, maintained
 /// as commands are appended, so building the key is O(1) in the path's
 /// length. It used to hash every `PathCommand`, which made a **cache hit**
-/// cost O(n): 1.3 µs for a 100-point path, 23.2 µs for a 2 000-point one.
+/// cost O(n) — linear in the point count, with the measured table in
+/// docs/ink.md §5, the one place those figures are written down.
 /// That is the whole of the ink cliff — a wet stroke that grows by a point
 /// per pointer sample paid a full walk every frame just to discover the
 /// bitmap it wanted was already resident, so one stroke was quadratic before
@@ -554,7 +555,7 @@ impl PathAtlas {
     ///
     /// Eviction must **never** move an entry that has already been handed out
     /// this frame: the renderer's pre-pass caches each path's `AtlasRegion` in
-    /// `path_regions[..]` and reads it back later in the same frame, so moving
+    /// `path_placements[..]` and reads it back later in the same frame, so moving
     /// those pixels makes the cached region sample the wrong location (flicker
     /// / wrong-pixel rendering on path-heavy widgets like LineChart and
     /// PieChart). A shelf packer cannot reclaim the fragmented space held by
@@ -639,7 +640,7 @@ impl PathAtlas {
     }
 
     /// Read a region's pixels back out of the atlas (for repacking
-    /// survivors during eviction). Returns an RGBA buffer of `w*h*4` bytes.
+    /// survivors during compaction). Returns an RGBA buffer of `w*h*4` bytes.
     fn read_region(&self, region: AtlasRegion) -> Vec<u8> {
         let mut out = vec![0u8; (region.w * region.h * 4) as usize];
         for row in 0..region.h {
@@ -1509,7 +1510,7 @@ mod tests {
     fn evict_preserves_current_frame_entries() {
         // Regression: previously `evict_lru` cleared the entire cache,
         // so a second path inserted in the same frame could displace
-        // the first — `path_regions[0]` ended up pointing at pixels
+        // the first — `path_placements[0]` ended up pointing at pixels
         // that now belonged to path #2. LineChart and PieChart hit this
         // routinely because their paths cover most of the plot area.
         let mut atlas = PathAtlas::new(64, 64);
@@ -1540,8 +1541,8 @@ mod tests {
             )
             .expect("p1 fits");
 
-        // p2 doesn't fit in the remaining space → eviction triggers.
-        // After the fix, p1 (current-frame) survives and gets repacked.
+        // p2 doesn't fit in the remaining space → the atlas grows rather than
+        // evicting, so p1 (current-frame) survives at the same coordinates.
         let _r2 = atlas.lookup_or_rasterize(
             &p2,
             &style,
@@ -1584,7 +1585,7 @@ mod tests {
         // Core invariant for the stale-UV fix: once a region is handed out
         // this frame it is frozen. If a later path can't fit and the atlas is
         // already at max size, the new path is skipped (returns None) — the
-        // live entry must NOT be repacked, or `path_regions[..]` would sample
+        // live entry must NOT be repacked, or `path_placements[..]` would sample
         // the wrong pixels later in the same frame.
         let mut atlas = PathAtlas::new(64, 64);
         atlas.max_size = 64; // forbid growth so eviction is the only path

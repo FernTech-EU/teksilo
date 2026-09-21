@@ -127,10 +127,13 @@ pub struct HexColorInput {
     width: Option<f32>,
     on_value_changed: Option<OnValueChanged>,
     on_invalid: Option<OnInvalid>,
-    /// Lazily created in [`Widget::build`]; mirrored by the inner
-    /// TextInput's wiring + by the focused-reformat effect.
+    /// Created with the widget and re-seeded by the `alpha_enabled` /
+    /// `uppercase` setters; mirrored by the inner TextInput's wiring + by the
+    /// focused-reformat effect.
     text_signal: Signal<String>,
-    /// Lazily set during build — true while the inner field has focus.
+    /// Always `false` today: unlike `DateEdit`, which wires its twin through
+    /// `.focus_within(..)`, nothing here hands this signal to the inner field —
+    /// so the focused-reformat guard in `build` never engages.
     focused: Signal<bool>,
     /// Mirrored from the inner TextInput's
     /// `validation_feedback_signal()` so external observers can react

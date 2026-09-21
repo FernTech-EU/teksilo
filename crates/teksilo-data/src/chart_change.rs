@@ -65,8 +65,8 @@ pub enum ChartChange {
     /// A series' display name changed.
     SeriesRenamed { series: SeriesId },
 
-    /// A series' explicit color changed (set or cleared). The only variant
-    /// that bumps [`crate::ChartModel::style_version`] rather than
+    /// A series' explicit color changed (set or cleared). Bumps
+    /// [`crate::ChartModel::style_version`] rather than
     /// [`crate::ChartModel::structure_version`].
     SeriesColorChanged { series: SeriesId },
 

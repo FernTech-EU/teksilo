@@ -270,6 +270,4 @@ impl SceneView {
             }
         }
     }
-
-    // -- A11y-walker helpers used by `accessibility` -----------------------
 }

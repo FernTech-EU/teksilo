@@ -80,7 +80,9 @@ fn scrollable(
 ///
 /// Taken as a parameter rather than chained on afterwards: a second
 /// `WidgetBuilder` call on an already-wrapped `impl Widget` re-wraps rather
-/// than merging, and the inner wrapper's handlers would be dropped.
+/// than merging in place. `Widget::take_handler_set` merges the inner
+/// wrapper's set through on insertion, so it costs a wasted node rather than
+/// the handlers above it.
 fn scrollable_with(
     log: Shared,
     max: f32,
@@ -162,7 +164,8 @@ fn scrollable_full(
         });
     // Chained on the wrapper itself, never on the `impl Widget` it is returned
     // as: a `WidgetBuilder` call on an already-wrapped widget re-wraps rather
-    // than merging, and every handler above would be lost.
+    // than merging in place, costing a wasted node — `take_handler_set` merges
+    // the handlers above through it on insertion.
     let widget = if takes_press {
         widget.on_tap(|_event, _ctx| {})
     } else {

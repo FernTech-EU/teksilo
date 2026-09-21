@@ -1562,10 +1562,12 @@ register_widget_catalog_at!(
 // Tier B — composites with fixture variants
 // =========================================================================
 //
-// These widgets don't have flat knob surfaces; their interesting states
-// are structural ("with header + footer", "expanded with content",
-// "two segments"). Each `variants()` is a hand-authored list of
-// scenarios, and `knobs()` is left empty.
+// These widgets' interesting states are structural ("with header +
+// footer", "expanded with content", "two segments"), so their
+// `variants()` are hand-authored: a scenario builder where no flat knob
+// surface fits (IconButton, Breadcrumb, Toolbar, StatusBar, RadioGroup,
+// RadioTileGroup, SplitButton), knob presets where one does (Card,
+// Panel, GroupBox, GroupHeader, Snackbar, Accordion, RadioTile).
 
 // ---------------------------------------------------------------------------
 // Card

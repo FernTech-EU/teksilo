@@ -54,9 +54,10 @@
 //! Inline links are reachable by a plain tap: the handler at `on_tap` follows
 //! the link run under the press with no modifier of any kind. (The touch
 //! inventory recorded this file as Ctrl-gated and therefore unreachable by
-//! touch; that gate is `rich_text/mouse.rs`'s — `modifiers.command() ||
-//! read_only` — and does not exist here.) The hover cursor over a link run is
-//! a mouse and pen affordance and costs a finger nothing.
+//! touch; that gate was `rich_text/mouse.rs`'s — `modifiers.command() ||
+//! read_only`, since widened to `kind.is_direct() || read_only ||
+//! command_held` — and never existed here.) The hover cursor over a link run
+//! is a mouse and pen affordance and costs a finger nothing.
 //!
 //! A link run is text-height and its size is constrained by the line height of
 //! the text around it, which is exactly WCAG 2.2 SC 2.5.8's *inline* exception,
@@ -84,12 +85,13 @@ use teksilo_core::widget_builder::HandlerSet;
 use teksilo_i18n::LocalizedString;
 use teksilo_tokens::TextRole;
 
+/// Closure type for link click dispatch.
+/// Closure type for link hover dispatch.
 /// A leaf widget that renders a localized text string.
 ///
 /// See the [module documentation](self) for the full feature description.
 /// Construct with [`TextWidget::new`] and chain builder methods for color,
 /// style, overflow mode, and optional markup/link dispatch.
-/// Closure type for link click/hover dispatch.
 type LinkClickHandler = Rc<dyn Fn(&str, &mut EventContext)>;
 type LinkHoverHandler = Rc<dyn Fn(&str, bool, Rect, &mut EventContext)>;
 
@@ -690,10 +692,10 @@ impl Widget for TextWidget {
         // scale_factor roundtrip (logical → physical → logical).
         let max_width = proposal.width.map(|w| w + 0.5);
 
-        // Markup path: only reachable in Wrap mode. The backend parses
-        // the source internally and returns a TextLayout whose `spans`
-        // field carries per-run rects (including links) that we stash
-        // for hit-testing during event dispatch.
+        // Markup path: the backend parses the source internally and
+        // returns a TextLayout whose `spans` field carries per-run rects
+        // (including links). `place_children` and `paint` stash the final
+        // one for hit-testing during event dispatch.
         if self.markup {
             // Branch on the overflow mode, exactly as `paint` does. Keying
             // on whether a width was proposed instead meant an `Ellipsis`

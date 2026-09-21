@@ -24,7 +24,9 @@ pub(crate) fn is_layout_primitive(type_name: &str) -> bool {
 /// Decorative leaf widget that paints overlay strokes for the
 /// inspector. Driven by `InspectorState::overlay_mode`:
 ///
-/// - `Off`: paints nothing.
+/// - `Off`: paints no bounds overlay. (The overflow hazard stripes are
+///   driven by `overflow_overlay`, not by the mode, so they still paint
+///   here — see `paint`.)
 /// - `SelectionOnly`: stroke around the selected widget's bounds.
 /// - `AllBounds`: stroke every active widget; layout primitives in
 ///   cyan, content widgets in magenta. The selected widget gets a

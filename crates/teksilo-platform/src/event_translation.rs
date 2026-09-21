@@ -1620,9 +1620,9 @@ pub fn translate_rotation_gesture(
 
 /// Translate a winit DoubleTapGesture (trackpad smart magnification).
 ///
-/// Synthetic OS-driven double-tap: there's no underlying mouse button
-/// or modifier set the OS hands us, so we attribute it to
-/// `PointerButton::Primary` with no modifiers. Apps that need richer
+/// Synthetic OS-driven double-tap: the OS hands us no mouse button, so we
+/// attribute it to `PointerButton::Primary`; the modifiers are the ones the
+/// window last reported, not the gesture's own. Apps that need richer
 /// trackpad-gesture metadata should match on `WidgetEvent::Gesture`
 /// directly rather than hooking `on_double_tap`.
 pub fn translate_double_tap_gesture(state: &TranslationState) -> Option<WidgetEvent> {

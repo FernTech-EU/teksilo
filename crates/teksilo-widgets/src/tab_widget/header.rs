@@ -2,21 +2,28 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! `TabHeader` — one tab's chrome (icon + leading slot + label + trailing slot),
-//! plus background/indicator/focus-ring painting and the input handlers.
+//! plus the per-state background rects and the input handlers. The accent
+//! indicator and the focus ring are painted by the active `TabStyle`
+//! (`TabBodyPainter` in `styles/recipe_tab_style.rs`), not here — this widget
+//! has no `paint`.
 //!
 //! Layout contract:
 //! - `layout_response(proposal)` honors `proposal.width` when the parent
 //!   row forces a width (Shared-sizing path). When the parent leaves
 //!   width unspecified, the header reports its natural content width
 //!   clamped to `[min_tab_width, max_tab_width]` (Independent path).
-//! - Height is the tab style's `editor_tab_height` plus the focus-ring
-//!   envelope reserved on top and bottom — the row's place_children
+//! - Height is the tab style's `editor_tab_height` — the **outer**
+//!   measurement, with the focus-ring envelope reserved *inside* it
+//!   rather than added on top — and the row's place_children
 //!   uniforms the height across all headers.
 //!
 //! Paint contract (Int UI / IntelliJ):
-//! - Selected: `surface_content` background, `text_primary` label,
-//!   1 dp accent bar at the top.
-//! - Hovered: `surface_hover` background.
+//! - Selected: `text_primary` label, 2 dp accent bar at the top
+//!   (`TAB_UNDERLINE_ACTIVE`). No background of its own — the per-state
+//!   fills are opt-in via the bar's `tab_background` /
+//!   `selected_tab_background` family.
+//! - Hovered: no background of its own — `hover_tab_background` /
+//!   `tab_background` if the bar set one, else transparent.
 //! - Idle: transparent background.
 //! - Disabled: transparent background, `text_disabled` label.
 //! - Focus ring: 2 dp `focus_ring` stroke painted around the visual
@@ -29,11 +36,12 @@
 //! `on_tap` (so already on the release), `TabHeaderInteraction` has no pressed
 //! state to move onto the framework press, and the close affordance is an
 //! `IconButton` at `IconButtonSize::Compact` — 24 dp at Compact, and it
-//! inherits the framework press from the button family. What is **not** solved
-//! here is that the close button is revealed by hover only, so a finger cannot
-//! see it at all; that is row 5 of `docs/hover-affordance-census.md` and
-//! belongs to the hover-reveal package, which gives it `RevealPolicy::Always`
-//! at Touch density plus an assistive "Close" action.
+//! inherits the framework press from the button family. The close `×` is
+//! hover-revealed only at a density whose `RevealPolicy` is `OnHover`: at
+//! `RevealPolicy::Always` (Touch) no `visible_when` gate is installed at all,
+//! so a finger simply sees it — and an assistive "Close" custom action
+//! ([`CLOSE_ACTION_ID`]) reaches it without hover or a middle-click. That is
+//! row 5 of `docs/hover-affordance-census.md`, now closed.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -984,7 +992,7 @@ impl Widget for TabHeader {
                         }
                         Action::CustomAction => {
                             // Custom action ids we advertise: the four moves
-                            // (`MOVE_ACTION_IDS`) plus `CLOSE_ACTION_ID`.
+                            // (see `move_action_id`) plus `CLOSE_ACTION_ID`.
                             let Some(ActionData::CustomAction(idx)) = data else {
                                 return EventResponse::Ignored;
                             };

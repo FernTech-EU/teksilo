@@ -53,8 +53,8 @@ use crate::shape::{
 /// else because of how little of it there is.
 pub const MACOS_HELP_TAG_CORNER_RADIUS: f32 = 5.0;
 
-/// `NSTableView.rowHeight` on macOS 11+. Shared by the table, the row
-/// styles and the calendar's own grid so a mixed window keeps one rhythm.
+/// `NSTableView.rowHeight` on macOS 11+. Shared by the table and the row
+/// styles so a mixed window keeps one rhythm.
 pub const MACOS_ROW_HEIGHT: f32 = 24.0;
 
 // ── Containers ──────────────────────────────────────────────────────────

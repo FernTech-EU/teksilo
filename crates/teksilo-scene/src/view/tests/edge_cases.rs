@@ -3,8 +3,8 @@
 
 //! Defensive coverage for scene-graph edge cases the audit
 //! flagged as untested: NaN / infinite coordinates, the
-//! self-parent / cycle case explicitly documented as unchecked
-//! in `set_item_parent`, empty-scene queries, and the marquee
+//! self-parent / cycle case `set_item_parent` now rejects with
+//! its cycle guard, empty-scene queries, and the marquee
 //! commit's interaction with `IS_SELECTABLE` (which the original
 //! audit incorrectly flagged as missing — this test pins the
 //! actual behavior).
@@ -134,8 +134,8 @@ fn set_item_parent_to_descendant_is_rejected() {
 fn marquee_commit_respects_is_selectable_flag() {
     // Audit flagged a hypothetical bug: marquee might select
     // items where IS_SELECTABLE is cleared. Verify the actual
-    // commit path filters correctly by driving Scene's
-    // commit_marquee_box through SceneSelection.
+    // commit path filters correctly by driving
+    // SceneSelection::commit_marquee.
     let mut scene = Scene::new();
     let selectable = scene.add_item(rect_item(20.0, 20.0), Point::new(10.0, 10.0));
     let unselectable = scene.add_item(rect_item(20.0, 20.0), Point::new(40.0, 10.0));

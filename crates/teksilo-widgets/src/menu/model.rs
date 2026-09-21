@@ -412,10 +412,10 @@ impl StandardMenu {
         self.settings_route.map(|(intent, _)| intent)
     }
 
-    /// The intent + item id [`settings_intent`](Self::settings_intent)
-    /// installed, if any.
     /// Advertise the registered shortcut `id` on the routed **Quit** row,
     /// instead of the platform's conventional chord (⌘Q on macOS).
+    /// The intent + item id [`settings_intent`](Self::settings_intent)
+    /// installed, if any.)
     ///
     /// Worth naming whenever the app registers a quit shortcut of its own —
     /// which is to say whenever [`quit_intent`](Self::quit_intent) is set, since

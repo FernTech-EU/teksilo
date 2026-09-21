@@ -15,7 +15,7 @@
 //! ctx.set_dormant(content_id);       // ...and immediately parks it
 //! ```
 //!
-//! That is correct and it is what `Arena::set_dormant`
+//! That is correct and it is what `WidgetArena::set_dormant`
 //! documents: dormancy is about *activation*, not construction, and a parked
 //! subtree keeps its state. What it costs is a full `build()` of content the
 //! user may never open — on **every rebuild of the owner**.

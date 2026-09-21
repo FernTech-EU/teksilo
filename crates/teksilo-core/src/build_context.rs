@@ -438,7 +438,7 @@ impl<'a> BuildContext<'a> {
     /// `tree.set_theme(...)` is called. Build implementations that want
     /// theme-driven values to update without a rebuild should use this
     /// instead of cloning tokens from `self.theme()` — for example,
-    /// `ctx.theme_signal().map(|t| t.colors.primary)` or combining with
+    /// `ctx.theme_signal().map(|t| t.colors.accent)` or combining with
     /// interaction state via `zip(...)`.
     pub fn theme_signal(&self) -> crate::signal::Signal<crate::styles::Theme> {
         self.tree.theme_signal().clone()
@@ -509,7 +509,7 @@ impl<'a> BuildContext<'a> {
         self.tree.app_context().poster()
     }
 
-    /// Bind a widget's visibility to a boolean prop or compatibility state binding.
+    /// Bind a widget's visibility to a boolean prop.
     pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.visible_when(id, state);
     }
@@ -597,8 +597,9 @@ impl<'a> BuildContext<'a> {
 
     /// Like [`begin_view_focus`](Self::begin_view_focus) but keys the scope on
     /// an explicit `node_id` rather than the widget being built. A view whose
-    /// rows are built by a **separate body-pane widget** (TableView /
-    /// TreeTableView / GridView) passes its own focusable root id so descendant
+    /// rows are built by a **separate body-pane widget** (ListView / TreeView /
+    /// TableView / TreeTableView / GridView) passes its own focusable root id so
+    /// descendant
     /// items resolve the *root's* keyboard focus — not the pane's, which is a
     /// child of the root and so never holds focus itself.
     pub fn begin_view_focus_for(&mut self, node_id: WidgetId) -> Signal<bool> {
@@ -674,7 +675,7 @@ impl<'a> BuildContext<'a> {
         self.tree.set_blur(id, radius);
     }
 
-    /// Bind a widget's enabled state to a boolean prop or compatibility state binding.
+    /// Bind a widget's enabled state to a boolean prop.
     pub fn enabled_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         self.tree.enabled_when(id, state);
     }
@@ -705,8 +706,8 @@ impl<'a> BuildContext<'a> {
         self.tree.effective_enabled_signal(id)
     }
 
-    /// Bind a widget's Tab-key participation to a boolean prop or
-    /// compatibility state binding. When false, the widget is removed
+    /// Bind a widget's Tab-key participation to a boolean prop.
+    /// When false, the widget is removed
     /// from Tab / Shift+Tab traversal but remains reachable via
     /// `request_focus` and arrow-key navigation. Implements the ARIA
     /// roving-tabindex pattern (HTML `tabindex="-1"` semantics).

@@ -164,11 +164,10 @@ impl TextHitSource for FieldHitSource<'_> {
         // question and must not move the caret to do it. The document registers
         // cursors weakly and prunes dead ones, so it costs nothing to drop.
         //
-        // Deliberately the same `SelectionType::WordUnderCursor` the
-        // double-click path uses, so a hold and a double click cannot disagree
         // about where a word ends — and deliberately *not* the AccessKit
-        // `compute_word_starts` table, which is an alphanumeric-plus-underscore
-        // heuristic rather than UAX #29.
+        // `line_word_starts` table, which segments the displayed line for a
+        // screen reader's own word navigation rather than the document the
+        // selection is written to.
         let probe = self.st.document.cursor_at(offset.min(self.doc_len()));
         probe.select(SelectionType::WordUnderCursor);
         let (a, p) = (probe.anchor(), probe.position());

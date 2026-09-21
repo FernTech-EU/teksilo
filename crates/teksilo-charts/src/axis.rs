@@ -4,9 +4,12 @@
 //! Axis configuration and tick generation.
 //!
 //! `nice_ticks` implements the Wilkinson / Heckbert nice-numbers algorithm
+//! Axis configuration and tick generation.
+//!
+//! `nice_ticks` implements the Wilkinson / Heckbert nice-numbers algorithm
 //! used by matplotlib, d3, and most data-viz libraries. Tick spacings are
-//! 1, 2, or 5 × 10^k for the smallest k that yields ≤ `target_count`
-//! intervals covering `[min, max]`.
+//! 1, 2, 2.5, 5, or 10 × 10^k, chosen so that roughly `target_count`
+//! intervals cover `[min, max]`.
 
 use std::rc::Rc;
 
@@ -97,7 +100,7 @@ impl AxisConfig {
     }
 
     /// Format `v` for display using the configured formatter, or a default
-    /// that drops trailing zeros and caps at 4 decimal places.
+    /// that drops trailing zeros and caps at 3 decimal places.
     pub fn format(&self, v: f32) -> String {
         if let Some(f) = &self.formatter {
             f(v)
@@ -149,12 +152,15 @@ fn default_format(v: f32) -> String {
 
 /// Generate a "nice" set of tick values covering `[min, max]` using the
 /// Wilkinson / Heckbert algorithm. Returns ticks in ascending order, each
-/// at a spacing of 1/2/5 × 10^k.
+/// Generate a "nice" set of tick values covering `[min, max]` using the
+/// Wilkinson / Heckbert algorithm. Returns ticks in ascending order, each
+/// at a spacing of 1/2/2.5/5/10 × 10^k.
 ///
 /// `target_count` is a hint for the desired number of intervals (so
-/// `target_count + 1` ticks). The algorithm picks the smallest spacing
-/// from the {1, 2, 5} set times a power of ten that produces no more
-/// than `target_count` intervals.
+/// roughly `target_count + 1` ticks). The algorithm rounds `range /
+/// target_count` to the nearest spacing in the {1, 2, 2.5, 5, 10} set
+/// times a power of ten, so the tick count lands near the hint rather
+/// than exactly on it.
 pub fn nice_ticks(min: f32, max: f32, target_count: usize) -> Vec<f32> {
     let target_count = target_count.max(2);
 

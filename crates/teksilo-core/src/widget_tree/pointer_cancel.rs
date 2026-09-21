@@ -76,9 +76,10 @@ impl WidgetTree {
     /// reacts by capturing or dragging starts from a clean slate rather than
     /// racing the teardown.
     ///
-    /// Two teardown steps named in the design are absent because their subject
-    /// does not exist yet: the framework press signal (P11) and the fling
-    /// driver (P13/P21) each clear at the marked point below.
+    /// Between the drag session and the table entry sits the touch-motion
+    /// layer: the pan session is abandoned without a release, every coast its
+    /// claimant chain was running is stopped, the palm watch is dropped, the
+    /// framework press signal is cleared and the pinch is told.
     pub fn cancel_pointer(
         &mut self,
         pointer: PointerId,
@@ -1634,7 +1635,9 @@ mod tests {
         let cancels = log();
         // Built in one chain rather than through `recorder`: a second
         // `WidgetBuilder` call on an already-wrapped `impl Widget` re-wraps
-        // instead of merging, and the inner handler set would be dropped.
+        // rather than adding to the set it already has, and one wrapper is
+        // cheaper than two. The inner set is no longer lost either way —
+        // `Widget::take_handler_set` recurses and merges.
         let recorded = cancels.clone();
         let slot = id_slot.clone();
         let node = tree.add(

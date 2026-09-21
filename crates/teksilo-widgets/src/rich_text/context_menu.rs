@@ -7,7 +7,7 @@
 //! [`context_menu(factory)`](teksilo_core::widget_builder::WidgetBuilder::context_menu)
 //! infrastructure: a fresh menu widget is created on every right-click,
 //! shown at the pointer position, and torn down on dismissal. That
-//! machinery lives in `teksilo-core::widget_tree::event_dispatch_impl::show_context_menu_for`
+//! machinery lives in `teksilo-core::widget_tree::pointer_router::show_context_menu_for`
 //! — we just hand it a factory.
 //!
 //! ## Why no Actions / Intents for the built-in items

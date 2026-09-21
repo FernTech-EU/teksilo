@@ -12,9 +12,9 @@
 //!
 //! `make_body` receives the pre-built field plus optional step buttons
 //! and returns the visual core (the bordered surface holding both).
-//! The widget keeps responsibility for sizing policy (`width_chars` /
-//! `width_pixels`), keyboard / wheel handlers, and the `Role::SpinButton`
-//! accessibility.
+//! The widget keeps responsibility for sizing policy (`width` /
+//! `width_chars` / `fill_width`), keyboard / wheel handlers, and the
+//! `Role::SpinButton` accessibility.
 
 use std::rc::Rc;
 

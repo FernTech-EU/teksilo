@@ -257,7 +257,7 @@ impl SequenceMember {
 ///
 /// One predicate, three consumers: it fails a tap, it triggers
 /// [`GestureArenaSet::cancel_taps`](super::GestureArenaSet::cancel_taps), and
-/// it will clear the framework press visual. A coarse pointer uses `Bounds`
+/// it clears the framework press visual. A coarse pointer uses `Bounds` A coarse pointer uses `Bounds`
 /// because a finger's reported centre wanders several device pixels while
 /// resting inside the control it is pressing; a precise pointer keeps the
 /// radius it always had.
@@ -822,8 +822,13 @@ impl PointerSequence {
     /// walks from the queried node to the root. A container that really does
     /// own every hold in its subtree says so there.
     ///
-    /// A mouse never has one of these at all: both resolutions need an eligible
-    /// pan competitor and a mouse enrols none.
+    /// A mouse reaches only the first, and only by an **explicit** declaration:
+    /// `Auto` resolves to `AfterLongPress` for a direct pointer with an eligible
+    /// pan competitor and a mouse enrols none, but an explicitly declared
+    /// `AfterLongPress` is passed through untouched for every pointer kind — see
+    /// `an_explicitly_deferred_grab_takes_the_hold_from_every_pointer_kind`. The
+    /// `defer_own_drag` half stays out of a mouse's reach either way: it needs a
+    /// live [`MemberRole::Pan`] member.
     ///
     /// Read by the framework through `WidgetTree::long_press_is_a_grab`.
     pub fn has_deferred_grab_for(&self, id: WidgetId) -> bool {

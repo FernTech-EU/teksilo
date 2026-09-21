@@ -208,7 +208,7 @@ pub struct RichTextEditor {
     /// Horizontal scrollbar child id. `None` when
     /// `h_scroll_policy == ScrollPolicy::AlwaysOff`.
     h_scrollbar_id: Option<WidgetId>,
-    /// Scrollbar window-space bounds, written by `place_children` and
+    /// Scrollbar **widget-local** bounds, written by `place_children` and
     /// read by the wrapper's `on_pointer_event` handler. Used to bail
     /// out of the drag-select latch when the press lands over an
     /// overlay scrollbar — without this guard the preview-pass pointer
@@ -1157,8 +1157,8 @@ impl RichTextEditor {
     // --- Character-format commands ----------------------------------------
     //
     // Each setter writes to `TextCursor::merge_char_format`, which
-    // applies to the current selection (or acts as a typing format when
-    // there is no selection — see text-document's semantics). Toggle
+    // applies to the current selection — a collapsed caret formats
+    // nothing, since the document model has no typing/pending format. Toggle
     // variants (`toggle_bold`, `toggle_italic`, `toggle_underline`,
     // `toggle_strikethrough`) read the current state via
     // [`caret_char_format`](Self::caret_char_format) first and flip,
@@ -1172,8 +1172,8 @@ impl RichTextEditor {
         // cursor mutation, so no manual bookkeeping is needed here.
     }
 
-    /// Apply **bold** to the current selection (or set the typing bold
-    /// state when no selection is active). Pairs with
+    /// Apply **bold** to the current selection. A no-op when nothing is
+    /// selected — the document model has no typing format. Pairs with
     /// [`is_bold`](Self::is_bold) and [`toggle_bold`](Self::toggle_bold).
     pub fn set_bold(&self, enabled: bool) {
         self.apply_char_format(TextFormat {
@@ -1690,7 +1690,7 @@ impl RichTextEditor {
     // silently discarded — toolbars gate the buttons on
     // [`can_undo`](Self::can_undo) / [`can_redo`](Self::can_redo)
     // signals so the error path is unreachable in normal use, and the
-    // keyboard handlers at `keyboard.rs:357-366` use the same
+    // keyboard handlers at `keyboard.rs:512-523` use the same
     // `let _ =` discipline.
 
     /// Undo the most recent edit. Mirrors Ctrl+Z. No-op when the undo
@@ -3503,7 +3503,8 @@ impl EditorHandle {
 /// `min_lines` / `max_lines`), `place_children` (records the
 /// viewport on `state`), `paint` (glyph runs, caret, selection),
 /// `accessibility` (Role::MultilineTextInput / Role::Document plus
-/// the flow-snapshot walk that emits paragraph + text-run children).
+/// the flow-snapshot walk, whose text-run children hang directly off
+/// this node except under a table, blockquote or heading).
 ///
 /// Handlers, focus, the context-menu factory, and per-frame ticking
 /// all live on the composing outer [`RichTextEditor`]; the body
@@ -4408,7 +4409,7 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
     // Restart the blink phase on every cursor mutation: a steady-visible
     // caret while typing or holding an arrow key, blinking only
     // resumes after the user stops moving. Mirrors focus-gain behavior
-    // (see the FocusChanged handler around rich_text.rs:2041). The frame
+    // (see the `on_focus` handler around rich_text.rs:3854). The frame
     // loop only toggles once a full interval has elapsed since the phase
     // start, so restarting here delays the next toggle by a full interval.
     let blink_reset = st.has_focus && matches!(st.policy.caret_policy, CaretPolicy::Blinking);
@@ -4426,8 +4427,9 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
 
 /// Dispatch an AccessKit `ActionRequest` payload for the rich text
 /// editor. Handles `SetTextSelection` (screen-reader-initiated
-/// caret moves), `SetValue` (programmatic text replacement), and
-/// `ScrollIntoView` (scroll so the caret is visible).
+/// caret moves), `SetValue` (whole-document replacement),
+/// `ReplaceSelectedText` (insert at the caret over the selection),
+/// and `ScrollIntoView` (scroll so the caret is visible).
 fn handle_access_action_request(
     state: &SharedState,
     action: teksilo_core::accesskit::Action,
@@ -4537,10 +4539,12 @@ fn handle_access_action_request(
 }
 
 /// Convert an intra-fragment byte offset into a character index.
-/// Used by `accessibility()` to map the user's document-absolute
-/// cursor position into AccessKit's `TextPosition.character_index`
-/// (which indexes into the target TextRun's `character_lengths`,
-/// i.e., one entry per Rust `char`).
+/// Convert an intra-fragment byte offset into a character index —
+/// AccessKit's `TextPosition.character_index`, which indexes into the
+/// target TextRun's `character_lengths`, i.e. one entry per Rust `char`.
+///
+/// (No caller remains since the a11y walk moved to `body/flow_walk.rs`;
+/// deleting the function outright is the honest fix.)
 fn char_index_in_text(text: &str, byte_offset: usize) -> usize {
     // Walk char_indices until we pass byte_offset; the count at
     // that point is the character index. Fall back to the char

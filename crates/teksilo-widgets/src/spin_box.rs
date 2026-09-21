@@ -363,11 +363,14 @@ pub struct SpinBox<T: SpinValue> {
     label: Option<LocalizedString>,
     placeholder: LocalizedString,
     /// Enabled state, static or reactive; forwarded to the arena at
-    /// build time. Also captured as a build-time snapshot for the
-    /// several build-time decisions inside `build()` that need a
-    /// plain `bool` (seeding the inner `TextInputField`'s read-only
-    /// mode, deriving the step buttons' enabled signals, and gating
-    /// the key-preview / scroll handlers alongside `read_only`).
+    /// build time. Also captured as a build-time snapshot for the two
+    /// build-time decisions inside `build()` that need a plain `bool`
+    /// (seeding the inner `TextInputField`'s own `enabled` prop, and
+    /// deriving the step buttons' enabled signals). The key-preview
+    /// and scroll handlers deliberately do NOT read it — the
+    /// dispatcher gates on `arena.is_enabled` first, and a build-time
+    /// snapshot would leave a `Signal`-enabled spin box with a dead
+    /// keyboard and wheel.
     enabled: Prop<bool>,
     read_only: bool,
     text_from_value: Option<TextFromValue<T>>,
@@ -939,10 +942,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             });
         }
 
-        // Commit helper: called on Enter and on blur. Parses the
-        // current text; on success, clamps and writes the value and
-        // reformats the text. On failure, reverts the text to the
-        // formatted current value.
+        // Three commit helpers follow: `set_committed` (the tail —
+        // clamp, reformat, publish, notify), `commit_text` (the one
+        // parse site, with the revert on failure) and `commit` (what
+        // Enter and blur call: reads the field text, hands it over).
         // The commit *tail*: clamp into `[min, max]`, reformat the field
         // text, publish the value and fire `on_value_changed`. Split out of
         // `commit` because the AccessKit `SetValue` path is handed a *number*
@@ -1390,10 +1393,9 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         // ── Root: attach key + wheel handlers on the outer sized id ─
         //
-        // Bubble-phase `on_key` catches Up / Down / PageUp / PageDown
-        // after the `TextInputField` declines them (the field's
-        // keyboard dispatch falls through to `_ =>` for arrow keys,
-        // returning `Ignored` so the bubble loop continues up).
+        // Preview-pass `on_key_preview` claims Up / Down / PageUp /
+        // PageDown before the focused `TextInputField` ever sees them;
+        // the handler below says why preview rather than bubble.
         let root_id = sized_id;
         self.root_child_id = Some(root_id);
 
@@ -1698,8 +1700,9 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-/// Build the stacked up/down step-button column. Returns its root
-/// `WidgetId` for the caller to drop into the HStack.
+/// Build the stacked up/down step buttons. Returns the two
+/// `WidgetId`s (up, down) for the caller to pass to the active
+/// `SpinBoxStyle` through `SpinBoxStyleConfig`, which owns the row.
 ///
 /// `step` (with `EventContext`) is called on the initial tap;
 /// `step_silent` is called from the hold-to-repeat timer, which
@@ -1893,8 +1896,9 @@ fn format_for_display<T: SpinValue>(
 
 /// Decide the effective step for an [`Adaptive`](StepType::Adaptive)
 /// step type given the current value. For a value ∈ [10^n,
-/// 10^(n+1)) the effective step is 10^n; inside [0, 1) the
-/// step stays at `base_step` to avoid vanishing.
+/// 10^(n+1)) the effective step is 10^n from 10 upwards; below 10
+/// the step stays at `base_step`, which also keeps it from
+/// vanishing inside [0, 1).
 fn resolve_effective_step<T: SpinValue>(step_type: StepType, current: T, base_step: T) -> T {
     if step_type == StepType::Fixed {
         return base_step;
@@ -1940,7 +1944,7 @@ fn approx_ne<T: SpinValue>(a: T, b: T) -> bool {
 /// app-wide `SharedTypesetter` (the same backend the field paints
 /// with). Falls back to a rough heuristic when no typesetter is
 /// installed (headless tests) so the caller still gets a non-zero
-/// width and the `MaxSize` cap behaves reasonably.
+/// width and the resolved `pixel_cap` behaves reasonably.
 fn measure_width_px(ctx: &mut BuildContext, text: &str, style: &TextStyle) -> f32 {
     if text.is_empty() {
         return 0.0;

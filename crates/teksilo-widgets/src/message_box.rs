@@ -86,9 +86,11 @@
 //! ## Result reporting
 //!
 //! [`MessageBox::on_result`] takes `impl Fn(MessageBoxResult,
-//! &mut EventContext) + 'static`. The callback fires exactly once — on
-//! button activation or Escape dismissal — then the modal is closed by
-//! the framework.
+//! &mut EventContext) + 'static`. The callback fires exactly once, whichever
+//! route closes the dialog — button activation, Escape, a press outside, or a
+//! programmatic dismissal — with [`MessageBoxResult::dismissal`] naming which
+//! one. On a button activation the modal is then closed by the framework; on
+//! the other routes it is already going away.
 //!
 //! ## Accessibility
 //!
@@ -439,8 +441,9 @@ pub enum MessageBoxDismissal {
 /// Report passed to [`MessageBox::on_result`] when the dialog closes.
 #[derive(Debug, Clone, Copy)]
 pub struct MessageBoxResult {
-    /// Which button fired — either by click, Enter (default button),
-    /// or escape-button resolution for any of the dismissal routes.
+    /// Which button fired — either by click, Enter (the focused button,
+    /// else the default), or escape-button resolution for any of the
+    /// dismissal routes.
     pub button: StandardButton,
     /// State of the "Don't show again" checkbox at dismiss time, when
     /// one was configured via [`MessageBox::show_again_checkbox`] or
@@ -790,8 +793,9 @@ impl MessageBox {
         self
     }
 
-    /// Register the result callback, invoked exactly once when a
-    /// button fires (either by click or by Enter/Escape shortcut).
+    /// Register the result callback, invoked exactly once however the
+    /// dialog closes — a button (by click, or by the Enter/Escape
+    /// shortcut), a press outside, or a programmatic dismissal.
     pub fn on_result(mut self, f: impl Fn(MessageBoxResult, &mut EventContext) + 'static) -> Self {
         self.on_result = Some(Box::new(f));
         self

@@ -133,7 +133,7 @@ fn the_mounted_grip_takes_its_corner_and_nothing_else() {
 // the resize strip
 // ---------------------------------------------------------------------------
 
-/// The panel's resize strip, found by its 6 dp painted height.
+/// The panel's resize strip, found by its type name.
 fn find_resize_handle(tree: &WidgetTree, id: WidgetId) -> Option<WidgetId> {
     if tree
         .widget_type_name(id)

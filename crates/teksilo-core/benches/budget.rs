@@ -10,8 +10,9 @@
 //! — is a build gate. A 16.6 ms frame has to survive a burst of coalesced
 //! samples with room left over for layout and paint, so the budget is set at
 //! roughly a hundred samples of headroom per frame. [`Report::verdict`] answers
-//! it, the bench binary turns that answer into a process exit status, and a CI
-//! job asserts on the exit status.
+//! it and the bench binary turns that answer into a process exit status, so
+//! `cargo bench -p teksilo-core --bench pointer_dispatch -- --gate-only` fails
+//! outright on a breach. CI builds this target but does not run it.
 //!
 //! The **advisory** — the relative delta between a measurement and its mouse
 //! baseline — is a number to read, not a wall to hit. Shared CI runners

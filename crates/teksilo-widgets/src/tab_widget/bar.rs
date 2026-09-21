@@ -307,10 +307,11 @@ pub struct TabBar<T: 'static> {
     /// stand-alone `TabBar` use.
     header_ids_buffer: Option<Rc<RefCell<Vec<WidgetId>>>>,
 
-    /// Drop indicator x position in bar-local coords, painted by
-    /// `paint()`. `None` means no drag in progress / not dropping
-    /// here. Cloned into the on_drag_hover / on_drag_leave handlers
-    /// at build time and into the bar's paint via `paint_state`.
+    /// Drop indicator x position in bar-local coords, painted by the
+    /// active `TabStyle`'s `make_bar` chrome. `None` means no drag in
+    /// progress / not dropping here. Cloned into the on_drag_hover /
+    /// on_drag_leave handlers at build time and handed to the chrome
+    /// via `TabBarChromeConfig::drop_indicator`.
     paint_state: PaintState,
 
     /// "Scroll the active tab into view" plumbing, shared with the
@@ -662,7 +663,7 @@ impl<T: 'static> TabBar<T> {
     /// cross-axis width, so the same knob defines the bar's minimum
     /// width — the sidebar adapts to the widest piece of bar content
     /// (tab labels or a slot widget) and never shrinks below this floor.
-    /// Vertical pill heights stay at `theme.components.tab.editor_tab_height`
+    /// Vertical pill heights stay at the tab style's `editor_tab_height`
     /// regardless of this knob.
     ///
     /// Under [`TabSizing::Fill`] a **vertical** bar takes the width it is
@@ -840,14 +841,14 @@ impl<T: 'static> TabBar<T> {
     }
 
     /// Bar-level leading slot — a widget rendered before the headers
-    /// row (and before any pinned region in later phases).
+    /// row, and before the pinned-tab strip.
     pub fn bar_leading_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self {
         self.bar_leading_slot = Some(teksilo_core::IntoTeksiChild::into_pending(w));
         self
     }
 
     /// Bar-level trailing slot — a widget rendered after the headers
-    /// row (and after any overflow dropdown in later phases).
+    /// row, and after the overflow dropdown.
     pub fn bar_trailing_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self {
         self.bar_trailing_slot = Some(teksilo_core::IntoTeksiChild::into_pending(w));
         self
@@ -2232,10 +2233,11 @@ struct TabHeaderRow {
     header_ids: Vec<WidgetId>,
     axis: TabBarOrientation,
     sizing: TabSizing,
-    /// Min extent on the *layout axis* — width for horizontal,
-    /// height for vertical. Reuses the same `min_tab_width` knob for
-    /// the vertical case (it's about per-tab pill extent, not the
-    /// width of the bar).
+    /// Min extent, in whichever sense the axis gives it: the per-tab
+    /// width for a horizontal bar, and the *bar's own* minimum width
+    /// for a vertical one (vertical pill extents come from the style's
+    /// `editor_tab_height`, never from this knob). Reuses the bar's
+    /// `min_tab_width` in both cases.
     min_extent: f32,
     max_extent: f32,
     spacing: f32,

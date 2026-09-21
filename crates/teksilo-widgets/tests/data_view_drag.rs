@@ -593,7 +593,7 @@ fn a_finger_slide_across_a_column_header_does_not_sort_it() {
     );
 }
 
-/// A table wide enough to pan sideways, with two equal columns so which one is
+/// A table wide enough to pan sideways, with six equal columns so which one is
 /// first identifies a reorder.
 fn wide_table() -> teksilo_widgets::table_view::TableView<usize> {
     let mut v = teksilo_widgets::table_view::TableView::new(ListModel::from_vec(

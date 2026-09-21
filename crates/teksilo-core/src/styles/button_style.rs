@@ -18,8 +18,7 @@ use crate::styles::recipe::{BorderRecipe, FillRecipe, PerStateRecipe, ShadowReci
 use crate::widget_id::WidgetId;
 
 /// Closed enum naming the design-language variants of `Button`. Set
-/// per-call via `Button::variant(ButtonVariant::Outlined)` or
-/// per-app default via a `ComponentDefaults` extension.
+/// per-call via `Button::variant(ButtonVariant::Outlined)`.
 ///
 /// Variants are *hints* the active [`ButtonStyle`] may honour or
 /// remap. The IntUI default `RecipeButtonStyle` collapses some pairs:

@@ -133,7 +133,9 @@ struct Inner<T: Versioned + DeserializeOwned> {
 /// A reactive handle to a single typed file on disk.
 ///
 /// `Clone` is cheap (an `Rc` bump). All clones share one in-memory
-/// projection and one I/O thread.
+/// projection and one path. There is no I/O thread: every write is a
+/// synchronous locked read-modify-write on the calling thread (see the
+/// module docs).
 pub struct SettingsFile<T: Versioned + DeserializeOwned> {
     inner: Rc<Inner<T>>,
 }
@@ -464,7 +466,8 @@ pub(crate) fn disk_stamp(path: &Path) -> (Option<SystemTime>, Option<u64>) {
 ///
 /// Shared by every persisted type in this crate that reads raw TOML off
 /// disk before running its own migration ([`SettingsFile`],
-/// [`crate::collection::list::PersistedListModel`]).
+/// [`crate::collection::list::PersistedListModel`],
+/// [`crate::WindowStateService`]).
 pub(crate) fn read_toml_with_retry(path: &Path) -> Result<Option<toml::Value>, SettingsFileError> {
     let mut last_parse_err = None;
     for attempt in 0..MAX_READ_ATTEMPTS {

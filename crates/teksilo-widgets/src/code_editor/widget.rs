@@ -85,8 +85,8 @@ pub struct CodeEditor {
     // pointer handler to bypass the drag-select latch over an overlay bar.
     v_scrollbar_bounds: Rc<Cell<Rect>>,
     h_scrollbar_bounds: Rc<Cell<Rect>>,
-    // Gutter width, published by `place_children` so `paint` can offset the
-    // bracket cells into body space.
+    // Gutter width, published by `place_children`. The bracket cells in `paint`
+    // offset from the body's own `viewport_origin`, which already includes it.
     gutter_width: Rc<Cell<f32>>,
     /// The touch-selection mount: the controller, its two overlays, and the
     /// host intent behind the selection toolbar.

@@ -18,7 +18,7 @@ use crate::vertex::{AnimQuadVertex, QuadVertex, RectVertex, SdfVertex, ShadowVer
 /// static). 128 × 64 B = 8 KiB — well within UBO caps.
 const MAX_ANIM_SLOTS: usize = 128;
 
-/// GPU renderer that draws a RenderFrame using six shader pipelines.
+/// GPU renderer that draws a RenderFrame using seven shader pipelines.
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -39,9 +39,9 @@ pub struct Renderer {
     /// (texture + sampler) with `quad_pipeline`, so it binds the same
     /// `path_atlas_texture` bind group the solid path-quad batch uses.
     path_gradient_pipeline: wgpu::RenderPipeline,
-    /// Procedural animated-quad pipeline — IndeterminateSweep and
-    /// future Pulse / Shimmer kinds. Binds group 0 to a uniform buffer
-    /// holding an array of `AnimParams` (one per slot).
+    /// Procedural animated-quad pipeline — IndeterminateSweep,
+    /// SpinnerArc and future Pulse / Shimmer kinds. Binds group 0 to a
+    /// uniform buffer holding an array of `AnimParams` (one per slot).
     anim_proc_pipeline: wgpu::RenderPipeline,
     /// Sprite-atlas animated-quad pipeline — frame-cycling for
     /// `AnimatedQuadKind::SpriteCycle`. Shares the same uniform buffer
@@ -54,7 +54,7 @@ pub struct Renderer {
     /// Uniform buffer backing both animated-quad pipelines' per-slot
     /// state. Rewritten wholesale at the top of each `render()` from
     /// `frame.anim_params`. Fixed size (`MAX_ANIM_SLOTS * 64 B`); the
-    /// tree's registry truncates if it ever exceeds.
+    /// upload in `render()` truncates if it ever exceeds.
     anim_uniform_buffer: wgpu::Buffer,
     /// Bind group for the animated pipelines (group 0 on both).
     anim_uniform_bind_group: wgpu::BindGroup,
@@ -499,8 +499,8 @@ impl Renderer {
         self.streams.reset();
 
         // Upload animated-quad per-slot state for this frame. Truncate
-        // past MAX_ANIM_SLOTS — the registry currently caps at
-        // 128 slots and growing the buffer would require recreating
+        // past MAX_ANIM_SLOTS — the registry allocates slots without a
+        // ceiling and growing the buffer would require recreating
         // the bind group, so we just drop excess slots and warn in
         // debug builds. In practice, 128 is well beyond typical UIs.
         if !frame.anim_params.is_empty() {
@@ -589,7 +589,8 @@ impl Renderer {
             let mut anim_proc_batch: Vec<AnimQuadVertex> = Vec::new();
             let mut path_gradient_batch: Vec<crate::vertex::PathGradientVertex> = Vec::new();
 
-            // Which pipeline the current quad batch uses (glyph atlas, path atlas, or image).
+            // Which pipeline the current quad batch uses (glyph atlas or path atlas;
+            // images draw individually with their own bind group).
             // Flushed when the bind group source changes.
             #[derive(Clone, Copy, PartialEq, Eq)]
             enum QuadSource {
@@ -2069,7 +2070,6 @@ impl Renderer {
     }
 }
 
-/// Convert pixel coordinates to NDC (-1..1).
 /// Build 4 QuadVertex for a path entry (in pixel space, pre-NDC).
 fn path_quad_verts(
     entry: &teksilo_canvas::PathEntry,
@@ -2351,8 +2351,8 @@ fn run_kawase_pass(
 /// flag set, binds the intermediate texture + sampler, and issues one
 /// indexed draw.
 ///
-/// `index_binding` is the per-frame index buffer (the first 6 u16s
-/// already encode the standard quad index pattern, so we slice 12
+/// `index_binding` is the per-frame index buffer (the first 6 u32s
+/// already encode the standard quad index pattern, so we slice 24
 /// bytes off the front).
 #[allow(clippy::too_many_arguments)]
 fn composite_blur_quad(
@@ -2445,7 +2445,7 @@ fn composite_blur_quad(
 
     // Caller has already sized `quad_stream` for the worst-case quad
     // count *including composites* (see render()'s up-front sizing).
-    // The index buffer's first 6 u16s = `[0, 1, 2, 0, 2, 3]` (the
+    // The index buffer's first 6 u32s = `[0, 1, 2, 0, 2, 3]` (the
     // standard quad pattern), reused here.
     let _ = device; // device is only used for bind-group creation above
     let Some((vb, v_off, v_len)) = quad_stream.write(queue, bytemuck::cast_slice(&verts)) else {
@@ -2999,7 +2999,7 @@ pub(crate) fn stream_quad_counts(frame: &RenderFrame) -> StreamQuadCounts {
 /// buffer, bind group, and bind-group layout. The layout is returned
 /// so the sprite pipeline can reuse it as its `group 0`. Buffer is
 /// sized for [`MAX_ANIM_SLOTS`] × `size_of::<teksilo_canvas::AnimParams>()`;
-/// the tree's registry truncates writes past that cap.
+/// the per-frame upload in `render()` truncates writes past that cap.
 fn create_anim_proc_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,

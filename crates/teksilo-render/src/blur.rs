@@ -10,7 +10,7 @@
 //!
 //! 1. Allocates an intermediate RGBA8 texture sized to the widget's
 //!    bounds × scale_factor (drawn from a recycled pool keyed on the
-//!    next-power-of-two of the requested size).
+//!    exact requested size).
 //! 2. Suspends the surface render pass and begins a new pass against
 //!    the intermediate, with a translation pushed onto the transform
 //!    stack so the subtree paints at the intermediate's origin.
@@ -18,7 +18,7 @@
 //!    the dual-Kawase chain: `N = ceil(log2(radius))` downsample
 //!    passes (each halves the texture, applies a 4-tap bilinear
 //!    shader), then `N` upsample passes back to the source size with
-//!    a different 4-tap shader.
+//!    a different 8-tap shader.
 //! 4. Resumes the surface pass with `LoadOp::Load` (so previous draws
 //!    survive) and composites the blurred result as a textured quad
 //!    via the existing quad pipeline.

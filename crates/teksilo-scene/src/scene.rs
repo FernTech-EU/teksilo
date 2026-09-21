@@ -113,10 +113,10 @@ use teksilo_core::widget_id::WidgetId;
 ///
 /// `#[non_exhaustive]`: this is the crate's outbound event vocabulary, matched
 /// by every observer, and it grows whenever the scene learns to report
-/// something new — `HandlersChanged` is the most recent. Without the
-/// attribute each such addition would stop a downstream `match` from
-/// compiling; with it, a consumer's wildcard arm keeps meaning "a change I do
-/// not act on".
+/// something new — `MeasuredSizeChanged` and `SizePolicyChanged` are the most
+/// recent. Without the attribute each such addition would stop a downstream
+/// `match` from compiling; with it, a consumer's wildcard arm keeps meaning
+/// "a change I do not act on".
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ItemChange {
@@ -1381,9 +1381,10 @@ pub(crate) struct SceneEntry {
     /// by z on the next rebuild (see [`Scene::set_z`]).
     pub(crate) z: f32,
     /// Which lightweight paint band this item sits in relative to the
-    /// heavyweight tier — [`SceneLayer::Under`] (default, backdrop) or
-    /// [`SceneLayer::Over`] (foreground). Lightweight tier only; ignored
-    /// for heavyweight widget entries (they paint via the arena).
+    /// heavyweight tier — [`SceneLayer::Under`] (default, backdrop),
+    /// [`SceneLayer::Interleaved`] (among the cards, ordered against them by
+    /// `z`) or [`SceneLayer::Over`] (foreground). Lightweight tier only;
+    /// ignored for heavyweight widget entries (they paint via the arena).
     pub(crate) layer: SceneLayer,
     /// Logical parent. `None` means the item is rooted directly in
     /// the Scene. Composes coordinate frames: a child's `local_pos`
@@ -1393,8 +1394,8 @@ pub(crate) struct SceneEntry {
     pub(crate) parent: Option<ItemId>,
     /// Direct children, in the order they became children — the downward half
     /// of the parent pointer above, maintained by `push_entry` / `remove` /
-    /// [`Scene::set_item_parent`] / [`Scene::orphan`], the only four doors that
-    /// can change a parent link.
+    /// [`Scene::set_item_parent`] / [`Scene::set_placement`] / [`Scene::orphan`],
+    /// the only five doors that can change a parent link.
     ///
     /// Kept rather than derived because every downward walk needs it and
     /// deriving it means scanning the whole model: `rebucket_subtree` used to

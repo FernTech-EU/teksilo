@@ -1611,8 +1611,8 @@ pub(crate) struct TransformRuntime {
     /// only for [`TransformSource::Pointer`]; a keyboard or AT route already
     /// has the focus it needs.
     pub focus_before: Cell<Option<WidgetId>>,
-    /// Bumped on every session change; bound at `BindingLevel::Relayout` **and**
-    /// `RepaintOnly` so both tiers re-derive their preview from the same value.
+    /// Bumped on every session change; bound at `BindingLevel::Relayout` so
+    /// both tiers re-derive their preview from the same value.
     ///
     /// This is the trigger the design needs and a plain `Cell` cannot be:
     /// `place_children` re-runs on a relayout, and the heavyweight tier's

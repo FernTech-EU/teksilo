@@ -5,9 +5,8 @@
 //!
 //! Single table, key = monotonic `u64` (FIFO order = ascending key
 //! order), value = `serde_json` bytes of [`PersistedRecord`].
-//! Events are bounded by capacity (oldest dropped past the cap) and
 //! by age (events older than `max_age` are dropped during the next
-//! drain or push).
+//! push).
 //!
 //! Per-event retry metadata (`attempts`, `next_attempt_at_unix_ms`)
 //! is reserved in the schema for a future scheduled-retry feature
@@ -111,7 +110,7 @@ impl PersistentEventQueue {
 
     /// Like [`open`](Self::open) but with explicit `capacity` (events
     /// past which the oldest is dropped) and `max_age` (events older
-    /// than this are dropped on next push or drain).
+    /// than this are dropped on next push).
     pub fn open_with(
         path: impl Into<PathBuf>,
         capacity: usize,

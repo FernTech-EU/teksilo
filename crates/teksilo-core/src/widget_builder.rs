@@ -117,7 +117,7 @@ pub struct AccessibilityOverrides {
     pub numeric_step: Option<f64>,
 
     /// Standard `accesskit::Action` advertisements with their handlers.
-    /// Dispatched by `event_dispatch_impl.rs` when handling
+    /// Dispatched by `pointer_router.rs` when handling
     /// `WidgetEvent::AccessAction`, layered on top of any
     /// user-installed `on_access_action` / `on_access_action_request`
     /// handlers (both fire for the same dispatched event).
@@ -277,7 +277,7 @@ impl AccessibilityOverrides {
         }
         // `shortcut_id` resolution happens in the accessibility tree
         // walker (where the `ShortcutRegistry` is reachable) — see
-        // `accessibility_impl::build_accessibility_recursive`.
+        // `accessibility_emit_impl::build_accessibility_recursive`.
         if let Some(p) = self.has_popup {
             b.set_has_popup(p);
         }
@@ -340,10 +340,12 @@ impl AccessibilityOverrides {
 /// owning the factory (or on a descendant whose nearest ancestor with
 /// a factory is this one). It receives:
 ///
-/// - `position`: pointer position in widget-local coordinates of the
-///   factory-owning widget. Useful when the menu's contents depend on
-///   *what* was right-clicked (a row in a list, a node in a tree, an
-///   item under a hit-test, …).
+/// - `position`: pointer position in **window** coordinates — the factory
+///   runs straight off the right-click `PointerDown`, before the localizing
+///   handler dispatch, and the same point reaches every factory the walk
+///   tries, so subtract the widget's own origin before hit-testing. Useful
+///   when the menu's contents depend on *what* was right-clicked (a row in a
+///   list, a node in a tree, an item under a hit-test, …).
 /// - `ctx`: a full [`EventContext`], so the factory can read window
 ///   state, query app state, send intents (e.g. for analytics), or
 ///   update Signals before the menu mounts.
@@ -430,7 +432,7 @@ pub struct HandlerSet {
     /// Builder-level accessibility overrides. Mirrored to
     /// `WidgetNode::access_overrides` at insertion. Action callbacks
     /// (`actions`, `custom_actions`) are dispatched by
-    /// `event_dispatch_impl.rs` when handling
+    /// `pointer_router.rs` when handling
     /// `WidgetEvent::AccessAction`, in addition to the user's
     /// `on_access_action` / `on_access_action_request` handlers — so
     /// builder order doesn't matter.
@@ -558,7 +560,8 @@ impl HandlerSet {
     }
 
     /// Set the on_triple_tap handler — fires on the third click within the
-    /// recognizer's window (same 300 ms / 10 px defaults as double tap).
+    /// recognizer's window (the same `multi_tap_interval` / `multi_tap_slop`
+    /// the pointer's gesture profile gives double tap).
     /// Runs independently of `on_double_tap` via cooperative gesture
     /// recognizers (`GestureRecognizer::resets_on_peer_recognition`).
     pub fn on_triple_tap(mut self, f: impl FnMut(&TapEvent, &mut EventContext) + 'static) -> Self {
@@ -654,7 +657,7 @@ impl HandlerSet {
     }
 
     /// Set the on_pinch handler. On desktop the phases are produced from
-    /// OS trackpad gestures (winit `TouchpadMagnify` / `RotationGesture`).
+    /// OS trackpad gestures (winit `PinchGesture` / `RotationGesture`).
     pub fn on_pinch(mut self, f: impl FnMut(PinchPhase, &mut EventContext) + 'static) -> Self {
         self.handlers.on_pinch = Some(Box::new(f));
         self
@@ -953,7 +956,7 @@ impl HandlerSet {
 
     /// Set a context-menu factory. See [`ContextMenuFactory`] for the
     /// full contract: the closure receives the click position
-    /// (widget-local) and a full [`EventContext`], and returns
+    /// (window-local) and a full [`EventContext`], and returns
     /// `Some(menu)` to mount or `None` to decline (falling through to
     /// the nearest ancestor with a factory).
     pub fn context_menu(
@@ -1489,10 +1492,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     // (produced by `tr!(...)`) provides `From<LocalizedString> for
     // Prop<String>`, which yields a locale-observing `Prop::Bound`, so
     // `.access_label(tr!(save()))` follows the locale. A bare `&str`
-    // does NOT convert to `Prop<String>`, so untranslated literals must
-    // go through `lit!(...)` (downstream crates) or the `_literal`
-    // twins (which store `Prop::Static` — the only literal path
-    // reachable from within `teksilo-core`).
+    // still converts (`impl From<&str> for Prop<String>` in `signal.rs`,
+    // kept so call sites written against the older `impl Into<String>`
+    // setters keep compiling), so routing untranslated literals through
+    // `lit!(...)` (downstream crates) or the `_literal` twins (which
+    // store `Prop::Static` — the only literal path reachable from within
+    // `teksilo-core`) is a convention, not a compiler-enforced one. Do it
+    // anyway: it is what makes an untranslated AT string greppable.
 
     /// Override the accessibility label (`Node::label`) of this widget.
     /// Replaces whatever the inner widget emitted via `set_name`.
@@ -1509,7 +1515,8 @@ impl<W: Widget> WidgetWithHandlers<W> {
     }
 
     /// `#[doc(hidden)]` grep marker for explicitly-untranslated label
-    /// strings — the same convention as `Button::new_literal`. Stores a
+    /// strings — the same convention as the `lit!` macro downstream, which
+    /// replaced the widgets' own `*_literal` constructors. Stores a
     /// `Prop::Static`. The distinct name makes untranslated call sites
     /// greppable as a one-pass audit, and it's the literal path
     /// reachable from within `teksilo-core` (where `lit!` isn't usable).
@@ -1574,7 +1581,7 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// Mark (or un-mark) this widget as disabled for AT. `false`
     /// clears both widget-emitted disabled state AND the framework's
     /// arena-driven disabled gate at
-    /// `accessibility_impl::build_accessibility_recursive`.
+    /// `accessibility_emit_impl::build_accessibility_recursive`.
     pub fn access_disabled(mut self, disabled: bool) -> Self {
         self.handler_set.access_mut().disabled = Some(disabled);
         self

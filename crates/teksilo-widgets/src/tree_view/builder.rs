@@ -240,11 +240,15 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
+    /// **Scroll from a signal the caller owns**, so the position survives the
+    /// view.
+    ///
+    /// A `TreeView` mints its own by default, which is right for a tree whose
+    /// lifetime is the writer's: it is created once and scrolls until they leave.
+    /// (…rest of the existing block unchanged, through the ⚠ animated-signal note…)
     /// How the scroll bar is displayed (default `Permanent`). `Overlay`
     /// and `Thin` float the bar over the content instead of reserving a
     /// layout column for it, mirroring `ScrollArea::scroll_bar_style`.
-    /// **Scroll from a signal the caller owns**, so the position survives the
-    /// view.
     ///
     /// A `TreeView` mints its own by default, which is right for a tree whose
     /// lifetime is the writer's: it is created once and scrolls until they leave.
@@ -433,7 +437,8 @@ impl<T: 'static> TreeView<T> {
     }
 
     /// Set the row-**activation** handler — invoked with the flat row index on a
-    /// primary click on the row body, or **Enter** on the focused row.
+    /// primary click on the row body (per [`activate_on`](Self::activate_on),
+    /// which defaults to a double click), or **Enter** on the focused row.
     /// Activation is distinct from *selection*: arrow-key navigation and
     /// **Space** move / toggle the selection but do **not** activate, so a view
     /// can open/commit a row on a deliberate click/Enter without firing on
@@ -455,6 +460,13 @@ impl<T: 'static> TreeView<T> {
         self
     }
 
+    /// Whether a composite row tooltip offers dwell-to-sticky promotion.
+    /// Default `true`.
+    ///
+    /// Turn it off for a read-only row card: with nothing to reach into there
+    /// is nothing to pin, so the countdown indicator would promise an
+    /// interaction that does not exist and the surface would outlive the
+    /// pointer for no reason.
     /// Enable **type-ahead** ("type to jump"): typing a printable character
     /// while the tree has keyboard focus jumps the selection to the next
     /// *visible* row whose label starts with the accumulated search term,

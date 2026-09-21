@@ -610,7 +610,7 @@ mod tests {
             let side = (n as f64).sqrt().ceil() as u64;
             // Two lattice steps to a cell, so a 100x100 window spans a handful
             // of buckets at either scale. The 256-unit default would put the
-            // whole small lattice in nine cells and measure nothing.
+            // whole small lattice in ~64 cells and measure nothing.
             let mut g = GridHashIndex::new(40.0);
             let start = Instant::now();
             for i in 0..n {
@@ -708,10 +708,12 @@ mod tests {
 
 /// Property-based tests for [`GridHashIndex`].
 ///
-/// `GridHashIndex` is `pub(crate)` (see `pub(crate) mod index;` in
-/// `lib.rs`), so a `tests/*.rs` integration file cannot reach it —
-/// this suite lives inline, after the example-based `mod tests` above,
-/// per house style.
+/// `GridHashIndex` itself is re-exported (`pub use index::{GridHashIndex,
+/// SpatialIndex};` in `lib.rs`), but this suite leans on crate-private
+/// surface a `tests/*.rs` integration file cannot reach — `ItemId`'s
+/// `pub(crate)` constructor, `MAX_CELLS_PER_ITEM`, and the `#[cfg(test)]`
+/// `has_empty_bucket` / `is_oversized` probes — so it lives inline, after
+/// the example-based `mod tests` above, per house style.
 ///
 /// The central risk here is coordinate/cell arithmetic: `cells_for_rect`
 /// divides by `cell_size` and floors, so an item and a query rect that
@@ -789,8 +791,8 @@ mod proptests {
     }
 
     // Zero and near-zero extents are the "single point" edge case
-    // documented in `cells_for_rect`'s width/height <= 0.0 branch; we
-    // also want ordinary and very large extents.
+    // documented in `cell_span_for_rect`'s width/height <= 0.0 branch;
+    // we also want ordinary and very large extents.
     /// Cap on how many cells a single generated item may span per axis, for
     /// the GENERATORS that stress the ordinary bucketed fast path (item
     /// count vs. query correctness, insertion-order independence, etc.).
@@ -818,7 +820,7 @@ mod proptests {
     ///
     /// It is kept at 64 anyway, deliberately, for a coverage reason
     /// unrelated to safety: `arb_extent`'s "a few cells" branch draws
-    /// `(1.0..MAX_CELLS_PER_AXIS)`, and properties 1, 2, 4, 5, 6, 8, 9 lean
+    /// `(1.0..MAX_CELLS_PER_AXIS)`, and properties 1, 2, 3, 5, 6, 8, 9 lean
     /// on that branch to stress the NORMAL bucketed path's boundary/
     /// precision arithmetic (the 2–64-cells-per-axis regime is where an
     /// off-by-one or an f32 rounding slip in `cells_for_rect` would show

@@ -66,7 +66,10 @@ impl LineInfo {
     }
 }
 
-/// The line containing `pos`, or `None` past the end of the document.
+/// The line containing `pos`. A position past the end of the document
+/// **clamps** to the last line rather than yielding `None` — see
+/// [`next_line`], which exists to tell a clamped read apart from a real
+/// next line.
 fn line_at(st: &CodeEditorState, pos: usize) -> Option<LineInfo> {
     let block = st
         .document

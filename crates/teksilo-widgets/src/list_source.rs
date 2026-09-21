@@ -11,7 +11,7 @@
 //! The [`DndLazy`] bundle erases the source's DnD + lazy capability protocol the
 //! same way: the view works in **indices** (geometry-derived), and each closure
 //! translates index → the source's `Key` (via `key_at`) before calling the
-//! source's `can_accept` / `accept_drop` / `row_state` / … . The `Key` type
+//! source's `drag` / `can_accept` / `accept_drop` / … . The `Key` type
 //! therefore never escapes into the (key-less) `ListView<T>`.
 
 use std::cell::RefCell;

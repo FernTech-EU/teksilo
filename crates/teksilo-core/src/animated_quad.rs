@@ -142,8 +142,9 @@ struct AnimatedQuadEntry {
     /// Wall-clock when the animation entered the registry — drives phase.
     started_at: Instant,
     /// Phase-continuous pause support, mirroring `AnimationScheduler`.
-    /// Set when the window goes inactive; on resume, the elapsed
-    /// paused duration is added to `started_at` so `t` doesn't jump.
+    /// Never set per entry: the pause mark lives on the registry, and
+    /// on resume the elapsed paused duration is added to every entry's
+    /// `started_at` so `t` doesn't jump.
     #[allow(dead_code)]
     paused_at: Option<Instant>,
 }
@@ -307,8 +308,8 @@ impl AnimatedQuadRegistry {
         self.window_active
     }
 
-    /// Total registered slots (alive + freed-but-reservable). Test /
-    /// debug API.
+    /// Live slots — one freed by [`Self::cancel_by_widget`] stops
+    /// counting even though it stays reservable. Test / debug API.
     pub fn active_count(&self) -> usize {
         self.entries.len()
     }

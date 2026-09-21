@@ -19,8 +19,9 @@
 //! therefore drives navigation directly while the popup is open, and this module
 //! drives trigger / filter / dismiss from the document state after each edit. The
 //! popup widget ([`CompletionPanel`]) is purely presentational: it renders the
-//! current session from the shared state and rebuilds when the session version or
-//! the selection changes.
+//! current session from the shared state and rebuilds when the selection signal
+//! changes — set on every (re)filter as well as every arrow move, so one
+//! binding covers both.
 //!
 //! # Accessibility
 //!
@@ -716,8 +717,9 @@ pub(super) fn dismiss_suppress(state: &SharedState, ctx: &mut EventContext) {
 // ─────────────────────────────────────────────────────────────────────────
 
 /// The presentational suggestion list — reads the live session from the shared
-/// state, rebuilds when the session version or the selection changes, and
-/// commits a row on tap. It holds no completion logic of its own.
+/// state, rebuilds when the selection signal changes (set on every (re)filter as
+/// well as every arrow move), and commits a row on tap. It holds no completion
+/// logic of its own.
 pub(super) struct CompletionPanel {
     state: SharedState,
     root: Option<WidgetId>,

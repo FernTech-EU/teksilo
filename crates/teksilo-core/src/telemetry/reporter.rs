@@ -16,9 +16,9 @@ use std::rc::Rc;
 use super::event::{Event, RemoteDataExport};
 
 /// The observability sink. Implemented by adapter crates
-/// (`teksilo-analytics-plausible`, `teksilo-analytics-posthog`, etc.) and
-/// by `teksilo-telemetry::DynamicReporter` (which forwards to whichever
-/// concrete adapter is currently active).
+/// (`teksilo-analytics-plausible`, `teksilo-analytics-native`,
+/// `teksilo-analytics-otlp`) and by `teksilo-telemetry::DynamicReporter`
+/// (which forwards to whichever concrete adapter is currently active).
 ///
 /// Object-safe — registered into the app-state registry as
 /// `Rc<dyn UsageReporter>` and looked up by trait-object pointer.
@@ -33,10 +33,10 @@ use super::event::{Event, RemoteDataExport};
 /// The dispatch tap calls `record` unconditionally; the reporter
 /// drops the event when consent is not `Granted`.
 pub trait UsageReporter: 'static {
-    /// Invoked synchronously from any thread. MUST NOT block the
-    /// caller (queue and return). Drops events when consent is not
-    /// `Granted`. Errors are buffered internally — there is no
-    /// return value because the caller cannot meaningfully react.
+    /// Invoked synchronously from any call site, on the UI thread.
+    /// MUST NOT block the caller (queue and return). Drops events when
+    /// consent is not `Granted`. Errors are buffered internally — there
+    /// is no return value because the caller cannot meaningfully react.
     fn record(&self, event: &Event<'_>);
 
     /// Best-effort drain of the on-disk queue. Called on graceful
@@ -75,8 +75,8 @@ pub trait UsageReporter: 'static {
         None
     }
 
-    /// `"plausible"`, `"posthog"`, `"otlp"`, `"stub"`. Shown in the
-    /// widget's "what gets sent" tab.
+    /// `"plausible"`, `"teksilo-collector"`, `"otlp"`, `"stub"`. Shown in
+    /// the widget's "what gets sent" tab.
     fn adapter_name(&self) -> &'static str;
 
     /// Endpoint URL displayed verbatim in the consent widget.
@@ -92,8 +92,9 @@ pub trait UsageReporter: 'static {
 
 /// Registration type for the dispatch tap.
 ///
-/// `teksilo-telemetry::TelemetryBundle::open` constructs one of these
-/// and registers it into `app_state`. The dispatch tap in
+/// `TeksiloAppBuilder::install_telemetry` constructs one of these from
+/// the `OpenedTelemetry` that `teksilo-telemetry::TelemetryBundle::open`
+/// returns, and registers it into `app_state`. The dispatch tap in
 /// `crate::widget_tree::WidgetTree::dispatch_intent` looks it up
 /// by `TypeId`, calls `record` if found.
 ///
@@ -104,8 +105,9 @@ pub struct TelemetryContext {
     pub reporter: Rc<dyn UsageReporter>,
     /// Per-process random session id. Not persisted across restarts.
     pub session_id: String,
-    /// Event-schema version at this build. Bumped whenever the
-    /// framework's events.yaml gains, drops, or reshapes an event.
+    /// Event-schema version at this build — the value the app handed to
+    /// `TelemetryBundle::new`. Bumped whenever the event schema it
+    /// describes gains, drops, or reshapes an event.
     pub schema_version: u32,
 }
 

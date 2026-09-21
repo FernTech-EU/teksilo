@@ -99,10 +99,10 @@ pub trait SliderStyle: 'static {
     /// instead.
     ///
     /// The **painted** knob is deliberately not grown here: A10 gives the
-    /// slider its coarse target through `target_regions` and `hit_outset` over
-    /// an unchanged 14 dp visual (the design's Constants table: "14 dp visual →
-    /// 24 dp hit, 44 at Touch"). This exists so a style *may* disagree, not so
-    /// the framework does.
+    /// slider its coarse target through `target_regions`, which reports the
+    /// knob at this diameter, over an unchanged 14 dp visual (the design's
+    /// Constants table: "14 dp visual → 24 dp hit, 44 at Touch"). This exists
+    /// so a style *may* disagree, not so the framework does.
     fn thumb_diameter_for(&self, cfg: &SliderStyleConfig, _tokens: &InputTokens) -> f32 {
         self.thumb_diameter(cfg)
     }

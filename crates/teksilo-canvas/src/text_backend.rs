@@ -194,8 +194,8 @@ pub struct TextLayout {
     /// raster-scale-independent, but the glyph quads behind
     /// `layout_key` sample bitmaps of this density — drawing a
     /// retained layout under a *different* ambient scale renders
-    /// soft/oversharp glyphs. `Canvas::draw_text_layout` debug-asserts
-    /// on the mismatch; widgets that retain layouts across paints
+    /// soft/oversharp glyphs. `Canvas::draw_text_layout` warns in debug
+    /// builds on the mismatch; widgets that retain layouts across paints
     /// should re-layout when the scale changed.
     pub raster_scale: f32,
     /// Per-line, per-character geometry, when the backend produced it.
@@ -439,8 +439,9 @@ pub trait TextBackend {
     /// the glyph cache for a key can be evicted while the metrics cache
     /// — which is keyed by the text — survives, so a real backend can map
     /// the key back to its text for the message. Returns `None` when the
-    /// backend can't (the default, including the mock, which shares one
-    /// `layout_key` across all layouts). Never on a hot path; only invoked
+    /// backend can't (the default). [`MockTextBackend`] overrides it: it
+    /// hands out a distinct `layout_key` per layout and remembers each
+    /// one's text. Never on a hot path; only invoked
     /// from a `cfg(debug_assertions)` warning.
     fn debug_layout_text(&self, _layout_key: u64) -> Option<String> {
         None

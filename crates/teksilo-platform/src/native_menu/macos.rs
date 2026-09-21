@@ -14,8 +14,10 @@
 //! [`AppEventPoster`]. `teksilo-app` routes the payload back into the window's
 //! widget tree, where the item's intent / action fires.
 //!
-//! A minimal application menu (About / Hide / Quit) is auto-prepended unless the
-//! snapshot already declares a [`StandardMenuRole::App`] root, so the app always
+//! The conventional application menu (About / Hide / Quit) comes from the
+//! snapshot's [`StandardMenuRole::App`] root, which the widget layer guarantees —
+//! it injects one with localized labels when the model declares none, so this
+//! backend never fabricates user-visible strings of its own — and the app always
 //! has the conventional first menu with a working ⌘Q.
 
 use std::collections::HashMap;

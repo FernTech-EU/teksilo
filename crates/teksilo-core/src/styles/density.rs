@@ -5,9 +5,9 @@
 //! a density-aware one.
 //!
 //! These live in `teksilo-core` rather than `teksilo-widgets` so that
-//! `teksilo-terminal`, `teksilo-webview`, `teksilo-scene` and the future
-//! `target_audit` can all reach them without a widgets dependency;
-//! `teksilo-widgets` re-exports them for ergonomics.
+//! `teksilo-terminal`, `teksilo-webview`, `teksilo-scene` and
+//! `accessibility::target_audit` can all reach them without a widgets
+//! dependency; `teksilo-widgets` re-exports them for ergonomics.
 //!
 //! Each helper is the **identity at [`TargetDensity::Compact`]** for any value
 //! that already conforms, which is what makes the density layer a no-op until

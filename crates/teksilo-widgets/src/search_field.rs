@@ -140,9 +140,9 @@ pub struct SearchField {
     highlighted_slot: RefCell<Option<Signal<Option<usize>>>>,
     /// Pre-created suggestions panel content. Inserted as a dormant
     /// arena root in `build()` and shown as an overlay anchored to
-    /// the field via `OverlayRequest`. Tracked across rebuilds so the
-    /// previous subtree can be torn down — the framework's rebuild
-    /// destroys this widget's direct children but not arena roots.
+    /// the field via `OverlayRequest`. Added detached, so the
+    /// framework owns the teardown — the previous panel is reaped on
+    /// rebuild and the live one when the field is destroyed.
     panel_content_id: Option<WidgetId>,
     /// Whether the suggestions overlay is currently shown. Set true
     /// when the open helper fires `ctx.show_overlay`, set false by the
@@ -513,7 +513,7 @@ impl Widget for SearchField {
                 // (we `set_dormant` it there), `show_overlay` only
                 // pushes onto the stack, and `layout_impl`'s overlay
                 // loop skips dormant content — popup never paints.
-                // ComboBox does the same dance at combo_box.rs:545.
+                // ComboBox does the same dance in its `open_overlay` helper.
                 // Build the panel if this is its first open — `activate` alone
                 // would wake a node whose subtree does not exist yet.
                 ctx.materialize_now(panel_id);
@@ -934,9 +934,10 @@ impl Widget for SuggestionPanel {
         // Listbox surface — routed through `PopoverStyle` (the
         // `Menu`-flavoured variant), so the panel background, border,
         // corner radius, and the field-attached drop shadow are owned
-        // by the active popover style. The suggestion popup always
-        // opens below the field (`BelowPreferred` in `SearchField`),
-        // so the placement suppresses the top-side shadow.
+        // by the active popover style. The suggestion popup normally
+        // opens below the field (`NearAnchor` in `SearchField`, which
+        // flips above only when there is no room below), so the
+        // placement handed to the style suppresses the top-side shadow.
         let listbox_inner = ctx.add(column);
         let padded = ctx.add(Padding::uniform(sf::PANEL_PADDING).child(listbox_inner));
         let popover_style: teksilo_core::styles::SharedPopoverStyle =
@@ -1065,8 +1066,8 @@ impl Widget for SuggestionListBox {
 struct SuggestionRow {
     label: String,
     index: usize,
-    /// Minimum row height — pulled from
-    /// `SearchFieldStyle::row_height` at build time.
+    /// Minimum row height — the `recipe_search_field_style::ROW_HEIGHT`
+    /// module constant, read at build time.
     row_height: f32,
     selected_signal: Signal<Option<usize>>,
     inner_id: WidgetId,

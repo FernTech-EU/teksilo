@@ -139,7 +139,8 @@ fn checkbox_mounts() {
 }
 
 /// The regression guard: every `RadioStyleConfig` signal is derived, so a
-/// style that observes one panics the moment a radio is built.
+/// style that writes one — `Signal::set` still panics on a derived signal —
+/// takes the app down the moment a radio is built.
 #[test]
 fn radio_mounts() {
     for theme in themes() {
@@ -560,13 +561,12 @@ fn a_text_field_is_at_least_the_control_height() {
         // It *is* taller, and that is the framework's doing rather than
         // the preset's: `TextInput` sizes itself from its editor's line
         // box plus its own vertical inset plus the reserved validation
-        // strip, none of which a style can shorten, so the 22 dp floor
-        // never bites. The gap therefore widens as the control height
-        // falls — under IntUI's 24 dp button it is 8 dp, under this
-        // preset's 22 dp button it is 10 — and bounding it against the
-        // button would be measuring the wrong thing. What actually has to
-        // hold is that the *chrome* adds nothing on top, which
-        // `the_field_chrome_adds_no_vertical_inset` pins directly.
+        // strip, none of which a style can shorten, so the floor — the
+        // density sweep's 24 dp, over the 22 dp bezel — never bites. The
+        // gap therefore widens as the control height falls, and bounding
+        // it against the button would be measuring the wrong thing. What
+        // actually has to hold is that the *chrome* adds nothing on top,
+        // which `the_field_chrome_adds_no_vertical_inset` pins directly.
         assert!(
             field > button,
             "the field is no longer taller than the button — the framework's \

@@ -51,7 +51,7 @@ pub struct ToastStyleConfig {
     /// optional progress bar). The recipe arranges it next to the
     /// leading glyph.
     pub content: WidgetId,
-    /// Pre-built `SeverityGlyph` (or app-supplied custom leading
+    /// Pre-built `SeverityBadge` (or app-supplied custom leading
     /// widget). The recipe places it at the leading edge.
     pub leading_glyph: WidgetId,
     /// Optional pre-built close `IconButton`. `None` when the toast

@@ -12,7 +12,9 @@
 //! `.on_tap(..)` that stopped it.
 //!
 //! Which is why exercising a hook on a bare widget proves nothing about it. Two
-//! probes here answer every hook distinctively, are then wrapped by a builder
+//! probes here answer every hook distinctively — bar `culls_children` and
+//! `accepts_child_hit`, which joined `Widget` after the probes were written and
+//! are held by the lint alone — are then wrapped by a builder
 //! method, and are asked again through the wrapper. The pure queries are asked
 //! directly; the hooks that only a framework pass can call are driven by a real
 //! layout / paint / accessibility pass and observed through a counter.
@@ -203,8 +205,8 @@ impl Widget for QueryProbe {
     }
 }
 
-/// Ask every pure-query hook through `widget` and name each one that did not
-/// answer [`QueryProbe`]'s value.
+/// Ask every pure-query hook [`QueryProbe`] answers through `widget` and name
+/// each one that did not answer its value.
 ///
 /// Takes `&mut dyn Widget` so the calls go through the vtable the arena stores
 /// — the same dispatch the framework performs, not an inherent method the

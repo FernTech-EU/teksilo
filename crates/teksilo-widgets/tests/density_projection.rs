@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! The density sweep's contract, checked three ways.
+//! The density sweep's contract, checked four ways.
 //!
 //! 1. **Compact is the identity.** Every `Recipe*Style::for_tokens` at
 //!    `TargetDensity::Compact` equals its `Default`, and every dimension

@@ -273,7 +273,10 @@ impl<T: 'static> SortFilterListModel<T> {
             _filters_handle: None,
         }));
 
-        // Register upstream observer; on any source change rebuild + Reset.
+        // Register upstream observer; on a source change rebuild + Reset —
+        // except for the `ItemUpdated` fast path, which patches the one row
+        // (scoped `ItemUpdated`, or nothing at all when the row was and stays
+        // filtered out). See `rebuild_and_notify_with`.
         let weak = Rc::downgrade(&inner);
         let upstream_handle = (observe_fn)(Box::new(move |change| {
             if let Some(strong) = weak.upgrade() {

@@ -37,8 +37,10 @@ pub(super) enum KeyAction {
     /// or anything else where the resulting caret position is not on
     /// a wrap boundary or, if it is, should render at the downstream
     /// (end-of-previous-line) placement. Clears the sticky column AND
-    /// resets `cursor_affinity` to `Downstream`. Covers Left/Right,
-    /// Ctrl+Home/Ctrl+End, Backspace/Delete/Enter/typing, paste, etc.
+    /// resets `cursor_affinity` to `Downstream`. Covers
+    /// Ctrl+Home/Ctrl+End, Backspace/Delete/Enter/typing, paste and the
+    /// Shift+Arrow cell-selection branch, etc. (the plain Left/Right
+    /// arrows carry [`KeyAction::LineEdgeMotion`]).
     ClearPreferredX,
     /// Visual-line edge motion that went through
     /// [`move_cursor_to_line_edge`], or horizontal motion that had to
@@ -249,7 +251,7 @@ pub(super) fn handle_key(
                     KeyAction::ClearPreferredX
                 } else {
                     // `move_cursor_to_line_edge` sets `cursor_affinity`
-                    // from the hit-test, so this path returns
+                    // from the line's extent, so this path returns
                     // `LineEdgeMotion` (skips the post-processing
                     // affinity reset).
                     move_cursor_to_line_edge(&mut st, LineEdge::Start, mode);
@@ -269,8 +271,8 @@ pub(super) fn handle_key(
                     // returns the *next* block when queried at a
                     // boundary; (b) wrapped blocks stop at the wrap
                     // point, which is the standard editor behaviour.
-                    // The helper sets `cursor_affinity` from
-                    // hit_test → returns `LineEdgeMotion`.
+                    // The helper sets `cursor_affinity` from the
+                    // line's extent → returns `LineEdgeMotion`.
                     move_cursor_to_line_edge(&mut st, LineEdge::End, mode);
                     KeyAction::LineEdgeMotion
                 }
@@ -526,7 +528,8 @@ pub(super) fn handle_key(
                 // `KeyDown::text` with the character produced by the
                 // key (post-layout mapping, so Shift / dead keys /
                 // layout translations are already applied). Guard
-                // against Ctrl / Super (Cmd) being held — some
+                // against the platform accelerator (⌘ on macOS, Ctrl
+                // elsewhere) being held — some
                 // layouts populate `text` with a control character
                 // even for Ctrl+letter, and we don't want
                 // unhandled Ctrl combos (Ctrl+F, Ctrl+W, …) to
@@ -1121,9 +1124,9 @@ pub(super) fn clear_ime_preedit(state: &SharedState) {
     st.ime_preedit = None;
 }
 
-/// Shared helper for printable-character ingestion: push the text
+/// Helper for IME-commit character ingestion: push the text
 /// into `pending_chars`, clear sticky `preferred_x`, request a frame.
-/// Reused by the IME commit path.
+/// Called only from the IME commit path.
 fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -> EventResponse {
     if text.is_empty() {
         return EventResponse::Ignored;
@@ -1587,8 +1590,9 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
     }
 
     // Scroll so the new caret position is visible. We do a simple
-    // viewport-height step on the scroll signal and let the frame
-    // loop's `ensure_caret_visible` path clamp it.
+    // viewport-height step on the scroll signal and let
+    // `caret_moved_epilogue`'s `ensure_caret_visible` clamp it once
+    // `handle_key` returns — the frame loop deliberately never calls it.
     let new_scroll =
         (st.scroll_y.get() + (direction as f32) * page_step).clamp(0.0, st.max_scroll_y.get());
     st.scroll_y.set(new_scroll);
@@ -1733,10 +1737,10 @@ fn navigate_table_cell_down(
     }
 }
 
-/// Move the caret to the first block of `(table_id, row, col)`. Uses
-/// `table_cell_blocks_first_position` via the table handle obtained
-/// through the current cursor's snapshot. No-op if the cell doesn't
-/// exist.
+/// Move the caret to the first block of `(table_id, row, col)`. Finds
+/// the table by walking the document's flow (see the body for why the
+/// cursor's own snapshot will not do), then takes the cell's first
+/// block. No-op if the cell doesn't exist.
 fn move_cursor_to_cell_first_block(st: &mut EditorState, table_id: usize, row: usize, col: usize) {
     // Re-resolve the table via `current_table_cell` is insufficient
     // because after `insert_row_below` the cursor may still be in

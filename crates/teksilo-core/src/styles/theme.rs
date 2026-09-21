@@ -212,8 +212,9 @@ impl Theme {
     /// This is a **token projection only**: it replaces [`Self::input`] with
     /// [`InputTokens::for_density`] and carries `style_slots` and `extensions`
     /// across verbatim. It deliberately does *not* re-run any recipe
-    /// constructor, because there is nothing in a theme to re-run — every
-    /// `ComponentStyleSlots` slot is `None` in the shipped presets, and each
+    /// constructor, because there is nothing in such a theme to re-run — every
+    /// `ComponentStyleSlots` slot is `None` in a raw-token theme and in the
+    /// IntUI preset, and each
     /// widget builds its `Recipe*Style` lazily at its own build site, in
     /// `teksilo-widgets`, from `ctx.theme().input`. Changing the tokens here is
     /// therefore sufficient; the widgets read the new values on their next

@@ -409,7 +409,8 @@ mod tests {
 ///   5. `total()` conserves the sum of every row height plus the `rows-1`
 ///      inter-row gaps plus the insets (CONSERVATION, f32 epsilon).
 ///
-/// 256 cases per property (the workspace default); override with
+/// 256 cases per property (the workspace default), except the boundary
+/// property below, which pins its own 512; override the rest with
 /// `PROPTEST_CASES=4096 cargo test -p teksilo-widgets --lib row_offsets`.
 #[cfg(test)]
 mod proptests {

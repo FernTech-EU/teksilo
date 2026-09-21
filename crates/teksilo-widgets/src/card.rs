@@ -127,14 +127,14 @@ impl Card {
         self
     }
 
-    /// Override the corner radius (default: theme `components.card.corner_radius`).
+    /// Override the corner radius (default: `CARD_CORNER_RADIUS` in the active `CardStyle`'s recipe — see `recipe_card_style.rs`).
     /// Accepts a static `f32` or a reactive `Signal<f32>`.
     pub fn corner_radius(mut self, radius: impl Into<Prop<f32>>) -> Self {
         self.corner_radius = Some(radius.into());
         self
     }
 
-    /// Override the padding (default: theme `components.card.padding`).
+    /// Override the padding (default: `CARD_PADDING` in the active `CardStyle`'s recipe — see `recipe_card_style.rs`).
     /// Accepts a static `f32` or a reactive `Signal<f32>`.
     pub fn padding(mut self, padding: impl Into<Prop<f32>>) -> Self {
         self.padding = Some(padding.into());

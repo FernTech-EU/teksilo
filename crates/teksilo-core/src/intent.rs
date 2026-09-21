@@ -76,12 +76,13 @@ impl Intent {
         }
     }
 
-    /// Tag the intent with its origin. Called by framework
-    /// activation wrappers (button on_activate, menu on_select,
-    /// shortcut activation, gesture on_recognized) right before
-    /// dispatch. App code typically doesn't call this directly
-    /// — use `EventContext::send_intent` from inside the right
-    /// handler and the source is set automatically.
+    /// Tag the intent with its origin. Called by the shortcut
+    /// activation path right before dispatch; the other framework
+    /// activation wrappers (button, menu, gesture, AT) tag through
+    /// the dispatcher's `EventContext::current_source` instead. App
+    /// code typically doesn't call this directly — use
+    /// `EventContext::send_intent` from inside the right handler and
+    /// the source is set automatically.
     ///
     /// (Note: `EventContext::send_intent` infers the source from
     /// the handler context where possible; this method is the

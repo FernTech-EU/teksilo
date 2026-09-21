@@ -93,8 +93,8 @@ pub struct TreeRow<K, T> {
     /// It is a deadlock for a source that wants to materialise a branch only when it
     /// is opened. Such a source emits no children until the row is expanded, so the
     /// row is derived childless, so no chevron is drawn, so there is nothing to
-    /// click, so it is never expanded. `StandardTreeItem::on_toggle` exists to hang
-    /// exactly that kind of load off, and without this the callback can never fire.
+    /// click, so it is never expanded. `StandardTreeItem::on_chevron_toggle` exists to
+    /// hang exactly that kind of load off, and without this the callback can never fire.
     ///
     /// Set it to `Some(true)` to promise children that are not there yet: the row
     /// draws its chevron, the toggle reaches the app, and the app re-sources with the

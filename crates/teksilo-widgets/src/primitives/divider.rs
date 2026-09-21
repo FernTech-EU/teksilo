@@ -32,7 +32,7 @@ use teksilo_core::widget::{LayoutContext, PaintContext, Widget};
 use teksilo_tokens::Color;
 use teksilo_tokens::Orientation;
 
-/// A themed separator line. Thickness defaults to `DividerStyle::thickness`
+/// A themed separator line. Thickness defaults to [`DIVIDER_THICKNESS`]
 /// and the color defaults to `BorderRole::Divider`; both can be overridden.
 #[derive(Debug)]
 pub struct Divider {

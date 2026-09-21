@@ -13,8 +13,9 @@
 //! This widget is the **content** of a tooltip overlay — the anchor /
 //! hover trigger / overlay lifetime live in the surrounding attach
 //! API. A caller (the owning widget's build) wraps a `RichTooltipWidget`
-//! into an `OverlayRequest` or attaches it via the simple tooltip
-//! attach API once that integration lands.
+//! into an `OverlayRequest` or attaches it via the tooltip attach API
+//! ([`attach_rich_tooltip`](super::attach::attach_rich_tooltip) and its
+//! `_content` / `_source` siblings).
 //!
 //! Sticky-on-dwell:
 //! - At t=0 the tooltip is shown by the normal hover path.
@@ -26,8 +27,10 @@
 //! - At step 4 the indicator flips to a pin icon and the widget's
 //!   `sticky` signal goes true. The widget tree (via
 //!   `attach_tooltip_with_sticky`) auto-promotes the overlay on
-//!   the same 2 s timer: removes the entry from the hover tracker
-//!   and swaps the dismiss behavior to `EscapeOrClickOutside`. The
+//!   the same 2 s timer: flags the entry sticky so the hover tracker
+//!   no longer auto-dismisses it, and swaps the dismiss behavior to
+//!   `EscapeOrClickOutside` (the entry itself stays, so a later
+//!   dismissal can re-show the tooltip from scratch). The
 //!   widget's a11y role flips from `Tooltip` to `Dialog` and a
 //!   `Focus` action is advertised on the node. Promotion does **not**
 //!   move keyboard focus into the panel — the user Tabs in. This is
@@ -349,7 +352,7 @@ impl Widget for RichTooltipWidget {
         // otherwise, if the tooltip was bound to a shortcut id via
         // `.for_shortcut(id)`, the effective primary keystroke is
         // pulled from the tree's `ShortcutRegistry`. The registry's
-        // `version` signal is bound to the tooltip at `Relayout`
+        // `version` signal is bound to the tooltip at `Rebuild`
         // level so user rebinds and late registrations refresh the
         // chip on the next pass.
         let shortcut_text: Option<String> = content.shortcut_label.clone().or_else(|| {
@@ -601,7 +604,7 @@ fn make_link_click_handler(
                     // can't know its own overlay id, so the dispatch
                     // layer injects the real parent
                     // (`overlay_ancestor_for_widget(source_widget)` in
-                    // event_dispatch_impl.rs). That links this nested
+                    // pointer_router.rs). That links this nested
                     // tooltip to the one it was opened from, so
                     // dismissing the parent cascade-closes it
                     // (`OverlayManager::dismiss_immediate` BFS). Same

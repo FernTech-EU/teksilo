@@ -52,7 +52,7 @@
 //! left the row, which is most of the departures a hand actually makes.
 //!
 //! The algorithm is RTL-symmetric **automatically** because the
-//! "near edge" is inferred from `anchor.x` vs `submenu.x`, not from
+//! "near edge" is inferred from `apex.x` vs `submenu.x`, not from
 //! a hardcoded `Leading` / `Trailing` enum. A submenu opened to the
 //! left of its parent (RTL, or LTR with no room right) flips the
 //! triangle's near edge to the submenu's right edge without any

@@ -3,7 +3,7 @@
 
 //! `SpinValue` trait — abstracts numeric primitives for `SpinBox`.
 //!
-//! Implemented for `i32`, `i64`, `u32`, `u64`, `usize`, `f32`, `f64`.
+//! Implemented for `i32`, `i64`, `u8`, `u32`, `u64`, `usize`, `f32`, `f64`.
 //! The trait is **sealed** via the private [`sealed::Sealed`]
 //! supertrait: only the primitive numeric types above implement it,
 //! and downstream crates cannot add their own implementations.

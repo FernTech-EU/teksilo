@@ -145,8 +145,8 @@ impl Widget for TextInputField {
         // `read_only_effective` snapshots the build-time state so the
         // shared TextInputState's read-only mode is set once. Disabled
         // is now arena-driven and propagates per-paint via
-        // `effective_enabled`; the field's interaction handlers also
-        // check `ctx.is_enabled(self_id)` for keystroke gating. The
+        // `effective_enabled`; the framework gates pointer events on
+        // `arena.is_enabled` before they reach this field's handlers. The
         // shared state's read_only stays a separate, document-level
         // concept (allows selection / no edits).
         let read_only_effective = self.read_only || !self.enabled.get();
@@ -349,12 +349,12 @@ impl Widget for TextInputField {
         // block there). Selection is theme + window-active only, so it
         // stays on this effect path.
         let theme_signal = ctx.theme_signal();
-        // The selection colour is also window-active-aware. `ctx.effect` can
-        // only observe *mutable* signals (a derived `theme.zip(window_active)`
-        // would panic), so the theme effect reads the live window-active value
-        // via `.get()`, and the separate window-active effect (below, near the
-        // frame handles) re-applies the selection colour reading the live
-        // theme. Between them, a change to either axis re-applies correctly.
+        // The selection colour is also window-active-aware. Rather than one
+        // effect on a derived `theme.zip(window_active)`, the theme effect
+        // reads the live window-active value via `.get()`, and the separate
+        // window-active effect (below, near the frame handles) re-applies the
+        // selection colour reading the live theme. Between them, a change to
+        // either axis re-applies correctly.
         {
             let theme = theme_signal.get();
             let colors = &theme.colors;
@@ -659,10 +659,13 @@ impl Widget for TextInputField {
         let handlers = HandlerSet::new()
             .focusable(true)
             .cursor(CursorIcon::Text)
-            // Secure fields opt the focused node out of OS IME
-            // composition so the preedit / candidate window can't
-            // surface plaintext. Read by the platform IME layer at
-            // focus-change time (default `true` for plain fields).
+            // Secure fields declare `ImePurpose::Password` so the platform
+            // suppresses the IME's learning dictionary / candidate history —
+            // the OS input method stays enabled (a password must still be
+            // composable in a non-Latin script), and masking the preedit is
+            // this widget's own job. Read by the platform IME layer at
+            // focus-change time; an unset descriptor (the node default) is
+            // what means "no OS IME".
             .ime_input(if self.secure {
                 teksilo_core::ime::ImeContext::password()
             } else {

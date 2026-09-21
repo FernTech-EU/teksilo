@@ -43,7 +43,9 @@ pub(crate) struct SegmentCell {
     /// `visible` prop is currently true), which is also what the private
     /// index mirror holds.
     pub(crate) index: usize,
-    /// Number of live segments, for `size_of_set`.
+    /// Number of live segments at construction time. Currently unused by
+    /// this cell — `size_of_set` is set on the parent `SegmentedControl`'s
+    /// own AT node from its live list, not from here.
     pub(crate) live_count: usize,
     /// The control's private index mirror — the single write target for
     /// every internal interactive path.

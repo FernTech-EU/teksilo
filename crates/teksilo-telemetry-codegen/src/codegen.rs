@@ -11,7 +11,7 @@ use crate::manifest::{EventDef, PropDef, Schema};
 pub fn generate(schema: &Schema, warnings: &[String]) -> TokenStream {
     let schema_version = schema.schema_version;
 
-    // Emit each expired-event warning as a doc comment on a dummy const
+    // Emit each expired-event warning as a `compile_error!` call
     // (stable-Rust alternative to proc_macro::Diagnostic on stable).
     let warning_tokens: Vec<TokenStream> = warnings
         .iter()

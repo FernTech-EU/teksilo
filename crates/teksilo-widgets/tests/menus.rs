@@ -109,8 +109,8 @@ fn dispatcher_installed_when_menubar_mounted() {
 #[test]
 fn menubar_with_two_menus_has_distinct_mnemonic_keys() {
     // The Alt+F and Alt+E mnemonics should map to two different
-    // triggers. Verified through the AT `access_key` field that the
-    // walker propagates.
+    // triggers. This only checks the trigger ids differ by label;
+    // it does not assert the AT `access_key` field.
     let mut t = fresh_tree();
     let mb = t.add(
         MenuBar::new()

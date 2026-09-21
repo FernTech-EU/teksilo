@@ -35,13 +35,17 @@ use crate::toolbar::build_toolbar;
 /// Background-mode selector for the canvas pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackgroundMode {
-    /// Use `SurfaceRole::Main` from the canvas's own theme.
+    /// Use `SurfaceRole::Sunken` from the canvas's own theme — deliberately
+    /// not `Main`, so controls that themselves sit on `Main` stay visible
+    /// against the backdrop.
     Themed,
     /// Use `SurfaceRole::Content` (sunken / inset look).
     ContentSurface,
     /// Use `SurfaceRole::Sunken` — flat sunken look.
     Sunken,
-    /// Show a checkered transparency pattern (light + dark squares).
+    /// A checkered transparency pattern (light + dark squares). Currently
+    /// approximated with `SurfaceRole::Sunken` — the real pattern needs a
+    /// custom paint and is deferred (see `PreviewCanvas::build_background`).
     Checkered,
 }
 
@@ -182,10 +186,10 @@ impl AppState {
             canvas_rebuild_tick: Signal::new(0),
             // Default to "Native" so the previewer adopts the OS
             // desktop palette at startup (KDE Breeze, GNOME Adwaita,
-            // etc.). `run_previewer` calls `CanvasTheme::Native.theme()`
-            // to resolve the initial concrete `Theme` so chrome,
-            // canvas, and the highlighted toolbar button all agree
-            // on frame 1.
+            // etc.). `run_previewer` calls
+            // `CanvasTheme::Native.theme_at(density)` to resolve the initial
+            // concrete `Theme` so chrome, canvas, and the highlighted
+            // toolbar button all agree on frame 1.
             canvas_theme: Signal::new(CanvasTheme::Native),
             canvas_locale: Signal::new(None),
             density: Signal::new(teksilo_tokens::TargetDensity::Compact),

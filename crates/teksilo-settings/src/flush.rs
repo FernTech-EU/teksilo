@@ -589,7 +589,8 @@ impl DebouncedWriter {
     /// Queue a [`Patch`] — a replayable mutation of the file.
     ///
     /// The patch is **appended** to this writer's queue, and the deadline is
-    /// reset to `now + delay` (the debounce window restarts on activity). At
+    /// moved **forward** to `now + delay` (the debounce window restarts on
+    /// activity; an already-armed retry backoff is never pulled back). At
     /// the deadline the whole queue is applied, in order, to the document read
     /// from disk **under an exclusive lock**, and the result written atomically.
     ///

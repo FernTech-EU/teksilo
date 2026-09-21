@@ -4,7 +4,7 @@
 //! Default `PopoverStyle` impl driven by paint-recipe data.
 //!
 //! `RecipePopoverStyle` constructs the IntUI `PopoverSurface`
-//! (`crates/teksilo-widgets/src/popover.rs`) — an elevated panel with
+//! (`crates/teksilo-widgets/src/popover_surface.rs`) — an elevated panel with
 //! `surface_main` background, accent-aware shadow whose attached side
 //! is suppressed (so the panel reads as connected to its trigger),
 //! and an optional directional caret that points at the trigger.

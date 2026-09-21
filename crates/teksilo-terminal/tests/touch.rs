@@ -41,9 +41,9 @@ fn cell_size() -> (f32, f32) {
 }
 
 /// A window point inside the cell at `(col, row)` of an origin-aligned terminal.
-/// The `+ 6.0` is the chrome inset between the widget's bounds and the grid's
-/// content origin; a fractional `col`/`row` lands inside the cell rather than on
-/// its edge.
+/// The `+ 6.0` clears the chrome inset between the widget's bounds and the grid's
+/// content origin (`RecipeTerminalStyle::content_inset()`, 4 dp); a fractional
+/// `col`/`row` lands inside the cell rather than on its edge.
 fn cell_position(col: f32, row: f32) -> Point {
     let (cw, ch) = cell_size();
     Point::new(cw * col + 6.0, ch * row + 6.0)
@@ -578,8 +578,9 @@ fn a_wheel_report_names_the_cell_under_the_pointer() {
 }
 
 /// A real mouse wheel carries **no** position — it is routed by hover, and
-/// `WidgetEvent::Scroll::position` is `None` for it — so the cell comes from
-/// where the cursor last was. Without that, the shipped wheel would keep
+/// `WidgetEvent::Scroll::window_position` is `None` for it — so the cell comes
+/// from where the cursor last was. Without that, the shipped wheel would keep
+/// reporting the origin however the positioned form behaved. Without that, the shipped wheel would keep
 /// reporting the origin however the positioned form behaved.
 #[test]
 fn a_positionless_wheel_report_names_the_cell_the_cursor_is_over() {

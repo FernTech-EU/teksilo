@@ -5,7 +5,7 @@
 //!
 //! Built atop the [`ListModel<T>`](teksilo_data::ListModel) /
 //! [`ListDataSource`] data layer in
-//! `teksilo-data` and the `teksilo-tokens` `TableStyle`. Mirrors Qt's
+//! `teksilo-data` and the `teksilo-core` `TableStyle`. Mirrors Qt's
 //! `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
 //! The core skeleton: single body pane, row-virtualized with alternating
 //! backgrounds, grid lines, `Role::Table > Role::Row > Role::Cell`
@@ -120,8 +120,8 @@ const SCROLLBAR_THICKNESS: f32 = 12.0;
 /// Pane partition produced by [`TableView::display_order`].
 ///
 /// `leading_count` columns sit in the leading-pinned region, the next
-/// `middle_end - leading_count` columns sit in the middle (scrollable
-/// in future phases) region, and the remainder are trailing-pinned.
+/// `middle_end - leading_count` columns sit in the middle (horizontally
+/// scrollable) region, and the remainder are trailing-pinned.
 /// All counts are positions inside the display-order vector.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct PaneBoundaries {
@@ -339,7 +339,7 @@ pub struct TableView<T: 'static> {
 
     /// `true` while this view — its root or any descendant (e.g. a cell
     /// editor) — holds keyboard focus. Captured at build from
-    /// [`BuildContext::view_focus_active`] and bound `RepaintOnly`. Drives
+    /// [`BuildContext::begin_view_focus`] and bound `RepaintOnly`. Drives
     /// **focus-aware selection**: the selection band paints with the active
     /// `Selected` chrome while focused and the muted `SelectedInactive` chrome
     /// once focus leaves the table — the standard desktop affordance.
@@ -437,7 +437,7 @@ pub struct TableView<T: 'static> {
     /// Cross-widget export / foreign-receive machinery — the builders
     /// (`.exportable`, `.export_external`, `.accept_foreign_rows`,
     /// `.on_rows_received`, `.on_rows_transferred_out`), the drag-start payload
-    /// build, and the move-out completion, shared by all four data views.
+    /// build, and the move-out completion, shared by all five data views.
     export: crate::data_views::RowExport<T>,
 
     /// Whole-view enabled state, statically or reactively. Forwarded to the
@@ -1019,8 +1019,9 @@ impl<T: 'static> TableView<T> {
         self
     }
 
-    /// Show or hide the built-in vertical scroll bar. Default: visible. Set to
-    /// `false` when an external scroll bar is wired to [`scroll_y_signal`](Self::scroll_y_signal).
+    /// Show or hide the built-in vertical and horizontal scroll bars. Default:
+    /// visible. Set to `false` when an external scroll bar is wired to
+    /// [`scroll_y_signal`](Self::scroll_y_signal).
     pub fn show_internal_scrollbars(mut self, show: bool) -> Self {
         self.show_internal_scrollbars = show;
         self
@@ -1331,7 +1332,7 @@ impl<T: 'static> TableView<T> {
     /// here is told nothing at all. Worse, the first arrow press steps *past*
     /// that row, because the cursor was somewhere the user was never shown.
     ///
-    /// The row resolves the way `context_menu_key_target` below resolves it:
+    /// The row resolves the way `widget_impl`'s `context_menu_key_target` resolves it:
     /// the focused cell's row if the user has navigated, else the first
     /// selected row. Both are "the row this table is currently about", and a
     /// session restored into a selection has no focused cell yet.
@@ -1343,7 +1344,7 @@ impl<T: 'static> TableView<T> {
     /// whatever the horizontal offset is. The row is the only axis that can
     /// hide it from the AT tree. A sighted keyboard user can still land with
     /// the cursor's column scrolled off to the side, which would want
-    /// `ensure_col_visible` (`table_view/keyboard.rs:483`); that is a private
+    /// `ensure_col_visible` (`table_view/keyboard.rs:710`); that is a private
     /// helper of the key-handler module and out of this change's reach.
     ///
     /// Ensure-visible rather than scroll-to: a row already on screen must not

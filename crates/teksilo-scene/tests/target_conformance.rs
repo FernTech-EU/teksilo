@@ -385,7 +385,7 @@ fn no_scene_allow_list_entry_is_stale() {
 ///   whose declared `hit_outset` ring reaches 30 dp: past the 24 dp AA floor at
 ///   every density, short of the 32 and 44 dp `target_size` ones. And a
 ///   heavyweight `Button` placed in a 32 dp scene rectangle, which is exactly
-///   the `Comfortable` figure and eight short of the `Touch` one — the same finding
+///   the `Comfortable` figure and twelve short of the `Touch` one — the same finding
 ///   [`a_heavyweight_items_target_size_is_the_rect_the_app_declared`] states:
 ///   the declared rectangle does not follow the density ladder, so at `Touch`
 ///   every 32 dp scene rectangle in the list is under the recommendation.

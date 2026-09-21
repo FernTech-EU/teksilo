@@ -239,8 +239,9 @@ pub struct EventContext<'ops> {
     pub(crate) scroll_widget_into_view_requests: Vec<(crate::widget_id::WidgetId, f32)>,
     /// Keyboard-highlight tooltip requests: surface the tooltip of the given
     /// (menu) item immediately and dismiss the previously-highlighted one.
-    /// Drained after the handler (see `event_dispatch_impl`). Only the last
-    /// entry per handler is honoured — a handler sets one highlight per key.
+    /// Drained after the handler (see `pointer_router::collect_from_ctx`).
+    /// Only the last entry per handler is honoured — a handler sets one
+    /// highlight per key.
     pub(crate) highlight_tooltip_requests: Vec<crate::widget_id::WidgetId>,
     /// Drag start request: (source_widget_id, payload, optional_preview_widget).
     pub(crate) drag_start_request: Option<(
@@ -386,9 +387,10 @@ pub struct EventContext<'ops> {
     /// and for handlers run outside a pointer dispatch (a timer, an
     /// accessibility action).
     pub(crate) input: crate::pointer::InputSnapshot,
-    /// The frozen [`TouchAction`] for the gesture being handled. Defaults to
-    /// [`TouchAction::AUTO`] for a hand-constructed context and for every
-    /// handler today, since no dispatch path populates this yet — see
+    /// The frozen [`TouchAction`] for the gesture being handled. Populated by
+    /// `make_event_context` from the pressed pointer's sequence; defaults to
+    /// [`TouchAction::AUTO`] for a hand-constructed context and for a handler
+    /// running outside a press — see
     /// [`touch_action`](EventContext::touch_action) and
     /// `crate::pointer::touch_action`.
     pub(crate) touch_action: TouchAction,
@@ -1049,9 +1051,6 @@ impl<'ops> EventContext<'ops> {
 
     // -------------------- Multi-window API --------------------
 
-    /// The [`WindowState`](crate::window::WindowState) for the window
-    /// hosting this handler. `None` only for handlers run outside
-    /// of an app (hand-constructed `EventContext` in tests).
     /// Cursor position at the moment this handler was invoked. `None`
     /// when no `PointerMove` has reached the tree yet, or when the
     /// context was constructed without a tree-side snapshot (e.g.

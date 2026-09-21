@@ -270,9 +270,13 @@ impl SceneView {
         }
     }
 
-    /// Disable user-driven navigation: scroll, pinch, and keyboard
-    /// handlers are not registered, and the SceneView is not made
-    /// focusable. Programmatic [`pan_to`](Self::pan_to) /
+    /// Disable user-driven navigation: pinch and keyboard handlers are not
+    /// registered, the scroll handler's wheel arm returns early, and the
+    /// SceneView is not made focusable. The `on_scroll` slot itself stays
+    /// registered, because it also carries a descendant's `ScrollIntoView`
+    /// reveal — a focused caret inside an embedded card is entitled to be on
+    /// screen whether or not the *user* may drive the camera. Programmatic
+    /// [`pan_to`](Self::pan_to) /
     /// [`zoom_to`](Self::zoom_to) / [`fit_to_content`](Self::fit_to_content)
     /// still work — this gates only user input.
     ///
@@ -876,7 +880,10 @@ impl SceneView {
     /// (e.g. a custom item whose paint depends on a private
     /// `Signal<Color>` that doesn't drive `local_bounds`) call this
     /// to invalidate. The cache is otherwise dropped automatically
-    /// on `LocalBoundsChanged` / `OpacityChanged` / `Removed`.
+    /// on `LocalBoundsChanged` / `ItemReplaced` / `AppearanceChanged` /
+    /// `MeasuredSizeChanged` / an `IS_ENABLED` `FlagsChanged` / `Removed` —
+    /// but never on opacity / transform / z / `local_pos`, which are applied
+    /// as wrapping scopes at replay and don't bake into a cached frame.
     pub fn invalidate_item_cache(&self, id: ItemId) {
         self.item_cache.borrow_mut().evict(id);
     }

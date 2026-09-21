@@ -200,7 +200,7 @@ impl ArchiveBackend {
 
 /// Shared model — clones share state. Constructed by the install
 /// helper from `NotificationArchive` + `AppPaths`; apps reach it
-/// via `ctx.app_state::<Rc<RefCell<NotificationArchiveModel>>>()`.
+/// via `ctx.app_state::<Rc<NotificationArchiveModel>>()`.
 ///
 /// `NotificationLog` and `NotificationCenterButton`
 /// consume this model directly.
@@ -333,8 +333,8 @@ impl NotificationArchiveModel {
     /// toast push).
     ///
     /// If `entry.dedup_id` matches an existing entry, the existing
-    /// entry is updated in place (title / body / progress collapsed
-    /// into a `NotificationUpdate` appended to `updates`) and no
+    /// entry is updated in place (title / body collapsed into a
+    /// `NotificationUpdate` appended to `updates`) and no
     /// new row is inserted. Unread count increments either way (an
     /// in-place update IS new information for the user).
     pub fn push(&self, mut entry: NotificationEntry) {
@@ -454,7 +454,7 @@ impl NotificationArchiveModel {
     }
 
     /// Mark every archived entry as read; reset `unread_count` to 0.
-    /// Called by `NotificationCenterButton` when its popover opens.
+    /// Called by `NotificationCenterButton` when its popover closes.
     pub fn mark_all_read(&self) {
         let model = self.backend.model();
         // Collect the ids to flip first: mutating the persisted
@@ -1196,7 +1196,7 @@ mod tests {
     /// `NotificationLog::build` bind. The reconcile-order half of the
     /// property — that one window's flush does not consume another's —
     /// needs real trees, and is covered by
-    /// `center_button::tests::two_windows_bells_both_rebuild_on_one_archive_push`.
+    /// `center_button::tests::two_windowless_trees_both_rebuild_on_one_archive_push`.
     #[test]
     fn every_windows_binding_sees_an_archive_mutation() {
         use teksilo_core::binding::{BindingLevel, BindingRegistry};

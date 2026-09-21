@@ -1168,7 +1168,7 @@ impl SceneModel {
     pub fn send_to_back(&self, id: ItemId) {
         self.write(|s| s.send_to_back(id));
     }
-    /// Move `id` to a different [`SceneLayer`] (background, default, foreground); notifies all views.
+    /// Move `id` to a different [`SceneLayer`] (`Under`, `Interleaved`, `Over`); notifies all views.
     pub fn set_layer(&self, id: ItemId, layer: SceneLayer) {
         self.write(|s| s.set_layer(id, layer));
     }

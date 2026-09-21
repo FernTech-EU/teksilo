@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! `DropdownPanel` — the overlay-content widget shown when the combo
-//! is open. Owns the Tab / ArrowDown / ArrowUp key handling, the
+//! is open. Owns the ArrowDown / ArrowUp key handling, the
 //! `TextInput`-backed search field, and the inner `FilteredItemList`
 //! child that binds the query + version signals.
 //!
@@ -320,8 +320,10 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     /// default is a case-insensitive substring match on the label.
     pub(super) filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
     /// Shared slot populated during `build` with the `TextInput`'s
-    /// widget id so the owning `ComboBox` can `ctx.request_focus(..)`
-    /// the field when the overlay opens.
+    /// widget id. Not the focus route: the owning `ComboBox` calls
+    /// `ctx.request_focus(..)` on the *panel* id instead, because the
+    /// panel may not have been built when the open handler runs and this
+    /// slot would still be empty on the very first open.
     pub(super) search_input_slot: Rc<Cell<Option<WidgetId>>>,
     /// How many options are currently visible, written by whichever build path
     /// ran (filtered, virtualized or plain) and read by this panel's
@@ -604,14 +606,16 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // in searchable mode (non-searchable combos keep focus on the
         // trigger and navigate there). Handles:
         //
-        // - ArrowDown / ArrowUp / Home / End: navigate the filtered
+        // - ArrowDown / ArrowUp: navigate the filtered
         //   item list while the search field retains focus, so the
         //   user can type a query then arrow through the matches
-        //   without losing the cursor.
-        // - Enter: confirm the current selection and close. The
+        //   without losing the cursor. Home / End are left to the search
+        //   field's own caret semantics — see below.
+        // - Enter is not handled here: `TextInputField` consumes it, so
+        //   the search field's `on_submit` dismisses instead. The
         //   `selected` signal was already updated by the arrow keys;
-        //   the item's own tap handler would duplicate that, so here
-        //   we just dismiss.
+        //   the item's own tap handler would duplicate that, so the
+        //   submit hook just dismisses.
         //
         // Tab is deliberately absent: the framework dismisses a non-modal
         // overlay the keyboard walks out of, so letting Tab reach the ordinary
@@ -735,8 +739,9 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         }
     }
 
-    // No `paint()`: the panel is pure composition. The drop shadow is
-    // the `DropdownShadow` leaf at the back of the panel's ZStack.
+    // No `paint()`: the panel is pure composition. The surface — the
+    // background, border, corner radius and the drop shadow — is built
+    // by the active `PopoverStyle` in `build`.
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListBox);

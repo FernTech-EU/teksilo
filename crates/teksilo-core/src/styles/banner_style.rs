@@ -7,7 +7,7 @@
 //! surface tint, corner radius, padding, and the arrangement of the
 //! leading severity glyph next to the message/action content. The
 //! `Banner` widget keeps its `Role::Status` / `Live::Polite`
-//! accessibility node and builds the functional `SeverityGlyph`
+//! accessibility node and builds the functional `SeverityBadge`
 //! painter itself (principle 6: a domain renderer is not chrome).
 
 use std::rc::Rc;
@@ -62,7 +62,7 @@ pub struct BannerStyleConfig {
     /// Pre-built message + action content (everything but the leading
     /// glyph) the strip arranges to the right of the glyph.
     pub content: WidgetId,
-    /// Pre-built `SeverityGlyph` subtree — placed at the leading edge.
+    /// Pre-built `SeverityBadge` subtree — placed at the leading edge.
     pub leading_glyph: WidgetId,
 }
 

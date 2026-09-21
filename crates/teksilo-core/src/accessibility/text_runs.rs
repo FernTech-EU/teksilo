@@ -21,7 +21,8 @@
 //!   onto index 0 and word navigation walks backwards.
 //! - A hard break is **one** character at the end of its line's last
 //!   run — a `\r\n` being one character whose `character_lengths` entry
-//!   is 2 — and no run is break-only.
+//!   is 2 — and never a run of its own beside text on the same line. A
+//!   line with no text at all still gets the one run its break rides.
 //! - Every run carries `bounds`, `text_direction`, `character_positions`
 //!   and `character_widths`, real when measured and degenerate when not.
 //!   `Range::bounding_boxes()` discards the boxes it has already

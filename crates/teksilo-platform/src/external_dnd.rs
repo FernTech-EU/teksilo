@@ -300,9 +300,9 @@ pub trait ExternalDndGuard {
     /// an OS-exportable payload.
     ///
     /// Returns `true` if a native session actually started. The default is a
-    /// no-op returning `false` — outbound is only implemented on macOS and
-    /// Wayland; Windows / X11 / the test sink decline, and the framework then
-    /// keeps the in-app drag alive (it can come back into the window).
+    /// no-op returning `false`, for a backend with no outbound implementation
+    /// at all; the framework then keeps the in-app drag alive (it can come
+    /// back into the window).
     ///
     /// When the OS drag ends, the backend MUST post an
     /// [`ExternalDragEvent::DragEnded`] through the poster captured at
@@ -543,11 +543,11 @@ impl std::fmt::Debug for ExternalDndHandle {
 }
 
 // ============================================================
-// NoopExternalDndBackend (X11 / unsupported targets)
+// NoopExternalDndBackend (unsupported targets)
 // ============================================================
 
-/// Backend that registers nothing and never emits events. Used on X11 and any
-/// target without a raw drop-target implementation. External OS drops simply
+/// Backend that registers nothing and never emits events. Used on any target
+/// without a raw drop-target implementation. External OS drops simply
 /// don't fire; a `DropZone` widget stays usable via its keyboard "Browse…"
 /// fallback button.
 #[derive(Default)]

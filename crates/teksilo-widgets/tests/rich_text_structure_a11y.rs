@@ -36,7 +36,7 @@ fn settle(tree: &mut WidgetTree) {
     let _ = tree.render();
 }
 
-/// Insert a 2x2 table after `at`, then fill its cells with `cells`.
+/// Insert a 2x2 table after `prefix`, then fill its cells with `cells`.
 fn table_document(prefix: &str, cells: &[&str]) -> (TextDocument, WidgetTree) {
     let (doc, mut tree) = editor_with(prefix);
     {

@@ -7,8 +7,9 @@
 //! Wraps a caller-built trigger (`T: PopoverTrigger`) with overlay
 //! wiring: owns a `popover_open: Signal<bool>` toggled on activate /
 //! dismiss, sets `has_popup` and `expanded_when` on the inner trigger so
-//! AT announces the disclosure state, pre-builds the popover content as a
-//! dormant subtree, and shows / hides it via [`OverlayRequest`]. The
+//! AT announces the disclosure state, adds the popover content as a
+//! dormant subtree whose panel is built the first time it is opened, and
+//! shows / hides it via [`OverlayRequest`]. The
 //! `set_dormant` + `activate` + `show_overlay` sequence and the
 //! dismiss-callback shape match [`DateEdit`](crate::date_edit::DateEdit)
 //! so behavior across the disclosure family stays consistent.
@@ -84,8 +85,9 @@ use crate::primitives::ZStack;
 type OnVoid = Rc<dyn Fn()>;
 
 /// A trigger widget usable with [`PopoverWidget`]. Implemented for
-/// [`Button`] and [`IconButton`]. Captures the few points where the two
-/// triggers differ; everything else is handled by the generic wrapper.
+/// [`Button`], [`IconButton`] and [`OverlayTrigger`]. Captures the few
+/// points where the triggers differ; everything else is handled by the
+/// generic wrapper.
 pub trait PopoverTrigger: Widget + Sized + 'static {
     /// The `has_popup` kind announced by AT when the caller doesn't
     /// override it. `Button` → [`HasPopup::Dialog`]; `IconButton` →
@@ -297,7 +299,8 @@ pub struct PopoverWidget<T: PopoverTrigger> {
     /// `PopoverStyle`, or a hand-rolled surface `Panel`).
     surface_variant: Option<PopoverVariant>,
     /// Per-call style override (highest precedence over the theme slot
-    /// and the built-in `RecipePopoverStyle`). Mirrors `Popover::style`.
+    /// and the built-in `RecipePopoverStyle`). Mirrors the per-call
+    /// override the standalone `Popover` used to offer.
     surface_style: Option<SharedPopoverStyle>,
     /// Accessible name for the surface's `Role::Dialog` node. Empty by
     /// default (the wrapped content usually carries its own role/name).
@@ -1266,7 +1269,7 @@ mod tests {
         // Close and reopen. Driven through the widget's own open signal rather
         // than a second keystroke: opening moved focus into the panel, and
         // routing a key back out of it is a different guarantee, covered by
-        // `shared_open_closure_fires_from_trigger_and_from_inside_the_panel`.
+        // `open_action_toggles_rather_than_only_opening`.
         open.set(false);
         tree.layout(SizeProposal::exact(300.0, 120.0));
         open.set(true);

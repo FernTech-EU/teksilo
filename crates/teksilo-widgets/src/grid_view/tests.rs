@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Headless tests for `GridView` (Phase 1: uniform grid).
+//! Headless tests for `GridView` — the uniform grid, variable row heights and
+//! anchoring, reorder / activation / type-ahead / incremental loading, sections
+//! and waterfall.
 //!
 //! No GPU / display server needed — exercises virtualization, column-count
 //! derivation, tile placement, selection, keyboard navigation, data-change

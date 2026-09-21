@@ -4,8 +4,9 @@
 //! `BodyPane<T>` — the virtualized row pane underneath the header.
 //!
 //! Splitting this out of `TableView`'s root widget is a deliberate
-//! architectural choice: `TableView` owns three direct children — the
-//! header, the body pane, and the scrollbar. Rebuilds triggered by
+//! architectural choice: `TableView` owns the header row, the body
+//! pane, the vertical and horizontal scrollbars and the empty view as
+//! direct children. Rebuilds triggered by
 //! scroll-buffer exits, selection changes, or row-edit toggles target
 //! the body pane only, *not* the table root.
 //!
@@ -51,8 +52,8 @@ pub(crate) type WithItemFn<T> = Rc<dyn Fn(usize, &dyn Fn(&T))>;
 
 /// The row-virtualization pane. Owns the visible row widgets and
 /// handles their per-row click + drag handlers. Sized to fill the
-/// caller's proposal; lays each row at `flat_index * row_height -
-/// scroll_y` in pane-local coordinates.
+/// caller's proposal; lays each row at `RowMetrics::row_top(flat_index)
+/// - scroll_y` in pane-local coordinates.
 pub(crate) struct BodyPane<T: 'static> {
     pub(crate) len_fn: LenFn,
     pub(crate) with_item_fn: WithItemFn<T>,

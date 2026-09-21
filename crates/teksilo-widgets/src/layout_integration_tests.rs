@@ -252,7 +252,7 @@ fn demo_layout_no_overlap_between_sections() {
             .child(inner_spacer)
             .child(trailing),
     );
-    let caption2 = tree.add(TextWidget::new(lit!("Spacer pushing items to edges"))); // 30*8=240
+    let caption2 = tree.add(TextWidget::new(lit!("Spacer pushing items to edges"))); // 29*8=232
 
     let showcase = tree.add(
         VStack::new()

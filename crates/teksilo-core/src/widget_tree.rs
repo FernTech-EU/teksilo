@@ -30,8 +30,6 @@ mod rendering_impl;
 mod test_api;
 pub mod touch_route;
 
-/// The main widget tree orchestrating arena, layout, events, accessibility, and paint.
-/// Provides both the runtime API and the headless test API.
 struct AnimatedRegistration {
     weak: crate::signal::WeakAnimatedSignal,
     owner: WidgetId,
@@ -68,6 +66,10 @@ impl AnimatedRegistration {
     }
 }
 
+// (line 33, above `struct AnimatedRegistration`) — remove entirely
+// (line 71, above `#[allow(clippy::type_complexity)]` / `pub struct WidgetTree`)
+/// The main widget tree orchestrating arena, layout, events, accessibility, and paint.
+/// Provides both the runtime API and the headless test API.
 #[allow(clippy::type_complexity)]
 pub struct WidgetTree {
     pub(crate) arena: WidgetArena,
@@ -324,7 +326,7 @@ pub struct WidgetTree {
     /// returns at once and the outer loop picks up whatever it parked, so the
     /// recursion is one level deep by construction rather than by luck.
     pub(crate) draining_dismiss: std::cell::Cell<bool>,
-    /// Tooltip attachments: (anchor_id, content_id, text, delay, hover_start, overlay_id).
+    /// Tooltip attachments, one per anchor. See [`TooltipEntry`].
     tooltips: Vec<TooltipEntry>,
     /// Simulated-clock end of the tooltip "reshow session". While any tip is
     /// visible, or until this instant after the last tip dismissed, subsequent
@@ -613,7 +615,7 @@ pub struct WidgetTree {
     /// current one must re-request. Stored as `Rc<Cell>` so observers
     /// fired from inside the layout pass (`ctx.effect` closures on
     /// `frame_tick`) can chain-request without needing &mut access
-    /// to the tree — see `FrameRequestHandle`.
+    /// to the tree — see [`frame_request_handle`](Self::frame_request_handle).
     pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
     /// Debug-only re-entrancy flag: `true` while a focus-change dispatch
     /// (`FocusGained` / `FocusLost` handlers) is running. Threaded into each
@@ -753,8 +755,8 @@ const TOOLTIP_SESSION_GRACE: std::time::Duration = std::time::Duration::from_mil
 /// running — one redraw per step boundary rather than a free-run — but it must
 /// match the step count the content widget actually renders, or the indicator
 /// would advance on a different beat from the wake-ups driving it.
-/// `teksilo-widgets`' `DWELL_STEPS` is pinned to this value by a compile-time
-/// assertion; the per-step *duration* is derived from each entry's own
+/// `teksilo-widgets`' `DWELL_STEPS` is defined *as* this constant, so the two
+/// cannot drift; the per-step *duration* is derived from each entry's own
 /// `sticky_after`, so a caller that picks a non-default promotion window still
 /// gets correctly-spaced wake-ups.
 pub const TOOLTIP_DWELL_STEPS: u32 = 4;
@@ -1776,7 +1778,7 @@ impl WidgetTree {
         // `theme_signal` — widgets that observe the signal (e.g.
         // `TextInputField` resetting the rich-text engine's default
         // text colour) would otherwise see the constructor's
-        // `light_default()` initial value forever, even when
+        // `presets::intui::light()` initial value forever, even when
         // `TeksiloAppBuilder.theme(crate::presets::intui::dark())` was used.
         // `set_theme` already does this; `with_theme` was the
         // builder-time analogue that forgot to keep them aligned.
@@ -2163,7 +2165,7 @@ impl WidgetTree {
             self.announce(wording(density));
         }
         self.set_theme(self.theme.with_density(density));
-        // The `BindingLevel::Rebuild` arm of `apply_binding_dirty`
+        // The `BindingLevel::Rebuild` arm of `process_state_changes`
         // (`widget_tree/layout_impl.rs`), applied at every root.
         for root in self.arena.roots() {
             self.arena.mark_needs_rebuild(root);
@@ -2189,7 +2191,7 @@ impl WidgetTree {
     /// tree.set_density_announcement(Some(std::rc::Rc::new(|d| match d {
     ///     TargetDensity::Compact => tr!(layout_compact()).into(),
     ///     TargetDensity::Comfortable => tr!(layout_comfortable()).into(),
-    ///     TargetDensity::Spacious => tr!(layout_spacious()).into(),
+    ///     TargetDensity::Touch => tr!(layout_touch()).into(),
     /// })));
     /// ```
     ///
@@ -3217,8 +3219,8 @@ impl WidgetTree {
     /// node, *preserving* any overrides the widget already carries — unlike
     /// `apply_external_handler_set`, which replaces the whole override struct.
     /// Used by container widgets (e.g. `FormLayout`) to name a field after its
-    /// label once both ids are known. Idempotent-ish: re-adding the same target
-    /// pushes a duplicate, so call once per pairing.
+    /// label once both ids are known. Idempotent: re-adding the same target is
+    /// a no-op, so a composite may re-register the relation on every rebuild.
     pub(crate) fn push_access_labelled_by(&mut self, id: WidgetId, label_id: WidgetId) {
         if let Some(node) = self.arena.get_mut(id) {
             let overrides = node.access_overrides.get_or_insert_with(|| {
@@ -4031,9 +4033,9 @@ impl WidgetTree {
 
     // --- Property bindings ---
 
-    /// Bind a widget's visibility to a boolean prop or compatibility state binding.
+    /// Bind a widget's visibility to a boolean prop.
     /// When false, the widget is set dormant; when true, it is activated.
-    /// Accepts `Signal<bool>`, `Prop<bool>`, compatibility state bindings, or plain `bool`.
+    /// Accepts `Signal<bool>`, `Prop<bool>`, or plain `bool`.
     pub fn visible_when(&mut self, id: WidgetId, state: impl Into<crate::signal::Prop<bool>>) {
         let prop = state.into();
         prop.register_if_bound(

@@ -109,8 +109,8 @@ impl<'a> RecognizerContext<'a> {
         }
     }
 
-    /// The context a single mouse event implies, with the shipped mouse
-    /// profile and no bounds. What [`GestureArena::process`](super::GestureArena::process)
+    /// The context a single event implies, with the shipped profile for its own
+    /// pointer kind and no bounds. What [`GestureArena::process`](super::GestureArena::process)
     /// builds for a caller that supplies no node.
     pub fn for_event(event: &RawPointerEvent) -> RecognizerContext<'static> {
         let pointer = event.pointer();

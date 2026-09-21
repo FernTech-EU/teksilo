@@ -18,11 +18,12 @@
 //!   heavyweight widget at its scene-space rect (composed from the
 //!   item's `local_pos`, `transform`, and parent chain).
 //! - **Paint bands.** Three passes: `paint` draws the `Under` lightweight
-//!   items (backdrop), the arena child-walk draws the heavyweight widgets,
-//!   then `post_paint` draws the `Over` lightweight items + marquee /
-//!   foreground / debug overlays. `z` orders within each tier; the
-//!   Under/Over band ([`Scene::set_layer`](crate::Scene::set_layer))
-//!   chooses the side. See `docs/teksilo-scene.md` §"Z-order and paint bands".
+//!   items (backdrop), the arena child-walk draws the heavyweight widgets
+//!   — with an `Interleaved` item's own paint node slotted in among them by
+//!   `z` — then `post_paint` draws the `Over` lightweight items + marquee /
+//!   foreground / debug overlays. `z` orders within each tier; the band
+//!   ([`Scene::set_layer`](crate::Scene::set_layer)) chooses `Under`,
+//!   `Interleaved` or `Over`. See `docs/teksilo-scene.md` §"Z-order and paint bands".
 //! - **View transform.** Pan / zoom / rotation are four animated
 //!   `Signal<f32>`s on `SceneView`, composed into a derived
 //!   `Signal<Transform2D>` bound via `BuildContext::set_content_transform`
@@ -130,8 +131,8 @@ use crate::transform::{anchor_pan_for_pinch, compose_view};
 use teksilo_i18n::LocalizedString;
 
 /// Logical pixels of pan applied per `ScrollDelta::Lines` notch.
-/// Mirrors the convention used by `ScrollArea` (`line_height` ≈ 16 in
-/// teksilo-widgets).
+/// The same convention `ScrollArea` uses for its own `line_height` in
+/// teksilo-widgets (which defaults to 20).
 const DEFAULT_LINE_HEIGHT: f32 = 16.0;
 const DEFAULT_PAN_DURATION: Duration = Duration::from_millis(120);
 const DEFAULT_ZOOM_DURATION: Duration = Duration::from_millis(180);
@@ -509,8 +510,9 @@ impl MarqueeState {
 /// A drag-to-move in flight: which lightweight item is being
 /// translated, in scene coords. The committed delta on `Ended`
 /// is `current_scene - anchor_scene`; that delta is applied to
-/// the target item *and* every declared descendant via
-/// `Scene::collect_descendants`.
+/// every item in [`SceneView::drag_group`], and a declared
+/// descendant follows its ancestor because its `local_pos` is
+/// relative to it.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct DragTarget {
     item_id: ItemId,
@@ -1259,17 +1261,21 @@ pub struct SceneView {
     drag_target: Rc<Cell<Option<DragTarget>>>,
     /// Pending drag-to-move commit: `(target_id, delta)` set by
     /// the on_drag `Ended` branch, drained in `build`. The drain
-    /// code translates the target item AND every descendant
-    /// (declared via `Scene::set_item_parent`) by the same delta
+    /// code translates every item in
+    /// [`drag_group`](Self::drag_group) by the same delta; a
+    /// descendant (declared via `Scene::set_item_parent`) follows
+    /// its ancestor because its `local_pos` is relative to it
     /// — so a labelled rectangle (Rect parent + TextItem child)
     /// moves as one unit, QGraphicsScene-style.
     pending_item_move: Rc<Cell<Option<(ItemId, Vec2)>>>,
     /// Snapshot of **draggable** lightweight scene items + their narrow-phase
     /// hit geometry, used by the on_drag drag-start hit-test and the grab-cursor
-    /// hover check. Refreshed in `place_children` each layout pass — the
-    /// snapshot stays consistent within a single drag and refreshes between
-    /// drags via the spatial-index mutation triggering relayout. Avoids forcing
-    /// `Scene` into an `Rc<RefCell>`.
+    /// hover check. Brought up to date in `layout_response` (not
+    /// `place_children`, which never runs for a scene of only lightweight
+    /// items) — the snapshot stays consistent within a single drag, and
+    /// between drags is patched or rebuilt from the `item_change_signal`
+    /// stream. Keeps the dispatch path off the model's `RefCell`, which an
+    /// `ItemChange` observer may already hold.
     lightweight_bounds_snapshot: Rc<RefCell<Vec<DraggableSnapshotEntry>>>,
     /// Bumped by the on_drag closure on `Ended` after posting a
     /// `pending_item_move`. SceneView binds to this at
@@ -1397,8 +1403,11 @@ pub struct SceneView {
     /// recorded in the item's local coordinates and replayed via
     /// `Canvas::draw_render_frame` when valid. Invalidated by an
     /// observer on [`Scene::item_change_signal`](crate::Scene::item_change_signal):
-    /// `LocalBoundsChanged` / `OpacityChanged` / `Removed` for an id
-    /// drop that id's entry. Apps that mutate item-internal state
+    /// `Removed` / `LocalBoundsChanged` / `ItemReplaced` /
+    /// `AppearanceChanged` / `MeasuredSizeChanged`, and an `IS_ENABLED`
+    /// flip in `FlagsChanged`, drop that id's entry — position,
+    /// transform, opacity, `z` and layer do not, being re-applied as
+    /// wrapping scopes at replay. Apps that mutate item-internal state
     /// outside of `Scene` mutators must call
     /// [`SceneView::invalidate_item_cache`] to evict.
     pub(crate) item_cache: Rc<RefCell<crate::cache::ItemCoordinateCache>>,

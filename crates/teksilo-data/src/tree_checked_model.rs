@@ -180,8 +180,8 @@ impl<T: 'static> TreeCheckedModel<T> {
 
     /// Build the cascade observer for `node`'s signal: on any write, cascade
     /// Checked/Unchecked to descendants and recompute ancestors, guarded
-    /// against re-entry. It's a no-op while the model is performing its own
-    /// cascade pass (suppress = true).
+    /// against re-entry. It's a no-op only while *this* node's own signal is
+    /// being written by an in-progress cascade pass (see `Inner::suppressed`).
     fn make_cascade_observer(&self, sig: &Signal<CheckState>, node: NodeId) -> ObserverHandle {
         let inner_w = Rc::downgrade(&self.inner);
         let mode_w = Rc::downgrade(&self.mode);
@@ -397,8 +397,9 @@ impl Drop for SuppressGuard {
 }
 
 // Free functions so the observer closure can call them without
-// holding `&self` (the model isn't `Clone` cheaply, and the closure
-// only has a `Weak<Inner>`).
+// holding `&self` (a strong handle to the model's own `Inner` inside an
+// observer the model itself owns would be a cycle, so the closure keeps
+// `Weak`s to `inner` and `mode` plus a `TreeModel<T>` handle).
 
 fn cascade_descendants<T: 'static>(
     tree: &TreeModel<T>,

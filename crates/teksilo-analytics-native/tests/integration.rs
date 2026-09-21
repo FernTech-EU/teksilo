@@ -2,8 +2,14 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! End-to-end smoke test: spin up an in-process tonic server, point
-//! the TeksiloAdapter at it, fire events, confirm acks and Parquet
-//! files. Mirrors the structure of the Plausible adapter integration
+//! the TeksiloAdapter at it, fire events, confirm acks. Mirrors the
+//! structure of the Plausible adapter integration
+//! test ([crates/teksilo-analytics-plausible/tests/integration.rs]).
+//!
+//! These tests cover the client half of sub-phase A acceptance: "a
+//! Teksilo app emits events; events appear in a Parquet file readable
+//! by `duckdb -c 'SELECT * FROM events_*.parquet'`." The Parquet half
+//! is the collector's and is verified there. Mirrors the structure of the Plausible adapter integration
 //! test ([crates/teksilo-analytics-plausible/tests/integration.rs]).
 //!
 //! These tests cover sub-phase A acceptance: "a Teksilo app emits
@@ -503,10 +509,10 @@ fn wrong_bearer_token_is_rejected() {
 
 #[test]
 fn per_product_scope_enforced_at_batch_level() {
-    // Two adapter instances pointing at the same server with two
-    // different product_ids and tokens. Server tracks each product
-    // via a separate state via two MockServer instances; here we
-    // verify the per-batch reject path of *one* server.
+    // Two adapter instances pointing at the same server with the same
+    // token but two different product_ids. Full two-server isolation is
+    // the next test; here we verify the per-batch reject path of *one*
+    // server.
     let server = MockServer::start_with(MockServerState {
         expected_token: Some("token-a".into()),
         expected_product: Some("product.a".into()),

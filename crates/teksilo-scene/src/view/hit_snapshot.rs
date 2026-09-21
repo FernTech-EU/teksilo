@@ -404,9 +404,10 @@ impl SceneView {
     /// Build both snapshots from the model.
     ///
     /// The draggable snapshot carries only items that opted into drag via
-    /// `.draggable(true)` (or `is_draggable()` on a custom impl). Without that
-    /// filter every visible `RectItem` would answer a drag and the scene would
-    /// feel unstable.
+    /// `.draggable(true)` (or an `initial_flags()` carrying
+    /// `ItemFlags::IS_DRAGGABLE` on a custom impl). Without that filter every
+    /// visible `RectItem` would answer a drag and the scene would feel
+    /// unstable.
     ///
     /// The handler snapshot carries **every** hit-testable entry, not only the
     /// ones with handlers: a handler-less item painted on top still occludes

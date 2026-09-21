@@ -173,7 +173,12 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     }
 
     /// Compose child widgets. Called once after the widget is placed in the
-    /// arena, and again on environment change (theme switch, locale switch).
+    /// arena, and again whenever the widget is marked for rebuild — a
+    /// `BindingLevel::Rebuild` binding, `rebuild_single_widget`, or a density
+    /// switch. A theme or locale switch does **not** rebuild: `set_theme` and
+    /// `set_locale` mark layout + paint dirty and leave the built subtree
+    /// standing, so anything derived from the theme or the locale must be read
+    /// per pass or bound to a signal rather than captured here.
     /// Takes `&mut self` — store child IDs, signal handles, any state needed later.
     /// Returns the list of root child IDs (empty for leaf widgets).
     fn build(

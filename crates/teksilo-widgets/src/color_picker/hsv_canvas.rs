@@ -20,10 +20,13 @@
 //! The canvas is fundamentally a 2D pointer gesture with no ARIA
 //! precedent. Screen-reader users navigate the picker via the hue /
 //! saturation / value sliders or RGB / HSV / hex spinners — the
-//! containing `ColorPicker` excludes this widget's subtree from the
-//! AT tree via `.access_exclude_subtree()`. This widget itself emits a
-//! `Role::GenericContainer` placeholder so the override has something
-//! to prune.
+//! containing `ColorPicker` excludes this widget's descendants from the
+//! AT tree via `.access_subtree(AccessSubtreeMode::Exclude)` (it has
+//! none). The widget's own node still emits normally: a named
+//! `Role::Group` carrying the saturation/brightness value as text plus
+//! four custom actions (one per `CanvasStep`), so the control stays
+//! reachable and drivable by assistive technology rather than being a
+//! placeholder the walker prunes.
 
 use std::cell::Cell;
 use std::rc::Rc;

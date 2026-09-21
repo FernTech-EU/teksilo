@@ -14,7 +14,8 @@
 //! - flat, borderless headers (no corner radius)
 //! - 1 dp accent indicator bar on the leading edge of the active header
 //! - color-only emphasis (selected / hover / pressed surface roles)
-//! - border IS the focus ring: 1 dp accent border appears on the focused
+//! - border IS the focus ring: an accent border at the theme's
+//!   `focus_ring_width` (2 dp under Int UI) appears on the focused
 //!   header, no separate ring primitive
 //! - content swaps are **instant** — Int UI's house rule is to avoid
 //!   decorative animation for inline transitions; see
@@ -25,9 +26,9 @@
 //! ```ignore
 //! let selected = ctx.signal(0_usize);
 //! ToolBox::new(selected.clone())
-//!     .item("Outline",    outline_widget)
-//!     .item("Properties", properties_widget)
-//!     .add(ToolBoxItem::new("Build", build_widget).enabled(false))
+//!     .item(lit!("Outline"),    outline_widget)
+//!     .item(lit!("Properties"), properties_widget)
+//!     .add(ToolBoxItem::new(lit!("Build"), build_widget).enabled(false))
 //! ```
 //!
 //! ## Touch and pen
@@ -243,11 +244,13 @@ impl ToolBoxItem {
     /// click and keyboard activation are ignored, and arrow navigation
     /// skips it. Accepts a static bool or a reactive `Signal<bool>`.
     ///
-    /// Forwarded to the arena via
-    /// `ctx.enabled_when(header_id, self.enabled.clone())` at build time;
-    /// the arena is then the single source of truth and ANDs with
-    /// ancestors — disabling the surrounding `ToolBox` (or any ancestor)
-    /// disables every item regardless of this flag.
+    /// Read **once** at build time: a `false` snapshot is forwarded to the
+    /// arena via `ctx.enabled_when(header_id, false)`, and the arena is then
+    /// the single source of truth, ANDing with ancestors — disabling the
+    /// surrounding `ToolBox` (or any ancestor) disables every item regardless
+    /// of this flag. The `Prop` itself is *not* handed to the arena, so
+    /// flipping a bound `Signal<bool>` after build has no effect until the
+    /// `ToolBox` is rebuilt.
     pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
         self.enabled = enabled.into();
         self
@@ -430,7 +433,7 @@ impl std::fmt::Debug for ToolBox {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard navigation helpers — mirror `next_enabled_index` in tab_widget.rs
+// Keyboard navigation helpers — mirror `next_enabled_index` in tab_widget/header.rs
 // ---------------------------------------------------------------------------
 
 fn next_enabled_index(enabled: &[bool], current: usize, direction: isize) -> usize {
@@ -577,8 +580,8 @@ impl Widget for ToolBoxHeader {
         let interaction = ctx.signal(HeaderInteraction::Idle);
         // Track focus origin so the focus border only appears when focus
         // was gained via the keyboard — pointer clicks move focus here but
-        // must not show the ring. Same pattern as `TabHeader`
-        // ([tab_widget.rs:259-278]) and used by SegmentedControl/Slider/Toggle.
+        // must not show the ring. Same pattern as SegmentedControl / Slider
+        // / Toggle (`TabHeader` reads `ctx.focus_visible()` instead).
         let focus_origin: Signal<Option<teksilo_core::focus::FocusOrigin>> = ctx.signal(None);
 
         let registry = ctx.binding_registry();
@@ -591,8 +594,12 @@ impl Widget for ToolBoxHeader {
         // CLAUDE.md "Theming"). No `enabled` branch: the leaves
         // (TextWidget for the label, IconWidget for the chevron)
         // consult `PaintContext::effective_enabled` and substitute
-        // `TextRole::Disabled` themselves. `SurfaceRole` has no
-        // `Disabled` token by design — a disabled header simply
+        // Derived roles — Signal<SurfaceRole> / Signal<TextRole> (see
+        // CLAUDE.md "Theming"). No `enabled` branch: the leaves
+        // (TextWidget for the label, IconWidget for the chevron)
+        // consult `PaintContext::effective_enabled` and substitute
+        // `TextRole::Disabled` themselves. `SurfaceRole::Disabled` is
+        // deliberately left unused here — a disabled header simply
         // renders with its idle background (Transparent / Hover /
         // Selected per interaction).
         let bg_role = interaction.zip(&is_selected).map(move |(state, sel)| {
@@ -1039,7 +1046,8 @@ enum HeaderInteraction {
 }
 
 // ---------------------------------------------------------------------------
-// ToolBoxPanel — content wrapper that clamps height to 0 when inactive.
+// ToolBoxPanel — content wrapper that parks its content dormant and
+// reports a zero size on both axes when inactive.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]

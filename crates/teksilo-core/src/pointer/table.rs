@@ -18,11 +18,13 @@
 //!    mouse and a first touch are *both* primary. It is a property of the
 //!    sample, decided by whoever produced it, and this table never rewrites it.
 //! 2. [`PointerTable::primary`] is **Teksilo's** single pointer — the one that
-//!    backs the legacy singular accessors
-//!    ([`WidgetTree::hovered`](crate::WidgetTree::hovered),
-//!    [`WidgetTree::last_pointer_position`](crate::WidgetTree::last_pointer_position)).
+//!    backs the legacy singular position accessor
+//!    ([`WidgetTree::last_pointer_position`](crate::WidgetTree::last_pointer_position)).
 //!    Exactly one live pointer holds the role, a mouse always wins it, and it
 //!    is a table-level election rather than anything carried on a sample.
+//! 3. [`PointerTable::hover_owner`] is the most recent **hovering-capable**
+//!    pointer — a mouse, or a pen in proximity ([`PointerKind::hovers`]) — and
+//!    the one [`WidgetTree::hovered`](crate::WidgetTree::hovered) reads.
 //! 3. [`PointerTable::hover_owner`] is the most recent **hovering-capable**
 //!    pointer — a mouse, or a pen in proximity ([`PointerKind::hovers`]).
 //!
@@ -54,8 +56,9 @@ use crate::widget_id::WidgetId;
 /// contact) or the window loses it (a hovering pointer never lifts, so a
 /// mouse's entry persists for the life of the tree once it has been seen).
 ///
-/// `#[non_exhaustive]`: the gesture-sequence handle and the velocity tracker
-/// land here in later packages, and neither should break a construction site.
+/// `#[non_exhaustive]`: the velocity tracker lands here in a later package
+/// (the gesture-sequence handle already has), and it should not break a
+/// construction site.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PointerEntry {

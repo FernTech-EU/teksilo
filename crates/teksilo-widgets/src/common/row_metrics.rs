@@ -195,7 +195,8 @@ impl RowMetrics {
         matches!(self.mode, RowMode::AutoMeasure { .. })
     }
 
-    /// Whether any non-uniform mode is active (offset-table-backed).
+    /// Whether the arithmetic `Uniform` fast path is active (the other
+    /// modes are offset-table-backed).
     #[allow(dead_code)]
     pub(crate) fn is_uniform(&self) -> bool {
         matches!(self.mode, RowMode::Uniform { .. })
@@ -758,19 +759,20 @@ mod tests {
 /// unfinished investigation — `zzz_debug_probe_zero_height_rows` —
 /// suspected of breaking `row_at`/`insertion_index`), including the fully
 /// degenerate "every row height is 0.0 AND spacing is 0.0" case, which is
-/// exactly what property 3 below actually catches: `Uniform::row_at`
-/// short-circuits to `0` whenever `item_height + spacing <= 0.0`, while the
-/// `Exact` mode's offset table ties every offset to the same value and its
-/// `partition_point` search resolves the tie to the LAST row — the two
-/// disagree.
+/// exactly what property 3 below caught: `Uniform::row_at` short-circuits
+/// to `0` whenever `item_height + spacing <= 0.0`, while the `Exact` mode's
+/// offset table tied every offset to the same value and its
+/// `partition_point` search resolved the tie to the LAST row — the two
+/// disagreed, until `PrefixSumOffsets::row_at` grew the degenerate-table
+/// special case that answers `0` as well.
 ///
 /// Contracts asserted:
 ///   1. `insertion_index(y)` is always in `0..=n`.
 ///   2. `insertion_index(y)` is monotone non-decreasing in `y`.
 ///   3. Uniform and Exact-with-a-constant-height agree on every query
 ///      (`total_height`, `row_top`, `row_at`, `insertion_index`) — see the
-///      caveat above; this is expected to fail on the fully degenerate
-///      `item_height == 0.0 && spacing == 0.0` input.
+///      caveat above; the fully degenerate `item_height == 0.0 &&
+///      spacing == 0.0` input is the one this used to fail on.
 ///   4. `invalidate_from(k)` (AutoMeasure) preserves the measured prefix
 ///      `[0, k)` exactly (bit-identical, not just epsilon-close — no
 ///      arithmetic touches those rows).
@@ -916,9 +918,9 @@ mod proptests {
         //    Fixed by `PrefixSumOffsets::set_row_height_exact`, which the three
         //    Exact-mode seeding paths and `GridView`'s `reseed_exact` now use;
         //    the epsilon stays on the measure-feedback path, where it belongs.
-        //    This module's own `build` helper had already had to route around
-        //    the same epsilon to keep its oracle honest, which was the standing
-        //    hint that the filter sat on the wrong side of the seam.
+        //    `row_offsets.rs`'s own proptest `build` helper had already had to
+        //    route around the same epsilon to keep its oracle honest, which was
+        //    the standing hint that the filter sat on the wrong side of the seam.
         #[test]
         fn uniform_and_exact_constant_height_modes_agree_on_every_query(
             item_height in arb_height(),

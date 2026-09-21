@@ -318,7 +318,8 @@ impl WidgetTree {
     }
 
     /// Update an in-flight external drag as the OS reports pointer motion.
-    /// No-op unless an external session is active.
+    /// No-op unless an external session — or our own re-entered OS drag, which
+    /// is an internal session — is active.
     pub fn update_external_drag(
         &mut self,
         position: teksilo_canvas::Point,
@@ -336,7 +337,8 @@ impl WidgetTree {
     /// on the target. `data` is the authoritative payload read at drop time;
     /// if non-empty it replaces the session payload (some backends only have
     /// the full data at drop, not at enter). No-op unless an external session
-    /// is active.
+    /// — or our own re-entered OS drag, which is an internal session — is
+    /// active.
     pub fn end_external_drag(
         &mut self,
         position: teksilo_canvas::Point,
@@ -393,7 +395,8 @@ impl WidgetTree {
 
     /// Cancel an in-flight external drag (the pointer left the window or the
     /// OS aborted the operation) without dropping. No-op unless an external
-    /// session is active.
+    /// session — or our own re-entered OS drag, which is an internal session
+    /// that re-exits rather than cancels — is active.
     pub fn cancel_external_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
         // A re-entered OS drag leaving the window again must NOT cancel the
         // whole drag (the OS drag is still live) — re-stash the typed payload

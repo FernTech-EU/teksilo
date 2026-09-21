@@ -440,9 +440,9 @@ impl<T: 'static> std::fmt::Debug for SortFilterTreeModel<T> {
 }
 
 /// `SortFilterTreeModel` is a `TreeDataSource` so it drops directly into a
-/// `TreeView` / `TreeTableView`. DnD is left inert (reordering a sort/filter
-/// projection is ill-defined); apps that need a reorderable tree feed a
-/// `TreeSlice` or a bespoke source.
+/// `TreeView` / `TreeTableView`. Same-view reorder is supported and mutates
+/// the backing `TreeModel` — the projection then re-derives from it, so the
+/// sort/filter view never has to reorder itself; foreign drops are rejected.
 impl<T: 'static> TreeDataSource for SortFilterTreeModel<T> {
     type Item = T;
     type Key = NodeId;

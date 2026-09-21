@@ -4,10 +4,7 @@
 //! [`SplitterModel`] — the shared, cloneable, serializable state behind a
 //! [`Splitter`](crate::splitter::Splitter).
 //!
-//! Mirrors the `SceneModel = Rc<RefCell<…>>` handle pattern: cloning a
-//! `SplitterModel` produces a **second handle to the same data**, so the
-//! app keeps a clone to read/mutate/persist while the widget renders it,
-//! and a future `DockingLayout` composes a tree of them. Every mutator
+//! and `DockingLayout` composes a tree of them. Every mutator Every mutator
 //! takes `&self`, borrows the inner `RefCell` mutably, mutates, drops the
 //! borrow, then bumps a `version: Signal<u64>` — the widget binds that
 //! signal at `BindingLevel::Relayout`, so any external change reflows the

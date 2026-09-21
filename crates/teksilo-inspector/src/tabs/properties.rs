@@ -161,8 +161,9 @@ impl Widget for PropertiesRows {
                 let rows = rows_for_factory.borrow();
                 rows.get(idx).cloned()?
             };
-            // Stash the row context for the toolbar / Copy-button
-            // path, which still reads these signals.
+            // Stash the row context (kept for other tabs/consumers that may read
+            // it); the Copy-button item below captures the value directly and
+            // does not itself read these signals.
             key_sig.set(row.key.clone());
             value_sig.set(row.value.clone());
             // Capture the row's value directly into the Copy item's

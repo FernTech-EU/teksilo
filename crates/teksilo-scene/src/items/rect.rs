@@ -4,8 +4,11 @@
 //! [`RectItem`] — filled / stroked rectangle in local item coords.
 //!
 //! `RectItem` is the simplest and cheapest lightweight scene item: a rectangle
-//! in local item coordinates with an optional fill and/or stroke. It uses the
-//! default AABB hit-test (exact for a rectangle) and has zero arena overhead.
+//! in local item coordinates with an optional fill and/or stroke. Its
+//! hit-test is its own [`shape`](SceneItem::shape) — the box, exact, for a
+//! square-cornered rectangle, and a rounded rect once `corner_radius` is set
+//! (see `shape` for what that costs a click in a corner) — and it has zero
+//! arena overhead.
 //!
 //! Like all lightweight items, `RectItem` is constructed with its geometry
 //! relative to a local origin (`Rect::new(0.0, 0.0, w, h)`) and placed in
@@ -25,8 +28,10 @@
 //!
 //! Use `RectItem` for background tiles, card backgrounds, selection highlights,
 //! grid cells, or any rectangular decoration in the lightweight tier. For
-//! arbitrary shapes, use [`PathItem`](crate::PathItem); for interactive content needing focus
-//! or event handlers, embed a full widget with `Scene::add_widget`.
+//! arbitrary shapes, use [`PathItem`](crate::PathItem); a tap / hover /
+//! context-menu handler needs no widget (wire one through
+//! `Scene::handlers_mut`), but for interactive content needing keyboard
+//! focus, embed a full widget with `Scene::add_widget`.
 //!
 //! ## Example
 //!
@@ -141,7 +146,8 @@ impl RectItem {
 
     /// Human-readable label used for debug and the default AT name.
     /// Accepts anything convertible into `LocalizedString` — most
-    /// commonly `tr!(...)`. Plain strings auto-convert.
+    /// commonly `tr!(...)`, or `lit!(...)` for a deliberately
+    /// untranslated one. A bare `&str` does not convert.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls.resolve_now());

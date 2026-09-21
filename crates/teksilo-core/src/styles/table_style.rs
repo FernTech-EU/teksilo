@@ -15,11 +15,15 @@
 //! ## Wiring status
 //!
 //! The trait surface, the `TableGridRecipe`, and the
-//! `style_slots.table` slot are in place. Wiring `TableView` /
-//! `TreeTableView` through `make_*` is intentionally deferred. The
-//! widgets currently still own their cell / row / header / grid-line
-//! chrome directly; every dimension lives on
-//! `teksilo_widgets::styles::recipe_table_style` as `pub const`s.
+//! `style_slots.table` slot are in place. Header cells route through
+//! `make_header_cell` — the shared `table_view::header::HeaderCell`,
+//! used by both views — and their gutter comes from
+//! `cell_padding_horizontal` / `cell_padding_vertical` rather than from
+//! the module constants. Wiring `make_row_background` and
+//! `make_sort_indicator` is intentionally deferred: the widgets still
+//! own their cell / row / grid-line chrome directly, and those
+//! dimensions live on `teksilo_widgets::styles::recipe_table_style` as
+//! `pub const`s.
 
 use std::rc::Rc;
 

@@ -14,8 +14,8 @@
 //! rebuilds keep materializing rows mid-drag.
 //!
 //! Not parameterized into `BodyPane<T>` deliberately: the tree case
-//! needs `SortFilterTreeModel` access (`entry_at` / `with_entry` with
-//! `FlatEntry` metadata), the tree-column indent + `TwistArrow`
+//! needs `TreeSource` access (`meta` / `with_row` with `TreeRowMeta`
+//! metadata), the tree-column indent + `TwistArrow`
 //! wrapping, `CellContext::depth`, and the `BodyRow::a11y_hidden()` +
 //! `TreeRowA11y` row shape — injecting all that as hooks would bloat
 //! the flat pane's clean closure surface.
@@ -103,10 +103,10 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     pub(crate) model_id: ViewId,
 
     /// Cross-widget export / foreign-receive machinery, shared with the
-    /// root (`TreeTableView::export`). The pane builds the reader +
-    /// stable-`NodeId` removal-thunk closures inline at drag-start (see
-    /// `on_drag` below), since a `SortFilterTreeModel<T>`-backed view has no
-    /// pluggable source to supply them.
+    /// root (`TreeTableView::export`). At drag-start the pane hands
+    /// `build_payload` the reader and the stable-`NodeId` removal thunk
+    /// (see `on_drag` below), both taken off the erased source's own
+    /// closures — `TreeSource::read_item_fn` / `TreeDndLazy::snapshot_out_fn`.
     pub(crate) export: crate::data_views::RowExport<T>,
 
     /// Optional row-activation callback (a click per `activate_on`, or

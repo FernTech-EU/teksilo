@@ -573,13 +573,15 @@ impl CodeEditorState {
                     self.pending_undo_redo = Some((can_undo, can_redo));
                 }
                 DocumentEvent::BlockCountChanged(count) => {
-                    // The event carries the count, which is the only affordable
-                    // way to know it: `TextDocument::block_count()` advertises
-                    // "O(1) — reads cached value" and then fetches every block,
-                    // reads each one's content from the rope, and splits it by
+                    // The event carries the count, which is how this stayed
+                    // affordable: `TextDocument::block_count()` once advertised
+                    // "O(1) — reads cached value" and then fetched every block,
+                    // read each one's content from the rope, and split it by
                     // whitespace to count words before returning the cached
-                    // number it already had. A gutter sizing itself from that
-                    // per frame would word-count the document every frame.
+                    // number it already had — a gutter sizing itself from that
+                    // per frame word-counted the document every frame. Since
+                    // text-document 1.12.2 that call is one entity read, but
+                    // taking the count off the event is still the cheaper shape.
                     //
                     // A streaming view owns its own count (the stat undercounts
                     // the document's initial block), so it is not published here.

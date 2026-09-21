@@ -276,7 +276,7 @@ mod tests {
             height: None,
         });
         trigger.set(1);
-        // Tick well past the default 400ms duration — animation must
+        // Tick well past the default 300ms duration — animation must
         // have completed and the scheduler dropped it.
         tree.tick_animations(Duration::from_millis(600));
         assert!(

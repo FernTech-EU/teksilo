@@ -610,8 +610,9 @@ impl WidgetTree {
         let roots: Vec<WidgetId> = self.arena.roots();
         let focused = self.focused;
         // Everything a park would take away from the user, gathered once so a
-        // culling container can ask `LayoutContext::subtree_is_interacting`
-        // without the tree. Empty on an idle tree.
+        // culling container can ask
+        // `LayoutContext::for_each_interaction_ancestor` without the tree.
+        // Empty on an idle tree.
         let interaction_anchors = self.collect_interaction_anchors();
         // What the `culls_children` parents decided about their children
         // during this walk — parked and woken alike. Settled after it, because
@@ -715,13 +716,17 @@ impl WidgetTree {
                 })
                 .unwrap_or(Rect::ZERO);
             // Use the positioned overlay_bounds for layout, not the intrinsic
-            // size. For `BelowPreferred` (and any future placement that
-            // inflates the overlay rect beyond the content's intrinsic size
-            // to match an anchor, e.g. a combo-box dropdown that must be at
-            // least as wide as its trigger), this lets the content widget
+            // size. For `Below` / `BelowPreferred` (and any other placement
+            // that inflates the overlay rect beyond the content's intrinsic
+            // size to match an anchor, e.g. a combo-box dropdown that must be
+            // at least as wide as its trigger), this lets the content widget
             // actually fill the overlay rather than sitting as a narrow
-            // strip inside it. All other placements return
-            // overlay_bounds.size() == intrinsic, so this is a no-op there.
+            // strip inside it. It carries the placements that *shrink* the
+            // rect just as well — `Above`/`BelowPreferred` to the room they
+            // found, `Centered`/`BottomCenter`/`ViewportCorner` to the usable
+            // area, `FullViewport` to the whole window — so the content is
+            // laid out at the rectangle it was actually given, whichever
+            // placement decided it.
             let content_proposal = SizeProposal::exact(overlay_bounds.width, overlay_bounds.height);
             let extras = crate::widget::LayoutExtras {
                 focused: self.focused,

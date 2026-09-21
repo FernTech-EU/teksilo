@@ -669,8 +669,8 @@ fn a_mouse_click_on_a_selected_grid_tile_collapses_the_selection() {
 /// `[0]`. A mouse click on the same row still selects it, because a mouse
 /// commits on the press and the press *bubble* does reach the row; it is the
 /// release-time commit that is lost. No example in `examples/` is affected —
-/// there is exactly one `on_tap` in the whole directory and it is on a scene
-/// card.
+/// there is no `on_tap` in the whole directory (the one that was, on a scene
+/// card, went away when `SceneCard` replaced it).
 ///
 /// **Why it is not fixed here.** The obvious fix is the absorber applied
 /// unconditionally at all four row sites, as `GridView` now applies it to tiles.

@@ -55,8 +55,9 @@ use crate::toast::{ToastAudience, ToastRoute};
 use teksilo_core::window::TeksiloWindowId;
 
 /// Bell-icon trigger + unread-count badge + popover that contains a
-/// [`NotificationLog`]. On popover open the archive's `mark_all_read`
-/// runs (the user is presumed to have seen the toasts now).
+/// [`NotificationLog`]. On popover *close* the entries in this bell's
+/// scope are marked read (the user is presumed to have seen the
+/// toasts now).
 pub struct NotificationCenterButton {
     archive: Rc<NotificationArchiveModel>,
     size: IconButtonSize,

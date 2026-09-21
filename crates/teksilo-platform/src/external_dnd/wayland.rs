@@ -27,8 +27,9 @@
 //! as soon as a second exists.)
 //!
 //! On X11 (the display handle is Xlib/XCB, not Wayland) `attach` returns an
-//! inert guard — external OS drops are then a no-op and the `DropZone` Browse
-//! button is the path.
+//! inert guard — such a window is routed to the sibling XDND backend
+//! (`external_dnd/x11.rs`) by `UnixExternalDndBackend`, so this one never has
+//! to answer for it.
 //!
 //! **Verification status:** compiled and exercised on a Linux/Wayland host
 //! (`cfg(all(unix, not(target_os = "macos")))`); not built on the macOS

@@ -155,8 +155,10 @@ impl ItemA11yOverrides {
 
 /// Emit the `.access_*` builder chain on a struct that holds an
 /// `a11y: ItemA11yOverrides` field. Built-in items invoke this inside
-/// their inherent impl block so they all share the same translated +
-/// `_literal` method names. Custom items can do the same.
+/// Emit the `.access_*` builder chain on a struct that holds an
+/// `a11y: ItemA11yOverrides` field. Built-in items invoke this inside
+/// their inherent impl block so they all share the same method names.
+/// Custom items can do the same.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! item_a11y_builders {
@@ -255,10 +257,10 @@ mod tests {
 
     #[test]
     fn literal_twins_match_translated_setters_via_observable_state() {
-        // The `_literal` twin must produce the same observable state
-        // as its translated counterpart — they're a grep-marker for
-        // explicitly-untranslated call sites, not a behavior split.
-        // We compare via the public `SceneItem::label` getter.
+        // `lit!` marks an explicitly-untranslated call site; it is a
+        // grep-marker, not a behavior split, so an item built from one
+        // is observably identical to any other `LocalizedString`
+        // source. We compare via the public `SceneItem::label` getter.
         let r = Rect::new(0.0, 0.0, 10.0, 10.0);
 
         let translated = RectItem::new(r).label(lit!("Hello"));

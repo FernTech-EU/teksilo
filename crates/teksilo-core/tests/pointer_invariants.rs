@@ -184,10 +184,10 @@ fn arb_stack() -> impl Strategy<Value = Vec<NodeSpec>> {
 /// platform cancel.
 ///
 /// The range spans every threshold in the token table (`slop_precise` 2,
-/// `drag_slop` 5/18, `tap_slop` 5/18, `pan_slop` 8/36) with room either side,
-/// and the fixture is 400 dp square, so an offset can also leave a member's
-/// bounds — which is what makes the coarse `TapBoundary::Bounds` rule
-/// reachable.
+/// `drag_slop` 5/18, `tap_slop` 5/18, `pan_slop` 8/36) with room either side.
+/// It stays inside the 400 dp square fixture, though — the press is at its
+/// centre and an offset reaches at most 120 dp — so the coarse
+/// `TapBoundary::Bounds` rule is never what ends a press here.
 fn arb_script() -> impl Strategy<Value = Script> {
     (
         arb_kind(),

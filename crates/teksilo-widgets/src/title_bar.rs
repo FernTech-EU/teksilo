@@ -15,7 +15,7 @@
 //! the host from the widget tree:
 //!
 //! ```ignore
-//! .root(|tree| {
+//! .root(|tree, _state| {
 //!     let host = tree.title_bar_host().expect("custom_chrome enabled");
 //!     tree.add(
 //!         VStack::new()
@@ -55,9 +55,8 @@ pub use drag_region::DragRegion;
 pub use resize_strip::ResizeStrip;
 pub use window_frame::{WINDOW_FRAME_RESIZE_THICKNESS, WindowFrame};
 
-/// Type alias for the user-supplied close action that overrides
-/// `host.close()` (which on Wayland is currently a no-op due to winit 0.30
-/// lacking `Window::request_close`). Set via [`TitleBar::close_action`].
+/// Type alias for the user-supplied close action that overrides the close
+/// button's default `ctx.close_window()`. Set via [`TitleBar::close_action`].
 pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
 
 /// A custom window title bar.
@@ -231,11 +230,10 @@ impl TitleBar {
     }
 
     /// Override the close-button action. When set, the close button calls
-    /// this closure instead of `host.close()`. Required on Wayland where
-    /// the host's `close()` is a no-op (winit 0.30 has no
-    /// `Window::request_close`); the application typically wires this to
-    /// call `EventContext::close_window` directly, or to send an
-    /// `Intent` whose root-level `Action` handler calls it.
+    /// this closure instead of the default `ctx.close_window()` — the hook
+    /// for a "save before closing?" guard. The application typically ends
+    /// the closure by calling `EventContext::close_window` itself, or by
+    /// sending an `Intent` whose root-level `Action` handler calls it.
     pub fn close_action(mut self, action: impl Fn(&mut EventContext) + 'static) -> Self {
         self.close_action = Some(Rc::new(action));
         self
@@ -319,9 +317,9 @@ impl Widget for TitleBar {
 
         // The leading and trailing slots arrive as `Box<dyn Widget>`, which
         // does not itself implement `Widget`, so we register them via
-        // `BuildContext::add_boxed` first and then attach them by id. The
-        // `add_child` and `child` calls on `HStack` push into the same
-        // ordered pending list, so interleaving is safe.
+        // `BuildContext::add_boxed` first and then attach them by id.
+        // `HStack::child` takes an id or a widget and pushes both into the
+        // same ordered pending list, so interleaving is safe.
         let mut row = HStack::new().spacing(0.0);
 
         if leading_inset.width > 0.0 {
@@ -631,13 +629,13 @@ mod tests {
     /// changes shape this test will tell us by panicking with a helpful
     /// debug print of the children at each level.
     ///
-    /// The maximize slot is a `Switcher` whose two pages (`□` normal and
-    /// `❐` zoomed) are pre-mounted ControlButtons handed in via
-    /// `child_id`. With Switcher's lazy-mount semantics, `PreMounted`
+    /// The maximize slot is a `Switcher` whose two pages (normal and zoomed,
+    /// both deliberately drawing `□`) are pre-mounted ControlButtons handed
+    /// in via `child(id)`. With Switcher's lazy-mount semantics, `PreMounted`
     /// entries become `Mounted` eagerly on first build, so the Switcher
     /// reports both pages as direct children — this helper picks the
-    /// first (normal-state) since `TestHost::default()` reports
-    /// `is_maximized = false`.
+    /// first (normal-state), which is the page `TitleBar` selects when no
+    /// `WindowState` is attached and `show_restore` falls back to `false`.
     fn locate_control_buttons(tree: &WidgetTree, bar: WidgetId) -> [WidgetId; 3] {
         // bar -> [HStack root]
         let bar_kids = tree.children(bar);
@@ -670,7 +668,7 @@ mod tests {
             "inner controls row should contain 3 items, got {inner_kids:?}"
         );
         // Switcher's direct children are its mounted pages — both
-        // pre-mounted ControlButtons (□ normal + ❐ zoomed) in
+        // pre-mounted ControlButtons (normal + zoomed, both `□`) in
         // declaration order.
         let max_buttons = tree.children(inner_kids[1]);
         assert_eq!(
@@ -1140,7 +1138,7 @@ mod tests {
         // Regression for: in M2 the gesture-arena auto-wiring in teksilo-core
         // only built a TapRecognizer when on_tap was set. DragRegion uses
         // on_drag (no on_tap) and so was getting no arena at all → drag
-        // never fired. The fix in event_dispatch_impl::ensure_gesture_arena
+        // never fired. The fix in gesture_dispatch_impl::ensure_gesture_arena
         // installs DragRecognizer whenever on_drag is set.
         let host = Rc::new(TestHost::default());
         let (mut tree, bar) = build_realistic_tree(host.clone(), |b| b);

@@ -357,7 +357,7 @@ fn arrow_nav_resumes_from_the_clicked_row() {
     );
 }
 
-/// A flat tree of `n` roots labelled "Node {i}", with a single-select model.
+/// A flat tree of `n` roots labelled "Node {i}", and a `mode` selection model.
 fn flat_tree_view(
     n: usize,
     mode: teksilo_data::SelectionMode,
@@ -2692,7 +2692,7 @@ fn lazy_loading_tree_rows_render_placeholders_and_request_the_window() {
     t.layout(SizeProposal::exact(400.0, 300.0));
 
     // 300px / 28px ≈ 10 visible + buffer → the loading rows are realized as
-    // placeholder child widgets (children minus the scrollbar), NOT skipped.
+    // placeholder child widgets (the body pane's children), NOT skipped.
     let placeholder_rows = row_ids(&t, v).len();
     assert!(
         placeholder_rows >= 10,
@@ -3345,10 +3345,10 @@ fn into_box_is_inset_so_it_cannot_be_read_as_an_insertion_line() {
 // A flat tree of roots, so `position_in_set` read back off the node is exactly
 // the flat row index, which makes it a readable stand-in for "which row is
 // this" below. Two conversions cancel: `sibling_pos` numbers visible roots from
-// 1 (`tree_source.rs:369-387`) and `TreeItemWrapper` passes that 1-based value
-// on (`list_item_a11y.rs:164`), while `set_position_in_set` stores AccessKit's
-// 0-based ordinal (`teksilo-core/src/accessibility.rs:466-468`, via
-// `to_accesskit_ordinal`). Zero-based in the tree, one-based in the ear.
+// 1 (`tree_source.rs:377-396`) and `TreeItemWrapper` passes that 1-based value
+// on (`list_item_a11y.rs:275-277`), while `set_position_in_set` stores
+// AccessKit's 0-based ordinal (`teksilo-core/src/accessibility.rs:726-729`,
+// via `to_accesskit_ordinal`). Zero-based in the tree, one-based in the ear.
 
 /// The rows that are both realized and marked selected, by sibling position.
 fn realized_selected(wtree: &mut WidgetTree) -> Vec<usize> {

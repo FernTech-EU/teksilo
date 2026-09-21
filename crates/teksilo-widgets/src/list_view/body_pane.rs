@@ -131,7 +131,7 @@ pub(crate) struct ListBodyPane<T: 'static> {
     /// Shared mirror of [`Self::item_entries`], published at the end of each
     /// build so the `ListView` root — and anything the app hands the handle to
     /// — can resolve a model index back to the realized row's wrapper id. The
-    /// wrapper is the node carrying `Role::ListItem`, so this is what an
+    /// wrapper is the node carrying `Role::ListBoxOption`, so this is what an
     /// `active_descendant` must point at. Same shape as `GridView`'s
     /// `tile_map`. Only realized rows appear; a row outside the virtualization
     /// window has no widget and therefore no id.
@@ -700,10 +700,10 @@ impl<T: 'static> Widget for ListBodyPane<T> {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // The pane stands in as the listbox's `Role::Group` — the
         // ARIA-blessed intermediate between `Role::ListBox` and its
-        // `Role::ListItem` options (`listbox` permits `group` children, which
-        // is how option groups are expressed). Without a non-hidden role
-        // here, AT clients that walk ListBox → ListItem directly would balk
-        // at a hidden generic container in the path.
+        // `Role::ListBoxOption` children (`listbox` permits `group`
+        // children, which is how option groups are expressed). Without a
+        // non-hidden role here, AT clients that walk ListBox → option
+        // directly would balk at a hidden generic container in the path.
         builder.set_role(teksilo_core::accesskit::Role::Group);
     }
 

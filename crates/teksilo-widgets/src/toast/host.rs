@@ -63,8 +63,10 @@ pub struct ToastInstallOptions {
     pub margin: Vec2,
     /// Vertical gap between stacked toasts. Default `8.0`.
     pub gap: f32,
-    /// Maximum simultaneously visible toasts. Default `5`. Normal
-    /// priority overflow drops; High / Urgent evict the oldest Normal.
+    /// Maximum simultaneously visible toasts PER ROUTE BUCKET — each
+    /// window, each audience and `Broadcast` get their own budget (see
+    /// `ToastRegistry::enqueue`). Default `5`. Normal priority overflow
+    /// drops; High / Urgent evict the oldest Normal in the same bucket.
     pub max_visible: usize,
     /// Fixed width for each toast surface. Default `380.0` (matches
     /// IntelliJ balloon width).
@@ -129,8 +131,8 @@ pub struct ToastHost {
     registry: ToastRegistry,
     options: ToastInstallOptions,
     /// Toast surface ids matched 1:1 with the registry's live entry
-    /// ids at the time of the last `build()`. Used by `place_children`
-    /// to know the placement order.
+    /// ids THAT ROUTE TO THIS HOST, at the time of the last `build()`.
+    /// Used by `place_children` to know the placement order.
     toast_surface_ids: Vec<WidgetId>,
     /// `Instant` of the last timer tick — used to compute `dt`. The
     /// auto-dismiss timer is driven by a `wake_at` deadline (see
@@ -167,7 +169,8 @@ impl ToastHost {
     /// Backwards-compatibility alias for ergonomic post-root
     /// installation: an app that already has a wrapping ZStack can
     /// construct a host via the standalone `new(...)`. This helper
-    /// returns a fresh wrapper that uses `ZStack` internally — but
+    /// ignores `_user_root` and just returns that host — the ZStack
+    /// wrapping is owned by `install_toast` itself, so this is
     /// since the wrapping is owned by `install_toast` itself, this is
     /// rarely called by user code.
     pub fn wrapping(

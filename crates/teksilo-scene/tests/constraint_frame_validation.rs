@@ -163,8 +163,9 @@ fn a_negative_extent_frame_is_refused() {
 }
 
 /// A **zero** extent is not an error. The resize path clamps at `min_size`
-/// rather than mirroring, and the default `min_size` is zero, so a frame
-/// collapsed to a point is a legitimate end of a drag and must go through.
+/// rather than mirroring, and that floor lives in the controller rather than
+/// in this validation, so a frame collapsed to a point is a legitimate end of
+/// a drag and must go through.
 #[test]
 fn a_zero_extent_frame_is_still_applied() {
     let (model, id) = one_square();

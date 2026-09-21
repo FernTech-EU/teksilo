@@ -702,7 +702,7 @@ impl ToastRegistry {
     }
 
     /// Tick the per-entry timers by `dt`. When `paused` is true (any
-    /// surface is hovered or focused), or any surface is being held down,
+    /// surface is hovered), or any surface is being held down,
     /// this is a no-op. Returns `true`
     /// if at least one entry expired (host then bumps the version
     /// signal and rebuilds, dropping the surfaces). Called from the

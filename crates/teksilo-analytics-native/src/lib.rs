@@ -4,9 +4,12 @@
 //! Teksilo analytics adapter for the home-grown
 //! [`teksilo-collector`](../../../teksilo-collector) gRPC backend.
 //!
-//! # Sub-phase A
+//! # Auth and TLS
 //!
-//! Localhost ingest only — no auth, no TLS. Wire format defined in
+//! Optional bearer-token auth (`TeksiloAdapterBuilder::bearer_token`) and
+//! optional TLS/mTLS (`TeksiloAdapterBuilder::tls`) are both supported;
+//! unset, the adapter talks plaintext, unauthenticated gRPC to a localhost
+//! collector. Wire format defined in
 //! `teksilo-collector/proto/telemetry/v1.proto` and consumed via the
 //! [`teksilo_collector_proto`] crate.
 //!

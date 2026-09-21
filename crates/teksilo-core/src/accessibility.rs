@@ -1500,6 +1500,7 @@ impl AccessNodeBuilder {
     /// same-line chain); the first run keeps no `previous_on_line` and the last
     /// no `next_on_line`, which is how the consumer detects the line's ends. A
     /// slice of zero or one is a no-op. Every id must be a run pushed earlier via
+    /// [`push_text_run`](Self::push_text_run) — or the older
     /// [`push_text_run_child`](Self::push_text_run_child).
     pub fn link_runs_on_line(&mut self, run_ids: &[NodeId]) {
         for pair in run_ids.windows(2) {

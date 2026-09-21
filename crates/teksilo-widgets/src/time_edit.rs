@@ -543,9 +543,9 @@ impl Widget for TimeEdit {
         // Same trick as DateEdit: the framing, padding, validation
         // strip, and focus-driven border all live in TextInput. We
         // just pass the time-shaped configuration (pattern-derived
-        // input mask, validator, char filter, commit handlers) and
-        // wrap with a min-width floor so the field sits at the
-        // editor's design width.
+        // input mask, validator, char filter, commit handlers); the
+        // pattern-derived mask is what sits the field at the editor's
+        // design width.
         let pattern_for_filter = pattern_rc.clone();
         let mask_string = mask_for_pattern(&pattern_rc);
         let mut text_input = TextInput::new(self.text_signal.clone())
@@ -790,9 +790,9 @@ impl Widget for TimeEdit {
             builder.set_read_only();
         }
         builder.add_action(Action::Focus);
-        // SetValue is advertised on the inner field (overridden to
-        // Role::TimeInput). Wrapper duplicating it would route AT-
-        // invoked SetValue through both nodes.
+        // SetValue is advertised on the inner field (Role::TextInput).
+        // Wrapper duplicating it would route AT-invoked SetValue through
+        // both nodes.
     }
 }
 
@@ -810,9 +810,9 @@ pub(crate) fn clamp_time(t: Time, min: Option<Time>, max: Option<Time>) -> Time 
 /// Build a time-validator closure suitable for plugging into
 /// `TextInputField::validator(...)`. Mirrors
 /// [`crate::date_edit::build_date_validator`] in shape: lenient
-/// strict-parse → clamp-recovery → reject. Used by `TimeEdit` itself
-/// AND by `DateTimeEdit`'s time half so both share the same parsing
-/// semantics without duplicating the closure body.
+/// strict-parse → clamp-recovery → reject. Used by `DateTimeEdit`'s time
+/// half; `TimeEdit::build` still inlines its own copy of the same closure
+/// body, so the two have to be kept in step.
 pub(crate) fn build_time_validator(
     pattern: Rc<ParsedPattern>,
     min: Option<Time>,

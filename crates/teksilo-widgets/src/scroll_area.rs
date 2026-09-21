@@ -135,7 +135,7 @@ pub struct ScrollArea {
     smooth_scrolling: bool,
     /// Duration of the smooth scroll animation.
     smooth_scroll_duration: Duration,
-    /// Preferred size returned by `size_that_fits` when the proposal is
+    /// Preferred size returned by `layout_response` when the proposal is
     /// unconstrained. `None` falls back to cached content size or 300×200.
     preferred_size: Option<Size>,
     /// Height-only cap; width still follows the content. See `preferred_height`.

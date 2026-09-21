@@ -7,7 +7,8 @@
 //! trailing shortcut label, and an activation closure. `MenuItem` is
 //! non-generic: actions are type-erased closures identical to `Button`'s
 //! `on_activate_fn` model. Submenus are declared with `MenuItem::submenu`
-//! — the factory builds the nested `MenuList` lazily at hover time.
+//! — the factory runs during `build()`, and the nested `MenuList` it
+//! returns stays a dormant, deferred subtree until first wanted.
 //!
 //! Every item operates in one of three **modes** selected by builder methods:
 //!
@@ -288,9 +289,11 @@ pub struct MenuItem {
     /// shortcut) and the keyboard-driven type-ahead.
     parsed_mnemonic: Option<ParsedMnemonic>,
     /// Shared safe-triangle state owned by the enclosing
-    /// [`MenuList`](crate::menu_list::MenuList). Submenu triggers
-    /// write to it on hover-enter (stamp the anchor); sibling items
-    /// read it before firing their hover-switch so a diagonal
+    /// [`MenuList`](crate::menu_list::MenuList). A submenu trigger
+    /// publishes its open submenu's content id here on hover-*leave*
+    /// (the apex itself lives in core, armed via
+    /// `ctx.arm_overlay_safe_region`); sibling items read that id
+    /// before firing their hover-switch so a diagonal
     /// pointer trajectory toward the open submenu doesn't steal
     /// focus. `None` for items that haven't been adopted by a
     /// MenuList (e.g. solo menu items in tests).
@@ -427,11 +430,16 @@ impl MenuItem {
 
     /// Bind the trailing shortcut label to a registered
     /// [`Shortcut`](teksilo_core::shortcut::Shortcut) by its stable id.
-    /// At build time the effective primary keystroke is rendered;
-    /// rebinds performed through
+    /// Bind the trailing shortcut label to a registered
+    /// [`Shortcut`](teksilo_core::shortcut::Shortcut) by its stable id.
+    /// The effective primary keystroke is bound *reactively*, via a
+    /// per-id signal, so a rebind performed through
     /// [`ShortcutRegistry`](teksilo_core::shortcut::ShortcutRegistry)
-    /// rebuild this item automatically via the registry's version
-    /// signal.
+    /// refreshes the chord in place — the item itself is never rebuilt
+    /// for shortcut changes.
+    ///
+    /// A manual [`shortcut_label`](Self::shortcut_label) takes
+    /// precedence when both are set.
     ///
     /// A manual [`shortcut_label`](Self::shortcut_label) takes
     /// precedence when both are set.
@@ -670,11 +678,12 @@ impl MenuItem {
     /// safe-triangle state. Called by `MenuList::build` for every
     /// item before it reaches the arena. The handle lets:
     ///
-    /// - a submenu trigger stamp the anchor (pointer position at
-    ///   submenu-open time) and the open submenu's content id;
-    /// - a sibling item read the anchor + submenu id on hover and
-    ///   skip its dismiss / open call when the cursor is currently
-    ///   inside the safe triangle.
+    /// - a submenu trigger publish the open submenu's content id when
+    ///   the pointer leaves its row (the apex is armed separately, in
+    ///   core, via `ctx.arm_overlay_safe_region`);
+    /// - a sibling item read that submenu id on hover and skip its
+    ///   dismiss call while the region for that submenu is still
+    ///   armed.
     pub(crate) fn set_safe_triangle_state(
         &mut self,
         state: crate::menu_list::SharedSafeTriangleState,

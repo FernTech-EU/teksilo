@@ -140,7 +140,7 @@ fn three_panes_have_two_handles() {
     tree.layout(SizeProposal::exact(600.0, 200.0));
     // children: pane,handle,pane,handle,pane = 5
     assert_eq!(tree.children(root).len(), 5);
-    // Equal thirds (each gets min 0 + equal stretch slack).
+    // Equal thirds (equal min floors + equal stretch slack).
     let avail = 600.0 - 2.0 * SPLITTER_GUTTER_THICKNESS;
     for idx in [0usize, 2, 4] {
         let w = tree.bounds(tree.child_widget(root, idx)).width;

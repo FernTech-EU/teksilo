@@ -9,18 +9,21 @@
 //! ```text
 //! InspectorShell
 //! └── VStack
-//!     ├── Expanded (flex=1) {
+//!     ├── Expand (flex=1) {
 //!     │     ZStack {
 //!     │       user_root,                              // pre-existing
 //!     │       HighlightLayer { event_pass_through },  // selection border
 //!     │       PickerOverlay { mounted when picking },
+//!     │       PointerWatchOverlay { mounted while armed },
+//!     │       InspectorGrip { mounted on a coarse pointer, panel closed },
 //!     │     }
 //!     │   }
 //!     ├── BoundsTracker (zero size)
 //!     ├── PickResolver (zero size)
 //!     └── Switcher(open as 0|1) {
 //!           0: zero-size placeholder,
-//!           1: Panel { Tabs (Tree, Properties, A11y) },
+//!           1: Panel { Tabs (Tree, Properties, Accessibility, Theme, Locale,
+//!              Focus, Shortcuts, Overlays, Models, Pointers) },
 //!         }
 //! ```
 
@@ -352,7 +355,7 @@ fn build_panel(state: InspectorState) -> impl Widget + 'static {
 }
 
 /// Toolbar above the tabs:
-/// `[Pick] [Bounds: Off|Sel|All] [Opacity slider] ··· [×]`.
+/// `[Pick] [Bounds: Off|Sel|All] [Opacity slider] [Overflow] [Watch] ··· [×]`.
 fn build_toolbar(state: InspectorState) -> impl Widget + 'static {
     let picker_state_for_label = state.picker_mode.clone();
     let picker_label_signal = picker_state_for_label.map(|active| {

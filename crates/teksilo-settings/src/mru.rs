@@ -105,7 +105,8 @@ pub trait MruEntry: Keyed + Clone + Serialize + DeserializeOwned + Send + 'stati
 ///
 /// Cheap to clone (`Rc`-shared internally). The reactive
 /// [`ListModel<T>`](teksilo_data::ListModel) returned by [`model()`](Self::model) is the same
-/// handle the persistence bridge observes.
+/// handle this list's own mutators update — nothing observes it for
+/// persistence, so only those mutators reach the disk.
 pub struct MruList<T: MruEntry> {
     persisted: Rc<PersistedListModel<T>>,
     max_items: usize,
@@ -593,9 +594,10 @@ mod tests {
 
     /// Two `MruList` handles over one file each `add` a *different*
     /// recent, with no coordination between them. A third, fresh handle
-    /// must see **both** — today, one is silently lost because the old
-    /// design re-derives and overwrites the whole file from an
-    /// increasingly stale in-memory snapshot on every mutation.
+    /// must see **both** — before the op-merge design, one was silently
+    /// lost because the old design re-derived and overwrote the whole
+    /// file from an increasingly stale in-memory snapshot on every
+    /// mutation.
     #[test]
     fn two_peers_each_adding_a_different_recent_both_survive() {
         let dir = tempdir().unwrap();

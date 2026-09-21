@@ -97,7 +97,7 @@ pub const RANK_OVER: u8 = 2;
 /// | rank | contents |
 /// |------|----------|
 /// | [`RANK_UNDER`] | lightweight items in [`SceneLayer::Under`](crate::SceneLayer::Under) |
-/// | [`RANK_WIDGET`] | heavyweight widget entries |
+/// | [`RANK_WIDGET`] | heavyweight widget entries, and lightweight items in [`SceneLayer::Interleaved`](crate::SceneLayer::Interleaved) |
 /// | [`RANK_OVER`] | lightweight items in [`SceneLayer::Over`](crate::SceneLayer::Over) |
 ///
 /// Within a rank, ascending `z`; ties broken by `seq`, the entry's
@@ -226,8 +226,11 @@ impl PartialOrd for PaintKey {
 /// a handler that a press is the beginning of: `on_tap`, `on_double_tap` or
 /// `on_context_menu`. False for everything else.
 ///
-/// Read at exactly one place — the `Over`-band veto that decides whether the
-/// lightweight tier may take a press away from a heavyweight card. Everything
+/// Read at exactly one place — the above-a-card veto that decides whether the
+/// lightweight tier may take a press away from a heavyweight card. Not
+/// band-scoped: it compares whole [`PaintKey`]s per child, so an
+/// [`Interleaved`](crate::SceneLayer::Interleaved) claimant vetoes the cards it
+/// is painted over too. Everything
 /// else in the scene still resolves the topmost *entry* and consults its
 /// handlers afterwards.
 ///

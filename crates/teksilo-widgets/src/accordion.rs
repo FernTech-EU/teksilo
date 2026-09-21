@@ -408,7 +408,9 @@ impl Widget for Accordion {
         let horizontal = self.orientation == AccordionOrientation::Horizontal;
 
         // Optional trailing header slot (options `⋮` button / action toolbar),
-        // inserted just before the disclosure chevron in either orientation.
+        // inserted just before the disclosure chevron in the vertical
+        // orientation, and after the rotated title in the horizontal one (where
+        // the chevron leads the strip).
         // Wrap it in a [`DeadZone`](crate::primitives::DeadZone) so operating the
         // controls (even with a few px of click jitter) never starts the header
         // drag and gap-taps don't toggle the disclosure — while a press anywhere
@@ -1262,8 +1264,8 @@ mod tests {
         // Regression: a draggable header (`on_header_drag`) must NOT be dragged
         // by interacting with its trailing controls — clicking/dragging an
         // options button there used to arm the header-drag recognizer and a few
-        // px of jitter started dragging the whole dock. The trailing absorber
-        // shadows the header drag.
+        // px of jitter started dragging the whole dock. The trailing slot's
+        // `DeadZone` stops the header-drag arming structurally.
         use crate::primitives::{FixedSize, RectWidget};
         use std::cell::Cell as StdCell;
         use std::rc::Rc;

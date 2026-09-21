@@ -40,7 +40,7 @@
 //! `Leading` / `Trailing` — each with its own optional hint, and route the drop
 //! by which zone the pointer released over. This is the VS Code-style
 //! "drop on the centre to add, drop on an edge to split" affordance
-//! (`DockingLayout` computes the same five zones by hand). Declare regions with
+//! (`DockingLayout`'s pane split/stack zones are built on it). Declare regions with
 //! [`DropTarget::region`]; the side zones share one [`DropTarget::zone_size_factor`]
 //! (`0.1..=1.0`, the fraction of the axis each edge strip occupies — `0.2` is the
 //! default fifth, `0.5` bisects) so you size them to the context. Route with
@@ -59,8 +59,8 @@
 //! Declaring **any** region switches the target to exactly the declared regions;
 //! declaring none keeps the `Center`-only whole-bounds default (`.hint(w)` is
 //! sugar for `.region(DropRegion::Center, |z| z.hint(w))`). `Leading` / `Trailing`
-//! map to left / right — the framework surfaces no writing direction on the
-//! layout context yet, so RTL mirroring is a follow-up.
+//! map to left / right — this widget does not yet consult
+//! `LayoutContext::layout_direction`, so RTL mirroring is a follow-up.
 //!
 //! Each zone can be **reactively enabled** with `z.enabled(signal)` (default
 //! `true`): a bound `Signal<bool>` disables the zone live — no rebuild — and its
@@ -99,9 +99,10 @@
 //! If you use `DropTarget` for an action that has *no* other affordance, you
 //! must add a keyboard equivalent yourself (a button, menu item, or shortcut) —
 //! otherwise the action is unreachable for keyboard-only users, and entirely
-//! unavailable on platforms with no external-DnD backend (e.g. X11, where OS
-//! drag-and-drop is a no-op). `DropZone` is the better choice when the drop
-//! *is* the primary action.
+//! unavailable on any target with no external-DnD backend (all four desktop
+//! backends are real — OLE on Windows, `NSDraggingDestination` on macOS,
+//! `wl_data_device` on Wayland, XDND on X11). `DropZone` is the better choice
+//! when the drop *is* the primary action.
 //!
 //! ## Touch and pen
 //!
@@ -381,7 +382,7 @@ impl DropTarget {
     /// Enable and configure a drop [`DropRegion`]. Declaring **any** region
     /// switches the target to exactly the declared regions; declaring none
     /// leaves the implicit `Center`-only whole-bounds default. The spec closure
-    /// configures the region (currently: an optional hint).
+    /// configures the region (an optional hint, and a reactive `enabled` flag).
     ///
     /// ```ignore
     /// DropTarget::new()

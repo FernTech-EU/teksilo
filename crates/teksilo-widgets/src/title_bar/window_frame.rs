@@ -193,7 +193,7 @@ impl Widget for WindowFrame {
 
         // Corners — added AFTER the edges so that teksilo-core's hit-test
         // (children walked in reverse order — see `hit_test_recursive`
-        // in `event_dispatch_impl.rs`) checks the corners first. In
+        // in `arena.rs`) checks the corners first. In
         // practice we also place them at non-overlapping positions, but
         // walking last also guarantees priority under future layout
         // refactors.

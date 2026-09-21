@@ -375,9 +375,11 @@ fn show_buttons_sugar_matches_button_layout() {
 // `width()` / `fill_width()` behaviour is exercised visually in
 // `examples/spin_box` rather than unit-tested here: the test harness
 // uses `SizeProposal::exact` for the tree root, which pins the root
-// widget to that exact size and bypasses the SpinBox's internal
-// `MaxSize` cap. Validating the cap needs a multi-child parent
-// (HStack row) that distributes space — covered by the demo.
+// widget to that exact size and hides the SpinBox's internal
+// horizontal cap (applied by narrowing the proposal in
+// `layout_response`, not by a clipping `MaxSize` wrapper).
+// Validating the cap needs a multi-child parent (HStack row) that
+// distributes space — covered by the demo.
 
 // ── Suffix & special value text coexist ───────────────────────────
 
@@ -391,10 +393,9 @@ fn a11y_numeric_value_matches_signal() {
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
 
-    // We can't inspect the raw AccessKit `Node` through the public
-    // API, but we can round-trip via the Role + Action set and
-    // confirm the value updates the a11y string published by
-    // `builder.set_value`. The Info wrapper doesn't expose the
+    // The raw AccessKit `Node` is reachable through
+    // `tree.sync_accessibility()` (as `at_value` below does), but the
+    // `AccessibilityInfo` wrapper used here doesn't expose the
     // numeric_value itself, so the closest smoke test is that the
     // node exists and advertises the expected actions.
     let info = tree.accessibility_node(id);
@@ -491,11 +492,14 @@ fn tooltip_appears_on_hover() {
 
 // ── Disabled appearance ───────────────────────────────────────────
 //
-// A SpinBox frames its `TextInputField` in *neutral* roles
-// (`SurfaceRole::Content` / `BorderRole::Default`), and the disabled-role
-// substitution in `ColorProp::resolve` only rewrites the *accent* family —
-// so unlike a Filled Button it gets no automatic greying and must opt in via
-// `SurfaceRole::Disabled`. It once did not, and stayed fully lit after
+// A SpinBox frames its `TextInputField` in the *neutral interactive* roles
+// (`SurfaceRole::Field` / `BorderRole::Field`), which the disabled-role
+// substitution in `ColorProp::resolve` rewrites to their `Disabled`
+// counterparts. It once painted the pass-through `SurfaceRole::Content` /
+// `BorderRole::Default` — which that hook leaves alone, because a passive
+// `Panel` paints them too — so unlike a Filled Button it got no automatic
+// greying and stayed fully lit after `.enabled(false)`. These pin the
+// painted pixels, not the intent. It once did not, and stayed fully lit after
 // `.enabled(false)`. These pin the painted pixels, not the intent.
 //
 // Match on the frame rect + stroke width rather than "some quad has this
@@ -633,7 +637,7 @@ fn spin_box_dims_inside_a_disabled_ancestor() {
 /// `lines` is in Teksilo's own `ScrollDelta` sign, which is a *scroll
 /// offset* delta rather than a raw wheel reading: `translate_mouse_wheel`
 /// negates winit's natural sign, so a physical wheel-**down** notch arrives
-/// here as `+3.0` (one notch × `LINES_PER_NOTCH`).
+/// here as `+3.0` (one notch × `InputTokens::lines_per_notch`, default 3.0).
 fn wheel(tree: &mut WidgetTree, spin_id: teksilo_core::widget_id::WidgetId, lines: f32) {
     use teksilo_canvas::Point;
     use teksilo_core::event::{ScrollDelta, WidgetEvent};

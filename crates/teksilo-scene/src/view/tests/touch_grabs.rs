@@ -241,9 +241,9 @@ fn a_finger_grabs_a_thin_item_a_mouse_has_to_hit_exactly() {
 
 /// The slop is a bounded top-up, not "a finger gets the bounding box".
 ///
-/// A thin L's box is 100×100 with the stroke along two edges; a press at the
-/// box's interior centre is ~35 px from any stroke, far outside the 8 dp a
-/// coarse pointer can ever earn, so it must still fall through to the marquee.
+/// A thin L's box is 100×100 with the stroke along two edges; a press deep in
+/// the box's empty quadrant is ~85 px from either stroke, far outside the 8 dp
+/// a coarse pointer can ever earn, so it must still fall through to the marquee.
 #[test]
 fn a_finger_does_not_get_a_thin_items_whole_bounding_box() {
     use crate::items::PathItem;

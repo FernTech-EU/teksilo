@@ -4,8 +4,11 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// The pre-existing suite. Not one assertion here has been edited: mouse and
-// keyboard translation are byte-for-byte what they were.
+// ---------------------------------------------------------------------------
+// The pre-existing suite. Mouse and keyboard translation are byte-for-byte what
+// they were; the one assertion edited since is `rotation_gesture_translates`'s,
+// whose own doc comment states the contract change that forced it.
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
 #[test]

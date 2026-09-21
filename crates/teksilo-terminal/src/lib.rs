@@ -13,8 +13,8 @@
 //! in this crate re-implements escape-code handling.
 //!
 //! Sits at the `teksilo-widgets` tier but depends only on `teksilo-core` /
-//! `teksilo-tokens` / `teksilo-canvas`, so apps that don't embed a terminal pay
-//! nothing.
+//! `teksilo-tokens` / `teksilo-canvas` / `teksilo-platform`, so apps that don't
+//! embed a terminal pay nothing.
 
 mod a11y;
 pub mod color_scheme;

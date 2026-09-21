@@ -55,7 +55,7 @@ pub enum WidgetState {
 
 /// Send+Sync, serializable color value usable inside a recipe.
 ///
-/// Three flavours, all `Copy`:
+/// Four variants, all `Copy`:
 /// - **`Static(Color)`** — frozen literal color.
 /// - **`Surface(SurfaceRole)`** / `Border(BorderRole)` / `Text(TextRole)` —
 ///   theme-aware role; resolves against the current `ColorTokens` at
@@ -155,7 +155,7 @@ impl ShapeRecipe {
 /// Material-3 / Fluent "state layer" model). `LinearGradient` /
 /// `RadialGradient` describe true gradients; the renderer paints them via
 /// the SDF gradient pipeline once a `PaintProp` carries them (see
-/// `resolve_fill_to_paint`).
+/// [`PaintProp::from_fill`](crate::paint_prop::PaintProp::from_fill)).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FillRecipe {
     /// Single flat color.
@@ -213,8 +213,9 @@ impl FillRecipe {
 
     /// Resolve the flat-color variants (`Solid`, `StateLayer`, `None`)
     /// against `colors`. Gradient variants return `None` here — they are
-    /// resolved to a `Paint` by `resolve_fill_to_paint`, not to a flat
-    /// color. `FillRecipe::None` maps to `Some(Color::TRANSPARENT)`.
+    /// resolved to a `Paint` by
+    /// [`PaintProp::from_fill`](crate::paint_prop::PaintProp::from_fill), not
+    /// to a flat color. `FillRecipe::None` maps to `Some(Color::TRANSPARENT)`.
     pub fn resolve_flat(&self, colors: &ColorTokens) -> Option<Color> {
         match self {
             FillRecipe::Solid(c) => Some(c.resolve_with(colors)),

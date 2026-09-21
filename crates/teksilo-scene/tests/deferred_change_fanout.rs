@@ -1228,8 +1228,8 @@ fn a_recursive_remove_keeps_its_leaves_then_root_order() {
 
     let (log, _handles) = record(&model);
 
-    // Every `Removed` observer reads the scene back. `None` at every one of them
-    // means the mutation had fully landed before any notification went out.
+    // Every `Removed` observer reads the scene back. An empty scene at every one
+    // of them means the mutation had fully landed before any notification went out.
     let reader = model.clone();
     let sizes: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
     let seen_sizes = sizes.clone();

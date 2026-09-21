@@ -350,7 +350,9 @@ impl DragPayload {
         self.origin == DragOrigin::External
     }
 
-    /// Dropped filesystem paths (empty for internal drags or non-file drops).
+    /// Dropped filesystem paths (empty for non-file drops, and for internal
+    /// drags unless [`Self::enrich_external_from_mime`] has filled the
+    /// external view).
     pub fn files(&self) -> &[PathBuf] {
         self.external.as_ref().map_or(&[], |e| &e.files)
     }
@@ -360,7 +362,9 @@ impl DragPayload {
         self.external.as_ref().and_then(|e| e.text.as_deref())
     }
 
-    /// Dropped non-file URLs (empty for internal drags or file-only drops).
+    /// Dropped non-file URLs (empty for file-only drops, and for internal
+    /// drags unless [`Self::enrich_external_from_mime`] has filled the
+    /// external view).
     pub fn uris(&self) -> &[String] {
         self.external.as_ref().map_or(&[], |e| &e.uris)
     }

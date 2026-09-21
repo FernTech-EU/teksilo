@@ -49,7 +49,7 @@ struct Board {
     selection: SceneSelection,
     mode: Signal<CardMode>,
     root: WidgetId,
-    /// Every change the model emitted since `record()`.
+    /// Every change the model emitted since the `Board` was built.
     changes: Rc<RefCell<Vec<ItemChange>>>,
     _obs: teksilo_core::signal::ObserverHandle,
 }
@@ -880,7 +880,7 @@ fn activate_label_names_the_at_action() {
     );
 }
 
-/// The `*_id` builders take a widget the caller already mounted, and the card
+/// The slot builders take a widget the caller already mounted, and the card
 /// wires it exactly as the by-value form does.
 #[test]
 fn the_by_id_slots_wire_a_pre_mounted_widget() {
@@ -988,7 +988,7 @@ fn mode_signal_hands_back_the_cards_own_mode() {
 }
 
 /// A composing widget that mounts the card's slots itself and passes them by
-/// id — the shape `header_id` / `body_id` / `header_trailing_id` exist for.
+/// id — the shape `header` / `body` / `header_trailing` take a `WidgetId` for.
 #[derive(Debug)]
 struct PreMounted {
     model: SceneModel,

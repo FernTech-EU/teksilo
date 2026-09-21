@@ -188,7 +188,8 @@ fn scan_source_files(src_roots: &[&Path], emit_names: &[String], _schema: &Schem
         hits.insert(name.clone(), Vec::new());
     }
 
-    // Also track patterns that look like emit_* but aren't in the schema.
+    // Names that look like `emit_*` but aren't in the schema are tracked
+    // separately, by `check_undeclared_emits`.
     for root in src_roots {
         walk_dir(root, &mut |file_path, content| {
             for (line_no, line) in content.lines().enumerate() {

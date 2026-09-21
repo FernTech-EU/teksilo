@@ -43,9 +43,8 @@ pub struct Size {
 ///
 /// Lives in teksilo-canvas (not teksilo-tokens) because it's a generic
 /// geometry primitive, not a design token. Used by per-widget
-/// recipes (`ButtonRecipe::padding`), the `Padding` widget
-/// primitive in teksilo-widgets, and any caller that needs to describe
-/// a rectangular inset. Pure data — `Send + Sync + Serialize`.
+/// recipes (`ButtonRecipe::padding`) and any caller that needs to
+/// describe a rectangular inset. Pure data — `Send + Sync + Serialize`.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EdgeInsets {
     pub top: f32,

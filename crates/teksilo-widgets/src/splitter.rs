@@ -15,8 +15,8 @@
 //! clipping, RTL-correct horizontal layout. New: N panes, per-pane
 //! stretch (container-resize policy), animated collapse with four triggers
 //! (programmatic / double-click / drag-past-min snap / keyboard), a Tier-3
-//! [`SplitterStyle`], and serializable import/export. Intended as the
-//! building block for a future `DockingLayout`.
+//! [`SplitterStyle`], and serializable import/export. It is the building
+//! block `DockingLayout` is built from.
 //!
 //! ```ignore
 //! let model = SplitterModel::from_panes(vec![
@@ -82,8 +82,10 @@ pub struct Splitter {
     // ---- build-time state ----
     pane_clip_ids: Vec<WidgetId>,
     /// The user content widget inside each clip pane (in model order).
-    /// `visible_when`-gated on the collapse progress so collapsed content
-    /// goes dormant.
+    /// `visible_when`-gated on the combined collapse × visibility progress,
+    /// so collapsed or hidden content goes dormant — except a pane with a
+    /// non-zero `collapsed_size`, which keeps a visible sliver while
+    /// collapsed and is therefore gated on visibility alone.
     pane_inner_ids: Vec<Option<WidgetId>>,
     /// Per-pane *full* (uncollapsed) main-axis size, written each layout
     /// pass and read by the clip so content lays out at full size and is
@@ -196,9 +198,10 @@ impl Splitter {
         self
     }
 
-    /// Enable or disable handle dragging, statically or reactively. When
-    /// `false`, divider handles are rendered inert — the pane layout is
-    /// still valid but the user cannot resize panes.
+    /// Enable or disable handle dragging. When `false`, divider handles are
+    /// rendered inert — the pane layout is still valid but the user cannot
+    /// resize panes. Read once at build time: a bound `Signal` is
+    /// snapshotted, not tracked.
     pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self {
         self.enabled = enabled.into();
         self

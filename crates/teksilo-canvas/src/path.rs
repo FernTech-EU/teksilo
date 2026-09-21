@@ -1427,9 +1427,9 @@ mod tests {
         let t = Transform2D::rotate(std::f32::consts::FRAC_PI_4);
         let rotated = r.transformed(&t);
         assert!(rotated.contains_point(Point::ZERO, FillRule::Winding, 0.25));
-        // The rotated silhouette is the same rounded square turned a quarter of
-        // a right angle, so the image of a point in the original's transparent
-        // corner is still out.
+        // The rotated silhouette is the same rounded square turned half a right
+        // angle, so the image of a point in the original's transparent corner
+        // is still out.
         let corner = t.apply_point(Point::new(-49.0, -49.0));
         assert!(!rotated.contains_point(corner, FillRule::Winding, 0.25));
         // ...and the image of a point on the original's edge is still in.
