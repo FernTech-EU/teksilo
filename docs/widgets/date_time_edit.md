@@ -50,12 +50,14 @@ is used to from booking sites, calendar apps, and form builders.
 
 - Container — `Role::DateTimeInput` with `set_value` formatted as
   `YYYY-MM-DDTHH:MM:SS` (ISO 8601 datetime).
-- Each `TextInputField` keeps its own `Role::TextInput` AT node;
-  the wrapper's `Role::DateTimeInput` provides the datetime semantics.
+- Each `TextInputField` keeps its own AT node, re-roled per half to
+  `Role::DateInput` / `Role::TimeInput`; the wrapper's
+  `Role::DateTimeInput` provides the datetime semantics.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.
-use teksilo_widgets::date_time_edit::{DateTimeEdit, SecondsMode};
+use teksilo_widgets::date_time_edit::DateTimeEdit;
+use teksilo_widgets::time_edit::SecondsMode;
 
 let datetime = ctx.signal(None);
 let _w = DateTimeEdit::new(datetime.clone())
@@ -138,6 +140,14 @@ text validator enforce this ceiling.
 
 Minute increment for Up/Down segment stepping on the minute field.
 Defaults to `1`; values below `1` are clamped to `1`.
+
+**Currently inert**, exactly as on `TimeEdit`: segment-aware
+stepping moves the field under the caret by one of *that*
+segment's units (±1, ±10 with Shift, ±10 / ±100 on the page
+keys) rather than by a fixed number of minutes. The builder is
+kept on the public surface so callers that already configured it
+still compile, and as the hook a future per-segment custom step
+would use; it has no effect today.
 
 #### `pub fn first_day_of_week(mut self, w: Weekday) -> Self`
 

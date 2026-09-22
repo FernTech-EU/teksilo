@@ -171,9 +171,9 @@ builds a fresh one. Mutually exclusive with `on_activate` / `toggle`
 
 #### `pub fn tooltip(mut self, text: impl Into<LocalizedString>) -> Self`
 
-Plain-text tooltip shown after a hover delay (also the AT name
-supplement in `IconOnly` mode). Overrides any previously set rich
-tooltip — every setter clears the other so last-call wins.
+Plain-text tooltip shown after a hover delay (the inline button is
+icon-only; with none set, the label is used). Overrides any previously
+set rich tooltip — every setter clears the other so last-call wins.
 
 #### `pub fn rich_tooltip(mut self, key: impl Into<String>) -> Self`
 

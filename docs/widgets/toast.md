@@ -22,10 +22,10 @@ configured via builder methods, and presented with
 or `toast.present(ctx)`. A `ToastHost`
 installed via `TeksiloAppBuilder.install_toast(opts)` from the `teksilo`
 umbrella accepts the request, picks a free slot from its pool, and
-mounts a `ToastSurface` at the
-configured viewport corner using the
-`OverlayPlacement::ViewportCorner`
-variant.
+mounts a `ToastSurface` as one of its own children, placed at
+the configured viewport corner by the host's `place_children`. No
+overlay system involvement — toasts are regular widgets in the
+arena.
 
 ```ignore
 ctx.show_toast(
@@ -189,9 +189,10 @@ Set to `false` for actions that toggle state without closing
 
 #### `pub fn shortcut_id(mut self, id: impl Into<String>) -> Self`
 
-Associate the action with a registered `Shortcut` id. Two
-effects: the keystroke label is shown as a chip on the action,
-and the archived form of this action (in
+Associate the action with a registered `Shortcut` id. The live
+toast renders nothing extra for it — the action's own callback
+is the source of truth there. The id is carried so the archived
+form of this action (in
 `NotificationLog`)
 is re-invokable by name through the existing Intent
 dispatcher.
@@ -395,7 +396,7 @@ callback fires on tap. Cursor changes to `Pointer` over the body.
 
 Notification of dismissal. Fires exactly once per toast on any
 dismiss path (timer, action invocation, close click, escape,
-programmatic, host shutdown, slot-pool overflow).
+swipe, programmatic, host shutdown, slot-pool overflow).
 
 #### `pub fn show_close_button(mut self, show: bool) -> Self`
 

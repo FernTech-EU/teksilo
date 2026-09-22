@@ -723,8 +723,8 @@ move, it glides.
 
 #### `pub fn set_bold(&self, enabled: bool)`
 
-Apply **bold** to the current selection (or set the typing bold
-state when no selection is active). Pairs with
+Apply **bold** to the current selection. A no-op when nothing is
+selected — the document model has no typing format. Pairs with
 `is_bold` and `toggle_bold`.
 
 #### `pub fn set_italic(&self, enabled: bool)`

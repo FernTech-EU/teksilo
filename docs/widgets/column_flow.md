@@ -171,9 +171,9 @@ theme's divider colour.
 
 Expose the children to assistive technology as a list.
 
-The container becomes `Role::List` and every child is wrapped in a
-layout-transparent node reporting `Role::ListItem` with its position and
-the set size, so a screen reader announces "list, 30 items" and
+The container becomes `Role::List` carrying the set size, and every
+child is wrapped in a layout-transparent node reporting `Role::ListItem`
+with its position, so a screen reader announces "list, 30 items" and
 "item 5 of 30" rather than reading 30 unrelated widgets.
 
 Off by default: a layout primitive should not invent semantics its

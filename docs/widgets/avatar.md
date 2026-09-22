@@ -35,8 +35,11 @@ let _w = Avatar::with_image(&face)
     .on_activate_fn(|ctx| ctx.send_intent(Intent::new("app.open-user-menu")));
 ```
 
-The widget reuses `ImageWidget` for the image path and draws bg /
-border / presence directly via `Canvas`. Hash-derived background
+The widget reuses `ImageWidget` for the image path and hands bg /
+border / focus ring / presence to the active `AvatarStyle`, whose
+default (`RecipeAvatarStyle`) draws them via `Canvas`. Hash-derived
+background tints come from `theme.colors.chart_palette` (Okabe-Ito),
+so they track the active theme automatically. Hash-derived background
 tints come from `theme.colors.chart_palette` (Okabe-Ito), so they
 track the active theme automatically.
 
@@ -177,7 +180,7 @@ Choose which corner the presence dot occupies. Default:
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
 Override the accessible name. When unset:
-* image-mode → `alt` if set, else the initials, else "Avatar"
+* image-mode → `alt` if set, else the initials (`"?"` when none)
 * initials-mode → the initials.
 
 #### `pub fn alt(mut self, alt: impl Into<LocalizedString>) -> Self`

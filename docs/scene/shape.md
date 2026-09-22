@@ -43,7 +43,8 @@ slop pass, which widens an item's *box* rather than its shape.
 
 Cloning an `ItemShape` is O(1): the path variant is one
 `Rc<ShapeGeometry>` refcount bump and every other variant is small and
-`Copy`-sized. The view clones one per item per layout pass, so that matters.
+`Copy`-sized. The view clones one per item each time it rebuilds a
+hit-test snapshot row, so that matters.
 Curve flattening is memoised **inside** the `Rc` — built once per
 `ShapeGeometry`, never once per pass — which is why
 `PathItem` builds its `ShapeGeometry` in its constructor

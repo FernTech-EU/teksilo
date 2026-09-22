@@ -159,8 +159,10 @@ model.set_geometry_constraint(move |c| match weak.upgrade() {
 });
 ```
 
-`constraint_capturing_the_scene_strongly_leaks_it` (in
-`tests/constraint_lifetime.rs`) pins both halves with a `Drop` sentinel.
+`a_constraint_capturing_a_strong_handle_leaks_the_scene` (in
+`tests/constraint_lifetime.rs`, beside
+`a_constraint_capturing_a_weak_handle_lets_the_scene_drop`) pins both halves
+with a `Drop` sentinel.
 
 # What it may hand back
 

@@ -11,7 +11,7 @@ MenuList — a themed vertical menu container with keyboard navigation.
 popover-style menus. It provides a themed surface (background, rounded
 border, drop shadow) and owns the full keyboard navigation stack:
 ArrowUp/Down moves focus, Enter activates, Escape bubbles to the
-enclosing overlay host, Home and End jump to the first/last enabled item.
+enclosing overlay host, Home and End jump to the first/last visible item.
 Type-ahead search jumps to the next item whose stripped label starts with
 the accumulated keystrokes (500 ms reset window by default).
 
@@ -22,8 +22,10 @@ and is skipped by keyboard navigation. For very long lists (recent files,
 etc.) call `.max_visible_items(n)` to cap the panel height and wrap the
 content in a `ScrollArea`.
 
-**Safe-triangle hover gate.** When a submenu item opens its child overlay,
-`MenuList` stamps a shared anchor so sibling items can skip their
+**Safe-triangle hover gate.** When the pointer leaves a submenu trigger's
+row with the submenu still up, the trigger arms the safe region (the apex
+and the cone live in `teksilo_core::overlay`) and publishes that submenu's
+id on a `MenuList`-wide shared state, so sibling items can skip their
 hover-switch while the cursor travels diagonally toward the submenu.
 
 ## Accessibility

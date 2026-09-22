@@ -60,7 +60,7 @@ pub enum ChartChange { /* variants */ }
 - **`SeriesRemoved`** — A series (and all of its points) was removed.
 - **`SeriesMoved`** — A series was moved to a new position among its siblings.
 - **`SeriesRenamed`** — A series' display name changed.
-- **`SeriesColorChanged`** — A series' explicit color changed (set or cleared). The only variant that bumps `crate::ChartModel::style_version` rather than `crate::ChartModel::structure_version`.
+- **`SeriesColorChanged`** — A series' explicit color changed (set or cleared). Bumps `crate::ChartModel::style_version` rather than `crate::ChartModel::structure_version`.
 - **`SeriesPatternChanged`** — A series' explicit `SeriesPattern` changed (set or cleared). Paint-only, like `SeriesColorChanged`: it bumps `crate::ChartModel::style_version`, not `structure_version`.
 - **`SeriesVisibilityChanged`** — A series' visibility flag changed.
 - **`PointsInserted`** — Points were inserted; `range` holds the indices of the newly inserted points within `series`.

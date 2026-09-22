@@ -82,7 +82,8 @@ A persisted MRU list backed by `PersistedListModel<T>`.
 
 Cheap to clone (`Rc`-shared internally). The reactive
 `ListModel<T>` returned by `model()` is the same
-handle the persistence bridge observes.
+handle this list's own mutators update — nothing observes it for
+persistence, so only those mutators reach the disk.
 
 ```rust
 pub struct MruList<T: MruEntry> { /* fields */ }

@@ -125,6 +125,7 @@ range. Use `orientation` to switch to vertical.
 
 #### `pub fn on_change( mut self, f: impl Fn(f32, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
+Run `f` for every value this control produces under the **user's**
 Set the discrete step size for keyboard arrows and accessibility
 Increment/Decrement actions. When unset, defaults to 1 % of the
 range.

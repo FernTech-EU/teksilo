@@ -19,8 +19,8 @@ drag, keyboard resize, `Role::Splitter` accessibility, per-pane content
 clipping, RTL-correct horizontal layout. New: N panes, per-pane
 stretch (container-resize policy), animated collapse with four triggers
 (programmatic / double-click / drag-past-min snap / keyboard), a Tier-3
-`SplitterStyle`, and serializable import/export. Intended as the
-building block for a future `DockingLayout`.
+`SplitterStyle`, and serializable import/export. It is the building
+block `DockingLayout` is built from.
 
 ```ignore
 let model = SplitterModel::from_panes(vec![
@@ -111,9 +111,10 @@ Override the active `SplitterStyle` for this instance only.
 
 #### `pub fn enabled(mut self, enabled: impl Into<Prop<bool>>) -> Self`
 
-Enable or disable handle dragging, statically or reactively. When
-`false`, divider handles are rendered inert — the pane layout is
-still valid but the user cannot resize panes.
+Enable or disable handle dragging. When `false`, divider handles are
+rendered inert — the pane layout is still valid but the user cannot
+resize panes. Read once at build time: a bound `Signal` is
+snapshotted, not tracked.
 
 ## `pub struct PaneDescriptor`
 

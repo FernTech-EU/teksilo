@@ -680,7 +680,7 @@ Give `id` the lowest z-value in its layer so it paints beneath all siblings.
 
 #### `pub fn set_layer(&self, id: ItemId, layer: SceneLayer)`
 
-Move `id` to a different `SceneLayer` (background, default, foreground); notifies all views.
+Move `id` to a different `SceneLayer` (`Under`, `Interleaved`, `Over`); notifies all views.
 
 #### `pub fn set_item_parent(&self, child: ItemId, parent: Option<ItemId>)`
 

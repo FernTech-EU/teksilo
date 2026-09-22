@@ -100,9 +100,11 @@ eagerly recorded.
 
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
-Add a child page. The widget stays Boxed until its index is
+Add a child page. An `impl Widget` stays Boxed until its index is
 selected for the first time, then is mounted into the arena
-and kept alive across selection changes.
+and kept alive across selection changes. A `WidgetId` (an
+already-mounted page) is pre-mounted immediately instead, built
+eagerly regardless of the selected index — see `Slot::PreMounted`.
 
 #### `pub fn child_opt(self, widget: Option<impl teksilo_core::IntoTeksiChild>) -> Self`
 

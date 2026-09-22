@@ -11,7 +11,8 @@ Each item consists of an optional leading icon, a label, an optional
 trailing shortcut label, and an activation closure. `MenuItem` is
 non-generic: actions are type-erased closures identical to `Button`'s
 `on_activate_fn` model. Submenus are declared with `MenuItem::submenu`
-— the factory builds the nested `MenuList` lazily at hover time.
+— the factory runs during `build()`, and the nested `MenuList` it
+returns stays a dormant, deferred subtree until first wanted.
 
 Every item operates in one of three **modes** selected by builder methods:
 
@@ -184,11 +185,16 @@ the chord renders first and the hint follows it.
 
 Bind the trailing shortcut label to a registered
 `Shortcut` by its stable id.
-At build time the effective primary keystroke is rendered;
-rebinds performed through
+Bind the trailing shortcut label to a registered
+`Shortcut` by its stable id.
+The effective primary keystroke is bound *reactively*, via a
+per-id signal, so a rebind performed through
 `ShortcutRegistry`
-rebuild this item automatically via the registry's version
-signal.
+refreshes the chord in place — the item itself is never rebuilt
+for shortcut changes.
+
+A manual `shortcut_label` takes
+precedence when both are set.
 
 A manual `shortcut_label` takes
 precedence when both are set.

@@ -18,7 +18,7 @@ all `Rc`-based internals and is usable in closures without keeping the
 tree-change observer alive.
 
 `TreeSlice` implements `TreeDataSource` and is the
-built-in source for `TreeView` / `TreeTableView`.
+built-in source for `TreeView`.
 
 ## Example
 

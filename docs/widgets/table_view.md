@@ -9,7 +9,7 @@
 
 Built atop the `ListModel<T>` /
 `ListDataSource` data layer in
-`teksilo-data` and the `teksilo-tokens` `TableStyle`. Mirrors Qt's
+`teksilo-data` and the `teksilo-core` `TableStyle`. Mirrors Qt's
 `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
 The core skeleton: single body pane, row-virtualized with alternating
 backgrounds, grid lines, `Role::Table > Role::Row > Role::Cell`
@@ -385,8 +385,9 @@ distinguish them.
 
 #### `pub fn show_internal_scrollbars(mut self, show: bool) -> Self`
 
-Show or hide the built-in vertical scroll bar. Default: visible. Set to
-`false` when an external scroll bar is wired to `scroll_y_signal`.
+Show or hide the built-in vertical and horizontal scroll bars. Default:
+visible. Set to `false` when an external scroll bar is wired to
+`scroll_y_signal`.
 
 #### `pub fn empty_view(mut self, f: impl Fn() -> Box<dyn Widget> + 'static) -> Self`
 
@@ -903,7 +904,6 @@ anchor to `(row, col)`. In `SingleCell` mode this falls back to
 
 #### `pub fn select_cells(&self, cells: impl IntoIterator<Item = (usize, usize)>)`
 
-Select every cell in `0..row_count × 0..col_count`.
 Replace the selection with an arbitrary set of cells, committing it as
 the base a following Shift range extends around.
 

@@ -91,7 +91,9 @@ pub enum SettingsFileError { /* variants */ }
 A reactive handle to a single typed file on disk.
 
 `Clone` is cheap (an `Rc` bump). All clones share one in-memory
-projection and one I/O thread.
+projection and one path. There is no I/O thread: every write is a
+synchronous locked read-modify-write on the calling thread (see the
+module docs).
 
 ```rust
 pub struct SettingsFile<T: Versioned + DeserializeOwned> { /* fields */ }

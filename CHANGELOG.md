@@ -13,6 +13,8 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-22
+
 ### Fixed
 
 - **`cargo teksilo build-vectors` now runs on a Windows checkout.** Git for
@@ -2690,7 +2692,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/FernTech-EU/teksilo/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/FernTech-EU/teksilo/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/FernTech-EU/teksilo/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/FernTech-EU/teksilo/compare/v0.11.0...v0.12.0

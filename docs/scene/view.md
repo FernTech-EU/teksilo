@@ -20,11 +20,12 @@ reconcile independently on every mutation.
   heavyweight widget at its scene-space rect (composed from the
   item's `local_pos`, `transform`, and parent chain).
 - **Paint bands.** Three passes: `paint` draws the `Under` lightweight
-  items (backdrop), the arena child-walk draws the heavyweight widgets,
-  then `post_paint` draws the `Over` lightweight items + marquee /
-  foreground / debug overlays. `z` orders within each tier; the
-  Under/Over band (`Scene::set_layer`)
-  chooses the side. See `docs/teksilo-scene.md` §"Z-order and paint bands".
+  items (backdrop), the arena child-walk draws the heavyweight widgets
+  — with an `Interleaved` item's own paint node slotted in among them by
+  `z` — then `post_paint` draws the `Over` lightweight items + marquee /
+  foreground / debug overlays. `z` orders within each tier; the band
+  (`Scene::set_layer`) chooses `Under`,
+  `Interleaved` or `Over`. See `docs/teksilo-scene.md` §"Z-order and paint bands".
 - **View transform.** Pan / zoom / rotation are four animated
   `Signal<f32>`s on `SceneView`, composed into a derived
   `Signal<Transform2D>` bound via `BuildContext::set_content_transform`

@@ -193,8 +193,10 @@ observer runs — reconciling with unchanged data is silent.
 # Preconditions
 `key_fn` must be a pure, stable function of an item's identity (not
 its content) and keys must be **unique** within both the current list
-and `new_items`. See `# Panics` below — violating either is a caller
-bug, not a silently-tolerated edge case.
+and `new_items`. See `# Panics` below — an unstable `key_fn` or a
+duplicate within `new_items` panics; a duplicate within the current
+list is silently tolerated and leaves the extra copies behind, which
+is worse.
 
 # Panics
 Panics (via an internal `.expect`) if `key_fn` is not stable — it

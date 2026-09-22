@@ -6,7 +6,7 @@
 The minimize / maximize / close button cluster on the trailing edge of
 a `TitleBar`. Rendered only when
 `PlatformTitleBarHost::renders_custom_controls` is `true`
-(Windows + Wayland; never on macOS).
+(Windows, Wayland, and X11 with a capable window manager; never on macOS).
 
 These are deliberately NOT built on top of the regular `Button` widget:
 `Button` carries a 72 dp minimum width, themed padding, focus ring and
@@ -16,9 +16,11 @@ window control. Instead, each control is a small composing widget
 RectWidget + Center + TextWidget) so we inherit centering, theming and
 reactive hover for free.
 
-For M2 the maximize/restore swap is *not* implemented — the maximize
-button always shows the `□` glyph. M3+ will add a `Signal<bool>`-driven
-glyph swap once the host can update it from `WindowEvent::Resized`.
+The maximize/restore swap is driven by a `Signal<bool>` (`show_restore`,
+sourced from `WindowState::placement`): the a11y name and action toggle
+between Maximize and Restore. The glyph itself does not swap — both
+states render `□`, since text-typeset's font fallback has no reliable
+"two stacked squares" glyph (see `WindowControls::build`).
 
 ## Touch and pen
 
@@ -98,7 +100,9 @@ Register the callback invoked when the user taps this button.
 ## `pub struct WindowControls`
 
 The minimize / maximize / close cluster, laid out as an HStack of
-`ControlButton`s. Each cell forwards taps to the supplied host.
+`ControlButton`s. Each cell drives the window directly through
+`WindowState::placement` / `ctx.close_window()`; the host is used only
+to register each button's external hover signal.
 
 ```rust
 pub struct WindowControls { /* fields */ }

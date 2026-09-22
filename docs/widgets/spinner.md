@@ -28,9 +28,9 @@ arc rotating clockwise from the top, completing one full
 rotation every 900 ms.
 
 Honours `prefers-reduced-motion`: registers no animated quad and
-falls back to a static three-quarter arc — the indicator is still
-visible (so the user can tell the surface is busy) but doesn't
-rotate.
+falls back to a static arc of the same length (`arc_fraction`,
+a quarter-circle by default) — the indicator is still visible
+(so the user can tell the surface is busy) but doesn't rotate.
 
 ## Density
 

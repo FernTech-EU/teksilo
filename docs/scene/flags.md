@@ -62,14 +62,18 @@ Item is included in marquee box-select results. Default on.
 
 #### `pub const IS_FOCUSABLE: Self = Self(1 << 4);`
 
-Item can take keyboard focus. Default off; the focus_order
-callback considers only items with this flag set.
+Item can take keyboard focus. Default off. Declared only: the
+built-in traversal (`SceneView::focus_in_direction`) walks every
+item in insertion order, and a `focus_order` callback is handed
+the whole `Scene` and filters for itself — nothing reads this bit.
 
 #### `pub const ACCEPTS_HOVER: Self = Self(1 << 5);`
 
 Item dispatches hover events (Qt `setAcceptHoverEvents`).
-Default off; hover handlers wired via `ItemBuilder::on_hover`
-flip this on automatically.
+Item dispatches hover events (Qt `setAcceptHoverEvents`).
+Default off. Declared only: the view dispatches hover from the
+presence of a `SceneItemHandlerSet::on_hover` callback, and
+nothing sets or reads this bit.
 
 #### `pub const CLIPS_TO_SHAPE: Self = Self(1 << 6);`
 

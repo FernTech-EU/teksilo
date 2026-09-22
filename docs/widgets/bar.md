@@ -224,7 +224,7 @@ In **vertical** orientation every tab is forced to the bar's
 cross-axis width, so the same knob defines the bar's minimum
 width — the sidebar adapts to the widest piece of bar content
 (tab labels or a slot widget) and never shrinks below this floor.
-Vertical pill heights stay at `theme.components.tab.editor_tab_height`
+Vertical pill heights stay at the tab style's `editor_tab_height`
 regardless of this knob.
 
 Under `TabSizing::Fill` a **vertical** bar takes the width it is
@@ -352,12 +352,12 @@ pinned state.
 #### `pub fn bar_leading_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Bar-level leading slot — a widget rendered before the headers
-row (and before any pinned region in later phases).
+row, and before the pinned-tab strip.
 
 #### `pub fn bar_trailing_slot(mut self, w: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Bar-level trailing slot — a widget rendered after the headers
-row (and after any overflow dropdown in later phases).
+row, and after the overflow dropdown.
 
 #### `pub fn separator(mut self, on: bool) -> Self`
 

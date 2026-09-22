@@ -105,9 +105,10 @@ theme-wide default `DialogStyle` for just this container.
 
 #### `pub fn title(mut self, title: impl Into<LocalizedString>) -> Self`
 
-Accessible title for the dialog. Screen readers announce this
-as the dialog's name. Should match the inner `DialogContent`'s
-visible title string.
+Accessible title for the dialog, announced as the dialog's name
+when the content paints no title of its own. Content that does —
+e.g. `DialogContent::title` — names the dialog by pointing at that
+label and wins over this string, so the two should match.
 
 ## `pub struct ModalScrim`
 

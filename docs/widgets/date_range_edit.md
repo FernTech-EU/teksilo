@@ -48,8 +48,9 @@ to from booking sites and analytics dashboards.
 
 - Container — `Role::DateInput` with `set_value` formatted as
   `YYYY-MM-DD/YYYY-MM-DD` (ISO range).
-- Each `TextInputField` keeps its own `Role::TextInput` AT node;
-  the wrapper's `Role::DateInput` provides the range semantics.
+- Each `TextInputField` carries its own AT node, re-roled to
+  `Role::DateInput` and named for its half; the wrapper's
+  `Role::DateInput` provides the range semantics.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.

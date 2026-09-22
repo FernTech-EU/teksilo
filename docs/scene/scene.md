@@ -97,10 +97,10 @@ off the signal and wants the same number the record has.
 
 `#[non_exhaustive]`: this is the crate's outbound event vocabulary, matched
 by every observer, and it grows whenever the scene learns to report
-something new — `HandlersChanged` is the most recent. Without the
-attribute each such addition would stop a downstream `match` from
-compiling; with it, a consumer's wildcard arm keeps meaning "a change I do
-not act on".
+something new — `MeasuredSizeChanged` and `SizePolicyChanged` are the most
+recent. Without the attribute each such addition would stop a downstream
+`match` from compiling; with it, a consumer's wildcard arm keeps meaning
+"a change I do not act on".
 
 ```rust
 pub enum ItemChange { /* variants */ }

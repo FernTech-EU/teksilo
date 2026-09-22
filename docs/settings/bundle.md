@@ -104,13 +104,19 @@ window's geometry under its own label (e.g. `"main"`,
 Override the debounce window passed to every service this bundle
 opens.
 
-Only `SettingsStore` actually debounces on it — its writes are
-frequent enough (every `Signal::set`) that coalescing matters.
-`WindowStateService` accepts the same parameter (so `open` can
-call both uniformly) but ignores it: `SettingsFile`'s writes are
-always a synchronous locked read-modify-write now, so there is
-nothing left to debounce (see `file.rs`'s and `window_state.rs`'s
-module docs).
+Override the debounce window passed to every service this bundle
+opens.
+
+Both `SettingsStore` and `WindowStateService` actually debounce
+on it: `SettingsStore`'s writes are frequent enough (every
+`Signal::set`) that coalescing matters, and `WindowStateService`'s
+`record` fires once per reported window-geometry frame during a
+drag, so it schedules its own coalesced write through the same
+delay via a `DebouncedWriter` (see `window_state.rs`'s module docs,
+"`record` is debounced, not synchronous"). It is a plain
+`crate::SettingsFile` — not opened by this bundle — whose writes
+are always a synchronous locked read-modify-write, with nothing
+left to debounce (see `file.rs`'s module docs).
 
 #### `pub fn store_name(&self) -> &str`
 

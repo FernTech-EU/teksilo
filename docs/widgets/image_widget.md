@@ -43,7 +43,7 @@ box is exactly 32×32 and the artwork is letterboxed inside it
 # use teksilo_canvas::RasterIcon;
 # use teksilo_widgets::primitives::image_widget::{ImageWidget, ImageFit};
 # use teksilo_widgets::primitives::image_mask::ImageMaskShape;
-// A 64×64 image shown at natural size with no masking.
+// A 64×64 source pinned to a fixed 32×32 box, with no masking.
 let icon = RasterIcon::from_raw(vec![255; 64 * 64 * 4], 64, 64);
 let _logo = ImageWidget::new(&icon).size(32.0, 32.0);
 

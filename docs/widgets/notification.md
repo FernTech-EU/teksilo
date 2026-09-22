@@ -147,7 +147,7 @@ name and use `AppPaths::for_testing(tmpdir)`.
 
 Shared model — clones share state. Constructed by the install
 helper from `NotificationArchive` + `AppPaths`; apps reach it
-via `ctx.app_state::<Rc<RefCell<NotificationArchiveModel>>>()`.
+via `ctx.app_state::<Rc<NotificationArchiveModel>>()`.
 
 `NotificationLog` and `NotificationCenterButton`
 consume this model directly.
@@ -208,8 +208,8 @@ when the entry is unread (which is the typical case from a
 toast push).
 
 If `entry.dedup_id` matches an existing entry, the existing
-entry is updated in place (title / body / progress collapsed
-into a `NotificationUpdate` appended to `updates`) and no
+entry is updated in place (title / body collapsed into a
+`NotificationUpdate` appended to `updates`) and no
 new row is inserted. Unread count increments either way (an
 in-place update IS new information for the user).
 
@@ -226,7 +226,7 @@ window's/audience's unread state too.
 #### `pub fn mark_all_read(&self)`
 
 Mark every archived entry as read; reset `unread_count` to 0.
-Called by `NotificationCenterButton` when its popover opens.
+Called by `NotificationCenterButton` when its popover closes.
 
 #### `pub fn clear(&self)`
 

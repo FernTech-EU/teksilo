@@ -70,8 +70,8 @@ roll back because nothing was written.
 # Modes, and why there is no `on_commit`
 
 `CardMode` is a `Signal` the **app owns**. The card writes into it
-(`Editing` on activation, `Idle` when focus leaves its subtree or `Esc` is
-pressed) and reads it for its chrome and its accessibility state. An app
+(`Editing` on activation, `Selected` when focus leaves its subtree or `Esc`
+is pressed) and reads it for its chrome and its accessibility state. An app An app
 that wants to persist on commit observes that signal; there is no second
 `on_commit` callback, because the trigger for the most important case —
 focus leaving the subtree — is the framework's `focus_within` signal, which

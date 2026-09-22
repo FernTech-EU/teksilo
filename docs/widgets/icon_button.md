@@ -47,7 +47,7 @@ call `.embedded()`, `.toolbar()`, `.large()`, etc. to configure:
 # let visible = Signal::new(false);
 let _w = IconButton::browse().embedded();           // 24 dp, dim — TextInput trailing
 let _w = IconButton::clear().embedded();            // 24 dp, dim — clear-X
-let _w = IconButton::search().toolbar();            // 40 dp, full weight — toolbar
+let _w = IconButton::search().toolbar();            // 30 dp, full weight — toolbar
 let _w = IconButton::visibility_toggle(visible);    // password-field eye toggle
 ```
 
@@ -163,9 +163,10 @@ its own. Used by wrapper widgets like
 whose disclosure caret needs to match the icon's color across
 hover / press / focus / disabled states.
 
-The provided signal is reset to `Disabled` when `enabled == false`
-during `build()` so the shared signal honors the button's
-enabled state without the caller having to seed it.
+The interaction signal never carries `Disabled`: the arena's
+`enabled_state` is the single source of truth, so a wrapper that
+also needs the disabled look reads
+`ctx.effective_enabled_signal(..)` beside this signal.
 
 #### `pub fn embedded(mut self) -> Self`
 

@@ -100,7 +100,7 @@ pub enum IconLocation { /* variants */ }
 
 - **`None`** — No icon (default).
 - **`IconOnly`** — Icon only, no label.
-- **`Leading`** — Icon to the left of the label (default).
+- **`Leading`** — Icon to the left of the label.
 - **`Trailing`** — Icon to the right of the label.
 - **`Top`** — Icon above the label.
 - **`Bottom`** — Icon below the label.
@@ -141,9 +141,12 @@ its own. Used by wrapper widgets like
 disclosure caret needs to match the label's color across hover
 / press / focus / disabled states.
 
-The provided signal is reset to `Disabled` when `enabled == false`
-during `build()` so the shared signal honors the button's
-enabled state without the caller having to seed it.
+The provided signal never carries `Disabled`: the arena's
+enabled-state is the single source of truth since the
+single-sourced-enabled refactor, so a wrapper mirrors the disabled
+look from `ButtonStyleConfig::is_disabled` (or lets its own leaves
+dim at paint via `PaintContext::effective_enabled`) rather than
+from this signal.
 
 #### `pub fn variant(mut self, variant: ButtonVariant) -> Self`
 

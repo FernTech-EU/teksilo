@@ -17,7 +17,7 @@ Construct a `TitleBar` from inside the root-builder closure, fetching
 the host from the widget tree:
 
 ```ignore
-.root(|tree| {
+.root(|tree, _state| {
     let host = tree.title_bar_host().expect("custom_chrome enabled");
     tree.add(
         VStack::new()
@@ -39,9 +39,8 @@ the host from the widget tree:
 
 ## `pub type CloseAction`
 
-Type alias for the user-supplied close action that overrides
-`host.close()` (which on Wayland is currently a no-op due to winit 0.30
-lacking `Window::request_close`). Set via `TitleBar::close_action`.
+Type alias for the user-supplied close action that overrides the close
+button's default `ctx.close_window()`. Set via `TitleBar::close_action`.
 
 ```rust
 pub type CloseAction = Rc<dyn Fn(&mut EventContext)>;
@@ -159,8 +158,7 @@ Rendered before the window controls.
 #### `pub fn close_action(mut self, action: impl Fn(&mut EventContext) + 'static) -> Self`
 
 Override the close-button action. When set, the close button calls
-this closure instead of `host.close()`. Required on Wayland where
-the host's `close()` is a no-op (winit 0.30 has no
-`Window::request_close`); the application typically wires this to
-call `EventContext::close_window` directly, or to send an
-`Intent` whose root-level `Action` handler calls it.
+this closure instead of the default `ctx.close_window()` — the hook
+for a "save before closing?" guard. The application typically ends
+the closure by calling `EventContext::close_window` itself, or by
+sending an `Intent` whose root-level `Action` handler calls it.

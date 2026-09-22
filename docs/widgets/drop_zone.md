@@ -83,10 +83,10 @@ pub struct DropZone { /* fields */ }
 
 Build a drop zone with the given prompt (e.g. `tr!("drop_files_here")`).
 The label may come from `tr!(...)` (translated) or
-`lit!(...)`; it is resolved eagerly at construction
-and stored as a `String`. Locale changes rebuild the composite parent,
-which re-creates the `DropZone` with a fresh translation — the same
-model as `Button::new`.
+`lit!(...)`; it is stored as a `LocalizedString` and handed to the
+prompt's `TextWidget`, so a `tr!(...)` label re-resolves on a locale
+switch without rebuilding the zone — the same model as
+`Button::new`.
 
 #### `pub fn subtitle(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -116,7 +116,8 @@ single pointer. See
 
 #### `pub fn starting_dir(mut self, path: impl Into<PathBuf>) -> Self`
 
-Override the Browse button's label (e.g. `tr!("browse")`).
+Directory the Browse button's dialog opens in. If unset, the OS default is
+used.
 Directory the Browse button's dialog opens in. If unset, the OS default is
 used.
 

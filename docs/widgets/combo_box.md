@@ -16,8 +16,8 @@ of the backing model. Items come from one of four input paths:
 - `ComboBox::from_model` — reactive `ListModel<T>`.
 - `ComboBox::from_source` — external `ListDataSource<Item = T>`.
 
-The dropdown panel is pre-created during `build()` and kept dormant until
-it is opened.
+The dropdown panel's node is created during `build()` and kept dormant, but
+its subtree is deferred — built the first time the combo is opened.
 
 # Keyboard
 
@@ -39,8 +39,8 @@ it is opened.
   through to the application; `Shift` is, so a capital letter still types.
 
 The widget is split across four internal modules:
-- `state` holds the interaction-state enum, the `ItemSource` accessor,
-  and color/index helpers.
+- `state` holds the `ItemSource` accessor, the default
+  `max_visible_items` constant, and the index helpers.
 - `item` holds the single-row `DropdownItem` widget.
 - `panel` holds the `DropdownPanel` overlay content and the
   `FilteredItemList` inner widget.
@@ -234,7 +234,8 @@ a custom impl (Material 3, macOS, etc.) might paint differently.
 
 Override the active `ComboBoxStyle` for this widget instance
 only. The default IntUI chrome (`crate::styles::RecipeComboBoxStyle`)
-reads its tokens from `theme.components.combo_box`; custom impls
+resolves its dimensions from `theme.input` (the density
+`InputTokens`); custom impls
 can paint anything they want around the selected-label slot.
 
 #### `pub fn text_style(mut self, style: impl Into<teksilo_core::color_prop::TextStyleProp>) -> Self`

@@ -46,7 +46,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## `pub struct Divider`
 
-A themed separator line. Thickness defaults to `DividerStyle::thickness`
+A themed separator line. Thickness defaults to `DIVIDER_THICKNESS`
 and the color defaults to `BorderRole::Divider`; both can be overridden.
 
 ```rust

@@ -63,7 +63,7 @@ Wiring rules:
 `StandardListItem.accessibility()` sets the row's `name` (label
 only) and `description` (subtitle, if any) — structural role +
 position/level/expanded/selected come from the parent's
-`ListItemA11y` / `TreeRowA11y` wrapper. The embedded `Checkbox`
+`ListItemWrapper` / `TreeItemWrapper` wrapper. The embedded `Checkbox`
 receives an `access_label*` override carrying the row label so
 screen readers announce "checkbox, checked, `[label]`" rather than
 a nameless `Role::CheckBox`. The chevron's `TwistArrow` is
@@ -188,7 +188,9 @@ Mutually exclusive with `tristate_checkbox` — last call wins.
 #### `pub fn tristate_checkbox(mut self, state: Signal<CheckState>) -> Self`
 
 Optional tri-state checkbox bound to `Signal<CheckState>`.
-Cycles `Unchecked → Checked → Indeterminate`. Mutually
+User clicks toggle `Checked` ↔ `Unchecked` (clicking from
+`Indeterminate` checks the whole); `Indeterminate` is reserved for
+external sources such as `TreeCheckedModel` aggregation. Mutually
 exclusive with `checkbox` — last call wins.
 
 #### `pub fn on_checkbox_toggle( mut self, f: impl Fn(bool, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
@@ -238,14 +240,6 @@ Override the subtitle's text color. Default (unset) is
 
 #### `pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self`
 
-Truncate the primary label instead of wrapping it. Default (unset) is
-`TextOverflow::Wrap`.
-
-A wrapping label reports its full intrinsic width, so on a row too
-narrow to hold it the primary `HStack` is over-constrained and the
-`trailing_slot` is pushed past the row's edge.
-Set `TextOverflow::Ellipsis(..)` on rows whose trailing actions must
-stay reachable: the label then shrinks and truncates within the row.
 **Share the row's interaction state** — idle, hovered, pressed.
 
 A row that shows its actions only while the pointer is over it is a standard
@@ -362,8 +356,6 @@ Create a tree item with the given primary label.
 
 #### `pub fn interaction_signal(mut self, signal: Signal<InteractionState>) -> Self`
 
-Forwarded to the inner `StandardListItem` — see its
-`subtitle`.
 See [`StandardListItem::interaction_signal`]: the row's own hover/press
 state. To gate revealed controls use
 `reveal_signal`.

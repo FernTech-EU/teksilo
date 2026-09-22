@@ -74,7 +74,7 @@ A settings panel for browsing and rebinding application shortcuts.
 
 Reads every `Shortcut` in the tree's `ShortcutRegistry`, groups rows
 by category, and renders primary + secondary keystroke slots with
-Rebind, Unbind, and Reset controls. See the module-level docs for the
+Rebind and Reset controls. See the module-level docs for the
 full feature list.
 
 ```rust

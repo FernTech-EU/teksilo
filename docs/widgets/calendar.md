@@ -25,7 +25,8 @@ Used standalone for event apps and scheduling, and embedded in
 - **Visible month** is independent of the selection — navigating past
   the selected month doesn't lose the selection.
 - **Today highlight** draws a ring around today's cell whenever it's
-  in the visible month. Color comes from `TextRole::Accent`.
+  in the visible month. Color comes from `BorderRole::Focused`,
+  painted by the active `CalendarStyle::make_day_cell`.
 - **Out-of-month cells** (the leading days from the previous month
   and trailing days from the next month that fill the 6×7 grid) are
   rendered with `TextRole::Disabled` and remain selectable (matching
@@ -53,14 +54,16 @@ Used standalone for event apps and scheduling, and embedded in
   en-dash because some screen readers skip U+2013.
 - Header arrow buttons — `Role::Button` with localized labels
   ("Previous month", "Next month") and `Action::Click` advertised.
-- Header month/year label — `Role::Button` (clickable to open the
-  month picker) with `set_has_popup(HasPopup::Grid)` and
-  `set_expanded(open)`.
+- Header month/year label — `Role::Button` (a `Ghost` `Button`
+  whose activation demotes `CalendarMode` one level, swapping the
+  body for the coarser grid in place — no popup is opened).
 - Weekday header row — `Role::Row` of `Role::ColumnHeader` cells,
   each labelled with the long weekday name (e.g. "Monday").
 - Day cells — `Role::GridCell` with localized long-form labels
-  ("May 2, 2026"), `set_selected`, `set_focused`, `set_disabled` for
-  filter rejections, and `Action::Click` advertised.
+  ("Saturday May 2, 2026"), `set_selected`, `set_aria_current(Date)`
+  on today, `set_disabled` for filter rejections, and
+  `Action::Click` advertised. Keyboard focus roves on the Calendar
+  root, so a cell never carries a focused flag.
 
 # Example
 

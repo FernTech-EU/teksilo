@@ -30,7 +30,8 @@ popover anchored below the field for graphical date selection.
   - A chord holding `Ctrl` or `Super` is not the field's and falls
     through to the application.
 - **Calendar popover**: dismisses on click-outside or Escape,
-  commits on cell click, animates with `motion.duration_fast` fade.
+  commits on cell click. The request carries no `fade_duration`, so
+  it appears and goes without a fade.
 - **Min / Max**: clamps on commit and on step. Out-of-range values
   in the popover cell are disabled.
 
@@ -39,8 +40,9 @@ popover anchored below the field for graphical date selection.
 - Container — `Role::DateInput`, `set_value` to ISO selection,
   `set_label` from `.label()` builder, `set_placeholder` when
   value is `None`.
-- Calendar trigger button — `Role::Button` with
-  `set_has_popup(HasPopup::Grid)` and `set_expanded(open)`.
+- Calendar trigger button — `Role::Button`, named from its tooltip.
+  `set_has_popup(HasPopup::Grid)` and `set_expanded(open)` sit on the
+  container node above, not on the button.
 - Internally the editing surface remains a `Role::TextInput` for
   AT discoverability (so screen readers know it accepts text); the
   wrapper carries the DateInput role on the outer node.
@@ -55,7 +57,7 @@ ctx.add(
     DateEdit::new(date.clone())
         .min_date(Date::constant(2020, 1, 1))
         .max_date(Date::constant(2030, 12, 31))
-        .label("Birth date"),
+        .label(lit!("Birth date")),
 );
 ```
 
@@ -144,19 +146,22 @@ Per-call style override for the date-edit chrome.
 
 Construct from a non-nullable date signal. Internally backed by
 a `Signal<Option<Date>>` proxy that mirrors the source in both
-directions. The placeholder is unused — the proxy is always
-initialized to `Some(value.get())` and the mirror keeps it
-non-empty.
+directions. The placeholder is normally unused — the proxy is
+initialized to `Some(value.get())`, and only goes `None`
+transiently when a commit clears the text (the mirror then leaves
+the source alone until the next valid commit re-establishes it).
 
 #### `pub fn min_date(mut self, d: Date) -> Self`
 
 Clamp the selectable range from below. Dates earlier than `d`
-are rejected on commit and are shown as disabled in the calendar popover.
+are clamped up to `d` on commit and on step, and are shown as
+disabled in the calendar popover.
 
 #### `pub fn max_date(mut self, d: Date) -> Self`
 
 Clamp the selectable range from above. Dates later than `d`
-are rejected on commit and are shown as disabled in the calendar popover.
+are clamped down to `d` on commit and on step, and are shown as
+disabled in the calendar popover.
 
 #### `pub fn format_pattern(mut self, pat: impl Into<String>) -> Self`
 

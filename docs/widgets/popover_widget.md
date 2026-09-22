@@ -9,8 +9,9 @@ activated, plus the `PopoverButton` / `PopoverIconButton` aliases.
 Wraps a caller-built trigger (`T: PopoverTrigger`) with overlay
 wiring: owns a `popover_open: Signal<bool>` toggled on activate /
 dismiss, sets `has_popup` and `expanded_when` on the inner trigger so
-AT announces the disclosure state, pre-builds the popover content as a
-dormant subtree, and shows / hides it via `OverlayRequest`. The
+AT announces the disclosure state, adds the popover content as a
+dormant subtree whose panel is built the first time it is opened, and
+shows / hides it via `OverlayRequest`. The
 `set_dormant` + `activate` + `show_overlay` sequence and the
 dismiss-callback shape match `DateEdit`
 so behavior across the disclosure family stays consistent.

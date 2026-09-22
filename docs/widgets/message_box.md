@@ -90,9 +90,11 @@ default only by pressing Enter. Where focus lands is the whole contract.
 ## Result reporting
 
 `MessageBox::on_result` takes `impl Fn(MessageBoxResult,
-&mut EventContext) + 'static`. The callback fires exactly once — on
-button activation or Escape dismissal — then the modal is closed by
-the framework.
+&mut EventContext) + 'static`. The callback fires exactly once, whichever
+route closes the dialog — button activation, Escape, a press outside, or a
+programmatic dismissal — with `MessageBoxResult::dismissal` naming which
+one. On a button activation the modal is then closed by the framework; on
+the other routes it is already going away.
 
 ## Accessibility
 
@@ -390,8 +392,9 @@ dialog lifetime (useful for "remember my choice" persistence).
 
 #### `pub fn on_result(mut self, f: impl Fn(MessageBoxResult, &mut EventContext) + 'static) -> Self`
 
-Register the result callback, invoked exactly once when a
-button fires (either by click or by Enter/Escape shortcut).
+Register the result callback, invoked exactly once however the
+dialog closes — a button (by click, or by the Enter/Escape
+shortcut), a press outside, or a programmatic dismissal.
 
 #### `pub fn present(mut self, ctx: &mut EventContext)`
 

@@ -15,10 +15,12 @@ single / multi selection with 2D keyboard navigation, and is fully
 accessible (`Role::Grid` → `Role::GridCell`).
 
 The layout is pluggable via `GridLayoutStrategy`;
-the stock `UniformGrid` gives fixed tile size /
-fixed column count / adaptive min-width grids. (Variable-row-height and
-waterfall strategies, plus marquee selection, drag-reorder, sections and
-sticky headers, are layered on in later phases.)
+The layout is pluggable via `GridLayoutStrategy`: the stock
+`UniformGrid` gives fixed tile size / fixed column count /
+adaptive min-width grids, `VariableRowGrid` sizes each row to its
+tallest tile, and `VirtualizedMasonry` flows items into the
+currently-shortest column. Marquee selection, drag-reorder, sections
+and sticky headers are layered over whichever one is in force.
 
 ```ignore
 GridView::new(model, |tc| {

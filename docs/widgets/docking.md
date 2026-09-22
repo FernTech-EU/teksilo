@@ -450,7 +450,7 @@ pub enum TabPresentation { /* variants */ }
 
 ### Variants
 
-- **`Strip`** — In-side tab strip (hidden when a single tab is present).
+- **`Strip`** — In-side tab strip (always shown, even for a single tab).
 - **`Rail`** — External always-visible activity rail; the in-side strip is suppressed.
 
 ## `pub enum DockOpenMode`
@@ -463,7 +463,7 @@ pub enum DockOpenMode { /* variants */ }
 
 ### Variants
 
-- **`Stack`** — Stack into the side's currently-selected tab (as a ToolBox section).
+- **`Stack`** — Stack into the side's currently-selected tab (as an extra Splitter pane).
 - **`NewTab`** — Create a brand-new tab holding just this dock.
 
 ## `pub struct DockOpenLocation`
@@ -704,7 +704,7 @@ before (`before = true`) or after the pane at `pane_idx`.
 
 Drop a dock into a tab as a new Splitter pane appended after its
 existing panes (the "centre" drop — join this group without choosing a
-split direction). Each pane is its own single-item ToolBox.
+split direction). Each pane is its own Accordion.
 
 #### `pub fn move_dock(&self, id: DockWidgetId, loc: DockOpenLocation)`
 

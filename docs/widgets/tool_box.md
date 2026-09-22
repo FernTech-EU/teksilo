@@ -18,7 +18,8 @@ Int UI visual language:
 - flat, borderless headers (no corner radius)
 - 1 dp accent indicator bar on the leading edge of the active header
 - color-only emphasis (selected / hover / pressed surface roles)
-- border IS the focus ring: 1 dp accent border appears on the focused
+- border IS the focus ring: an accent border at the theme's
+  `focus_ring_width` (2 dp under Int UI) appears on the focused
   header, no separate ring primitive
 - content swaps are **instant** — Int UI's house rule is to avoid
   decorative animation for inline transitions; see
@@ -29,9 +30,9 @@ Int UI visual language:
 ```ignore
 let selected = ctx.signal(0_usize);
 ToolBox::new(selected.clone())
-    .item("Outline",    outline_widget)
-    .item("Properties", properties_widget)
-    .add(ToolBoxItem::new("Build", build_widget).enabled(false))
+    .item(lit!("Outline"),    outline_widget)
+    .item(lit!("Properties"), properties_widget)
+    .add(ToolBoxItem::new(lit!("Build"), build_widget).enabled(false))
 ```
 
 ## Touch and pen
@@ -174,11 +175,13 @@ Disable the item: its header renders in the disabled text role,
 click and keyboard activation are ignored, and arrow navigation
 skips it. Accepts a static bool or a reactive `Signal<bool>`.
 
-Forwarded to the arena via
-`ctx.enabled_when(header_id, self.enabled.clone())` at build time;
-the arena is then the single source of truth and ANDs with
-ancestors — disabling the surrounding `ToolBox` (or any ancestor)
-disables every item regardless of this flag.
+Read **once** at build time: a `false` snapshot is forwarded to the
+arena via `ctx.enabled_when(header_id, false)`, and the arena is then
+the single source of truth, ANDing with ancestors — disabling the
+surrounding `ToolBox` (or any ancestor) disables every item regardless
+of this flag. The `Prop` itself is *not* handed to the arena, so
+flipping a bound `Signal<bool>` after build has no effect until the
+`ToolBox` is rebuilt.
 
 ## `pub const TOOL_BOX_HEADER_MIN_HEIGHT`
 

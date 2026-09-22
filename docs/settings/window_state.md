@@ -105,7 +105,9 @@ region) and return a sanitized copy:
   with the work area, the position is recentered on the
   monitor so the window comes back on screen instead of
   spawning at coordinates from a missing monitor.
-* `maximized` and `label` are preserved.
+* `placement` and `label` are preserved, except that
+  `Minimized` is downgraded to `Floating` so a restored
+  window comes back visible.
 
 Use this on app startup with `(work_area_w, work_area_h)`
 pulled from the OS (e.g. winit's `MonitorHandle::size()` minus

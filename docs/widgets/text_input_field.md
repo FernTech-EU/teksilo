@@ -222,7 +222,8 @@ configured unit string otherwise.
 Override the intrinsic text-area height. The field is a
 pure leaf with no theme lookup of its own; by default it
 reports `DEFAULT_TEXT_HEIGHT`. A wrapping composite like
-`TextInput` passes its theme's `text_field.height` minus
+`TextInput` passes the `TEXT_FIELD_HEIGHT` recipe constant
+(in `crate::styles::recipe_text_input_style`) minus
 border + padding here so the visuals line up with the
 rest of the form.
 
@@ -255,8 +256,9 @@ no-mask behaviour rather than panicking.
 #### `pub fn mask_placeholder(mut self, c: char) -> Self`
 
 Override the visible character used for unfilled editable mask
-positions. Default: the theme's
-`text_field.mask_placeholder_char` (typically `_`).
+positions. Default: the `TEXT_FIELD_MASK_PLACEHOLDER_CHAR`
+recipe constant (in `crate::styles::recipe_text_input_style`,
+`_`).
 
 #### `pub fn validator(mut self, f: impl Fn(&str) -> ValidationOutcome + 'static) -> Self`
 
@@ -275,7 +277,9 @@ Turn this into a secure (password) field with the given
 glyph per source `char`), so the plaintext never reaches the
 shaper or glyph atlas while masked, and caret / selection /
 hit-test stay correct. Also defaults `allow_copy` to `false` and
-opts the focused node out of OS IME composition. Pair with
+declares the focused node an `ImePurpose::Password` surface — the
+OS IME stays enabled so non-Latin passwords can still be composed,
+with the preedit masked on screen and hidden from AT. Pair with
 `revealed` for a reveal toggle.
 
 #### `pub fn input_purpose(mut self, purpose: InputPurpose) -> Self`

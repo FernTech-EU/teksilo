@@ -266,10 +266,11 @@ Raw escape hatch for a foreign drop.
 `from_source`; over an external source there is no
 `NodeId` to hand it, so it never fires. Prefer
 `accept_foreign_rows` +
-`on_rows_received`, which are source-agnostic. Unlike `ListView` / `TableView`,
-`TreeTableView` is backed by a concrete `SortFilterTreeModel<T>` rather
-than a pluggable source, so it cannot express foreign-accept purely
-through source capability closures (`can_accept` / `accept_drop`).
+`on_rows_received`, which are source-agnostic.
+A source-backed view expresses foreign-accept through its source's own
+capability closures (`can_accept` / `accept_drop`), like `ListView` /
+`TableView`; this hook is what a **projection**-backed view has instead,
+since a `SortFilterTreeModel` carries no such closures.
 This fires for **any** payload NOT recognized as this view's own row
 drag — a different view's `RowDragData<T>`, or a
 completely different payload type — dropped on a node: `(payload,
@@ -410,17 +411,17 @@ Control how column widths are distributed when the table is resized
 
 #### `pub fn tab_traversal(mut self, mode: TabTraversal) -> Self`
 
-Set the keyboard Tab traversal direction inside the table (default `Cells`).
+Set the keyboard Tab traversal direction inside the table (default `CellsThenRows`).
 
 #### `pub fn edit_triggers(mut self, trigger: EditTriggers) -> Self`
 
-Set which user gesture starts an in-place cell edit (default
-`DoubleClick`).
+Set which user gestures open an in-place cell editor — a set, composed
+with `|` (default `F2 | ANY_KEY | DOUBLE_CLICK`). See `EditTriggers`.
 
 #### `pub fn on_cell_edit_request( mut self, f: impl Fn(usize, &str, &mut EventContext) + 'static, ) -> Self`
 
 Callback invoked when the user requests an in-place cell edit (e.g.
-double-click when `edit_triggers` is `DoubleClick`). Receives the flat row
+double-click when `edit_triggers` contains `DOUBLE_CLICK`). Receives the flat row
 index, the column id, and a mutable `EventContext`.
 
 #### `pub fn on_cell_edit_dismissed( mut self, f: impl Fn(usize, &str, &mut EventContext) + 'static, ) -> Self`

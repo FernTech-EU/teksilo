@@ -76,6 +76,7 @@ alongside the user root inside a `ZStack`.
 Backwards-compatibility alias for ergonomic post-root
 installation: an app that already has a wrapping ZStack can
 construct a host via the standalone `new(...)`. This helper
-returns a fresh wrapper that uses `ZStack` internally — but
+ignores `_user_root` and just returns that host — the ZStack
+wrapping is owned by `install_toast` itself, so this is
 since the wrapping is owned by `install_toast` itself, this is
 rarely called by user code.

@@ -381,7 +381,7 @@ Install a close-tab handler. Receives the `TabId` of the
 closed tab (not its index — indices are presentation-only)
 and the firing `EventContext`. The latter lets the handler
 open a confirmation dialog
-(`ctx.present_modal(MessageBox::confirm(...))`), dispatch an
+(`MessageBox::question(...).present(ctx)`), dispatch an
 intent, or otherwise route the close request before mutating
 the underlying model. To veto, do nothing in the handler; to
 confirm-then-close, only call the model mutator on accept.
