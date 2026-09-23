@@ -31,7 +31,7 @@ use crate::window::TeksiloWindowId;
 /// events asynchronously and that widgets need to react to.
 pub trait EventSource: 'static {
     /// The key by which subscribers identify which events they care about.
-    /// Typically an enum (a Qleany `Origin`) or a topic string.
+    /// Typically an enum (e.g. a data layer's `Origin`) or a topic string.
     type Origin: Clone + 'static;
 
     /// The event payload delivered to subscriber callbacks. Must be `Send`

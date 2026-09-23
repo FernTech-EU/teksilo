@@ -5,7 +5,7 @@
 
 **Status:** Design rationale, revision 3, reconciled with the shipped implementation
 **Date:** April 17, 2026, reconciled September 15, 2026
-**Companion to:** architecture.md §28.9
+**Companion to:** architecture.md §29
 **Supersedes:** teksu-language-spec-v2.md
 
 ---
@@ -186,7 +186,7 @@ method calls, and all three of Freya's stated reasons measure in its favour.
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-Eleven places where v3 as written does not describe v3 as built. Each was verified against the
+Fourteen places where v3 as written does not describe v3 as built. Each was verified against the
 source before the body text was changed, and every corrected code example was compiled.
 
 **The `*_id` twins of Appendix A.3 no longer exist, and neither does `add_child`.** Every
@@ -194,7 +194,7 @@ widget-accepting slot method takes `impl IntoTeksiChild`, implemented for `Widge
 blanket for every `Widget`, so one name carries both: `.child(id)`, `.content(id)`,
 `.header(id)`, `.pane(id)`. 80 methods were removed. Appendices A.2 and A.3 are kept as the
 record of a refactor that has since been undone, and are marked superseded where they stand.
-The macro lost the matching rule: `lower_property` no longer appends an `_id` suffix when a
+The macro lost the matching rule: `lower_property_call` no longer appends an `_id` suffix when a
 slot value is a binding or an escape, because there is no second method to route to.
 
 **A bare child need not be an element (§3.6, §4.1).** A lowercase identifier that continues
@@ -210,8 +210,9 @@ before it.
 { ... }` does not lower to `.visible_when(signal)`. Every `if` at body position lowers to a
 plain Rust conditional, so the condition must be a `bool`, and a `Signal<bool>` there is a type
 error. The runtime the rule needed, `IntoTeksiCondition`
-(`crates/teksilo-core/src/widget_builder_branching.rs:292`), exists and is exported from two
-preludes, and nothing emits it. Settled by `crates/teksilo-macros/src/lower.rs:311`, which
+(`crates/teksilo-core/src/widget_builder_branching.rs:307`), exists and is re-exported from the
+`teksilo-core` root and the `teksilo` prelude, and nothing emits it. Settled by
+`crates/teksilo-macros/src/lower.rs:312`, which
 emits `.child_opt(if #cond { Some(..) } else { None })` unconditionally. The reactive form that
 does work is the `visible_when:` property, which §5.1 already documented as the alternative.
 
@@ -239,7 +240,7 @@ and the diagnostics live in `teksilo-parse`, not `teksilo-macros`.
 (`crates/teksilo-widgets/src/splitter.rs`), an N-pane container whose `.child()` and
 `.pane()` both take `impl IntoTeksiChild`, so it belongs in Category A, not Category B. The `Popover` entry is stale a
 second way: no type is spelled `Popover`. The family is `PopoverWidget<T>` and its three
-aliases (`crates/teksilo-parse/src/diag.rs:145`).
+aliases (`crates/teksilo-parse/src/diag.rs:154`).
 
 **Appendix A's `*_id` convention no longer exists at all.** It was never the invariant the
 appendix claimed — measured over `crates/teksilo-widgets/src`, 37 of 101 widget-taking setters
@@ -248,15 +249,17 @@ fill the gaps, the twins were deleted: every slot is now **one** method taking
 `impl IntoTeksiChild`, which accepts a `WidgetId` and any `Widget + 'static` alike. Appendix A.6
 keeps the old measurement as the record of why. See the `*_id` removal entry above.
 
-**§6.1's `IntoTeksiChild` dispatch was never implemented either.** A body-position
-`#{ expr }` emits `.child(expr)` and carries a widget value or a `WidgetId`
-(`crates/teksilo-macros/src/lower.rs:195`); a widget-valued expression there is a compile error.
-`crates/teksilo-parse/src/ir.rs:76` records this in the IR's own doc comment.
+**§6.1's `IntoTeksiChild` dispatch landed in the builders, not in the macro.** A body-position
+`#{ expr }` emits a plain `.child(expr)` (`crates/teksilo-macros/src/lower.rs:204`); the
+widget-or-id dispatch happens inside `child`, which takes `impl IntoTeksiChild`, so a widget
+value and a `WidgetId` both compile there (`crates/teksilo/tests/escape_carries_a_widget.rs`).
+The IR's own doc comment (`crates/teksilo-parse/src/ir.rs:76`) still says the routing is not
+implemented; that comment predates the `*_id` removal.
 
 **Binding scope is one block, not a nest of them (§3.3).** v3 described five kinds of
 statement-forming block and said a binding in one `if` arm is invisible from its sibling. The
 lowering keeps one `hoisted` vector for the whole tree and emits every `let` at the root of the
-expansion (`crates/teksilo-macros/src/lower.rs:43`), so every binding is visible everywhere in
+expansion (`crates/teksilo-macros/src/lower.rs:47`), so every binding is visible everywhere in
 the block and every bound widget is constructed unconditionally. Bindings are not legal inside
 an `if` / `else` / `match` arm in any case: an arm must hold exactly one element.
 
@@ -269,10 +272,12 @@ parenthesis escape an UpperCamel-rooted method chain needs
 (`crates/teksilo/tests/teksi/pass/54_paren_wraps_method_chain.rs`). This one mattered: the
 broken shape was v3's own worked example in two places.
 
-**Spread (§5.5) takes ids, not widgets.** v3 said `..expr` inlines "a `Vec<WidgetId>` or an
-iterator of widgets". The emitted loop calls `.child(id)`
-(`crates/teksilo-macros/src/lower.rs:142`), so a widget value there does not compile. §5.5's
-desugaring illustration also named the wrong locals; it now matches what the macro emits.
+**Spread (§5.5) was written for ids.** v3 said `..expr` inlines "a `Vec<WidgetId>` or an
+iterator of widgets". The emitted loop calls `.child(item)` once per item
+(`crates/teksilo-macros/src/lower.rs:148`). When this entry was first written that took ids
+only; since the `*_id` removal `child` takes `impl IntoTeksiChild`, so (2026-09-23) an iterator
+of widget values compiles there too. §5.5's desugaring illustration also named the wrong locals;
+it now matches what the macro emits.
 
 **Several method names in the worked translations (§7) never existed.** The `*_literal` twins
 the examples lean on (`new_literal`, `tooltip_literal`, `title_literal`,
@@ -386,13 +391,13 @@ child_element := element
 Body items are separated by newlines. This eliminates the `,` noise between `.child(...).child(...)` calls that dominates the uploaded example files.
 
 > **As shipped, a comma between body items is accepted as an optional separator**, so
-> `Panel { padding: 8.0, color: RED }` on one line works the same as two newline-separated
+> `Panel { padding: 8.0, background: RED }` on one line works the same as two newline-separated
 > properties (`crates/teksilo-parse/src/parse/body.rs:36`). v3 called commas an error and §9.2
 > promised a diagnostic for them; that diagnostic was never written and the relaxation went in
 > instead. The one place a comma still changes meaning is at the end of a property's argument
 > list, which §3.4 covers.
 
-At positions where an `arg` is expected, the parser uses "commit on distinctive prefix" to decide between element and expression: if the leading tokens form a TypePath followed by `(`, `::`, or `{`, or match `ident = TypePath(...)`, commit to element or bound-element parsing. Otherwise commit to expression parsing. This rule is local (no backtracking) and preserves clean error spans.
+At positions where an `arg` is expected, the parser uses "commit on distinctive prefix" to decide between element and expression: if the leading tokens are an UpperCamel identifier followed by `(`, `::`, or `{` (or nothing), or match `ident = <that>`, commit to element or bound-element parsing. A path ending in two UpperCamel segments (`Type::Variant`, `Type::Variant(x)`) is the one exception: it commits to element parsing only when a `{` body follows (`peek_element_start`, `crates/teksilo-parse/src/parse/cursor.rs`). Otherwise commit to expression parsing. This rule is local (no backtracking) and preserves clean error spans.
 
 ### 3.2 Constructors
 
@@ -424,11 +429,10 @@ Naming a widget binds its `WidgetId` to a local so it can be referenced later. B
 ```rust
 teksu!(ctx =>
     VStack {
-        open_btn = Button("Open") {
+        status = TextWidget("Ready")
+        Button("Open") {
             on_activate_fn: |ctx| ctx.send_intent(AppIntent::Open)
-        }
-        TextWidget("Status") {
-            linked_to: open_btn
+            access_described_by: status
         }
     }
 )
@@ -438,15 +442,14 @@ Desugars to:
 
 ```rust
 {
-    let open_btn: WidgetId = ctx.add(
-        Button::new("Open").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Open))
-    );
+    let status = ctx.add(TextWidget::new("Ready"));
     ctx.add(
         VStack::new()
-            .child(open_btn)
+            .child(status)
             .child(
-                TextWidget::new("Status")
-                    .linked_to(open_btn)
+                Button::new("Open")
+                    .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Open))
+                    .access_described_by(status)
             )
     )
 }
@@ -463,7 +466,7 @@ teksu!(
         content: VStack {
             TextWidget("Set title:")
             Button("Focus title") {
-                on_tap: move |_, ctx| ctx.focus(title)
+                on_tap: move |_, ctx| ctx.request_focus(title)
             }
         }
     }
@@ -474,7 +477,7 @@ Desugars to:
 
 ```rust
 {
-    let title: WidgetId = ctx.add(
+    let title = ctx.add(
         TextWidget::new("Manuscript").style(t.body_bold.clone())
     );
     Card::new()
@@ -484,7 +487,7 @@ Desugars to:
                 .child(TextWidget::new("Set title:"))
                 .child(
                     Button::new("Focus title")
-                        .on_tap(move |_, ctx| ctx.focus(title))
+                        .on_tap(move |_, ctx| ctx.request_focus(title))
                 )
         )
 }
@@ -499,7 +502,7 @@ form's scope) and said a binding declared in one arm is not visible from a sibli
 
 **As shipped there is exactly one block.** The lowering carries a single `hoisted` vector for
 the whole tree and emits every `let` at the root of the expansion
-(`lower_root`, `crates/teksilo-macros/src/lower.rs:43`), so a name bound in one subtree is
+(`lower_root`, `crates/teksilo-macros/src/lower.rs:47`), so a name bound in one subtree is
 visible from any other subtree in the same block, which is what makes the `#{ }` / `on_tap`
 cross-references in §6.1 and §7.9 work. The v3 sentence about sibling arms describes a
 situation that cannot arise anyway: a binding is not a legal body item inside an `if`, `else`
@@ -558,13 +561,13 @@ TitleBar::new(host)
 
 ```rust
 Expand {
-    fills_stack
+    respect_intrinsic
     TextWidget("Body")
 }
 
 // Desugars to
 Expand::new()
-    .fills_stack()
+    .respect_intrinsic()
     .child(TextWidget::new("Body"))
 ```
 
@@ -599,7 +602,7 @@ Bracket groups are atomic, because `syn` parses a delimited group as one token t
 multi-line argument value keeps its internal commas whatever they are:
 
 ```rust
-Panel {
+Probe {
     offset: (4.0, 2.0)
     TextWidget("Hello")
 }
@@ -625,11 +628,12 @@ common case at that position.
 `peek_element_start` declines and the whole thing goes down the expression path:
 
 ```rust
-Panel {
+Probe {
     style: (TextStyle {
         family: "sans-serif".into(),
         size: 14.0,
         weight: FontWeight::BOLD,
+        ..Default::default()
     })
     offset: (4.0, 2.0)
     TextWidget("Hello")
@@ -748,7 +752,7 @@ An argument-free wrapping method (§3.4's bare-lowercase form) is reordered on t
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-A bare element at body position, with no `name:` prefix and no `name =` binding, is a child element. Children desugar to `.child(...)` calls on the parent, using the inline-child resolution path from architecture §6.1.
+A bare element at body position, with no `name:` prefix and no `name =` binding, is a child element. Children desugar to `.child(...)` calls on the parent, using the inline-child resolution path from architecture §6.
 
 ```rust
 VStack {
@@ -819,15 +823,14 @@ Probe::new()
 This is a pure extension: every form it accepts was a parse error before it, so no program
 changed meaning.
 
-**Two heads it does not reach.** The dispatch starts from an identifier, so an expression whose
-head is a keyword path (`self::section("x")`, `crate::ui::row()`) or an operator (`*boxed()`)
-still falls through to the "expected a property name, child element, binding, or `#{ expr }`
-escape" error. Write those through the property form instead, which takes an arbitrary Rust
-expression:
+**Heads it does not reach.** An expression whose head is one of the excluded punctuation
+tokens (`(section("x"))`, `*boxed()`, `&w`) still falls through to the "expected a property
+name, child element, binding, or `#{ expr }` escape" error. Write those through the property
+form instead, which takes an arbitrary Rust expression:
 
 ```rust
 Probe {
-    child: self::section("four")
+    child: (section("four"))
 }
 ```
 
@@ -848,7 +851,7 @@ Every Teksilo widget falls into one of two categories based on how it accepts co
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-These widgets accept one or more children through a `.child(..)` method taking `impl IntoTeksiChild`, so the same name takes a widget or a `WidgetId`. Body-block child syntax in the DSL maps directly.
+These widgets accept one or more children through a `.child(..)` method taking `impl IntoTeksiChild`, so the same name takes a widget or a `WidgetId`. Body-block child syntax in the DSL maps directly. (`Cycle` and `RadioGroup` are the exceptions whose `.child(..)` takes `impl Widget` only, so a binding or an id cannot attach there.)
 
 **Members:**
 
@@ -882,7 +885,7 @@ Bare children and bound children both desugar to `.child(..)`.
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-These widgets have no `.child()` method. Content goes through named setter methods, one per semantic slot. Each slot method takes `impl IntoTeksiChild`, so `.slot_name(..)` accepts a widget or a `WidgetId`; there is no `*_id` twin.
+These widgets have no `.child()` method. Content goes through named setter methods, one per semantic slot. Most slot methods take `impl IntoTeksiChild`, so `.slot_name(..)` accepts a widget or a `WidgetId`; there is no `*_id` twin. The exceptions take a widget value only: `PopoverWidget::content` and `Wizard::trigger` (`impl Widget`), `Dialog::content` (a factory), `Breadcrumb::item` (a `BreadcrumbItem`) and `Wizard::step` (a `Step`).
 
 **Members and their slots:**
 
@@ -930,7 +933,7 @@ Widgets with no child-accepting methods at all. Buttons, TextWidget, IconWidget,
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-Wizard is structurally its own case: it takes a title in the constructor and wires multi-step content through `.step(WizardStep)` and `.steps(iter)` methods. It is not refactored in Appendix A because its shape does not fit cleanly into either Category A or B. For DSL authoring, treat Wizard like Category B with named slots, adding `step` and `steps` to the slot vocabulary.
+Wizard is structurally its own case: it takes a title in the constructor and wires multi-step content through `.step(Step)` and `.steps(iter)` methods. It is not refactored in Appendix A because its shape does not fit cleanly into either Category A or B. For DSL authoring, treat Wizard like Category B with named slots, adding `step` and `steps` to the slot vocabulary.
 
 As shipped the macro agrees: `Wizard` is in `is_category_b_widget`, so a bare child under it gets the slot diagnostic pointing at `step`.
 
@@ -986,7 +989,7 @@ bare identifier whose static type is `Signal<bool>` or `Prop<bool>`, the lowerin
 be the one place where the macro performs type-directed inference.
 
 **No such inference exists.** Every `if` at body position lowers to the plain Rust conditional
-described above (`crates/teksilo-macros/src/lower.rs:311`), so the condition must be a `bool`
+described above (`crates/teksilo-macros/src/lower.rs:312`), so the condition must be a `bool`
 and a `Signal<bool>` there is a type error:
 
 ```text
@@ -997,7 +1000,7 @@ error[E0308]: mismatched types
 ```
 
 The runtime the rule would have needed was built and is still exported: `IntoTeksiCondition`
-(`crates/teksilo-core/src/widget_builder_branching.rs:292`) has impls for `bool`,
+(`crates/teksilo-core/src/widget_builder_branching.rs:307`) has impls for `bool`,
 `Signal<bool>` and `Prop<bool>`, its doc comment describes the dispatch, and the macro never
 calls it. Whether to finish it or delete it is a v4 question, not a documented capability.
 
@@ -1066,7 +1069,7 @@ For dynamic item collections backed by `ListModel<T>`, use the `ListView` widget
 ```rust
 VStack {
     match state {
-        State::Loading => Spinner(),
+        State::Loading => Spinner(16.0),
         State::Loaded(data) => DataView(data.clone()),
         State::Error(msg) => ErrorBanner(msg.clone()),
     }
@@ -1075,7 +1078,7 @@ VStack {
 // Desugars to
 VStack::new()
     .child(match state {
-        State::Loading => TeksiBranch3::A(Spinner::new()),
+        State::Loading => TeksiBranch3::A(Spinner::new(16.0)),
         State::Loaded(data) => TeksiBranch3::B(DataView::new(data.clone())),
         State::Error(msg) => TeksiBranch3::C(ErrorBanner::new(msg.clone())),
     })
@@ -1096,16 +1099,17 @@ VStack {
 }
 ```
 
-When a body contains `let` bindings, the desugaring switches from a pure builder chain to a statement sequence. This desugaring also applies to body-position bindings (§3.3), spread forms (§5.5), and pure-side-effect `rust` blocks (§5.6). A body containing only properties and child elements continues to use the pure chain form for readability.
+When a body contains `let` bindings, the desugaring switches from a pure builder chain to a statement sequence. This desugaring also applies to spread forms (§5.5) and pure-side-effect `rust` blocks (§5.6) (`body_needs_stmt_form`, `crates/teksilo-macros/src/lower.rs`). Every other body, including one with body-position bindings (§3.3), whose `let`s hoist to the root of the expansion instead, continues to use the pure chain form for readability.
 
 ### 5.5 Spread Forms
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-A spread `..expr` inlines an iterable of `WidgetId` as children at that position. v3 said "or an
-iterator of widgets"; it is ids only, because the emitted loop calls `.child(id)`
-(`crates/teksilo-macros/src/lower.rs:142`). For a run of widget *values*, use the container's own
-`.children(iter)` as a property.
+A spread `..expr` inlines an iterable of children at that position. v3 said "a `Vec<WidgetId>`
+or an iterator of widgets". The emitted loop calls `.child(item)` once per item
+(`crates/teksilo-macros/src/lower.rs:148`), and since `child` takes `impl IntoTeksiChild`, both
+work (on the containers whose `child` does; see §4.1). For a run of widget *values*, the
+container's own `.children(iter)` as a property is the chain-form alternative.
 
 ```rust
 VStack {
@@ -1134,19 +1138,17 @@ Spread is for programmatic child list assembly (plugin registries, restored work
 
 A `rust { ... }` block switches to imperative construction. Two shapes, distinguished by whether the block produces a value.
 
-**Expression-producing form.** The block ends with an expression without a trailing semicolon. The value is used as a child or spread across children via the `IntoTeksiChild` trait.
+**Expression-producing form.** The block ends with an expression without a trailing semicolon. The value is passed to `.child(..)`, so it must be one widget or one `WidgetId` (via `IntoTeksiChild`); a collection is not a child, and several ids go through a spread (§5.5) instead.
 
 ```rust
 VStack {
     TextWidget("Header")
     rust {
-        let mut items = Vec::new();
-        for ch in chapters.iter() {
-            if ch.visible {
-                items.push(ctx.add(ChapterRow::new(ch.clone())));
-            }
+        let mut list = VStack::new();
+        for ch in chapters.iter().filter(|ch| ch.visible) {
+            list = list.child(ChapterRow::new(ch.clone()));
         }
-        items
+        list
     }
     TextWidget("Footer")
 }
@@ -1178,6 +1180,8 @@ VStack {
 }
 ```
 
+A block that borrows `ctx` mutably, like the `subscribe_event` call above, only compiles in the no-preamble form; see the borrow caveat after §7.8.
+
 **Disambiguation is mechanical.** The macro looks at the last statement in the `rust` block. If it ends without `;`, the block is expression-producing. If it ends with `;`, the block is side-effect.
 
 **Failure mode for forgotten `;`.** If the user writes a side-effect block without a trailing `;`, and the tail has type `()` (for example, a bare `if let { ...; }` without `else`), the macro treats it as expression form and tries to dispatch `()` through `IntoTeksiChild`. The compiler responds with "the trait `IntoTeksiChild` is not implemented for `()`" pointing at the block's tail expression. This is a survivable error: the message is clear and the fix is to add the missing `;`.
@@ -1200,10 +1204,10 @@ position it emits `.slot(expr)` under the slot's own name.
 
 **The expression may be either a widget or a `WidgetId`.** v3 specified dispatch through an
 `IntoTeksiChild` trait and left it unimplemented; it is implemented now. The lowering is still
-unconditional — `#{ expr }` always emits `.child(expr)` — but every child- and slot-taking
-method takes `impl IntoTeksiChild`
-(`crates/teksilo-core/src/widget_builder_branching.rs:257`), whose two impls cover `WidgetId`
-and any `Widget + 'static`. The routing therefore happens in the type system rather than in the
+unconditional — `#{ expr }` always emits `.child(expr)` — but nearly every child- and
+slot-taking method takes `impl IntoTeksiChild`
+(`crates/teksilo-core/src/widget_builder_branching.rs:265`; the exceptions are listed in §4.1
+and §4.2), whose two impls cover `WidgetId` and any `Widget + 'static`. The routing therefore happens in the type system rather than in the
 macro, which is why the one lowering serves both.
 
 ```rust
@@ -1245,7 +1249,7 @@ Each translation takes a block from one of the uploaded example files and shows 
 Source:
 
 ```rust
-.root(|tree| {
+.root(|tree, _state| {
     tree.add(
         Button::new(lit!("Click Me"))
             .variant(ButtonVariant::Plain)
@@ -1258,7 +1262,7 @@ Source:
 With `teksu!`:
 
 ```rust
-.root(|tree| teksu!(tree =>
+.root(|tree, _state| teksu!(tree =>
     Button::new(lit!("Click Me")) {
         variant: ButtonVariant::Plain
         on_activate_fn: |ctx| ctx.send_intent(AppIntent::ButtonClicked)
@@ -1667,10 +1671,11 @@ let root = teksu!(ctx =>
 Five things exercise the language here. First, `ScrollArea` is Category A post-refactor, so its VStack content is a body-block child. Second, the Dialog binding `modal_trigger =` uses the new assignment form to bind the dialog's id. Third, Dialog's `content:` property takes a `move ||` factory closure whose body contains a nested `teksu!(...)` building the DialogContent. Fourth, DialogContent is Category B with `title`, `supporting_text`, `body`, and `footer` as slot properties. Fifth, `trigger:` in Popover takes a full element value, and all three trigger-like widgets (Popover, Snackbar, and Dialog as a button itself) appear at the same depth in the HStack.
 
 > **This block will not compile as written against the shipped API.** It is kept as the
-> rationale's worked translation, and two things in it are stale: the `Popover::new(label)` /
-> `trigger:` shape (the popover family takes its trigger in the constructor, Appendix A.1), and
-> the Dialog binding, which needs `Dialog` to be a Category A or bound-capable position. Treat
-> §7.6 as illustrating the *grammar*, not the current widget surface.
+> rationale's worked translation, and the popover in it is stale: the `Popover::new(label)` /
+> `trigger:` shape (the popover family is `PopoverWidget<T>`, which takes its trigger in the
+> constructor, Appendix A.1), and `caret_size`, which no popover method is called. The Dialog
+> binding and the Snackbar are fine: `HStack` is Category A, so `modal_trigger =` attaches by
+> id. Treat §7.6 as illustrating the *grammar*, not the current widget surface.
 
 ### 7.7 internationalization, mixed declarative and imperative
 
@@ -1818,10 +1823,11 @@ impl Widget for App {
                         .variant(ButtonVariant::Plain),
                 )
                 // ... more children ...
-                .child(Expand::new().fills_stack())
+                .child(Spacer::new())
                 .child(
                     StatusBar::new().child(
                         TextWidget::new(tr!(milestone_status()))
+                            .single_line()
                             .style(t.tiny.clone())
                             .color(c.text_secondary),
                     ),
@@ -1909,9 +1915,10 @@ impl Widget for App {
                     variant: ButtonVariant::Plain
                     on_activate_fn: |ctx| ctx.send_intent(AppIntent::ToggleDarkMode)
                 }
-                Expand { fills_stack }
+                Spacer
                 StatusBar {
                     TextWidget(tr!(milestone_status())) {
+                        single_line
                         style: t.tiny.clone()
                         color: c.text_secondary
                     }
@@ -1924,7 +1931,13 @@ impl Widget for App {
 }
 ```
 
-The `let` forms at body position handle the signal cloning. The `rust { }` side-effect block registers the event subscription. `Expand { fills_stack }` uses the bare-lowercase-identifier rule for argument-free properties. StatusBar is Category A, so its child is a bare element.
+The `let` forms at body position handle the signal cloning. The `rust { }` side-effect block registers the event subscription. `single_line` uses the bare-lowercase-identifier rule for argument-free properties. StatusBar is Category A, so its child is a bare element.
+
+> **Borrow caveat (§7.7 too).** Under the `ctx =>` preamble the whole tree is the argument of
+> `ctx.add(...)`, so a body item that borrows `ctx` mutably, here `ctx.subscribe_event` and in
+> §7.7 `ctx.signal` / `ctx.effect`, conflicts with that call's own borrow of `ctx` and is
+> rejected by the borrow checker. Hoist those calls above the `teksu!` block, as the builder
+> source does, or use the no-preamble form and `ctx.add` its result.
 
 ### 7.9 Card, Category B with bound slot widget
 
@@ -1948,7 +1961,7 @@ let card = Card::new()
             .child(TextWidget::new("Edit title:"))
             .child(
                 Button::new("Focus title")
-                    .on_tap(move |_, ctx| ctx.focus(title_id)),
+                    .on_tap(move |_, ctx| ctx.request_focus(title_id)),
             ),
     )
     .footer(Button::new("Save").on_activate_fn(|ctx| ctx.send_intent(AppIntent::SaveTitle)))
@@ -1968,7 +1981,7 @@ teksu!(
             spacing: 12.0
             TextWidget("Edit title:")
             Button("Focus title") {
-                on_tap: move |_, ctx| ctx.focus(title)
+                on_tap: move |_, ctx| ctx.request_focus(title)
             }
         }
         footer: Button("Save") { on_activate_fn: |ctx| ctx.send_intent(AppIntent::SaveTitle) }
@@ -1985,7 +1998,7 @@ teksu!(
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-The V2 model splits handlers between two attachment patterns (architecture §28.3): handlers on child widgets (Checkbox on MinSize, Accordion on its header) and handlers attached to `self` via `HandlerSet::new()` + `ctx.apply_self_handlers()` (Button, Toggle, Slider, SegmentedControl).
+The V2 model splits handlers between two attachment patterns ([events-and-gestures.md](events-and-gestures.md)): handlers on child widgets (Checkbox on MinSize, Accordion on its header) and handlers attached to `self` via `HandlerSet::new()` + `ctx.apply_self_handlers()` (Button, Toggle, Slider, SegmentedControl).
 
 `teksu!` does not change this. Handlers written on an element attach via the builder methods of that element. Which attachment mechanism the builder uses internally is a per-widget implementation detail.
 
@@ -2027,6 +2040,7 @@ from the committed `.stderr` fixtures under `crates/teksilo/tests/teksi/fail/`.
 **Emitted by the parser** (`crates/teksilo-parse/src/parse/`):
 
 ```text
+expected end of teksu! input — the root element must be the only top-level element
 expected a property name, child element, binding, or `#{ expr }` escape
 expected a single expression inside `#{ ... }`
 expected a `let` binding at this body position
@@ -2094,8 +2108,10 @@ better, and both worth knowing:
 - A comma before an UpperCamel element continues the argument list (§3.4), so the element
   lands as an extra argument to the preceding property and the user gets an arity error on a
   call they did not mean to make.
-- A binding or `#{ }` escape in a slot whose widget has no `*_id` twin produces
-  `no method named 'slot_id'` (Appendix A).
+- A binding or `#{ }` escape in one of the few slots that take `impl Widget` rather than
+  `impl IntoTeksiChild` (`PopoverWidget::content`, `Wizard::trigger`, `Cycle` and
+  `RadioGroup`'s `child`; §4.1, §4.2) is a trait-bound error saying `WidgetId` is not a
+  `Widget`. (Before the `*_id` removal this was `no method named 'slot_id'`.)
 
 ---
 
@@ -2103,7 +2119,7 @@ better, and both worth knowing:
 
 > **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-**Implicit theme access.** Every reference to theme tokens is an explicit Rust path. Implicit access would require a thread-local (fights multi-window) or an injected ctx parameter (breaks error messages). Mitigation: a small `themed!` helper macro that expands to `let t = &theme.typography; let c = &theme.colors;`.
+**Implicit theme access.** Every reference to theme tokens is an explicit Rust path. Implicit access would require a thread-local (fights multi-window) or an injected ctx parameter (breaks error messages). Possible mitigation, not implemented: a small `themed!` helper macro that expands to `let t = &theme.typography; let c = &theme.colors;`.
 
 **Implicit reactive bindings.** `text: model.title` passes the value once. To get reactivity, write `text: signal.map(...)`. This matches `Prop<T>`.
 
@@ -2153,10 +2169,11 @@ actually emitted.
 
 **Supporting types.** `TeksiBranch<L, R>`, `TeksiBranch3`, `TeksiBranch4`, `IntoTeksiChild` and
 `IntoTeksiCondition` are public in `teksilo-core`, in `widget_builder_branching.rs` rather than
-`widget_builder.rs`, and re-exported from both preludes. They are not DSL-specific:
+`widget_builder.rs`, and re-exported from the `teksilo-core` root and the `teksilo` prelude. They are not DSL-specific:
 hand-written builder chains can use them. The three `TeksiBranch*` types are live, emitted by
-`if`/`else` and `match` lowering. `IntoTeksiChild` and `IntoTeksiCondition` are **not**: nothing
-emits them (§5.1, §6.1).
+`if`/`else` and `match` lowering. `IntoTeksiChild` is never named by the expansion, but it is the
+parameter type of `child` and of nearly every slot, so every emitted `.child(..)` goes through it
+(§6.1). `IntoTeksiCondition` is emitted by nothing (§5.1).
 
 **Bootstrapping.** Develop, test, and land the macro after the framework changes in Appendix A. The `tr!` macro's infrastructure (crate layout, `trybuild` tests, span discipline, rebuild tracking) is the template. Estimated cost: four to six weeks including `trybuild` corpus and documentation rewrite.
 
@@ -2189,10 +2206,11 @@ The grammar has three primary forms: elements with explicit constructors, bindin
 
 The widget catalog divides into two categories: Category A containers accepting body-block children, and Category B composites with named slot properties. Appendix A specifies the framework changes that complete this split, and A.6 measures how far the framework actually went.
 
-Three things this design asked for were not built: type-directed reactive `if` (§5.1),
-`IntoTeksiChild` routing for `#{ }` (§6.1), and a universal `*_id` twin (Appendix A.6). Two
-things arrived after it was written: commas as optional body separators (§3.1) and the
-expression child (§3.6). [teksu-macro-reference.md](teksu-macro-reference.md) is normative for
+Two things this design asked for were not built: type-directed reactive `if` (§5.1) and a
+universal `*_id` twin (Appendix A.6), which was removed in favour of one slot method taking
+`impl IntoTeksiChild`. The `IntoTeksiChild` routing for `#{ }` (§6.1) did land, in the builders
+rather than the macro. Two things arrived after the design was written: commas as optional body
+separators (§3.1) and the expression child (§3.6). [teksu-macro-reference.md](teksu-macro-reference.md) is normative for
 all of it.
 
 ---
@@ -2343,9 +2361,9 @@ pub fn trigger_id(mut self, id: WidgetId) -> Self
 
 Add to `teksilo-core`. **Shipped in `widget_builder_branching.rs`**, not `widget_builder.rs`,
 and re-exported from `teksilo_core` and the `teksilo` prelude. The three `TeksiBranch*` enums
-are live. `IntoTeksiChild` was written with its blanket impls and is emitted by nothing (§6.1);
-a sibling trait `IntoTeksiCondition` was written for §5.1's reactive `if` and is likewise
-emitted by nothing.
+are live. `IntoTeksiChild` was written with its blanket impls; the expansion never names it,
+but it is the parameter type of `child` and of nearly every slot (§6.1). A sibling trait
+`IntoTeksiCondition` was written for §5.1's reactive `if` and is emitted by nothing.
 
 ```rust
 pub enum TeksiBranch<L: Widget, R: Widget> { L(L), R(R) }

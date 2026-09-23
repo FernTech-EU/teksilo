@@ -49,9 +49,9 @@ Expansion routes every internal `add` call through that ident, so
 `teksu!(tree => ...)` emits `tree.add(...)`.
 
 Without the preamble, expansion falls back to an unqualified `ctx`
-when bindings or escapes are present — that local must be in scope at
-the call site. Pure teksu! blocks with no bindings or escapes (just
-elements and properties) don't need `ctx` available.
+when bindings are present — that local must be in scope at the call
+site. A block with no bindings (escapes included: `#{ expr }` lowers to
+a plain `.child(expr)`) doesn't need `ctx` available.
 
 ---
 
@@ -86,7 +86,7 @@ Padding::symmetric(12.0, 8.0)   // → Padding::symmetric(12.0, 8.0)
 The `{ ... }` block contains body items: properties, bindings, bare
 children, structural forms, body-position escapes. Items are separated
 by **newlines**; commas between items are accepted as optional
-separators (so `Panel { padding: 8.0, color: RED }` on one line works
+separators (so `Panel { padding: 8.0, background: RED }` on one line works
 the same as two newline-separated properties).
 
 ---
@@ -129,10 +129,10 @@ A single lowercase identifier at body position is a zero-arg method call:
 
 ```rust
 Expand {
-    fills_stack
+    respect_intrinsic
     TextWidget("Body")
 }
-// ↓ Expand::new().fills_stack().child(TextWidget::new("Body"))
+// ↓ Expand::new().respect_intrinsic().child(TextWidget::new("Body"))
 ```
 
 *Standing alone* is the operative part. A lowercase identifier that continues
@@ -431,7 +431,7 @@ teksu!(ctx =>
 
 given `fn section(title: &str) -> VStack` and
 `fn boxed_branch(n: i32) -> Box<dyn Widget>`. A lowercase identifier standing
-alone is still the argument-free property (`fills_stack`), so the two forms do
+alone is still the argument-free property (`respect_intrinsic`), so the two forms do
 not collide.
 
 ### What genuinely does not work
@@ -553,21 +553,24 @@ it later. Bindings hoist to the enclosing `teksu!` block:
 ```rust
 teksu!(ctx =>
     VStack {
-        open_btn = Button("Open") {
+        status = TextWidget("Ready")
+        Button("Open") {
             on_activate_fn: |ctx| ctx.send_intent(AppIntent::Open)
-        }
-        TextWidget("Status") {
-            linked_to: open_btn
+            access_described_by: status
         }
     }
 )
 // ↓
 {
-    let open_btn: WidgetId = ctx.add(Button::new("Open").on_activate_fn(|ctx| ctx.send_intent(AppIntent::Open)));
+    let status = ctx.add(TextWidget::new("Ready"));
     ctx.add(
         VStack::new()
-            .child(open_btn)
-            .child(TextWidget::new("Status").linked_to(open_btn))
+            .child(status)
+            .child(
+                Button::new("Open")
+                    .on_activate_fn(|ctx| ctx.send_intent(AppIntent::Open))
+                    .access_described_by(status),
+            )
     )
 }
 ```
@@ -586,7 +589,7 @@ Card {
     header: title = TextWidget("Manuscript") { style: bold }
     content: VStack {
         Button("Focus title") {
-            on_tap: move |_, ctx| ctx.focus(title)
+            on_tap: move |_, ctx| ctx.request_focus(title)
         }
     }
 }
@@ -597,7 +600,7 @@ Card {
 //         .header(title)
 //         .content(VStack::new().child(
 //             Button::new("Focus title")
-//                 .on_tap(move |_, ctx| ctx.focus(title))
+//                 .on_tap(move |_, ctx| ctx.request_focus(title))
 //         ))
 // }
 ```
@@ -698,7 +701,7 @@ Conditions are boolean expressions. For reactive visibility, bind a
 ```rust
 VStack {
     match state {
-        State::Loading => Spinner,
+        State::Loading => Spinner(16.0),
         State::Loaded(data) => DataView(data.clone()),
         State::Error(msg) => ErrorBanner(msg.clone()),
     }
@@ -749,7 +752,8 @@ scoped to the element's body block.
 
 ### `..spread`
 
-Inline an iterator of `WidgetId`s as children:
+Inline an iterator of children, each passed to `.child(..)` (so `WidgetId`s
+or widget values):
 
 ```rust
 VStack {
@@ -785,6 +789,11 @@ VStack {
 ```
 
 Side-effect form forces statement-sequence lowering.
+
+Under the `ctx =>` preamble the whole tree is the argument of `ctx.add(...)`,
+so a block that borrows `ctx` mutably (like the `subscribe_event` call above)
+conflicts with that borrow. Make such calls before the macro, or use the
+no-preamble form and `ctx.add` the result yourself.
 
 ---
 
@@ -889,6 +898,11 @@ The macro emits one targeted error for the common mistake:
   widget with named slots — use `content: <widget>` instead of a bare
   child element". Points at the misplaced child.
 
+Its other errors are structural and self-explanatory: a multi-arm `if`
+without a final `else`, more than four `if` / `match` arms, a `match`
+with fewer than two arms, and an `if` / `else` / `for` body holding more
+than one element.
+
 Everything else (unknown property, wrong handler arity, constructor
 typo, type mismatches on property values) surfaces as a regular rustc
 diagnostic under the user's token, thanks to span-preserving emission.
@@ -915,20 +929,22 @@ diagnostic under the user's token, thanks to span-preserving emission.
   branch that mentions it is taken. Binding is not a way to build a
   subtree lazily.
 - **Reactive-if is not special-cased**: `if signal { ... }` where
-  `signal: Signal<bool>` does **not** auto-bind `visible_when`. Bind
-  visibility through `ctx.visible_when(id, signal)` directly on a
-  pre-registered child, or wrap the widget in your own helper.
+  `signal: Signal<bool>` does **not** auto-bind `visible_when`. Write
+  `visible_when: signal` as a property on the element (a `WidgetBuilder`
+  method, so it is reordered to the end), or bind
+  `ctx.visible_when(id, signal)` on a pre-registered child.
 - **Struct literals need parens**: `prop: MyStruct { ... }` is parsed as a
   teksu element (per the spec's "commit on distinctive prefix" rule), at a
   property value and at body position alike. To pass a Rust struct literal,
-  wrap it: `prop: (MyStruct { ... })`. Enum variants don't need this wrapping,
+  wrap it: `prop: (MyStruct { ... })` at a property value, `#{ MyStruct { ... } }`
+  at body position (where parentheses are rejected). Enum variants don't need this wrapping,
   since `prop: Type::Variant` and `prop: Type::Variant(inner)` are recognized
   as expressions by their `UpperCamel::UpperCamel` shape. The error when you
   forget is in
   [What genuinely does not work](#what-genuinely-does-not-work).
 - **No UpperCamel method chains at property-arg position**: write
-  `item: MenuItem::new("x").on_activate(cmd).tooltip("t")` as body form,
-  `item: MenuItem("x") { on_activate: cmd, tooltip: "t" }`. The body form reads
+  `item: MenuItem::new("x").on_activate_fn(f).tooltip("t")` as body form,
+  `item: MenuItem("x") { on_activate_fn: f, tooltip: "t" }`. The body form reads
   uniformly with top-level elements and skips the element-vs-expression
   ambiguity. Chains rooted in a lowercase path (`signal.map(...)`,
   `pad.max(4.0)`, `items.iter().collect()`) need no workaround: they go through
@@ -958,5 +974,6 @@ diagnostic under the user's token, thanks to span-preserving emission.
   available if the question reopens.
 - [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
   — trybuild fixtures exercising every supported form.
-- [crates/teksilo-macros/src/](../crates/teksilo-macros/src/) — the
-  implementation (parse → IR → lower).
+- [crates/teksilo-parse/src/](../crates/teksilo-parse/src/) — the parser
+  and IR; [crates/teksilo-macros/src/](../crates/teksilo-macros/src/) — the
+  lowering (parse → IR → lower).

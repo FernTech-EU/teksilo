@@ -3,7 +3,7 @@
 
 //! Spec §3.3: a body-position binding `name = Element` hoists to the
 //! enclosing teksu! block as `let name = ctx.add(...)` and attaches via
-//! `.add_child(name)` on the parent. The binding's id is in scope for
+//! `.child(name)` on the parent. The binding's id is in scope for
 //! sibling items in the same body and for nested property values.
 
 use teksilo::prelude::*;

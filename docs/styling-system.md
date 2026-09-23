@@ -26,11 +26,11 @@ touching the widget source.
 | Task | Tier | API |
 | --- | --- | --- |
 | Tweak a color across the whole app | 0 | `theme.colors.accent = …` |
-| Make a single Button red | n/a | `Button::color(Color::RED)` (always-allowed prop override) |
+| Make a single Button's label red | n/a | `Button::text_role(Color::RED)` (always-allowed prop override; a per-instance fill goes through `.style(...)`) |
 | Pick "outlined" instead of "filled" on a Button | 1 | `Button::variant(ButtonVariant::Outlined)` |
 | Make every Outlined Button thicker | 2 | Modify a `BorderRecipe` in the IntUI preset, OR ship a new preset |
 | Replace Button chrome entirely (glassmorphism / brutalist / Material-3) | 3 | `impl ButtonStyle for MyGlassButton` then `theme.style_slots.button = Some(Rc::new(MyGlassButton))` |
-| Reskin from designer-exported SVGs | 3 | Ship an `ImageBackedButtonStyle` via the manifest loader |
+| Reskin from designer-exported SVGs | 3 | An image-backed `impl ButtonStyle` (a built-in `ImageBackedButtonStyle` + manifest loader is planned, not shipped) |
 
 The cardinal rule: **never edit widget source to change a look**. If
 the existing API doesn't get you there, write an `impl FooStyle` block
@@ -43,17 +43,19 @@ The five token groups (`ColorTokens`, `ShapeTokens`, `LayoutTokens`,
 [`teksilo-tokens/src/`](../crates/teksilo-tokens/src/). They're pure data
 structs with no widget knowledge.
 
-`Theme` aggregates the five token groups plus appearance, component
-dimensions, and the typed style-slot bag:
+`Theme` aggregates the five token groups plus an id, appearance, the
+input/density tokens, and the typed style-slot bag:
 
 ```rust
 pub struct Theme {
+    pub id: ThemeId,                        // "intui.light", "custom", …
     pub appearance: ThemeAppearance,        // Light | Dark — required
     pub colors: ColorTokens,
     pub layout: LayoutTokens,
     pub typography: TypographyTokens,
     pub shape: ShapeTokens,
     pub motion: MotionTokens,
+    pub input: InputTokens,                  // density, target sizes, gesture slop
     pub style_slots: ComponentStyleSlots,    // typed Rc<dyn FooStyle> slots
     pub extensions: ThemeExtensions,
 }
@@ -70,8 +72,8 @@ Other presets ship as opt-in Cargo features (Material 3, macOS,
 Fluent) — only IntUI is bundled by default.
 
 **Reactive.** `Theme` lives behind a `Signal<Theme>` on
-`WidgetTree` — `set_theme(...)` dirty-marks every widget for repaint
-without rebuilding the tree. Focus, scroll offsets, and animation
+`WidgetTree` — `set_theme(...)` dirty-marks every widget for relayout
+and repaint without rebuilding the tree. Focus, scroll offsets, and animation
 state survive theme swaps. See
 [`docs/reactive-theme.md`](reactive-theme.md).
 
@@ -179,7 +181,10 @@ SliderVariant    { Continuous, Discrete, Range }
 TextInputVariant { Outlined, Filled, Underline, Bare }
 ComboBoxVariant  { Outlined, Filled, Underline, Plain }
 ScrollBarVariant { Permanent, Overlay, Thin }
-AvatarShape      { Circle, Square, Rounded }                  // and AvatarSize, AvatarCorner, AvatarPresence
+AvatarShape      { Circle, RoundedSquare, Square }            // and AvatarSize, AvatarCorner, AvatarPresence
+RadioTileVariant { Outlined, Elevated, Filled }
+DropTargetVariant { Default, Prominent, Subtle, None }        // border weight
+// SplitButton reuses ButtonVariant
 ```
 
 `Card` defaults to `Elevated` (shadow + surface_main) — the "just
@@ -244,7 +249,7 @@ pub enum FillRecipe {
 pub struct BorderRecipe {
     pub width: f32,
     pub color: RecipeColor,
-    pub style: BorderStyle,           // Solid | Dashed { dash, gap } | Dotted
+    pub style: BorderStyle,           // Solid | Dashed { dash, gap } | Dotted { gap }
     pub position: BorderPosition,     // Inside | Center | Outside (now honoured)
     pub sides: Option<BorderSides>,   // None = uniform; Some = per-side widths
 }
@@ -337,10 +342,15 @@ The trait is `'static` only (not `Send + Sync`) because all Teksilo
 trees are single-threaded by construction; `Rc<dyn FooStyle>` is the
 public alias (`SharedButtonStyle` and friends).
 
-**Same shape across widgets.** All 34 style traits live in
-[`teksilo-core/src/styles/`](../crates/teksilo-core/src/styles/), all
-return `WidgetId` from their `make_*` methods, all take a
-`*StyleConfig` describing the inputs that vary by widget. The trait
+**Same shape across widgets.** All 42 style traits live in
+[`teksilo-core/src/styles/`](../crates/teksilo-core/src/styles/), one per
+`ComponentStyleSlots` slot. All but three return `WidgetId` from their
+`make_*` methods and take a `*StyleConfig` describing the inputs that
+vary by widget; the exceptions are all-recipe traits that hand back
+paint data instead — `ChartStyle` (`bar_fill` / `area_fill` /
+`donut_fill` / `gridline`), `GridViewStyle` (`focus_ring` / `marquee` /
+`insertion` / `pinned_header_surface`) and `TextSelectionStyle`
+(`handle` / `magnifier`). The trait
 is the public API; everything below it is implementation. The full
 list lives in the [migration status table](#migration-status-as-of-this-branch).
 
@@ -352,7 +362,7 @@ use std::rc::Rc;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::styles::{ButtonStyle, ButtonStyleConfig};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_tokens::{Color, CornerRadius, SurfaceRole};
+use teksilo_tokens::{CornerRadius, SurfaceRole};
 use teksilo_widgets::primitives::{Padding, RectWidget, ZStack};
 
 struct MaterialFilledButton;
@@ -380,10 +390,10 @@ impl ButtonStyle for MaterialFilledButton {
 
         let padded_label = ctx.add(
             Padding::symmetric(10.0, 24.0)     // M3 spec: 10×24
-                .child_id(cfg.label),
+                .child(cfg.label),
         );
 
-        ctx.add(ZStack::new().add_child(rect).add_child(padded_label))
+        ctx.add(ZStack::new().child(rect).child(padded_label))
     }
 }
 ```
@@ -424,7 +434,7 @@ own without depending on any sibling crate:
 pub fn brutalist_light() -> Theme {
     let mut theme = intui::light();
     theme.colors.accent     = Color::new(1.0, 0.0, 0.4, 1.0);   // hot pink
-    theme.shape.radius_md   = 0.0;                              // sharp corners everywhere
+    theme.shape.radius_control = 0.0;                           // sharp control corners
     theme.style_slots.button   = Some(Rc::new(MyBrutalistButton));
     theme.style_slots.checkbox = Some(Rc::new(MyBrutalistCheckbox));
     theme
@@ -434,8 +444,8 @@ pub fn brutalist_light() -> Theme {
 ## Migration status (as of this branch)
 
 Every themable widget is on the Tier-3 trait + recipe-default +
-slot lookup. No themable widget self-paints anymore. **43 widgets
-across 38 style traits, spanning seven families** (a "trait" can cover
+slot lookup. No themable widget self-paints anymore. **47 widgets
+across 42 style traits, spanning seven families** (a "trait" can cover
 more than one widget — e.g. `ListContainerStyle` styles both
 `ListView` and `TreeView`; `ChartStyle` styles `BarChart`, `LineChart`,
 and `PieChart`):
@@ -482,6 +492,9 @@ and `PieChart`):
 | `TableView` / `TreeTableView` (header + sort + row chrome) | `TableStyle` ¹ | `RecipeTableStyle` | `style_slots.table` |
 | `DropZone` | `DropZoneStyle` | `RecipeDropZoneStyle` | `style_slots.drop_zone` |
 | `DropTarget` | `DropTargetStyle` | `RecipeDropTargetStyle` | `style_slots.drop_target` |
+| `Splitter` (divider handles) | `SplitterStyle` | `RecipeSplitterStyle` | `style_slots.splitter` |
+| `GridView` (focus ring, marquee, insertion bar, pinned header) | `GridViewStyle` ² | `RecipeGridViewStyle` | `style_slots.grid_view` |
+| `WebView` (overlay chrome, `teksilo-webview`) | `WebViewStyle` | `RecipeWebViewStyle` (in `teksilo-webview`) | `style_slots.web_view` |
 
 **Overlays**
 
@@ -506,6 +519,7 @@ and `PieChart`):
 | Widget | Trait | Default impl | Slot |
 | --- | --- | --- | --- |
 | `ScrollBar` | `ScrollBarStyle` | `RecipeScrollBarStyle` | `style_slots.scroll_bar` |
+| Touch text-selection handles + magnifier | `TextSelectionStyle` ² | `RecipeTextSelectionStyle` | `style_slots.text_selection` |
 
 **Data Visualization**
 
@@ -516,11 +530,12 @@ and `PieChart`):
 ¹ Multi-method trait — see [Multi-method styles](#multi-method-styles)
 below.
 
-² All-recipe trait, no `make_*` methods — see
-[Data-visualization styling](#data-visualization-styling) below. Its
-default impl is the one entry in this table whose `Recipe*Style` does
-**not** live under `teksilo-widgets/src/styles/*` — `teksilo-charts`
-deliberately has no dependency on `teksilo-widgets`, so its default
+² All-recipe trait, no `make_*` methods (for `ChartStyle`, see
+[Data-visualization styling](#data-visualization-styling) below).
+`RecipeChartStyle` and `RecipeWebViewStyle` are the two entries in this
+table whose `Recipe*Style` does **not** live under
+`teksilo-widgets/src/styles/*` — `teksilo-charts` and `teksilo-webview`
+deliberately have no dependency on `teksilo-widgets`, so each default
 style has to live where its own dependencies already reach. See
 [charts.md §11](charts.md) for the
 full reference.

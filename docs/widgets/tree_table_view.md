@@ -107,7 +107,7 @@ Wrap a `SortFilterTreeModel<T>`.
 #### `pub fn from_source<S: TreeDataSource<Item = T> + 'static>(source: S) -> Self`
 
 Build a tree table over any `TreeDataSource` — an external source of
-truth (a Qleany entity store, a database, a virtual filesystem) carrying
+truth (an entity store, a database, a virtual filesystem) carrying
 its own `Key`, so it needs no `TreeModel` mirror.
 
 This is the tree-table sibling of

@@ -9,10 +9,12 @@ editors, timeline views, CAD canvases, simple maps — where content is
 free-positioned at scene coordinates instead of placed by a layout
 algorithm.
 
-The crate sits at the same tier as `teksilo-widgets`: it depends on
-`teksilo-core`, `teksilo-canvas`, and `teksilo-tokens`, but **not** on
-`teksilo-widgets`. Apps mixing scene-based and standard-widget UI bring
-both crates in.
+The crate sits at the same tier as `teksilo-widgets` and depends on it
+(alongside `teksilo-core`, `teksilo-canvas`, `teksilo-tokens`,
+`teksilo-data` and `teksilo-i18n`): the widget catalog is both the
+heavyweight tier's content and what renders lightweight-item tooltips.
+`teksilo-widgets` does not depend on `teksilo-scene`, so the edge is
+acyclic.
 
 ---
 
@@ -96,9 +98,12 @@ pub trait SceneItem: Debug + 'static {
     fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>);
 
     // Optional:
-    fn set_fill(&mut self, fill: Option<ColorProp>) -> bool;                     // live colour mutation
-    fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>) -> bool;
+    fn set_fill(&mut self, fill: Option<ColorProp>)
+        -> AppearanceWrite<ColorProp>;                        // live colour mutation
+    fn set_stroke(&mut self, stroke: Option<(ColorProp, StrokeStyle)>)
+        -> AppearanceWrite<(ColorProp, StrokeStyle)>;
     fn shape(&self) -> ItemShape;                             // the item's geometry (§ Shapes)
+    fn thumbnail_color(&self) -> Color;                       // minimap swatch
     fn initial_flags(&self) -> ItemFlags;                     // set on insert
     fn label(&self) -> Option<String>;                        // debug + AT default
     fn cache_mode(&self) -> CacheMode;                        // None | ItemCoordinate
@@ -111,8 +116,11 @@ pub trait SceneItem: Debug + 'static {
 `paint` runs in **local coordinates** — the canvas already has the
 item's `scene_transform` (chain × view) pushed by the SceneView paint
 walk, so a `RectItem` paints with `canvas.fill_rect(self.local_bounds, ...)`.
-`set_fill` / `set_stroke` default to a no-op (`false`) and back the live
-[`SceneModel::set_item_fill`](../crates/teksilo-scene/src/scene.rs) /
+`set_fill` / `set_stroke` default to `AppearanceWrite::Refused` (nothing
+written, no change emitted); an implementation that writes the slot returns
+`AppearanceWrite::Accepted { was }` — the value it overwrote, which becomes
+`ItemChange::AppearanceChanged`'s `old`. They back the live
+[`SceneModel::set_item_fill`](../crates/teksilo-scene/src/scene_model.rs) /
 `set_item_stroke` mutators — see **Item colours & theming** below.
 
 Five built-ins ship out of the box:
@@ -225,11 +233,13 @@ Default is `IS_VISIBLE | IS_ENABLED | IS_SELECTABLE`.
 | `IS_ENABLED` | Disabled items don't dispatch pointer events and don't take focus. |
 | `IS_DRAGGABLE` | The item participates in drag-to-move when the view is in `DragMode::RubberBand`. |
 | `IS_SELECTABLE` | The item can be picked up by marquee-select. |
-| `IS_FOCUSABLE` | The item can receive keyboard focus. |
-| `ACCEPTS_HOVER` | Reserved — tracks hover entrance / exit. |
+| `IS_FOCUSABLE` | Declared only — nothing reads it: the built-in traversal walks every item, and a `focus_order` callback filters for itself. |
+| `ACCEPTS_HOVER` | Declared only — hover dispatches from the presence of an `on_hover` handler. |
 | `CLIPS_TO_SHAPE` / `CLIPS_CHILDREN_TO_SHAPE` | Reserved for clip-region paint. |
 | `IGNORES_TRANSFORMATIONS` | Item paints / hit-tests at fixed pixel size regardless of view zoom. Anchor (parent-relative scene point) still follows pan/zoom — so the item tracks the data point underneath, but its size stays constant. Mirrors Qt's `ItemIgnoresTransformations`. |
 | `HAS_NO_CONTENTS` | Logical-only entry, skipped by the paint walk. |
+| `IS_RESIZABLE` / `IS_ROTATABLE` | The item offers resize / rotate handles to a selection transform controller (default off; rotate is lightweight-only). |
+| `ASPECT_LOCKED` | A resize keeps the item's aspect ratio whatever the controller's `keep_ratio` says. |
 
 Read / mutate via `Scene::flags(id)` / `Scene::set_flag(id, flag, on)` /
 `Scene::set_flags(id, flags)`. Convenience: `Scene::set_visible(id,
@@ -274,8 +284,9 @@ cannot disagree about what an item is.
 
 The composite [`view_transform`](../crates/teksilo-scene/src/view.rs)
 projects scene → screen and is bound via
-`BuildContext::set_transform` so the renderer pushes it around the
-entire subtree.
+`BuildContext::set_content_transform` so the renderer pushes it around the
+entire subtree — a *content* transform, so the viewport itself stays
+hit-testable at any pan.
 
 Pointer and gesture input plugs in directly:
 
@@ -308,8 +319,8 @@ view.fit_to_content();    view.fit_to_items(&ids);    view.fit_to_selection();
 State persistence:
 
 ```rust
-let snap = view.state();    // SceneViewState — Serde-friendly
-view.restore_state(snap);
+let snap = view.state();    // SceneViewState — plain `Copy` data (pan_x, pan_y, zoom, rotation)
+view.restore_state(snap);   // no serde derive: the crate has no serde dep; wrap it to persist
 ```
 
 ---
@@ -359,7 +370,8 @@ SceneView::new(scene).drag_mode(DragMode::ScrollHandDrag)    // left-drag pans t
 SceneView::new(scene).drag_mode(DragMode::NoDrag)
 ```
 
-Middle-click pan is unconditional. Right-click on an item with an
+There is no built-in middle-click pan: a marquee / item drag starts only
+from the primary button. Right-click on an item with an
 `on_context_menu` handler fires the handler.
 
 **Drag-start hit-test (narrow-phase).** In `RubberBand` mode, a press
@@ -574,7 +586,7 @@ above: persistence, validation, audit, and mirroring into a data layer.
 `LocalBoundsChanged`, `TransformChanged`, `VisibilityChanged`,
 `OpacityChanged`, `FlagsChanged`, `ZChanged`, `LayerChanged`, `ParentChanged`,
 `PlacementChanged`, `PayloadChanged`, `AppearanceChanged`, `ItemReplaced`,
-`HandlersChanged`. It is `#[non_exhaustive]`, so a wildcard arm keeps meaning
+`HandlersChanged`, `SizePolicyChanged`, `MeasuredSizeChanged`. It is `#[non_exhaustive]`, so a wildcard arm keeps meaning
 "a change I do not act on".
 
 **Every variant that replaces a value carries both sides of it**, so an edit is
@@ -587,7 +599,7 @@ cannot ride a `Signal` at all: see the seam section below.
 
 ### Edits and derived notifications
 
-Two of the variants are not *edits* at all. They are notifications the scene
+Three of the variants are not *edits* at all. They are notifications the scene
 emits **beside** the edit that describes the same mutation, for consumers that
 would otherwise have to diff for it, and `ItemChange::is_edit()` is the test
 that tells them apart. Neither reaches a `SceneTransactionRecord`, so the
@@ -597,6 +609,7 @@ record keeps the property above without exception:
 | --- | --- | --- |
 | `VisibilityChanged { id, visible }` | every door that flips `IS_VISIBLE` — `set_visible`, `set_flag`, `set_flags` | the `FlagsChanged` that follows it carries both bitsets and describes the mutation. Recording both would make hiding a card two edits. |
 | `HandlersChanged { id, replaced: None }` | `handlers_mut` | it describes nothing — see below |
+| `MeasuredSizeChanged { id, old, new }` | a `SizePolicy` measurement write-back (`set_measured_size`) | the size is *derived* from content the document already holds; recording it would put every re-wrap in the undo stack |
 
 `VisibilityChanged` used to come from `set_flag` and **not** from a wholesale
 `set_flags` flipping the same bit, so one mutation had two different shapes
@@ -1986,7 +1999,8 @@ impl SceneItem for HeavyDecoration {
 `ItemCoordinate` records the item's first paint into a sub-canvas as
 a `RenderFrame` in **local** coordinates, replays that frame on
 subsequent paints. The cache is invalidated automatically on
-`LocalBoundsChanged` / `Removed` via an observer wired in
+`LocalBoundsChanged` / `ItemReplaced` / `AppearanceChanged` / `Removed`
+and on an `IS_ENABLED` flip (a `FlagsChanged`), via an observer wired in
 `SceneView::build()`. Items that mutate visual state without going
 through a Scene mutator call `view.invalidate_item_cache(id)`
 manually.
@@ -2300,6 +2314,8 @@ will land rather than to where it was.
 [`ItemChange::MeasuredSizeChanged`]: ../crates/teksilo-scene/src/scene.rs
 [`ItemChange::SizePolicyChanged`]: ../crates/teksilo-scene/src/scene.rs
 [`CardMode`]: ../crates/teksilo-scene/src/scene_card.rs
+[`SceneModel`]: ../crates/teksilo-scene/src/scene_model.rs
+[`Scene::mutation_version`]: ../crates/teksilo-scene/src/scene.rs
 
 ---
 
@@ -2311,7 +2327,7 @@ SceneView::new(scene).selection_mode(SceneSelectionMode::Multi)
 ```
 
 Click-to-select (with Ctrl/Shift modifiers for extend / toggle),
-marquee box-select. The selection state is a `Signal<HashSet<ItemId>>`
+marquee box-select. The selection state is a `Signal<BTreeSet<ItemId>>`
 exposed via [`SceneSelection`](../crates/teksilo-scene/src/selection.rs).
 
 ---
@@ -2337,8 +2353,8 @@ chrome**.
 ```rust
 scene.set_z(id, 5.0);          // higher z paints later (on top)
 scene.z(id) -> Option<f32>;
-scene.bring_to_front(id);      // z = current max + 1
-scene.send_to_back(id);        // z = current min − 1
+scene.bring_to_front(id);      // z = current max + 1 (no-op if already strictly on top)
+scene.send_to_back(id);        // z = current min − 1 (no-op if already strictly below)
 ```
 
 `set_z` works for **both** tiers. Lightweight items re-sort within their band on
@@ -2350,7 +2366,8 @@ animations across the restack. Equal-`z` falls back to insertion order, in paint
 the pointer picks.
 
 `bring_to_front` is the drag-to-front primitive: call it on drag-start (via
-[`SceneView::scene_mut`]) so the grabbed card — and its text — render over the
+`SceneView::scene_mut`, or `SceneModel::bring_to_front` from a card's own
+handler) so the grabbed card — and its text — render over the
 others.
 
 ### Across the tiers — the three bands
@@ -2463,7 +2480,7 @@ value, so that every hit test in the crate is a comparison rather than a second,
 independently-invented rule:
 
 ```rust
-PaintKey { rank, z, seq }
+PaintKey::new(rank, z, seq)   // private fields; read via .rank() / .z() / .seq()
 // rank: RANK_UNDER (0) | RANK_WIDGET (1) | RANK_OVER (2)
 //       — a heavyweight card AND a lightweight `Interleaved` item both sit at
 //         RANK_WIDGET, which is what lets them order against each other by z
@@ -3134,7 +3151,7 @@ let mut scene = Scene::new();
 scene.set_scene_rect(Some(Rect::new(0.0, 0.0, 4000.0, 3000.0)));
 
 // Background grid as decoration — lightweight closure, no items.
-let view = SceneView::new(scene)
+let mut view = SceneView::new(scene)
     .selection_mode(SceneSelectionMode::Multi)
     .background(|canvas, _ctx, region| draw_grid(canvas, region, 50.0));
 
@@ -3143,8 +3160,8 @@ let card1 = view.scene_mut().add_widget(card("Idea 1"), Rect::new(0.0, 0.0, 200.
 let card2 = view.scene_mut().add_widget(card("Idea 2"), Rect::new(300.0, 200.0, 200.0, 120.0));
 
 // Connector line as a lightweight item beneath the cards.
-let path = Path::new()
-    .move_to(Point::new(200.0, 60.0))
+let mut path = Path::new();
+path.move_to(Point::new(200.0, 60.0))
     .line_to(Point::new(300.0, 260.0));
 view.scene_mut().add_item(
     // `PathItem` derives its own AABB from the geometry plus the stroke.
@@ -3155,9 +3172,10 @@ view.scene_mut().add_item(
 
 These `scene_mut()` calls run **pre-mount** — the app still owns `view`. To
 mutate the same scene from a handler *after* the view is added to the tree, go
-through `ctx.with_widget_mut::<SceneView>(view_id, …)` (see *Runtime mutation*
-above); the live `scene-corkboard` example does exactly that for its "Add Act"
-button.
+through a `SceneModel` clone (`view.model()`, captured before mounting — see
+*Runtime mutation* above); the live `scene-corkboard` example does exactly that
+for its "Add Act" button, and reaches for `ctx.with_widget_mut::<SceneView>(..)`
+only to move each pane's camera onto the new act.
 
 `scene_mut()` hands out a raw `RefMut` into the shared cell, so it does **not**
 open a write scope: its changes fan out synchronously, under the live exclusive
@@ -3225,3 +3243,5 @@ on its own write-back. See *Deferred fan-out*.
 - Accessibility-shaping API: [`docs/teksilo-scene-a11y.md`](teksilo-scene-a11y.md)
 - Showcase demo: `cargo run -p scene-showcase`
 - Corkboard demo: `cargo run -p scene-corkboard`
+- Magnetism demo: `cargo run -p scene-magnetism`
+- Ink demo: `cargo run -p scene-ink` (see [Ink](ink.md))

@@ -277,7 +277,7 @@ impl<T: 'static> TabDelegate<T> {
     }
 
     /// Per-tab closable flag. When `true`, the tab gets a trailing
-    /// close button and middle-click / `Ctrl+W` close affordances.
+    /// close button and middle-click / `Delete` close affordances.
     /// Pinned tabs suppress the close button regardless of this flag
     /// (pinned tabs only close via the context menu — Firefox
     /// convention).

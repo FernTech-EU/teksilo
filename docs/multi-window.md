@@ -8,7 +8,7 @@ A single `WindowConfig` describes any window you want to open (initial
 or runtime); per-window state lives in a reactive
 [`WindowState`](../crates/teksilo-core/src/window/state.rs) that widgets
 bind against; handlers open, focus, and close windows through
-[`EventContext`](../crates/teksilo-core/src/widget.rs) methods that
+[`EventContext`](../crates/teksilo-core/src/widget/event_context.rs) methods that
 return real ids immediately.
 
 Mental model in one line:
@@ -72,6 +72,7 @@ pass it to `TeksiloAppBuilder::initial_window` at startup or to
 pub struct WindowConfig {
     pub title: String,                   // also feeds WindowState::title
     pub string_id: Option<String>,       // stable lookup key for find_window
+    pub app_id: Option<String>,          // Wayland xdg app_id / X11 WM_CLASS; ignored elsewhere
     pub size: (u32, u32),                // restored size; always set
     pub position: Option<(i32, i32)>,    // restored position; None = WM picks
     pub min_size: Option<(u32, u32)>,
@@ -80,11 +81,18 @@ pub struct WindowConfig {
     pub initial_placement: WindowPlacement,
     pub decorations: DecorationsMode,
     pub resizable: bool,
+    pub size_to_content: SizeToContent,  // Off (default) | Height — dialogs that grow with content
     pub always_on_top: bool,
     pub skip_taskbar: bool,
+    pub activate_from_env: bool,         // consume an xdg_activation startup token (Wayland)
     pub icon: Option<WindowIcon>,
     pub modal: Option<ModalConfig>,
     pub root_builder: Option<RootBuilder>,
+    pub post_root_builder: Option<PostRootBuilder>,
+    pub on_close_requested: Option<CloseGuard>,        // see "Intercepting close / quit"
+    pub can_close: Option<Prop<bool>>,
+    pub on_close_blocked: Option<CloseBlockedCallback>,
+    pub on_removed: Option<WindowRemovedCallback>,     // fires once, after teardown
 }
 ```
 
@@ -214,7 +222,7 @@ so signals and command queue are shared across clones. Widgets get a
 clone from `ctx.window()` (in both `BuildContext` and `EventContext`).
 
 ```rust
-pub struct WindowState(Rc<WindowStateInner>);
+pub struct WindowState { inner: Rc<WindowStateInner> }
 
 impl WindowState {
     pub fn id(&self) -> TeksiloWindowId;
@@ -227,14 +235,20 @@ impl WindowState {
     pub fn title(&self)         -> &Signal<String>;
     pub fn size(&self)          -> &Signal<(u32, u32)>;
     pub fn position(&self)      -> &Signal<(i32, i32)>;
-    pub fn focused(&self)       -> &Signal<bool>;
     pub fn resizable(&self)     -> &Signal<bool>;
     pub fn always_on_top(&self) -> &Signal<bool>;
+
+    // OS-driven, read-only in practice: no observer, so an app write
+    // reaches no OS call. Pull focus with `focus()` instead.
+    pub fn focused(&self)       -> &Signal<bool>;
+    pub fn caps_lock(&self)     -> &Signal<bool>;
+    pub fn alt_down(&self)      -> &Signal<bool>;
 
     // Imperative one-shots. Each pushes a single `WindowCommand` on
     // the next drain.
     pub fn request_attention(&self, kind: UserAttentionKind);
-    pub fn focus(&self);
+    pub fn focus(&self);                       // carries a pending activation token, if any
+    pub fn set_activation_token(&self, token: String);   // Wayland raise; consumed by focus()
     pub fn close(&self);
 }
 ```
@@ -252,11 +266,11 @@ impl Widget for AppRoot {
             .placement()
             .map(|p| p.is_fullscreen());
 
-        let label = fs.map(|f| if f { "Exit fullscreen" } else { "Fullscreen" });
+        let label = fs.map(|f| if *f { "Exit fullscreen" } else { "Fullscreen" }.to_string());
 
         vec![ctx.add(
-            Button::new()
-                .label(label)
+            Button::new(lit!("Fullscreen"))
+                .label(label)                  // Prop<String>; the bound signal wins
                 .on_activate_fn(|ctx| {
                     let Some(w) = ctx.window() else { return };
                     let next = if w.placement().get().is_fullscreen() {
@@ -279,8 +293,8 @@ write into the same `placement()` signal.
 
 ### Two-way OS sync — how it works
 
-`WindowState::new` wires an observer to every writable signal. The
-observer:
+`WindowState::new` wires an observer to every writable signal
+(`focused` has none — it is purely OS-driven). The observer:
 
 1. Checks the `applying_from_os` flag on `WindowStateInner`.
 2. If set (OS-initiated write): does nothing — the OS already knows.
@@ -330,8 +344,15 @@ impl EventContext<'_> {
     pub fn close_window_by_id(&mut self, id: TeksiloWindowId);
     pub fn window_state(&self, id: TeksiloWindowId) -> Option<WindowState>;
     pub fn windows(&self) -> Vec<WindowState>;
+    pub fn request_activation_token(&mut self, id: TeksiloWindowId,
+                                    cb: Box<dyn FnOnce(Option<String>)>);
+    pub fn request_activation_token_self(&mut self, cb: Box<dyn FnOnce(Option<String>)>);
 }
 ```
+
+The two `request_activation_token*` calls mint an `xdg_activation_v1` token
+to hand to another window or process so it can raise itself on Wayland; the
+callback receives `None` wherever the platform cannot provide one.
 
 ### `open_window` is synchronous
 
@@ -436,8 +457,9 @@ TeksiloAppBuilder::new()
 
 Notes:
 
-- Framework payload types (file-dialog results, async completions, native-menu
-  choices, `CloseWindowRequest`, title-bar synthetics, `RepaintWindowRequest`)
+- Framework payload types (file-dialog results, external drag-and-drop events,
+  async completions, native-menu choices, WebView and automation-bridge
+  payloads, `CloseWindowRequest`, title-bar synthetics, `RepaintWindowRequest`)
   are handled *before* this hook and never reach it, so it never has to
   defend against them.
 - It is a **single slot**, like `on_app_event` — a second call replaces the
@@ -466,7 +488,11 @@ if let Some(main_state) = ctx.window_state(main_id) {
 
 `EventContext::open_modal` is a thin wrapper that builds a
 `WindowConfig` with `ModalConfig { parent: ctx.window().id(), focus_target }`
-and calls `open_window`. Use it when you already have a
+(plus the request's `title` / `size`) and calls `open_window`. It always
+opens a native window, so the request's `presentation` is not consulted,
+and it returns `None` outside a dispatch or for a
+`ModalContent::ExistingWidget` request (only `Deferred` content can be
+built into a fresh tree). Use it when you already have a
 `ModalRequest` in hand:
 
 ```rust
@@ -599,17 +625,22 @@ Working demo: `cargo run -p close-confirmation` (main window: full
      the dispatching window (via the stashed raw handle on the ops
      object) or to another window that's still in the map.
 4. After dispatch, `post_event`:
-   - Drains tree-level pending operations (locale, close-window).
-   - Processes in-tree modal requests.
-   - Drains every window's `pending_os_commands` and applies them via
-     winit calls.
-   - Drains `pending_closes` (from any source — `ctx.close_window()`,
-     `ctx.close_window_by_id(id)`, `state.close()`, close requests
-     via `TitleBarHostCallbacks::request_close`). Each entry is either
-     *guarded* (interactive gestures — runs the window's close guard,
-     may be vetoed) or *forced* (explicit programmatic closes +
-     framework teardown — unconditional). See **Intercepting close /
-     quit** above.
+   - Drains tree-level pending operations (locale, theme, follow-system
+     theme, text scale, close-window).
+   - Processes modal requests and dismissals.
+   - Drains `pending_closes` (`WindowManager::process_pending` — from
+     any source: `ctx.close_window()`, `ctx.close_window_by_id(id)`,
+     close requests via `TitleBarHostCallbacks::request_close`). Each
+     entry is either *guarded* (interactive gestures — runs the window's
+     close guard, may be vetoed) or *forced* (explicit programmatic
+     closes + framework teardown — unconditional). See **Intercepting
+     close / quit** above.
+   - Runs queued post-mount actions.
+   - Drains every window's `pending_os_commands`
+     (`WindowManager::drain_window_commands`) and applies them via winit
+     calls. A `WindowCommand::Close` from `state.close()` is re-queued
+     there as a forced close, torn down on the next tick's
+     `process_pending`.
 5. `handle_redraw_requested` runs `layout_with_ops` + `render_with_ops`
    — both thread ops through, so state-change-triggered handlers
    (data-driven rebuilds, delayed overlays, drag-tick) can open
@@ -633,6 +664,9 @@ pub trait WindowOps {
     fn windows(&self) -> Vec<WindowState>;
     fn focus_window(&mut self, id: TeksiloWindowId);
     fn close_window_by_id(&mut self, id: TeksiloWindowId);
+    // …plus defaulted hooks: activation tokens, the parent window
+    // handle (file dialogs), the IME cursor area, outbound OS drags,
+    // soft-keyboard support.
 }
 ```
 
@@ -649,7 +683,8 @@ let Some(mut current) = self.wm.take_managed(winit_id) else { return };
 {
     let mut ops = WindowOpsImpl::new(&mut self.wm, event_loop,
                                       current.teksilo_id,
-                                      current_handle);
+                                      current_handle,   // not on macOS
+                                      current_arc);
     current.tree.dispatch_event_with_ops(evt, &mut ops);
 }
 self.wm.reinsert_managed(winit_id, current);
@@ -676,16 +711,21 @@ handler now write directly to `WindowState::placement` (through
 `ctx.window()`). The button glyph swap is driven by a derived signal:
 
 ```rust
-let is_maximized = ctx
+let show_restore = ctx
     .window()
-    .map(|w| w.placement().map(|p| p.is_maximized()))
+    .map(|w| w.placement().map(|p| p.is_maximized() || p.is_fullscreen()))
     .unwrap_or_else(|| Signal::new(false));
 ```
+
+(A fullscreen window is restorable too, so it shows "restore", never
+"maximize".)
 
 The `PlatformTitleBarHost` trait shrank — it no longer owns `minimize`,
 `toggle_maximize`, `close`, `is_maximized`, `is_maximized_signal`, or
 `notify_window_resized`. It keeps only what's genuinely chrome-specific
-(insets, drag/resize interaction, hit regions, `show_window_menu`).
+(insets, whether it renders its own controls or needs custom resize
+handles, drag/resize interaction, hit regions, `show_window_menu` /
+`has_window_menu`).
 Custom chrome now works with `DecorationsMode::Native` windows too —
 the TitleBar widget binds to `WindowState::placement` either way.
 
@@ -786,7 +826,7 @@ installing an observer through the current window's build context.
   - Types — [`crates/teksilo-core/src/window/`](../crates/teksilo-core/src/window/)
   - Dispatch — [`crates/teksilo-core/src/widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs)
   - Window manager — [`crates/teksilo-app/src/window_manager.rs`](../crates/teksilo-app/src/window_manager.rs)
-  - `EventContext` methods — [`crates/teksilo-core/src/widget.rs`](../crates/teksilo-core/src/widget.rs)
+  - `EventContext` methods — [`crates/teksilo-core/src/widget/event_context.rs`](../crates/teksilo-core/src/widget/event_context.rs)
 - Related docs:
   - [`title-bar.md`](title-bar.md) — custom chrome integration
   - [`shortcut-intent-action.md`](shortcut-intent-action.md) — the

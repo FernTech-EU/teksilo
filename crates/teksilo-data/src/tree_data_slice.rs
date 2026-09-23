@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! `TreeDataSlice` — the reusable [`TreeDataSource`] engine for an **external,
-//! indent-ordered** tree (a Qleany entity store, a database, a virtual
+//! indent-ordered** tree (an entity store, a database, a virtual
 //! filesystem) that is NOT mirrored into a [`TreeModel`](crate::TreeModel).
 //!
 //! [`TreeSlice`](crate::TreeSlice) gives per-view expand state + flattening +

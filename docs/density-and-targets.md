@@ -94,25 +94,33 @@ tree.set_input_density(TargetDensity::Touch);
 ```
 
 `WidgetTree::set_input_density` writes `theme.with_density(d)` **and marks the
-tree for a rebuild** — not `set_theme`'s layout-and-paint dirty pass. A target
+tree for a rebuild** — not merely `set_theme`'s layout-and-paint dirty pass. A target
 size is baked in `build()` (a `MinSize` wrapper, a recipe's metrics, how many
 `Toolbar` items fit), and marking layout cannot re-bake it. It reuses the same
 `mark_needs_rebuild` + `mark_ancestors_need_layout` path a
 `BindingLevel::Rebuild` binding takes, so focus restoration, the AccessKit
 re-walk and interaction-state revalidation all come for free.
 
-`Theme::with_density` itself is a **token projection only**. It replaces
-`input` and carries `style_slots` and `extensions` across verbatim; it does not
-re-run any recipe constructor, because there is nothing in a theme to re-run —
-every `ComponentStyleSlots` slot is `None` in the shipped presets, and each
-widget builds its `Recipe*Style` lazily at its own build site from
-`ctx.theme().input`. A slot an app installed itself is preserved as it is, so a
-hand-written Tier-3 style keeps whatever metrics its author gave it.
+`Theme::with_density` itself is a **token projection only** for a theme with
+no `DensityProjection` (a raw-token theme, or IntUI). It replaces `input` and
+carries `style_slots` and `extensions` across verbatim; it does not re-run any
+recipe constructor, because there is nothing in such a theme to re-run — every
+`ComponentStyleSlots` slot is `None` there, and each widget builds its
+`Recipe*Style` lazily at its own build site from `ctx.theme().input`. A slot an
+app installed itself is preserved as it is, so a hand-written Tier-3 style keeps
+whatever metrics its author gave it. A preset that installs slots of its own
+(Material 3, Fluent, macOS) registers a `DensityProjection`, and `with_density`
+takes that function's answer instead, so the preset's own chrome follows the
+density.
 
 `DensityPolicy` describes *how* the density is chosen: `Fixed(Compact)` is the
-default, and `FollowLastPointer { coarse, fine, hysteresis }` tracks the most
-recent pointer kind with a settling delay so a stray event cannot thrash a full
-tree rebuild.
+default, and `FollowLastPointer { coarse, fine, hysteresis }` declares tracking
+the most recent pointer kind with a settling delay so a stray event cannot
+thrash a full tree rebuild. `WidgetTree::set_density_policy` only stores the
+policy: storing `Fixed(d)` does not switch density (call `set_input_density`),
+and `FollowLastPointer` is not yet acted on by anything — what a stray tap
+should cost is still undecided (see the `density_policy` field in
+`widget_tree.rs`).
 
 ## Hit targeting: three mechanisms, three domains
 
@@ -210,8 +218,10 @@ Four rules, each pinned by a test:
   already owns — through a `clips_children` ancestor included.
 - **Zero for a precise pointer**, unless the widget opts every kind in
   deliberately. A mouse hot-spot is exact and occludes nothing, so widening its
-  targets steals clicks. The rich-text image grip is the one control that opts
-  in, because its mouse target is genuinely undersized.
+  targets steals clicks. No shipped `hit_outset` opts a mouse in; the rich-text
+  image grip, which widens for every kind because its mouse target is genuinely
+  undersized, does so inside its own hit routine (`grip_reach` in
+  `rich_text/mouse.rs`) rather than through an outset.
 - **Resolved through the child.** A point inside the child still resolves
   normally — descendants win, `hit_shape` is honoured — and only a point in the
   ring resolves to the child itself.
@@ -463,8 +473,10 @@ The `TOUCH` and `PEN` columns are new:
 
 `theme.input.scroll_physics` holds the fling / settle / overscroll constants.
 They are **live**: every scrollable surface passes them into its own
-`KineticScroller` at build time (`ScrollHandlingOptions::physics`, filled from
-`ctx.theme().input.scroll_physics` at each of the nine adopting build sites), and
+`KineticScroller` at build time (filled from `ctx.theme().input.scroll_physics`
+at each of the nine adopting build sites — through `ScrollHandlingOptions::physics`
+at six, and `common::text_scroll::text_surface_behavior` at the three text
+surfaces), and
 the tree's own fling pump reads them from the effective theme. Retuning a theme's
 physics retunes the feel; the constants are on the page because scroll feel is
 muscle memory and a value nobody can trace is a value nobody can review.

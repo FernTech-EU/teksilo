@@ -65,6 +65,7 @@ pub struct PointerInfo {
     pub buttons: ButtonMask,
     pub axes: PointerAxes,      // pressure, tilt, twist, contact patch
     pub time: EventTime,
+    pub palm: bool,             // the digitizer classified it as a palm
 }
 ```
 
@@ -366,10 +367,13 @@ whatever the mouse last touched, or nowhere at all.
 ```
 
 `EventContext` exposes `pointer()`, `pointer_kind()`, `pointer_position()`,
-`scroll_phase()`, `scroll_source()` and `coalesced()`. Outside a pointer or
-scroll dispatch — a gesture timer, an assistive-technology action, a hand-built
-test context — they report the mouse at the epoch, which is the same answer such
-a handler got before pointers were distinguishable.
+`scroll_phase()`, `scroll_source()` and `coalesced()`. A gesture the timer
+recognised reports the contact that held, and a drag-and-drop handler the
+pointer that started the drag. Outside any pointer, scroll, gesture or drag
+dispatch — an assistive-technology action, a hand-built test context —
+`pointer()` is the mouse at the epoch (the same answer such a handler got
+before pointers were distinguishable), `pointer_position()` is `None` and
+`coalesced()` is empty.
 
 ### 3.2.1 The positions the OS batched
 
@@ -381,11 +385,13 @@ tilt *within* a batch and that variation is what a stroke's width is made of.
 
 ```rust
 .on_pointer_event(|event, ctx| {
-    if let WidgetEvent::PointerMove { position, .. } = event {
+    if let WidgetEvent::PointerMove { .. } = event {
         for c in ctx.coalesced() {                 // every batched position…
             stroke.extend(c.window_position, c.axes.pressure);
         }
-        stroke.extend(*position, ctx.pointer().axes.pressure);   // …then this one
+        if let Some(now) = ctx.pointer_position() { // …then this one (window space too)
+            stroke.extend(now, ctx.pointer().axes.pressure);
+        }
     }
     EventResponse::Ignored
 })
@@ -456,7 +462,7 @@ drained at `about_to_wait`.
 
 ### 3.3 Cancellation
 
-`WidgetEvent::PointerCancel { position, reason, pointer }` says the system took
+`WidgetEvent::PointerCancel { window_position, reason, pointer }` says the system took
 the interaction away, as against `PointerUp`, which says the user finished it.
 Conflating the two is how a drag whose window lost focus ends up *dropped*
 wherever the pointer happened to be.
@@ -508,7 +514,7 @@ that beat it.
 | --- | --- | --- | --- |
 | `Platform` | A `PointerPhase::Cancel` sample from the backend — `wl_touch.cancel`, `WM_POINTERCAPTURECHANGED`, a compositor grab | The captor, else the last widget that accepted one of this pointer's events | Release everything the press latched. The contact is gone; nothing further will arrive. |
 | `WindowDeactivated` | `WidgetTree::set_window_active(false)` | The captor | Drop the grab. The user is releasing the button over another window and this one will never hear about it. |
-| `Occluded` | Reserved for the platform layer's occlusion path | The captor | As `WindowDeactivated`. |
+| `Occluded` | The app layer's occlusion path (`WindowEvent::Occluded`, routed by `teksilo-app`'s `input_routing.rs`) | The captor | As `WindowDeactivated`. |
 | `ModalOpened` | A `Centered` overlay opening (`show_overlay*`) | Every live pointer's captor | Abandon the press: the surface is behind a scrim and the `Up` will land on the modal. |
 | `SubtreeParked` | `WidgetTree::park_subtree` — an explicit `set_dormant`, a `visible_when` gate closing, an `EventContext::set_dormant` | Pointers whose captor is inside the parked subtree | Release the press. Dormancy is invisible to dispatch, so no further event can reach you. |
 | `WidgetDestroyed` | A sequence *member* destroyed mid-press (member-level), or the sequence *winner* destroyed (pointer-level) | The dead member, if it still exists; else nobody | Nothing, usually — the widget is going away. |
@@ -517,9 +523,9 @@ that beat it.
 | `ExternalDndTakeover` | Reserved for the inbound external-DnD path | The captor | As `OsDragStarted`. |
 | `PeerClaimed` | Another member of the sequence won arbitration | That member alone — **member-level** | Undo whatever the press provisionally started. The pointer is alive and belongs to someone else now. |
 | `OverlayDismissed` | An overlay being torn down, for pointers anchored inside it | The captor inside the dismissed overlay | Release the press. **Exempt**: a pointer whose press has already finished — see below. |
-| `MultiContactIgnored` | Reserved for `MultiContact::First` (P13) | The extra contact's target | Ignore the second finger. |
+| `MultiContactIgnored` | Reserved. `MultiContact::First` shipped without raising it: the extra contact is terminated at the node and never delivered | The extra contact's target | Ignore the second finger. |
 | `ContactCapExceeded` | Refused at `PointerTable::begin`, before any event exists | Nobody | — |
-| `PalmRejected` | Refused at `PointerTable::begin`, before any event exists | Nobody | — |
+| `PalmRejected` | A backend-flagged palm is refused at `PointerTable::begin`, before any event exists; a contact the `PalmWatch` heuristic rejects on its release takes the cancel funnel | Nobody (backend flag); the contact's captor (`PalmWatch`) | Release the press — the contact fires no tap. |
 | `Deactivated` | A catch-all for a revocation that fits nothing above | The captor | Release the press. |
 
 The reserved rows name variants whose producer belongs to a package that has
@@ -553,6 +559,7 @@ caller set in `teksilo-core`:
 | Site | Route |
 | --- | --- |
 | `widget_tree/layout_impl.rs` — the per-layout visibility pass (`visible_when` closing) | `park_subtree_with_ops` |
+| `widget_tree/layout_impl.rs` — the culling pass (a `culls_children` parent parking what it no longer lays out) | `park_subtree_with_ops` |
 | `widget_tree/test_api.rs` — `WidgetTree::set_dormant`, which `BuildContext::set_dormant` calls | `park_subtree` |
 | `widget_tree/pointer_router.rs` — `TreeMutation::SetDormant`, from `EventContext::set_dormant` | `park_subtree` |
 | `widget_tree/overlay_impl.rs` — `dormant_dismissed_content`, an overlay being torn down | `cancel_pointers_in_subtree(OverlayDismissed)` then `arena.set_dormant` — a more specific reason than `SubtreeParked`, and the one the exemption above is written against |
@@ -578,11 +585,12 @@ $ TEKSILO_TRACE_INPUT=samples cargo run -p widget-catalog
 
 | value | traces |
 | --- | --- |
-| `samples` | raw pointer and scroll samples entering the tree |
-| `gestures` | recognizer transitions, arbitration, cancellations |
-| `all` | both |
+| `samples` (or `sample`) | raw pointer and scroll samples entering the tree |
+| `gestures` (or `gesture`) | recognizer transitions, arbitration, cancellations |
+| `all` (or `1`, `true`) | both |
 
-Anything else, including an unset variable, is off.
+Matching is case-insensitive. Anything else, including an unset variable, is
+off.
 
 The variable is read once through a `OnceLock`, and the `trace_input!` macro
 **guards its arguments** — with tracing off, a trace call formats nothing,
@@ -722,14 +730,18 @@ reused across two taps, a Wayland cancel — plus recorded pen sessions driven
 through `poll_pen`, one of them a **coalesced batch** arriving in a single drain
 with the device's own stamps on it, through six invariants:
 
-1. **Identity is unique across OS id reuse.**
+1. **Identity is unique across OS id reuse** — for a coarse pointer; a mouse
+   and a pen keep one identity across any number of presses.
 2. **Cancel completeness** — every `Down` is terminated by exactly one `Up` or
-   one `Cancel`, never both, never neither.
+   one `Cancel`, never both, never neither. A hovering-capable pointer may
+   additionally end its proximity session with one `Cancel` while nothing is
+   down: a session end, not a completion.
 3. **Time is monotone** within a stream.
 4. **Primacy and hover** — at most one live pointer *of a kind* is primary
    (W3C `isPrimary`; the mouse is always primary in its own stream, and the
    cross-stream arbitration is the tree's pointer table, not the platform
-   layer's), and no direct pointer ever hovers.
+   layer's), and no **coarse** pointer ever hovers — a pen is direct and
+   hovers.
 5. **One stream per contact** — the X11 double-stream case.
 6. **Well-formed scroll phases** — `Began → Changed* → Ended`, `Momentum*` only
    after an `Ended`.
@@ -887,19 +899,17 @@ pointer's life ended without completing an interaction" — and it is right for
 the down case too, where a stylus yanked off the tablet mid-stroke must not read
 as a deliberate lift.
 
-Two consequences for the conformance suite (§5.7), both owed by the package that
-routes pen samples into the tree rather than by the platform layer:
+Two consequences for the conformance suite (§5.7), both now written into it,
+since the suite drives recorded pen sessions through
+`TranslationState::poll_pen` as well as `PointerBackend::translate`:
 
-- Invariant 4 says *"a direct pointer never hovers, so a buttonless move is
-  impossible"*. That is touch-shaped, and `PointerKind::hovers()` already
-  contradicts it for `Pen`. It needs to read "a **coarse** pointer never
-  hovers".
-- Invariant 2 counts one terminator per `Down`. A pen session that draws and
-  then leaves emits `Down → Up → Cancel` for one id, which is correct for a
-  hovering-capable pointer and two terminators by that counting.
-
-Neither bites today: pen samples arrive through `TranslationState::poll_pen`,
-not through `PointerBackend::translate`, and the suite drives only the latter.
+- Invariant 4 once said *"a direct pointer never hovers"*. That is
+  touch-shaped, and `PointerKind::hovers()` contradicts it for `Pen`; it now
+  reads "a **coarse** pointer never hovers".
+- Invariant 2 once counted one terminator per `Down`. A pen session that draws
+  and then leaves emits `Down → Up → Cancel` for one id, which is correct for a
+  hovering-capable pointer; the suite now counts the trailing `Cancel` as a
+  session end, not a second completion.
 
 ### 6.4 Buttons and the eraser, normatively
 
@@ -1291,7 +1301,7 @@ out to be, because in two cases it was not what was planned.
 
 | site | what it did on press | what it does now |
 | --- | --- | --- |
-| [`widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — `handle_click_outside` | dismissed every click-outside overlay | **Converted.** `handle_click_outside` no longer exists: `arm_outside_press_dismissal` *arms* on the Down and `commit_outside_press_dismissal` commits on the Up, per pointer. For a direct pointer the arming Down is also **suppressed beneath**, so nothing under the overlay activates, and a press that slides off or is cancelled aborts the arm having delivered nothing. A mouse is unchanged. |
+| [`widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — `handle_click_outside` | dismissed every click-outside overlay | **Converted.** The router no longer calls `handle_click_outside` on the press (it survives only as an `OverlayManager` helper its own tests drive): `arm_outside_press_dismissal` *arms* on the Down and `commit_outside_press_dismissal` commits on the Up, per pointer. For a direct pointer the arming Down is also **suppressed beneath**, so nothing under the overlay activates, and a press that slides off or is cancelled aborts the arm having delivered nothing. A mouse is unchanged. |
 | [`widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs) — the `PointerButton::Secondary` arm | opens the context menu | **Closed by P29**, though not as written: the Secondary arm is left exactly as it is (a mouse still has that button) and the long press is a **fourth, additive** route into the same `show_context_menu_for`. It is not a long-press *recognizer* either — see [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs) for why a recognizer cannot reach a disabled node. |
 | [`title_bar/drag_region.rs`](../crates/teksilo-widgets/src/title_bar/drag_region.rs) | `host.show_window_menu(position)` on a Secondary press | **Already closed** before P29 looked at it: the node carries an `on_long_press` that calls `show_window_menu`, and its module header documents it. A widget's own `on_long_press` takes precedence over the tree route, so the two do not collide. (The window *move* on this node is not a press-time actor at all — it starts from `DragPhase::Started`.) |
 | `data_views::deferred_select::on_down` — the `command()` and `shift()` arms, at the five body panes listed above | modified row selection | **Converted, and further than planned.** For a **direct** pointer `on_down` now applies *nothing at all*: it decides which of `Collapse` / `Toggle` / `Extend` the modifiers chose, parks it, and `on_up` applies it only if `release_completes_the_press` — so a pan commits nothing a release on that row would have committed. The mouse keeps its press-time behaviour, justified above, except for the pre-existing multi-selection collapse, which was already deferred. |
@@ -1732,7 +1742,11 @@ expecting a behaviour to change is the failure mode they share.
   reachable, which is what `teksu!` produces from a builder method applied to an
   `if`/`else` whose arms carry handlers — and the inner arm's handlers are
   silently dropped. Fixing it needs a per-field precedence decision between two
-  handler sets: an owner's call.
+  handler sets: an owner's call. *(2026-09-23: resolved.
+  `WidgetWithHandlers::take_handler_set` now lifts the inner widget's set
+  recursively and folds it in with `HandlerSet::merge_under` — the later (outer)
+  declaration wins field by field, and the accessibility block's lists are
+  merged rather than replaced.)*
 - **`TextSurface::allows_copy` for a text-field handle returns the raw opt-in**
   rather than the resolved permission, so a *revealed* password field greys out
   Edit ▸ Copy while `Ctrl+C` works. Pre-existing.
@@ -1851,7 +1865,11 @@ patch. They are the only `#[ignore]`s the programme added.
   so five of those features have never been buildable by anyone who clones this
   repository. Verified against `main`, so not branch-introduced. **Deliberately not
   added to any gate.** It needs either the fonts committed or the features gated
-  behind a build-time probe.
+  behind a build-time probe. *(2026-09-23: closed the second way —
+  `crates/teksilo-text/build.rs` now probes `fonts/` and emits the `font_*` cfg
+  each `include_bytes!` is gated on, so a feature whose face is absent is an
+  inert build warning rather than an error, and `--all-features` builds. The
+  five faces are still not committed.)*
 - **The trackpad rotation sign may be inverted, and only macOS hardware can say.**
   `Transform2D::rotate` maps a positive angle to a clockwise turn in y-down screen
   space, and the touchscreen arm is self-consistent with that — its `atan2` is in

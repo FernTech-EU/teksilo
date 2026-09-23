@@ -38,7 +38,7 @@ intent came from. The three firing paths:
 |-------------------------------|-------------------------------------------------------------|---------------------------------|
 | **Shortcut** (keyboard chord) | Registry invokes `on_activate` or synthesizes `Intent::new` | Focused widget or root fallback |
 | **Widget handler** (`ctx.send_intent`) | Handler builds or returns an `Into<Intent>` value           | The originating widget          |
-| **Programmatic** (tests, tools)        | Build `Intent` by hand or via `IntentKind::into_intent`     | Caller-supplied source id       |
+| **Programmatic** (tests, tools)        | Build `Intent` by hand or via `IntentKind::into_intent`     | First arena root (`WidgetTree::run_with_event_context`) |
 
 The **name** is the dispatch key; the **payload** (if any) is
 downcastable data the handler extracts when it needs typed fields.
@@ -157,8 +157,9 @@ Key fields ([source](../crates/teksilo-core/src/shortcut.rs)):
   `Into<Intent>` — typically an `IntentKind` variant. Omit when the
   shortcut only needs the name: the registry synthesizes
   `Intent::new(intent_name)` for you.
-- **`enabled_when: Option<Signal<bool>>`** — reactive "is this
-  shortcut live?" predicate. When `false`, the shortcut is treated as
+- **`enabled_when: Option<Prop<bool>>`** — reactive "is this
+  shortcut live?" predicate (the builder takes any `impl Into<Prop<bool>>`,
+  so a `Signal<bool>` or a plain `bool`). When `false`, the shortcut is treated as
   *if not registered* — the keystroke falls through to the focused
   widget's normal `on_key` dispatch. Compose composite predicates with
   the [`Signal<bool>` combinators](#composing-enabled_when-predicates)
@@ -588,7 +589,8 @@ Key bits:
 - **`intent: &'static str`** — the dispatch key. Must exactly match
   `Intent::name`. Typo-safety comes from `IntentKind`'s name attributes,
   not from the action side.
-- **`enabled_when: Option<Signal<bool>>`** — reactive predicate. When
+- **`enabled_when: Option<Prop<bool>>`** — reactive predicate (builder
+  takes `impl Into<Prop<bool>>`). When
   `false`, the action is skipped during dispatch (the intent
   propagates past this level as if no match existed here — unless the
   firing shortcut has `propagate_when_disabled == false`, in which case
@@ -698,11 +700,14 @@ ordering.
   anchor is the overlay's content, whose source→root walk does **not** pass
   through the widget that opened it — register an app-global action
   (`register_action_global`) for commands fired from menus/chrome.
-- **`tree.dispatch_intent(source, intent, propagate)`**: caller chooses.
+- **Outside any handler** (a test, an app-layer hook): `WidgetTree::dispatch_intent`
+  is crate-internal; call `ctx.send_intent(...)` inside
+  `tree.run_with_event_context(ops, |ctx| …)`, which anchors at the first
+  arena root.
 
 ### Focus invalidation on destroy
 
-`WidgetTree::destroy_subtree` clears `self.focused` and `self.hovered`
+`WidgetTree::destroy_subtree` clears the focused and hovered widget
 when they point at the widget about to be destroyed. Without this, a
 rebuild of a currently-focused subtree (classic scenario: hitting
 Rebind and editing a chord) would leave focus pointing at a dead id,
@@ -717,7 +722,7 @@ A KeyDown event flows through three stages, in this order:
    widget dispatch. `ShortcutRegistry::matches_by_keystroke` yields
    **every** enabled shortcut bound to the chord; the dispatcher then
    picks the one whose scope applies to the current focus (see
-   [Same-chord precedence](#same-chord-precedence) below). If an
+   [Same-chord precedence](#same-chord-precedence) above). If an
    applicable shortcut is found, its intent is activated and the key
    event is consumed. If no candidate applies — every match is a
    `Scoped` binding outside the focused subtree — the event falls
@@ -729,6 +734,11 @@ A KeyDown event flows through three stages, in this order:
 3. **Focused widget bubble.** If preview returned `Ignored` for every
    ancestor, the focused widget's own `on_key` runs, then the event
    bubbles to ancestors via their `on_key` slots.
+
+Two things run ahead of stage 1: an armed `begin_key_capture` takes the
+KeyDown outright, and a focused surface built with
+`.keyboard_capture(true)` (a terminal) skips shortcut resolution entirely,
+so a host `Ctrl+C` shortcut cannot steal the chord it forwards to its child.
 
 **Implication: shortcuts always win over `on_key_preview`.** An
 ancestor that wants to override a registered shortcut should *also*
@@ -829,7 +839,10 @@ impl Widget for Root {
         );
 
         // --- Actions ---
-        ctx.register_action(
+        // Global: the File menu below renders in an overlay, so its intent's
+        // source→root walk never passes through `Root` (see "Scoped vs global
+        // actions").
+        ctx.register_action_global(
             Action::new("app.save")
                 .on_invoke(|_intent, _ctx| println!("saved")),
         );
@@ -908,4 +921,4 @@ impl Widget for Root {
   [`action.rs`](../crates/teksilo-core/src/action.rs)
 - Derive macro: [`crates/teksilo-macros/src/intent_kind.rs`](../crates/teksilo-macros/src/intent_kind.rs)
 - Pre-built settings widget: [`crates/teksilo-widgets/src/shortcut_settings.rs`](../crates/teksilo-widgets/src/shortcut_settings.rs)
-- Architecture §11: keyboard & shortcut design rationale
+- [Architecture §11](architecture.md#11-actions-intents-and-shortcuts): one-paragraph summary pointing back here

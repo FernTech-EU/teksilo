@@ -35,7 +35,7 @@ Explorer panel on the leading edge, a draggable divider between them, and a
 keyboard- and screen-reader-navigable structure you did not write.
 [§1](#1-the-minimal-case-in-context) puts them in a widget that runs.
 
-Verified against teksilo 0.13.0. Sources:
+Verified against teksilo 0.13.1. Sources:
 [`docking.rs`](../crates/teksilo-widgets/src/docking.rs),
 [`docking/model.rs`](../crates/teksilo-widgets/src/docking/model.rs),
 [`docking/panel.rs`](../crates/teksilo-widgets/src/docking/panel.rs),
@@ -466,7 +466,8 @@ needs a minimum size that keeps the zones hittable.
 **Right-click** an activity for: `Hide "<name>"`, `Move to ▸`, a checkable list
 of every activity on that side, and `Activity bar size ▸` (rail) or
 `Tab size ▸` (tab). Right-clicking the rail's empty background gives the
-checklist alone — that is the way back when the user has hidden everything.
+checklist and the size submenu, without the per-activity rows — that is the way
+back when the user has hidden everything.
 A Strip-presentation side grows a trailing hamburger for the same purpose.
 
 To take affordances away, declare a `DockPolicy`:
@@ -539,7 +540,7 @@ model owns the truth, the menu only mirrors it.
 | Hide/restore an activity | `set_tab_hidden(tab_id, b)`, `is_tab_hidden(tab_id)` |
 | Is this dock declared yet? | `is_registered(id)` |
 | How is the edge configured? | `side_size`, `side_min_size`, `side_presentation`, `side_rail_thickness`, `side_has_rail` |
-| How many activities, and what is one called? | `tab_count(side)`, `tab_title(tab_id)` |
+| How many activities, and what title is pinned on one? | `tab_count(side)`, `tab_title(tab_id)` (the explicit override; `None` when the label derives from a dock) |
 | Who owns a corner? | `corner_owner(corner)` |
 
 Prefer `select_tab_by_id` over `select_tab` anywhere the index could be stale:

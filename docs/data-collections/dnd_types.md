@@ -12,7 +12,7 @@ These types are the Teksilo-shaped equivalent of Qt's
 `TreeDataSource`. A source *owns* the answer to
 "may this drop happen?" (`can_accept`) and "apply the move" (`accept_drop`);
 the view merely renders the source's verdict and routes the commit. This is
-what lets an external source of truth (e.g. a Qleany entity store) drive a
+what lets an external source of truth (e.g. an entity store) drive a
 view without the view ever mutating a mirror model.
 
 ## Key types

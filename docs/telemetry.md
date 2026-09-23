@@ -293,8 +293,8 @@ durability. See §3.4 for the full reasoning.
 ```text
 intent.dispatched                                     // name, source
   → app_state::<TelemetryContext>()? if absent → return
-  → ConsentStore::is_granted()? if not → return
   → DynamicReporter::record(&Event)
+       ├── ConsentStore::is_granted()? if not → return
        ├── recent_log.push(event.to_owned())          // user-visible
        ├── recent_log_revision.set(version + 1)       // signals widget rebuild
        └── active_adapter.record(event)               // outbound
@@ -546,7 +546,7 @@ The "Inspect data sent" accordion auto-refreshes as events land —
 the `recent_log_revision` signal triggers a widget rebuild whenever
 `DynamicReporter::record` or `discard_pending` fires.
 
-i18n: 42 keys under the `privacy-*` namespace in
+i18n: 50 keys under the `privacy-*` namespace in
 [`crates/teksilo-widgets/locales/en-US.ftl`](../crates/teksilo-widgets/locales/en-US.ftl)
 and [`fr-FR.ftl`](../crates/teksilo-widgets/locales/fr-FR.ftl). Apps install
 the framework bundle via `I18nConfig::framework_locales(teksilo_widgets::framework_locales())`.

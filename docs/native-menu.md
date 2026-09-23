@@ -71,7 +71,8 @@ tree of `MenuNode`s with a `version: Signal<u64>`:
 | `.shortcut("app.x")` | display + bind the `ShortcutRegistry` chord |
 | `.enabled(prop)` | static or `Signal<bool>` — greys out **reactively** (both surfaces) |
 | `.visible(prop)` | static or `Signal<bool>` — hide reactively in-window (native: omitted at build) |
-| `.checkable(Signal<bool>)` | two-state check item |
+| `.checkable(Signal<bool>)` | two-state check item — activation flips the signal (two-way) |
+| `.checked(Signal<bool>)` | two-state check item, **reflect-only** — the checkmark mirrors the signal but activation does not write it; pair with `.intent`/`.on_activate` |
 | `.tri_checkable(Signal<CheckState>)` | tri-state check item |
 | `.radio(value, Signal<usize>)` | radio item within a group |
 
@@ -137,7 +138,9 @@ let model = MenuModel::new()
     .menu(tr!(file()), |m| m.submenu_with_id(recent, tr!(open_recent()), |s| s));
 
 // ...anywhere later (hold a clone of `model`):
-let id = model.push_item(recent, MenuEntry::new(lit!("doc.txt")).on_activate(|_| open()));
+let entry = MenuEntry::new(lit!("doc.txt")).on_activate(|_| open());
+let id = entry.id();                           // MenuEntry::new allocates the id
+model.push_item(recent, entry);                // returns true if `recent` was found
 model.remove(id);                              // remove any item/submenu by id
 let edit = model.push_menu(tr!(edit()), |m| m.item(...));  // add a top-level menu
 model.modify(|nodes| { /* full control: reorder, retitle, … */ });
@@ -145,8 +148,8 @@ model.modify(|nodes| { /* full control: reorder, retitle, … */ });
 
 | method | effect |
 | --- | --- |
-| `push_item(into, entry)` | append an item to the submenu with id `into` |
-| `push_separator(into)` | append a separator |
+| `push_item(into, entry) -> bool` | append an item to the submenu with id `into`; `false` if not found |
+| `push_separator(into) -> bool` | append a separator; `false` if not found |
 | `push_menu(title, \|m\| …) -> MenuItemId` | add a top-level menu |
 | `remove(id) -> bool` | remove an item or submenu anywhere |
 | `modify(\|&mut Vec<MenuNode>\| …)` | arbitrary structural edit (escape hatch) |

@@ -12,7 +12,7 @@ capability protocol for identity, DnD validation, and lazy loading.
 The built-in `TreeSlice` and
 `SortFilterTreeModel` implement it over an
 in-memory `TreeModel`; an external source of truth
-(e.g. a Qleany entity store) implements it directly with its own `Key` type
+(e.g. an entity store) implements it directly with its own `Key` type
 and so never needs to mirror itself into a `TreeModel`.
 
 ## When to use

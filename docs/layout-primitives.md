@@ -41,7 +41,7 @@ Stacks (HStack/VStack)              ZStack                  Grid
 
 ## 2. The stack containers
 
-Three containers cover almost everything: `VStack`, `HStack`, `ZStack`. They share the *deferred children* idiom — `.child(widget)` queues an inline child, `.add_child(id)` references a pre-registered `WidgetId`, `.children(iter)` adds many at once, `.child_opt(opt)` is a no-op when `None`. Pick whichever fits the call site; you can mix them on one builder.
+Three containers cover almost everything: `VStack`, `HStack`, `ZStack`. They share the *deferred children* idiom — `.child(widget)` queues an inline child (it also accepts a pre-registered `WidgetId`), `.children(iter)` adds many at once, `.child_opt(opt)` is a no-op when `None`. Pick whichever fits the call site; you can mix them on one builder.
 
 ### 2.1 `VStack` — vertical stack
 
@@ -60,7 +60,7 @@ VStack::new()
     .child(Button::new(lit!("Save")))
 ```
 
-**Sizing rule:** wants `Σ heights + spacing` on the main axis, `max(width)` on the cross axis. If any child reports `flex > 0` and the parent bounds the height, the VStack greedily claims the offered height so slack exists.
+**Sizing rule:** wants `Σ heights + spacing` on the main axis, `max(width)` on the cross axis (or the offered width, when that is larger). If any child reports `flex > 0` and the parent bounds the height, the VStack greedily claims the offered height so slack exists.
 
 **Cross-axis floor.** Every child receives the VStack's full width as its `proposal.width`. A `TextWidget` in `TextOverflow::Wrap` will measure-and-wrap against that width; an `HStack` child fills that width.
 
@@ -87,7 +87,7 @@ HStack::new()
 
 [crates/teksilo-widgets/src/primitives/zstack.rs](../crates/teksilo-widgets/src/primitives/zstack.rs)
 
-Children overlap; later children paint on top. Size is the max of children's intrinsic sizes; the proposal is *only* used as a fallback when no child has a queryable size. Container-level alignment is a full `Alignment` (both axes); per-child override via `tree.set_alignment(id, …)`.
+Children overlap; later children paint on top. Size is the max of children's intrinsic sizes (heights re-measured at the proposed width, so a wrapping child reports its wrapped height); the proposal is otherwise *only* used as a fallback when no child has a queryable size. Container-level alignment is a full `Alignment` (both axes); per-child override via `tree.set_alignment(id, …)`.
 
 ```rust
 ZStack::new()
@@ -115,7 +115,7 @@ Slack is the leftover space inside a stack after every child's wanted size and t
 
 [crates/teksilo-widgets/src/primitives/spacer.rs](../crates/teksilo-widgets/src/primitives/spacer.rs)
 
-Returns `LayoutResponse::flexible(Size::new(min, min), 1.0)`. The min-length is a floor on the main axis (default 0); the parent stack adds slack share on top.
+Returns `LayoutResponse::flexible(size, 1.0)` where `size` is `min_length` on the enclosing stack's main axis and `0` on the cross axis (outside a stack, `min_length` on both). The min-length is a floor on the main axis (default 0); the parent stack adds slack share on top.
 
 ```rust
 HStack::new()
@@ -159,7 +159,7 @@ VStack::new()
 
 // Opt out of fill — align the child at its natural size in claimed space:
 Expand::new()
-    .align_child(Alignment::CENTER)                  // == Center::new()
+    .align_child(Alignment::CENTER)                  // like Center, but claims slack (flex = 1)
     .child(label)
 ```
 
@@ -169,7 +169,7 @@ By default `Expand` reports `wanted = 0` on its flex axes. That's CSS `flex-basi
 
 Switch with `.respect_intrinsic()` (CSS `flex-basis: auto`) when the parent is unconstrained on the flex axis. The child's natural size acts as a floor and slack is added on top. Use this inside an outer `VStack` with `height = None`, where zero-basis would let the child overflow because the parent has no bound to share.
 
-**Trade-off (called out at [expand.rs:130](../crates/teksilo-widgets/src/primitives/expand.rs#L130)):** with `respect_intrinsic`, exact ratios bend by content. The same `[1, 2]` split inside a 300 px parent now gives `60 + 66 = 126` and `40 + 133 = 173` rather than `100 / 200`. Keep zero-basis for ratio layouts and reach for `respect_intrinsic` only when you actually need the floor.
+**Trade-off (called out at [expand.rs:160](../crates/teksilo-widgets/src/primitives/expand.rs#L160)):** with `respect_intrinsic`, exact ratios bend by content. The same `[1, 2]` split inside a 300 px parent now gives `60 + 66 = 126` and `40 + 133 = 173` rather than `100 / 200`. Keep zero-basis for ratio layouts and reach for `respect_intrinsic` only when you actually need the floor.
 
 #### `horizontal()` / `vertical()` semantics
 
@@ -178,7 +178,7 @@ The named axis is the one the wrapper *competes for slack on*. Cross-axis behavi
 - `Expand::vertical()` inside a `VStack` (parent binds width, distributes height) — fills the VStack's full width AND distributes vertical slack.
 - `Expand::horizontal()` inside a `VStack` — claims the VStack's full width, but reports `flex = 0` on the open vertical axis. It does **not** steal vertical slack from siblings — height stays at child intrinsic.
 
-Symmetric for HStack. The behavior is documented and tested at [expand.rs:25-41](../crates/teksilo-widgets/src/primitives/expand.rs#L25-L41).
+Symmetric for HStack. The behavior is documented at [expand.rs:56-72](../crates/teksilo-widgets/src/primitives/expand.rs#L56-L72).
 
 ### 3.3 `Center` — center a child within given space
 
@@ -290,7 +290,7 @@ MinSize::height(36.0).child(row)
 MinSize::width(0.0).min_width(min_w_signal).child(text)
 ```
 
-The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width — not the unconstrained natural width. Tested at [min_size.rs:230-258](../crates/teksilo-widgets/src/primitives/min_size.rs#L230-L258).
+The proposal forwarded to the child is **clamped upward** to the minimum. A wrapping `TextWidget` inside `MinSize::width(100)` measures against `width >= 100`, so its wrapped height reflects the minimum width — not the unconstrained natural width. Tested at [min_size.rs:320-350](../crates/teksilo-widgets/src/primitives/min_size.rs#L320-L350).
 
 ### 4.3 `MaxSize`
 
@@ -329,7 +329,7 @@ The child fills the resolved bounds.
 
 ```rust
 // All four insets:
-Padding::new(16.0, 24.0, 16.0, 24.0).child(content)  // top, right, bottom, left
+Padding::new(16.0, 24.0, 16.0, 24.0).child(content)  // top, trailing, bottom, leading (RTL-aware)
 
 // Symmetric — vertical and horizontal pairs:
 Padding::symmetric(12.0, 16.0).child(content)
@@ -381,7 +381,7 @@ Grid::new()
 - **`Auto`** — sized to the largest child intrinsic size in that track.
 - **`Fractional(weight)`** — splits remaining space (after Fixed and Auto are claimed) by weight.
 
-**Two-pass layout.** Auto tracks are resolved against children's unspecified-proposal width. Fractional tracks then take the remainder. Children that landed in Fractional columns *narrower* than their intrinsic single-line width are re-measured at the resolved column width — wrapping content reports its actual wrapped height instead of bleeding outside its cell. See [grid.rs:159-223](../crates/teksilo-widgets/src/primitives/grid.rs#L159-L223) for the reasoning.
+**Two-pass layout.** Auto tracks are resolved against children's unspecified-proposal width. Fractional tracks then take the remainder. Children that landed in Fractional columns *narrower* than their intrinsic single-line width are re-measured at the resolved column width — wrapping content reports its actual wrapped height instead of bleeding outside its cell. See [grid.rs:230-300](../crates/teksilo-widgets/src/primitives/grid.rs#L230-L300) for the reasoning.
 
 Both `column_gap` and `row_gap` accept `impl Into<Prop<f32>>`.
 
@@ -523,16 +523,16 @@ It is deliberately **not** `Role::Grid`: the ARIA grid pattern mandates arrow-ke
 A specialized two-column layout: label column auto-sizes to the widest label, field column takes the rest. Supports full-width rows for separators or wide inputs.
 
 ```rust
-// host, port, timeout are Signal<String> / Signal<u16> / Signal<u32>.
+// host is a Signal<String>; port and timeout are Signal<u32>.
 FormLayout::new()
     .label_gap(12.0)
     .row_spacing(8.0)
     .label(tr!(connection_settings()))           // emits Role::Form landmark
     .line(TextWidget::new(tr!(host())), TextInput::new(host))
-    .line(TextWidget::new(tr!(port())), SpinBox::new(port, 0u16, 65535u16))
+    .line(TextWidget::new(tr!(port())), SpinBox::new(port, 0u32, 65535u32))
     .full_width(Divider::new())
     .full_width(GroupHeader::new(tr!(advanced())))
-    .line(TextWidget::new(tr!(timeout_ms())), TextInput::new(timeout))
+    .line(TextWidget::new(tr!(timeout_ms())), SpinBox::new(timeout, 0u32, 60_000u32))
 ```
 
 - `.line(label, field)` adds a paired row.
@@ -545,7 +545,7 @@ Row height is `max(label.height, field.height)`. The label column width is the w
 
 [crates/teksilo-widgets/src/primitives/switcher.rs](../crates/teksilo-widgets/src/primitives/switcher.rs)
 
-Internally a `ZStack` where each child has a `visible_when` binding derived from `selected.map(|i| i == index)`. Layout is the size of the active child.
+Each mounted page carries a `visible_when` binding derived from `selected.map(|i| i == index)`; unselected pages go dormant. Pages added with `.child(widget)` mount lazily, on first selection, and then persist. The `Switcher` reports the maximum size of its mounted pages at the incoming proposal, so flipping pages does not resize the slot.
 
 ```rust
 let page = Signal::new(0_usize);
@@ -584,7 +584,7 @@ HStack::new()
 
 `color()` accepts the full `ColorProp` range — `Color`, a role (typically `BorderRole`), or `Signal<Color>`. Defaults to `BorderRole::Divider`. Emits `Role::Splitter` to AT.
 
-Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-to-resize panes, use `SplitView` from teksilo-widgets.
+Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-to-resize panes, use `Splitter` from teksilo-widgets.
 
 ### 6.2 Spacing summary
 
@@ -594,7 +594,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Hard gap with grow-if-available | `Spacer::new().min_length(n)` |
 | Static gap between siblings | `HStack::new().spacing(n)` / `VStack::new().spacing(n)` |
 | Visual divider line | `Divider::new()` |
-| Inset around a child | `Padding::uniform(n)` / `Padding::symmetric(v, h)` / `Padding::new(t, r, b, l)` |
+| Inset around a child | `Padding::uniform(n)` / `Padding::symmetric(v, h)` / `Padding::new(top, trailing, bottom, leading)` |
 
 ---
 
@@ -612,7 +612,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Force a minimum touch area | `MinSize::new(min.width, min.height)` with `min = density_min_size(base, TargetAxes::BOTH, tokens)` — the floor is the density's, not the call site's (§4.2) |
 | Cap reading width | `MaxSize::width(640.0)` |
 | Dialog with a fixed width | `FixedSize::new().width(w)` |
-| Animated panel width | `FixedSize::width(animated_signal)` |
+| Animated panel width | `FixedSize::new().width(animated_signal)` |
 | Locked aspect ratio (image, video) | `AspectRatio::new(w/h)` |
 | Inner spacing | `Padding` |
 | Tabular data with mixed track sizes | `Grid` |
@@ -622,7 +622,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter — for drag-t
 | Settings forms | `FormLayout` |
 | Tab pages / wizard steps | `Switcher` |
 
-When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(w, h)` instead of `FixedSize::width(w).height(h)` when you mean "at least," not "exactly" — and for a *target*, take `w` and `h` from `density_min_size` rather than writing a number (§4.2). (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
+When two primitives could express the same thing, prefer the more specific one — the name is a hint to the next reader. `Spacer::new()` instead of `Expand::new()` when you mean "empty pushable region." `MinSize::new(w, h)` instead of `FixedSize::new().width(w).height(h)` when you mean "at least," not "exactly" — and for a *target*, take `w` and `h` from `density_min_size` rather than writing a number (§4.2). (Note `Center` is *not* a synonym for `Expand::new().align_child(CENTER)` — it reports `flex = 0` and shrink-wraps an open axis, so it does not claim stack slack; see §3.3.)
 
 ---
 

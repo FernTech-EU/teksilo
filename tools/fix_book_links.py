@@ -21,8 +21,7 @@ Per link target, relative to the file it appears in:
   * a relative source/asset path (`../crates/..`, `locales/x.ftl`, …) -> GitHub URL
   * a rustdoc path (`crate::X`, `Self::y`, `self`, bare `TreeView`)   -> inline code
 
-It is idempotent (rewritten links no longer match) and mirrors qleany's CI `sed`
-link-fixup, generalized for Teksilo's source and rustdoc links.
+It is idempotent (rewritten links no longer match).
 
 Usage:
     python3 tools/fix_book_links.py docs

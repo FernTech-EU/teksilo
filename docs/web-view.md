@@ -41,7 +41,7 @@ TeksiloAppBuilder::new()
 Every realistic engine — WKWebView (macOS), WebView2 (Windows), WebKitGTK
 (Linux/X11), Servo — owns its own rendering and lives as a **native OS subview
 on top of** Teksilo's wgpu surface. `WebView` accepts that and mirrors the
-established platform-backend pattern ([`FileDialogBackend`](file-dialog),
+established platform-backend pattern ([`FileDialogBackend`](../crates/teksilo-platform/src/file_dialog.rs),
 `ExternalDndBackend`): a swappable [`WebViewBackend`] creates an engine-specific
 [`WebViewHandle`]; a per-app [`WebViewRegistry`] (in `app_state`) routes
 JS→Rust / lifecycle events back into the widget tree. The engine is pluggable;
@@ -78,7 +78,7 @@ the umbrella `teksilo` crate. **wry is the default engine.**
   depend on `teksilo-webview` directly with `features = ["servo-backend"]` and
   pass `ServoBackend::new()` to `install_web_view(...)`.
 
-Pinned versions: `wry = 0.55.1`, `servo = 0.2.0`.
+Pinned versions: `wry = 0.56.1`, `servo = 0.5.0`.
 
 ### Linux build dependencies (wry / WebKitGTK)
 

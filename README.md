@@ -88,7 +88,7 @@ Also useful as a shelf of ready-to-use widgets if you're shopping the Rust GUI e
 
 ## Design priorities
 
-Teksilo is a retained-tree framework inspired by Qt and the ShiftUI layouting.
+Teksilo is a retained-tree framework inspired by Qt and the SwiftUI layouting.
 
 - **Composition with painting layered on top.** The `Widget` trait offers both `build()` (compose children) and `paint()` (draw chrome); both methods are optional, and a single widget can do both. Most of the widgets are pure compositions of primitives (`RectWidget`, `TextWidget`, `HStack`, `Padding`); `Card`, `Panel`, overlays, and custom chrome layer paint on top of their composed children.
 - **Accessibility at the trait level.** Every widget declares its role and name in an `accessibility()` method that sits beside `layout_response` and `paint`. The AT tree is built alongside the widget tree, not reconstructed from it.
@@ -100,7 +100,7 @@ Teksilo is a retained-tree framework inspired by Qt and the ShiftUI layouting.
 
 Expect breaking changes between 0.x versions.
 
-The test suite is roughly 6,200 tests in teksilo and over 8,700 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
+The test suite is roughly 9,400 tests in teksilo and over 12,000 across the whole stack. Tests target behavior (event dispatch, layout output, accessibility-tree structure), not implementation snapshots. The same widget tree runs under tests without a window, a GPU, or winit, and a simulated clock makes time-dependent behavior deterministic.
 
 Teksilo builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/ferntech-eu/text-document) (rich-text document model) and [text-typeset](https://github.com/ferntech-eu/text-typeset) (typesetting engine).
 
@@ -108,7 +108,7 @@ Production deployment is currently limited to FernTech's own applications; the 0
 
 Project. Architecture, design reviews, code review and final acceptance were human; code generation and routine refactoring were LLM-assisted (Claude Opus and Mistral Medium) under that review.
 
-**Scale:** 40+ framework crates · 450k+ lines of Rust · 100+ widgets · 1400+ builder methods.
+**Scale:** 40+ framework crates · 700k+ lines of Rust · 100+ widgets · 1600+ builder methods.
 
 ## Authorship and review
 
@@ -138,7 +138,7 @@ The rules under which Teksilo is built:
 
 **Reactive state.** One `Signal<T>` type, used everywhere. A color change repaints; a size change relayouts; nothing rebuilds that doesn't need to.
 
-**Data models.** `ListModel<T>` and `TreeModel<T>` are generic over your domain type and drive `ListView`, `TreeView`, `TableView`, `TreeTableView`, `Repeater`, and `TabBar<T>` directly. Sort/filter projections, per-view tree expand state, shared selection, drag-and-drop reorder, and descendant-to-ancestor tri-state checkbox aggregation come built in.
+**Data models.** `ListModel<T>` and `TreeModel<T>` are generic over your domain type and drive `ListView`, `TreeView`, `TableView`, `TreeTableView`, `GridView`, `Repeater`, and `TabBar<T>` directly. Sort/filter projections, per-view tree expand state, shared selection, drag-and-drop reorder, and descendant-to-ancestor tri-state checkbox aggregation come built in.
 
 **Rendering.** GPU-accelerated via wgpu, with text and graphics sharing one pipeline. When nothing is moving, the app is idle: no wasted frames, near-zero CPU and GPU use.
 
@@ -146,7 +146,7 @@ The rules under which Teksilo is built:
 
 **Internationalization.** Translations are checked at compile time via macro on top of Fluent: missing or misspelled keys are build errors. Right-to-left layout, locale-aware number and date formatting, and re-rendering on locale change are built in.
 
-**Themes.** Default light and dark, inspired by JetBrains' Int UI; switching is instant and preserves focus, scroll position, and selection. On Linux, the active palette (accent, surface, selection, tooltip colors) follows the desktop environment (GNOME, KDE, Cinnamon). Apps can override anything from a single color to a whole widget's chrome via the four-tier styling system (tokens → variants → recipes → style protocols), described in [`docs/styling-system.md`](docs/styling-system.md).
+**Themes.** Default light and dark, inspired by JetBrains' Int UI; switching is instant and preserves focus, scroll position, and selection. On Linux, the active palette (accent, surface, selection, tooltip colors) follows the desktop environment (GNOME, KDE, Cinnamon). Material 3, Fluent (Windows 11) and macOS Aqua presets ship behind the `theme-material3` / `theme-fluent` / `theme-macos` features. Apps can override anything from a single color to a whole widget's chrome via the four-tier styling system (tokens → variants → recipes → style protocols), described in [`docs/styling-system.md`](docs/styling-system.md).
 
 **Input.** Keyboard shortcuts, menus, and accessibility actions flow through one rebindable pipeline; a user remap updates every surface that mentions the binding. External-source events (databases, file watchers) bypass it; widgets subscribe directly.
 
@@ -162,15 +162,15 @@ The rules under which Teksilo is built:
 
 **Scene canvas.** Pannable, zoomable viewport for non-grid content: story corkboards, mind maps, node-graph editors, simple maps. Heavyweight `Widget` nodes and lightweight `SceneItem`s coexist under one transform, both fully accessible.
 
-**Charts.** BarChart, LineChart, and PieChart (with donut and center slot), generic over the app's data type. Locale-aware axis formatting and theme integration are built in.
+**Charts.** BarChart, LineChart, and PieChart (with donut and center slot), generic over the app's data type. Pluggable axis-label formatters and theme integration are built in.
 
 **Web view (prototype).** Embed HTML / web content as a `WebView` widget, the one widget that can't render into the wgpu surface, so the engine is a native OS subview composited on top. It behaves like a normal widget otherwise: SwiftUI-style layout, dormancy-aware visibility (a tab-parked page hides its subview), JS↔Rust messaging, two-way URL binding, and `Role::WebView` accessibility. **Still a prototype.** The default engine is **wry** (macOS WKWebView / Windows WebView2 / Linux-X11 WebKitGTK) and is functional; on Linux it needs the WebKitGTK toolkit and, on a Wayland session, XWayland (see [`docs/web-view.md`](docs/web-view.md)). The **Servo** backend (the native Wayland path) is **work in progress**: it constructs a real engine but isn't frame-driven yet. See [`docs/web-view.md`](docs/web-view.md).
 
 **Widget previewer.** Storybook-style 3-pane explorer (navigator, canvas, knob form) for the widget catalog, with live property editing, multi-variant rendering, and PNG export. Custom widget libraries register via `inventory::submit!` and become previewable with no extra wiring.
 
-**Tooling.** In-app debug inspector (F12, debug builds only) with tabs for tree, properties, accessibility, theme, focus, shortcuts, overlays, and data models. Opt-in privacy-conscious telemetry stack with compile-time-validated event schemas and a build-time linter for schema drift.
+**Tooling.** In-app debug inspector (F12, debug builds only) with tabs for tree, properties, accessibility, theme, locale, focus, shortcuts, overlays, data models, and pointers. Opt-in privacy-conscious telemetry stack with compile-time-validated event schemas and a schema-drift linter (`cargo teksilo-telemetry-lint`).
 
-**Agent automation (MCP).** A Model Context Protocol server lets an AI agent observe (the live accessibility tree plus screenshots) and drive (accessibility actions, synthetic pointer / key / IME input) a Teksilo app, in-process, with no OS accessibility layer needed. A debug-only bridge drives a live running app on Linux, Windows and macOS — a Unix-domain socket where the platform has one, a named pipe on Windows, and no surface at all in a release build — and the running app publishes an endpoint descriptor, so an agent attaches with `--attach` rather than a socket path scraped out of a log; a headless mode runs the toolkit's CI harness (and is a kit for building your own headless test harness: `teksilo-automation::execute` against your own tree). It reuses the same AccessKit tree every widget already declares: a node id is stable while the widget lives (re-find after a structural rebuild). Complements, rather than replaces, a real screen-reader smoke test. See [`docs/automation-mcp.md`](docs/automation-mcp.md).
+**Agent automation (MCP).** A Model Context Protocol server lets an AI agent observe (the live accessibility tree plus screenshots) and drive (accessibility actions, synthetic pointer / key / IME input) a Teksilo app, in-process, with no OS accessibility layer needed. A debug-only bridge drives a live running app on Linux, Windows and macOS — a Unix-domain socket where the platform has one, a named pipe on Windows, and no surface at all in a release build — and the running app publishes an endpoint descriptor, so an agent attaches with `--attach` rather than a socket path scraped out of a log; a headless mode runs the toolkit's CI harness (and is a kit for building your own headless test harness: `teksilo_automation::execute` against your own tree). It reuses the same AccessKit tree every widget already declares: a node id is stable while the widget lives (re-find after a structural rebuild). Complements, rather than replaces, a real screen-reader smoke test. See [`docs/automation-mcp.md`](docs/automation-mcp.md).
 
 For depth on any of these, see `docs/`.
 
@@ -200,14 +200,17 @@ cargo teksilo setup             # run inside your app
 
 ```sh
 cargo teksilo symbol Button                  # exact public API, for your version
-cargo teksilo symbol --crate data ListModel  # 30 crates are queryable
+cargo teksilo symbol --crate data ListModel  # 32 crates are queryable
 cargo teksilo search "make a list scrollable"
 cargo teksilo probe                          # automation harness -> scripts/
 ```
 
 `setup` writes the probe harness into `scripts/teksilo_probe/` and installs the
-skill wherever the coding agents on your machine already look for one. It never
-touches your own files, and it refuses outright rather than answering for a
+skill (or a condensed brief, in that agent's own format) for every coding agent
+already configured in the project; `--user` installs the skill into your home
+directory instead (the harness, being project code, still goes into the
+project). It never edits your own content (a shared file such as `AGENTS.md` gets
+a marked region of its own), and it refuses outright rather than answering for a
 version you do not have — a wrong answer about a framework reads exactly like a
 right one.
 
@@ -365,6 +368,6 @@ See TRADEMARKS.md for the full policy; for anything it doesn't cover, contact tr
 
 ## Acknowledgments
 
-Teksilo builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via harfrust), swash, fontdb, etagere, and ICU4X; unicode-bidi and unicode-linebreak; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
+Teksilo builds on the work of others: AccessKit; winit and wgpu; HarfBuzz (via harfrust), swash, fontdb, etagere, and ICU4X; unicode-bidi; Fluent and the Mozilla l10n team; the published design notes of the Druid, Masonry, and Xilem projects; and SwiftUI's layout protocol. Anthropic and Mistral provided the language models whose code generation contributed substantially under human review.
 
 The theme presets follow design languages published by others: JetBrains' Int UI, which the default light and dark themes are drawn from; Microsoft's Fluent and the WinUI theme resources; Google's Material 3; and Apple's macOS Human Interface Guidelines. Each preset is an independent implementation, and none of those vendors is affiliated with or endorses Teksilo. See [TRADEMARKS.md](TRADEMARKS.md) and [NOTICE](NOTICE).

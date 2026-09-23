@@ -21,8 +21,9 @@ fails a test rather than misleading a reader.
 ## How a dimension reaches a density
 
 The projection is not a token read at paint time. `ComponentStyleSlots` is empty in
-every shipped preset, so there is nothing in a `Theme` to re-run; instead **each
-recipe reads the tokens at its own construction site, in the crate that owns it**.
+the default IntUI preset, so there is nothing in such a `Theme` to re-run; instead
+**each recipe reads the tokens at its own construction site, in the crate that owns
+it** (the presets that do install slots are item 3 below).
 Three things make that work:
 
 1. Every `Recipe*Style` and its `*Recipe` gained `for_tokens(&InputTokens) -> Self`,
@@ -155,6 +156,14 @@ grep -rnE '^\s*(pub )?const [A-Z_0-9]+: f32' --include=*.rs \
      crates/teksilo-theme-{fluent,macos,material3}/src \
      crates/teksilo-preview-ui/src | grep -v tests.rs | wc -l                 # 133
 ```
+
+> **Note (2026-09-23).** These are the counts P02 measured, and the tables below were
+> not re-censused since. Re-run today the same greps return **47** `MinSize::new`
+> sites, **40** recipe files (three of them matching `min_size`), **236** recipe
+> constants, **61** / **106** widget-module `pub` / private constants and **136**
+> preset + previewer constants. A row that no longer matches the code is drift in this
+> record, not a claim about the current tree; `tests/density_projection.rs` holds the
+> rows that *are* here to their class rules, not the tables to completeness.
 
 ## Totals
 

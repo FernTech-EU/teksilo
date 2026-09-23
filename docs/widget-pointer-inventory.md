@@ -67,6 +67,26 @@ Those eight are listed at the end under "Prose-only mentions".)
 | `no change needed` | 2 |
 | **Total** | **78** |
 
+**Correction, 2026-09-23.** Re-running the scope method above finds real,
+non-test, non-comment pointer-handler code in seven files this inventory does
+not list: `common/scrollable.rs` (the shared `on_scroll` installer every
+`P22 done (scroll)` row below points at, but which never got its own row),
+`primitives/text_input_field/touch.rs` and
+`primitives/text_input_field/widget_impl.rs`, `rich_text/touch_mount.rs`,
+`menu_bar/trigger.rs`, `menu_item/widget_impl.rs`, and
+`text_input/widget_impl.rs`. All seven already existed when this inventory's
+closing commit landed (they came from `refactor(widgets): split the eight
+largest widget modules along their seams` and
+`feat(widgets): a finger selects text in every single-line field`, both
+immediately before the commit that closed this file), so the omission is not
+later drift — the **78** total and the "every row… no row says pending" claim
+below were never quite complete. The seven are not re-triaged here; each sits
+beside a file already carrying a verdict in the table below (`text_input.rs`
+→ P27, `menu_item.rs` / `menu_bar.rs` → P29, `rich_text.rs` → P28,
+`primitives/text_input_field.rs` → P27) and its content reads as that same
+package's work, but that is an inference from proximity, not a re-audit, and
+is recorded here rather than folded into the table as if it had been checked.
+
 The five files the first pass found **unclaimed** are settled: `combo_box.rs` and
 `snackbar.rs` went to P25 (the clause named both), `avatar.rs` and
 `primitives/text_widget.rs` to P24, and `primitives/dead_zone.rs` was reviewed

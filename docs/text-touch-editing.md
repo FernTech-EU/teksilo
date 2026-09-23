@@ -196,7 +196,8 @@ what it used to prescribe.
    `EditorTouch::press_is_still_a_tap` (`rich_text/touch_mount.rs`), which records
    the press's window position on `PointerDown` and refuses a release that
    travelled further than a tap of its kind may. The shipped single-line family
-   asks `press_is_inside` alone (`text_input_field/mouse.rs`), and that is enough
+   asks `press_is_inside` alone (`text_input_field/mouse.rs`, through
+   `data_views::release_completes_the_press`), and that is enough
    there for two reasons that do not survive a taller surface: a strip that short
    cannot absorb a vertical pan, so a panning finger leaves the rectangle; and a
    press whose pan an ancestor scrollable won is refused by the same predicate.

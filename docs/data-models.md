@@ -17,13 +17,13 @@ Data models sit *above* the widget tree conceptually: a `ListModel<String>` has 
 - `teksilo-data` → reactive collections — depends on `teksilo-core` only for `Signal<T>` and `ObserverHandle` (utility plumbing).
 - `teksilo-widgets` → depends on both and consumes teksilo-data through its widgets.
 
-Application code that wants to share a `ListModel<Project>` between a Teksilo view and, say, a headless validation pipeline can depend on `teksilo-data` without pulling in the renderer. The Qleany Clean-Architecture consumer is the main beneficiary: a domain layer holds its entity collections as `ListModel<Entity>`, a view-model layer observes and transforms, and the view layer binds a `ListView` to the result. See §6 on MVVM below.
+Application code that wants to share a `ListModel<Project>` between a Teksilo view and, say, a headless validation pipeline can depend on `teksilo-data` without pulling in the renderer. A layered (Clean Architecture) application is the main beneficiary: a domain layer holds its entity collections as `ListModel<Entity>`, a view-model layer observes and transforms, and the view layer binds a `ListView` to the result. See §6 on MVVM below.
 
 Cloning any teksilo-data handle produces a second handle to the same underlying data. There is no deep-copy semantics and no ownership complication — the models are `Rc<RefCell<…>>` inside, so clones cost two pointer copies and all see the same items.
 
 ## 2. `ListModel<T>` — the common case
 
-`ListModel<T>` is a concrete reactive list: a `Vec<T>` plus an observer list, behind an `Rc<RefCell<…>>`. Every mutation method (`push`, `insert`, `remove`, `set`, `move_item`, `replace_all`, `clear`) drops the mutable borrow *before* notifying observers, so a callback that reads `len()` or `with_item(...)` during the notification does not deadlock the cell.
+`ListModel<T>` is a concrete reactive list: a `Vec<T>` plus an observer list, behind an `Rc<RefCell<…>>`. Every mutation method (`push`, `insert`, `remove`, `set`, `move_item`, `move_items`, `replace_all`, `clear`, `reconcile_by_key`) drops the mutable borrow *before* notifying observers, so a callback that reads `len()` or `with_item(...)` during the notification does not deadlock the cell.
 
 ```rust
 use teksilo_data::{ListModel, DataChange};
@@ -38,6 +38,7 @@ let _handle = projects.observe_changes(|change| match change {
     DataChange::ItemsRemoved  { range } => println!("{} item(s) removed at {}",  range.len(), range.start),
     DataChange::ItemsMoved    { from, to, count } => println!("moved {count} items from {from} to {to}"),
     DataChange::ItemUpdated   { index } => println!("item {index} updated"),
+    DataChange::WindowLoaded  { range } => println!("rows {range:?} finished loading"), // lazy sources only
     DataChange::Reset => println!("list reset"),
 });
 ```
@@ -53,13 +54,18 @@ Observation returns an `ObserverHandle` — drop the handle to unsubscribe. Widg
 ```rust
 pub trait ListDataSource: 'static {
     type Item: 'static;
+    type Key: ItemKey;   // stable per-row identity (`usize` = the index for ListModel)
     fn len(&self) -> usize;
     fn with_item<R>(&self, index: usize, f: impl FnOnce(&Self::Item) -> R) -> Option<R>;
     fn observe_changes(&self, f: impl Fn(&DataChange) + 'static) -> ObserverHandle;
+    // …plus defaulted capability methods: identity (`key_at` / `index_of`),
+    // DnD (`drag` / `can_accept` / `accept_drop` / `reorder_within` / `on_drag_out`),
+    // lazy loading (`row_state` / `request_window` / `can_fetch_more` / `fetch_more`),
+    // and `first_changed_index` (§13). See data-source.md.
 }
 ```
 
-`ListDataSource` is *not* related to `ListModel<T>` by inheritance — they are two separate input paths. `ListView` provides both `ListView::new(model, delegate)` and `ListView::from_source(source, delegate)` constructors to consume either.
+`ListDataSource` is the input every flat view reads through, and the built-in `ListModel<T>` (and `SortFilterListModel<T>`) implement it — so the two are not separate worlds: a hand-written source is simply another implementor. `ListView` provides both `ListView::new(model, delegate)` and `ListView::from_source(source, delegate)` constructors (plus `from_source_keyed` for keyed selection).
 
 The trait is not object-safe (associated type + generic methods), which is deliberate: widgets consume it generically. Implementors are free to keep internal locks, LRU caches, or network state across calls; `with_item` passing the item by callback rather than reference means the implementor controls the borrow lifetime.
 
@@ -74,7 +80,7 @@ The tree side has grown a small family. They layer as **source → projection �
 | **`TreeModel<T>`** (§4.1) | source | you build it in memory | `NodeId` | the tree lives in memory and you own it — the in-memory container |
 | **`TreeSlice<T>`** (§4.2) | projection | wraps a `TreeModel` | `NodeId` | you need per-view expand + flatten over a `TreeModel` (the built-in `TreeView` source) |
 | **`SortFilterTreeModel<T>`** (§13) | projection | wraps a `TreeModel` | `NodeId` | …and sort / tree-aware filter too; it owns *its own* expand state |
-| **`TreeDataSlice<K, T>`** (§4.4) | projection | `Vec<TreeRow>` you supply (indent-ordered) | your domain `K` | the tree lives in an **external** store (Qleany / DB) as an outline — no `TreeModel` mirror |
+| **`TreeDataSlice<K, T>`** (§4.4) | projection | `Vec<TreeRow>` you supply (indent-ordered) | your domain `K` | the tree lives in an **external** store (DB, entity store) as an outline — no `TreeModel` mirror |
 | **`TreeRowFilter<K, T>`** (§4.5) | pre-transform | `Vec<TreeRow>` → `Vec<TreeRow>` | — | sort / filter the rows feeding a `TreeDataSlice` (wire into `set_source`; pair with `set_all_expanded` to reveal matches) |
 
 Two orthogonal companions ride *alongside* a tree view rather than being sources themselves — pick the `NodeId` or domain-keyed variant to match your projection: **selection** — `SelectionModel` / `KeyedSelectionModel<K>` (§5); **checkboxes** — `TreeCheckedModel<T>` / `KeyedTreeCheckedModel<K>` (§6, §6.1). Rule of thumb: everything on a `TreeModel` is `NodeId`-keyed; everything on a `TreeDataSlice`/external source is domain-`K`-keyed.
@@ -104,8 +110,8 @@ A `TreeModel<T>` describes a hierarchy but does not decide what's expanded, what
 - Publishes a `version: Signal<u64>` that bumps on each re-flatten — consumers bind to this signal to know when to repaint.
 
 ```rust
-pub struct FlatEntry {
-    pub node_id: NodeId,
+pub struct FlatEntry<K: ItemKey = NodeId> {
+    pub node_id: K,            // the row's key (`NodeId` for a TreeSlice)
     pub depth: usize,          // 0 for roots
     pub has_children: bool,    // whether the node has any children in the model
     pub is_expanded: bool,     // whether this slice shows them
@@ -118,11 +124,11 @@ Consumers access entries via `slice.with_entry(index, |data, entry| …)` and ge
 
 ### 4.3 `TreeSliceHandle` — the consumer API
 
-`TreeView` doesn't re-implement expand/collapse; it holds a `TreeSliceHandle` and calls `toggle_expand(node_id)`, `expand(node_id)`, `collapse(node_id)`. The handle is `Clone` — widgets can share access to the same slice without ambient state. (`expand_all()` and `collapse_all()` are available on the owning `TreeSlice` itself.)
+`TreeSliceHandle` (from `slice.handle()`) is the lightweight `Clone` handle to a slice's shared state, usable in closures: `toggle_expand(node_id)`, `expand(node_id)`, `collapse(node_id)`, `is_expanded`, `expand_all()`. `TreeView` doesn't re-implement expand/collapse — on the `TreeModel` path it owns a `TreeSlice` (exposed as `tree_view.tree_slice()`, with `expand` / `collapse` / `toggle` / `expand_all` / `collapse_all` forwarded on the view), and hands each 4-arg `new_with_context` delegate a `TreeRowContext` whose `slice_handle()` / `toggle_callback()` wrap a `TreeSliceHandle`, so widgets share the slice without ambient state. (`collapse_all()` is on the owning `TreeSlice` only.) A handle does not keep the slice's model observer alive — the `TreeSlice` must outlive handles that rely on automatic re-flattening.
 
 ### 4.4 `TreeDataSlice<K, T>` — the same, over an *external* tree
 
-`TreeSlice` needs a `TreeModel` to wrap. When the tree's source of truth lives **outside** teksilo — a Qleany entity store, a database, a virtual filesystem — and you don't want to mirror it into a `TreeModel`, `TreeDataSlice<K, T>` gives the same machinery over your own data. It is the tree counterpart of the `ListDataSource` escape hatch (§3), but *ready-made* rather than a bare trait — it implements `TreeDataSource` for you.
+`TreeSlice` needs a `TreeModel` to wrap. When the tree's source of truth lives **outside** teksilo — an entity store, a database, a virtual filesystem — and you don't want to mirror it into a `TreeModel`, `TreeDataSlice<K, T>` gives the same machinery over your own data. It is the tree counterpart of the `ListDataSource` escape hatch (§3), but *ready-made* rather than a bare trait — it implements `TreeDataSource` for you.
 
 You hand it the tree as a flat, **indent-ordered** row stream — the shape an outline is actually stored in (binders / chapters / scenes, OPML, Markdown headings) — and it derives the hierarchy:
 
@@ -136,7 +142,7 @@ slice.reload();
 // let view = TreeView::from_source(slice.clone(), delegate);
 ```
 
-Each `TreeRow<K, T>` is `{ key, item, depth }` in document order. The engine derives every row's parent (the nearest preceding row of strictly smaller depth), its children, the roots (depth-0 rows), and its structural depth — then owns, exactly like `TreeSlice`:
+Each `TreeRow<K, T>` is `{ key, item, depth, has_children }` in document order (`TreeRow::new(key, item, depth)` leaves `has_children: None`, i.e. derived from the stream; `.with_children(true)` *promises* children the source has not emitted yet, so a lazy branch still draws its chevron and can be opened). The engine derives every row's parent (the nearest preceding row of strictly smaller depth), its children, the roots (depth-0 rows), and its structural depth — then owns, exactly like `TreeSlice`:
 
 - a per-view **expand set keyed by `K`** — so expand state (and keyed selection) survive a full re-source, which a `TreeModel` mirror can't guarantee because `NodeId`s are reassigned on rebuild;
 - the collapse-aware **flatten** into visible rows;
@@ -158,7 +164,7 @@ Identity is *your domain key* `K` (an `i64` entity id, a tagged enum) — not a 
 
 ### 4.5 `TreeRowFilter<K, T>` — sort + filter for the `TreeDataSlice` pipeline
 
-`SortFilterTreeModel` (§below, the `TreeModel`-backed sort/filter projection) owns its *own* expand state, so stacking it on a `TreeDataSlice` — which already has one — would give you two projections and two expand states. For an external tree, sort/filter belongs **below** the slice, on its raw indent-ordered input:
+`SortFilterTreeModel` (§13, the `TreeModel`-backed sort/filter projection) owns its *own* expand state, so stacking it on a `TreeDataSlice` — which already has one — would give you two projections and two expand states. For an external tree, sort/filter belongs **below** the slice, on its raw indent-ordered input:
 
 ```text
 rows::load()  →  TreeRowFilter::apply  →  TreeDataSlice::set_source  →  TreeView
@@ -192,6 +198,7 @@ pub struct SelectionModel {
     mode: SelectionMode,
     selection: Signal<BTreeSet<usize>>,  // indices into the flat view
     anchor: Rc<Cell<Option<usize>>>,      // for Shift+click range extend
+    // …plus the base set a Shift gesture extends around
 }
 ```
 
@@ -199,10 +206,11 @@ The selection exposes a `Signal<BTreeSet<usize>>` (via `selection_signal()`), so
 
 - `select(index)` — replace selection with a single item; set anchor.
 - `toggle(index)` — Ctrl+click: add or remove. In `Single` mode, degrades to `select`.
-- `extend_to(index)` — Shift+click: select the range from anchor to index, keeping anchor.
-- `select_all(range)` / `clear()` — bulk ops.
+- `extend_to(index)` — Shift+click: select the range from anchor to index, keeping anchor (unioned with the selection as it stood at the last click/toggle, so reversing the gesture shrinks it). `extend_to_additive(index)` is the Ctrl+Shift form that keeps the live selection.
+- `select_indices(indices, additive)` — marquee / arbitrary subset.
+- `select_all(count)` / `clear()` — bulk ops.
 
-In `None` mode every operation is a no-op; widgets can construct a disabled selection model when selection doesn't apply (a toolbar's action list, for instance). `select_all` is *also* a no-op in `Single` mode — every other mutator (`select`, `toggle`, `extend_to`, `select_indices`) already collapses to one index there, so "select all" has no coherent reading for a model that holds at most one item, and selecting one arbitrary row would be more surprising than doing nothing. `ListView`'s Ctrl+A handler and `TableView`'s `select_all` helper already gated on `Multi` before this was enforced in the model itself; `GridView`'s Ctrl+A handler did not, so a single-selection `GridView` used to select every tile on Ctrl+A.
+In `None` mode every operation is a no-op; widgets can construct a disabled selection model when selection doesn't apply (a toolbar's action list, for instance). `select_all` is *also* a no-op in `Single` mode — every other mutator (`select`, `toggle`, `extend_to`, `select_indices`) already collapses to one index there, so "select all" has no coherent reading for a model that holds at most one item, and selecting one arbitrary row would be more surprising than doing nothing. `ListView`'s Ctrl+A handler and `TableView`'s `select_all` helper already gated on `Multi` before this was enforced in the model itself; `GridView`'s Ctrl+A handler did not, so a single-selection `GridView` used to select every tile on Ctrl+A. (As of 2026-09-23 `GridView`'s handler gates on `Multi` too.)
 
 The selection is stored as flat indices into the view. For a `TreeView`, those are indices into the `TreeSlice`'s flat list — which means expanding or collapsing a parent changes which `NodeId`s those indices correspond to. Widgets translate at interaction time (e.g., on Ctrl+click): take the clicked `FlatEntry.node_id`, find its current flat index via the slice, then call `selection.toggle(index)`. Alternative designs where selection stores `NodeId`s directly have their own trade-offs (expansion doesn't lose selection, but the signal type changes per-widget); keeping selection index-based keeps the type uniform.
 
@@ -253,14 +261,17 @@ Selection (where the cursor is) and checkedness (which rows are *marked*) are or
 ```rust
 // Flat-list checkbox state.
 pub struct CheckedModel {
-    checked: Signal<BTreeSet<usize>>,
-    per_index: Rc<RefCell<HashMap<usize, Signal<bool>>>>,
+    checked: Signal<BTreeSet<usize>>,      // aggregate, derived from the per-index signals
+    inner: Rc<RefCell<Inner>>,             // per-index Signal<bool> cache + observers
 }
 
 impl CheckedModel {
     pub fn new() -> Self;
     pub fn signal_for(&self, index: usize) -> Signal<bool>;   // shared per index
+    pub fn checked_signal(&self) -> Signal<BTreeSet<usize>>;
+    pub fn is_checked(&self, index: usize) -> bool;
     pub fn checked_indices(&self) -> Vec<usize>;
+    pub fn checked_count(&self) -> usize;
     pub fn check(&self, index: usize);
     pub fn uncheck(&self, index: usize);
     pub fn toggle(&self, index: usize);
@@ -277,10 +288,13 @@ impl<T: 'static> TreeCheckedModel<T> {
     pub fn new(tree: TreeModel<T>) -> Self;
     pub fn with_mode(tree: TreeModel<T>, mode: AggregateMode) -> Self;
     pub fn signal_for(&self, node: NodeId) -> Signal<CheckState>;  // tristate per node
+    pub fn bool_signal_for(&self, node: NodeId) -> Signal<bool>;   // two-state bridge
+    pub fn check_state(&self, node: NodeId) -> CheckState;
     pub fn check(&self, node: NodeId);
     pub fn uncheck(&self, node: NodeId);
     pub fn toggle(&self, node: NodeId);
     pub fn checked_nodes(&self) -> Vec<NodeId>;                    // Checked only — Indeterminate excluded
+    pub fn clear(&self);
     pub fn aggregate_mode(&self) -> AggregateMode;
     pub fn set_aggregate_mode(&self, mode: AggregateMode);
 }
@@ -382,25 +396,25 @@ Use `ListView` for **unbounded or large collections that scroll**:
 - Chat histories.
 - Log viewers.
 
-`ListView` accepts both `ListModel<T>` and `ListDataSource` via separate constructors. Selection is driven by a shared `SelectionModel`. Drag-and-drop (intra-widget reorder) produces insertion-line feedback and emits typed reorder commands; see §8.
+`ListView` accepts both `ListModel<T>` and `ListDataSource` via separate constructors. Selection is driven by a shared `SelectionModel`. Drag-and-drop (intra-widget reorder) produces insertion-line feedback and commits through the source; see §9.
 
 ## 9. Drag-and-drop integration
 
-`ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder routes through `ListModel::move_item(from, to)` / `TreeModel::move_node(node, new_parent, new_index)`; the widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets) and emits typed reorder intents. Cross-widget drag flows through `DragPayload`; external (OS) drops (files / text / URLs from another app) arrive as a `DragPayload` with `origin() == External` through the same handlers — see [architecture.md §14 Drag and Drop](architecture.md) and [drag-and-drop.md §11](drag-and-drop.md) for the full picture.
+`ListView` and `TreeView` are drag sources and drop targets out of the box. Intra-widget reorder commits through the bound source's `accept_drop` / `reorder_within` — for a `ListModel` that is `move_item(from, to)` (or the `move_items` block move for a multi-row drag); for a `TreeSlice`, `TreeModel::move_node(node, new_parent, new_index)` / `move_to_root` behind a cycle guard. The widget produces visual feedback (insertion lines, depth-tinted highlight on tree drop targets). Cross-widget drag flows through `DragPayload`; external (OS) drops (files / text / URLs from another app) arrive as a `DragPayload` with `origin() == External` through the same handlers — see [architecture.md §14 Drag and Drop](architecture.md) and [drag-and-drop.md §11](drag-and-drop.md) for the full picture.
 
 The relevant teksilo-data hook is the `DataChange::ItemsMoved { from, to, count }` / `TreeChange::NodeMoved { node, old_parent, new_parent, new_index }` notifications. The source widget emits the mutation on the model; every observer of the model — including other `ListView`s sharing the data — receives the notification and updates consistently.
 
-## 10. Qleany and adjacent-app integration
+## 10. Layered-application integration
 
 For applications that already have a Clean Architecture split, teksilo-data sits naturally at the ViewModel layer:
 
-- Qleany entities live in the domain crate, no teksilo dependency.
+- Entities live in the domain crate, no teksilo dependency.
 - The view-model crate depends on teksilo-data to publish entity collections as `ListModel<EntityVM>`.
 - The view crate (widgets + windows) depends on teksilo-widgets and binds `ListView` / `TreeView` to those models.
 
-The architecture doc's `EntityListModel` example shows the shape: a wrapper that observes a Qleany store, maps its entities through a presentation transform on change, and holds the result in a `ListModel<EntityVM>`. The widget side is unaware of Qleany.
+The shape is a wrapper that observes the domain store, maps its entities through a presentation transform on change, and holds the result in a `ListModel<EntityVM>`. The widget side is unaware of the domain layer.
 
-Nothing in teksilo-data requires Qleany. An application that uses `diesel` + raw structs, or one that streams events off a Kafka topic, follows the same pattern with whatever domain-layer types it prefers.
+Nothing in teksilo-data requires a particular domain layer. An application that uses `diesel` + raw structs, or one that streams events off a Kafka topic, follows the same pattern with whatever domain-layer types it prefers.
 
 ## 11. Testing patterns
 
@@ -435,7 +449,7 @@ Widget-tree tests that want a representative model use `ListModel::from_vec(vec!
 - Access items through callbacks (`with_item`, `with_entry`) rather than returning references. The `RefCell` borrow stays internal.
 - `NodeId` is stable across mutations; index-based addressing is not (indices change when items insert or move). Store IDs, not indices, in long-lived state.
 - Selection is a separate concern (`SelectionModel`) — not part of `ListModel` / `TreeModel`.
-- `ListModel<T>` in memory, `ListDataSource` for external; pick one per view — they are not composable.
+- `ListModel<T>` in memory, a hand-written `ListDataSource` for external data; `ListModel` is itself a `ListDataSource`, so every flat view reads both through the same trait.
 - `Repeater` for bounded non-scrollable collections, `ListView` for scrollable or large ones.
 - Two `TreeView`s sharing a `TreeModel` get independent `TreeSlice`s; expand state is per-view.
 - Mutations flow one-way: widget emits typed intent → `Action` translates → model mutates → change notification → widgets repaint. The widget never writes directly to the model.
@@ -494,14 +508,15 @@ the next one. Read it synchronously from a change observer
 (`observe_changes` callbacks and `version_signal()` observers fire
 inline on every rebuild, so per-change reads cannot miss a value). The
 external `DataChange::Reset` contract of the proxies is unchanged.
-`ListDataSource` carries a defaulted `first_changed_index()` (returning
-`None`) so generic consumers reach the side-channel without downcasts.
+`ListDataSource` and `TreeDataSource` both carry a defaulted
+`first_changed_index()` (returning `None`) so generic consumers reach the
+side-channel without downcasts.
 
 ## 14. Projecting an external source of truth
 
 §7 and §10 assume the view-model *owns* its model (the `QStandardItemModel`
 shape). When the **domain owns the data** and the teksilo model is a projection
-over it (a Qleany entity store, a DB, an event stream — the
+over it (an entity store, a DB, an event stream — the
 `QAbstractItemModel` shape), **implement a data source over the domain instead
 of mirroring it into a built-in model.**
 
@@ -536,11 +551,14 @@ demand, where the eager flatten doesn't fit. Add view-layer sort/filter with a
 projection.
 
 A bounded, fully-resident, flat list is the one case where a `ListModel`
-projection can still be simpler than a source impl. There is no `reconcile`
-helper for it — keep the projection in sync by emitting the minimal `insert` /
-`remove` / `move_item` / `set` mutations yourself (a `Repeater` then reorders
-subtrees instead of recreating them); accept a `Reset` only when per-item state
-loss is acceptable.
+projection can still be simpler than a source impl. Keep the projection in sync
+with minimal mutations rather than `replace_all`: `ListModel::reconcile_by_key(new_items,
+key_fn)` diffs a freshly-loaded `Vec<T>` against the current contents by a
+unique, stable key and emits coalesced `ItemsRemoved` / `ItemsMoved` /
+`ItemsInserted` / `ItemUpdated` events (never `Reset`), so selection and focus
+survive and a `Repeater` reorders subtrees instead of recreating them; or emit
+the `insert` / `remove` / `move_item` / `set` mutations yourself. Accept a
+`Reset` only when per-item state loss is acceptable.
 
 **Tables.** A `TableView`'s rows are a `ListDataSource` (or a `ListModel` for
 the bounded-projection case); a `TreeTableView`'s rows are a `TreeDataSource`. A
@@ -573,7 +591,8 @@ stable handle — the chart counterpart of `NodeId`: removing other
 series never invalidates an existing `SeriesId`), plus a separate
 `order: Vec<SeriesId>` giving display order independent of arena
 layout. Each series holds a `Vec<ChartDatum<T>>` (`{ category: T,
-value: f32 }`).
+value: f32, color: Option<ColorProp> }` — the optional per-point colour
+overrides the series colour, bar charts only).
 
 ```rust
 use teksilo_data::{ChartModel, ChartSeries, ChartDatum};
@@ -725,7 +744,9 @@ Same three `SelectionMode`s as `SelectionModel` (`None` / `Single` /
 `extend_to(series, target)` only extends **within the anchor's own
 series** — a cross-series "range" has no natural order, so it falls
 back to a single-point select of `(series, target)`. `adjust(&change)`
-keeps the selection consistent as the source model mutates: a removed
+keeps the selection consistent as the source model mutates (call it from your
+own observer, or build with `ChartSelection::attached(mode, &model)` /
+`sel.attach(&model)` to have every `ChartChange` routed through it): a removed
 or wholesale-replaced series drops its selected points (and the
 anchor, if it pointed there); point insertions/removals shift or drop
 indices within their series; series metadata changes (rename / recolor

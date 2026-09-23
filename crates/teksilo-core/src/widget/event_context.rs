@@ -2183,9 +2183,10 @@ impl<'ops> EventContext<'ops> {
         self.cancel_drag = true;
     }
 
-    /// Replace the tree-level theme. Composite widgets are rebuilt so any
-    /// derived values they captured at build time pick up the new tokens,
-    /// and all widgets are marked dirty for repaint.
+    /// Replace the tree-level theme. All widgets are marked dirty for
+    /// relayout and repaint; nothing is rebuilt (see
+    /// `WidgetTree::set_theme`), so focus, scroll offsets and other
+    /// interaction state survive.
     ///
     /// An explicit theme also turns **off** OS-following: the app's theme
     /// mode is reset to manual, so a later OS light/dark change won't

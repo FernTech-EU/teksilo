@@ -28,7 +28,7 @@ cargo teksilo setup        # in the app: harness + a brief for every agent it fi
 First released at **0.13.0** — it tracks Teksilo's version, so an app on teksilo
 0.12 or older has no matching tool and is refused; see §2.
 
-Verified against teksilo 0.12.1.
+Last checked against the source at teksilo 0.13.1.
 
 ---
 
@@ -61,13 +61,15 @@ note: 'Theme' isn't in teksilo-widgets; resolved via the teksilo umbrella
 ```
 
 It accepts [`tools/extract_widget_api.py`](../tools/extract_widget_api.py)'s own
-flags (`--list`, `--all`, `-f`, `--crate`), because it *is* that extractor: 30
-crates are queryable, and a name reached through the `teksilo` umbrella prelude
-resolves to its owning crate rather than reporting "not found".
+flags (`--list`, `--all`, `-f`, `--crate`), because it *is* that extractor: 32
+crates are queryable (the two external text siblings, `text-document` and
+`text-typeset`, included), and a name reached through the `teksilo` umbrella
+prelude — or found by a sweep of the other crates — resolves to its owning
+crate rather than reporting "not found".
 
 ### `search`
 
-Retrieval over the 70 hand-written guides and the 56 worked example crates — the material
+Retrieval over the 69 hand-written guides and the 56 worked example crates — the material
 that reaches no consumer today.
 
 ```console
@@ -94,7 +96,7 @@ than the version the app pinned. So a non-empty result ends with one footer line
 naming the door that is offline *and* version-matched:
 
 ```
-Read any of these in full: cargo teksilo show <path>   (offline, teksilo 0.12.1 — not GitHub, which tracks main)
+Read any of these in full: cargo teksilo show <path>   (offline, teksilo 0.13.1 — not GitHub, which tracks main)
 ```
 
 ### `show`
@@ -200,7 +202,7 @@ state that a rule *without* frontmatter is always active; adding one would make
 the brief conditional for no gain. Cline also reads a project's `AGENTS.md`, so
 a project with one is already served before any of these exist.
 
-The **brief** is a self-contained ~40 lines: what Teksilo is, the five commands,
+The **brief** is a self-contained ~60 lines: what Teksilo is, the five commands,
 that every answer is pinned to the version this app resolved, and the rule that
 matters most — *read a search hit with `cargo teksilo show <path>`, never from
 GitHub, because `blob/main` tracks `main` and not what this app pinned*. It
@@ -241,7 +243,7 @@ Four properties worth relying on:
   your github.com account, Windsurf's global rules are one file at
   `~/.codeium/windsurf/memories/global_rules.md`, and a repository-root
   `AGENTS.md` is per-repository by definition. `setup --user` prints that list
-  rather than silently installing three of eight.
+  rather than silently installing three of seven.
 
 If the encoder fetch fails — offline, proxy, unsupported target — that is a
 **warning** and setup still succeeds: `search` degrades to BM25 by design (§5).
@@ -254,8 +256,8 @@ its exit code never depends on what it finds.
 
 ```console
 $ cargo teksilo status
-cargo-teksilo 0.12.1
-app resolved teksilo 0.12.1
+cargo-teksilo 0.13.1
+app resolved teksilo 0.13.1
 
 Project  /Users/me/myapp
   Claude Code        here      .claude/skills/teksilo/
@@ -270,6 +272,13 @@ User  /Users/me
 
 Search encoder  BAAI/bge-small-en-v1.5 (384 dimensions)
   model              here      /Users/me/Library/Caches/teksilo/fastembed (127.6 MB on disk)
+
+Symbol extractor  Python 3
+  interpreter        here      /usr/bin/python3
+
+These are files on disk. An agent picks them up on its own terms —
+some ask you to trust the folder first, and a gitignored instruction
+file is skipped silently.
 ```
 
 Three things it is built to get right:
@@ -344,7 +353,9 @@ move the app to teksilo 0.13.
 published at every teksilo version from 0.9.0, so `--version <pinned>` is
 correct advice there and should not be "fixed" to match this.)
 
-A refusal therefore has two regimes, and the message distinguishes them. Inside
+A refusal therefore has two regimes, and the message distinguishes them (a
+third, for a resolved version that is not a semver triple at all, offers only
+the checkout routes). Inside
 the tool's own version range it names the fix and, because a model is one of its
 two readers, tells it not to fall back on memory:
 
@@ -403,7 +414,7 @@ prevent. The message closes with what *does* work — reading the resolved sourc
 whose path it prints when it can find it.
 
 The same reasoning governs empty results: `search` prints
-`no match in the 0.12.1 corpus`, never "no results", so the absence is scoped to
+`no match in the 0.13.1 corpus`, never "no results", so the absence is scoped to
 the index rather than read as a fact about the framework.
 
 ---
@@ -424,8 +435,8 @@ Two details in path 2 look like style and are not. The extractor derives its
 repository root from `Path(__file__).resolve()`, so the tool is **copied** into
 the staging directory, never symlinked — a symlinked tool resolves its root back
 to the original and extracts from the wrong tree. And crate sources are
-*symlinked* rather than copied, because copying `teksilo-widgets` alone means 356
-files per invocation; on Windows, where a directory symlink needs Developer Mode
+*symlinked* rather than copied, because copying `teksilo-widgets` alone means
+nearly 400 files per invocation; on Windows, where a directory symlink needs Developer Mode
 or elevation, that falls back to copying just `src/`.
 
 ---
@@ -461,7 +472,7 @@ silently overwritten (`--force` overrides). Provenance goes in your `Cargo.toml`
 
 ```toml
 [package.metadata.teksilo]
-probe = "0.12.1"
+probe = "0.13.1"
 ```
 
 and a later run warns when that drifts from the resolved Teksilo.
@@ -496,14 +507,14 @@ mechanism — the author of the fourth probe copies one of these:
 | `example_dialogs.py` | Overlay focus, Escape, the two-press dismiss rule |
 | `example_rich_text.py` | `type_text`, IME preedit/commit, undo |
 
-All three run against this repository's own example apps in CI.
+All three run against this repository's own example apps in CI (on Linux).
 
 ---
 
 ## 5. The `semantic` feature
 
 Vector search needs an encoder, which means `fastembed` → ONNX Runtime plus two
-other C/C++ `sys` crates. That is a heavy dependency for a tool whose other three
+other C/C++ `sys` crates. That is a heavy dependency for a tool whose other
 commands need none of it, so it is contained at both ends:
 
 - **Compile time.** `semantic` is default-on, but `--no-default-features` yields a

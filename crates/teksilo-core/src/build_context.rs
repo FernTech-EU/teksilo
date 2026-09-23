@@ -1345,8 +1345,8 @@ impl<'a> BuildContext<'a> {
     /// none of which a plain (context-free) `subscribe_event` callback can do
     /// (it can only poke `Signal`s).
     ///
-    /// This is the supported bridge for **long-operation progress**: a Qleany
-    /// `Origin::LongOperation(Progress | Completed | Cancelled | Failed)` event
+    /// This is the supported bridge for **long-operation progress**: a data
+    /// layer's `Progress | Completed | Cancelled | Failed` event
     /// crosses from the operation's background thread to the UI thread and the
     /// callback drives an evolving progress toast (percentage in the body, a
     /// Cancel action, a success/error replacement on completion) — see the

@@ -294,8 +294,8 @@ let step = s.pan(time, pointer_position, offset_delta);
 // On release:
 if s.fling_for_phase(phase, velocity, profile) { /* schedule ticks */ }
 
-// Each frame while animating:
-while let Some(step) = s.tick(now) { … }
+// Each frame while animating (`None` once the coast has finished):
+if let Some(step) = s.tick(now) { … }
 ```
 
 **`ScrollStep::absorbed` is the boundary hand-off signal.** An axis that absorbed
@@ -632,9 +632,13 @@ Still to come:
   `a_finger_pans_the_rich_text_editor` (`rich_text/tests.rs`) covers that
   helper — but a build site that dropped the call, or passed
   `PanAxes::NONE`, would be caught for the rich editor and for neither of the
-  other two. The obstacle is the fixture, not the assertion: a headless text
+  other two. The obstacle was the fixture, not the assertion: a headless text
   surface needs its engine viewport seeded and a pump before it has anything to
-  scroll, and that scaffolding exists only in `rich_text/tests.rs` today;
+  scroll. That scaffolding now also exists in `code_editor/touch_tests.rs`,
+  whose `Harness` mounts a `CodeEditor`, a `PlainTextEditor` and a `LogView`
+  (as of 2026-09-23) — but its one finger-pan test,
+  `a_finger_that_panned_places_no_caret`, asserts that the pan placed no caret,
+  not that the surface scrolled;
 - the platform layer produces no `ScrollSource::TouchPan` sample of its own, and
   does not need to: a finger's pan is synthesised **in core**, by the pan
   arbiter, from that contact's own pointer samples, which is what lets it be

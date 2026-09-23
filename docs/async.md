@@ -30,8 +30,8 @@ linear `async` / `.await` — sequencing or branching several awaits in one plac
 
 For the common "kick off work, update the UI when it lands" case the reactive
 data path is simpler and needs no executor — reach for `spawn_local` only when
-the *imperative* shape genuinely reads better. (Teksilo apps backed by a data
-layer such as Qleany generally keep async in that layer entirely.)
+the *imperative* shape genuinely reads better. (Teksilo apps backed by a separate
+data layer generally keep async in that layer entirely.)
 
 ## The three crates
 
@@ -175,8 +175,8 @@ in each crate's `tests/`.
 The reactive data path (`EventSource` / `ctx.subscribe_event`) and this executor
 are complementary, not competing:
 
-- A background **publisher** (a Qleany `LongOperation`, a file watcher, a
-  message bus) → `subscribe_event` → `Signal::set`. No executor; the result is
+- A background **publisher** (a data layer's long operation, a file
+  watcher, a message bus) → `subscribe_event` → `Signal::set`. No executor; the result is
   pushed in. Best for "data arrives, UI reacts."
 - An **imperative flow** that sequences/branches awaits in one handler →
   `spawn_local`. Best when the callback shape would fragment the logic.

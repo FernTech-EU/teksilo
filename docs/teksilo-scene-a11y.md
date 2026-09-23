@@ -24,7 +24,9 @@ tree.
 The AT machinery has two cooperating layers:
 
 1. **Visual default.** [`A11yOffScreenMode`](../crates/teksilo-scene/src/a11y.rs)
-   decides which off-viewport entries the walker still emits. Pick
+   decides which off-viewport entries the walker still emits, and
+   [`A11yMode`](../crates/teksilo-scene/src/a11y.rs) decides whether
+   entries with no declared logical parent appear at all. Pick
    `Cooperative` (default) when the visual layout *is* a sensible
    reading order; pick `StrictlyParallel` when AT shape diverges
    meaningfully from visual layout.
@@ -128,8 +130,10 @@ Pick this for charts, dashboards, simple maps where visual layout
 *is* the reading order.
 
 `StrictlyParallel` — only entries placed in the logical tree
-(`set_a11y_parent`, `add_a11y_group`) are emitted. Items without an
-explicit declaration are **suppressed**. Pick this for corkboards /
+(`set_a11y_parent`, `add_a11y_group`) are emitted. Lightweight items
+without an explicit declaration are **suppressed**; heavyweight widgets
+still emit (they own focus and interaction state), directly under the
+SceneView when they have no declared parent. Pick this for corkboards /
 graph editors where AT shape should ignore visual layout entirely.
 
 ---
@@ -197,6 +201,17 @@ scene.add_a11y_relation(A11yNode::Item(node_a), A11yRelation::FlowTo,      A11yN
   editors use this so VoiceOver / NVDA "next item" follows
   data-flow order rather than scene-insertion order.
 
+**Where a relation lands.** Relations — and the live-region and landmark
+decorations below — are written onto the synthetic nodes the scene emits
+itself, so the `from` end must be a **lightweight item** or a **logical
+group** that is emitted this pass. A heavyweight entry (`Scene::add_widget` /
+`add_widget_item`, or an `A11yNode::Widget`) is emitted by the framework
+walker, which the scene cannot decorate from its own `accessibility()`, so a
+relation *from* one is silently dropped today. A heavyweight entry works as
+the `to` end only when addressed as `A11yNode::Widget(widget_id)`; addressed
+as `A11yNode::Item(..)` it resolves to a synthetic node that does not exist,
+and the dangling target is stripped.
+
 ---
 
 ## Live regions
@@ -207,7 +222,9 @@ Mark a scene entry as a polite or assertive live region:
 scene.set_a11y_live(A11yNode::Item(toast), accesskit::Live::Polite);
 ```
 
-Updates to the entry's AT name / value are announced.
+Updates to the entry's AT name / value are announced. Like relations, this
+lands only on a lightweight item or a logical group (see
+[Relations](#relations)); pass `Live::Off` to clear.
 
 ---
 
@@ -218,6 +235,8 @@ Promote a group to a landmark for screen-reader navigation:
 ```rust
 scene.set_a11y_landmark(A11yNode::Group(toolbar_group), accesskit::Role::Toolbar);
 ```
+
+The landmark overrides the node's role; pass `Role::Unknown` to clear.
 
 ---
 
@@ -232,6 +251,11 @@ Apps coin their own category names — `"node"`, `"connector"`,
 scene.set_a11y_categories(A11yNode::Item(node), &[A11yCategory::new("node")]);
 scene.set_a11y_categories(A11yNode::Item(edge), &[A11yCategory::new("connector")]);
 ```
+
+> **Not yet emitted.** The scene stores categories (read back with
+> `Scene::a11y_categories_of`), bumps `a11y_change_signal` when they change and
+> carries them through `take` / `restore`, but the `SceneView` walker does not
+> yet write them onto any AccessKit node, so no AT client sees them today.
 
 ---
 
@@ -257,14 +281,26 @@ RectItem::new(rect)
 for the AT user. `Exclude` is useful for animated decorations whose
 emission would be noisy (a pulsing recording dot, a spinner).
 
+> **Recorded, not yet honoured.** The mode is stored on the item and
+> reported by `SceneItem::access_subtree_mode`, but the `SceneView` walker
+> (`view/a11y_impl.rs`) does not consult it: every emitted item — including
+> one logically parented under a `Merge` / `Exclude` item — still gets its
+> own node. Until it does, hide a sub-part with `.access_hidden(true)` and
+> name the whole with `.access_label(..)` on the item that stands for it.
+
 ---
 
 ## Override chain (`access_*` builders)
 
-Every built-in item's builder, every custom item that invokes the
-`item_a11y_builders!()` macro, and `A11yGroupBuilder` / `SceneView`
-expose a parallel `.access_*` chain that mirrors `WidgetBuilder` on
-the widget tier:
+Every built-in item's builder, and every custom item that holds an
+`a11y: ItemA11yOverrides` field and invokes the `item_a11y_builders!()`
+macro, exposes a parallel `.access_*` chain (`access_label`,
+`access_description`, `access_role`, `access_hidden(bool)`,
+`access_subtree` / `access_merge_subtree` / `access_exclude_subtree`, and the
+value/numeric setters below) that mirrors `WidgetBuilder` on the widget tier.
+`A11yGroupBuilder` has only `label` and `role`; `SceneView`, being a widget,
+takes the ordinary widget-tier `.access_*` chain from
+[accessibility-overrides.md](accessibility-overrides.md).
 
 ```rust
 RectItem::new(rect)
@@ -302,7 +338,11 @@ magnitude and bounds, not just a label.
 ## Custom focus order
 
 Apps that need a focus traversal that diverges from scene-insertion
-order install a callback. Common cases:
+order install a callback. It is **not** bound to Tab by the view:
+`SceneView::next_focus` / `previous_focus` (or `focus_in_direction`) route
+through it — falling back to scene insertion order without one — and the app
+wires those into its own Tab / Shift+Tab handling and moves focus itself.
+Common cases:
 
 - Story corkboards — Tab follows Acts → Scene cards in story order.
 - Node-graph editors — Tab follows data-flow order via `FlowTo`
@@ -322,12 +362,14 @@ SceneView::new(scene).focus_order(|scene, dir, current| {
 ```
 
 The callback is `Fn(&Scene, FocusDirection, Option<ItemId>) -> Option<ItemId>`.
-Returning `None` ends the cycle (the focus exits the SceneView and
-moves to the next focusable in the parent).
+Returning `None` means "no next item" — the app's handler can then let focus
+leave the SceneView for the next focusable in the parent.
 
-When the focused item is off-viewport, the SceneView calls
-[`ensure_visible`](teksilo-scene.md#background--foreground-hooks)
-automatically so the focus indicator stays on screen.
+When a heavyweight widget inside the view takes focus off-viewport, the
+framework's reveal walk (`ScrollIntoView`) reaches the SceneView, which pans
+the camera to it (honouring reduced motion). Focus traversal does not call
+[`ensure_visible`](teksilo-scene.md#background--foreground-hooks) for you;
+call it yourself when you move to an item the reveal walk cannot reach.
 
 ---
 
@@ -459,7 +501,7 @@ back and silently lose all five. On a crate whose differentiator is per-item
 accessibility, that is the failure worth naming.
 
 `Scene::take(id)` lifts those decorations out instead of dropping them, and
-`Scene::restore` puts them back **at the same `ItemId`** — which the whole
+`Scene::restore` (or `restore_all` for the whole salvage) puts them back **at the same `ItemId`** — which the whole
 logical tree is keyed by, so a restore that minted a fresh id would re-root the
 item, break every relation naming it and orphan whatever was AT-parented under
 it. `Scene::remove` is the same call with the salvage routed to the edit sink,
@@ -644,9 +686,11 @@ let view = SceneView::new(scene)
     .focus_order(|scene, dir, current| story_order_traversal(scene, dir, current));
 ```
 
-Screen-reader output: "Act 1, Region. Opening, Card. Act 2, Region.
-Climax, Card." Tab cycles in story order regardless of where the
-cards sit visually.
+Screen-reader output: "Act 1, group. Opening … Act 2, group. Climax …"
+(`A11yGroup::builder()` defaults to `Role::Group`; pass `.role(Role::Region)`
+for a region). With `next_focus` / `previous_focus` wired to Tab (see
+[Custom focus order](#custom-focus-order)), Tab moves in story order
+regardless of where the cards sit visually.
 
 ---
 
@@ -717,8 +761,12 @@ let view = SceneView::new(scene)
     .focus_order(|scene, dir, current| flow_order_traversal(scene, dir, current));
 ```
 
-VoiceOver rotor offers "Nodes" and "Connectors" categories; "next
-item" via the rotor follows the user's chosen category.
+The intent is a VoiceOver rotor offering "Nodes" and "Connectors", but
+two parts of this example do not reach AT today: categories are not yet
+emitted (see [Categories](#categories-rotor--quick-nav)), and `node_a` /
+`node_b` are heavyweight, so the `FlowTo` from `node_a` is dropped (see
+[Relations](#relations)). A graph whose nodes are lightweight items gets the
+relation.
 
 ---
 
@@ -818,7 +866,7 @@ focusing the node: `WidgetTree::focus(id)` does not check `focusable`, so
 focusing proves the handlers run and nothing about a keyboard user getting
 there.
 
-[`EventContext::announce`]: ../crates/teksilo-core/src/announcer.rs
+[`EventContext::announce`]: ../crates/teksilo-core/src/widget/event_context.rs
 
 ---
 
@@ -935,7 +983,7 @@ It is not done here because it is not a hit-test change: an AccessKit child list
 is also the **reading order**, so either route reorders how a screen reader walks
 the scene — today structure, then items, then cards; afterwards, interleaved by
 z. That is an architecture decision about the AT tree's shape, with an existing
-app-facing surface to reconcile (`A11yMode`, `SceneView::focus_order_callback`),
+app-facing surface to reconcile (`A11yMode`, `SceneView::focus_order`),
 and it belongs with whoever owns that surface rather than inside a picker fix.
 The table above is pinned by
 `view::tests::pick_order::what_the_press_claiming_rule_does_and_does_not_reconcile`,
@@ -948,7 +996,7 @@ so the day it changes, it changes deliberately.
 - Implementation: [`crates/teksilo-scene/src/a11y.rs`](../crates/teksilo-scene/src/a11y.rs),
   [`crates/teksilo-scene/src/scene.rs`](../crates/teksilo-scene/src/scene.rs)
   (the `Scene::add_a11y_*` / `set_a11y_*` API), and the AT walker in
-  [`crates/teksilo-scene/src/view.rs`](../crates/teksilo-scene/src/view.rs).
+  [`crates/teksilo-scene/src/view/a11y_impl.rs`](../crates/teksilo-scene/src/view/a11y_impl.rs).
 - Widget-tier override surface: [`docs/accessibility-overrides.md`](accessibility-overrides.md).
 - Agent/CI automation over this AT surface: [`docs/automation-mcp.md`](automation-mcp.md).
 - AccessKit reference: <https://accesskit.dev>.

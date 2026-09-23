@@ -510,7 +510,7 @@ serves them for the version this app pins.
   `ListModel<T>` / `TreeModel<T>` and keep it in sync (`push`/`insert`/`remove`/`move_item`/
   `replace_all`). Right for bounded, in-memory, fully-resident data.
 - **Domain owns the data** (Qt `QAbstractItemModel` shape) — implement `ListDataSource` /
-  `TreeDataSource` **directly** over your store (DB cursor, Qleany entity store, paged feed);
+  `TreeDataSource` **directly** over your store (DB cursor, entity store, paged feed);
   no second in-memory copy to sync, identity is your own domain key. Bind with
   `ListView::from_source` / `TreeView::from_source` (add `_keyed` for `KeyedSelectionModel`).
   A first-class path, **not** a mere "escape hatch for huge sources" — reach for it whenever

@@ -56,6 +56,24 @@
 > should be read: a *conformance gate* now exists and is not the same thing as
 > conformance, and the gate measures the **IntUI** preset only.
 
+> **Citation note, 2026-09-23.** Not a re-assessment — three pointers that have moved
+> since `7b15f57d`, recorded so the pinned citations stay followable:
+>
+> - The AT tree walker has been split out of `accessibility_impl.rs` into
+>   [`accessibility_emit_impl.rs`](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs).
+>   The `accessibility_impl.rs` line citations for walker code below — the root
+>   language tag (§3.3 3.1.1), row name-from-content (§3.1 1.3.1), `accessibility_children`
+>   (G17), tooltip description owners (§3.1 1.4.13) and context-menu advertisement (§3.6) —
+>   now resolve there, by symbol: `build_accessibility_tree`,
+>   `build_accessibility_recursive`, `tooltip_description_target`, `announce_context_menu`.
+> - §6's description of the terminal tree predates §5.8b: its runs are now direct
+>   children of the `Role::Terminal` node, with no `Role::Paragraph` per row, and the
+>   "keyboard problem" it mentions is the trap fixed in §5.1.
+> - The two corrections §5.13 and §8 ask of
+>   [`accessibility-overrides.md`](accessibility-overrides.md) have been made: it now
+>   documents `access_hidden` as taking `impl Into<Prop<bool>>` and notes that
+>   `access_disabled` is a plain, non-reactive `bool`.
+
 ---
 
 ## 1. Executive summary

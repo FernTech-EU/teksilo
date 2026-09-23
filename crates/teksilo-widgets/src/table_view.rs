@@ -1230,8 +1230,8 @@ impl<T: 'static> TableView<T> {
     /// a persisted layout).
     ///
     /// A no-op when the map is unchanged, so the documented
-    /// settings-round-trip wiring (see docs/table-view.md, "Persistence")
-    /// terminates instead of recursing: `Signal::set` has no equality check of
+    /// signal round trip (see docs/table-view.md, "Persistence", which shows
+    /// it for the column order) terminates instead of recursing: `Signal::set` has no equality check of
     /// its own, and a live resize writes a width on every pointer move.
     pub fn set_column_widths(&self, widths: HashMap<String, f32>) {
         imperative::set_column_widths(&self.column_widths_signal, widths);

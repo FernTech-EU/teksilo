@@ -50,7 +50,7 @@ let clock = teksilo::res!("resources/icons/clock.webp");
 let font = teksilo::res!("resources/fonts/custom.ttf");
 ```
 
-The macro validates known formats at compile time (XML structure for SVG, magic bytes for PNG/WebP). Unknown extensions are embedded as raw bytes without validation — only file existence is checked.
+The macro validates known formats at compile time: SVG is parsed with the real `SvgIcon` parser and rejected if it contains no drawable geometry (an `<image>`/embedded-bitmap-only SVG fails, since the icon renderer skips `<image>` and `<text>`); PNG and WebP are checked by magic bytes (PNG's 8-byte signature + IHDR chunk; WebP's RIFF/WEBP signature). Unknown extensions are embedded as raw bytes without validation — only file existence is checked.
 
 ### Using icons in buttons
 

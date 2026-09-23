@@ -91,8 +91,9 @@ the degenerate-height tie-break.
 Pass a flat `SelectionModel` (`None` / `Single` / `Multi`). Mouse: click =
 select, Ctrl+click = toggle, Shift+click = reading-order range (Finder /
 Explorer). Ctrl+A = select-all — a no-op in `Single`/`None` mode, matching
-`ListView` and `TableView` (`SelectionModel::select_all` itself enforces this,
-so no per-view gating is needed). `Multi` mode adds **rubber-band marquee** — a
+`ListView` and `TableView`; the grid's handler gates on `Multi` (and leaves the
+chord unclaimed otherwise), and `SelectionModel::select_all` enforces the same
+rule for any other caller. `Multi` mode adds **rubber-band marquee** — a
 drag on the empty background sweeps a rectangle and selects every intersecting
 tile (Ctrl/Shift at drag-start = additive). The hit-test is geometric, so it
 selects tiles outside the realized window. `.on_selection_changed(|set|)` fires
@@ -110,14 +111,16 @@ painted focus ring. Matrix (RTL-aware; horizontal arrows swap):
 | Arrow ↑/↓ | ±columns |
 | Home / End | first / last item of the collection |
 | Ctrl+Home / Ctrl+End | the same, without moving the selection |
+| Ctrl+Arrow | move the focus without touching the selection |
+| Ctrl+Space | toggle the focused tile's selection |
 | PageUp / PageDown | ± a viewport of rows + scroll |
 | Space | check the focused tile if it holds a checkbox, else toggle (`Multi`) / select (`Single`) |
 | Enter | `.on_tile_activate` (else select) |
 | Esc | clear focus |
 | Ctrl+A | select all (`Multi` mode only); Ctrl+Shift+A deselects |
-| Alt+Arrow | reorder the focused tile (when `.reorderable`) |
+| Alt+Arrow / Alt+Home / Alt+End | reorder the focused tile (when `.reorderable`); Alt+↑/↓ moves it a whole row |
 | printable | type-ahead (needs `.type_ahead_label(i)`; `.type_ahead_timeout`) |
-| Tab | `.tab_traversal(WithinGrid \| OutOfGrid)` |
+| Tab | `.tab_traversal(WithinGrid \| OutOfGrid)` (default `OutOfGrid`); Ctrl+Tab always leaves the grid |
 
 Shift + any navigation extends the selection range. Every navigation scrolls
 the new focus into view.
@@ -153,7 +156,7 @@ separate, whole-grid "first page is loading" overlay.) See
 
 ## Drag-and-drop reorder
 
-`.reorderable(true)` enables intra-grid drag (and keyboard Alt+Arrow). Drags
+`.reorderable(true)` enables intra-grid drag (and keyboard Alt+Arrow / Alt+Home / Alt+End). Drags
 route through the bound source's DnD capabilities: a tile is draggable only when
 the source's `drag(key)` returns `CanDrag`; on hover the geometric
 `(target, position)` is validated by `can_accept(query)` (a vertical insertion
@@ -215,7 +218,8 @@ contents.
 ## Tests
 
 Headless (no GPU): [crates/teksilo-widgets/src/grid_view/tests.rs](../crates/teksilo-widgets/src/grid_view/tests.rs)
-plus unit tests in `layout/offsets.rs` and `layout/strategy.rs`. Coverage:
+plus unit tests in `layout/strategy.rs` and, for the prefix-sum table
+(`layout/offsets.rs` is now only a re-export shim), `common/row_offsets.rs`. Coverage:
 virtualization window, column derivation, tile placement (uniform / variable /
 waterfall / sectioned), prefix-sum + anchoring, selection, 2D keyboard,
 reorder (source `accept_drop`), type-ahead, source-driven lazy loading

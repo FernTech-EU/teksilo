@@ -7,10 +7,9 @@
 #     at the site root.
 #   * rustdoc — the deep API reference under /api/ (catalog pages deep-link in).
 #
-# Modelled on qleany's mdbook-gh-pages.yml (same Cloudflare Pages deploy via
-# wrangler-action + CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets), with
-# the Teksilo-specific steps added: regenerate the catalog from widget source and
-# build the rustdoc API reference.
+# Deploys to Cloudflare Pages via wrangler-action + CLOUDFLARE_API_TOKEN /
+# CLOUDFLARE_ACCOUNT_ID secrets. Teksilo-specific steps: regenerate the
+# catalog from widget source and build the rustdoc API reference.
 
 name: Deploy documentation to Cloudflare Pages
 

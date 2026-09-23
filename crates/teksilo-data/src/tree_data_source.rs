@@ -10,7 +10,7 @@
 //! The built-in [`TreeSlice`](crate::TreeSlice) and
 //! [`SortFilterTreeModel`](crate::SortFilterTreeModel) implement it over an
 //! in-memory [`TreeModel`]; an external source of truth
-//! (e.g. a Qleany entity store) implements it directly with its own `Key` type
+//! (e.g. an entity store) implements it directly with its own `Key` type
 //! and so never needs to mirror itself into a `TreeModel`.
 //!
 //! ## When to use

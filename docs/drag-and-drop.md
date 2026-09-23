@@ -61,7 +61,7 @@ handlers = handlers.on_drag(move |phase, ctx| {
 });
 ```
 
-Two source APIs on [`EventContext`](../crates/teksilo-core/src/widget.rs):
+Two source APIs on [`EventContext`](../crates/teksilo-core/src/widget/event_context.rs):
 
 | Call | Effect |
 |---|---|
@@ -86,8 +86,8 @@ AccessKit `ShowContextMenu` action, or on a visible overflow affordance.
 Three cursor / capture invariants the framework guarantees for the source:
 
 - `current_cursor` switches to `CursorIcon::Grabbing` at drag start and resets to `Default` on drop / cancel / source-destroyed.
-- Pointer capture is installed on the source's wrapper automatically via the recognizer's `ctx.capture_pointer()` call. The source keeps receiving `PointerMove` / `PointerUp` even when the cursor leaves its bounds.
-- `Escape` cancels: the preview overlay is dismissed and `on_drag_leave` fires on the current target before the session is cleared.
+- Pointer capture is installed on the `source` widget passed to `start_drag` when the session starts. The source keeps receiving `PointerMove` / `PointerUp` even when the cursor leaves its bounds.
+- `Escape` cancels: the preview overlay is dismissed, the session cleared and capture released, then `on_drag_leave` fires on the current target and the source's `on_drag_ended` receives `DropOutcome::Cancelled`.
 - The session records **which pointer** is carrying the drag, once, at
   `start_drag`. Most of a drag then runs where there is no sample to ask — the
   per-layout tick (§4.2) and an OS drag's phases, delivered from a platform
@@ -106,7 +106,7 @@ Target-side handlers fire in this strict order, each at most once per role per d
 Fires on every `PointerMove` while this widget is the current drop target. Two jobs:
 
 1. **Decide acceptance.** Inspect `payload` via `has_typed` / `mime_types`. If this target doesn't want this payload, return `DropFeedback::NoFeedback` (and make sure your `on_drop` also rejects it — nothing enforces consistency).
-2. **Provide visual feedback.** Return `DropFeedback::InsertionLine { y, width }` (between-items insertion) or `DropFeedback::HighlightRect { rect, color }` (drop-into container). The framework stores the descriptor on the active session for anything that wants to render it; the widget itself is responsible for actually drawing the feedback in its `paint()`.
+2. **Provide visual feedback.** Return `DropFeedback::InsertionLine { y, width }` (between-items insertion), `DropFeedback::HighlightRect { rect, color }` (drop-into container), or `DropFeedback::Accept` (accepted, but the widget draws its own signal-driven visual). The framework stores the descriptor on the active session for anything that wants to render it; the widget itself is responsible for actually drawing the feedback in its `paint()`.
 
 ```rust
 handlers = handlers.on_drag_hover(move |payload, pos, _ctx| {
@@ -162,7 +162,7 @@ handlers = handlers.on_drag_leave(move |_ctx| {
 
 ### 4.4 `on_drop(payload, local_pos, ctx) -> bool`
 
-Fires on `PointerUp` only if this widget is the drop target at the release position. Already preceded by `on_drag_leave`, so by the time `on_drop` runs the feedback state is cleared. Return `true` if the drop was accepted.
+Fires once on `PointerUp`, on the target the hover settled on (§4.5). Already preceded by `on_drag_leave`, so by the time `on_drop` runs the feedback state is cleared. Return `true` if the drop was accepted.
 
 ```rust
 handlers = handlers.on_drop(move |mut payload, pos, _ctx| {
@@ -175,7 +175,7 @@ handlers = handlers.on_drop(move |mut payload, pos, _ctx| {
 });
 ```
 
-Whether the drop is "accepted" has no framework-observable side effect today — the payload is dropped (Rust `Drop`) regardless, and no user-visible state hangs off the return. The `bool` is an extension point for future listener APIs.
+The return value reaches the drag's source as `DropOutcome::InApp { accepted }` in its `on_drag_ended` (§11.5) — that is how a data view decides whether an exported `Move` should remove its rows (§12.4). A `false` does not re-bubble the drop to another target; the target was already chosen during the hover. The payload itself is moved into the handler either way.
 
 ### 4.5 Drop-target bubbling — nested targets
 
@@ -198,8 +198,10 @@ targets, firing each one's `on_drag_hover`, and stops at the first that
 
 A target with an `on_drop` but no `on_drag_hover` engages **optimistically**
 (`Accept`, no visual), so it can still receive the drop — `on_drop` makes the
-final call on release. The same engage-or-bubble walk runs on `PointerUp`, so
-the drop lands on whichever target the hover settled on.
+final call on release. On `PointerUp` the drop goes to whichever target the
+hover settled on; the same engage-or-bubble walk re-runs at the release position
+only when there is none (a quick drag with no hover, or a settled target
+destroyed mid-drag).
 
 ## 5. The preview overlay
 
@@ -217,7 +219,7 @@ Cleanup: `cleanup_drag_preview()` dismisses the overlay and destroys its content
 
 ### The [`DragPreview`](../crates/teksilo-widgets/src/drag_preview.rs) wrapper
 
-`ListView` / `TreeView` don't hand the raw delegate widget to `start_drag_with_preview` — they wrap it in a small `DragPreview` composite that:
+`ListView` / `TreeView` (and `TableView`, `TreeTableView`, `GridView` and the `TabBar` strip) don't hand the raw delegate widget to `start_drag_with_preview` — they wrap it in a small `DragPreview` composite that:
 
 - Applies a fixed `(width, height)` so a `Spacer` inside the delegate doesn't collapse under the overlay's unbounded proposal.
 - Wraps the inner in `Panel::new().background(SurfaceRole::Raised).corner_radius(6.0)` so the floating row reads as picked-up against the window.
@@ -242,7 +244,7 @@ The kind comes from the drag session (§4.2), which is what makes it reachable f
 
 ## 7. Keyboard equivalence
 
-Every drag operation should have a keyboard-accessible equivalent that emits the same semantic command. `ListView` / `TreeView` implement this via `Alt+Arrow` (in their `on_key` handler), calling the same `ListModel::move_item` / `TreeModel::move_node` that `on_drop` would call. The semantic operation is decoupled from the input gesture.
+Every drag operation should have a keyboard-accessible equivalent that emits the same semantic command. `ListView` / `TreeView` implement this via `Alt+Arrow` (in their `on_key` handler), which synthesizes the same `RowDragData` a drag would and routes it through the source's `accept_drop` — the path `on_drop` takes, ending in `ListModel::move_item` / `TreeModel::move_node` for the stock sources (§9). The semantic operation is decoupled from the input gesture.
 
 This is a **contract**, not a framework feature — nothing forces a custom drop target to provide a keyboard path. For anything accessible, you have to.
 
@@ -265,16 +267,18 @@ drop target (whichever widget find_drop_target_at_or_above returns):
                                 │
    target changes ─────────────►│ on_drag_leave (prev target)
                                 │
-  Escape / cancel  ─────────────►│ on_drag_leave (current target)
-                                │ cleanup_drag_preview
+  Escape / cancel  ─────────────►│ cleanup_drag_preview
                                 │ pointer_captured_by = None
                                 │ current_cursor = Default
+                                │ on_drag_leave (current target)
+                                │ on_drag_ended(Cancelled)   (source)
                                 │
-  PointerUp on target  ─────────► on_drag_leave (current target)
-                                 on_drop(payload, LOCAL pos)
-                                 cleanup_drag_preview
+  PointerUp on target  ─────────► cleanup_drag_preview
                                  pointer_captured_by = None
                                  current_cursor = Default
+                                 on_drag_leave (current target)
+                                 on_drop(payload, LOCAL pos)
+                                 on_drag_ended(InApp { accepted })   (source)
 
 scroll wheel during drag:
   Scroll ─► routed to active_drag.current_target.on_scroll
@@ -337,15 +341,15 @@ Everything is headless. The key harness helpers (on `WidgetTree`):
 |---|---|
 | `dispatch_event(WidgetEvent::PointerDown/Move/Up/...)` | Feed raw events |
 | `advance_time(Duration)` | Advance the sim clock (used by tooltip / long-press delays) |
-| `overlay_manager().len()` / `.overlay(id)` | Inspect active overlays (incl. drag preview) |
+| `overlay_manager().len()` / `.active_ids()` / `.bounds_for(id)` | Inspect active overlays (incl. drag preview) |
 | `widget_as_any(id)` | Downcast a widget for test introspection (via the `Widget::as_any` hook) |
 | `active_drag.is_some()` (pub(crate) — in teksilo-core tests only) | Check whether a session is live |
 
 Common patterns from the existing suite:
 
 - **Core-level lifecycle tests** ([drag_drop_impl.rs tests module](../crates/teksilo-core/src/widget_tree/drag_drop_impl.rs)) — use `FillWidget` / `InsetWidget` / `StackWidget` with handlers attached directly, drive events with `tree.dispatch_event(...)`, assert via `Rc<Cell<u32>>` counters and `tree.active_drag`. The `on_drag_leave_*` tests are the canonical examples.
-- **Widget-level integration tests** ([list_view.rs](../crates/teksilo-widgets/src/list_view.rs), [tree_view.rs](../crates/teksilo-widgets/src/tree_view.rs) tests modules) — build a real `ListView`/`TreeView` with a `ListModel` / `TreeModel`, run the full gesture chain via a `drag_item` helper, assert the model's observable state (`with_item`, `root_count`) and the feedback signal via the `widget_as_any` downcast.
-- **Drag across a rebuild** — `drag_survives_rebuild_triggered_by_selection` in `list_view.rs` pins the scenario where clicking a row triggers a selection-driven rebuild between `PointerDown` and the first `PointerMove`. The drag must still complete.
+- **Widget-level integration tests** ([list_view/tests.rs](../crates/teksilo-widgets/src/list_view/tests.rs), [tree_view/tests.rs](../crates/teksilo-widgets/src/tree_view/tests.rs)) — build a real `ListView`/`TreeView` with a `ListModel` / `TreeModel`, run the full gesture chain via a `drag_item` helper, assert the model's observable state (`with_item`, `root_count`) and the feedback signal via the `widget_as_any` downcast.
+- **Drag across a rebuild** — `drag_survives_rebuild_triggered_by_selection` in `list_view/tests.rs` pins the scenario where clicking a row triggers a selection-driven rebuild between `PointerDown` and the first `PointerMove`. The drag must still complete.
 - **External handlers survive rebuild** — `external_handlers_survive_rebuild` in [widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs) pins the handler-bucket invariant: closures attached via `SomeWidget::new().on_tap(...)` must keep firing after the widget rebuilds in place.
 
 See [events-and-gestures.md §8](events-and-gestures.md) for the general testing patterns.
@@ -383,7 +387,8 @@ fn on_drop(payload: DragPayload, _pos, ctx) -> bool {
 [`ExternalDndBackend`](../crates/teksilo-platform/src/external_dnd.rs) registers
 the app as the OS drop target for a window and, for each phase
 (`Entered { data, position }` / `Moved` / `Left` / `Cancelled` /
-`Dropped { data, position }`), posts an `ExternalDndEventPayload` through
+`Dropped { data, position }`, plus `DragEnded { outcome }` when an outbound
+drag this window started finishes), posts an `ExternalDndEventPayload` through
 `AppEventPoster::post_external` — the same channel file dialogs use.
 `teksilo-app` routes it to the window's tree and drives
 `WidgetTree::{begin,update,end,cancel,abort}_external_drag`, which construct a
@@ -577,13 +582,16 @@ reports `OsCopy` (the OS's view), not `InApp` — drops that never left report
 `InApp`.
 
 **Per-platform:** macOS uses `NSDraggingSource` + `beginDraggingSessionWithItems:event:source:`
-(triggering event from `NSApp.currentEvent`); Wayland uses `wl_data_source` +
+(triggering event from `NSApp.currentEvent`); Windows runs OLE `DoDragDrop` on the
+next event-loop turn (it spins its own modal loop, so it cannot run inside the
+dispatch that armed the escalation); Wayland uses `wl_data_source` +
 `wl_data_device.start_drag` with a press serial captured on the DnD thread (see
 below; the `Drop` handler skips the pipe-read for a self-drag to avoid a
 single-thread deadlock); X11 owns `XdndSelection` from its proxy window
-and polls the pointer rather than grabbing it (§11.3.1). No target declines
-(`begin_drag` returns
-`false`) and the framework keeps the in-app drag alive. Demo: the "Drag OUT" rows
+and polls the pointer rather than grabbing it (§11.3.1). A backend that cannot
+start the drag (nothing exportable, or on Wayland no press serial for the
+dragging device) declines (`begin_drag` returns `false`) and the framework keeps
+the in-app drag alive. Demo: the "Drag OUT" rows
 and "Internal drop target" in `cargo run -p file-drop`.
 
 **Which press opened the grab — the one thing the platform must be told.**
@@ -649,10 +657,10 @@ implicitly sets `accept_typed::<T>()` and hands the extracted `T` to the callbac
 Beyond one whole-bounds target, a `DropTarget` can expose up to five
 independently enable-able **regions** — `DropRegion::{Center, Top, Bottom,
 Leading, Trailing}` — each with its own optional hint, and route the drop by
-*where* the pointer released. This is the reusable form of `DockingLayout`'s
-hand-computed five-zone drag-to-dock overlay (its `compute_drop_zone` /
-`DockDropOverlay`); the pure hit-test (`region_at`) and geometry (`region_rect`)
-live in `teksilo-core::styles`.
+*where* the pointer released. `DockingLayout`'s pane split/stack drop zones are
+built on it; the pure hit-test (`region_at`) and geometry (`region_rect`) live in
+`teksilo-core::styles`, and the widget applies them through its floored twins
+`drop_target::region_at_floored` / `region_rect_floored` (see the floor below).
 
 ```rust
 DropTarget::new()
@@ -674,7 +682,7 @@ DropTarget::new()
   `Signal<bool>` disables the zone **live, without a rebuild** — it stops
   hit-testing (its strip falls through to the next-priority enabled zone, or
   `Center`, or rejects), never highlights, and never shows its hint.
-- `region_at` classifies the *target-local* pointer (§4.1) against the currently
+- `region_at_floored` classifies the *target-local* pointer (§4.1) against the currently
   **enabled** zones — side zones are `size_factor`-thick strips tested in
   leading→trailing→top→bottom priority; a middle covered by no enabled zone
   resolves to `Center` when enabled, else the drop is **rejected** (the hover
@@ -683,8 +691,8 @@ DropTarget::new()
   shows through; an **edge strip → translucent fill + accent frame**) and only
   that zone's hint appears, centered within the zone rect. Accept uses this
   per-zone overlay; a reject paints a full-bounds error border.
-- `Leading` / `Trailing` map to left / right — the framework surfaces no writing
-  direction on the layout context yet, so RTL mirroring is a follow-up.
+- `Leading` / `Trailing` map to left / right — the widget does not yet consult
+  `LayoutContext::layout_direction`, so RTL mirroring is a follow-up.
 - An edge zone's depth has a **floor**, per axis: `size_factor` of the extent, but
   never less than the density's `target_size`, and never more than a third of the
   extent (past that the strips would leave no middle). So a shallow strip on a
@@ -737,9 +745,10 @@ pub struct RowDragData<T: 'static> {
 ```
 
 It occupies the single typed slot of the [`DragPayload`](#2-payload--dragpayload)
-and serves both audiences: the origin's own erased classifier reads
-`source` + `rows` to recognise a same-view reorder; a **foreign** receiver reads
-`items`. A plain `.reorderable(true)` drag carries `items == None`, so a
+and serves both audiences: the origin's own erased classifier reads `source` to
+recognise a same-view reorder (its accept path uses the rows' stable keys,
+resolved at drag-start — `rows` is informational and goes stale if the source
+reflows mid-drag); a **foreign** receiver reads `items`. A plain `.reorderable(true)` drag carries `items == None`, so a
 reorder-only view is never accidentally consumed elsewhere — a receiver gates on
 [`RowDragData::is_export()`](../crates/teksilo-widgets/src/data_views.rs).
 
@@ -797,7 +806,7 @@ same-view reorder lands the block **contiguously** (`ListModel::move_items`
 emits `ItemsMoved` so index selection follows; trees re-anchor and drop
 descendants of another dragged node, and reject a drop *into* a dragged
 subtree). See the integration tests in
-[list_view.rs](../crates/teksilo-widgets/src/list_view.rs) (`exportable_*`,
+[list_view/tests.rs](../crates/teksilo-widgets/src/list_view/tests.rs) (`exportable_*`,
 `accept_foreign_rows_receives_from_another_view`,
 `two_views_over_same_model_do_not_spuriously_reorder`).
 
@@ -805,19 +814,19 @@ subtree). See the integration tests in
 
 - **Cross-window / re-entry *move* semantics.** A drop that crossed the window boundary reports `OsCopy`, never `OsMove`/`InApp` — the source can't know to delete its item. True app-internal move across windows would need a private-MIME handshake beyond the current Copy-only export. (A data-view `.exportable(Move)` drag therefore behaves as a copy across the window boundary — see §12.4.)
 - **Telling a foreign OS drag's device apart.** No inbound protocol names the source's pointer kind to the destination, so a drag from another application is credited to `PointerKind::Unknown` and treated as precise: hover slop, drop bands and any widget branch on the kind all read it as a cursor even when a finger is doing the dragging. The app's own drag re-entering one of its windows is the exception and does carry the real device (§11.2).
-- **A drag icon on X11.** XDND has no drag image in the wire protocol; GTK and Qt each create their own override-redirect window and reposition it per motion, which needs an ARGB visual and a running compositor to avoid drawing a black rectangle. Teksilo changes the cursor instead, so `DragImageData` is ignored on X11.
+- **A drag icon on X11.** XDND has no drag image in the wire protocol; GTK and Qt each create their own override-redirect window and reposition it per motion, which needs an ARGB visual and a running compositor to avoid drawing a black rectangle. Teksilo changes the cursor instead, so `DragImageData` is ignored on X11. (No backend receives one yet: escalation passes `None`, and macOS / Windows ignore the parameter too.)
 - **Non-`XdndProxy` X11 sources.** See §11.3.1 — a source that ignores the proxy reaches winit's built-in handler and its drop is not delivered. No mainstream toolkit is affected.
-- **`Opacity` primitive for previews.** The current `DragPreview` uses a raised surface — no transparency. Opacity is a separate widget-primitive enhancement.
+- **Translucent previews.** The current `DragPreview` uses a raised surface — no transparency. The primitive now exists (`BuildContext::set_opacity`, the `Fade` wrapper), but `DragPreview` does not apply it yet.
 - **Public `preview_builder(..)` on ListView / TreeView.** Today the preview is always a delegate-built `DragPreview`. Apps that need a differently-styled preview have to re-implement the full reorderable widget or wait for the builder API.
 
 ## See also
 
 - [architecture.md §14 Drag and Drop](architecture.md) — the design rationale and the three DnD scenarios.
 - [events-and-gestures.md §4 Gesture recognizers](events-and-gestures.md) — how `DragRecognizer` fits into the gesture arena.
-- [data-models.md §8 Drag-and-drop integration](data-models.md) — how `ListModel::move_item` / `TreeModel::move_node` / `DataChange::ItemsMoved` / `TreeChange::NodeMoved` plug into the drop handlers.
+- [data-models.md §9 Drag-and-drop integration](data-models.md) — how `ListModel::move_item` / `TreeModel::move_node` / `DataChange::ItemsMoved` / `TreeChange::NodeMoved` plug into the drop handlers.
 - [shortcut-intent-action.md](shortcut-intent-action.md) — when a drop should fire a typed `Intent` instead of mutating a model directly.
 - [crates/teksilo-core/src/drag_payload.rs](../crates/teksilo-core/src/drag_payload.rs), [drag_state.rs](../crates/teksilo-core/src/drag_state.rs) — the framework types.
 - [crates/teksilo-widgets/src/list_view.rs](../crates/teksilo-widgets/src/list_view.rs), [tree_view.rs](../crates/teksilo-widgets/src/tree_view.rs), [drag_preview.rs](../crates/teksilo-widgets/src/drag_preview.rs) — the canonical widget integrations.
-- [crates/teksilo-platform/src/external_dnd.rs](../crates/teksilo-platform/src/external_dnd.rs) — the external (OS) drag backend trait (`ExternalDndGuard::begin_drag` for outbound, `set_drop_accepted` for the inbound verdict), `TouchSerialSource`, the handle, and macOS / Wayland / no-op / memory backends; [external_dnd/macos.rs](../crates/teksilo-platform/src/external_dnd/macos.rs) (`NSDraggingSource`), [external_dnd/wayland.rs](../crates/teksilo-platform/src/external_dnd/wayland.rs) (`wl_data_source`); [drop_zone.rs](../crates/teksilo-widgets/src/drop_zone.rs) — the standalone `DropZone` widget; [drop_target.rs](../crates/teksilo-widgets/src/drop_target.rs) — the wrapping `DropTarget` widget (§11.6).
+- [crates/teksilo-platform/src/external_dnd.rs](../crates/teksilo-platform/src/external_dnd.rs) — the external (OS) drag backend trait (`ExternalDndGuard::begin_drag` for outbound, `set_drop_accepted` for the inbound verdict), `TouchSerialSource`, the handle, and the no-op / memory backends; [external_dnd/macos.rs](../crates/teksilo-platform/src/external_dnd/macos.rs) (`NSDraggingSource`), [external_dnd/wayland.rs](../crates/teksilo-platform/src/external_dnd/wayland.rs) (`wl_data_source`), [external_dnd/windows.rs](../crates/teksilo-platform/src/external_dnd/windows.rs) (OLE), [external_dnd/x11.rs](../crates/teksilo-platform/src/external_dnd/x11.rs) (XDND); [drop_zone.rs](../crates/teksilo-widgets/src/drop_zone.rs) — the standalone `DropZone` widget; [drop_target.rs](../crates/teksilo-widgets/src/drop_target.rs) — the wrapping `DropTarget` widget (§11.6).
 - Outbound escalation + typed re-entry live in [crates/teksilo-core/src/widget_tree/drag_drop_impl.rs](../crates/teksilo-core/src/widget_tree/drag_drop_impl.rs) (`try_escalate_to_os_drag`, `handle_os_drag_ended`, the global typed-payload stash); `DropOutcome` / `OutboundDragData` / `DragImageData` / `DragPayload::{to_outbound,is_os_exportable,enrich_external_from_mime}` in [drag_payload.rs](../crates/teksilo-core/src/drag_payload.rs); `WindowOps::begin_os_drag` / `set_drop_accepted` in [window/ops.rs](../crates/teksilo-core/src/window/ops.rs); the shared auto-scroll band in [common/drag_autoscroll.rs](../crates/teksilo-widgets/src/common/drag_autoscroll.rs).
 - [examples/drag_and_drop](../examples/drag_and_drop/) — runnable in-app DnD demo; [examples/file_drop](../examples/file_drop/) — external (OS) drop demo.

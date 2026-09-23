@@ -2,10 +2,11 @@
 // SPDX-FileCopyrightText: 2026 FernTech
 
 //! Spec §3.3 + §A.3: a binding at a Category B slot position hoists
-//! the binding and routes the slot to the `_id` twin.
+//! the binding and passes its id to the slot, which takes
+//! `impl IntoTeksiChild`.
 //! `header: title = Widget { ... }` desugars to:
 //!   let title = ctx.add(Widget::new()...);
-//!   parent.header_id(title);
+//!   parent.header(title);
 
 use teksilo::prelude::*;
 

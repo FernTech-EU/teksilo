@@ -10,7 +10,7 @@
 //! The two source traits — [`ListDataSource`] (flat) and [`TreeDataSource`]
 //! (hierarchical) — are the read-and-command interfaces every data view talks
 //! to. `ListModel` / `TreeModel` are built-in implementations; an external
-//! source of truth (e.g. a Qleany entity store) implements a source trait
+//! source of truth (e.g. an entity store) implements a source trait
 //! directly and so never mirrors itself into a built-in model. Each trait
 //! carries a capability protocol — identity (`key_at`/`index_of`), DnD
 //! validation (`drag`/`can_accept`/`accept_drop`/`on_drag_out`), and lazy

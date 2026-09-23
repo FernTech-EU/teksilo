@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Spec §6.1: `#{ expr }` escape. The expression is
-//! expected to evaluate to a `WidgetId`. At body position it lowers to
-//! `.add_child(expr)`; at slot-value position it forces the `_id`
-//! suffix on the property.
+//! Spec §6.1: `#{ expr }` escape. The expression may be a `WidgetId` or a
+//! widget value. At body position it lowers to `.child(expr)`; at
+//! slot-value position it is passed through unchanged to the slot, which
+//! takes `impl IntoTeksiChild`.
 
 use teksilo::prelude::*;
 
@@ -65,7 +65,7 @@ impl Widget for Holder {
 fn build(ctx: &mut BuildContext) -> WidgetId {
     let external = ctx.add(Leaf::new());
     // #{ external } at body position -> .child(external)
-    // #{ external } at slot position -> .header_id(external)
+    // #{ external } at slot position -> .header(external)
     teksu!(ctx => Holder {
             header: #{ external }
             #{ external }

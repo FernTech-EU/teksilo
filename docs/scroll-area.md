@@ -30,7 +30,7 @@ three text surfaces scroll themselves, and wrapping one is a bug with three
 symptoms — see [§2](#2-widgets-that-scroll-themselves) before you wrap anything
 that shows a list.
 
-Verified against teksilo 0.12.1. Sources: [`scroll_area.rs`](../crates/teksilo-widgets/src/scroll_area.rs),
+Verified against teksilo 0.13.1. Sources: [`scroll_area.rs`](../crates/teksilo-widgets/src/scroll_area.rs),
 [`scroll_bar.rs`](../crates/teksilo-widgets/src/scroll_bar.rs),
 [`common/scrollable.rs`](../crates/teksilo-widgets/src/common/scrollable.rs).
 Framework internals: [`architecture.md`](architecture.md) §3. Touch physics:
@@ -223,7 +223,8 @@ unreachable inside a `ScrollArea`; the data views bind their own `PageUp` /
   viewport without adding any widget, padding, or layout. The typewriter-scroll
   case: to pin a caret at mid-viewport the view must be able to travel half a
   viewport past the last line, or the pin quietly stops working over the final
-  page. Takes a `Signal<f32>`, so it can follow a setting live.
+  page. Takes an `impl Into<Prop<f32>>` — a plain value, or a `Signal<f32>` so it
+  can follow a setting live.
 
 ## 4. Layout: the unbounded proposal
 
@@ -263,7 +264,7 @@ the horizontal axis into overflow. `place_children` measures optimistically,
 resolves both bars, and re-measures only if the vertical reservation changed.
 
 Clipping is one flag: `Widget::clips_children` (or `.clips_children(true)` on a
-`HandlerSet` / `WidgetBuilder`). The paint walker pushes the node's bounds as a
+`HandlerSet`, `.clips_children_on(true)` through the `WidgetBuilder` trait). The paint walker pushes the node's bounds as a
 clip rect before recursing and pops it after, and the renderer maps that to a
 wgpu scissor rect; nested clippers intersect via a stack.
 
@@ -279,8 +280,8 @@ from it and, for every ancestor whose `clips_children` viewport does not already
 contain the target, dispatches `ScrollIntoView` so that container adjusts its
 offset. Two details are load-bearing:
 
-- The walk fires only for **keyboard and programmatic** focus, never for a
-  pointer press. A widget the user just clicked is by definition already visible,
+- The walk fires only for **keyboard, programmatic and assistive-technology**
+  focus, never for a pointer press. A widget the user just clicked is by definition already visible,
   and auto-scrolling on click yanks a tall editor to its far end on the stale
   pre-click caret.
 - The focused widget itself is **excluded**. A scrollable widget is responsible
@@ -353,7 +354,8 @@ gets no re-targeting, which is exact for the ordinary single-container case.
 door when the target is a virtualized row that has no arena node to reveal:
 `ListView::scroll_to_index(i)`, `TableView::scroll_to_row(r)` (and
 `TreeTableView`), `GridView::scroll_to_index(i, ScrollAnchor::Center)` /
-`ensure_index_visible`, `LogView::scroll_to_bottom()`. For a `ScrollArea` itself,
+`ensure_index_visible`, `LogViewHandle::scroll_to_bottom()` (the handle from
+`LogView::handle()`). For a `ScrollArea` itself,
 write the offset signal: `area.scroll_y_signal().set(0.0)`, or
 `animate_to(..)` for a glide. Read `max_scroll_y_signal()` for "is there more?"
 chrome and `viewport_ratio_y_signal()` for a custom position indicator.
@@ -434,10 +436,10 @@ correctly.
 a spurious Tab stop and a second way to say the same thing, so AT scrolls through
 the parent `ScrollView`'s actions and navigates the content region directly.
 
-> Note: [`architecture.md`](architecture.md) §3.6 and §3.10 describe the
-> originally-designed alternative in which `ScrollBar` carried its own
-> `Role::ScrollBar` with `set_numeric_value` and `Action::SetValue`. The shipped
-> widget does not; the roster above is what 0.12.1 emits.
+> Note: an earlier design gave `ScrollBar` its own `Role::ScrollBar` with
+> `set_numeric_value` and `Action::SetValue`. It was not built;
+> [`architecture.md`](architecture.md) §3.6 and §3.10 record why, and the roster
+> above is what 0.13.1 emits.
 
 What an app author does have to do: make sure the content is reachable. Because
 `ScrollArea` has no keyboard handler ([§3](#3-axes-scroll-bars-and-visibility)),

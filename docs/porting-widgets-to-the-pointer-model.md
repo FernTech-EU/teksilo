@@ -60,9 +60,10 @@ Two mistakes the shipped code has already made, both worth stating:
   gesture through it. Declare the narrowest thing that is true: `PAN_Y` says "a
   vertical pan may pass through me", not "I pan".
 
-Declarers of `NONE` in the shipped catalogue: `Slider`, the `ColorPicker` alpha
-strip and its HSV canvas, `WebView` (an engine subview owns its own gestures) —
-and, outside the catalogue, the Inspector's Pointers tab. Pan claimants:
+Declarers of `NONE` in the shipped catalogue: `Slider`, the `ColorPicker` hue
+strip, alpha strip and HSV canvas, the `Splitter` handle, the `DockingLayout`
+resize handle, the `TitleBar` resize strip, `WebView` (an engine subview owns
+its own gestures) — and, outside the catalogue, the Inspector's Pointers tab. Pan claimants:
 `ScrollArea` plus, through `ScrollableBehavior`, the five data views and the three
 text surfaces — nine surfaces from one implementation; `Terminal` and `SceneView`
 declare their own claims directly, because neither scrolls a pixel offset in
@@ -289,7 +290,7 @@ Three things about them that are easy to get wrong:
   exist as far as any gate is concerned, and a 12 dp thumb inside a 200 dp lane
   measures as a 200 dp target. Build the rects with
   [`partition_targets`](../crates/teksilo-core/src/partition.rs) where the split
-  is a division of one axis, so the geometry you paint and the geometry you
+  is a horizontal division (it splits the width only), so the geometry you paint and the geometry you
   report cannot drift.
 
 **How to know your hook is doing anything.** `hit_outset` and the framework's
@@ -453,7 +454,7 @@ Two habits that decide whether your test is worth having:
 * **A test that focuses a node and dispatches a key proves the handler runs, and
   says nothing about reachability.** `WidgetTree::focus(id)` does not check that
   the node is focusable. A claim of keyboard reachability must assert that the
-  node appears in `test_api::tab_stops_within(root)`.
+  node appears in `tree.tab_stops_within(root)` (defined in `test_api.rs`).
 
 ## See also
 

@@ -229,11 +229,12 @@ tree, which knows the layout direction, that decides which is which.
 - It does not decide **when** to ask, and that is now an **unowned gap rather
   than a dependency**. When this page was written the touch text contract did not
   exist; it does now, and every editing surface is a host — and still no widget
-  calls `request_soft_keyboard`. Its only caller is the plumbing that drains
-  `EventContext::soft_keyboard_request`. What is missing is the policy: which
-  gesture on which surface counts as a request (a caret placed by a release? a
-  hold that selected a word? a focus arriving from a `Tab`?), and what
-  `SoftKeyboardPolicy::Auto` should mean for each.
+  calls `request_soft_keyboard`. Its only callers are `teksilo-app`'s own tests
+  of the plumbing that drains `EventContext::soft_keyboard_request`
+  (`input_loop.rs`). What is missing is the policy: which gesture on which
+  surface counts as a request (a caret placed by a release? a hold that selected
+  a word? a focus arriving from a `Tab`?), and what an automatic mode should mean
+  for each — no policy type exists yet to carry that choice.
 - `TouchSelection::report_ime_area` is **gone**. Each editing stack reports the
   IME area from its *own* touch paths — the direct-pointer arm of its `mouse.rs`,
   a second reporter in its `place_caret_at`, and a third on a caret-handle drag —

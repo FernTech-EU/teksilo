@@ -76,17 +76,19 @@ Shared by `CodeEditor` and `PlainTextEditor`:
 | Builder | Effect |
 | --- | --- |
 | `wrap_mode(WrapMode)` | `CodeEditor` defaults to `None` (a wrapped source line breaks the gutter's one-number-per-line correspondence); `PlainTextEditor` defaults to `Word`. |
-| `v_scroll_policy` / `h_scroll_policy` | `Auto` (default) / `AlwaysOn` / `AlwaysOff`. |
 | `min_lines` / `max_lines` | Switch from greedy to intrinsic sizing — grow with content up to `max_lines`, then scroll (the composer pattern). |
-| `font_family` / `zoom` / `follow_text_scale` | Typography. `follow_text_scale` (default on) grows text with the global accessibility scale. |
-| `background` / `text_color` / `caret_color` / `selection_color` | `Color`, a theme role, or a `Signal`. |
+| `font_family` / `font_size_scale` / `follow_text_scale` | Typography. `follow_text_scale` (default on) grows text with the global accessibility scale; `font_size_scale` is a per-editor logical multiplier. |
+| `background` | `Color`, a theme role, or a `Signal`. |
 | `on_change(Fn)` | Fired once per drain batch that contained a real edit. |
-| `window_to_clip(bool)` | Cull the render to the visible clip band — only for an editor laid out at full document height inside an outer `ScrollArea`. |
+| `context_menu(factory)` / `default_context_menu(bool)` | Replace or suppress the built-in right-click menu — see [The right-click menu](#the-right-click-menu). |
 
 `CodeEditor`-only:
 
 | Builder | Effect |
 | --- | --- |
+| `v_scroll_policy` / `h_scroll_policy` | `Auto` (default) / `AlwaysOn` / `AlwaysOff`. |
+| `text_color` / `caret_color` / `selection_color` | `Color`, a theme role, or a `Signal`. |
+| `window_to_clip(bool)` | Cull the render to the visible clip band — only for an editor laid out at full document height inside an outer `ScrollArea`. |
 | `gutter(bool)` (default on) | The line-number gutter. |
 | `current_line_highlight(bool)` (default on) | A full-width band under the caret's line. |
 | `indent_style` / `tab_width` / `use_soft_tabs` | Spaces of a width, or tabs rendered a width wide. |

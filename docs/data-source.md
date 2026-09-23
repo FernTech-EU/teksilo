@@ -19,7 +19,7 @@ There are two traits, both in `teksilo-data`:
 | Trait | Shape | Built-in impls |
 | --- | --- | --- |
 | [`ListDataSource`](../crates/teksilo-data/src/list_data_source.rs) | flat list | `ListModel<T>`, `SortFilterListModel<T>` |
-| [`TreeDataSource`](../crates/teksilo-data/src/tree_data_source.rs) | per-view flattened tree | `TreeSlice<T>`, `SortFilterTreeModel<T>` |
+| [`TreeDataSource`](../crates/teksilo-data/src/tree_data_source.rs) | per-view flattened tree | `TreeSlice<T>`, `SortFilterTreeModel<T>`, `TreeDataSlice<K, T>` |
 
 Neither is object-safe (associated types + generic `with_item`/`with_entry`),
 so a view consumes it generically via `from_source(...)` and erases it into an
@@ -30,8 +30,8 @@ so it never leaks into the view's type parameters.
 > **When to implement a source vs. use a built-in model.** A bounded, in-memory
 > collection that the view-model owns is a `ListModel` / `TreeModel` (which
 > *are* sources — see the matrix below); reach for them first. Implement a
-> source trait **directly** when the truth lives elsewhere (a DB cursor, a
-> Qleany entity store, a paged feed) or doesn't fit in memory. Then there is no
+> source trait **directly** when the truth lives elsewhere (a DB cursor, an
+> entity store, a paged feed) or doesn't fit in memory. Then there is no
 > second copy to keep in sync. See [data-models.md §14](data-models.md).
 
 ---
@@ -110,21 +110,27 @@ nodes persist while collapsed should override it.
 ```rust
 // Flat:
 let list = ListView::from_source(source, |index, item: &Row, selected| {
-    Box::new(StandardListItem::new(item.title.clone()).selected(selected))
+    Box::new(StandardListItem::new(lit!(item.title.clone())).selected(selected))
 });
 
-// Tree: the delegate gets a TreeRow (depth / has_children / is_expanded +
-// a one-call chevron `toggle_callback()`):
+// Tree: the delegate gets a `TreeRow` (depth / has_children / is_expanded +
+// a one-call chevron `toggle_callback()`). It is not a `FlatEntry`, so set the
+// three fields directly rather than through `from_entry`:
 let tree = TreeView::from_source(source, |item: &Node, row, selected| {
-    Box::new(StandardTreeItem::new(item.name.clone())
-        .from_entry(row)
+    Box::new(StandardTreeItem::new(lit!(item.name.clone()))
+        .depth(row.depth)
+        .has_children(row.has_children)
+        .is_expanded(row.is_expanded)
+        .selected(selected)
         .on_chevron_toggle_rc(row.toggle_callback()))
 });
 ```
 
 The built-in models implement the trait, so `ListView::from_source(list_model,
-…)` / `TreeView::from_source(tree_slice, …)` work unchanged; `from_model` sugar
-exists where it reads better. `TableView::from_source(source)` then adds columns
+…)` / `TreeView::from_source(tree_slice, …)` work unchanged; the model-taking
+constructors (`ListView::new(list_model, …)`, `TreeView::new(tree_model, …)` /
+`new_with_context`, `TableView::new(list_model)`, `TreeTableView::new(tree_model)`)
+are sugar that reads better for the in-memory case. `TableView::from_source(source)` then adds columns
 via the builder; `TreeTableView` fuses a `TreeDataSource` with columns. See
 [table-view.md](table-view.md).
 
@@ -146,20 +152,28 @@ struct DropCommit<'a, K> { source: DragSource<'a, K>, target: K, position: DropP
 enum   DropPosition      { Before, Into, After }          // Into = reparent (trees only)
 ```
 
-The four source methods (all default to inert):
+The source methods (all default to inert — `NoDrag` / `Reject` / `false` / no-op):
 
 ```rust
 fn drag(&self, key: &Self::Key) -> DragEligibility;       // may this row start a drag?
 fn can_accept(&self, q: &DropQuery<'_, Self::Key>) -> DropResponse;   // hover verdict
 fn accept_drop(&self, c: DropCommit<'_, Self::Key>) -> bool;          // apply
+fn reorder_within(&self, sources: &[Self::Key], target: &Self::Key,
+                  position: DropPosition) -> bool;        // multi-row same-view commit
 fn on_drag_out(&self, key: &Self::Key);                   // source-side completion
 ```
+
+`reorder_within` has a working default that applies the dragged rows one by one
+through `accept_drop` so they land contiguously (the tree default first rejects a
+drop into one of the dragged subtrees and skips rows nested under another dragged
+row); `ListModel` overrides it with its index-safe `move_items` block move.
 
 **Flow per drag:**
 
 1. **Start.** A row begins a drag only if `drag(key) == CanDrag`. The view emits
-   a `RowDrag { source_index, source_view_id }` typed payload (shared by all
-   four views via `data_views`).
+   a `RowDragData<T> { source: ViewId, rows, items }` typed payload (shared by all
+   the data views via `data_views`; `items` is `Some` only for an
+   `.exportable(..)` view).
 2. **Hover.** The view computes the geometric `(target_key, position)` and calls
    `can_accept`. `Accept` paints the insertion line / reparent box; `Reject`
    paints the no-drop affordance and will refuse; `Redirect(pos)` snaps the
@@ -168,7 +182,7 @@ fn on_drag_out(&self, key: &Self::Key);                   // source-side complet
    validation the integrated reorder never had.**
 3. **Drop.** The view re-queries `can_accept`; if not `Reject`, it calls
    `accept_drop(commit)`. A store-backed source mutates its `Vec`/arena; an
-   external source routes to its command (a Qleany `move_node`, an SQL `UPDATE`).
+   external source routes to its command (a domain `move_node`, an SQL `UPDATE`).
 4. **Cross-view / external.** A drag from another view or the OS arrives as
    `DragSource::Foreign { payload }`; the source downcasts the payload itself
    (`payload.get_typed::<MyPaletteDrop>()`, `payload.files()`, …). The same
@@ -180,10 +194,12 @@ fn on_drag_out(&self, key: &Self::Key);                   // source-side complet
    shared/command-backed source no-ops it; an independent model uses it to drop
    the moved row. (Same-view reorders don't fire it.)
 
-**Keyboard reorder.** `Alt`+`Arrow` synthesizes the same `RowDrag` against the
-sibling target derived from `parent`/`child_keys`, then routes through
-`can_accept` → `accept_drop`. All four data views share this (TableView /
-TreeTableView gained it in the redesign).
+**Keyboard reorder.** `Alt`+`Arrow` (and `Alt`+`Home` / `Alt`+`End` for the far
+ends) turns the move into the same `(target, position)` pair a pointer drop would
+carry — for trees, the sibling target derived from `parent`/`child_keys` — and
+commits it through the source's `accept_drop` / `reorder_within`. The decoding and
+commit live once in `common::ordered_move`, shared with the row context menu and
+the AccessKit custom actions, and all five data views (GridView included) use it.
 
 **Tree reorder helpers.** Custom `TreeDataSource` impls building on a
 `TreeModel` can reuse
@@ -265,14 +281,15 @@ index selection.
 
 | Type | Trait | `Key` | DnD | Lazy |
 | --- | --- | --- | --- | --- |
-| `ListModel<T>` | `ListDataSource` | `usize` | `accept_drop` = `move_item`, `can_accept` = `Accept` | resident |
-| `SortFilterListModel<T>` | `ListDataSource` | `usize` | inert (sorted view) | resident |
+| `ListModel<T>` | `ListDataSource` | `usize` | `accept_drop` = `move_item` (`reorder_within` = `move_items`), `can_accept` = `Accept` for a same-view `Before`/`After` | resident |
+| `SortFilterListModel<T>` | `ListDataSource` | `usize` (source index) | inert (sorted view) | resident |
 | `TreeSlice<T>` | `TreeDataSource` | `NodeId` | `accept_drop` = `move_node` w/ cycle guard | resident |
 | `SortFilterTreeModel<T>` | `TreeDataSource` | `NodeId` | as `TreeSlice` | resident |
+| `TreeDataSlice<K, T>` | `TreeDataSource` | your `K` | policy injected (`set_drag_policy` / `set_drop_resolver` / `set_reorder`), cycle guard first | resident |
 
 `TreeModel<T>` is **not** itself a `TreeDataSource` — it carries no per-view
 expand state; wrap it in a `TreeSlice` (independent expansion per view) or a
-`SortFilterTreeModel`. External sources supply their own `Key` (an `i64` entity
+`SortFilterTreeModel`, or feed an indent-ordered outline to a `TreeDataSlice`. External sources supply their own `Key` (an `i64` entity
 id, a `Uuid`, …) and implement the trait directly — that domain key is exactly
 what removes the need for a mirror model.
 

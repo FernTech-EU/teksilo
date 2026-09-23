@@ -1213,9 +1213,10 @@ Five things about that list that have each cost real time:
 - **`check_spdx_headers.py` only inspects tracked files**, so run it after
   `git add` (path-scoped) or a new file passes by being invisible.
 - **`typos` reads `_typos.toml` at the root**, not anything under `.github/`.
-- **`cargo check --workspace --all-features` is known broken and is not a gate**:
-  `teksilo-text` `include_bytes!`-es two Noto fonts under non-default features and
-  those files were never committed. True on `main` too.
+- **`cargo check --workspace --all-features` is not a gate**, but the missing Noto
+  fonts no longer break it: five `fonts-*` faces were never committed, and
+  `teksilo-text/build.rs` now turns an absent face into a build **warning** (and
+  registers nothing) instead of an `include_bytes!` error (commit `13ad2eca`).
 
 ## Implementation Status
 

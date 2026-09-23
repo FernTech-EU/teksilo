@@ -148,11 +148,11 @@ PieChart::new(model)
 ```
 
 The center slot follows the existing `Option<PendingChild>` pattern
-used by [`Card`](../crates/teksilo-widgets/src/card.rs:31),
-[`DialogContent`](../crates/teksilo-widgets/src/dialog.rs:351), and
-[`GroupBox`](../crates/teksilo-widgets/src/group_box.rs:29): two builders
-(`.center(impl Widget)` and `.center_id(WidgetId)`), resolved in
-`build()` via `ctx.add_boxed`.
+used by [`Card`](../crates/teksilo-widgets/src/card.rs),
+[`DialogContent`](../crates/teksilo-widgets/src/dialog.rs), and
+[`GroupBox`](../crates/teksilo-widgets/src/group_box.rs): one builder,
+`.center(impl IntoTeksiChild)`, taking either a widget or a `WidgetId`,
+resolved in `build()` via `ctx.add_boxed`.
 
 The placement is the largest square inscribed in the donut hole
 (`side = inner_radius * √2`). A `TextWidget` for the total / a
@@ -181,6 +181,7 @@ discipline (drop the borrow, then notify) and:
 1. emits a [`ChartChange`](../crates/teksilo-data/src/chart_change.rs)
    describing exactly what changed (`SeriesInserted`, `SeriesRemoved`,
    `SeriesMoved`, `SeriesRenamed`, `SeriesColorChanged`,
+   `SeriesPatternChanged`,
    `SeriesVisibilityChanged`, `PointsInserted`, `PointsRemoved`,
    `PointUpdated`, `SeriesDataReplaced`, `Reset`) to every observer
    registered via `model.observe_changes(|change| …)`, and
@@ -193,14 +194,16 @@ in `teksilo-data` alongside the model and are re-exported from
 
 ```rust
 pub struct ChartDatum<T> {
-    pub category: T,        // x-axis position: String, enum, date, …
-    pub value: f32,         // y-axis value (always f32)
+    pub category: T,               // x-axis position: String, enum, date, …
+    pub value: f32,                // y-axis value (always f32)
+    pub color: Option<ColorProp>,  // per-point fill override (bar charts only)
 }
 
 pub struct ChartSeries<T> {
     pub name: String,
-    pub color: Option<ColorProp>,    // None → palette assigns
-    pub visible: bool,               // plain bool — see note below
+    pub color: Option<ColorProp>,          // None → palette assigns
+    pub pattern: Option<SeriesPattern>,    // None → position assigns (§5.1)
+    pub visible: bool,                     // plain bool — see note below
     pub points: Vec<ChartDatum<T>>,
 }
 ```
@@ -522,27 +525,29 @@ PieChart bypasses axis bands entirely (pie has no axes) and only
 carves off the legend band. The disc inscribes into the largest
 centered square minus `pie_padding`.
 
-For PieChart with a center widget, `place_children` and `paint` both
-go through `compute_plot_rect` so the inscribed-square slot is
-centered on the actually-rendered disc, not on the full bounds —
-otherwise the slot drifts when a legend is shown.
+For PieChart with a center widget, `place_children`, `paint`, and
+`accessibility` all go through the shared `ensure_geometry` →
+`compute_pie_geometry` path so the inscribed-square slot is centered
+on the actually-rendered disc, not on the full bounds — otherwise the
+slot drifts when a legend is shown.
 
 ## 8. Reactivity — binding levels
 
 Every chart binds to its `ChartModel<T>`'s two version signals — see
 §3 and [data-models.md §15](data-models.md)
 for what bumps which. The mapping is deliberately coarse: **only a
-series color change is paint-only** — everything else that can mutate
-a model (including a visibility toggle, which shifts the auto
-y-domain and bar widths) goes through `structure_version` and is a
-full `Relayout`.
+series color or pattern change is paint-only** — everything else that
+can mutate a model (including a visibility toggle, which shifts the
+auto y-domain and bar widths) goes through `structure_version` and is
+a full `Relayout`.
 
 | Change | Model signal | Binding level | Why |
 |---|---|---|---|
 | Series add/insert/remove/move/rename | `structure_version` | `Relayout` + `AccessibilityOnly` | Y-domain, tick positions, and label widths may all shift; the per-datum AT mark list must also refresh |
 | Point push/insert/remove/update, `replace_series_data`, `clear` | `structure_version` | `Relayout` + `AccessibilityOnly` | Same — any point-shape change can move the domain |
 | `set_series_visible` | `structure_version` | `Relayout` + `AccessibilityOnly` | Visible set changes the auto y-domain and bar widths, not just paint |
-| `set_series_color` / `clear_series_color` | `style_version` | `RepaintOnly` | Geometry unchanged — this is the **only** `ChartChange` variant that doesn't bump `structure_version` |
+| `set_series_color` / `clear_series_color` | `style_version` | `RepaintOnly` | Geometry unchanged |
+| `set_series_pattern` / `clear_series_pattern` | `style_version` | `RepaintOnly` | Geometry unchanged — with `SeriesColorChanged`, the only two `ChartChange` variants that don't bump `structure_version` |
 | Hover state (private `Signal<Option<(SeriesId, usize)>>`, all three charts) | — | `RepaintOnly` | Marker + tooltip only |
 | Theme change | — | Auto via tree-wide `mark_all_dirty` | Colors/fonts re-resolved on next paint |
 | `Prop<ChartPalette>` change | — | `RepaintOnly` | Color-only |
@@ -1078,5 +1083,5 @@ What it shows, end to end:
   timer.
 
 Useful as a sanity-check after any change to teksilo-charts;
-`cargo test -p teksilo-charts` (88 headless tests, no GPU) is the
+`cargo test -p teksilo-charts` (200+ headless tests, no GPU) is the
 faster CI path.

@@ -5,12 +5,12 @@
 
 Proptest was introduced to the workspace on the branch that produced this
 document, into a codebase that had zero property tests before it. There are
-now ~92 properties across `teksilo-tokens`, `teksilo-data`, `teksilo-scene`,
-and `teksilo-widgets`, and they found eight real bugs (see *What this
-found* below) — including one that exhausted 61 GiB of RAM and forced three
-hard reboots of the developer's workstation before it was diagnosed. That
-incident is itself part of what this document exists to prevent from
-happening again.
+now over 130 properties across `teksilo-core`, `teksilo-tokens`,
+`teksilo-data`, `teksilo-scene`, and `teksilo-widgets`, and the original
+suites found eight real bugs (see *What this found* below) — including one
+that exhausted 61 GiB of RAM and forced three hard reboots of the
+developer's workstation before it was diagnosed. That incident is itself
+part of what this document exists to prevent from happening again.
 
 Mental model in one line:
 
@@ -409,9 +409,10 @@ being wrong.
 
 | Crate | File(s) |
 |---|---|
+| `teksilo-core` | [`tests/pointer_invariants.rs`](../crates/teksilo-core/tests/pointer_invariants.rs), [`tests/prop_kinetic.rs`](../crates/teksilo-core/tests/prop_kinetic.rs), [`tests/text_run_invariants.rs`](../crates/teksilo-core/tests/text_run_invariants.rs) |
 | `teksilo-tokens` | [`tests/prop_color.rs`](../crates/teksilo-tokens/tests/prop_color.rs) |
 | `teksilo-data` | [`tests/prop_list_and_selection.rs`](../crates/teksilo-data/tests/prop_list_and_selection.rs), [`tests/prop_tree_slice.rs`](../crates/teksilo-data/tests/prop_tree_slice.rs), [`tests/prop_tree_checked.rs`](../crates/teksilo-data/tests/prop_tree_checked.rs), [`tests/prop_sort_filter.rs`](../crates/teksilo-data/tests/prop_sort_filter.rs) |
-| `teksilo-scene` | [`src/index.rs`](../crates/teksilo-scene/src/index.rs) (`mod proptests`, inline) |
+| `teksilo-scene` | [`src/index.rs`](../crates/teksilo-scene/src/index.rs) (`mod proptests`, inline), [`tests/prop_selection_modes.rs`](../crates/teksilo-scene/tests/prop_selection_modes.rs) |
 | `teksilo-widgets` | [`src/common/row_offsets.rs`](../crates/teksilo-widgets/src/common/row_offsets.rs), [`src/common/row_metrics.rs`](../crates/teksilo-widgets/src/common/row_metrics.rs), [`src/primitives/column_flow.rs`](../crates/teksilo-widgets/src/primitives/column_flow.rs), [`src/common/column_geometry.rs`](../crates/teksilo-widgets/src/common/column_geometry.rs), [`src/splitter/distribute.rs`](../crates/teksilo-widgets/src/splitter/distribute.rs) (all `mod proptests`, inline) |
 
 Each file's own module doc states its case-count defaults, its

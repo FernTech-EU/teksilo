@@ -70,10 +70,9 @@ pub enum BodyItem {
     /// to the enclosing statement-forming block, then attaches via
     /// `.child(name)` on the parent.
     Binding { name: Ident, element: TeksiElement },
-    /// `#{ expr }` at body position — the expr is expected to evaluate
-    /// to a `WidgetId` and attaches via `.child(expr)`.
-    /// The semantics are simple: always WidgetId. The full
-    /// `IntoTeksiChild` routing (widget-or-id dispatch) is not yet implemented.
+    /// `#{ expr }` at body position — attaches via `.child(expr)`. `child`
+    /// takes `impl IntoTeksiChild`, so the expr may be a `WidgetId` or a
+    /// widget value.
     Escape { expr: Expr, span: Span },
     /// `let pat = expr;` at body position. Introduces a
     /// local whose value is used by subsequent body items. Triggers

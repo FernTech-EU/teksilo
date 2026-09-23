@@ -42,7 +42,8 @@ Screenshots render offscreen on the tree thread via `pollster::block_on`
 offscreen path the widget previewer's PNG export uses).
 
 **What the stock binary drives.** `teksilo-automation-mcp --headless` builds a
-small *built-in demo* (a heading, two buttons, a text field, a checkbox) — it
+small *built-in demo* (a heading, two buttons, a text field, a checkbox, plus
+a list-row-in-a-scroller fixture the touch ops' arbitration checks press) — it
 is the toolkit's own conformance harness and a worked reference, **not** your
 app. To headlessly automate *your* app there are two paths:
 
@@ -104,7 +105,8 @@ value is missing is an error, not a shrug: `--connect` with nothing after it
 used to fall through and start the *demo* server while the caller believed it
 was driving their app.
 
-The five modes above are **mutually exclusive**, declared as one clap argument
+The five modes — `--headless`, `--attach`, `--attach-pid`, `--connect` and
+`--list` — are **mutually exclusive**, declared as one clap argument
 group rather than resolved by precedence — `--attach --list` is a usage error
 naming both flags, not a silent win for whichever branch the dispatch happened
 to test first. A usage error (an unknown flag, a missing value, two modes, a
@@ -209,7 +211,7 @@ Add the `automation` feature to the umbrella crate (debug-only by design):
 
 ```toml
 [dependencies]
-teksilo = { version = "0.9", features = ["automation"] }
+teksilo = { version = "0.13", features = ["automation"] }
 ```
 
 `install_automation_bridge_in_debug()` is gated on `debug_assertions`: a
@@ -253,9 +255,10 @@ difference between a reply you can read and one you cannot: take a shallow
 snapshot first, then descend from a node you picked out of it.
 
 `assert_node`'s `kind` is one of `role_equals`, `label_equals`,
-`label_contains`, `value_equals` (each taking the expected string in `value`),
-`toggled`, `expanded`, `selected`, `disabled` (each taking the expected bool in
-`flag`), or `exists` / `focused`, which take neither. An unrecognised `kind` is
+`label_contains`, `value_equals`, `document_text_equals` (each taking the
+expected string in `value`), `toggled`, `expanded`, `selected`, `disabled`
+(each taking the expected bool in `flag`), or `exists` / `focused` /
+`supports_text_ranges`, which take neither. An unrecognised `kind` is
 refused rather than defaulted — the same reason every op's parameters are
 `deny_unknown_fields`: a probe that asks a question the server does not
 understand must not be quietly answered with a different one.
@@ -540,8 +543,11 @@ reports the live nodes themselves.
 and returns it as an MCP **image content block**, alongside a metadata block:
 
 ```jsonc
-{ "width": 1600, "height": 1200, "scale": 2.0, "warnings": [] }
+{ "width": 1600, "height": 1200, "scale": 2.0 }
 ```
+
+`warnings` is added only when there is one to report (see the WebView blind
+spot below).
 
 **`scale` is not decoration.** Pixel dimensions are physical, and a live window
 on a HiDPI display is not laid out at that size: an 800×600 logical window

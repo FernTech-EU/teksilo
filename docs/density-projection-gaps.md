@@ -37,10 +37,11 @@ which a whole-crate `.<field>` grep does: `size_large` is a field of both
 `SearchFieldRecipe`, `padding_horizontal` of seven recipes, and a grep that does
 not scope by owner reports every one of them as read.
 
-`teksilo-core`'s own two projected recipes (`HandleMetrics`,
-`TextSelectionRecipe`) are outside the scope and were checked by hand: all four
-of their projected fields are read, by `text_touch.rs` and
-`text_touch/affordance_layer.rs`.
+`teksilo-core`'s own projected recipe (`HandleMetrics`, in `text_touch.rs`) is
+outside the scope and was checked by hand: both its projected fields are read, by
+`text_touch.rs` and `text_touch/affordance_layer.rs`. `TextSelectionRecipe`, once
+listed beside it, lives in `teksilo-widgets/src/styles/recipe_text_selection_style.rs`
+and is therefore inside the scope; the rule finds both its projected fields read.
 
 ## The counts
 
@@ -61,7 +62,7 @@ those cost a test failure would discourage the one change it invites: the tables
 are the record, the guard keeps their *membership* honest, and the arithmetic is
 a snapshot of the day it was taken.
 
-Four further fields were on this list until the metrics-accessor work that
+Five further fields were on this list until the metrics-accessor work that
 produced this page wired them, and they are the worked examples for what wiring
 one looks like: `TableRecipe::cell_padding_horizontal` / `cell_padding_vertical`
 (`TableStyle`), `CalendarRecipe::nav_arrow_size` (`CalendarStyle`) and

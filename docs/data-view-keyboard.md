@@ -31,7 +31,7 @@ as `Linear`.
 | `Shift`+*any of the above* | extend from the anchor | " | " |
 | `Ctrl`+`Shift`+*any* | extend **additively** | " | " |
 | `Ctrl`+`↑`/`↓` | move the cursor only | move the cursor only | move the cursor only |
-| `Space` | **check the row** if it has a checkbox, else toggle (Multi) / select (Single) | toggle (Multi) / select (Single) | toggle the cell |
+| `Space` | **check the row** if it has a checkbox, else toggle (Multi) / select (Single) | **check the tile** if it has a checkbox, else toggle (Multi) / select (Single) | **check the cell** if it has a checkbox, else toggle its selection |
 | `Ctrl`+`Space` | toggle the focused row | toggle the focused tile | **select the column** (`MultiCell`) |
 | `Shift`+`Space` | — | — | **select the row** (`MultiCell`) |
 | `Enter` | activate | activate | activate the row |
@@ -203,7 +203,7 @@ type-to-edit on bare letters, and the editor wins; the WinForms default
 - A selectable `TableView` announces `Role::Grid`, not `Role::Table`.
   AccessKit's consumer will not treat `Table` as a selection container, so a
   multi-select table announced that way exposed no selection at all to UIA.
-  `Role::Table` is kept for `SelectionMode::None`, where the static-structure
+  `Role::Table` is kept for `TableSelectionMode::None`, where the static-structure
   role is the right one.
 - In a cell-selection mode the cells announce `Role::GridCell`, which is the
   only cell role AccessKit gives the UIA `SelectionItem` pattern.

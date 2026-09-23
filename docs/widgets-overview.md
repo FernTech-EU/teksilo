@@ -15,7 +15,7 @@ shortcuts/intents/actions), see [SUMMARY.md](SUMMARY.md).
 
 ## Styling status
 
-All 33 themable widgets are on the four-tier styling system
+All 42 themable widgets are on the four-tier styling system
 ([docs/styling-system.md](styling-system.md)): each ships a `*Style`
 trait in `teksilo-core::styles::*` plus a default `Recipe*Style` impl in
 `teksilo-widgets/src/styles/*`. The widget builds its parts, hands a
@@ -87,6 +87,7 @@ slack distribution math, and worked examples.
 - [Switcher](../crates/teksilo-widgets/src/primitives/switcher.rs) — shows one of N children, driven by `Signal<usize>`.
 - [DeadZone](../crates/teksilo-widgets/src/primitives/dead_zone.rs) — layout-transparent **gesture dead zone**: a press inside it never arms a drag/swipe on an ancestor. Wrap interactive controls (buttons, a `⋮` menu) inside a draggable/swipeable container (a dock-panel header, a card, a list row) so clicking them — even with click jitter — can't start the ancestor's drag. The framework counterpart of Electron's `-webkit-app-region: no-drag`; backed by the node-level `gesture_dead_zone` flag (robust by construction, not a recognizer-timing race).
 - [FocusScope](../crates/teksilo-widgets/src/focus_scope.rs) — layout-transparent **Tab traversal boundary** (lives at crate root). Scopes its descendants' `tab_index` so sibling regions don't interleave, and traps or passes Tab via `TraversalScopePolicy::{Cycle, Continue}`. See [events-and-gestures.md §6.1](events-and-gestures.md).
+- [TouchTarget](../crates/teksilo-widgets/src/primitives/touch_target.rs) — the last-resort hit-targeting mechanism: grows the layout around an undersized control to a conforming touch target, siblings reflowing, and only at `TargetDensity::Touch`. Use only when `Widget::hit_outset` (a thin grip claiming space, hit-only) and the miss-only slop pass (an isolated near-miss catch, also hit-only) aren't enough because a neighboring target leaves no space to borrow. See [density-and-targets.md](density-and-targets.md).
 
 ## Visual primitives
 
@@ -135,8 +136,9 @@ Themed framing, sectioning, and window-level structure.
 - [Button](../crates/teksilo-widgets/src/button.rs) — seven `ButtonVariant`s (Filled / Tinted / Outlined / Plain / Ghost / Link / Destructive) × five interaction states; `IconLocation` for leading/trailing icon; chrome via the `ButtonStyle` trait (see Styling status above). Reference exemplar — read the source.
 - [IconButton](../crates/teksilo-widgets/src/icon_button.rs) — square icon-only button at five `IconButtonSize` steps (Compact / Default / Toolbar / Large / Hero). `.embedded()` mode for trailing-slot use inside fields. Includes `BuiltInIcons` factory.
 - [CommandLinkButton](../crates/teksilo-widgets/src/command_link_button.rs) — large two-line CTA: leading icon + bold title + secondary description; flat surface.
-- [PopoverButton](../crates/teksilo-widgets/src/popover_button.rs) — Button preset that opens a Popover when activated.
-- [PopoverIconButton](../crates/teksilo-widgets/src/popover_icon_button.rs) — IconButton variant of the same.
+- [PopoverButton](../crates/teksilo-widgets/src/popover_widget.rs) — Button preset that opens a Popover when activated (`type PopoverButton = PopoverWidget<Button>`).
+- [PopoverIconButton](../crates/teksilo-widgets/src/popover_widget.rs) — IconButton variant of the same (`type PopoverIconButton = PopoverWidget<IconButton>`).
+- [OverlayTrigger](../crates/teksilo-widgets/src/overlay_trigger.rs) — wraps an arbitrary non-button widget (a table-header filter glyph, a tag chip) so it can drive a `PopoverWidget`: supplies the activate route, `has_popup`/`expanded` a11y annotations, and the arena `enabled` gate that `PopoverButton`/`PopoverIconButton` get from `Button`/`IconButton`.
 - [SplitButton](../crates/teksilo-widgets/src/split_button.rs) — main action region + chevron region that opens a related-actions menu.
 
 ## Inputs and indicators
@@ -182,6 +184,7 @@ Themed framing, sectioning, and window-level structure.
 - [HexColorInput](../crates/teksilo-widgets/src/hex_color_input.rs) — hex code text input with live swatch.
 - [ColorEdit](../crates/teksilo-widgets/src/color_edit.rs) — compact color editor with swatch trigger.
 - [ColorPicker](../crates/teksilo-widgets/src/color_picker.rs) — full HSV picker; `ColorPickerLayout` controls panel arrangement.
+- [ColorSwatch](../crates/teksilo-widgets/src/color_picker/swatch.rs) — single clickable color cell (`Role::ColorWell`) for composing custom swatch rows/palettes outside the bundled grid; `Prop<Color>`-bound so it can track a live preview.
 
 ---
 
@@ -198,14 +201,15 @@ Themed framing, sectioning, and window-level structure.
 
   All four (icon / check / tristate / radio) are mutually exclusive — a `debug_assert!` fires if both `.icon(...)` and a check/radio mode are set. AT state mirrors [`Checkbox`](../crates/teksilo-widgets/src/checkbox.rs) exactly: `set_toggled(bool)` for binary, `inner_mut().set_toggled(Toggled::Mixed)` for Indeterminate.
 - **Mnemonics** use the in-string Windows / Qt `&` convention: `&Save` underlines 'S' when Alt is held; `&&` produces a literal `&`. [`MenuLabel`](../crates/teksilo-widgets/src/menu_item/menu_label.rs) (private leaf widget) renders the underline via `canvas.draw_underline` gated on [`WindowState::alt_down`](../crates/teksilo-core/src/window/state.rs); the AT name strips the `&`, and the mnemonic letter is written to `inner_mut().set_access_key("S")` for Windows Narrator. Parser at [`mnemonic.rs`](../crates/teksilo-widgets/src/menu_item/mnemonic.rs).
-- **Safe-triangle submenu hover gate**: when a submenu opens, the trigger MenuItem stamps a shared anchor (cursor position at open) into the enclosing MenuList's [`SafeTriangleState`](../crates/teksilo-widgets/src/menu_list.rs); sibling items, before firing their hover-switch, call [`point_in_safe_triangle(cursor, anchor, submenu_bounds)`](../crates/teksilo-widgets/src/menu_item/safe_triangle.rs). The triangle's near edge is inferred from `anchor.x` vs `submenu.x` — the algorithm is RTL-symmetric automatically. `EventContext` exposes `tree_pointer_position()` + `overlay_bounds_for_content(content_id)` (snapshotted per dispatch). The existing 150 ms `PointerLeave` close stays as a graceful fallback.
+- **Safe-triangle submenu hover gate**: the mechanism lives in [`teksilo-core::overlay::safe_triangle`](../crates/teksilo-core/src/overlay/safe_triangle.rs), not in the widget, since both a sibling row's hover-switch and the overlay's own `PointerLeave` dismissal grace must honour the same region. The trigger arms the region from its hover-leave (`ctx.arm_overlay_safe_region(sub_id)`); sibling rows read it via `ctx.pointer_in_overlay_safe_region(content_id)`. The enclosing MenuList's [`SafeTriangleState`](../crates/teksilo-widgets/src/menu_list.rs) now tracks only *which* submenu is open. A sibling submenu trigger's hover-switch instead calls `ctx.show_overlay_after_replacing_siblings(...)`, which dismisses the open sibling only when the new submenu opens, so a pointer merely crossing the row costs nothing.
 
 ## Overlays and dialogs
 
 See [tooltips.md](tooltips.md) for the tooltip system.
 
 - [TooltipWidget](../crates/teksilo-widgets/src/tooltip.rs) — plain, rich, or composite tooltips (three tiers, per-anchor mutual exclusion); sticky-on-dwell promotion to non-modal `Role::Dialog`; `TooltipRegistry` for app-wide reuse. Rich tier carries inline markup + shortcut chip + "more" disclosure; composite tier ([`CompositeTooltipWidget`](../crates/teksilo-widgets/src/tooltip/composite.rs)) hosts an arbitrary widget tree (CK3-style: tabbed sections, charts, progress bars).
-- [Popover](../crates/teksilo-widgets/src/popover.rs) — anchored overlay accepting arbitrary `impl Widget` content; configurable placement, dismissal, optional caret.
+- [Popover](../crates/teksilo-widgets/src/popover_widget.rs) — anchored overlay accepting arbitrary `impl Widget` content; configurable placement, dismissal, optional caret.
+- [CommandPalette](../crates/teksilo-widgets/src/command_palette.rs) — type-to-run access to every registered command. Application-agnostic: its content is the tree's `ShortcutRegistry`, so a command becomes searchable just by registering it (bound to a keystroke or not); activating a row sends the same intent a menu row or chord would. `CommandPalette::new().present(ctx)` shows it centered, dismissed by Escape or an outside click.
 - [Dialog](../crates/teksilo-widgets/src/dialog.rs) — modal dialog frame; `DialogContent` / `ModalContainer` for content + presentation.
 - [MessageBox](../crates/teksilo-widgets/src/message_box.rs) — predefined info/warning/error/question modals (`MessageBoxSeverity`); semantic-role buttons (`ButtonRole`, `StandardButton`, `MessageBoxButton`, `MessageBoxButtons`) with platform-aware ordering; result via `MessageBoxResult`.
 - [Snackbar](../crates/teksilo-widgets/src/snackbar.rs) — queued auto-dismissing toast with animated slide-in.
@@ -220,7 +224,7 @@ See [tooltips.md](tooltips.md) for the tooltip system.
 
 ## Data-driven widgets
 
-Backed by the `teksilo-data` reactive collections. See [data-models.md](data-models.md) for the underlying `ListModel<T>` / `TreeModel<T>` / `SelectionModel` / sort-filter projections.
+Backed by the `teksilo-data` reactive collections. See [data-models.md](data-models.md) for the underlying `ListModel<T>` / `TreeModel<T>` / `SelectionModel` / sort-filter projections. All five (ListView/TreeView/TableView/TreeTableView/GridView) share cross-widget row-drag export machinery — `ActivateOn`, `ViewId`, `RowDragData<T>` — in [data_views.rs](../crates/teksilo-widgets/src/data_views.rs); see [drag-and-drop.md §12](drag-and-drop.md).
 
 - [Repeater](../crates/teksilo-widgets/src/repeater.rs) — non-virtualized siblings driven by `ListModel<T>` change notifications; for small bounded collections.
 - [ListView](../crates/teksilo-widgets/src/list_view.rs) — virtualized vertical list for large/unbounded collections.

@@ -7,7 +7,9 @@ Two production-grade tabular widgets for Teksilo: a flat
 [`TableView<T>`](../crates/teksilo-widgets/src/table_view.rs) over any
 `ListDataSource<Item = T>` and a hierarchical
 [`TreeTableView<T>`](../crates/teksilo-widgets/src/tree_table_view.rs) over a
-[`SortFilterTreeModel<T>`](../crates/teksilo-data/src/sort_filter_tree_model.rs).
+[`SortFilterTreeModel<T>`](../crates/teksilo-data/src/sort_filter_tree_model.rs)
+(`from_projection`), a plain `TreeModel<T>` (`new`), or any `TreeDataSource<Item = T>`
+(`from_source` / `from_source_keyed`).
 They share the same column model, header strip, drag/resize/reorder,
 filter popover, keyboard map, and accessibility wrappers; only the body
 pane differs.
@@ -38,7 +40,7 @@ let proxy      = SortFilterListModel::new(model)
 
 let table = TableView::from_source(proxy.clone())
     .add_column(
-        Column::new("name", "Name", |row, _| {
+        Column::new("name", lit!("Name"), |row, _| {
             Box::new(TextWidget::new(lit!(row.name.clone())))
         })
         .width(ColumnWidth::Flex(2.0))
@@ -57,8 +59,9 @@ proxy.filters_signal(table.filters_signal().clone());
 table.set_sort(Some("name"), SortDirection::Ascending);
 ```
 
-`TreeTableView` is identical in shape but takes a `SortFilterTreeModel<T>`
-and adds a `tree_column(id)` plus an optional `filter_mode(...)`:
+`TreeTableView` is identical in shape; built from a `SortFilterTreeModel<T>`
+(`from_projection`) it adds a `tree_column(id)` (default: the first column)
+plus an optional `filter_mode(...)`:
 
 ```rust
 let proxy = SortFilterTreeModel::new(model)
@@ -112,8 +115,8 @@ above/below the current row's top), not by a fixed rows-per-page count.
 
 Measured/seeded heights are keyed by visible index, so the question on
 every change is "from which row on are they stale?". The projection
-layers answer it: `SortFilterListModel`, `SortFilterTreeModel`, and
-`TreeSlice` expose `first_changed_index()` (see
+layers answer it: `SortFilterListModel`, `SortFilterTreeModel`,
+`TreeSlice`, and `TreeDataSlice` expose `first_changed_index()` (see
 [data-models.md](data-models.md)), and the tables consume it
 automatically:
 
@@ -163,7 +166,7 @@ A column is a generic descriptor over the row type:
 ```rust
 pub struct Column<T: 'static> { /* … */ }
 
-Column::new("id", "ID", |row, ctx| Box::new(TextWidget::new(lit!(row.id.to_string()))))
+Column::new("id", lit!("ID"), |row, ctx| Box::new(TextWidget::new(lit!(row.id.to_string()))))
     .width(ColumnWidth::Fixed(64.0))   // Fixed | Flex(factor) | Auto
     .min_width(40.0)
     .max_width(200.0)
@@ -173,7 +176,8 @@ Column::new("id", "ID", |row, ctx| Box::new(TextWidget::new(lit!(row.id.to_strin
     .resizable(true)                   // default true
     .reorderable(true)                 // COLUMN drag-reorder; default true
     .pinned(PinnedSide::Leading)       // Leading | None | Trailing
-    .truncation(TruncationPolicy::Ellipsis);
+    .truncation(TruncationPolicy::Ellipsis) // Ellipsis | None | Fade
+    .editable(true);                   // cells may open an editor (see Editing)
 ```
 
 Column ids are the persistence key for sort, filter, width, and order
@@ -188,6 +192,7 @@ signals — keep them stable across releases.
 | `col_index`      | display position (0-based, post pin + reorder)              |
 | `is_selected`    | `true` when this row (or cell, in cell-mode) is selected    |
 | `is_focused`     | `true` when this cell carries the keyboard focus            |
+| `is_hovered`     | `true` when the pointer is over this cell                   |
 | `is_editing`     | `true` when `editing_cell_signal == Some((row, col_index))` |
 | `depth`          | `Some(level)` in `TreeTableView`, `None` in `TableView`         |
 | `is_tree_column` | `true` on the column hosting the twist arrow                |
@@ -227,13 +232,13 @@ Both widgets publish six reactive signals. Mutating any of them
 triggers the right rebuild level (no full layout when scrolling, no
 rebuild when only the focus ring moves, etc.).
 
-| Signal                                                                  | Type                                          | Mutated by                                                | Persistence key |
+| Signal                                                                  | Type                                          | Mutated by                                                | Persist via     |
 |-------------------------------------------------------------------------|-----------------------------------------------|-----------------------------------------------------------|-----------------|
-| [`sort_signal`](../crates/teksilo-widgets/src/table_view.rs)               | `Signal<Option<(String, SortDirection)>>`     | header click cycle, `set_sort`, `clear_sort`              | `table.sort`    |
-| [`filters_signal`](../crates/teksilo-widgets/src/table_view.rs)            | `Signal<HashMap<String, String>>`             | filter popover, `set_filter`, `clear_filters`             | `table.filters` |
-| [`column_widths_signal`](../crates/teksilo-widgets/src/table_view.rs)      | `Signal<HashMap<String, f32>>`                | header drag-resize, `set_column_width`                    | `table.widths`  |
-| [`column_order_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Vec<String>>`                         | header drag-reorder, `set_column_order`                   | `table.order`   |
-| [`column_pinning_signal`](../crates/teksilo-widgets/src/table_view.rs)     | `Signal<HashMap<String, PinnedSide>>`         | drag across pane boundary, `set_column_pinning`           | `table.pinning` |
+| [`sort_signal`](../crates/teksilo-widgets/src/table_view.rs)               | `Signal<Option<(String, SortDirection)>>`     | header click cycle, `set_sort`, `clear_sort`              | `SettingsFile<T>` |
+| [`filters_signal`](../crates/teksilo-widgets/src/table_view.rs)            | `Signal<HashMap<String, String>>`             | filter popover, `set_filter`, `clear_filters`             | `SettingsFile<T>` |
+| [`column_widths_signal`](../crates/teksilo-widgets/src/table_view.rs)      | `Signal<HashMap<String, f32>>`                | header drag-resize, `set_column_width`                    | `SettingsFile<T>` |
+| [`column_order_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Vec<String>>`                         | header drag-reorder, `set_column_order`                   | `SettingsStore` key (e.g. `table.order`) |
+| [`column_pinning_signal`](../crates/teksilo-widgets/src/table_view.rs)     | `Signal<HashMap<String, PinnedSide>>`         | drag across pane boundary, `set_column_pinning`           | `SettingsFile<T>` |
 | [`focused_cell_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Option<(usize, usize)>>`              | keyboard nav, `set_focused_cell`, `clear_focused_cell`    | (transient)     |
 
 ### Persistence
@@ -242,26 +247,35 @@ Use [`teksilo-settings`](settings.md) to round-trip the layout. A typical
 shape:
 
 ```rust
-const TABLE_SORT:    SettingsKey<String>             = SettingsKey::new("table.sort", String::new);
-const TABLE_FILTERS: SettingsKey<HashMap<String,String>> = SettingsKey::new("table.filters", HashMap::new);
-const TABLE_WIDTHS:  SettingsKey<HashMap<String,f32>>    = SettingsKey::new("table.widths", HashMap::new);
-const TABLE_ORDER:   SettingsKey<Vec<String>>            = SettingsKey::new("table.order", Vec::new);
+const TABLE_SORT:  SettingsKey<String>      = SettingsKey::new("table.sort", String::new);
+const TABLE_ORDER: SettingsKey<Vec<String>> = SettingsKey::new("table.order", Vec::new);
 
-let widths = ctx.settings().signal_for(&TABLE_WIDTHS);   // Signal<HashMap<String, f32>>
-// Restore, then keep both directions in sync. Hold the returned
-// `ObserverHandle`s for as long as the table lives — dropping one
-// unsubscribes it.
-table.set_column_widths(widths.get());
-let restore = widths.observe({
-    let table = table.clone();
-    move |w| table.set_column_widths(w.clone())
+let order = ctx.settings().signal_for(&TABLE_ORDER);   // Signal<Vec<String>>
+// Restore before the table is mounted, then keep both directions in sync.
+// `TableView` is not `Clone` (it is moved into the tree), so the closures
+// hold clones of its signal, which share state with the mounted table.
+// Hold the returned `ObserverHandle`s for as long as the table lives —
+// dropping one unsubscribes it.
+table.set_column_order(order.get());
+let table_order = table.column_order_signal().clone();
+let restore = order.observe({
+    let table_order = table_order.clone();
+    move |o| if table_order.get() != *o { table_order.set(o.clone()) }
 });
-let persist = table.column_widths_signal().observe({
-    let widths = widths.clone();
-    move |w| widths.set(w.clone())
+let persist = table_order.observe({
+    let order = order.clone();
+    move |o| if order.get() != *o { order.set(o.clone()) }
 });
-// Repeat for sort / filters / order.
+// Repeat for sort (encoded as a string).
 ```
+
+The map-valued signals — widths, filters, pinning — cannot be `SettingsStore`
+keys: a `HashMap` serializes as a TOML table, which the store's nested-key
+model cannot tell apart from a group of keys, so `signal_for` panics at
+registration. Persist them in one app-layout struct through a
+[`SettingsFile<T>`](settings.md) instead (its writes are synchronous, so
+pair a widths round trip with `ColumnResizePolicy::OnRelease`, or write on
+your own debounce).
 
 The signal API is the persistence boundary on purpose — the widget
 emits, the application persists. There are no `on_*_changed` hooks; an
@@ -271,15 +285,18 @@ Note the shape: two observers pointing at each other. `Signal::set` carries
 **no equality check** by design, so such a pair is an unbounded mutual
 recursion unless one edge guards its write — and a `ColumnResizePolicy::Live`
 resize writes a width on every pointer move, so the loop would fire on the
-first tick of the first drag. `set_column_widths` (and `set_column_width`,
-`set_sort`, `set_column_order`, `set_column_pinning`) are therefore
-**equality-guarded**: an unchanged value neither writes nor notifies, which
-is what makes the round trip settle after one pass. If you route the value
-through a transform of your own, guard your own edge the same way.
+first tick of the first drag. The table's imperative setters —
+`set_column_widths`, `set_column_width`, `set_sort`, `clear_sort`,
+`set_filter`, `clear_filters`, `set_column_order`, `set_column_pinning` — are
+therefore **equality-guarded**: an unchanged value neither writes nor
+notifies, which is what makes the round trip settle after one pass. A write
+straight to the signal (as in the closures above, which cannot reach the
+moved `TableView`) or through a transform of your own must guard its own
+edge the same way.
 
 ### `SortFilterListModel<T>` vs raw signals
 
-The minimum the widget needs is the four signals above; you can apply
+The minimum the widget needs is the signals above; you can apply
 sort and filter manually in your own `observe` on `sort_signal` /
 `filters_signal`. **Don't.** Use the proxy:
 
@@ -295,10 +312,17 @@ proxy.filters_signal(table.filters_signal().clone());
 The proxy:
 
 - maintains a single visible-index map shared between sort and filter,
-- emits `DataChange::Reset` once per upstream change (one rebuild, not two),
-- forwards row-level inserts/removes to the table's `SelectionModel`
-  via the `observe_changes` chain, so `MultiRow` selection survives data
-  mutations.
+- emits `DataChange::Reset` once per upstream change (one rebuild, not two) —
+  except an `ItemUpdated` that neither changes the row's filter verdict nor
+  moves it past a neighbour, which is forwarded as a scoped `ItemUpdated`
+  (see below),
+- reports `first_changed_index()` so measured row heights survive the `Reset`.
+
+Because the proxy speaks `Reset`, an index-based `SelectionModel` behind it is
+**cleared** by every sort, filter, or upstream structural change. Where the
+selection must survive those, use keyed selection (`TableView::from_source_keyed`
+with a `KeyedSelectionModel`; the proxy's key is the row's source index, which
+no sort/filter reprojection renumbers).
 
 For trees, [`SortFilterTreeModel<T>`](../crates/teksilo-data/src/sort_filter_tree_model.rs)
 plays the same role, plus a `TreeFilterMode` switch:
@@ -311,7 +335,8 @@ plays the same role, plus a `TreeFilterMode` switch:
 
 `TreeTableView::filter_mode(...)` forwards to the proxy in place — calling
 it on the builder mutates the shared `Rc<RefCell<…>>` even though the
-method consumes `Self`.
+method consumes `Self`. It only has an effect on a view built with
+`from_projection`; the other constructors hold no proxy to forward to.
 
 ### Incremental updates for a single-row edit
 
@@ -344,14 +369,17 @@ column to sort on.
 
 When `Column::filterable(true)`, the header cell paints a small funnel
 glyph at the trailing end (just before the resize zone). Tapping it
-opens a [`Popover`](../crates/teksilo-widgets/src/popover.rs) anchored to
-the glyph; the popover content is a one-line text editor + a `Clear`
-button that mutate the `filters_signal[col_id]` slot in place.
+opens a [`Popover`](../crates/teksilo-widgets/src/popover_widget.rs) anchored to
+the glyph; the popover content is a `TextInput` with a trailing clear
+`IconButton` that write the `filters_signal[col_id]` slot.
 
 - The popover dismisses on Escape or click-outside (default
   `DismissBehavior::EscapeOrClickOutside`).
-- Empty editor text removes the column's entry from the map; a
-  non-empty string inserts/replaces it.
+- The typed term is applied on **Enter**, not per keystroke (applying each
+  character would re-query the source and rebuild the table, tearing down the
+  popover mid-word); the clear button empties the field and applies at once.
+  Empty text removes the column's entry from the map; a non-empty string
+  inserts/replaces it.
 - The glyph tints `TextRole::Accent` when the column has an active
   filter and `TextRole::Secondary` otherwise.
 
@@ -360,10 +388,9 @@ Callers that already use `SortFilterListModel<T>` /
 `filters_signal` re-projects the visible list whenever the popover
 mutates the map.
 
-The editor inside the popover is a deliberately minimal text field:
-printable characters, Backspace, Delete (clear), and ImeCommit. It is
-self-contained, so the filter UI is available in any TableView/TreeTableView
-build.
+The editor inside the popover is the stock `TextInput`, so it has the full
+single-line editing surface (IME, clipboard, caret navigation); the filter UI
+is available in any TableView/TreeTableView build.
 
 The header's pointer handler reserves a **filter zone** at the trailing
 edge (resize handle + filter glyph + a small padding tolerance) so that
@@ -386,13 +413,19 @@ the header label still cycles the sort as before.
 | `MultiCell`          | `CellSelectionModel`                                | rectangular extension via Shift+Arrow / Shift+Click             |
 
 Both selection models auto-adjust on `DataChange::ItemsInserted` /
-`ItemsRemoved` / `Reset`, so visual selection survives sorting,
-filtering, and underlying mutation.
+`ItemsRemoved` / `ItemsMoved`, so selection follows fine-grained upstream
+mutation; a `DataChange::Reset` — which a `SortFilterListModel` emits on every
+sort or filter change — clears an index-based selection. A
+`KeyedSelectionModel` (via `from_source_keyed`) prunes only the keys that
+disappeared, so it survives sorting and filtering.
 
-`TreeTableView` accepts both row and cell modes; selection is keyed by the
-**flat visible index** of the `TreeSlice`. Expanding/collapsing
-re-numbers indices, so don't pin a selection across an `expand_all()`
-without a re-mapping step.
+`TreeTableView` accepts both row and cell modes. With a plain
+`SelectionModel`, selection is keyed by the **flat visible index** of the
+tree projection; expanding/collapsing re-numbers indices, so don't pin such a
+selection across an `expand_all()` without a re-mapping step. To key it by
+node identity instead, pass a `KeyedSelectionModel` — `.keyed_selection(..)`
+(`NodeId`-keyed) or `from_source_keyed(source, keyed)` — which survives
+expand / collapse / filter / reorder.
 
 ---
 
@@ -410,14 +443,15 @@ let table = TableView::from_source(proxy)
         // a date picker, a colour picker, …
     });
 
-let column = Column::new("amount", "Amount", move |row, ctx| {
+let column = Column::new("amount", lit!("Amount"), move |row, ctx| {
     if ctx.is_editing {
         // Swap in your editor while editing_cell_signal matches.
         Box::new(TextInputField::new(state_for(row.id)))
     } else {
         Box::new(TextWidget::new(lit!(format!("{}", row.amount))))
     }
-});
+})
+.editable(true);
 ```
 
 `EditTriggers` selects which gestures begin an edit. It is a **bitflag
@@ -459,10 +493,12 @@ clear behaviour).
 |-----------------------------|---------------------------------------------------------------------------------------|
 | Arrow keys                  | move focused cell within the visible grid                                             |
 | Home / End                  | cell modes: first / last column of the row. Row modes: first / last **row**            |
-| Ctrl-Home / Ctrl-End        | the same, without moving the selection (cell modes also jump to the corner)            |
+| Ctrl-Home / Ctrl-End        | first / last row without moving the selection (a flat table in a cell mode jumps to the corner cell; `TreeTableView` keeps the column) |
 | PgUp / PgDn                 | scroll one page; focus moves the same number of rows                                  |
 | Tab / Shift+Tab             | next / previous cell in row order, wrapping rows (configurable via `tab_traversal`)   |
 | Shift + Arrow               | extend selection in `MultiRow` / `MultiCell` modes                                    |
+| Ctrl + Arrow                | move the focused cell without touching the selection                                  |
+| Ctrl-Tab / Ctrl-Shift-Tab   | leave the table (next / previous focusable widget) — the escape from cell traversal   |
 | Space                       | check the focused cell if it holds a checkbox, else toggle selection at focus          |
 | Ctrl-Space / Shift-Space    | `MultiCell`: select the column / the row (Excel and the ARIA grid pattern)             |
 | Enter                       | invoke `on_row_activate` (or fall back to toggle-select)                              |
@@ -509,7 +545,7 @@ Two exceptions narrow a grip:
   for click-to-sort and reorder-drag instead of becoming all grip.
 
 The header strip paints a separator at every column boundary,
-**independent of [`GridLines`](#grid-lines)** — in the header the separator
+**independent of [`GridLines`](../crates/teksilo-widgets/src/table_view/column.rs)** — in the header the separator
 *is* the affordance (it is the only thing showing where the grip is), which is
 why every desktop table draws header separators unconditionally. `GridLines`
 stays a body decoration.
@@ -595,13 +631,14 @@ zero-height-row tie-break that keeps a click and a drop agreeing.
 **TableView.** Set `.reorderable(true)` **on the table** (distinct from
 `Column::reorderable`, which reorders columns and defaults to `true`; the
 table-level flag reorders *rows* and defaults to `false`); a row drag emits the
-shared `RowDrag { source_index, source_view_id }`. An intra-table
+shared `RowDragData<T> { source: ViewId, rows, items }`. An intra-table
 reorder is a `DragSource::SameView` the source's `accept_drop` applies
 (a `ListModel<T>` reorders in place); a cross-table or external drop
 arrives as `DragSource::Foreign { payload }` at the *same*
 `accept_drop`, which downcasts the payload. Keyboard reorder
-(`Alt`+`Arrow`) routes a synthesized `RowDrag` through the same
-`accept_drop`.
+(`Alt`+`Arrow`, `Alt`+`Home`/`End`) turns the move into the same
+`(target, position)` a pointer drop carries and commits it through the
+same `accept_drop` / `reorder_within`.
 
 **TreeTableView.** Set `.reorderable(true)`; a row drag routes through
 the tree source with the **cycle guard** — `tree_apply_reorder` refuses
@@ -615,16 +652,19 @@ likewise routed through the source.
 
 ## Accessibility
 
-- `TableView` root: `Role::Table` with `row_count` (header inclusive
-  when shown) + `column_count`.
+- `TableView` root: `Role::Grid` (a keyboard-driven, selectable table;
+  `Role::Table` when `TableSelectionMode::None`) with `row_count` (header
+  inclusive when shown) + `column_count`.
 - `TreeTableView` root: `Role::TreeGrid`, same counts.
 - Each header cell: `Role::ColumnHeader` with `column_index` and, on
   the active sort column, `sort_direction`.
 - Each body row: `Role::Row` with `row_index` (1-based; header is row
   1, first body row is row 2). On `TreeTableView`, the row also carries
-  `level` (1-based depth) and `expanded` for non-leaf rows.
-- Each body cell: `Role::Cell` with `row_index` and `column_index`,
-  plus `selected` reflecting the current selection.
+  `level` (1-based depth), `expanded` for non-leaf rows, and its position
+  among its siblings.
+- Each body cell: `Role::Cell` (`Role::GridCell` in the cell-selection
+  modes, where the cell is the selectable unit) with `row_index` and
+  `column_index`, plus `selected` reflecting the current selection.
 - The filter popover's trigger inherits the popover's `set_expanded`
   state and is named `"Filter"` — locating it via screen-reader search
   is the same as locating any popover button.
@@ -641,18 +681,16 @@ PgDn handler uses.
 
 | Surface                       | Role                                |
 |-------------------------------|-------------------------------------|
-| outer frame border            | `BorderRole::Default`               |
 | header background             | `SurfaceRole::Raised`               |
 | header bottom divider         | `BorderRole::DividerStrong`         |
-| body even-row bg              | `SurfaceRole::Content`              |
-| body odd-row bg               | `SurfaceRole::AltRow`               |
-| row selected bg               | `SurfaceRole::Selected`             |
+| body even-row bg              | none (the surface behind shows through) |
+| body odd-row bg (`alternating_rows`) | `SurfaceRole::AltRow`        |
+| row selected bg               | `SurfaceRole::Selected` while the view is focused and the window active, else `SurfaceRole::SelectedInactive` |
 | cell focus ring               | `BorderRole::Focused`               |
 | grid lines                    | `BorderRole::Divider`               |
 | sort indicator (active)       | `TextRole::Accent`                  |
 | filter glyph (inactive)       | `TextRole::Secondary`               |
 | filter glyph (active)         | `TextRole::Accent`                  |
-| TreeTableView connector lines     | `BorderRole::Divider`               |
 
 Static numbers (`ROW_HEIGHT`, `HEADER_HEIGHT`, `RESIZE_HANDLE_WIDTH`,
 `GRID_LINE_THICKNESS`, `TREE_INDENT_PER_LEVEL`, …) are `pub const`s in
@@ -671,7 +709,7 @@ ctrl semantics, full keyboard nav with focus ring, edit hooks via
 `editing_cell_signal` + `on_cell_edit_request`, row drag-drop reorder
 on `TableView` and `TreeTableView`, tree expand/collapse via twist +
 `ArrowLeft/Right`, tree filter modes, `Role::Table` / `TreeGrid`
-accessibility with row indices and sort direction.
+(`Role::Grid` when selectable) accessibility with row indices and sort direction.
 
 **Intentionally not shipped:**
 
@@ -689,7 +727,7 @@ the column but the default header rendering ignores it for now;
 the descriptor but the user's cell delegate handles its own alignment
 and truncation; `row_header_column`, `cell_label`, `row_label`, and
 `auto_truncation_tooltip` builders are not yet wired (their
-accessibility slots exist on `CellA11y` and `RowA11y`). These are gaps,
+row-header role and name-override slots exist on `CellA11y`). These are gaps,
 not bugs.
 
 ---

@@ -103,7 +103,8 @@ A tab's runtime identity is split across three types, each with one job:
   storage (document UUID, file-path hash, …) — fresh ids would re-allocate
   every restart and break session-restore round-trips.
 - [`TabInfo`](../crates/teksilo-widgets/src/tab_widget/info.rs) — presentation
-  metadata: `title`, `icon`, `tooltip`, `closable`, `pinned`, `enabled`.
+  metadata: `title`, `icon`, `tooltip`, `closable`, `pinned`, `enabled`
+  (plus `context_menu`, rich / composite tooltips and `focusable_panel`).
   Title and tooltip are `LocalizedString` (accept `tr!(...)`); the icon is
   a factory closure (no `IconWidget: Clone` requirement) called each
   build, so it picks up theme/state changes naturally.
@@ -134,9 +135,10 @@ preserved.
 
 | Builder                                           | Content shape                              | Notes                                                                       |
 |---------------------------------------------------|--------------------------------------------|-----------------------------------------------------------------------------|
-| `static_tab(info, content)`                       | `impl Widget + 'static`                    | One-shot ownership; consumed on first build.                                |
+| `static_tab(info, content)`                       | `impl Widget + 'static` or a `WidgetId`    | One-shot ownership; consumed on first build. A pre-registered id (the `teksu!` DSL path) is used as-is. |
+| `tab(label, content)`                             | same as `static_tab`                       | Title-only shorthand for `static_tab(TabInfo::new().title(label), content)`. |
+| `static_tabs(iter)` / `tabs(iter)`                | iterators of the two forms above           | Loop forms; `static_tab_ids` / `tab_ids` spell the `WidgetId` case.         |
 | `static_tab_factory(info, fn(&TabHandle) -> Box)` | factory closure                            | Called once on first build.                                                 |
-| `static_tab_id(info, WidgetId)`                   | pre-registered `WidgetId`                  | For the `teksu!` DSL — wraps the id in an alias on first build.              |
 | `static_tab_with_id(id, info, content)`           | `impl Widget + 'static` + caller-chosen id | Use when external code (deep links, session restore) flips selection by id. |
 | `static_tab_factory_with_id(id, info, factory)`   | factory closure + caller-chosen id         | Factory variant of the above.                                               |
 
@@ -316,6 +318,11 @@ pub enum TabSizing {
     /// to [min_tab_extent, max_tab_extent]. Truncation via ellipsis
     /// when content hits max.
     Independent,
+    /// Tabs stretch to the full width the bar is offered. Horizontal:
+    /// the width is divided equally with no `max_tab_width` clamp
+    /// (`min_tab_width` still holds). Vertical: every pill takes the
+    /// bar's full width; pill height is unchanged.
+    Fill,
 }
 ```
 
@@ -355,9 +362,12 @@ The two orientations apply Shared sizing differently:
   intentionally **don't apply to vertical's height axis** — they'd
   force pills unreasonably tall.
 
+`Fill` is the nav-rail / full-bleed look; it needs a bounded width to fill
+(with no width proposed, a vertical bar falls back to `Shared`).
+
 Reactive: `TabWidget::sizing(Signal<TabSizing>)` rebinds at
-`BindingLevel::Rebuild` so toggling Shared ↔ Independent is a one-line
-operation from a toolbar button.
+`BindingLevel::Rebuild` so toggling Shared ↔ Independent ↔ Fill is a
+one-line operation from a toolbar button.
 
 ---
 
@@ -379,7 +389,8 @@ pub enum TabDisplayMode {
 
 Set it statically with `TabWidget::tab_display(mode)` or reactively with
 `TabWidget::tab_display(Signal<TabDisplayMode>)` (bound at
-`BindingLevel::Rebuild`, like `sizing`).
+`BindingLevel::Rebuild`, like `sizing`). A stand-alone `TabBar::tab_display`
+takes a plain mode.
 
 Mode-specific behaviour:
 
@@ -420,9 +431,9 @@ unpinned_view = items.filter(|(i, it)| !delegate.pinned(i, it))
 Indices in callbacks (`on_close(i)`, `selected.set(i)`,
 `on_reorder(from, to)`) remain **model indices**, not view positions.
 
-When the title is `None` and the tab is pinned, the framework promotes
-`info.title` (if any) to the tooltip — pinned tabs render icon-only and
-otherwise have no way for the user to identify them on hover.
+A pinned tab's title is promoted to its tooltip (replacing any tooltip the
+caller set) — pinned tabs render icon-only and otherwise have no way for the
+user to identify them on hover.
 
 DnD across the pinned/unpinned boundary fires
 `on_pin_toggle(model_index, new_pinned_flag)`. The app decides whether
@@ -436,15 +447,15 @@ transition without applying it itself (pinning is app semantics).
 ```rust
 TabWidget::new(selected)
     // …
-    .on_close(|id: TabId| {
+    .on_close(|id: TabId, ctx: &mut EventContext| {
         // default behavior: remove from dynamic_model.
         // static tabs are not auto-closable.
     })
-    .on_reorder(|moved_id: TabId, dest_index: usize| {
+    .on_reorder(|moved_id: TabId, dest_index: usize, ctx: &mut EventContext| {
         // default behavior: ListModel::move_item within the dynamic region only.
         // implies .reorderable(true).
     })
-    .on_pin_toggle(|id: TabId, new_pinned: bool| {
+    .on_pin_toggle(|id: TabId, new_pinned: bool, ctx: &mut EventContext| {
         // no default — pinning is app semantics.
     });
 ```
@@ -452,8 +463,11 @@ TabWidget::new(selected)
 Note the indirection: `TabWidget` callbacks speak `TabId`, but inside,
 the bar receives indices. The wrapper translates at the boundary using
 the `index_to_id` table captured at build time. On stand-alone
-`TabBar<T>` the callbacks are `Fn(usize)` / `Fn(usize, usize)` — the
-caller is closer to the data source and may prefer indices.
+`TabBar<T>` the callbacks are `Fn(usize, &mut EventContext)` /
+`Fn(usize, usize, &mut EventContext)` — the caller is closer to the data
+source and may prefer indices. Every callback receives the firing
+`EventContext`, so a close can be routed through a confirmation dialog
+before the model is mutated.
 
 `on_reorder(...)` implicitly sets `reorderable(true)`. The default
 reorder handler refuses cross-boundary moves (dynamic past static) and
@@ -480,8 +494,9 @@ is a drag source; the bar is the drop target.
   tabs).
 - **Insertion math.** `on_drag_hover` computes the insertion boundary
   from pointer position relative to tab boundaries (per-axis: x for
-  horizontal, y for vertical when wired). The boundary is published
-  through a shared `Cell<Option<f32>>` that the bar's `paint()` reads.
+  horizontal, y for vertical). The boundary is published through a
+  `Signal<Option<f32>>` handed to the tab style's bar chrome
+  (`TabBarChromeConfig::drop_indicator`), which paints it.
 - **Drop indicator.** A 2 dp accent-color line at the insertion
   boundary. Vertical line for horizontal bar, horizontal line for
   vertical bar — both the paint and the hover-to-insertion-boundary
@@ -635,6 +650,7 @@ regardless of orientation — useful on touchpads where two-finger scroll
 is ambiguous. Diagonal trackpad gestures pass through.
 
 ```rust
+// stand-alone TabBar only; TabWidget keeps both defaults
 .vertical_wheel_scrolls_horizontally(true)   // default
 .shift_wheel_scrolls_horizontally(true)       // default
 ```
@@ -644,7 +660,7 @@ per notch) so a single notch scrolls one full tab into view.
 
 ### "Show all tabs" overflow dropdown
 
-A single trailing `PopoverButton` with a chevron icon. Clicking it
+A single trailing `PopoverIconButton` with a chevron icon. Clicking it
 opens a `Popover` containing a `ListView` of every tab (pinned
 included). Activating an item sets `selected_id` and dismisses the
 popover.
@@ -664,7 +680,8 @@ popover.
 `show_overflow_dropdown(bool)` is a convenience over `overflow_button`:
 `true` → `Always`, `false` → `Never`. The popover's surface is a `Panel`
 with `SurfaceRole::Raised` and bounded height (max 320 dp, 28 dp per
-row), scrolling internally on long lists.
+row at the compact density, raised to the density's target size),
+scrolling internally on long lists.
 
 The dropdown advertises `HasPopup::Menu` to AccessKit so screen readers
 announce it as a popup trigger.
@@ -688,8 +705,8 @@ bar:
 .bar_trailing_slot(new_tab_button_toolbar)     // after the dropdown
 ```
 
-Both accept `impl Widget + 'static`. `_id` variants take a
-pre-registered `WidgetId` for the `teksu!` DSL. The slot widget is
+Both accept `impl Widget + 'static` or a pre-registered `WidgetId` (the
+`teksu!` DSL path). The slot widget is
 registered once on first build and **memoized** — subsequent rebuilds
 reuse the same id, so a slot's internal state (button hover, tooltip
 visibility, focus) survives bar rebuilds.
@@ -705,7 +722,7 @@ horizontal scroll position.
 All of these builders exist on both `TabBar` and `TabWidget` (the
 `TabWidget` form forwards to its inner bar). They tune the default
 `RecipeTabStyle`; an app that needs more than colour replaces the whole
-chrome with `.style(impl TabStyle)` or `theme.style_slots.tab` (see
+chrome with `TabBar::style(impl TabStyle)` or `theme.style_slots.tab` (see
 [styling-system.md](styling-system.md)).
 
 ### Per-tab backgrounds (selected / hover / idle)
@@ -794,7 +811,9 @@ interpret it freely.
 | `Home`                    | jump to first enabled tab                                |
 | `End`                     | jump to last enabled tab                                 |
 | `Enter` / `Space`         | activate the tab **and move focus into its content panel** (first focusable descendant) |
-| `Ctrl+W`                  | close the focused tab if `closable`                      |
+| `Delete`                  | close the focused tab if `closable`                      |
+| `Alt` + axis arrows       | move the focused tab one place (reorderable bars; the horizontal arrows swap under RTL) |
+| `Alt+Home` / `Alt+End`    | move the focused tab to the start / end                  |
 | `Middle-click`            | close the clicked tab if `closable` (mouse, not keyboard)|
 
 Disabled tabs are **skipped** by all keyboard navigation. Out-of-range
@@ -829,22 +848,25 @@ for horizontal and vertical bars without re-mapping.
   content-panel `WidgetId` when the bar is composed inside `TabWidget`.
 - **Each content pane**: `Role::TabPanel`, named after the tab's
   resolved title.
-- **Pinned tabs**: include `access_description("Pinned tab")` so screen
-  readers distinguish them.
-- **Closable tabs**: the header advertises `accesskit::Action::Click`
-  (suppressed while the tab is disabled) and `accesskit::Action::Focus`.
-  Closing is reachable from the keyboard with <kbd>Delete</kbd> on the
-  focused header, and by pointer through the trailing close
-  `IconButton`, whose i18n tooltip doubles as its accessible name. That
-  button is deliberately non-focusable and hidden until the header is
-  hovered, so <kbd>Tab</kbd> walks between headers instead of into them.
-- **Reorderable tabs**: advertise custom actions "Move Left" and
-  "Move Right" (or "Move Up" / "Move Down" on vertical bars), invoking
-  the same reorder path drag-drop uses. AT users can't drag, so this is
-  the supported reorder affordance.
-- **Overflow dropdown**: `HasPopup::Menu` + `controls(menu_list_id)`.
-- **Scroll arrows**: `Role::Button` with i18n labels "Scroll tabs
-  left" / "Scroll tabs right".
+- **Every header** advertises `accesskit::Action::Click` (suppressed
+  while the tab is disabled) and `accesskit::Action::Focus`, plus its
+  `position_in_set`.
+- **Closable tabs**: advertise a "Close" custom action for AT. Closing is
+  also reachable from the keyboard with <kbd>Delete</kbd> on the focused
+  header, and by pointer through the trailing close `IconButton`, whose
+  i18n tooltip doubles as its accessible name. That button is
+  deliberately non-focusable and hidden until the header is hovered
+  (always shown at a density that reveals every affordance, such as
+  Touch), so <kbd>Tab</kbd> walks between headers instead of into them.
+- **Reorderable tabs**: advertise custom actions "Move Left" / "Move
+  Right" / "Move to Start" / "Move to End" (or "Move Up" / "Move Down" /
+  "Move to Top" / "Move to Bottom" on vertical bars), invoking the same
+  reorder path drag-drop uses. AT users can't drag, so this is the
+  supported reorder affordance. Pinned tabs don't advertise them.
+- **Overflow dropdown**: `HasPopup::Menu`.
+- **Scroll arrows**: `IconButton`s named by their tooltips "Scroll tabs
+  left" / "Scroll tabs right" ("Scroll tabs up" / "Scroll tabs down" on
+  a vertical bar).
 
 The full `TabList → Tab → TabPanel` hierarchy is what AT software
 expects from a tabbed container, and matches what Firefox and Chrome
@@ -862,9 +884,9 @@ publish for their own browser tabs.
 | label text — idle           | `idle_text_role` (settable)             |
 | label text — disabled       | `TextRole::Disabled` (always)           |
 | accent indicator (selected) | `theme.colors.accent`                   |
-| bar bottom separator        | `BorderRole::DividerStrong`             |
+| bar bottom separator        | `BorderRole::Default` (`TabBar::separator(false)` removes it) |
 | close button hover          | `SurfaceRole::Hover`                    |
-| drop indicator line         | `TextRole::Accent`                      |
+| drop indicator line         | `theme.colors.accent`                   |
 | overflow popover surface    | `SurfaceRole::Raised`                   |
 | overflow popover border     | `BorderRole::Default`                   |
 
@@ -891,6 +913,8 @@ Static numbers are `pub const`s in
 - `TAB_EDITOR_HEIGHT` (default 50 dp) — height of horizontal bar tabs.
 - `TAB_TOOL_WINDOW_HEIGHT` (default 28 dp) — reserved for future
   tool-window tab variant; not currently consumed by vertical bars.
+  `TabWidget::tab_bar_height(dp)` / `compact_bar()` (38 dp) override the
+  50 dp strip height instead.
 - `TAB_UNDERLINE_ACTIVE` (default 2 dp) — thickness of the selection
   indicator. The indicator's color comes from `theme.colors.accent`.
 
@@ -929,11 +953,15 @@ TabWidget::new(selected)
   visibility
 - mouse-wheel-to-horizontal mapping (configurable: vertical-only,
   shift-only, both, neither)
-- "show all tabs" overflow dropdown via `PopoverButton` + `ListView`
-- keyboard navigation: arrow keys, Home/End, Enter/Space, Ctrl+W
-- accessibility: `TabList` / `Tab` / `TabPanel` roles; "Move Left/Right"
-  custom actions for AT-driven reorder; named close action; `HasPopup`
+- "show all tabs" overflow dropdown via `PopoverIconButton` + `ListView`
+- keyboard navigation: arrow keys, Home/End, Enter/Space, Delete,
+  Alt+arrows / Alt+Home/End reorder
+- accessibility: `TabList` / `Tab` / `TabPanel` roles; "Move …"
+  custom actions for AT-driven reorder; "Close" custom action; `HasPopup`
   on the dropdown
+- `TabWidget::bar_visibility(TabBarVisibility::{Always, WhenMultiple,
+  Never})`, statically or bound to a signal — hides the strip without
+  tearing down the panes
 - `Signal<Option<TabId>>` selection that survives reorders, removals,
   locale and theme changes
 
@@ -947,9 +975,10 @@ TabWidget::new(selected)
   hit the existing `ScrollDelta::Pixels` path with `Easing::EaseOut`
   animation; touch flicks would need `ScrollArea` ↔ `SwipeRecognizer`
   wiring, ~150 LOC, separate task)
-- `tool_window_tab_height` (28 dp) is reserved on `TabStyle` but not
-  yet consumed by vertical bars — they currently pick up
-  `editor_tab_height` like horizontal bars
+- `TabRecipe::tool_window_height` (`TAB_TOOL_WINDOW_HEIGHT`, 28 dp) is
+  reserved on the default `RecipeTabStyle` but not yet consumed by
+  vertical bars — they currently pick up the editor-tab height
+  (`TAB_EDITOR_HEIGHT`) like horizontal bars
 
 ---
 

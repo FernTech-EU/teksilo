@@ -96,9 +96,9 @@ TitleBar::new(host)
     .height(40.0)                                 // default: 40 logical px
     .background(theme.colors.surface_pressed)     // default: transparent
     .border(theme.colors.text_secondary, 2.0)     // 1px+ bottom rule
-    .leading(leading_widget)                      // or .leading_id(id)
-    .center(center_widget)                        // or .center_id(id)
-    .trailing(trailing_widget)                    // or .trailing_id(id)
+    .leading(leading_widget)                      // accepts a widget or a WidgetId
+    .center(center_widget)                        // accepts a widget or a WidgetId
+    .trailing(trailing_widget)                    // accepts a widget or a WidgetId
     .close_action(|ctx| ctx.close_window())       // optional override
 ```
 
@@ -254,7 +254,7 @@ On Wayland and (eventually) Windows, a borderless window has no OS-drawn frame, 
 ```rust
 match tree.title_bar_host() {
     Some(host) if host.needs_custom_resize_handles() =>
-        tree.add(WindowFrame::new(host).thickness(6.0).content_id(inner)),
+        tree.add(WindowFrame::new(host).thickness(6.0).content(inner)),
     _ => inner,                            // macOS, or no host
 }
 ```
@@ -263,7 +263,7 @@ Gate on `needs_custom_resize_handles()`; on macOS `NSWindow` still services edge
 
 Content fills the whole window — the strips sit *on top*. Hit-testing walks children in reverse insertion order so strips win clicks within `thickness` pixels of an edge; interior clicks fall through to the content. Default thickness 6 logical pixels, matching the common Windows 11 / GNOME convention.
 
-Builder: `.new(host)` → `.thickness(f32)` → `.content(widget)` / `.content_boxed(Box<dyn Widget>)` / `.content_id(WidgetId)`.
+Builder: `.new(host)` → `.thickness(f32)` → `.content(widget)` (accepts a widget or a `WidgetId`) / `.content_boxed(Box<dyn Widget>)`.
 
 ---
 

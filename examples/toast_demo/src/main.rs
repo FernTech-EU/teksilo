@@ -28,8 +28,8 @@
 //!   updates the loading toast in place (percentage + a Cancel
 //!   action), replacing it with a success/cancelled toast when the
 //!   job ends. This is the supported bridge for driving toasts from a
-//!   backend long-operation's progress events (Qleany
-//!   `Origin::LongOperation(Progress | Completed | Cancelled)`).
+//!   backend long-operation's progress events (`Progress | Completed |
+//!   Cancelled`).
 //!
 //! # Touch
 //!
@@ -271,8 +271,8 @@ struct DemoJobEvent {
 /// A trivial in-process [`EventSource`]: the worker thread `publish`es events
 /// from *off* the UI thread, and the framework bridges them back to the UI
 /// thread — where `subscribe_event_with_ctx` hands the callback a fresh
-/// `EventContext`. `Clone` shares one subscriber list (the real app's
-/// `EventHubSource` plays this role over Qleany's event hub).
+/// `EventContext`. `Clone` shares one subscriber list (in a real app, the
+/// data layer's event hub plays this role).
 #[derive(Clone, Default)]
 struct DemoBus {
     #[allow(clippy::type_complexity)]

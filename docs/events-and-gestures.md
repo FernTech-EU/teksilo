@@ -157,7 +157,7 @@ Widget builders register event handlers via blanket-implemented methods on the [
 ctx.add(
     MinSize::new(48.0, 48.0).child(content)
         .on_tap(|event, ctx| {
-            // event is &TapEvent { position, button, modifiers }
+            // event is &TapEvent { position, button, modifiers, pointer }
             ctx.send_intent(AppIntent::Clicked);
         })
         .on_hover(move |entered, _ctx| {
@@ -187,9 +187,10 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 | `on_hover` | Pointer enters / leaves the widget's bounds | `FnMut(bool, &mut EventContext)` |
 | `on_focus` | Widget gains or loses focus | `FnMut(bool, &mut EventContext)` |
 | `on_key` | Focused widget receives a `KeyDown` / `KeyUp` | `FnMut(&WidgetEvent, &mut EventContext) -> EventResponse` |
+| `on_key_preview` | A `KeyDown` / `KeyUp` / IME event whose focused target is a strict descendant — preview pass only | same |
 | `on_scroll` | Scroll event hits the widget | same |
 | `on_pointer_event` | Low-level pointer escape hatch (any `Pointer*` variant) | same |
-| `on_drag` | Gesture-based drag — `Started`, `Moved*`, `Ended` phases | `FnMut(DragPhase, &mut EventContext)` |
+| `on_drag` | Gesture-based drag — `Started`, `Moved*`, then `Ended` or `Cancelled` | `FnMut(DragPhase, &mut EventContext)` |
 | `on_swipe` | One-shot swipe with direction + velocity | `FnMut(SwipeDirection, f32, &mut EventContext)` |
 | `on_pinch` | Two contacts spreading or twisting, **or** the OS trackpad magnify / rotate stream — one ingress for both (§4) | `FnMut(PinchPhase, &mut EventContext)` |
 | `on_pointer_cancel` | The interaction was revoked rather than completed — terminal, no `PointerUp` follows | `FnMut(&PointerInfo, CancelReason, &mut EventContext)` |
@@ -197,6 +198,7 @@ Under the hood, the builder wraps the widget in a `WidgetWithHandlers<W>` that c
 | `on_drag_leave` | Drag leaves the widget (target change, drop, cancel, or source destroyed) | `FnMut(&mut EventContext)` |
 | `on_drag_tick` | Per-frame tick while the widget is the current drop target | `FnMut(Point, &mut EventContext)` |
 | `on_drop` | DnD payload released on the widget | `FnMut(DragPayload, Point, &mut EventContext) -> bool` |
+| `on_drag_ended` | Source side: the drag this widget started finished — in-app drop, OS copy / move, or cancel | `FnMut(DropOutcome, &mut EventContext)` |
 | `on_access_action` | AccessKit action request targets the widget | `FnMut(accesskit::Action, &mut EventContext) -> EventResponse` |
 | `on_access_action_request` | Full AccessKit action with payload (`SetTextSelection`, `SetValue`, `SetScrollOffset`) | see source |
 
@@ -270,7 +272,7 @@ Plus a handful of flag-like attachments that don't take event-data closures:
 | `.focusable(true)` | Opt the node into tab order |
 | `.tab_index(n)` | Explicit tab index, **scoped to the nearest `FocusScope`** (see §6) — `Some` sorts before unindexed, ascending |
 | `.cursor(CursorIcon::Pointer)` | Cursor when pointer is over the widget |
-| `.clips_children(true)` | Scissor clipping to bounds (ScrollArea, MaxSize) |
+| `.clips_children_on(true)` | Scissor clipping to bounds (ScrollArea, MaxSize). The `WidgetBuilder` trait spells it `clips_children_on` because `Widget::clips_children` is already the `&self` query; `HandlerSet` and `WidgetWithHandlers` also accept `.clips_children(true)` |
 | `.context_menu(factory)` | Right-click overlay factory — see §3.1.4 |
 
 `.cursor(..)` is a **declaration**, and the tree applies it on the
@@ -301,10 +303,10 @@ than tracking whether you once set a cursor.
 
 ### 3.1.4 Context-menu factory — `Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>`
 
-Context menus live at a different tier from the four tap-family hooks. Instead of a recognizer-driven callback, the framework wires a single **factory** that produces the menu widget on demand. Four things reach it — a secondary press, the `Shift+F10` / Menu chord, the AccessKit `ShowContextMenu` action, and a **hold** on a pointer that cannot hover (a finger has no secondary button; see [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)) — and all four go through one `show_context_menu_for`, which walks up the parent chain looking for the nearest ancestor with a factory installed, calls it with the click position (widget-local) plus a full `EventContext`, and:
+Context menus live at a different tier from the four tap-family hooks. Instead of a recognizer-driven callback, the framework wires a single **factory** that produces the menu widget on demand. Four things reach it — a secondary press, the `Shift+F10` / Menu chord, the AccessKit `ShowContextMenu` action, and a **hold** on a pointer that cannot hover (a finger has no secondary button; see [`touch_route`](../crates/teksilo-core/src/widget_tree/touch_route.rs)) — and all four go through one `show_context_menu_for`, which walks up the parent chain looking for the nearest ancestor with a factory installed, calls it with the click position (window-local) plus a full `EventContext`, and:
 
-- Mounts the returned widget as an `OverlayLayer::InTree` overlay anchored at the factory-owning widget, placed at the click position.
-- Dismisses pre-existing overlays first.
+- Mounts the returned widget as an `OverlayLayer::InTree` overlay anchored at the factory-owning widget, placed at the click position (for a coarse pointer, offset clear of the contact patch — `OverlayPlacement::at_pointer_for`).
+- Dismisses pre-existing overlays first — except any overlay that *contains* the right-clicked widget, so a right-click inside a modal editor does not tear down the modal it lives in.
 - Saves the previously-focused widget for restoration when the menu dismisses.
 - Focuses the menu content so keyboard navigation works immediately.
 
@@ -328,7 +330,7 @@ The factory is `Fn` (re-entrant) and called fresh on every right-click — the m
 .context_menu(|_, _| if disabled.get() { None } else { Some(build_menu()) })
 ```
 
-A factory that always returns `None` produces no menu and no fall-through visible effect — the right-click is consumed silently.
+If every factory on the chain returns `None`, no menu opens and the press falls through to normal dispatch (any intents or signal writes the factories queued are still applied).
 
 ### 3.2 HandlerSet — handlers from inside `build()`
 
@@ -352,7 +354,7 @@ fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
 }
 ```
 
-Multiple `apply_self_handlers` calls across a widget's `build()` chain merge via `HandlerSet::merge`; two `on_tap` closures both run. This lets a composite widget compose its own behavior with a base trait's contributed handlers.
+Multiple `apply_self_handlers` calls across a widget's `build()` chain merge onto the node via `EventHandlers::merge`; two `on_tap` closures both run. This lets a composite widget compose its own behavior with a base trait's contributed handlers.
 
 ### 3.3 Why attached handlers won
 
@@ -416,8 +418,8 @@ none of them is one node's business:
 When a widget attaches multiple gesture handlers (`on_tap` + `on_long_press`), both recognizers run in parallel on the same event stream via `GestureArena`. The arena's rules:
 
 - Each recognizer sees every raw event until it returns `Recognized` or `Failed`.
-- When one recognizes, competing recognizers whose `resets_on_peer_recognition` flag is set get reset (`DoubleTapRecognizer` peers-reset when `TapRecognizer` alone fires — so a single tap doesn't arm a phantom "missing second tap" in the double-tap recognizer).
-- Cooperative recognizers (tap and triple-tap, for instance) run to completion side-by-side.
+- When one recognizes, competing recognizers are reset — `GestureRecognizer::resets_on_peer_recognition` defaults to `true`, winner-take-all (tap vs drag, long-press vs tap).
+- Cooperative recognizers opt out by returning `false`: `DoubleTapRecognizer` and `TripleTapRecognizer` do, so a `DoubleTap` firing at click 2 does not wipe the triple-tap recognizer before click 3 arrives, and the two run to completion side-by-side.
 
 Widget authors never touch the arena directly. Attaching handlers via `WidgetBuilder` or `HandlerSet` auto-wires the recognizers and the arena on the node.
 
@@ -580,6 +582,8 @@ pub struct PointerSequence {
     last_position: Point,
     started_at: EventTime,
     pressed_owner: Option<WidgetId>,
+    // …plus per-press bookkeeping: `terminating`, `taps_cancelled`, and the
+    // `drag_activation_overrides` `set_drag_activation` stashes.
 }
 
 pub struct SequenceMember {
@@ -791,8 +795,8 @@ A finger's reported centre wanders several device pixels while resting on the
 control it is pressing, so `tap_slop` must **not** independently cancel a coarse
 tap that never left its target. The same predicate is (a) what `TapRecognizer`
 fails on, (b) what the router uses to fire `GestureArenaSet::cancel_taps` — once
-per press — when the pointer slides off, and (c) what will clear the framework's
-press visual. WCAG 2.2 SC 2.5.2's "slide off to abort" is exactly rule (b): the
+per press — when the pointer slides off, and (c) what clears the framework's
+press visual (`update_press`), restoring it if the pointer comes back inside. WCAG 2.2 SC 2.5.2's "slide off to abort" is exactly rule (b): the
 activation is abandoned, and a drag the same press started is not.
 
 There is a fourth trigger for `cancel_taps`, and it exists because `Bounds` has
@@ -959,7 +963,7 @@ mouse drag is never read as a pan.
 Handlers don't mutate the tree directly. They request mutations on their `EventContext` and the framework applies them after the dispatch finishes:
 
 ```rust
-pub struct EventContext {
+pub struct EventContext<'ops> {
     // tree structure
     tree_mutations: Vec<TreeMutation>,        // SetDormant / Activate / Destroy
     // focus
@@ -969,8 +973,7 @@ pub struct EventContext {
     overlay_dismissals: Vec<OverlayId>,
     delayed_overlay_requests: Vec<...>,
     timed_overlay_requests: Vec<...>,
-    dismiss_all_overlays: bool,
-    dismiss_top: bool,
+    dismiss_scope: Option<DismissScope>,      // All / AllExceptHosts / the source's menu chain
     // modals
     modal_requests: Vec<ModalRequest>,
     dismiss_modal: bool,
@@ -1003,7 +1006,7 @@ This single-pass deferral matters for two reasons:
 
 Via `EventContext`, any handler can:
 
-- `ctx.set_theme(theme)` — swap the app theme; all windows rebuild.
+- `ctx.set_theme(theme)` — swap the app theme in every window; the trees are dirty-marked for relayout and repaint, not rebuilt, so focus and scroll offsets survive.
 - `ctx.set_locale(id)` — switch i18n locale; dirty-marks locale-bound signals.
 - `ctx.close_window()` — request the owning window close.
 - `ctx.request_focus(widget_id)` — programmatic focus transfer (overlay content on open, first error field on submit).
@@ -1107,8 +1110,8 @@ The framework dispatches a few synthetic events the widget code doesn't see from
 
 - **`PointerEnter` / `PointerLeave`.** Derived from `PointerMove` by comparing the hit target frame-over-frame. A widget moving out from under a stationary pointer still gets `PointerLeave` — the hit target changed even if the pointer didn't. Both follow the **hover owner** (the most recent pointer that can hover: a mouse, or a pen in proximity), so a contact produces neither. When a pen in proximity takes hover from a live mouse, the mouse's node gets a `PointerLeave` and the pen's gets a `PointerEnter`.
 - **`FocusGained` / `FocusLost`.** Issued when focus moves.
-- **`ScrollIntoView { target }`.** Issued by the focus system after a focus change to a widget outside the viewport. Nearest clipping ancestor handles it by adjusting its scroll offset.
-- **Synthetic clicks.** `ctx.synthetic_click(id)` dispatches a simulated tap at the widget's center — used by AccessKit action routing (`Action::Click`), menu item activation, and some shortcut-triggered activations that want to go through the full tap path.
+- **`ScrollIntoView { target_bounds, margin, align, motion, applied_scroll }`.** Issued by the focus system after a focus change to a widget outside the viewport. Each clipping ancestor, innermost first, handles it by adjusting its scroll offset and reports the shift it applied through `applied_scroll`, so the next container out is asked about where the target will land.
+- **Synthetic clicks.** `ctx.synthetic_click(id)` dispatches a simulated `PointerDown` + `PointerUp` at the widget's center — used by menu item activation (Enter on a keyboard-focused item) and other keyboard activations that want to go through the full tap path. An AccessKit `Action::Click` does **not** go through it: it is delivered to the target node's `on_access_action*` handlers (§3.1).
 
 ## 8. Testing
 
@@ -1135,9 +1138,10 @@ tree.dispatch_event(WidgetEvent::pointer_up(at, PointerButton::Primary, Modifier
 
 ```rust
 let finger = tree.new_contact();               // one identity per press
+let below = Point::new(at.x, at.y + 40.0);
 tree.touch_down(finger, at);
-tree.touch_move(finger, at + Vec2::new(0.0, 40.0));
-tree.touch_up(finger, at + Vec2::new(0.0, 40.0));
+tree.touch_move(finger, below);
+tree.touch_up(finger, below);
 tree.assert_no_leaked_pointer_state();
 ```
 
@@ -1191,4 +1195,4 @@ No Xvfb, no GPU, no display server required.
 - [crates/teksilo-core/src/pointer.rs](../crates/teksilo-core/src/pointer.rs) — `PointerInfo` / `PointerId` / `EventTime` / `CancelReason`.
 - [crates/teksilo-core/src/widget.rs](../crates/teksilo-core/src/widget.rs) — `EventContext`.
 - [crates/teksilo-widgets/src/focus_scope.rs](../crates/teksilo-widgets/src/focus_scope.rs) — the `FocusScope` traversal-scope wrapper (§6.1).
-- [crates/teksilo-core/src/widget_tree/focus_impl.rs](../crates/teksilo-core/src/widget_tree/focus_impl.rs) — `cycle_focus` scope-tree traversal, `set_traversal_scope`, `view_focus_*` chrome signals.
+- [crates/teksilo-core/src/widget_tree/focus_impl.rs](../crates/teksilo-core/src/widget_tree/focus_impl.rs) — `cycle_focus` scope-tree traversal and the `view_focus_*` chrome signals (`set_traversal_scope` itself is on `WidgetTree` in `widget_tree.rs`).
