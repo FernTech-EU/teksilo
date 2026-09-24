@@ -1050,6 +1050,7 @@ let when = TeksiloDateTimeFormatter::new()
 ```
 
 `NumberStyle` is `Decimal | Percent | Currency`. `DateStyle` / `TimeStyle` are `Long | Medium | Short`. The Signal-side formatter builders are zero-arg `::new()` then chain options; there's no `BuildContext` argument — the formatter resolves the active locale via the same thread-local accessor `LocalizedString` uses.
+`.date_fields(DateFields)` picks which fields the date names (`YearMonthDay` default, `YearMonthDayWeekday` for CLDR's full date, `YearMonth` for a month with its year), and `.format_in_locale(value, &lang)` renders one value once as a plain `String` in a named locale, for a string computed on demand (an accessibility name) rather than displayed. `.calendar_system(CalendarSystem::Gregorian)` keeps the date on the Gregorian calendar where CLDR prefers another for the locale (Persian for `fa-IR`, Buddhist era for `th-TH`).
 
 **`tr_signal!` / `tr_signal_widget!` — `Signal<T>` inside translated sentences.** When a reactive value belongs in the middle of a localized sentence (counters in messages, balances in alerts, timestamps in status lines), use `tr_signal!`. Every named arg must be a `Signal<T>`; the result is a `Signal<String>` that re-renders on any-arg / locale / `.ftl`-hot-reload change:
 

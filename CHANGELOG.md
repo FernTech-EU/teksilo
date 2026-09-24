@@ -27,6 +27,22 @@ by crate for clarity, not because crates version independently.
   node, after the widget's own, and point relations naming the composite at
   it. The overrides guide has a section on it.
 
+#### Internationalization
+
+- **A formatted date can name its weekday, or stop at the month.**
+  `TeksiloDateTimeFormatter::date_fields(DateFields)` picks which fields the
+  date part names: `YearMonthDay`, the default and what every date style
+  rendered before; `YearMonthDayWeekday`, CLDR's full date at `DateStyle::Long`
+  ("lundi 31 août 2026", "Monday, August 31, 2026"); or `YearMonth`, a month
+  with its year ("août 2026"). ICU picks the pattern for the whole combination,
+  so the order and the grammar are the locale's: a Russian month is genitive
+  after a day and nominative beside its year alone. `format_in_locale(value,
+  &lang)` renders one value once, as a plain `String`, in a locale the caller
+  names, for a string computed on demand, such as an accessibility name.
+  `calendar_system(CalendarSystem::Gregorian)` keeps the date on the Gregorian
+  calendar where CLDR gives the locale another one: by default `fa-IR` writes
+  24 September 2026 as the 2nd of Mehr 1405, and `th-TH` counts its year 2569.
+
 ### Changed
 
 #### Data views

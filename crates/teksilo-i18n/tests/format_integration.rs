@@ -18,7 +18,10 @@
 use std::rc::Rc;
 
 use teksilo_core::signal::Signal;
-use teksilo_i18n::format::{NumberFormatter, TeksiloDateTime, TeksiloDateTimeFormatter};
+use teksilo_i18n::format::{
+    CalendarSystem, DateFields, DateStyle, NumberFormatter, TeksiloDateTime,
+    TeksiloDateTimeFormatter,
+};
 use teksilo_i18n::{I18nConfig, I18nManager, LanguageIdentifier, tr_signal};
 
 fn lid(s: &str) -> LanguageIdentifier {
@@ -304,6 +307,148 @@ fn signal_formatter_no_manager_falls_back_gracefully() {
     // doesn't panic and produces a non-empty result.
     let s = NumberFormatter::new().format(42.0_f64).get();
     assert!(!s.is_empty(), "fallback output must be non-empty");
+}
+
+// -----------------------------------------------------------------
+// Date fields, and the one-shot path
+// -----------------------------------------------------------------
+
+/// `date` in `lang` at `DateStyle::Long` with the given fields, through the
+/// one-shot path: no manager involved.
+fn long_date(lang: &str, fields: DateFields, date: jiff::civil::Date) -> String {
+    TeksiloDateTimeFormatter::new()
+        .date_style(DateStyle::Long)
+        .date_fields(fields)
+        .format_in_locale(date.at(0, 0, 0, 0), &lid(lang))
+}
+
+#[test]
+fn a_date_with_its_weekday_is_written_the_way_the_locale_writes_it() {
+    // The strings a screen reader speaks for a calendar day. Each language
+    // puts the weekday where it goes and inflects the month the way a day
+    // requires, which no concatenation of translated names can do: French
+    // puts the day before the month, Hungarian the weekday last, Russian the
+    // month in the genitive.
+    let day = jiff::civil::date(2026, 8, 31);
+    let with_weekday = DateFields::YearMonthDayWeekday;
+    assert_eq!(
+        long_date("en-US", with_weekday, day),
+        "Monday, August 31, 2026"
+    );
+    assert_eq!(long_date("fr-FR", with_weekday, day), "lundi 31 août 2026");
+    assert_eq!(
+        long_date("hu-HU", with_weekday, day),
+        "2026. augusztus 31., hétfő"
+    );
+    assert_eq!(
+        long_date("ru-RU", with_weekday, day),
+        "понедельник, 31 августа 2026\u{202f}г."
+    );
+}
+
+#[test]
+fn a_month_with_its_year_is_written_without_a_day() {
+    // Russian shows why this is a field set and not a trimmed date: a month
+    // standing with its year is nominative, "август", where the day above
+    // had the genitive "августа".
+    let day = jiff::civil::date(2026, 8, 31);
+    assert_eq!(
+        long_date("en-US", DateFields::YearMonth, day),
+        "August 2026"
+    );
+    assert_eq!(long_date("fr-FR", DateFields::YearMonth, day), "août 2026");
+    assert_eq!(
+        long_date("ru-RU", DateFields::YearMonth, day),
+        "август 2026\u{202f}г."
+    );
+}
+
+#[test]
+fn a_month_with_its_year_ignores_a_time_style() {
+    // ICU refuses a time on a calendar period. Passing the refusal on would
+    // have degraded the whole rendering to the ISO fallback.
+    let s = TeksiloDateTimeFormatter::new()
+        .date_style(DateStyle::Long)
+        .date_fields(DateFields::YearMonth)
+        .time_style(teksilo_i18n::TimeStyle::Short)
+        .format_in_locale(
+            jiff::civil::date(2026, 8, 31).at(14, 35, 0, 0),
+            &lid("en-US"),
+        );
+    assert_eq!(s, "August 2026");
+}
+
+#[test]
+fn a_date_style_alone_still_names_year_month_and_day() {
+    // The default the existing callers rely on: no weekday unless asked.
+    let day = jiff::civil::date(2026, 8, 31);
+    assert_eq!(
+        long_date("en-US", DateFields::default(), day),
+        "August 31, 2026"
+    );
+    assert_eq!(
+        long_date("fr-FR", DateFields::default(), day),
+        "31 août 2026"
+    );
+}
+
+#[test]
+fn a_date_can_stay_on_the_gregorian_calendar_where_the_locale_prefers_another() {
+    // CLDR gives fa-IR the Persian calendar and th-TH the Buddhist era, so
+    // by default 24 September 2026 is the 2nd of Mehr 1405, and a Thai year
+    // is 2569. A date naming a day of a Gregorian month grid has to stay on
+    // the grid's calendar, in the locale's own words and digits.
+    let day = jiff::civil::date(2026, 9, 24).at(0, 0, 0, 0);
+    let full = |lang: &str, system: CalendarSystem| {
+        TeksiloDateTimeFormatter::new()
+            .date_style(DateStyle::Long)
+            .date_fields(DateFields::YearMonthDayWeekday)
+            .calendar_system(system)
+            .format_in_locale(day, &lid(lang))
+    };
+    assert_eq!(
+        full("fa-IR", CalendarSystem::LocalePreferred),
+        "پنجشنبه ۲ مهر ۱۴۰۵"
+    );
+    assert_eq!(
+        full("fa-IR", CalendarSystem::Gregorian),
+        "پنجشنبه ۲۴ سپتامبر ۲۰۲۶"
+    );
+    assert_eq!(
+        full("th-TH", CalendarSystem::LocalePreferred),
+        "วันพฤหัสบดีที่ 24 กันยายน 2569"
+    );
+    assert_eq!(
+        full("th-TH", CalendarSystem::Gregorian),
+        "วันพฤหัสบดีที่ 24 กันยายน ค.ศ. 2026"
+    );
+    // Where the locale counts in Gregorian already, nothing changes.
+    assert_eq!(
+        full("fr-FR", CalendarSystem::Gregorian),
+        full("fr-FR", CalendarSystem::LocalePreferred)
+    );
+}
+
+#[test]
+fn format_in_locale_follows_its_argument_and_agrees_with_the_signal_path() {
+    // The manager is on en-US; the one-shot path is told fr-FR and must not
+    // consult the manager. Once the manager moves to fr-FR, the signal path
+    // must render the very same string, since both share one ICU cache.
+    let mgr = install_en_fr();
+    let dt = jiff::civil::date(2026, 8, 31).at(9, 5, 0, 0);
+    let formatter = TeksiloDateTimeFormatter::new()
+        .date_style(DateStyle::Long)
+        .date_fields(DateFields::YearMonthDayWeekday);
+
+    let one_shot = formatter.format_in_locale(dt, &lid("fr-FR"));
+    assert_eq!(one_shot, "lundi 31 août 2026");
+
+    let display = formatter.format(dt);
+    assert_eq!(display.get(), "Monday, August 31, 2026");
+    mgr.set_locale(lid("fr-FR"));
+    assert_eq!(display.get(), one_shot);
+
+    teksilo_i18n::thread_local::clear();
 }
 
 // -----------------------------------------------------------------

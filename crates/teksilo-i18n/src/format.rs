@@ -39,7 +39,9 @@
 //!   and offer no seam to pass ours, so [`NumberFormatter::use_grouping`]
 //!   does not reach it.
 //! - **DateTime** — full ICU support via `CompositeDateTimeFieldSet`; date
-//!   style + time style runtime-selected.
+//!   style, time style, the date's fields ([`DateFields`]: with or
+//!   without the weekday, or a month with its year) and the calendar the
+//!   date is counted in ([`CalendarSystem`]) runtime-selected.
 //!
 //! # The parse direction
 //!
@@ -60,17 +62,18 @@ use std::str::FromStr;
 use fluent_bundle::types::{FluentNumber, FluentType};
 use fluent_bundle::{FluentArgs, FluentValue};
 use icu_calendar::Date as IcuDate;
-use icu_datetime::DateTimeFormatter;
-use icu_datetime::fieldsets::builder::{DateFields, FieldSetBuilder};
+use icu_datetime::fieldsets::builder::{DateFields as IcuDateFields, FieldSetBuilder};
 use icu_datetime::fieldsets::enums::CompositeDateTimeFieldSet;
 use icu_datetime::input::{DateTime as IcuDateTime, Time as IcuTime};
 use icu_datetime::options::{Length as DtLength, TimePrecision};
+use icu_datetime::{DateTimeFormatter, DateTimeFormatterPreferences};
 use icu_decimal::DecimalFormatter;
 use icu_decimal::options::{DecimalFormatterOptions, GroupingStrategy};
 use icu_experimental::dimension::currency::CurrencyType;
 use icu_experimental::dimension::currency::formatter::CurrencyFormatter;
 use icu_experimental::dimension::percent::formatter::PercentFormatter;
 use icu_locale_core::Locale as IcuLocale;
+use icu_locale_core::preferences::extensions::unicode::keywords::CalendarAlgorithm;
 use intl_memoizer::Memoizable;
 use teksilo_core::signal::{Prop, Signal};
 use unic_langid::LanguageIdentifier;
@@ -127,6 +130,69 @@ impl DateStyle {
             Self::Short => DtLength::Short,
         }
     }
+}
+
+/// Which calendar fields the date part of a rendering names. [`DateStyle`]
+/// picks how long each field is written; this picks which fields there are.
+///
+/// ICU chooses the locale's pattern for the whole combination, so the fields
+/// arrive in the locale's own order and with its own grammar: the weekday
+/// ahead of the day in French and after the date in Hungarian, the month in
+/// the genitive after a day in Russian or Polish and in the nominative when it
+/// stands with its year alone. A sentence assembled from separately
+/// translated weekday and month names can do none of that.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum DateFields {
+    /// Year, month and day: "31 août 2026", "August 31, 2026". What a
+    /// [`DateStyle`] renders unless told otherwise.
+    #[default]
+    YearMonthDay,
+    /// Year, month and day with the weekday: "lundi 31 août 2026",
+    /// "Monday, August 31, 2026". At [`DateStyle::Long`] this is CLDR's
+    /// full date.
+    YearMonthDayWeekday,
+    /// A month with its year and no day: "août 2026", "August 2026". A month
+    /// has no time of day, so a [`TimeStyle`] set beside it is ignored.
+    YearMonth,
+}
+
+impl DateFields {
+    fn icu(self) -> IcuDateFields {
+        match self {
+            Self::YearMonthDay => IcuDateFields::YMD,
+            Self::YearMonthDayWeekday => IcuDateFields::YMDE,
+            Self::YearMonth => IcuDateFields::YM,
+        }
+    }
+
+    /// Whether these fields name one day, the only thing a time of day can
+    /// be attached to. ICU refuses a year and month with a time, and a
+    /// refused field set would degrade the whole rendering to ISO.
+    fn can_carry_a_time(self) -> bool {
+        !matches!(self, Self::YearMonth)
+    }
+}
+
+/// Which calendar a rendering counts the date in.
+///
+/// A `jiff` date is a day on the Gregorian calendar, and ICU writes it in the
+/// calendar the locale prefers, which CLDR makes a different one for some
+/// regions: the Persian calendar for `fa-IR`, the Buddhist era for `th-TH`.
+/// 24 September 2026 is then the 2nd of Mehr 1405 in Persian, and a Thai
+/// date carries the year 2569.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum CalendarSystem {
+    /// The calendar the locale prefers. Right for a date that stands on its
+    /// own.
+    #[default]
+    LocalePreferred,
+    /// The Gregorian calendar, whatever the locale prefers. For a date that
+    /// names something laid out on the Gregorian calendar, such as a day of
+    /// a month grid: in the locale's calendar, a Persian title would name a
+    /// month the days under it do not belong to.
+    Gregorian,
 }
 
 /// Length of a time sub-pattern.
@@ -203,7 +269,11 @@ impl NumberOptions {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default)]
 struct DateTimeOptions {
     date_style: Option<DateStyle>,
+    /// Only read when `date_style` is set: with no date part there are no
+    /// date fields to choose.
+    date_fields: DateFields,
     time_style: Option<TimeStyle>,
+    calendar_system: CalendarSystem,
 }
 
 impl DateTimeOptions {
@@ -388,10 +458,13 @@ impl Memoizable for IcuDateTimeFormatter {
 
         let mut builder = FieldSetBuilder::new();
         if let Some(ds) = opts.date_style {
-            builder.date_fields = Some(DateFields::YMD);
+            builder.date_fields = Some(opts.date_fields.icu());
             builder.length = Some(ds.icu_length());
         }
-        if let Some(ts) = opts.time_style {
+        let time_style = opts
+            .time_style
+            .filter(|_| opts.date_style.is_none() || opts.date_fields.can_carry_a_time());
+        if let Some(ts) = time_style {
             builder.time_precision = Some(match ts {
                 TimeStyle::Short => TimePrecision::Minute,
                 TimeStyle::Medium | TimeStyle::Long => TimePrecision::Second,
@@ -406,7 +479,11 @@ impl Memoizable for IcuDateTimeFormatter {
         }
 
         let field_set = builder.build_composite_datetime().map_err(|_| ())?;
-        let inner = DateTimeFormatter::try_new((&icu_locale).into(), field_set).map_err(|_| ())?;
+        let mut prefs = DateTimeFormatterPreferences::from(&icu_locale);
+        if opts.calendar_system == CalendarSystem::Gregorian {
+            prefs.calendar_algorithm = Some(CalendarAlgorithm::Gregory);
+        }
+        let inner = DateTimeFormatter::try_new(prefs, field_set).map_err(|_| ())?;
         Ok(Self { inner })
     }
 }
@@ -680,24 +757,56 @@ impl TeksiloDateTimeFormatter {
         self
     }
 
+    /// Which fields the date part names; see [`DateFields`]. Defaults to
+    /// [`DateFields::YearMonthDay`]. It shapes the date part only, so it
+    /// changes nothing when only a [`TimeStyle`] is set.
+    pub fn date_fields(mut self, fields: DateFields) -> Self {
+        self.options.date_fields = fields;
+        self
+    }
+
+    /// Which calendar the date is counted in; see [`CalendarSystem`].
+    /// Defaults to [`CalendarSystem::LocalePreferred`].
+    pub fn calendar_system(mut self, system: CalendarSystem) -> Self {
+        self.options.calendar_system = system;
+        self
+    }
+
     /// Format a civil (timezone-naive) datetime.
     pub fn format(&self, value: impl Into<Prop<jiff::civil::DateTime>>) -> Signal<String> {
-        let prop = value.into();
-        let mut opts = self.options.clone();
-        if opts.date_style.is_none() && opts.time_style.is_none() {
-            opts.date_style = Some(DateStyle::Medium);
-        }
-        format_datetime_signal_civil(prop, opts)
+        format_datetime_signal_civil(value.into(), self.resolved_options())
     }
 
     /// Format a zoned datetime; rendered as the wall-clock value at its zone.
     pub fn format_zoned(&self, value: impl Into<Prop<jiff::Zoned>>) -> Signal<String> {
-        let prop = value.into();
+        format_datetime_signal_zoned(value.into(), self.resolved_options())
+    }
+
+    /// Format one civil datetime in `lang`, once, as a plain string.
+    ///
+    /// [`format`](Self::format) returns a signal that follows the active
+    /// locale by itself, which is what text on screen needs. A string asked
+    /// for at a moment of the caller's choosing has no use for one: an
+    /// accessibility name computed when its node is published, or a widget
+    /// that rebuilds on a locale switch anyway and reads its locale from its
+    /// build context rather than from the `I18nManager`. It goes through the
+    /// same per-thread ICU cache, so both paths render a value identically.
+    pub fn format_in_locale(
+        &self,
+        value: jiff::civil::DateTime,
+        lang: &LanguageIdentifier,
+    ) -> String {
+        render_civil(&value, lang, &self.resolved_options())
+    }
+
+    /// The options with the default applied: a formatter told neither a
+    /// date style nor a time style renders a [`DateStyle::Medium`] date.
+    fn resolved_options(&self) -> DateTimeOptions {
         let mut opts = self.options.clone();
         if opts.date_style.is_none() && opts.time_style.is_none() {
             opts.date_style = Some(DateStyle::Medium);
         }
-        format_datetime_signal_zoned(prop, opts)
+        opts
     }
 }
 
