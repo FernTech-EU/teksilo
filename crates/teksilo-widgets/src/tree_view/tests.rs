@@ -3043,6 +3043,8 @@ fn treeview_exportable_move_removes_source_node_via_stable_key() {
 // `focused_index_follows_insert_before_it` /
 // `focused_index_dropped_when_its_row_is_removed`.
 
+/// In a multiple selection. A single selection takes its index along with
+/// the cursor — `a_single_index_selection_follows_its_row_through_an_insert_above_it`.
 #[test]
 fn focused_index_follows_insert_above_it() {
     use teksilo_core::event::{Key, Modifiers};
@@ -3052,7 +3054,7 @@ fn focused_index_follows_insert_above_it() {
     for i in 0..10usize {
         tree.insert_root(i, format!("Node {i}"));
     }
-    let selection = SelectionModel::new(SelectionMode::Single);
+    let selection = SelectionModel::new(SelectionMode::Multi);
     let sel = selection.clone();
     let mut wtree = WidgetTree::new();
     let tv = wtree.add(
@@ -3075,9 +3077,9 @@ fn focused_index_follows_insert_above_it() {
     wtree.layout(SizeProposal::exact(400.0, 300.0));
 
     // Index-based selection has no identity to shift by on a bare version
-    // bump, so it stays put — the documented limitation on
-    // `TreeView::selection` (unlike the keyboard cursor below, which tracks
-    // the row by identity via `RowAnchor`).
+    // bump, so in a multiple selection it stays put — the documented
+    // limitation on `TreeView::selection` (unlike the keyboard cursor below,
+    // which tracks the row by identity via `RowAnchor`).
     assert_eq!(
         selection.selected_indices(),
         vec![3],
@@ -3093,6 +3095,156 @@ fn focused_index_follows_insert_above_it() {
         "ArrowDown after a leading insert resumes from the shifted row \
          (5 → 6), not the stale pre-insert one (3 → 4)"
     );
+}
+
+/// In a single selection an index selection follows its row through an
+/// insert above it, carried by the cursor's identity anchor — the row the user
+/// was on stays the row selected, as it would in a `ListView`.
+#[test]
+fn a_single_index_selection_follows_its_row_through_an_insert_above_it() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let tree = TreeModel::new();
+    for i in 0..10usize {
+        tree.insert_root(i, format!("Node {i}"));
+    }
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new(tree.clone(), |_item, _entry, _sel| {
+            Box::new(FixedLeaf(120.0, 20.0))
+        })
+        .item_height(20.0)
+        .selection(sel),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+    press_at(&mut wtree, 100.0, 70.0);
+    assert_eq!(selection.selected_indices(), vec![3], "precondition");
+
+    tree.insert_root(0, "New A".to_string());
+    tree.insert_root(0, "New B".to_string());
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        selection.selected_indices(),
+        vec![5],
+        "the selection followed Node 3 to row 5"
+    );
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![6]);
+}
+
+/// The same through a collapse above the selected row, the structural change
+/// a flat list never has.
+#[test]
+fn a_single_index_selection_follows_its_row_when_a_branch_above_collapses() {
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let tree = sample_tree(); // A (A1, A2), B (B1), C — all collapsed
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new_with_context(tree, |item: &&'static str, entry, selected, ctx| {
+            Box::new(
+                crate::StandardTreeItem::new(lit!((*item).to_string()))
+                    .from_entry(entry)
+                    .selected(selected)
+                    .on_chevron_toggle_rc(ctx.toggle_callback()),
+            ) as Box<dyn Widget>
+        })
+        .item_height(28.0)
+        .row_click_expands(false)
+        .selection(sel),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+
+    // Expand A by its chevron: A(0), A1(1), A2(2), B(3), C(4). Then pick C.
+    press_at(&mut wtree, 8.0, 14.0);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    press_at(&mut wtree, 100.0, 126.0);
+    assert_eq!(selection.selected_indices(), vec![4], "precondition: C");
+
+    // Collapse A: C moves from row 4 to row 2, and the selection with it.
+    press_at(&mut wtree, 8.0, 14.0);
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(selection.selected_indices(), vec![2], "still C");
+}
+
+/// A selection the application made — before the tree was built, or after —
+/// follows its row as well: the cursor is seated on it with an anchor either
+/// way.
+#[test]
+fn a_single_index_selection_set_from_outside_follows_its_row() {
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    for select_before_build in [true, false] {
+        let tree = TreeModel::new();
+        for i in 0..10usize {
+            tree.insert_root(i, format!("Node {i}"));
+        }
+        let selection = SelectionModel::new(SelectionMode::Single);
+        if select_before_build {
+            selection.select(3);
+        }
+        let sel = selection.clone();
+        let mut wtree = WidgetTree::new();
+        wtree.add(
+            TreeView::new(tree.clone(), |_item, _entry, _sel| {
+                Box::new(FixedLeaf(120.0, 20.0))
+            })
+            .item_height(20.0)
+            .selection(sel),
+        );
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        if !select_before_build {
+            selection.select(3);
+        }
+
+        tree.insert_root(0, "New".to_string());
+        wtree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(
+            selection.selected_indices(),
+            vec![4],
+            "selected before the build: {select_before_build}"
+        );
+    }
+}
+
+/// An emptied selection stays empty through a structural change: only a
+/// cursor that was on the selection takes it along.
+#[test]
+fn an_emptied_single_selection_stays_empty_through_an_insert() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let tree = TreeModel::new();
+    for i in 0..10usize {
+        tree.insert_root(i, format!("Node {i}"));
+    }
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new(tree.clone(), |_item, _entry, _sel| {
+            Box::new(FixedLeaf(120.0, 20.0))
+        })
+        .item_height(20.0)
+        .selection(sel),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+    for _ in 0..4 {
+        wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    }
+    selection.clear();
+
+    tree.insert_root(0, "New".to_string());
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(selection.selected_indices().is_empty());
 }
 
 #[test]
@@ -3215,7 +3367,7 @@ fn collapsing_a_branch_above_keeps_the_cursor_on_the_same_logical_row() {
 fn alt_arrow_after_a_structural_change_reorders_the_row_the_cursor_is_on() {
     // No selection model, deliberately: Alt+Arrow's dragged-row fallback is
     // `selected_indices().first().or(fi.get())`, and index-based selection
-    // does NOT itself follow a structural change (see
+    // in a multiple selection does NOT itself follow a structural change (see
     // `focused_index_follows_insert_above_it`) — with one attached, this
     // scenario would still reorder the wrong row via the selection half of
     // that fallback, masking the `focused_index` fix under test here.

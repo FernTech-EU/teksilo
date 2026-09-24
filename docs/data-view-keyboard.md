@@ -79,11 +79,12 @@ the user left it, and so does a selection with no row the view shows (emptied,
 or keyed on a row this view filters out). A grid or a table with no cursor yet
 gets none this way; its cursor appears with the first key or click.
 
-One pairing still parts them: a `TreeView` over an index `SelectionModel`. A
-structural change — an insert above, an expand — carries no delta, so the
-cursor follows its row by identity while the selection keeps its position, as
-`TreeView::selection` documents. Use `keyed_selection` and both follow the
-row.
+A `TreeView` over an index `SelectionModel` gets no delta from a structural
+change — an insert above, an expand — to shift the selection by. Its cursor
+follows the row by identity, and in a single selection it takes the selection
+along, so the row selected stays the row the user was on, as it would in a
+`ListView` or under `keyed_selection`. A multiple selection keeps its indices.
+A selected row that disappears leaves the selection where it was.
 
 ## A row's own controls
 
@@ -253,9 +254,9 @@ type-to-edit on bare letters, and the editor wins; the WinForms default
 - Focus and selection are published as two independent facts. `Ctrl`+arrow
   exists precisely to make them disagree, and binding active-descendant to the
   selection would hide disjoint selection from assistive technology. In a
-  single selection neither a navigation key nor a selection the application
-  sets makes them disagree; the one pairing that still can is a `TreeView`
-  over an index selection, above.
+  single selection neither a navigation key, nor a selection the application
+  sets, nor a structural change makes them disagree. Only a selection on a row
+  the view does not show can, since the cursor has no row to go to.
 - All five views **advertise and** answer `Action::ScrollIntoView`, the one
   scroll action every AccessKit adapter consumes. Advertising is the load-bearing
   half: each adapter gates its scroll pattern on the node *supporting* the

@@ -310,11 +310,14 @@ impl<T: 'static> TreeView<T> {
     /// `ListView` (where every structural change carries an insert/remove
     /// `DataChange` the selection index-shifts against), a `TreeView`'s
     /// structural changes — including expand/collapse — surface only as a
-    /// version bump, with no delta to shift a *selected index* by; a moved
-    /// row's old index is only clamped into range, not followed to its new
-    /// position (`focused_index`, the keyboard cursor, tracks by identity
-    /// via a `RowAnchor` and IS followed). For selection that survives
-    /// expand / collapse / filter and node moves, use
+    /// version bump, with no delta to shift a *selected index* by. The
+    /// keyboard cursor tracks its row by identity (a `RowAnchor`), and in a
+    /// **single** selection the view keeps the cursor on the selected row, so
+    /// the selection follows that row to its new position. In a **multiple**
+    /// selection a moved row's old index is only clamped into range, not
+    /// followed. A selected row that disappears — removed, or hidden by a
+    /// collapse — leaves the selection at its clamped position in either mode.
+    /// For selection that survives all of these, use
     /// [`keyed_selection`](Self::keyed_selection) instead.
     pub fn selection(mut self, sel: SelectionModel) -> Self {
         self.row_selection = Some(RowSelection::from_index(sel));

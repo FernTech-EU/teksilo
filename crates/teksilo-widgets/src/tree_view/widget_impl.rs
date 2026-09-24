@@ -29,14 +29,16 @@ impl<T: 'static> TreeView<T> {
         map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
     }
 
-    /// In a single selection, hand the keyboard cursor back to the selection
-    /// whenever the selection moves without it — see `ListView`'s method of the
-    /// same name for why.
+    /// In a single selection, keep the keyboard cursor seated on the selected
+    /// row, whoever moved the selection — see `ListView`'s method of the same
+    /// name for why the two must not part.
     ///
-    /// A structural change is not a selection move, and is left as
-    /// [`TreeView::selection`](crate::TreeView::selection) documents it: over
-    /// an index selection the cursor follows its row by identity while the
-    /// selection keeps its position. A keyed selection follows the row too.
+    /// Seated rather than cleared, as `ListView` does, because a tree needs
+    /// the cursor's identity anchor: it is what the source version effect
+    /// resolves after a structural change, and what carries an index
+    /// selection along with its row there (see that effect). Seated once at
+    /// build as well, so a selection made before the view existed has an
+    /// anchor from the start.
     fn follow_the_selection_in_single_mode(
         &self,
         ctx: &mut teksilo_core::build_context::BuildContext,
@@ -47,11 +49,18 @@ impl<T: 'static> TreeView<T> {
         if selection.mode() != teksilo_data::SelectionMode::Single {
             return;
         }
+        seat_the_cursor_on_the_selection(
+            &selection,
+            &self.source,
+            &self.focused_index,
+            &self.focused_anchor,
+        );
+        let source = self.source.clone();
         let focused_index = self.focused_index.clone();
         let focused_anchor = self.focused_anchor.clone();
         let observed = selection.clone();
         let handle = observed.observe_for_rebuild(move || {
-            hand_the_cursor_to_the_selection(&selection, &focused_index, &focused_anchor);
+            seat_the_cursor_on_the_selection(&selection, &source, &focused_index, &focused_anchor);
         });
         ctx.own_handle(handle);
     }
@@ -104,24 +113,25 @@ impl<T: 'static> TreeView<T> {
     }
 }
 
-/// In a single selection, clear a keyboard cursor that is off the selection,
-/// so every reader falls back to the first selected row.
+/// In a single selection, put the keyboard cursor on the selected row, with
+/// the identity anchor that lets it follow that row through a structural
+/// change.
 ///
-/// The cursor is cleared with its identity anchor, or the next source version
-/// bump would resolve the anchor and put the stale row back. A selection with
-/// no row this view shows — emptied, or keyed on a node inside a collapsed
-/// branch — leaves the cursor alone: there is no row to hand it to.
-fn hand_the_cursor_to_the_selection(
+/// A selection with no row this view shows — emptied, or keyed on a node
+/// inside a collapsed branch — leaves the cursor alone: there is no row to
+/// put it on.
+fn seat_the_cursor_on_the_selection<T: 'static>(
     selection: &crate::data_views::RowSelection,
+    source: &crate::tree_source::TreeSource<T>,
     focused_index: &Cell<Option<usize>>,
     focused_anchor: &RefCell<Option<crate::data_views::RowAnchor>>,
 ) {
-    if let Some(index) = focused_index.get()
-        && !selection.is_selected(index)
-        && !selection.selected_indices().is_empty()
-    {
-        focused_index.set(None);
-        *focused_anchor.borrow_mut() = None;
+    let Some(&selected) = selection.selected_indices().first() else {
+        return;
+    };
+    if focused_index.get() != Some(selected) {
+        focused_index.set(Some(selected));
+        *focused_anchor.borrow_mut() = Some(source.anchor(selected));
     }
 }
 
@@ -225,6 +235,13 @@ impl<T: 'static> Widget for TreeView<T> {
             let focused = self.focused_index.clone();
             let focused_anchor = self.focused_anchor.clone();
             move |_| {
+                // Read before anything below moves either of them: in a single
+                // selection, was the cursor on the selected row?
+                let single_selection = row_sel
+                    .as_ref()
+                    .filter(|rs| rs.mode() == teksilo_data::SelectionMode::Single);
+                let was_on_selection = single_selection
+                    .is_some_and(|rs| focused.get().is_some_and(|i| rs.is_selected(i)));
                 // Source version observers fire synchronously per reflatten, so
                 // `first_changed_index()` describes exactly this change:
                 // heights of flat rows before it (e.g. above an
@@ -268,6 +285,24 @@ impl<T: 'static> Widget for TreeView<T> {
                             *focused_anchor.borrow_mut() = None;
                         }
                     }
+                }
+                // In a single selection the selection follows its row too.
+                // The cursor has just followed the row by identity. A keyed
+                // selection did the same on its own; an index selection has
+                // no identity and kept its position, now some other row. So a
+                // cursor that was on the selection and is off it now takes
+                // the selection with it — the row the user was on stays the
+                // row selected, as it would in a `ListView`, whose index
+                // selection shifts with an insert. A row that is gone leaves
+                // the selection where it is, and the cursor is seated there.
+                if let Some(rs) = single_selection {
+                    if was_on_selection
+                        && let Some(index) = focused.get()
+                        && !rs.is_selected(index)
+                    {
+                        rs.select(index);
+                    }
+                    seat_the_cursor_on_the_selection(rs, &source, &focused, &focused_anchor);
                 }
 
                 let next = dv.get() + 1;

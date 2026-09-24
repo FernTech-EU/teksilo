@@ -13,6 +13,16 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed
+
+#### Data views
+
+- **A single-selection `TreeView` over an index `SelectionModel` keeps the
+  selected row selected through a structural change.** An insert, a removal or
+  a collapse above it used to leave the selection at its old position, on
+  whichever row moved there. The selection now moves with its row, as a keyed
+  selection does. Multiple selections are unchanged. **Behaviour change.**
+
 ### Fixed
 
 #### Data views

@@ -37,9 +37,9 @@
 //! row and `PageUp` / `PageDown` a viewport of them, each moving the selection
 //! unless the accelerator is held, which moves the cursor alone — in a
 //! multiple selection only: a single selection always moves with the cursor,
-//! and a selection the application sets moves the cursor onto it.
-//! `Shift` extends a range from the anchor and `Ctrl+Shift` extends it
-//! additively.
+//! a selection the application sets moves the cursor onto it, and a
+//! structural change carries the selection along with its row. `Shift`
+//! extends a range from the anchor and `Ctrl+Shift` extends it additively.
 //!
 //! `→` opens a closed node and, on one already open, moves into its first
 //! child; `←` closes an open node and, on a leaf or a closed one, ascends to
