@@ -617,11 +617,22 @@ impl Widget for CommandPalette {
                 _ => EventResponse::Ignored,
             });
 
+        // `Live::Off` on the root of the content. The palette's own node is
+        // a polite live region, and `accesskit_consumer` hands a node's
+        // politeness down to every descendant that sets none (node.rs:
+        // 906-910), while all three adapters announce each named node that
+        // enters the filtered tree, or is renamed there, with an inherited
+        // politeness (atspi_common adapter.rs:71-77 and node.rs:610-622,
+        // windows adapter.rs:255-263, macos event.rs:236-241). Once the
+        // dialog panel stopped hiding the palette, opening it announced the
+        // field and every row and category, and each keystroke announced
+        // the rows it brought in, each cutting off the one before.
         let root = ctx.add_boxed(Box::new(
             FixedSize::new()
                 .width(PALETTE_WIDTH as f32)
                 .height(PALETTE_HEIGHT as f32)
-                .child(column),
+                .child(column)
+                .access_live(teksilo_core::accesskit::Live::Off),
         ));
         self.root_child_id = Some(root);
         vec![root]

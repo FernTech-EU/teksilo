@@ -30,6 +30,16 @@
 //! object navigation does with those is not observed here. The raw
 //! `TreeUpdate` is not enough to see this: a hidden subtree is still in it,
 //! node for node.
+//!
+//! Reaching content has a second edge, which the `heard` tests hold. A
+//! node's politeness is inherited by every descendant that sets none
+//! (accesskit_consumer 0.39 `node.rs:906-910`), and all three adapters
+//! announce each named node that enters the filtered tree, or is renamed
+//! there, with a politeness other than off. So a live region that was
+//! announced by its name alone while a hidden wrapper kept its content out
+//! is announced once for every named node in that content as soon as the
+//! wrapper lets it through. Each live region in this crate that speaks by
+//! its name gives its content `Live::Off`.
 
 #![cfg(test)]
 
@@ -720,5 +730,328 @@ mod calendar {
             reached_buttons, buttons,
             "every header button the calendar publishes must be reachable inside it"
         );
+    }
+}
+
+// ── What a live region says ─────────────────────────────────────────────
+
+mod heard {
+    use super::*;
+    use accesskit_consumer::{FilterResult, TreeChangeHandler};
+    use teksilo_core::accesskit::Live;
+    use teksilo_core::signal::Signal;
+
+    /// What each platform's adapter announces for the changes
+    /// `accesskit_consumer` reports, by the adapters' own rules, read out of
+    /// atspi_common 0.20, windows 0.35 and macos 0.27:
+    ///
+    /// * a named node entering the filtered tree with an inherited
+    ///   politeness other than off is announced by all three
+    ///   (atspi_common adapter.rs:71-77 and 281-297, windows
+    ///   adapter.rs:255-263 and 313-324, macos event.rs:236-241 and
+    ///   300-310), and AT-SPI announces a whole subtree that was excluded
+    ///   as one and is no longer (adapter.rs:84-89);
+    /// * such a node renamed while it stays is announced by all three
+    ///   (atspi_common node.rs:610-622 and the same Windows and macOS
+    ///   lines);
+    /// * a change of politeness alone is announced by Windows and macOS.
+    ///
+    /// The announced text is the name, which for a `Role::Label` comes from
+    /// its value (accesskit_consumer node.rs:744-746).
+    #[derive(Debug, Default)]
+    struct Heard {
+        atspi: Vec<String>,
+        uia: Vec<String>,
+        macos: Vec<String>,
+    }
+
+    fn name(node: &NodeRef<'_>) -> Option<String> {
+        if node.label_comes_from_value() {
+            node.value()
+        } else {
+            node.label()
+        }
+    }
+
+    impl Heard {
+        /// Every platform announced `expected`, and nothing else.
+        #[track_caller]
+        fn assert_only(&self, what: &str, expected: &str) {
+            for (platform, heard) in [
+                ("AT-SPI", &self.atspi),
+                ("UIA", &self.uia),
+                ("macOS", &self.macos),
+            ] {
+                assert_eq!(
+                    heard.as_slice(),
+                    [expected.to_string()],
+                    "{what}: {platform} must announce \"{expected}\" once and nothing else"
+                );
+            }
+        }
+
+        fn atspi_entered(&mut self, node: &NodeRef<'_>, subtree: bool) {
+            if node.live() != Live::Off
+                && let Some(text) = name(node)
+            {
+                self.atspi.push(text);
+            }
+            if subtree {
+                for child in node.filtered_children(&common_filter) {
+                    self.atspi_entered(&child, true);
+                }
+            }
+        }
+    }
+
+    impl TreeChangeHandler for Heard {
+        fn node_added(&mut self, node: &NodeRef<'_>) {
+            if common_filter(node) != FilterResult::Include || node.live() == Live::Off {
+                return;
+            }
+            if let Some(text) = name(node) {
+                self.atspi.push(text.clone());
+                self.uia.push(text.clone());
+                self.macos.push(text);
+            }
+        }
+
+        fn node_updated(&mut self, old: &NodeRef<'_>, new: &NodeRef<'_>) {
+            let was = common_filter(old);
+            if common_filter(new) != FilterResult::Include {
+                return;
+            }
+            let live = new.live() != Live::Off;
+            let text = name(new);
+            let renamed = text != name(old);
+            if was != FilterResult::Include {
+                self.atspi_entered(new, was == FilterResult::ExcludeSubtree);
+            } else if live && renamed {
+                self.atspi.push(text.clone().unwrap_or_default());
+            }
+            if live
+                && let Some(text) = text
+                && (was != FilterResult::Include || renamed || new.live() != old.live())
+            {
+                self.uia.push(text.clone());
+                self.macos.push(text);
+            }
+        }
+
+        fn focus_moved(&mut self, _old: Option<&NodeRef<'_>>, _new: Option<&NodeRef<'_>>) {}
+
+        fn node_removed(&mut self, _node: &NodeRef<'_>) {}
+    }
+
+    /// What the adapters announce as everything in `update` arrives in a
+    /// window that held nothing, the way a popover, a dialog or a toast
+    /// arrives.
+    fn appearing(update: TreeUpdate) -> Heard {
+        let Some(info) = update.tree.clone() else {
+            panic!("a full update names its root");
+        };
+        let empty = TreeUpdate {
+            nodes: vec![(info.root, teksilo_core::accesskit::Node::new(Role::Window))],
+            tree: Some(info),
+            tree_id: update.tree_id,
+            focus: update.focus,
+        };
+        let mut adapters = Tree::new(empty, true);
+        let mut heard = Heard::default();
+        adapters.update_and_process_changes(update, &mut heard);
+        heard
+    }
+
+    /// What the adapters announce between the tree as it stands and the
+    /// tree after `change`.
+    fn across(tree: &mut WidgetTree, change: impl FnOnce(&mut WidgetTree)) -> Heard {
+        let mut adapters = Tree::new(laid_out(tree), true);
+        change(tree);
+        let mut heard = Heard::default();
+        adapters.update_and_process_changes(laid_out(tree), &mut heard);
+        heard
+    }
+
+    #[test]
+    fn a_calendar_that_opens_is_announced_by_its_name_alone() {
+        // The grid is a polite live region so that its name speaks the
+        // month. Its 42 days, its weekdays and its header buttons are named
+        // too, and inherited that politeness once they were reachable: a
+        // date picker opening was 55 announcements, each cutting off the
+        // one before in Orca, which speaks every announcement with
+        // interrupt set.
+        let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+        tree.add(crate::calendar::Calendar::single(Signal::new(Some(
+            crate::common::datetime::Date::constant(2027, 3, 12),
+        ))));
+        let heard = appearing(laid_out(&mut tree));
+        teksilo_i18n::thread_local::clear();
+        heard.assert_only("a calendar opening", "Calendrier, mars 2027");
+    }
+
+    #[test]
+    fn a_change_of_month_is_announced_once_by_the_grids_name() {
+        // What PageDown says in the date picker. Every day is renamed by a
+        // change of month, and each renamed day was announced beside the
+        // grid's new name, in the order of the consumer's hash set: the
+        // last one, the one Orca let finish, was a date and not the month.
+        let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+        let calendar = crate::calendar::Calendar::single(Signal::new(Some(
+            crate::common::datetime::Date::constant(2027, 3, 12),
+        )));
+        let month = calendar.visible_month_signal();
+        tree.add(calendar);
+        let heard = across(&mut tree, |_| {
+            month.set(crate::common::datetime::types::YearMonth::new(2027, 4));
+        });
+        teksilo_i18n::thread_local::clear();
+        heard.assert_only("a change of month", "Calendrier, avril 2027");
+    }
+
+    #[test]
+    fn a_message_box_is_announced_by_its_title_alone() {
+        // The box is an assertive live region named by its title. Once the
+        // dialog panel stopped hiding it, its text, its informative text
+        // and both buttons inherited that politeness, and five assertive
+        // announcements arrived in hash order, each cutting off the one
+        // before.
+        let mut tree = themed_tree();
+        tree.add(crate::dialog::ModalContainer::new(
+            crate::message_box::MessageBox::warning(lit!("Delete Lunch?"))
+                .text(lit!("The event goes."))
+                .informative_text(lit!("It cannot be undone."))
+                .buttons(crate::message_box::MessageBoxButtons::YesNo),
+        ));
+        appearing(laid_out(&mut tree)).assert_only("a message box opening", "Delete Lunch?");
+    }
+
+    /// A palette with three commands, presented the way `present` mounts
+    /// it: inside a `ModalContainer`.
+    fn palette_tree() -> (WidgetTree, WidgetId) {
+        use teksilo_core::shortcut::Shortcut;
+        let mut tree = themed_tree();
+        for (id, command) in [
+            ("file.new", "New Work"),
+            ("file.export", "Export"),
+            ("view.zoom", "Zoom In"),
+        ] {
+            tree.shortcut_registry_mut()
+                .register(Shortcut::new(id).name(command).category("File").build());
+        }
+        let container = tree.add(crate::dialog::ModalContainer::new(
+            crate::command_palette::CommandPalette::new(),
+        ));
+        (tree, container)
+    }
+
+    #[test]
+    fn a_command_palette_is_announced_by_its_name_alone() {
+        // The palette is a polite live region. Revealed, its field, its
+        // rows and their categories each inherited that as it opened.
+        let (mut tree, container) = palette_tree();
+        let update = laid_out(&mut tree);
+        let Some(palette) = tree
+            .children(container)
+            .first()
+            .and_then(|panel| tree.children(*panel).first().copied())
+        else {
+            panic!("the palette sits under the dialog panel");
+        };
+        let Some(palette_name) = tree.accessibility_node(palette).name().map(str::to_string) else {
+            panic!("the palette names itself");
+        };
+        appearing(update).assert_only("a command palette opening", &palette_name);
+    }
+
+    #[test]
+    fn typing_in_a_command_palette_announces_no_row() {
+        // Every keystroke that changes the rows renames or adds them, and
+        // each one inherited the palette's politeness.
+        let (mut tree, _) = palette_tree();
+        laid_out(&mut tree);
+        let Some(field) = tree.find_by_role(Role::TextInput) else {
+            panic!("the palette has a search field");
+        };
+        tree.focus(field);
+        let heard = across(&mut tree, |tree| tree.type_text(field, "ex"));
+        for (platform, heard) in [
+            ("AT-SPI", &heard.atspi),
+            ("UIA", &heard.uia),
+            ("macOS", &heard.macos),
+        ] {
+            assert!(
+                heard.is_empty(),
+                "typing in the palette: {platform} must not announce the rows it filters: \
+                 {heard:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_snackbar_is_announced_once() {
+        // The documented pattern: the message as the content, and the same
+        // words as the announcement that names the alert. With the frame
+        // no longer hiding the message, it inherited the alert's politeness
+        // and was announced a second time.
+        let mut tree = themed_tree();
+        tree.add(
+            crate::snackbar::Snackbar::new(lit!("Show"))
+                .content(TextWidget::new(lit!("File deleted.")))
+                .announcement(lit!("File deleted.")),
+        );
+        laid_out(&mut tree);
+        let Some(trigger) = tree.find_by_label("Show") else {
+            panic!("the trigger is labelled");
+        };
+        let heard = across(&mut tree, |tree| {
+            tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+                action: teksilo_core::accesskit::Action::Click,
+                target: Some(trigger),
+                target_node: teksilo_core::accessibility::root_node_id(),
+                data: None,
+            });
+        });
+        heard.assert_only("a snackbar appearing", "File deleted.");
+    }
+
+    #[test]
+    fn a_banner_in_a_panel_is_announced_by_its_title_alone() {
+        // A banner is named by its title. Inside a panel, whose frame used
+        // to hide it whole, it was not heard at all; revealed, its
+        // description, its action and its dismiss button each inherited
+        // its politeness and were announced after the title.
+        let mut tree = themed_tree();
+        tree.add(
+            crate::panel::Panel::new().child(
+                crate::banner::Banner::warning(lit!("Disk almost full"))
+                    .description(lit!("Two gigabytes left."))
+                    .action(Button::new(lit!("Clean up")))
+                    .on_dismiss(|_| {}),
+            ),
+        );
+        appearing(laid_out(&mut tree)).assert_only("a banner appearing", "Disk almost full");
+    }
+
+    #[test]
+    fn a_toast_is_announced_by_its_title_alone() {
+        // A toast is named by its title and carries its body as its
+        // description. Its body, its action and its close button each
+        // inherited its politeness once the host stopped hiding it.
+        use crate::toast::{Toast, ToastAction, ToastHost, ToastInstallOptions, ToastRegistry};
+        let options = ToastInstallOptions {
+            archive: None,
+            ..ToastInstallOptions::default()
+        };
+        let registry = ToastRegistry::new(options.clone());
+        let mut tree = themed_tree();
+        tree.add(ToastHost::new(registry.clone(), options));
+        let heard = across(&mut tree, |_| {
+            registry.enqueue(
+                Toast::info(lit!("Saved"))
+                    .body(lit!("Three events written."))
+                    .action(ToastAction::new(lit!("Undo"), |_| {})),
+            );
+        });
+        heard.assert_only("a toast arriving", "Saved");
     }
 }

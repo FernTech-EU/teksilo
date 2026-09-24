@@ -24,6 +24,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::styles::{BannerStyleConfig, SharedBannerStyle};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{TextRole, TextStyleRole, VAlignment};
 
@@ -176,7 +177,18 @@ impl Widget for Banner {
                 .on_activate_fn(move |c| on_dismiss(c));
             content = content.child(ctx.add(btn));
         }
-        let content_id = ctx.add(content);
+        // `Live::Off` on the row that holds the description, the action and
+        // the dismiss button. The banner is a polite live region named by
+        // its title, and `accesskit_consumer` hands its politeness down to
+        // every descendant that sets none (node.rs:906-910), while all three
+        // adapters announce each named node entering the filtered tree with
+        // an inherited politeness (atspi_common adapter.rs:71-77, windows
+        // adapter.rs:255-263, macos event.rs:236-241). Without it a banner
+        // was heard as its title, then its description, its action and its
+        // dismiss button, each cutting off the one before; in a card, a
+        // panel, a tab or a dialog, whose wrappers used to hide it whole, it
+        // was not heard at all.
+        let content_id = ctx.add(content.access_live(teksilo_core::accesskit::Live::Off));
 
         // The strip chrome (per-severity surface tint, corner radius,
         // padding, glyph-content arrangement) is owned by the active

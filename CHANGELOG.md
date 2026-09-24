@@ -152,7 +152,9 @@ by crate for clarity, not because crates version independently.
   called `set_hidden()` the way the dialog panel did. A screen reader found a
   card, a panel, a toolbar, a status bar or a snackbar empty except for
   whichever of its controls held focus, and never reached a tile's `body`.
-  Each is now a bare `Role::GenericContainer`. The macOS and Fluent presets
+  Each is now a bare `Role::GenericContainer`, and the snackbar's frame is
+  also `Live::Off`, so a snackbar that announces its message says it once.
+  The macOS and Fluent presets
   build their cards, panels and snackbars from these frames, and Material 3
   its cards, so they are fixed with them. The `make_body` of `CardStyle`,
   `PanelStyle`, `SnackbarStyle` and `RadioTileStyle` now says what a custom
@@ -171,7 +173,11 @@ by crate for clarity, not because crates version independently.
   adapters all announce a live region as it enters that tree and pass over
   one that is filtered out, so a toast's `Role::Status` or `Role::Alert` said
   nothing on any platform, and its text and actions could not be reviewed or
-  used from a screen reader. The host is now a bare `Role::GenericContainer`.
+  used from a screen reader. The host is now a bare `Role::GenericContainer`,
+  and the toast's content is `Live::Off`, so a toast is announced by its
+  title, once; its body is its description, read on reaching it, and its
+  actions and close button stay reachable. `ToastStyle::make_body` says a
+  custom style has to do the same.
 - **A `TabWidget`'s panel, a `Stepper`'s step and anything inside a
   `Switcher`, `MaxSize` or `AspectRatio` was hidden from assistive
   technology.** The three layout primitives called `set_hidden()` to publish
@@ -201,6 +207,26 @@ by crate for clarity, not because crates version independently.
   shell is now a bare `Role::GenericContainer`. **Behaviour change** for a
   test that read the drag region's hidden flag: it is no longer hidden, and
   still no stop.
+- **A `Banner` was followed by its description, its action and its dismiss
+  button.** The banner is a polite live region named by its title, and every
+  node inside it that sets no politeness of its own inherits it, so the
+  AT-SPI, UIA and macOS adapters announced each of them as a message of its
+  own as the banner appeared, in the order of the consumer's hash set. Orca
+  speaks each announcement with interrupt set, so what was left to hear was
+  whichever came last. The banner's content
+  is now `Live::Off`: its title is what it announces, once, and the rest
+  stays reachable. A `StatusBar` with `announce_changes(true)` keeps the
+  inheritance, which is what it is for.
+- **Opening a `MessageBox` announced its default button, and not its
+  question.** The box is an assertive live region so that its question is
+  announced as it appears, and every node inside inherited the setting. The
+  hidden dialog panel let only the focused default button through, and it
+  was announced, assertively, as a message of its own, while the box's name
+  never was: a confirmation opening on its default button announced "No",
+  and its question reached a reader only as the name of the dialog
+  presenting the box, around the focus. With the dialog's content reachable,
+  everything inside the box is now `Live::Off`: the question, the box's own
+  name, is what it announces, once, and its text and buttons stay reachable.
 - **A focused `SpinBox` reported a nameless text field.** Focus lands on the
   spin box's editing field, while its name, value and range sat on a node
   around it, so a screen reader named the field once or not at all, and could

@@ -17,6 +17,7 @@
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::styles::{ToastStyle, ToastStyleConfig};
+use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, InputTokens, VAlignment};
 
@@ -147,6 +148,21 @@ impl ToastStyle for RecipeToastStyle {
                 .child(row_id),
         );
 
-        ctx.add(ZStack::new().child(bg).child(padded))
+        // `Live::Off` on the root, because the toast's own node is a live
+        // region announced by its name, and `accesskit_consumer` hands its
+        // politeness down to every descendant that sets none (node.rs:
+        // 906-910). All three adapters announce each named node entering
+        // the filtered tree with an inherited politeness (atspi_common
+        // adapter.rs:71-77, windows adapter.rs:255-263, macos event.rs:
+        // 236-241), so without it a toast was heard as its title, then its
+        // body, its close button and every action, in hash order, each
+        // cutting off the one before. The node stays a `GenericContainer`,
+        // which every adapter drops with its children kept.
+        ctx.add(
+            ZStack::new()
+                .child(bg)
+                .child(padded)
+                .access_live(teksilo_core::accesskit::Live::Off),
+        )
     }
 }

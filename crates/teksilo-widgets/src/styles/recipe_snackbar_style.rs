@@ -171,11 +171,21 @@ impl Widget for SnackbarFrame {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         // Presentational: the parent `SnackbarSurface` emits the
-        // `Role::Alert` + `Live::Polite` node with the announcement. A bare
-        // `GenericContainer` is dropped by the walker and by every adapter
-        // with its children kept; `set_hidden()` would take the message and
-        // its action button out of reach with it.
+        // `Role::Alert` + `Live::Polite` node with the announcement. A
+        // `GenericContainer` is dropped by every adapter with its children
+        // kept; `set_hidden()` would take the message and its action button
+        // out of reach with it.
+        //
+        // `Live::Off` as well, because the alert's name is the announcement
+        // and `accesskit_consumer` hands its politeness down to every
+        // descendant that sets none (node.rs:906-910). All three adapters
+        // announce each named node entering the filtered tree with an
+        // inherited politeness (atspi_common adapter.rs:71-77, windows
+        // adapter.rs:255-263, macos event.rs:236-241), so without it the
+        // message was announced a second time beside the name the caller
+        // set to the same words, and its action button with it.
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+        builder.set_live(teksilo_core::accesskit::Live::Off);
     }
 
     fn children(&self) -> Vec<WidgetId> {

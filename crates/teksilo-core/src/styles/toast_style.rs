@@ -60,6 +60,13 @@ pub struct ToastStyleConfig {
 }
 
 pub trait ToastStyle: 'static {
+    /// The chrome around a toast's pieces. Its root has to carry
+    /// `Live::Off`: the toast's own node is a live region announced by its
+    /// name, and every descendant that sets no politeness inherits it, so
+    /// the body, the actions and the close button would each be announced
+    /// beside that name. A `Role::GenericContainer` (a layout stack is one),
+    /// which the platform adapters drop while keeping its children. Never
+    /// `set_hidden()`, which an adapter reads as hiding the whole subtree.
     fn make_body(&self, cfg: &ToastStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
 

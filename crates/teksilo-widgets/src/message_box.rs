@@ -97,8 +97,10 @@
 //! The widget exposes `Role::AlertDialog` (distinct from
 //! `ModalContainer`'s `Role::Dialog`), with `set_modal()`,
 //! `set_live(Live::Assertive)`, `set_name(title)`, and
-//! `set_description(text + informative_text)` so screen readers
-//! announce the dialog and its body on open.
+//! `set_description(text + informative_text)`, so screen readers
+//! announce the dialog by its title as it opens and find the text as its
+//! description and by walking it. The content under it is `Live::Off`, so
+//! the title is the one thing announced, once.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -112,6 +114,7 @@ use teksilo_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
 use teksilo_core::shortcut::{KeyStroke, Shortcut};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
 use teksilo_tokens::{InputTokens, TargetRole, VAlignment};
@@ -994,7 +997,28 @@ impl Widget for MessageBox {
         let footer_id = ctx.add(footer);
         stack = stack.child(footer_id);
 
-        let root = ctx.add(stack);
+        // `Live::Off` on the root of the content. The box is an assertive
+        // live region so that its *name*, the title, interrupts as it
+        // opens, and `accesskit_consumer` hands a node's politeness down to
+        // every descendant that sets none (node.rs:906-910). All three
+        // adapters announce each named node entering the filtered tree with
+        // an inherited politeness (atspi_common adapter.rs:71-77, windows
+        // adapter.rs:255-263, macos event.rs:236-241), so once the dialog
+        // panel stopped hiding the box, opening it announced the text, the
+        // informative text and every button as well, each assertive, in
+        // hash order, and each cutting off the one before: Orca 46.1 speaks
+        // an announcement by interrupting the last (`speakMessage` in
+        // `scripts/default.py` defaults to `interrupt=True`), so what was left
+        // to hear was a button's name. The text still reaches a reader as the
+        // box's description and by walking it. The root stays a
+        // `GenericContainer`: the walker keeps it because it now says
+        // something, and the adapters step through it to its children, which
+        // inherit what it says.
+        let root = ctx.add(
+            stack
+                .access_role(teksilo_core::accesskit::Role::GenericContainer)
+                .access_live(teksilo_core::accesskit::Live::Off),
+        );
         self.root_child_id = Some(root);
 
         {
@@ -1235,6 +1259,95 @@ mod tests {
         let info = tree.accessibility_node(mb_id);
         assert_eq!(info.role(), teksilo_core::accesskit::Role::AlertDialog);
         assert_eq!(info.name(), Some("Title"));
+    }
+
+    /// Only the box itself is live. Its content inherited the box's
+    /// assertive setting through `accesskit_consumer`'s `live()`, so every
+    /// button and line of text was an announcement of its own.
+    #[test]
+    fn nothing_inside_the_box_is_live_on_its_own() {
+        use teksilo_core::accesskit::{Live, Role};
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let mb = MessageBox::warning(lit!("Supprimer « Vacances » ?"))
+            .text(lit!("Cet évènement sera retiré de votre liste."))
+            .buttons(MessageBoxButtons::YesNo)
+            .default_button(StandardButton::No);
+        let _content = present_and_lay_out(&mut tree, mb);
+        let update = tree.sync_accessibility();
+
+        let consumer = accesskit_consumer::Tree::new(update, true);
+        let state = consumer.state();
+        let mut stack = vec![state.root()];
+        let mut the_box = None;
+        let mut inside = Vec::new();
+        while let Some(node) = stack.pop() {
+            if node.role() == Role::AlertDialog {
+                the_box = Some((node.label(), node.live()));
+                let mut below: Vec<_> = node.children().collect();
+                while let Some(child) = below.pop() {
+                    inside.push((child.role(), child.live()));
+                    below.extend(child.children());
+                }
+            }
+            stack.extend(node.children());
+        }
+        assert_eq!(
+            the_box,
+            Some((
+                Some("Supprimer « Vacances » ?".to_string()),
+                Live::Assertive
+            )),
+            "the box stays an assertive live region named by its question"
+        );
+        assert!(
+            inside.iter().any(|(role, _)| *role == Role::Button),
+            "the walk must reach the buttons for this to say anything"
+        );
+        let live_inside: Vec<_> = inside
+            .iter()
+            .filter(|(_, live)| *live != Live::Off)
+            .collect();
+        assert!(
+            live_inside.is_empty(),
+            "live inside the box: {live_inside:?}"
+        );
+    }
+
+    /// What opening the box used to announce: the focused button, as an
+    /// assertive live region of its own, which interrupts. It is announced as
+    /// the focus now, the way any focused control is, and not a second time.
+    /// What the box announces is its question, once: a ring that heard
+    /// nothing at all would pass the first half of this.
+    #[test]
+    fn opening_the_box_does_not_announce_its_buttons() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let _ = tree.sync_accessibility();
+        let seen = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+        let mb = MessageBox::warning(lit!("Supprimer « Vacances » ?"))
+            .text(lit!("Cet évènement sera retiré de votre liste."))
+            .buttons(MessageBoxButtons::YesNo)
+            .default_button(StandardButton::No);
+        let _content = present_and_lay_out(&mut tree, mb);
+        let _ = tree.sync_accessibility();
+        let heard: Vec<String> = tree
+            .announcements_since(seen)
+            .into_iter()
+            .map(|a| a.text)
+            .collect();
+        let yes = StandardButton::Yes.default_label().resolve_now();
+        let no = StandardButton::No.default_label().resolve_now();
+        assert!(
+            !heard
+                .iter()
+                .any(|t| *t == yes || *t == no || t.starts_with("Cet évènement")),
+            "heard {heard:?}"
+        );
+        assert_eq!(
+            heard,
+            ["Supprimer « Vacances » ?"],
+            "the question, once, and nothing else"
+        );
     }
 
     #[test]

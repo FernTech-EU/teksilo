@@ -605,10 +605,29 @@ impl Widget for Calendar {
                     theme.shape.radius_popup,
                 )),
         );
+        // `Live::Off` on the one root everything else hangs from. The grid
+        // is a polite live region so that its *name* speaks a change of
+        // month (see `accessibility`), and `accesskit_consumer` hands a
+        // node's politeness down to every descendant that sets none
+        // (node.rs:906-910). The AT-SPI, UIA and macOS adapters announce
+        // every named node that enters the filtered tree, or is renamed
+        // there, with an inherited politeness other than off
+        // (atspi_common adapter.rs:71-77 and node.rs:610-622, windows
+        // adapter.rs:255-263 and 313-324, macos event.rs:236-241 and
+        // 300-310). So once the day grid, the header and the zoom grids
+        // were reachable, opening the calendar announced all 42 dates, the
+        // weekdays and the header buttons, and a change of month announced
+        // every renamed day beside the grid's name, in whatever order the
+        // consumer's hash set gave. Orca speaks each announcement with
+        // interrupt set (default.py `speakMessage`), so the last one won:
+        // a date picked by the hash, not the month. The node stays a
+        // `GenericContainer`, which every adapter drops with its children
+        // promoted into the grid.
         let framed_id = ctx.add(
             crate::primitives::ZStack::new()
                 .child(bg_id)
-                .child(padded_id),
+                .child(padded_id)
+                .access_live(Live::Off),
         );
         self.root_child_id = Some(framed_id);
 

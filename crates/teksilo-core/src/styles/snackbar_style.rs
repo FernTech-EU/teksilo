@@ -21,8 +21,11 @@ pub struct SnackbarStyleConfig {
 
 pub trait SnackbarStyle: 'static {
     /// The body wraps `cfg.content` and is chrome: its accessibility node has
-    /// to let the content through. `Role::GenericContainer` and nothing else,
-    /// which the platform adapters drop while keeping its children. Never
+    /// to let the content through. `Role::GenericContainer`, which the
+    /// platform adapters drop while keeping its children, and `Live::Off`:
+    /// the snackbar's own node is a live region announced by its name, and
+    /// every descendant that sets no politeness inherits it, so each named
+    /// node in the content would be announced beside that name. Never
     /// `set_hidden()`, which an adapter reads as hiding the whole subtree.
     fn make_body(&self, cfg: &SnackbarStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
