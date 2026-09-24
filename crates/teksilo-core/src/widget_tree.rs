@@ -14,6 +14,8 @@ use crate::widget_id::WidgetId;
 
 mod accessibility_emit_impl;
 mod accessibility_impl;
+#[cfg(test)]
+mod accessibility_proxy_tests;
 mod drag_drop_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;

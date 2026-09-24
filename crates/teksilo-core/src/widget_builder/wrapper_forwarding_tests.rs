@@ -139,6 +139,10 @@ impl Widget for QueryProbe {
         Some(WidgetId::default())
     }
 
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        Some(WidgetId::default())
+    }
+
     fn context_menu_key_target(&self) -> Option<WidgetId> {
         Some(WidgetId::default())
     }
@@ -264,6 +268,9 @@ fn query_hooks_lost(widget: &mut dyn Widget) -> Vec<&'static str> {
     }
     if widget.initial_focus_hint().is_none() {
         lost.push("initial_focus_hint");
+    }
+    if widget.accessibility_proxy().is_none() {
+        lost.push("accessibility_proxy");
     }
     if widget.context_menu_key_target().is_none() {
         lost.push("context_menu_key_target");

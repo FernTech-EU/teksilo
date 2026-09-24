@@ -105,6 +105,36 @@ and the shell wires the relation for it — that is how `Dialog` and
 returns a copy of the string; the hint remains for content that has no
 label node to point at.
 
+#### A composite that publishes itself through the field that holds focus
+
+Some composites keep everything a screen reader reads on one inner widget.
+A `SpinBox`'s editing field holds the focus, the caret, the text and the
+value, so the field is the node focus lands on, and the one an assistive
+technology announces. It therefore carries the spin box's role, name and
+numeric range, and the composite's own node is structure
+(`Role::GenericContainer`), which the presentational pass collapses.
+
+An application, though, only ever has the composite's id: `FormLayout`
+names it with `labelled_by`, an app calls `.access_label(..)`,
+`.access_described_by(..)` or `.tooltip(..)` on it. A composite in this
+shape returns the inner widget from
+[`Widget::accessibility_proxy`](https://docs.rs/teksilo-core/latest/teksilo_core/widget/trait.Widget.html),
+and the walker then:
+
+- applies every override attached to the composite to the proxy's node,
+  **after** the proxy's own, so what the application attached still wins;
+  a chain of composites applies innermost first, so the outermost wins;
+- keeps none of them on the composite's own node;
+- gives the proxy the tooltip the composite owns, which would otherwise
+  fall to the chrome it is anchored on;
+- points every `controls` / `described_by` / `labelled_by` target naming
+  the composite at the proxy.
+
+`accessibility_node`, `find_by_label` and `find_by_role` answer the same
+way the walk emits. Only a live, strict descendant counts, and only while
+the walk reaches it: the composite and every widget between the two walked
+normally (`Inherit`). Otherwise the overrides stay where they were attached.
+
 ### Tier 3 — subtree modes, numeric, actions, escape hatch
 
 | Method | Effect |
@@ -359,7 +389,8 @@ For each widget the AT walker visits, the sequence is:
     10. **`customize`** closure runs last with full `inner_mut()` access.
 3. **Walker post-processing**:
     1. Resolve `access_shortcut_id` against `ShortcutRegistry` (this needs tree access, so it lives outside `apply()`).
-    2. Subtree dispatch — for `Merge`, walk descendants and absorb into the current builder; for `Exclude`, prune.
+    2. For a node that stands for composites ([`accessibility_proxy`](#a-composite-that-publishes-itself-through-the-field-that-holds-focus)), apply their overrides next, innermost composite first. A composite that names a proxy skips step 2 and step 3.1 on its own node.
+    3. Subtree dispatch: for `Merge`, walk descendants and absorb into the current builder; for `Exclude`, prune.
 4. **Framework finalization**:
     1. Push child NodeIds (skipped for Exclude / Merge).
     2. Inject layout bounds (plus a transform at a content-transform boundary such as `SceneView`).
@@ -367,7 +398,7 @@ For each widget the AT walker visits, the sequence is:
     4. Tooltip → `push_described_by` when the tooltip is shown, otherwise its text as a static `description`.
     5. `builder.build(id)` → produces `(NodeId, accesskit::Node, synthetic_children, synthetic_local_bounds)`.
 
-After every widget has been visited, **tree-wide passes** run over the assembled node list: a nameless `TreeItem` / `ListBoxOption` row takes its name from its first named descendant; semantically-empty `GenericContainer` / `Unknown` nodes are dropped and their children promoted to the parent, exempting the root, the focused node, and relationship targets (see [Automatic presentational collapse](#automatic-presentational-collapse-no-opt-in)); and children and relation targets (`controls` / `described_by` / `labelled_by`) naming a node absent from the update are stripped.
+After every widget has been visited, **tree-wide passes** run over the assembled node list: a relation target naming a composite with a proxy is pointed at the proxy; a nameless `TreeItem` / `ListBoxOption` row takes its name from its first named descendant; semantically-empty `GenericContainer` / `Unknown` nodes are dropped and their children promoted to the parent, exempting the root, the focused node, and relationship targets (see [Automatic presentational collapse](#automatic-presentational-collapse-no-opt-in)); and children and relation targets (`controls` / `described_by` / `labelled_by`) naming a node absent from the update are stripped.
 
 ---
 

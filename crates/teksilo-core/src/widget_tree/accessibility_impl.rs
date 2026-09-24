@@ -405,7 +405,7 @@ impl WidgetTree {
     }
 
     pub fn accessibility_node(&self, id: WidgetId) -> AccessibilityInfo {
-        let node = self.arena.get(id).expect("widget id is active in arena");
+        // Panics on an inactive id, like every caller of this has relied on.
         let builder = self.build_overridden_builder(id);
         let role = builder.role();
         let name = builder.name().map(|s| s.to_string());
@@ -422,16 +422,20 @@ impl WidgetTree {
         }
         // Mirror the framework gate at `build_accessibility_recursive`:
         // arena-driven disabled wins unless the override explicitly
-        // asks for `access_disabled(false)`.
-        let force_clear_disabled =
-            node.access_overrides.as_deref().and_then(|ov| ov.disabled) == Some(false);
+        // asks for `access_disabled(false)`. The override in force is the
+        // one the walker applies, which for a proxy may be a composite's.
+        let disabled = self.access_disabled_override(
+            id,
+            self.live_accessibility_proxy(id).is_some(),
+            &self.composites_standing_behind(id),
+        );
+        let force_clear_disabled = disabled == Some(false);
         let disabled_arena = !self.arena.is_enabled(id) && !force_clear_disabled;
         // Override `Some(true)` already called `set_disabled()` inside
         // the override apply; we only need to surface it here as a
         // separate signal because `AccessNodeBuilder` doesn't expose a
         // `is_disabled()` getter on the builder side.
-        let disabled_override =
-            node.access_overrides.as_deref().and_then(|ov| ov.disabled) == Some(true);
+        let disabled_override = disabled == Some(true);
         if disabled_arena || disabled_override {
             info = info.with_disabled(true);
         }

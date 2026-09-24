@@ -86,6 +86,7 @@ impl WidgetTree {
         // anchor.
         let mut handled_tooltips: std::collections::HashSet<WidgetId> =
             std::collections::HashSet::new();
+        let mut proxies = ProxyLedger::default();
         for &root_id in &roots {
             self.build_accessibility_recursive(
                 root_id,
@@ -95,8 +96,15 @@ impl WidgetTree {
                 &mut local_bounds,
                 &mut seen_children,
                 &mut handled_tooltips,
+                &mut proxies,
             );
         }
+
+        // A relation that names a composite names the proxy that stands for
+        // it: the composite's own node is structure, and the presentational
+        // pass below may drop it. Run before that pass, which keeps any node a
+        // relation still names.
+        proxies.redirect_relations(&mut nodes);
 
         // The focused node, resolved to something this walk actually emitted.
         //
@@ -388,6 +396,9 @@ impl WidgetTree {
         // twice on the way into a control is worse than one announced in the
         // wrong place.
         handled_tooltips: &mut std::collections::HashSet<WidgetId>,
+        // What composites above have handed down to the descendants that
+        // stand for them (`Widget::accessibility_proxy`).
+        proxies: &mut ProxyLedger,
     ) {
         use crate::accessibility::widget_id_to_node_id;
         use crate::widget_builder::AccessSubtreeMode;
@@ -405,23 +416,48 @@ impl WidgetTree {
         self.announce_context_menu(id, &mut builder);
         self.announce_focusable(id, &mut builder);
 
+        // Whatever the composites this node stands for handed down (see
+        // `Widget::accessibility_proxy`). Taken out of the ledger here, so a
+        // composite below that names a proxy of its own passes them on rather
+        // than leaving a second copy behind.
+        let standing_for = proxies.standing_for.remove(&id).unwrap_or_default();
+        let mut reserved_tooltip = proxies.tooltips.remove(&id);
+        let proxy = self.live_accessibility_proxy(id);
+
         // Apply builder-level overrides AFTER the inner widget has
         // emitted its defaults, so the overrides win for scalar fields
         // and append on relationship lists.
-        if let Some(ov) = node.access_overrides.as_deref() {
-            ov.apply(&mut builder);
-            // `access_shortcut_id` resolution happens here in the
-            // walker (not in `apply()`) because the override struct
-            // can't reach the tree's `ShortcutRegistry`. Same
-            // mechanism as `MenuItem::for_shortcut(...)` — look up
-            // the effective primary keystroke and announce it via
-            // `KeyStroke`'s `Display` impl. Falls back silently if
-            // the id has no registered default.
-            if let Some(ref id) = ov.shortcut_id
-                && let Some(eff) = self.shortcut_registry.effective(id)
-                && let Some(ks) = eff.primary
-            {
-                builder.set_keyboard_shortcut(ks.to_string());
+        //
+        // A composite with a proxy keeps none of them. Its node is structure,
+        // and what an application attached to it (the only id it can reach)
+        // belongs on the node that holds focus: its overrides, those it was
+        // handed from further up, and the tooltip it owns all move down to the
+        // proxy, which applies them after its own so the application still
+        // has the last word. The tooltip is marked handled now, because the
+        // walk passes the composite's chrome, where the tooltip is anchored,
+        // before it reaches the proxy.
+        match proxy {
+            Some(proxy_id) => {
+                let mut chain = Vec::with_capacity(standing_for.len() + 1);
+                chain.push(id);
+                chain.extend(standing_for.iter().copied());
+                proxies.standing_for.insert(proxy_id, chain);
+                if let Some(content) = reserved_tooltip
+                    .take()
+                    .or_else(|| self.tooltip_claim_for_proxy(id, handled_tooltips))
+                {
+                    handled_tooltips.insert(content);
+                    proxies.tooltips.insert(proxy_id, content);
+                }
+                proxies
+                    .nodes
+                    .insert(widget_id_to_node_id(id), widget_id_to_node_id(proxy_id));
+            }
+            None => {
+                self.apply_access_overrides(id, &mut builder);
+                for &composite in &standing_for {
+                    self.apply_access_overrides(composite, &mut builder);
+                }
             }
         }
 
@@ -538,7 +574,7 @@ impl WidgetTree {
         // arena-driven disabled state too — without this short-circuit,
         // `clear_disabled()` in the override layer would be re-set here.
         let force_clear_disabled =
-            node.access_overrides.as_deref().and_then(|ov| ov.disabled) == Some(false);
+            self.access_disabled_override(id, proxy.is_some(), &standing_for) == Some(false);
         if !self.arena.is_enabled(id) && !force_clear_disabled {
             builder.set_disabled();
         }
@@ -562,9 +598,22 @@ impl WidgetTree {
         // every other row's entirely. A contested claim is no claim, and each
         // of those tooltips falls back to its own anchor, which is where they
         // already were.
-        if let Some(content_id) =
-            self.tooltip_description_target(id, handled_tooltips, &mut builder)
-        {
+        //
+        // A composite that handed its node to a proxy handed its tooltip with
+        // it, above; the proxy takes it here on the owner's terms (a node a
+        // reader stops on, with no description of its own), or falls back to
+        // the usual search.
+        let tooltip = if proxy.is_some() {
+            None
+        } else {
+            reserved_tooltip
+                .filter(|_| {
+                    !is_presentational_container(builder.inner_mut())
+                        && builder.inner_mut().description().is_none()
+                })
+                .or_else(|| self.tooltip_description_target(id, handled_tooltips, &mut builder))
+        };
+        if let Some(content_id) = tooltip {
             if self
                 .tooltips
                 .iter()
@@ -629,6 +678,7 @@ impl WidgetTree {
                     local_bounds,
                     seen_children,
                     handled_tooltips,
+                    proxies,
                 );
             }
         }
@@ -830,21 +880,194 @@ impl WidgetTree {
         node.widget.accessibility(&mut builder);
         self.announce_context_menu(id, &mut builder);
         self.announce_focusable(id, &mut builder);
-        if let Some(ov) = node.access_overrides.as_deref() {
-            ov.apply(&mut builder);
-            // Resolve `access_shortcut_id` against the live registry —
-            // see the matching block in `build_accessibility_recursive`.
-            if let Some(ref sid) = ov.shortcut_id
-                && let Some(eff) = self.shortcut_registry.effective(sid)
-                && let Some(ks) = eff.primary
-            {
-                builder.set_keyboard_shortcut(ks.to_string());
+        // The walker's rule, reached from the other end: it carries the
+        // composites down to their proxy, this climbs from the node to them.
+        if self.live_accessibility_proxy(id).is_none() {
+            self.apply_access_overrides(id, &mut builder);
+            for composite in self.composites_standing_behind(id) {
+                self.apply_access_overrides(composite, &mut builder);
             }
         }
         if node.access_subtree == AccessSubtreeMode::Merge {
             merge_descendants_into(&mut builder, id, &self.arena);
         }
         builder
+    }
+
+    /// Apply the builder-level overrides attached to `id` onto `builder`.
+    ///
+    /// `access_shortcut_id` is resolved here rather than in
+    /// `AccessibilityOverrides::apply` because the override struct cannot reach
+    /// the tree's `ShortcutRegistry`. Same mechanism as
+    /// `MenuItem::for_shortcut(...)`: look up the effective primary keystroke
+    /// and announce it through `KeyStroke`'s `Display`, or nothing when the id
+    /// has no registered default.
+    fn apply_access_overrides(&self, id: WidgetId, builder: &mut AccessNodeBuilder) {
+        let Some(ov) = self
+            .arena
+            .get(id)
+            .and_then(|node| node.access_overrides.as_deref())
+        else {
+            return;
+        };
+        ov.apply(builder);
+        if let Some(ref sid) = ov.shortcut_id
+            && let Some(eff) = self.shortcut_registry.effective(sid)
+            && let Some(ks) = eff.primary
+        {
+            builder.set_keyboard_shortcut(ks.to_string());
+        }
+    }
+
+    /// The descendant `id` hands its accessibility node to, if it names one
+    /// the walk will honour: see [`Widget::accessibility_proxy`].
+    ///
+    /// A strict, live descendant that the walk reaches: `id` and every widget
+    /// between the two walked normally. An excluded or merged subtree emits no
+    /// node for the proxy to carry anything on, wherever it sits on the way
+    /// down, so the overrides stay where they were attached.
+    pub(crate) fn live_accessibility_proxy(&self, id: WidgetId) -> Option<WidgetId> {
+        use crate::widget_builder::AccessSubtreeMode;
+        let node = self.arena.get(id)?;
+        if node.access_subtree != AccessSubtreeMode::Inherit {
+            return None;
+        }
+        let proxy = node.widget.accessibility_proxy()?;
+        if proxy == id || !self.arena.is_active(proxy) {
+            return None;
+        }
+        // Climb from the proxy to `id`, which is the descendant check, and
+        // refuse at the first widget in between that stops the walk.
+        let mut current = self.arena.parent(proxy);
+        while let Some(ancestor) = current {
+            if ancestor == id {
+                return Some(proxy);
+            }
+            if self.arena.get(ancestor)?.access_subtree != AccessSubtreeMode::Inherit {
+                return None;
+            }
+            current = self.arena.parent(ancestor);
+        }
+        None
+    }
+
+    /// The composites whose node `id` stands for, innermost first: the order
+    /// the walker applies their overrides in, so the outermost, which is the
+    /// one an application attached last, wins.
+    ///
+    /// A composite can name another composite as its proxy, which names a
+    /// field in turn, so the climb follows the chain rather than stopping at
+    /// the first match.
+    pub(crate) fn composites_standing_behind(&self, id: WidgetId) -> Vec<WidgetId> {
+        let mut found = Vec::new();
+        let mut stands_for = id;
+        let mut current = self.arena.parent(id);
+        while let Some(ancestor) = current {
+            if self.live_accessibility_proxy(ancestor) == Some(stands_for) {
+                found.push(ancestor);
+                stands_for = ancestor;
+            }
+            current = self.arena.parent(ancestor);
+        }
+        found
+    }
+
+    /// The `access_disabled` override in force on `id`'s node: its own, unless
+    /// it handed its node to a proxy, then those of the composites it stands
+    /// for, the last one set winning as it does for every scalar override.
+    pub(crate) fn access_disabled_override(
+        &self,
+        id: WidgetId,
+        handed_on: bool,
+        standing_for: &[WidgetId],
+    ) -> Option<bool> {
+        if handed_on {
+            return None;
+        }
+        std::iter::once(id)
+            .chain(standing_for.iter().copied())
+            .filter_map(|w| {
+                self.arena
+                    .get(w)
+                    .and_then(|node| node.access_overrides.as_deref())
+                    .and_then(|ov| ov.disabled)
+            })
+            .last()
+    }
+
+    /// The tooltip a composite that hands its node to a proxy should hand on
+    /// with it: the one it owns, when it owns exactly one, or else one
+    /// anchored on it. The same claim `tooltip_description_target` grants an
+    /// owner, without the checks on the node, which are the proxy's to pass.
+    fn tooltip_claim_for_proxy(
+        &self,
+        id: WidgetId,
+        handled: &std::collections::HashSet<WidgetId>,
+    ) -> Option<WidgetId> {
+        let mut claims = self
+            .tooltips
+            .iter()
+            .filter(|t| t.description_owner_id == id && !handled.contains(&t.content_id));
+        if let (Some(only), None) = (claims.next(), claims.next()) {
+            return Some(only.content_id);
+        }
+        self.tooltips
+            .iter()
+            .find(|t| t.anchor_id == id && !handled.contains(&t.content_id))
+            .map(|t| t.content_id)
+    }
+}
+
+/// What composites hand down, during one walk, to the descendants that stand
+/// for them in the accessibility tree ([`Widget::accessibility_proxy`]).
+///
+/// The walk visits a composite before its proxy, so the composite leaves its
+/// share here and the proxy collects it when the walk arrives.
+#[derive(Default)]
+pub(super) struct ProxyLedger {
+    /// For each proxy, the composites it stands for, innermost first.
+    standing_for: std::collections::HashMap<WidgetId, Vec<WidgetId>>,
+    /// The tooltip a composite owned, kept for its proxy.
+    tooltips: std::collections::HashMap<WidgetId, WidgetId>,
+    /// Each composite's node, and the node of the proxy standing for it.
+    nodes: std::collections::HashMap<accesskit::NodeId, accesskit::NodeId>,
+}
+
+impl ProxyLedger {
+    /// Point every `controls`, `described_by` and `labelled_by` target that
+    /// names a composite at the node standing for it, through any chain of
+    /// composites.
+    fn redirect_relations(&self, nodes: &mut [(accesskit::NodeId, accesskit::Node)]) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let resolve = |mut nid: accesskit::NodeId| {
+            // A proxy is a strict descendant, so a chain never loops; the
+            // bound is there so that cannot be assumed.
+            for _ in 0..self.nodes.len() {
+                match self.nodes.get(&nid) {
+                    Some(&next) => nid = next,
+                    None => break,
+                }
+            }
+            nid
+        };
+        let redirected = |ids: &[accesskit::NodeId]| {
+            ids.iter()
+                .any(|id| self.nodes.contains_key(id))
+                .then(|| ids.iter().map(|&id| resolve(id)).collect::<Vec<_>>())
+        };
+        for (_, node) in nodes.iter_mut() {
+            if let Some(ids) = redirected(node.controls()) {
+                node.set_controls(ids);
+            }
+            if let Some(ids) = redirected(node.described_by()) {
+                node.set_described_by(ids);
+            }
+            if let Some(ids) = redirected(node.labelled_by()) {
+                node.set_labelled_by(ids);
+            }
+        }
     }
 }
 

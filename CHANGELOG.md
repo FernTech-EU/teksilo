@@ -13,6 +13,20 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Accessibility
+
+- **`Widget::accessibility_proxy`: a composite can publish itself through the
+  field that holds focus.** Where a composite keeps its focus, text and value
+  on one inner widget, that widget is the node a screen reader lands on and has
+  to carry the composite's name, while an application can only reach the
+  composite's id. Returning the inner widget from the hook makes the tree apply
+  everything attached to the composite (its overrides, a `FormLayout`'s
+  `labelled_by`, `access_described_by`, the tooltip it owns) to that widget's
+  node, after the widget's own, and point relations naming the composite at
+  it. The overrides guide has a section on it.
+
 ### Changed
 
 #### Data views

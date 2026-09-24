@@ -1913,6 +1913,10 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.initial_focus_hint()
     }
 
+    fn accessibility_proxy(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.accessibility_proxy()
+    }
+
     fn context_menu_key_target(&self) -> Option<crate::widget_id::WidgetId> {
         self.widget.context_menu_key_target()
     }

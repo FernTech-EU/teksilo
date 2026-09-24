@@ -493,6 +493,36 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         None
     }
 
+    /// The descendant whose accessibility node stands for this widget.
+    ///
+    /// Some composites keep everything an assistive technology reads on one
+    /// inner widget. A `SpinBox`'s editing field holds the focus, the caret,
+    /// the text and the value, so the field is the node a screen reader lands
+    /// on, and it is the node that has to carry the spin box's name and its
+    /// spin semantics. The composite's own node is then structure, and says
+    /// so with `Role::GenericContainer`, which the presentational pass
+    /// collapses.
+    ///
+    /// What remains is that an application can only reach the composite. A
+    /// `FormLayout` names it with `labelled_by`, an application gives it
+    /// `.access_label(..)`, `access_described_by` or a tooltip, all on the
+    /// composite's id, and all of that would land on a node no platform
+    /// adapter exposes. Returning `Some(inner)` makes the walker apply
+    /// everything attached to this widget (its builder overrides, its
+    /// relations, the tooltip it owns) to `inner`'s node instead, after
+    /// `inner`'s own, so the application keeps the last word. A relation that
+    /// names this widget is pointed at `inner`.
+    ///
+    /// Only a live, strict descendant counts, and only while the walk reaches
+    /// it: this widget and every widget between the two walked normally,
+    /// neither excluded nor merged. Anything else is ignored and the overrides
+    /// stay where they were attached.
+    ///
+    /// Default: `None`.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        None
+    }
+
     /// Which descendant a keyboard request for a context menu should target.
     ///
     /// The context-menu key (and Shift+F10) opens the menu of the **focused**
@@ -948,6 +978,10 @@ impl<W: Widget + ?Sized> Widget for Box<W> {
 
     fn initial_focus_hint(&self) -> Option<WidgetId> {
         (**self).initial_focus_hint()
+    }
+
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        (**self).accessibility_proxy()
     }
 
     fn context_menu_key_target(&self) -> Option<WidgetId> {
