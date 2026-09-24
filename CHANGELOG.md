@@ -306,16 +306,44 @@ by crate for clarity, not because crates version independently.
   "samedi 2 mai 2026 à 14:35", with the seconds only when the field shows
   them. The editable text inside keeps its pattern. **Behaviour change** for
   anything that parsed those values.
-- **A `Calendar`'s days and header buttons could not be reached.** The day
-  grid's body and the header row called `set_hidden()` so as not to be
-  announced beside the `Role::Grid`, and hid what they hold with them: the 42
-  cells, each naming its date in full with its selected and today states, and
-  the arrows and the title button. A screen reader found nothing inside the
-  grid to review, and reached a header button only once it held focus. Both
-  are now a bare `Role::GenericContainer`, so the days are in the platform's
-  tree, six rows of seven cells under the grid, and so are the header's five
-  buttons. `DateEdit`, `DateRangeEdit` and `DateTimeEdit` open this calendar
-  and are fixed with it.
+- **A `Calendar`'s days and header buttons could not be reached, and
+  arrowing through its days said nothing on Linux.** The day grid's body and
+  the header row called `set_hidden()` so as not to be announced beside the
+  `Role::Grid`, and hid what they hold with them: the 42 cells, each naming
+  its date in full with its selected and today states, and the arrows and
+  the title button. A screen reader found nothing inside the grid to review,
+  and reached a header button only once it held focus. The day under the
+  keyboard cursor lived only in the grid's value, which UIA and macOS report
+  as a value change and AT-SPI carries on no interface, so Orca heard nothing
+  while the cursor moved. Both are now a bare `Role::GenericContainer`, so
+  the days are in the platform's tree, six rows of seven cells under the
+  grid, and so are the header's five buttons. While it holds focus in the day
+  view, the grid names the cell under the cursor as its active descendant,
+  and AccessKit reports that cell as the focus on all three platforms: each
+  arrow press, and each change of month from the keyboard, is a focus change
+  to the new day ("samedi 13 mars 2027"). The value still says the cursor
+  and the selection, for a client that reads the grid. A day offers
+  `Action::Click` and, like a grouped `RadioTile`, no longer
+  `Action::Focus`: the dispatcher moved keyboard focus onto a day an
+  assistive technology focused, off the grid, and every arrow press after
+  that moved the cursor in silence. `DateEdit`, `DateRangeEdit` and
+  `DateTimeEdit` open this calendar and are fixed with it. **Behaviour
+  change** for an automation client that focused a day, which is now
+  reported unhandled.
+- **A calendar said things twice.** The grid was a polite live region, and a
+  live node speaks its name as it enters the tree and on every rename, with
+  every descendant inheriting the setting. Opening a date field's calendar
+  announced the grid's name, then each of the seven weekday headers, and then
+  focus said the name again; PageUp or PageDown in the grid announced the new
+  month while Orca spoke the rename of its focus as well; and each header
+  button Tab reached was announced as it appeared and again as it took focus.
+  The grid is no longer live, and the calendar's content is `Live::Off`, so
+  one placed inside an application's own live region lends it the grid's
+  name and no day, weekday or button. A change of month made from a header
+  arrow, where focus stays on the arrow, is announced once through the
+  tree's announcer, as the title now reads; the Today button announces the
+  day it moved to, in full. Neither announces while the grid itself holds focus.
+  **Behaviour change** for anything that listened to the grid's live region.
 
 #### Data views
 

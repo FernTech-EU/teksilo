@@ -4,6 +4,7 @@
 use super::*;
 use crate::common::datetime::Date;
 use crate::common::locale_switch_test::{speaking, spoken_grid as grid};
+use std::rc::Rc;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget_tree::WidgetTree;
 
@@ -65,8 +66,402 @@ fn calendar_role_is_grid() {
     assert_eq!(info.role(), teksilo_core::accesskit::Role::Grid);
 }
 
+// ── What a screen reader is told, and how many times ─────────────
+
+use crate::common::heard_test::{Heard, Listener};
+use teksilo_core::event::{Key, Modifiers};
+
+/// A French grid on 12 March 2027 holding keyboard focus, and a screen
+/// reader listening from that moment.
+fn focused_french_grid(
+    calendar: Calendar,
+) -> (Rc<teksilo_i18n::I18nManager>, WidgetTree, Listener) {
+    let (mgr, mut tree) = speaking("fr-FR");
+    let id = tree.add(calendar);
+    lay_out(&mut tree);
+    tree.focus(id);
+    lay_out(&mut tree);
+    let listener = Listener::attach(&mut tree);
+    (mgr, tree, listener)
+}
+
+fn press(tree: &mut WidgetTree, key: Key) {
+    tree.press_key(key, Modifiers::NONE);
+    lay_out(tree);
+}
+
 fn twelfth_of_march() -> Calendar {
     Calendar::single(Signal::new(Some(Date::constant(2027, 3, 12))))
+}
+
+#[test]
+fn an_arrow_press_is_a_focus_change_to_the_next_day() {
+    // Orca heard nothing as the cursor moved: the grid's name changes only
+    // with the month, and the value, where the cursor was, reaches no AT-SPI
+    // interface. UIA and macOS heard the value change. Every platform
+    // speaks a focus change, and the day under the cursor is now the focus.
+    let (_mgr, mut tree, mut listener) = focused_french_grid(twelfth_of_march());
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("samedi 13 mars 2027".to_string())]
+    );
+    press(&mut tree, Key::ArrowDown);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("samedi 20 mars 2027".to_string())]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_change_of_month_from_the_keyboard_is_said_once() {
+    // The grid used to be a live region, so PageDown announced its new name
+    // and Orca spoke the rename of its focus as well: the month, twice. Now
+    // it is one focus change, to a day of the new month whose name says the
+    // month, while the rename of the grid, no longer the focus, is not
+    // spoken (Orca's `onNameChanged` speaks only its locus of focus).
+    let (_mgr, mut tree, mut listener) = focused_french_grid(twelfth_of_march());
+    press(&mut tree, Key::PageDown);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("lundi 12 avril 2027".to_string())]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+/// Every node a platform adapter walks under the calendar's grid, as
+/// `(role, name)` with each week's days after it, in order.
+fn platform_tree_of_the_grid(
+    tree: &mut WidgetTree,
+) -> Vec<(teksilo_core::accesskit::Role, String)> {
+    fn walk(
+        node: accesskit_consumer::NodeRef<'_>,
+        out: &mut Vec<(teksilo_core::accesskit::Role, String)>,
+    ) {
+        out.push((node.role(), node.label().unwrap_or_default()));
+        for child in node.filtered_children(&accesskit_consumer::common_filter) {
+            walk(child, out);
+        }
+    }
+    let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+    let state = platform.state();
+    let mut out = Vec::new();
+    for child in state
+        .root()
+        .filtered_children(&accesskit_consumer::common_filter)
+        .filter(|node| node.role() == teksilo_core::accesskit::Role::Grid)
+    {
+        walk(child, &mut out);
+    }
+    out
+}
+
+#[test]
+fn every_day_is_in_the_platform_tree_week_by_week() {
+    // The day grid and the header used to be hidden nodes, meant as
+    // "publish nothing of my own" and read by every adapter as "drop me and
+    // everything under me". A screen reader could not read a single day, nor
+    // find a header button that did not hold focus.
+    use teksilo_core::accesskit::Role;
+    let (_mgr, mut tree) = speaking("fr-FR");
+    tree.add(twelfth_of_march());
+    lay_out(&mut tree);
+    let nodes = platform_tree_of_the_grid(&mut tree);
+    let buttons: Vec<&str> = nodes
+        .iter()
+        .filter(|(role, _)| *role == Role::Button)
+        .map(|(_, name)| name.as_str())
+        .collect();
+    assert_eq!(
+        buttons,
+        [
+            "Année précédente",
+            "Mois précédent",
+            "mars 2027",
+            "Mois suivant",
+            "Année suivante"
+        ]
+    );
+    // One row of weekday headers, then six weeks of seven days.
+    let mut weeks: Vec<Vec<&str>> = Vec::new();
+    for (role, name) in &nodes {
+        match role {
+            Role::Row => weeks.push(Vec::new()),
+            Role::GridCell => weeks
+                .last_mut()
+                .expect("a day inside a row")
+                .push(name.as_str()),
+            _ => {}
+        }
+    }
+    assert_eq!(weeks.len(), 7, "{nodes:?}");
+    assert!(
+        weeks[0].is_empty(),
+        "the first row holds the weekday headers"
+    );
+    assert!(weeks[1..].iter().all(|week| week.len() == 7), "{weeks:?}");
+    assert_eq!(weeks[1][0], "lundi premier mars 2027");
+    assert_eq!(weeks[2][4], "vendredi 12 mars 2027");
+    assert_eq!(weeks[6][6], "dimanche 11 avril 2027");
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_grid_names_a_day_only_while_it_holds_focus_in_the_day_view() {
+    // A container without focus has no descendant to speak of, and in the
+    // month or year view no day is on screen: the grid itself is the focus.
+    let calendar = twelfth_of_march();
+    let mode = calendar.mode_signal();
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let id = tree.add(calendar);
+    lay_out(&mut tree);
+    let platform_focus = |tree: &mut WidgetTree| -> (teksilo_core::accesskit::Role, String) {
+        let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+        let focus = platform.state().focus().expect("the window has focus");
+        (focus.role(), focus.label().unwrap_or_default())
+    };
+    let grid_names_a_day = |tree: &mut WidgetTree| -> bool {
+        tree.sync_accessibility().nodes.iter().any(|(_, node)| {
+            node.role() == teksilo_core::accesskit::Role::Grid && node.active_descendant().is_some()
+        })
+    };
+    assert!(!grid_names_a_day(&mut tree), "no focus, no day named");
+
+    tree.focus(id);
+    lay_out(&mut tree);
+    assert_eq!(
+        platform_focus(&mut tree),
+        (
+            teksilo_core::accesskit::Role::GridCell,
+            "vendredi 12 mars 2027".to_string()
+        )
+    );
+
+    mode.set(CalendarMode::Months);
+    lay_out(&mut tree);
+    assert!(!grid_names_a_day(&mut tree), "no day on screen, none named");
+    assert_eq!(
+        platform_focus(&mut tree),
+        (
+            teksilo_core::accesskit::Role::Grid,
+            "Calendrier, mars 2027".to_string()
+        )
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn each_header_button_tab_reaches_is_said_once() {
+    // A descendant of a live node is live too, and each header button used to
+    // enter the platform's tree only as it took focus, the header above it
+    // being hidden, so under the live grid each one was announced as it
+    // arrived and then spoken again as the new focus. With the header in the
+    // tree, Tab no longer adds a button a live grid could announce (the tests
+    // above keep the grid from being live), so what this holds is the button
+    // being in the tree before Tab reaches it, where object navigation finds
+    // it too, and said once when Tab does.
+    let (_mgr, mut tree, mut listener) = focused_french_grid(twelfth_of_march());
+    for name in [
+        "Année précédente",
+        "Mois précédent",
+        "mars 2027",
+        "Mois suivant",
+    ] {
+        assert!(
+            listener.finds(teksilo_core::accesskit::Role::Button, name),
+            "{name} is in the tree before Tab reaches it"
+        );
+        press(&mut tree, Key::Tab);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::Focus(name.to_string())],
+            "Tab to {name}"
+        );
+    }
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_header_arrow_announces_where_it_moved_to_once() {
+    // Focus stays on the arrow, whose name does not change, so the month it
+    // moves to has to be announced, and only by the arrow: the grid is no
+    // longer a live region that would say it again. In the months view the
+    // same arrow steps a year and says the year.
+    let calendar = twelfth_of_march();
+    let mode = calendar.mode_signal();
+    let (_mgr, mut tree, mut listener) = focused_french_grid(calendar);
+    let next = tree
+        .find_by_label("Mois suivant")
+        .expect("the next-month arrow");
+    tree.focus(next);
+    lay_out(&mut tree);
+    let _ = listener.heard(&mut tree);
+
+    press(&mut tree, Key::Enter);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live("avril 2027".to_string())]
+    );
+
+    mode.set(CalendarMode::Months);
+    lay_out(&mut tree);
+    let _ = listener.heard(&mut tree);
+    press(&mut tree, Key::Enter);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live("2028".to_string())]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_header_arrow_clicked_while_the_grid_has_focus_is_not_announced() {
+    // An assistive technology can click the arrow without moving focus off
+    // the grid. The grid's own change then says the new month, so the arrow
+    // must not announce it a second time.
+    let (_mgr, mut tree, mut listener) = focused_french_grid(twelfth_of_march());
+    let next = tree
+        .find_by_label("Mois suivant")
+        .expect("the next-month arrow");
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(next),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    lay_out(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("lundi 12 avril 2027".to_string())],
+        "the change is heard through the grid, and only there"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_today_button_announces_the_day_it_moved_to_once() {
+    // The same reason as the arrows: focus stays on the button. The day is
+    // said in full, which says its month too.
+    let calendar = twelfth_of_march().show_today_button(true);
+    let (_mgr, mut tree, mut listener) = focused_french_grid(calendar);
+    let today = resolve_message_widget("calendar-button-today", &[]);
+    let button = tree.find_by_label(&today).expect("the Today button");
+    tree.focus(button);
+    lay_out(&mut tree);
+    let _ = listener.heard(&mut tree);
+
+    press(&mut tree, Key::Enter);
+    let lang: LanguageIdentifier = "fr-FR".parse().unwrap();
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live(full_date(today_local(), &lang))]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_today_button_clicked_while_the_grid_has_focus_is_not_announced() {
+    // The arrows' case again, for the Today button: clicked by an assistive
+    // technology while the grid keeps focus, the cursor's move to today is a
+    // focus change to that day, and an announcement would say it twice.
+    let (_mgr, mut tree, mut listener) =
+        focused_french_grid(twelfth_of_march().show_today_button(true));
+    let today = resolve_message_widget("calendar-button-today", &[]);
+    let button = tree.find_by_label(&today).expect("the Today button");
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(button),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    lay_out(&mut tree);
+    let lang: LanguageIdentifier = "fr-FR".parse().unwrap();
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus(full_date(today_local(), &lang))],
+        "the move is heard through the grid, and only there"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn an_assistive_focus_on_a_day_leaves_the_keyboard_on_the_grid() {
+    // A day is the grid's active descendant and takes no keys of its own.
+    // It used to offer `Action::Focus`, which the dispatcher services by
+    // moving keyboard focus onto the node named, focusable or not. After a
+    // UIA `SetFocus` on a day, or VoiceOver's keyboard focus following its
+    // cursor there, the grid had lost focus and named no descendant, and the
+    // next arrow press moved the cursor in silence, the platform's focus
+    // left on the day that had been focused.
+    let calendar = twelfth_of_march();
+    let (_mgr, mut tree, mut listener) = focused_french_grid(calendar);
+    let grid = tree.focused();
+    let day = tree
+        .find_by_label("mardi 16 mars 2027")
+        .expect("a day of the month on show");
+    assert!(
+        !tree
+            .accessibility_node(day)
+            .actions()
+            .contains(&teksilo_core::accesskit::Action::Focus),
+        "a day offers no focus of its own"
+    );
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Focus,
+        target: Some(day),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    lay_out(&mut tree);
+    assert_eq!(tree.focused(), grid, "keyboard focus stays on the grid");
+    assert_eq!(listener.heard(&mut tree), vec![]);
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("samedi 13 mars 2027".to_string())]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_day_has_nothing_under_it_a_screen_reader_would_read_instead() {
+    // Orca reads a focused table cell by the text of its children when it
+    // has any, and by its own name only when it has none (Orca 46.1,
+    // `orca/generator.py`, `_generateRealActiveDescendantDisplayedText`). The
+    // digit drawn in each day is kept out of the tree for that reason: in
+    // it, "12" would be what Orca said for every day the cursor reached, in
+    // place of "vendredi 12 mars 2027".
+    let (_mgr, mut tree) = speaking("fr-FR");
+    tree.add(twelfth_of_march());
+    lay_out(&mut tree);
+    fn walk(node: accesskit_consumer::NodeRef<'_>, days: &mut Vec<(String, Vec<String>)>) {
+        let children: Vec<accesskit_consumer::NodeRef<'_>> = node
+            .filtered_children(&accesskit_consumer::common_filter)
+            .collect();
+        if node.role() == teksilo_core::accesskit::Role::GridCell {
+            days.push((
+                node.label().unwrap_or_default(),
+                children
+                    .iter()
+                    .map(|child| format!("{:?} {:?}", child.role(), child.label()))
+                    .collect(),
+            ));
+        }
+        for child in children {
+            walk(child, days);
+        }
+    }
+    let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+    let mut days = Vec::new();
+    walk(platform.state().root(), &mut days);
+    assert_eq!(days.len(), 42, "{days:?}");
+    let with_children: Vec<_> = days
+        .iter()
+        .filter(|(_, children)| !children.is_empty())
+        .collect();
+    assert!(with_children.is_empty(), "{with_children:?}");
+    teksilo_i18n::thread_local::clear();
 }
 
 // ── What the calendar says, in the user's language ──────────────

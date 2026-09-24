@@ -50,17 +50,22 @@
 //! `common::datetime::written`).
 //!
 //! - Container: `Role::Grid`, named after the visible month
-//!   ("Calendar, May 2026", "Calendrier, mai 2026"), and a polite live
-//!   region. The AT-SPI, UIA and macOS adapters announce a live node when
-//!   its *name* changes, so a change of month is announced on all three. The
-//!   value is the day under the keyboard cursor in full, then the
-//!   selection when there is one: "Saturday, May 2, 2026 (selected:
-//!   Friday, May 1, 2026)". With the cursor on the one selected day, the
-//!   day is said once: "Friday, May 1, 2026 (selected)". A range is joined
-//!   by words ("… to …"), not an en-dash, which some screen readers skip.
-//!   UIA and macOS raise a value-changed event on it; AT-SPI carries a
-//!   string value on no interface, so the value never reaches an AT-SPI
-//!   client at all.
+//!   ("Calendar, May 2026", "Calendrier, mai 2026"). It is **not** a live
+//!   region: a live grid announced its name and each weekday header as it
+//!   opened, and then focus said its name again. A change of month made
+//!   from the keyboard moves the focus to a day of the new month (see the
+//!   day cells below), whose name says the month. One made from a header
+//!   arrow or the Today button, where focus stays on the button, is
+//!   announced once through the tree's announcer: the title as it now
+//!   reads, or today's date in full. The value is the day under the
+//!   keyboard cursor in full, then the selection when there is one:
+//!   "Saturday, May 2, 2026 (selected: Friday, May 1, 2026)". With the
+//!   cursor on the one selected day, the day is said once: "Friday, May 1,
+//!   2026 (selected)". A range is joined by words ("… to …"), not an
+//!   en-dash, which some screen readers skip. The value is for a client
+//!   that reads the grid; the cursor is heard through the focus. UIA and
+//!   macOS raise a value-changed event on the grid, which is not the focus
+//!   while a day is; AT-SPI carries a string value on no interface.
 //! - Header arrow buttons: `Role::Button` with localized labels
 //!   ("Previous month", "Next month") and `Action::Click` advertised.
 //! - Header month/year label: `Role::Button`, a `Ghost` `Button` whose
@@ -69,11 +74,17 @@
 //!   the month and year, the year, or the decade in words ("2020 to 2029").
 //! - Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
 //!   labelled with the long weekday name (e.g. "Monday").
+//! - Weeks: `Role::Row`, each holding its seven day cells, so the grid is
+//!   `Grid > Row > GridCell` in every platform's tree.
 //! - Day cells: `Role::GridCell` named by the day in full
 //!   ("Saturday, May 2, 2026", "samedi 2 mai 2026"), `set_selected`,
 //!   `set_aria_current(Date)` on today, `set_disabled` for filter
-//!   rejections, and `Action::Click` advertised. Keyboard focus roves on
-//!   the Calendar root, so a cell never carries a focused flag.
+//!   rejections, and `Action::Click` advertised. Keyboard focus stays on
+//!   the Calendar root, which names the cell under the cursor as its
+//!   active descendant while it holds focus in the day view. AccessKit
+//!   reports that cell as the focus on AT-SPI, UIA and macOS, so each
+//!   arrow press, and each change of month, is a focus change to the new
+//!   day, which is what a screen reader speaks.
 //!
 //! # Example
 //!
@@ -222,6 +233,9 @@ pub(crate) type OnSelectionChanged = Rc<dyn Fn(Option<Date>, &mut EventContext)>
 pub(crate) type OnRangeChanged = Rc<dyn Fn(Option<DateRange>, &mut EventContext)>;
 pub(crate) type OnMonthChanged = Rc<dyn Fn(YearMonth, &mut EventContext)>;
 pub(crate) type OnActivate = Rc<dyn Fn(Date, &mut EventContext)>;
+/// The day grid's cells with their dates, shared between the grid that
+/// builds them and the calendar root that names one to assistive technology.
+type DayCells = Rc<RefCell<Vec<(Date, WidgetId)>>>;
 
 /// Standalone month-grid date picker. See the [module docs](self) for
 /// the full feature list and a usage example.
@@ -256,9 +270,14 @@ pub struct Calendar {
     lang: LanguageIdentifier,
     /// `true` while the Calendar root holds keyboard focus. Drives the
     /// roving-focus ring on the cell at `focused_date` so keyboard
-    /// users see where the next arrow key will land. Written by
+    /// users see where the next arrow key will land, and whether the
+    /// root names that cell as its active descendant. Written by
     /// `.on_focus()` in `build()`.
     focused: Signal<bool>,
+    /// The day cells of the grid built last, each with its date, rewritten
+    /// by every build of the day grid. `accessibility()` finds the cell
+    /// under the cursor here to name it as the active descendant.
+    day_cells: DayCells,
     // Build state
     root_child_id: Option<WidgetId>,
 }
@@ -308,6 +327,7 @@ impl Calendar {
             on_activate: None,
             lang: date_locale(None),
             focused: Signal::new(false),
+            day_cells: DayCells::default(),
             root_child_id: None,
         }
     }
@@ -488,6 +508,7 @@ impl Widget for Calendar {
                 self.mode.clone(),
                 self.on_month_changed.clone(),
                 self.lang.clone(),
+                self.focused.clone(),
             ))
         } else {
             // Empty placeholder so layout shape stays consistent.
@@ -523,6 +544,7 @@ impl Widget for Calendar {
             on_range_changed: self.on_range_changed.clone(),
             on_activate: self.on_activate.clone(),
             lang: self.lang.clone(),
+            day_cells: self.day_cells.clone(),
         });
         // Cell footprint for zoom modes derived from day grid cell
         // size so the body's overall width matches the day grid (7
@@ -564,6 +586,7 @@ impl Widget for Calendar {
                     self.show_today_button,
                     self.visible_month.clone(),
                     self.focused_date.clone(),
+                    self.focused.clone(),
                     self.selection.clone(),
                     self.on_selection_changed.clone(),
                     self.on_month_changed.clone(),
@@ -606,21 +629,21 @@ impl Widget for Calendar {
                 )),
         );
         // `Live::Off` on the one root everything else hangs from. The grid
-        // is a polite live region so that its *name* speaks a change of
-        // month (see `accessibility`), and `accesskit_consumer` hands a
-        // node's politeness down to every descendant that sets none
-        // (node.rs:906-910). The AT-SPI, UIA and macOS adapters announce
-        // every named node that enters the filtered tree, or is renamed
-        // there, with an inherited politeness other than off
-        // (atspi_common adapter.rs:71-77 and node.rs:610-622, windows
-        // adapter.rs:255-263 and 313-324, macos event.rs:236-241 and
-        // 300-310). So once the day grid, the header and the zoom grids
-        // were reachable, opening the calendar announced all 42 dates, the
-        // weekdays and the header buttons, and a change of month announced
-        // every renamed day beside the grid's name, in whatever order the
+        // is not a live region (see `accessibility`), but an application
+        // can put the calendar inside one of its own, and
+        // `accesskit_consumer` hands a node's politeness down to every
+        // descendant that sets none (node.rs:906-910). The AT-SPI, UIA and
+        // macOS adapters announce every named node that enters the
+        // filtered tree, or is renamed there, with an inherited politeness
+        // other than off (atspi_common adapter.rs:71-77 and node.rs:610-622,
+        // windows adapter.rs:255-263 and 313-324, macos event.rs:236-241
+        // and 300-310). Inside such a region, opening the calendar would
+        // announce all 42 dates, the weekdays and the header buttons, and a
+        // change of month every renamed day, in whatever order the
         // consumer's hash set gave. Orca speaks each announcement with
-        // interrupt set (default.py `speakMessage`), so the last one won:
-        // a date picked by the hash, not the month. The node stays a
+        // interrupt set (default.py `speakMessage`), so the last one would
+        // win: a date picked by the hash. With the Off here, the region
+        // hears the grid's name and nothing under it. The node stays a
         // `GenericContainer`, which every adapter drops with its children
         // promoted into the grid.
         let framed_id = ctx.add(
@@ -676,9 +699,9 @@ impl Widget for Calendar {
         ctx.apply_self_handlers(handlers);
 
         // Bind reactive sources at AccessibilityOnly so the AT node's
-        // `name` (visible_month → "Calendar, May 2026") and `value`
-        // (focused_date + selection) refresh as the user navigates,
-        // without forcing a layout/repaint.
+        // `name` (visible_month → "Calendar, May 2026"), `value`
+        // (focused_date + selection) and active descendant refresh as the
+        // user navigates, without forcing a layout/repaint.
         let self_id = ctx.self_id();
         let registry = ctx.binding_registry();
         self.visible_month.bind_to(
@@ -687,6 +710,18 @@ impl Widget for Calendar {
             teksilo_core::binding::BindingLevel::AccessibilityOnly,
         );
         self.focused_date.bind_to(
+            self_id,
+            registry,
+            teksilo_core::binding::BindingLevel::AccessibilityOnly,
+        );
+        // Focus and the view decide whether a day is named as the active
+        // descendant, so both re-walk the node too.
+        self.focused.bind_to(
+            self_id,
+            registry,
+            teksilo_core::binding::BindingLevel::AccessibilityOnly,
+        );
+        self.mode.bind_to(
             self_id,
             registry,
             teksilo_core::binding::BindingLevel::AccessibilityOnly,
@@ -751,21 +786,71 @@ impl Widget for Calendar {
         };
         builder.set_name(label);
 
-        // A polite live region. The AT-SPI, UIA and macOS adapters all
-        // announce a live node's *name* when it changes, and only a label
-        // takes its name from its value, so this speaks a change of month
-        // (the name above). The cursor lives in the value below, which UIA
-        // and macOS report as a value change on the focused grid instead.
-        // The bindings registered in `build()` at `AccessibilityOnly`
-        // re-run this on every change of month, cursor or selection.
-        builder.set_live(Live::Polite);
+        // Deliberately not a live region. A live node speaks its name when it
+        // enters the tree and whenever the name changes (AT-SPI:
+        // `accesskit_atspi_common` `adapter.rs:72-77`, `node.rs:610-622`;
+        // UIA and macOS alike), and every descendant inherits the setting
+        // (`accesskit_consumer` `NodeRef::live`). So a live grid said
+        // everything twice: opening it announced its name, then its seven
+        // weekday headers, then focus said its name again; a change of month
+        // from the keyboard was an announcement plus the rename of the node
+        // Orca's focus was on, which Orca also speaks; and each header button
+        // Tab reached was announced as it entered the tree and again as it
+        // took focus. A change of month made from a header button, where
+        // focus is not on the grid, is announced by that button instead (see
+        // `header.rs`).
+        //
+        // The bindings registered in `build()` at `AccessibilityOnly` re-run
+        // this on every change of month, cursor, selection, focus or view.
+
+        // The day under the cursor, as the grid's active descendant.
+        //
+        // Keyboard focus stays here, on the grid, and the arrow keys move a
+        // cursor through its days. A screen reader is told about that cursor
+        // only if it becomes a focus change. `accesskit_consumer` resolves the
+        // platform's focus as `focused.active_descendant().unwrap_or(focused)`
+        // (`tree.rs:537-543`) and reports the node that comes out, so naming
+        // the day here makes every arrow press a focus change to that day on
+        // all three platforms: AT-SPI `state-changed:focused`
+        // (`accesskit_atspi_common` `adapter.rs:324-340`), which Orca speaks
+        // as its new locus of focus; UIA's focus-changed event
+        // (`accesskit_windows` `adapter.rs:341-345`), which is also the only
+        // way UIA has to say it, having no active-descendant property of its
+        // own; and macOS's `FocusedUIElementChanged` (`accesskit_macos`
+        // `event.rs:319-326`). A change of month is one too, to a day whose
+        // name says the month.
+        //
+        // Before this, Orca heard nothing at all as the cursor moved: the
+        // grid's name changes only with the month, and its value, where the
+        // cursor was, reaches no AT-SPI interface. It is `ListView`'s current
+        // row again (see `list_view/widget_impl.rs`), and gated the same way:
+        // only while the grid holds focus, since a container without focus
+        // has no descendant to speak of; and only in the day view, since in
+        // the month or year view the day cells are not on screen and the
+        // grid itself is what has focus. A cursor on a day the grid did not
+        // build names nothing, and the grid stays the focus.
+        if self.focused.get()
+            && self.mode.get() == CalendarMode::Days
+            && let Some(cell) = self
+                .day_cells
+                .borrow()
+                .iter()
+                .find(|(date, _)| *date == self.focused_date.get())
+                .map(|(_, cell)| *cell)
+        {
+            builder.set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(cell));
+        }
 
         // Compose the value: keyboard focus first, then the committed
-        // selection, every date in full. It is heard, not parsed: UIA and
-        // macOS report its changes on the focused grid, which is how the day
-        // under the cursor reaches a screen reader there. The words around
-        // the dates are the framework's messages, and a range is joined by
-        // words (`calendar-date-range`), not an en-dash some readers skip.
+        // selection, every date in full. It is no longer how the cursor is
+        // heard, now that the day under it takes the platform's focus: UIA
+        // and macOS raise its value-changed event on the grid, which is not
+        // that focus any more, and AT-SPI carries a string value on no
+        // interface. It stays for a client that reads the grid, and for the
+        // month and year views, where the grid itself has focus. The words
+        // around the dates are the framework's messages, and a range is
+        // joined by words (`calendar-date-range`), not an en-dash some
+        // readers skip.
         let cursor = self.focused_date.get();
         let focused = full_date(cursor, &self.lang);
         let value_text = match &self.selection {
@@ -882,13 +967,17 @@ struct BuildGridParams {
     on_activate: Option<OnActivate>,
     /// The locale the day cells name their dates in.
     lang: LanguageIdentifier,
+    /// Where the grid records the cells it builds, for the calendar root.
+    day_cells: DayCells,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_footer(
     ctx: &mut BuildContext,
     show_today: bool,
     visible_month: Signal<YearMonth>,
     focused_date: Signal<Date>,
+    calendar_focused: Signal<bool>,
     selection: SelectionBinding,
     on_selection_changed: Option<OnSelectionChanged>,
     on_month_changed: Option<OnMonthChanged>,
@@ -902,6 +991,7 @@ fn build_footer(
         let cb_selection = selection.clone();
         let cb_on_sel = on_selection_changed.clone();
         let cb_on_month = on_month_changed.clone();
+        let cb_lang = lang.clone();
         let today_btn = Button::new(lit!(today_label))
             .variant(ButtonVariant::Filled)
             .on_activate_fn(move |ctx_evt| {
@@ -921,6 +1011,14 @@ fn build_footer(
                     if let Some(cb) = cb_on_sel.as_ref() {
                         cb(Some(today), ctx_evt);
                     }
+                }
+                // Focus stays on this button, so the day it moved to is
+                // announced, in full, which says the month as well. The
+                // header's arrows do the same for theirs, and for the same
+                // reason: the grid is not a live region. Not while the grid
+                // holds focus, where the move of its cursor says it.
+                if !calendar_focused.get() {
+                    ctx_evt.announce(full_date(today, &cb_lang));
                 }
                 ctx_evt.request_frame();
             });
@@ -1064,6 +1162,7 @@ impl Widget for CalendarBody {
             _ => cal_recipe::CALENDAR_WEEK_NUMBER_COLUMN_WIDTH * scale,
         };
 
+        let mut cells = Vec::with_capacity(42);
         for week in 0..6 {
             let mut row = HStack::new().spacing(gap);
             if week_number_col_width > 0.0 {
@@ -1112,7 +1211,9 @@ impl Widget for CalendarBody {
                     self.params.on_activate.clone(),
                     self.params.lang.clone(),
                 );
-                row = row.child(ctx.add(cell));
+                let cell_id = ctx.add(cell);
+                cells.push((day_date, cell_id));
+                row = row.child(cell_id);
             }
             // AT: each week is a Role::Row; the WAI-ARIA grid pattern
             // expects Grid > Row > GridCell.
@@ -1124,6 +1225,9 @@ impl Widget for CalendarBody {
         }
         let col_id = ctx.add(col);
         *self.row_ids.borrow_mut() = vec![col_id];
+        // Replaced, not appended: a change of month rebuilds this grid with
+        // new cells, and the ones it had are gone from the arena.
+        *self.params.day_cells.borrow_mut() = cells;
         // Bind `visible_month` at `Rebuild` level so navigating prev/
         // next month triggers a full re-`build()` of this widget,
         // regenerating the 42 DayCells with new dates. Relayout would
@@ -1171,11 +1275,16 @@ impl Widget for CalendarBody {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Body itself is structural: the parent Calendar carries the
-        // Role::Grid name. A bare `GenericContainer` keeps it from being
-        // announced a second time, since every adapter drops it and
-        // promotes the day cells. Never `set_hidden()`, which an adapter
-        // reads as hiding the subtree: every day cell went with it.
+        // Structural: the calendar root carries the grid's role and name.
+        // Transparent rather than hidden, because the two are not the same
+        // thing to an adapter. `common_filter` drops a `GenericContainer`
+        // and keeps its children, and drops a hidden node together with
+        // everything under it (`accesskit_consumer` `filters.rs:17-34`).
+        // This used to be a hidden `Group`, which on its own took the six
+        // weeks and their 42 days out of every platform's tree: no screen
+        // reader could read a day except through the grid's value, and the
+        // day named as the grid's active descendant would have had no row
+        // above it.
         builder.set_role(Role::GenericContainer);
     }
 }

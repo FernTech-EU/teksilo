@@ -16,6 +16,8 @@ pub mod datetime;
 pub mod drag_autoscroll;
 pub(crate) mod drop_bands;
 pub(crate) mod editor_runtime;
+#[cfg(test)]
+pub(crate) mod heard_test;
 pub(crate) mod interaction;
 pub(crate) mod list_nav;
 #[cfg(test)]

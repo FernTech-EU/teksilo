@@ -487,3 +487,33 @@ fn the_popover_calendar_speaks_the_users_language() {
     );
     teksilo_i18n::thread_local::clear();
 }
+
+#[test]
+fn opening_the_popover_says_the_calendar_once() {
+    // What a screen reader is told as F4 opens the calendar. The grid used to
+    // be a live region, and a live node entering the tree is announced on
+    // every platform, with each of its descendants, which inherit the
+    // setting: "Calendrier, mai 2026", then the seven weekday headers, and
+    // then the same name again as the grid took focus. Now it is one focus
+    // change, to the day the field holds, and on Orca the day alone: Orca
+    // takes a table without the AT-SPI Table interface, which AccessKit does
+    // not implement, for a layout table (`ax_table.py`, `is_layout_table`)
+    // and leaves it out of the context it gives a new focus
+    // (`speech_generator.py`, `_generateAncestors`, Orca 46.1).
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    let mut listener = Listener::attach(&mut tree);
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("samedi 2 mai 2026".to_string())]
+    );
+    teksilo_i18n::thread_local::clear();
+}

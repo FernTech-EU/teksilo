@@ -294,10 +294,10 @@ impl Widget for DayCell {
 
         // `aria-current="date"` per ARIA spec marks the date that
         // represents *today* in a calendar — not the keyboard-focus
-        // indicator. The roving-focus visualization is announced via
-        // the parent calendar's Live region (see `set_live(Polite)`
-        // on the Calendar root and the focused-cell announcement
-        // wired in `Calendar::build`).
+        // indicator. The keyboard cursor is not a state of the cell either:
+        // the calendar root names the cell under it as its active
+        // descendant, which makes that cell the platform's focus (see
+        // `Calendar::accessibility`).
         if self.is_today {
             builder.set_aria_current(teksilo_core::accesskit::AriaCurrent::Date);
         }
@@ -313,7 +313,14 @@ impl Widget for DayCell {
         }
 
         builder.add_action(Action::Click);
-        builder.add_action(Action::Focus);
+        // No `Action::Focus`: a day is reached through the grid's active
+        // descendant, never focused itself, as a grouped `RadioTile` is. The
+        // dispatcher services `Focus` by moving keyboard focus onto the node
+        // it names, focusable or not (`pointer_router.rs`), so an assistive
+        // technology that focused a day (a UIA `SetFocus`, VoiceOver's
+        // keyboard focus following its cursor) took focus off the grid. The
+        // grid then named no descendant, and every arrow press after it moved
+        // the cursor in silence, the platform's focus left on that day.
     }
 }
 

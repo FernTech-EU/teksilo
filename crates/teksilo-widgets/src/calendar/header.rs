@@ -44,6 +44,10 @@ pub(crate) struct CalendarHeader {
     on_month_changed: Option<OnMonthChanged>,
     /// The locale the title writes its month in; the calendar's.
     lang: LanguageIdentifier,
+    /// `true` while the calendar's grid holds keyboard focus. A step taken
+    /// then is heard through the grid; one taken from a header button, where
+    /// focus stays on the button, is announced (see `build`).
+    calendar_focused: Signal<bool>,
     root_id: Option<WidgetId>,
 }
 
@@ -60,6 +64,7 @@ impl CalendarHeader {
         mode: Signal<CalendarMode>,
         on_month_changed: Option<OnMonthChanged>,
         lang: LanguageIdentifier,
+        calendar_focused: Signal<bool>,
     ) -> Self {
         Self {
             visible_month,
@@ -67,6 +72,7 @@ impl CalendarHeader {
             mode,
             on_month_changed,
             lang,
+            calendar_focused,
             root_id: None,
         }
     }
@@ -83,15 +89,26 @@ impl Widget for CalendarHeader {
         // body's natural unit (1 month in Days, 1 year in Months,
         // 10 years in Years). Double-chevron steps a coarser unit
         // (1 year, 10 years, 100 years respectively).
+        //
+        // Both say where they landed, the title as it now reads, through the
+        // tree's announcer. Focus stays on the button pressed, whose name
+        // does not change, and the grid is not a live region (see
+        // `Calendar::accessibility`), so nothing else would. Not while the
+        // grid holds focus, which an assistive technology's click on a button
+        // can leave it doing: the move of the grid's cursor already says the
+        // new month there, and the announcement would say it a second time.
         let step_single = {
             let visible = self.visible_month.clone();
             let focused = self.focused_date.clone();
             let mode = self.mode.clone();
             let cb = self.on_month_changed.clone();
+            let lang = self.lang.clone();
+            let calendar_focused = self.calendar_focused.clone();
             std::rc::Rc::new(
                 move |dir: i32, ctx_evt: &mut teksilo_core::widget::EventContext| {
                     let cur = visible.get();
-                    let new_ym = match mode.get() {
+                    let mode = mode.get();
+                    let new_ym = match mode {
                         CalendarMode::Days => {
                             if dir > 0 {
                                 cur.next_month()
@@ -107,6 +124,9 @@ impl Widget for CalendarHeader {
                     if let Some(cb) = cb.as_ref() {
                         cb(new_ym, ctx_evt);
                     }
+                    if !calendar_focused.get() {
+                        ctx_evt.announce(title_text(new_ym, mode, &lang));
+                    }
                     ctx_evt.request_frame();
                 },
             )
@@ -116,10 +136,13 @@ impl Widget for CalendarHeader {
             let focused = self.focused_date.clone();
             let mode = self.mode.clone();
             let cb = self.on_month_changed.clone();
+            let lang = self.lang.clone();
+            let calendar_focused = self.calendar_focused.clone();
             std::rc::Rc::new(
                 move |dir: i32, ctx_evt: &mut teksilo_core::widget::EventContext| {
                     let cur = visible.get();
-                    let new_ym = match mode.get() {
+                    let mode = mode.get();
+                    let new_ym = match mode {
                         CalendarMode::Days => cur.offset_months(dir * 12),
                         CalendarMode::Months => cur.offset_months(dir * 120),
                         // Years: a "double" step = +/- 100 years, but
@@ -130,6 +153,9 @@ impl Widget for CalendarHeader {
                     clamp_focus_into_month(&focused, new_ym);
                     if let Some(cb) = cb.as_ref() {
                         cb(new_ym, ctx_evt);
+                    }
+                    if !calendar_focused.get() {
+                        ctx_evt.announce(title_text(new_ym, mode, &lang));
                     }
                     ctx_evt.request_frame();
                 },
@@ -170,29 +196,12 @@ impl Widget for CalendarHeader {
         // signal (mode + visible_month → "May 2026" / "2026" /
         // "2020 to 2029"). Reactive via `Button::label`, so
         // the calendar doesn't have to rebuild on mode flips. It is also
-        // the button's accessible name, so the month is ICU's month with
-        // its year (whose order is the locale's: "2026年5月") and the decade
-        // is joined by words, where a dash would be skipped by some screen
-        // readers. The years go to Fluent as strings: as numbers they would
-        // be grouped, and French would read "2 020".
+        // the button's accessible name, written for the ear by `title_text`.
         let lang = self.lang.clone();
         let label_signal = self
             .visible_month
             .zip(&self.mode)
-            .map(move |(ym, m)| match m {
-                CalendarMode::Days => month_and_year(*ym, &lang),
-                CalendarMode::Months => format!("{}", ym.year()),
-                CalendarMode::Years => {
-                    let start = (ym.year() / 10) * 10;
-                    resolve_message_widget(
-                        "calendar-decade",
-                        &[
-                            ("start", FluentValue::from(start.to_string())),
-                            ("end", FluentValue::from((start + 9).to_string())),
-                        ],
-                    )
-                }
-            });
+            .map(move |(ym, m)| title_text(*ym, *m, &lang));
         let mode_for_action = self.mode.clone();
         let title_btn = crate::button::Button::new(lit!(""))
             .label(label_signal)
@@ -253,9 +262,12 @@ impl Widget for CalendarHeader {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Structural: a bare `GenericContainer`, which every adapter drops
-        // with the arrows and the title button promoted into the grid. Never
-        // `set_hidden()`, which an adapter reads as hiding them with it.
+        // Transparent, not hidden. A hidden node takes everything under it
+        // out of every platform's tree (`accesskit_consumer`
+        // `filters.rs:17-24`), so these five buttons existed for a screen
+        // reader only while one of them held focus, which lets a focused node
+        // through: object navigation and flat review never found them, and
+        // each appeared in the tree only as Tab reached it.
         builder.set_role(Role::GenericContainer);
     }
 }
@@ -473,6 +485,30 @@ impl Widget for NavArrow {
         builder.set_name(&self.label);
         builder.add_action(Action::Click);
         builder.add_action(Action::Focus);
+    }
+}
+
+/// What the title says for `ym` in `mode`: the month with its year, the
+/// year, or the decade in words ("de 2020 à 2029").
+///
+/// The month is ICU's month with its year, whose order is the locale's
+/// ("2026年5月"); the decade is joined by words, where a dash would be skipped
+/// by some screen readers. The years go to Fluent as strings: as numbers they
+/// would be grouped, and French would read "2 020".
+fn title_text(ym: YearMonth, mode: CalendarMode, lang: &LanguageIdentifier) -> String {
+    match mode {
+        CalendarMode::Days => month_and_year(ym, lang),
+        CalendarMode::Months => format!("{}", ym.year()),
+        CalendarMode::Years => {
+            let start = (ym.year() / 10) * 10;
+            resolve_message_widget(
+                "calendar-decade",
+                &[
+                    ("start", FluentValue::from(start.to_string())),
+                    ("end", FluentValue::from((start + 9).to_string())),
+                ],
+            )
+        }
     }
 }
 

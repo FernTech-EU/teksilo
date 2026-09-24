@@ -54,17 +54,22 @@ assembled from numbers or from translated names (see
 `common::datetime::written`).
 
 - Container: `Role::Grid`, named after the visible month
-  ("Calendar, May 2026", "Calendrier, mai 2026"), and a polite live
-  region. The AT-SPI, UIA and macOS adapters announce a live node when
-  its *name* changes, so a change of month is announced on all three. The
-  value is the day under the keyboard cursor in full, then the
-  selection when there is one: "Saturday, May 2, 2026 (selected:
-  Friday, May 1, 2026)". With the cursor on the one selected day, the
-  day is said once: "Friday, May 1, 2026 (selected)". A range is joined
-  by words ("… to …"), not an en-dash, which some screen readers skip.
-  UIA and macOS raise a value-changed event on it; AT-SPI carries a
-  string value on no interface, so the value never reaches an AT-SPI
-  client at all.
+  ("Calendar, May 2026", "Calendrier, mai 2026"). It is **not** a live
+  region: a live grid announced its name and each weekday header as it
+  opened, and then focus said its name again. A change of month made
+  from the keyboard moves the focus to a day of the new month (see the
+  day cells below), whose name says the month. One made from a header
+  arrow or the Today button, where focus stays on the button, is
+  announced once through the tree's announcer: the title as it now
+  reads, or today's date in full. The value is the day under the
+  keyboard cursor in full, then the selection when there is one:
+  "Saturday, May 2, 2026 (selected: Friday, May 1, 2026)". With the
+  cursor on the one selected day, the day is said once: "Friday, May 1,
+  2026 (selected)". A range is joined by words ("… to …"), not an
+  en-dash, which some screen readers skip. The value is for a client
+  that reads the grid; the cursor is heard through the focus. UIA and
+  macOS raise a value-changed event on the grid, which is not the focus
+  while a day is; AT-SPI carries a string value on no interface.
 - Header arrow buttons: `Role::Button` with localized labels
   ("Previous month", "Next month") and `Action::Click` advertised.
 - Header month/year label: `Role::Button`, a `Ghost` `Button` whose
@@ -73,11 +78,17 @@ assembled from numbers or from translated names (see
   the month and year, the year, or the decade in words ("2020 to 2029").
 - Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
   labelled with the long weekday name (e.g. "Monday").
+- Weeks: `Role::Row`, each holding its seven day cells, so the grid is
+  `Grid > Row > GridCell` in every platform's tree.
 - Day cells: `Role::GridCell` named by the day in full
   ("Saturday, May 2, 2026", "samedi 2 mai 2026"), `set_selected`,
   `set_aria_current(Date)` on today, `set_disabled` for filter
-  rejections, and `Action::Click` advertised. Keyboard focus roves on
-  the Calendar root, so a cell never carries a focused flag.
+  rejections, and `Action::Click` advertised. Keyboard focus stays on
+  the Calendar root, which names the cell under the cursor as its
+  active descendant while it holds focus in the day view. AccessKit
+  reports that cell as the focus on AT-SPI, UIA and macOS, so each
+  arrow press, and each change of month, is a focus change to the new
+  day, which is what a screen reader speaks.
 
 # Example
 

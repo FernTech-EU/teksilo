@@ -743,6 +743,7 @@ mod heard {
     use accesskit_consumer::{FilterResult, TreeChangeHandler};
     use teksilo_core::accesskit::Live;
     use teksilo_core::signal::Signal;
+    use teksilo_core::widget_builder::WidgetBuilder;
 
     /// What each platform's adapter announces for the changes
     /// `accesskit_consumer` reports, by the adapters' own rules, read out of
@@ -789,6 +790,21 @@ mod heard {
                     heard.as_slice(),
                     [expected.to_string()],
                     "{what}: {platform} must announce \"{expected}\" once and nothing else"
+                );
+            }
+        }
+
+        /// No platform announced anything.
+        #[track_caller]
+        fn assert_nothing(&self, what: &str) {
+            for (platform, heard) in [
+                ("AT-SPI", &self.atspi),
+                ("UIA", &self.uia),
+                ("macOS", &self.macos),
+            ] {
+                assert!(
+                    heard.is_empty(),
+                    "{what}: {platform} must announce nothing, and announced {heard:?}"
                 );
             }
         }
@@ -875,40 +891,64 @@ mod heard {
         heard
     }
 
-    #[test]
-    fn a_calendar_that_opens_is_announced_by_its_name_alone() {
-        // The grid is a polite live region so that its name speaks the
-        // month. Its 42 days, its weekdays and its header buttons are named
-        // too, and inherited that politeness once they were reachable: a
-        // date picker opening was 55 announcements, each cutting off the
-        // one before in Orca, which speaks every announcement with
-        // interrupt set.
-        let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
-        tree.add(crate::calendar::Calendar::single(Signal::new(Some(
-            crate::common::datetime::Date::constant(2027, 3, 12),
-        ))));
-        let heard = appearing(laid_out(&mut tree));
-        teksilo_i18n::thread_local::clear();
-        heard.assert_only("a calendar opening", "Calendrier, mars 2027");
-    }
-
-    #[test]
-    fn a_change_of_month_is_announced_once_by_the_grids_name() {
-        // What PageDown says in the date picker. Every day is renamed by a
-        // change of month, and each renamed day was announced beside the
-        // grid's new name, in the order of the consumer's hash set: the
-        // last one, the one Orca let finish, was a date and not the month.
-        let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+    /// A calendar in March 2027, and the signal that turns its month.
+    fn calendar_in_march() -> (
+        crate::calendar::Calendar,
+        Signal<crate::common::datetime::types::YearMonth>,
+    ) {
         let calendar = crate::calendar::Calendar::single(Signal::new(Some(
             crate::common::datetime::Date::constant(2027, 3, 12),
         )));
         let month = calendar.visible_month_signal();
+        (calendar, month)
+    }
+
+    fn to_april(month: &Signal<crate::common::datetime::types::YearMonth>) {
+        month.set(crate::common::datetime::types::YearMonth::new(2027, 4));
+    }
+
+    #[test]
+    fn a_calendar_announces_nothing_as_a_live_region() {
+        // The month and the day are heard through the focus: the grid
+        // names the day under the cursor as its active descendant, and a
+        // keyboard change of month is a focus change to a day whose name
+        // says the month (`calendar::tests`). A grid that was also live
+        // said its name as it opened and on every change of month, on top
+        // of the focus, and every named day under it inherited that and
+        // was announced with it.
+        let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+        let (calendar, month) = calendar_in_march();
         tree.add(calendar);
-        let heard = across(&mut tree, |_| {
-            month.set(crate::common::datetime::types::YearMonth::new(2027, 4));
-        });
+        let opening = appearing(laid_out(&mut tree));
+        let turning = across(&mut tree, |_| to_april(&month));
         teksilo_i18n::thread_local::clear();
-        heard.assert_only("a change of month", "Calendrier, avril 2027");
+        opening.assert_nothing("a calendar opening");
+        turning.assert_nothing("a change of month");
+    }
+
+    #[test]
+    fn a_calendar_in_a_live_region_lends_it_no_day() {
+        // An application's own live region around a calendar speaks the
+        // grid's name, which inherits the region's politeness. The 42
+        // days, the weekdays and the header buttons are named too, and
+        // would inherit it as well: a calendar opening there was 55
+        // announcements and a change of month 43, in hash order, each
+        // cutting off the one before in Orca, which speaks every
+        // announcement with interrupt set.
+        let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+        let (calendar, month) = calendar_in_march();
+        tree.add(VStack::new().child(calendar).access_live(Live::Polite));
+        let opening = appearing(laid_out(&mut tree));
+        let turning = across(&mut tree, |_| to_april(&month));
+        teksilo_i18n::thread_local::clear();
+        opening.assert_only(
+            "a calendar opening in a live region",
+            "Calendrier, mars 2027",
+        );
+        turning.assert_only(
+            "a change of month in a live region",
+            "Calendrier, avril 2027",
+        );
     }
 
     #[test]
