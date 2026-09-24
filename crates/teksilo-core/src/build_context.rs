@@ -343,7 +343,7 @@ impl<'a> BuildContext<'a> {
     /// drop — store it on `self` so its lifetime tracks the widget's.
     ///
     /// While at least one subscriber's owner is visible, the framework
-    /// auto-arms `frame_tick_requested` after every render. When all
+    /// re-arms the frame tick after every render. When all
     /// subscribers are hidden (e.g. parked inside a non-selected
     /// `Switcher` branch), no re-arm happens and the chain dies, so
     /// the event loop sleeps. On a hidden→visible transition the
@@ -374,6 +374,11 @@ impl<'a> BuildContext<'a> {
     /// identical 60 fps frames. Use when the widget's visible output
     /// changes far less often than 60 Hz — e.g. `Cycle`'s once-per-period
     /// index advance, or a seconds-granular clock.
+    ///
+    /// The interval delays this widget's own wake and nothing else: a frame
+    /// anything else requests still runs at 60 Hz, and the `frame_tick`
+    /// effect fires on it too. Read the clock in the effect rather than
+    /// counting ticks.
     pub fn subscribe_frame_tick_throttled(
         &self,
         interval: std::time::Duration,

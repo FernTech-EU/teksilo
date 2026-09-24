@@ -259,8 +259,7 @@ impl WidgetTree {
         // advance must not fire the per-frame observers. The delta is the
         // duration advanced, not a reading of `last_frame_time` — nothing was
         // rendered, and `last_frame_time` is the *render* pacing reference.
-        if self.frame_tick_requested.get() {
-            self.frame_tick_requested.set(false);
+        if self.take_frame_tick_request() {
             let delta = duration.as_secs_f32().clamp(0.0, 0.1);
             self.frame_tick.set(delta);
         }

@@ -103,7 +103,7 @@ scheduler that consults the same helpers.
    the widget scrolls / switches back in, the resulting paint
    re-stamps its epoch — `update_control_flow` re-queries
    `next_deadline` in `post_event` (signal + quad paths) and
-   `WidgetTree::render` re-arms `frame_tick_requested` after every
+   `WidgetTree::render` re-arms the frame tick after every
    visible-subscriber paint (per-frame-effect path) — and motion
    resumes phase-continuous.
 
@@ -180,7 +180,7 @@ the loop. Classify it:
 - **Poll mode forced?** `ControlFlow::Poll` is reserved for the
   async executor's loop-tick (`loop_tick_poll`), which must process
   runnable tasks as fast as possible and is *not* an animation. The
-  per-frame-effect path (`frame_tick_requested`: Pulse, Cycle, caret
+  per-frame-effect path (`request_frame` or a re-arm: Pulse, Cycle, caret
   blink, drag auto-scroll) does **not** force Poll — it publishes a
   fixed **60 Hz** deadline via
   [`WidgetTree::frame_tick_deadline`](../crates/teksilo-core/src/widget_tree.rs),
@@ -191,7 +191,13 @@ the loop. Classify it:
   ~45 % CPU on a 300 Hz panel vs. 60 fps / ~13 % CPU after the cap.)
   This matches the signal-tween `AnimationScheduler` and shader-quad
   `AnimatedQuadRegistry`, which already pace at the same 16.667 ms
-  interval. **For visual continuous animations** (Pulse, Cycle, …),
+  interval. A throttled subscription
+  (`ctx.subscribe_frame_tick_throttled(interval)`) stretches the wait
+  for **its own** tick to `interval` and nothing else: the render-end
+  re-arm and a raw `request_frame` are separate flags with separate
+  paces, so the announcer, a caret or a drag auto-scroll still gets its
+  frame at 60 Hz while a once-a-minute clock is on screen.
+  **For visual continuous animations** (Pulse, Cycle, …),
   prefer `ctx.subscribe_frame_tick()` over the raw
   `frame_request_handle().set(true)` re-arm — the scheduler-backed
   path automatically pauses the chain when the owner widget is

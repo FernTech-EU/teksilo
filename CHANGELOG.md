@@ -25,6 +25,18 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+#### Core
+
+- **A throttled frame-tick subscriber held back every frame requested while it
+  was on screen.** A widget on `subscribe_frame_tick_throttled` set the pace not
+  only of its own tick but of every `request_frame`: with a once-a-minute clock
+  painted, the announcer's follow-up syncs, a caret or a drag auto-scroll each
+  waited up to a minute. An announcement queue drained one step per wait, so
+  its later messages reached the screen reader at the user's next key press,
+  spoken ahead of whatever that key said. The interval now delays the
+  subscriber's own tick and nothing else; a requested frame is due at 60 Hz
+  whatever is subscribed.
+
 #### Data views
 
 - **A single-selection data view could move its cursor off the selection.**

@@ -2252,18 +2252,26 @@ mod tests {
 
     #[test]
     fn throttled_subscriber_stretches_deadline_but_per_frame_wins_min() {
-        use crate::test_widgets::FillWidget;
+        use crate::test_widgets::{FillWidget, StackWidget};
         let mut tree = WidgetTree::new();
         let w = tree.add(FillWidget::new());
+        let w2 = tree.add(FillWidget::new());
+        tree.add(StackWidget::new().child(w).child(w2));
         // Cycle-style throttled subscription: wake at most once per 1.5 s.
         let _throttled =
             tree.subscribe_frame_tick_throttled(w, std::time::Duration::from_millis(1500));
-        tree.request_frame();
-        let t0 = std::time::Instant::now();
-        tree.last_frame_time = Some(t0);
+        // Armed the way a subscription is, by a render that painted its
+        // owner. Not by `request_frame`: that is due at 60 Hz whatever is
+        // subscribed (`a_raw_frame_request_is_not_paced_by_a_throttled_subscriber`).
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.render();
+        assert!(
+            !tree.frame_tick_requested.get(),
+            "precondition: nothing but the subscriber wants this frame"
+        );
+        let t0 = tree.last_frame_time.expect("a frame has run");
 
-        // paint_epoch == 0 (never rendered) → the sentinel treats the
-        // subscriber as visible, so its throttled interval governs.
+        // The render painted the subscriber, so its throttled interval governs.
         let d = tree.frame_tick_deadline().expect("armed");
         let dt = d.saturating_duration_since(t0);
         assert!(
@@ -2272,16 +2280,155 @@ mod tests {
             "a lone throttled subscriber must pace at its interval (~1.5 s), got {dt:?}"
         );
 
-        // A per-frame subscriber pulls the *shared* deadline back to 60 Hz:
-        // the deadline is the minimum interval across visible subscribers,
-        // so a Cycle sharing a tree with a Pulse rides the Pulse's cadence.
-        let w2 = tree.add(FillWidget::new());
+        // A per-frame subscriber pulls the subscribers' deadline back to
+        // 60 Hz: it is the minimum interval across visible subscribers, so a
+        // Cycle sharing a tree with a Pulse rides the Pulse's cadence. `w2`
+        // was painted by the same render, so it counts as visible.
         let _per_frame = tree.subscribe_frame_tick(w2);
         let d2 = tree.frame_tick_deadline().expect("armed");
         let dt2 = d2.saturating_duration_since(t0);
         assert!(
             dt2 <= std::time::Duration::from_millis(20),
             "a per-frame subscriber must pull the shared deadline to 60 Hz, got {dt2:?}"
+        );
+    }
+
+    /// A throttled subscriber stretches its own wake and nothing else's. A
+    /// caret, a drag auto-scroll or the announcer asking for one more frame
+    /// is due at the normal 60 Hz pace even while a once-a-minute clock is on
+    /// screen, and when that request has been served the clock is back to
+    /// pacing alone.
+    #[test]
+    fn a_raw_frame_request_is_not_paced_by_a_throttled_subscriber() {
+        use crate::test_widgets::FillWidget;
+        const NORMAL_FRAME: std::time::Duration = std::time::Duration::from_micros(17_500);
+        const CLOCK: std::time::Duration = std::time::Duration::from_secs(60);
+        fn frame(tree: &mut WidgetTree) {
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            let _ = tree.render();
+        }
+        fn wait(tree: &WidgetTree) -> std::time::Duration {
+            let deadline = tree.frame_tick_deadline().expect("armed");
+            deadline.saturating_duration_since(tree.last_frame_time.expect("a frame has run"))
+        }
+
+        let mut tree = WidgetTree::new();
+        let clock = tree.add(FillWidget::new());
+        let _tick = tree.subscribe_frame_tick_throttled(clock, CLOCK);
+        frame(&mut tree);
+        assert!(
+            wait(&tree) >= CLOCK - NORMAL_FRAME,
+            "precondition: the painted clock paces the loop at its own interval"
+        );
+
+        // Both doors a widget reaches the flag by: the tree method, and the
+        // shared handle stashed for use inside a tick effect.
+        for request in [
+            (|tree: &WidgetTree| tree.request_frame()) as fn(&WidgetTree),
+            |tree: &WidgetTree| tree.frame_request_handle().set(true),
+        ] {
+            request(&tree);
+            assert!(
+                wait(&tree) <= NORMAL_FRAME,
+                "a requested frame must not wait on the clock (waited {:?})",
+                wait(&tree)
+            );
+            assert_eq!(tree.next_timer_deadline(), tree.frame_tick_deadline());
+
+            frame(&mut tree);
+            assert!(
+                wait(&tree) >= CLOCK - NORMAL_FRAME,
+                "once the request is served the clock paces alone again, rather than the loop \
+                 free-running at 60 Hz (waited {:?})",
+                wait(&tree)
+            );
+        }
+    }
+
+    /// The render-end re-arm has a flag of its own, so it needs what the raw
+    /// request flag always had: `frame_requested` reports it, and each door
+    /// that fires the tick (`layout`, and `advance_time` for a tree on
+    /// simulated time) spends it. An arm nothing spends outlives its owner: a
+    /// subscriber parked in a hidden `Switcher` branch would go on waking the
+    /// loop at 60 Hz, which is the bug the scheduler exists to prevent. No
+    /// test in the workspace failed when the arm was left unspent, when
+    /// `frame_requested` ignored it, or when `advance_time` skipped it.
+    #[test]
+    fn the_subscriber_arm_is_spent_by_its_tick_and_ends_with_its_owner() {
+        use crate::test_widgets::StackWidget;
+        fn frame(tree: &mut WidgetTree) {
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            let _ = tree.render();
+        }
+
+        let mut tree = WidgetTree::new();
+        let owner = tree.add(FillWidget::new());
+        let sibling = tree.add(FillWidget::new());
+        tree.add(StackWidget::new().child(owner).child(sibling));
+        let ticks = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let _count = tree.frame_tick().observe({
+            let ticks = ticks.clone();
+            move |_| ticks.set(ticks.get() + 1)
+        });
+        let _sub = tree.subscribe_frame_tick(owner);
+
+        frame(&mut tree);
+        assert!(
+            tree.frame_requested(),
+            "a render that painted the subscriber arms the next tick"
+        );
+        assert!(
+            !tree.frame_tick_requested.get(),
+            "precondition: armed by the subscribers' flag, not by a raw request"
+        );
+
+        // The layout door.
+        let before = ticks.get();
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert_eq!(
+            ticks.get(),
+            before + 1,
+            "the armed tick fires on the next layout"
+        );
+        assert!(
+            !tree.frame_requested(),
+            "the layout that fired the tick has spent the arm"
+        );
+        let _ = tree.render();
+        assert!(
+            tree.frame_requested(),
+            "the owner painted again and re-armed"
+        );
+
+        // The simulated-time door the automation bridge drives.
+        let before = ticks.get();
+        tree.advance_time(std::time::Duration::from_millis(16));
+        assert_eq!(ticks.get(), before + 1, "advance_time fires an armed tick");
+        assert!(
+            !tree.frame_requested(),
+            "advance_time spends the arm as layout does"
+        );
+        tree.resume_real_time();
+
+        // Parked, the owner stops painting. The tick it armed while visible
+        // still runs, once, and then nothing is left to wake the loop.
+        frame(&mut tree);
+        tree.set_dormant(owner);
+        assert!(
+            tree.frame_tick_deadline().is_some(),
+            "the tick armed before the owner was parked is still due"
+        );
+        let before = ticks.get();
+        frame(&mut tree);
+        assert_eq!(ticks.get(), before + 1);
+        assert!(
+            !tree.frame_requested(),
+            "a parked subscriber must not re-arm the tick"
+        );
+        assert_eq!(
+            tree.next_timer_deadline(),
+            None,
+            "with its only subscriber parked the loop sleeps"
         );
     }
 

@@ -243,15 +243,20 @@ impl WidgetTree {
         rc
     }
 
-    /// Walk the frame-tick subscriber set and arm `frame_tick_requested`
-    /// if any subscriber's owner is currently visible. Called from
-    /// `render_with_ops` (both cache-hit and full-render paths).
-    pub(crate) fn arm_frame_tick_for_visible_subscribers(&self) {
+    /// Walk the frame-tick subscriber set and arm
+    /// `frame_tick_armed_by_subscribers` if any subscriber's owner is
+    /// currently visible. Called from `render_with_ops` (both cache-hit and
+    /// full-render paths).
+    ///
+    /// Not `frame_tick_requested`: that flag is paced at 60 Hz, this one at
+    /// the subscribers' own interval, and `frame_tick_deadline` has to tell
+    /// them apart or a throttled subscriber slows every requested frame.
+    pub(crate) fn arm_frame_tick_for_visible_subscribers(&mut self) {
         if self
             .frame_tick_scheduler
             .should_arm_frame_tick(&self.arena, self.paint_epoch)
         {
-            self.frame_tick_requested.set(true);
+            self.frame_tick_armed_by_subscribers = true;
         }
     }
 }

@@ -801,6 +801,87 @@ mod tests {
         assert!(!tree.frame_requested());
     }
 
+    /// Asking for a frame is only half of it: the frame has to come soon. A
+    /// visible widget ticking once a minute (a calendar row re-reading the
+    /// clock) used to set the pace of *every* requested frame, so a queue of
+    /// messages drained one exposure per minute, and whatever was still queued
+    /// reached the user glued to the front of their next key press.
+    ///
+    /// Frames are driven in the order `teksilo-app` runs them (layout, then
+    /// the accessibility sync, then paint), and the wait before each one is
+    /// read from the deadline the event loop would sleep to.
+    #[test]
+    fn a_throttled_subscriber_does_not_hold_back_an_announcement() {
+        /// One frame at 60 Hz, with room for rounding.
+        const NORMAL_FRAME: std::time::Duration = std::time::Duration::from_micros(17_500);
+        const CLOCK: std::time::Duration = std::time::Duration::from_secs(60);
+
+        fn frame(tree: &mut WidgetTree) -> accesskit::TreeUpdate {
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            let update = tree.sync_accessibility();
+            let _ = tree.render();
+            update
+        }
+        fn wait_for_next_frame(tree: &WidgetTree) -> std::time::Duration {
+            let deadline = tree
+                .frame_tick_deadline()
+                .expect("a visible subscriber keeps a frame scheduled");
+            let last = tree.last_frame_time.expect("a frame has run");
+            deadline.saturating_duration_since(last)
+        }
+
+        let mut tree = WidgetTree::new();
+        let row = tree.add(FillWidget::new().label("content"));
+        let _clock = tree.subscribe_frame_tick_throttled(row, CLOCK);
+        let _ = frame(&mut tree);
+        let _ = frame(&mut tree);
+        assert!(
+            wait_for_next_frame(&tree) >= CLOCK - NORMAL_FRAME,
+            "precondition: with nothing else going on, the clock alone paces the loop"
+        );
+
+        let messages = ["Annulé : l'ajout d'un évènement", "3 évènements"];
+        for message in messages {
+            tree.announce(message);
+        }
+        // Checked before any frame runs, because not every announcement comes
+        // from a key press that redraws at once: one raised by a timer or an
+        // async completion waits for exactly this deadline.
+        assert!(
+            wait_for_next_frame(&tree) <= NORMAL_FRAME,
+            "an announcement must be carried by the next normal frame, not the clock's \
+             (waited {:?})",
+            wait_for_next_frame(&tree)
+        );
+
+        let mut exposed = Vec::new();
+        let mut frames = 0;
+        let settled = loop {
+            let update = frame(&mut tree);
+            frames += 1;
+            exposed.extend(
+                announced_by_consumer(&update)
+                    .into_iter()
+                    .map(|(text, _)| text),
+            );
+            let wait = wait_for_next_frame(&tree);
+            if wait > NORMAL_FRAME {
+                break wait;
+            }
+            assert!(frames < 16, "the announcer never went idle");
+        };
+        assert_eq!(
+            exposed, messages,
+            "every queued message must be exposed before the loop goes back to sleeping on the \
+             clock; one left behind is heard only at the next key press"
+        );
+        assert!(
+            settled >= CLOCK - NORMAL_FRAME,
+            "once the queue is spoken the clock must pace alone again, not free-run at 60 Hz \
+             (waited {settled:?})"
+        );
+    }
+
     /// The in-process ring is what the automation bridge reports, so it has to
     /// see the same thing the adapters do.
     #[test]

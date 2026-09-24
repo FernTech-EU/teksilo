@@ -54,7 +54,16 @@
 //! subscriber, stamping its `last_painted_epoch` to match the new
 //! `paint_epoch`. The render-end re-arm (see
 //! `should_arm_frame_tick`) then detects the visible subscriber
-//! and sets `frame_tick_requested` so the next tick fires.
+//! and sets the tree's subscriber arm so the next tick fires.
+//!
+//! ## Pacing
+//!
+//! A throttled subscription stretches the wait for its **own** tick and
+//! nothing else. The render-end re-arm is kept apart from the tree's raw
+//! `request_frame` flag, and a raw request is due at 60 Hz whatever is on
+//! screen: a once-a-minute clock must not make the announcer, a caret or a
+//! drag auto-scroll wait a minute for the frame they asked for. See
+//! `WidgetTree::frame_tick_deadline`.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -132,8 +141,14 @@ impl FrameTickScheduler {
     /// 60 Hz (`Cycle`'s once-per-period index advance, a seconds-granular
     /// clock, …). A throttled subscriber sharing a tree with a per-frame
     /// one (a `Cycle` next to a `Pulse`) transparently rides the faster
-    /// cadence — the deadline is the minimum interval across all visible
-    /// subscribers.
+    /// cadence, since the subscribers' deadline is the minimum interval
+    /// across all visible subscribers.
+    ///
+    /// The interval only ever delays this subscription's own wake. A frame
+    /// something else asks for (`request_frame`, the announcer) still runs
+    /// at 60 Hz, and the effect registered on `frame_tick` fires on that
+    /// frame too, so it has to measure elapsed time itself rather than
+    /// assume a tick means `interval` has passed.
     pub fn subscribe_throttled(
         &self,
         owner: WidgetId,
@@ -163,9 +178,10 @@ impl FrameTickScheduler {
 
     /// Whether ANY subscriber's owner widget was painted in the most
     /// recent paint pass. Used by `WidgetTree::render` to decide
-    /// whether to re-arm `frame_tick_requested` so the chain stays
-    /// alive across visible frames and dies cleanly when all
-    /// subscribers are hidden.
+    /// whether to set the tree's subscriber arm
+    /// (`frame_tick_armed_by_subscribers`, not the raw request flag) so
+    /// the chain stays alive across visible frames and dies cleanly when
+    /// all subscribers are hidden.
     pub fn should_arm_frame_tick(&self, arena: &WidgetArena, paint_epoch: u64) -> bool {
         self.subscribers
             .borrow()
@@ -175,9 +191,10 @@ impl FrameTickScheduler {
 
     /// The smallest wake interval among **currently-visible** subscribers
     /// (a per-frame subscriber counts as the 60 Hz `PER_FRAME_INTERVAL`).
-    /// `None` when no subscriber is visible — the caller then falls back to
-    /// 60 Hz for raw `request_frame` consumers (caret blink, drag
-    /// auto-scroll, `--cycle` drivers) that hold no subscription.
+    /// `None` when no subscriber is visible. It paces the subscribers'
+    /// re-arm only: raw `request_frame` consumers (caret blink, drag
+    /// auto-scroll, the announcer) are paced at 60 Hz by the caller
+    /// whatever this returns.
     ///
     /// This is what lets a lone visible `Cycle` pace the event loop at its
     /// period instead of 60 Hz, while a `Cycle` sharing a tab with a

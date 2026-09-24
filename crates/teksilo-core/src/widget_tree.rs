@@ -380,8 +380,8 @@ pub struct WidgetTree {
     /// same [`motion_visibility`](crate::motion_visibility) helpers.
     /// After every `render()` the tree calls
     /// `FrameTickScheduler::should_arm_frame_tick` and re-arms
-    /// `frame_tick_requested` if any subscriber's owner was painted
-    /// this frame.
+    /// `frame_tick_armed_by_subscribers` if any subscriber's owner was
+    /// painted this frame.
     pub(crate) frame_tick_scheduler: crate::frame_tick_scheduler::FrameTickScheduler,
     /// Live pans, live coasts, the window's pinch, and the palm watches — the
     /// whole touch-motion layer, in one field. See
@@ -606,9 +606,10 @@ pub struct WidgetTree {
     /// without rebuilding the widget tree.
     pub(crate) locale_signal: crate::signal::Signal<Option<String>>,
     /// Per-frame delta-seconds signal, advanced by `layout()` **only when
-    /// a widget has explicitly requested a frame** via `request_frame()`.
-    /// This preserves Teksilo's draw-when-needed model: idle trees stay
-    /// idle even if widgets have registered observers on this signal.
+    /// a frame was asked for**: through `request_frame()`, or by the
+    /// render-end re-arm for a painted frame-tick subscriber. This
+    /// preserves Teksilo's draw-when-needed model: idle trees stay idle
+    /// even if widgets have registered observers on this signal.
     pub(crate) frame_tick: crate::signal::Signal<f32>,
     /// Set by `request_frame()`; consumed by `advance_frame_tick()` on
     /// the next `layout()`. Observers that need another tick after the
@@ -617,6 +618,19 @@ pub struct WidgetTree {
     /// `frame_tick`) can chain-request without needing &mut access
     /// to the tree — see [`frame_request_handle`](Self::frame_request_handle).
     pub(crate) frame_tick_requested: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Set after a render in which a frame-tick subscriber's owner was
+    /// painted; consumed alongside `frame_tick_requested` by
+    /// `advance_frame_tick()`.
+    ///
+    /// A flag of its own so that [`frame_tick_deadline`](Self::frame_tick_deadline)
+    /// knows *why* a frame is wanted. A throttled subscriber may stretch the
+    /// wait for its own tick to its interval; a frame asked for through
+    /// `frame_tick_requested` (the announcer's follow-up syncs, a caret, a
+    /// drag auto-scroll) is due at 60 Hz whatever is on screen. When both
+    /// reasons shared one flag they could not be told apart, and a
+    /// once-a-minute clock anywhere in the window made every requested frame
+    /// wait a minute.
+    pub(crate) frame_tick_armed_by_subscribers: bool,
     /// Debug-only re-entrancy flag: `true` while a focus-change dispatch
     /// (`FocusGained` / `FocusLost` handlers) is running. Threaded into each
     /// `EventContext` so `open_window` / `focus_window` can warn if a handler
@@ -990,6 +1004,7 @@ impl WidgetTree {
             locale_signal: crate::signal::Signal::new(None),
             frame_tick: crate::signal::Signal::new(0.0_f32),
             frame_tick_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
+            frame_tick_armed_by_subscribers: false,
             in_focus_dispatch: std::rc::Rc::new(std::cell::Cell::new(false)),
             a11y_update_requested: std::rc::Rc::new(std::cell::Cell::new(false)),
             pending_wake_at: std::rc::Rc::new(std::cell::Cell::new(None)),
@@ -1250,11 +1265,22 @@ impl WidgetTree {
         self.a11y_update_requested.clone()
     }
 
-    /// Whether a frame was explicitly requested. Exposed for tests and
-    /// for the event-loop driver that decides when to schedule the next
-    /// wake-up.
+    /// Whether the next `layout()` will fire the per-frame tick: a frame
+    /// was requested, or a render painted a frame-tick subscriber's owner
+    /// and re-armed the chain. Exposed for tests and for the event-loop
+    /// driver that decides when to schedule the next wake-up; *when* that
+    /// frame is due is [`frame_tick_deadline`](Self::frame_tick_deadline).
     pub fn frame_requested(&self) -> bool {
-        self.frame_tick_requested.get()
+        self.frame_tick_requested.get() || self.frame_tick_armed_by_subscribers
+    }
+
+    /// Consume both reasons for a frame tick at once, returning whether
+    /// there was one. Every path that fires `frame_tick` goes through here,
+    /// so neither flag can outlive the tick it asked for.
+    pub(crate) fn take_frame_tick_request(&mut self) -> bool {
+        let requested = self.frame_tick_requested.replace(false);
+        let armed = std::mem::take(&mut self.frame_tick_armed_by_subscribers);
+        requested || armed
     }
 
     /// The next wake-up deadline for the per-frame-effect path, or
@@ -1274,27 +1300,39 @@ impl WidgetTree {
     /// which already share the same interval.
     ///
     /// A **throttled** subscriber (registered via
-    /// [`FrameTickScheduler::subscribe_throttled`](crate::frame_tick_scheduler::FrameTickScheduler::subscribe_throttled)
-    /// — e.g. `Cycle`, whose visible child only changes once per period)
-    /// stretches the deadline to its own interval: the loop then sleeps to
-    /// the period instead of rendering identical 60 fps frames in between.
-    /// The interval used is the **minimum across all currently-visible
-    /// subscribers**, so a `Cycle` next to a `Pulse` still ticks at 60 Hz
-    /// while a lone `Cycle` sleeps to its period. Raw `request_frame`
-    /// consumers with no subscription fall back to 60 Hz.
+    /// [`FrameTickScheduler::subscribe_throttled`](crate::frame_tick_scheduler::FrameTickScheduler::subscribe_throttled),
+    /// e.g. `Cycle`, whose visible child only changes once per period)
+    /// stretches the wait for **its own** tick to its interval: the loop
+    /// then sleeps to the period instead of rendering identical 60 fps
+    /// frames in between. The interval for the subscribers' re-arm is the
+    /// **minimum across all currently-visible subscribers**, so a `Cycle`
+    /// next to a `Pulse` still ticks at 60 Hz while a lone `Cycle` sleeps to
+    /// its period.
+    ///
+    /// A frame asked for through [`request_frame`](Self::request_frame) or
+    /// [`frame_request_handle`](Self::frame_request_handle) is due at 60 Hz
+    /// whatever subscribers are visible, and the earlier of the two
+    /// deadlines wins. The announcer, a caret, a drag auto-scroll and the
+    /// bootstrap frame of a new subscription all ask that way, and none of
+    /// them can be made to wait on somebody else's clock: an announcement
+    /// queued behind a once-a-minute clock was spoken a minute late, or at
+    /// the user's next key press.
     ///
     /// Paces from `last_frame_time` so the cadence is drift-free; before
     /// the first render it fires on the next loop turn.
     pub fn frame_tick_deadline(&self) -> Option<std::time::Instant> {
-        // 60 Hz fallback for raw `request_frame` consumers (no subscriber).
         const DEFAULT_INTERVAL: std::time::Duration = std::time::Duration::from_micros(16_667);
-        if !self.frame_tick_requested.get() {
-            return None;
-        }
-        let interval = self
-            .frame_tick_scheduler
-            .min_visible_interval(&self.arena, self.paint_epoch)
-            .unwrap_or(DEFAULT_INTERVAL);
+        // Each reason for a frame brings its own pace. A subscriber re-arm
+        // with no visible subscriber left keeps the 60 Hz fallback, so the
+        // one frame that finds nothing to re-arm still runs and the flag
+        // does not linger.
+        let requested = self.frame_tick_requested.get().then_some(DEFAULT_INTERVAL);
+        let subscribed = self.frame_tick_armed_by_subscribers.then(|| {
+            self.frame_tick_scheduler
+                .min_visible_interval(&self.arena, self.paint_epoch)
+                .unwrap_or(DEFAULT_INTERVAL)
+        });
+        let interval = requested.into_iter().chain(subscribed).min()?;
         Some(match self.last_frame_time {
             Some(prev) => prev + interval,
             None => std::time::Instant::now(),
@@ -1306,7 +1344,7 @@ impl WidgetTree {
     /// is an RAII guard — drop it (typically by replacing the field on
     /// the owning widget on rebuild, or letting the widget's `Drop`
     /// run) to remove the subscription. While the guard is alive, the
-    /// tree will keep arming `frame_tick_requested` after every render
+    /// tree will keep re-arming the frame tick after every render
     /// in which `owner` was painted, and stop on frames where it
     /// wasn't — so a subscribed widget hidden inside a non-selected
     /// `Switcher` branch contributes zero idle frames.
@@ -1344,11 +1382,10 @@ impl WidgetTree {
     /// requested. Called by `layout()` before the scheduler tick so the
     /// per-frame observers fire on the same frame they asked for.
     pub(crate) fn advance_frame_tick(&mut self, now: std::time::Instant) {
-        if !self.frame_tick_requested.get() {
+        if !self.take_frame_tick_request() {
             self.last_frame_time = Some(now);
             return;
         }
-        self.frame_tick_requested.set(false);
         let delta = match self.last_frame_time {
             Some(prev) => {
                 let d = now.saturating_duration_since(prev).as_secs_f32();
@@ -1845,7 +1882,7 @@ impl WidgetTree {
             || self.arena.any_needs_paint()
             || self.animation_scheduler.has_running()
             || self.animated_quads.has_running()
-            || self.frame_tick_requested.get()
+            || self.frame_requested()
     }
 
     /// Whether a render pass is needed (any widget needs layout or paint).
