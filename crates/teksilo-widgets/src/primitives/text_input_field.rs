@@ -898,11 +898,7 @@ fn field_selection_color(
 
 /// Simplified frame-loop tick for single-line text input.
 fn tick(state: &mut TextInputState, delta: f32) -> bool {
-    if !state.pending_chars.is_empty() {
-        let batch = std::mem::take(&mut state.pending_chars);
-        let _ = state.cursor.insert_text(&batch);
-        state.pending_text_changed = true;
-    }
+    state.apply_pending_chars();
 
     let had_events = state.drain_events();
 
@@ -1407,6 +1403,27 @@ impl TextFieldHandle {
     pub fn text(&self) -> String {
         self.with(|st| st.document.to_plain_text().unwrap_or_default())
             .unwrap_or_default()
+    }
+
+    /// The field's text with every keystroke in it, including those the
+    /// frame tick has not inserted yet, which this inserts first.
+    ///
+    /// For a composite that acts on what was typed from inside a key
+    /// handler: two keys delivered in one batch reach it before any frame
+    /// runs, and reading [`text`](Self::text), or the bound signal, which
+    /// lags further still, would act on the text as it stood before the
+    /// first of them.
+    ///
+    /// `None` when the field is not built, or when its state is borrowed by
+    /// a caller further up the stack. Such a caller is the field itself,
+    /// mid-edit, so there is nothing settled to read; the answer is "not
+    /// now" rather than a panic.
+    pub(crate) fn text_as_typed(&self) -> Option<String> {
+        let slot = self.slot.try_borrow().ok()?;
+        let state = slot.as_ref()?;
+        let mut st = state.try_borrow_mut().ok()?;
+        st.apply_pending_chars();
+        Some(st.document.to_plain_text().unwrap_or_default())
     }
 
     /// Is any text selected right now?

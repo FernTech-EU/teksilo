@@ -384,6 +384,21 @@ impl TextInputState {
         self.char_filter.as_ref().is_none_or(|f| f(c))
     }
 
+    /// Insert the keystrokes batched since the last frame at the caret.
+    ///
+    /// Typing queues characters and the frame tick inserts them, so between
+    /// a keystroke and the next tick the document lags what the user has
+    /// typed. The tick calls this, and so does anything that has to read the
+    /// text as typed before the tick comes round.
+    pub fn apply_pending_chars(&mut self) {
+        if self.pending_chars.is_empty() {
+            return;
+        }
+        let batch = std::mem::take(&mut self.pending_chars);
+        let _ = self.cursor.insert_text(&batch);
+        self.pending_text_changed = true;
+    }
+
     // ── Secure-field masking ────────────────────────────────────────
 
     /// Whether plaintext is currently shown despite `secure` — the

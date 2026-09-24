@@ -1686,3 +1686,190 @@ fn the_default_parser_still_filters_what_it_cannot_read() {
     type_and_commit(&mut tree, spin, "4x2");
     assert_eq!(value.get(), 42);
 }
+
+// ---------------------------------------------------------------------------
+// A step starts from what was typed
+// ---------------------------------------------------------------------------
+
+/// A minutes field: 0 to 59, stepping by five, holding 10.
+fn minutes_box() -> (WidgetTree, Signal<i32>, teksilo_core::widget_id::WidgetId) {
+    let value = Signal::new(10_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(SpinBox::new(value.clone(), 0, 59).single_step(5));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    (tree, value, spin)
+}
+
+/// What the editing field shows, read off its own accessibility node.
+fn field_text(tree: &mut WidgetTree, spin: teksilo_core::widget_id::WidgetId) -> String {
+    let field = tree
+        .first_focusable_descendant(spin)
+        .expect("SpinBox has a focusable inner field");
+    let update = tree.sync_accessibility();
+    let nid = teksilo_core::accessibility::widget_id_to_node_id(field);
+    update
+        .nodes
+        .iter()
+        .find(|(n, _)| *n == nid)
+        .and_then(|(_, n)| n.value().map(str::to_string))
+        .unwrap_or_default()
+}
+
+#[test]
+fn up_after_typing_steps_from_the_typed_number() {
+    // A step started from the value last committed and threw the typed text
+    // away: 35 typed over 10, then Up, read 15. Somebody who types a minute
+    // and nudges it has just heard the field say 35.
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tick(&mut tree);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 40, "Up from a typed 35 is 40");
+    assert_eq!(field_text(&mut tree, spin), "40");
+}
+
+#[test]
+fn down_after_typing_steps_from_the_typed_number() {
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tick(&mut tree);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 30);
+}
+
+#[test]
+fn a_step_in_the_same_batch_as_the_digits_still_counts_them() {
+    // Typed characters reach the document on the next frame, so a key that
+    // arrives in the same batch as the digits before it finds them still
+    // queued. No frame runs between the typing and the Up here.
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 40);
+}
+
+#[test]
+fn a_step_over_unreadable_text_restores_the_value_and_steps_nothing() {
+    // Qt's `QAbstractSpinBox::stepBy`: the press that finds text it cannot
+    // read puts the value back in the field and steps nothing, so the user
+    // hears the number the next press will step from. `-` passes the input
+    // filter and reads as no number.
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "-");
+    tick(&mut tree);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 10, "the value is untouched");
+    assert_eq!(field_text(&mut tree, spin), "10", "and shown again");
+
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 15, "the next press steps as usual");
+}
+
+#[test]
+fn a_restore_in_the_same_batch_as_the_typing_still_lands() {
+    // The bound signal learns of typing a frame late, so right after the
+    // keystroke it still holds the very text the restore writes. A write
+    // skipped as "unchanged" there left the field showing the typing, and the
+    // next frame published it.
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "-");
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    for _ in 0..3 {
+        tick(&mut tree);
+    }
+    assert_eq!(value.get(), 10);
+    assert_eq!(field_text(&mut tree, spin), "10");
+}
+
+#[test]
+fn a_typed_number_out_of_range_is_clamped_before_the_step() {
+    // The step starts from what Enter would have committed, and Enter clamps.
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "70");
+    tick(&mut tree);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(
+        value.get(),
+        54,
+        "70 clamps to 59, and Down steps from there"
+    );
+}
+
+#[test]
+fn the_typed_number_and_the_step_are_one_change() {
+    // One press, one change: the application hears the stepped value once,
+    // not the typed one on the way to it.
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let heard: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+    let heard_h = heard.clone();
+    let value = Signal::new(10_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(
+        SpinBox::new(value.clone(), 0, 59)
+            .single_step(5)
+            .on_value_changed(move |v, _ctx| heard_h.borrow_mut().push(v)),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    type_over(&mut tree, spin, "35");
+    tick(&mut tree);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(*heard.borrow(), vec![40]);
+}
+
+// The arrows are one door. The wheel, the step buttons and an assistive
+// technology's `Increment` step the same value, so they start from the same
+// place.
+
+#[test]
+fn a_wheel_notch_after_typing_steps_from_the_typed_number() {
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tick(&mut tree);
+    wheel(&mut tree, spin, -1.0);
+    tick(&mut tree);
+    assert_eq!(value.get(), 40);
+}
+
+#[test]
+fn an_assistive_increment_after_typing_steps_from_the_typed_number() {
+    use teksilo_core::accesskit::Action;
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tick(&mut tree);
+    assert!(access(&mut tree, spin, Action::Increment, None));
+    assert_eq!(value.get(), 40);
+}
+
+#[test]
+fn the_up_button_after_typing_steps_from_the_typed_number() {
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tick(&mut tree);
+    let up = step_buttons(&tree, spin)[0];
+    tree.pointer_down_button(up.center(), teksilo_core::event::PointerButton::Primary);
+    tree.pointer_up_button(up.center(), teksilo_core::event::PointerButton::Primary);
+    tick(&mut tree);
+    assert_eq!(value.get(), 40);
+}
+
+#[test]
+fn enter_in_the_same_batch_as_the_digits_commits_them() {
+    // The commit reads the field, not the signal it mirrors into a frame
+    // late, so Enter right behind the digits commits them.
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 35);
+}

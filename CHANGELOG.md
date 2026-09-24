@@ -44,6 +44,14 @@ by crate for clarity, not because crates version independently.
   `"march"` as 3 dropped the letters as they were typed, and the commit put the
   old month back. A custom parser now receives every character and alone
   decides, at commit, what it can read; the default parser keeps its filter.
+- **A `SpinBox` step threw away what had just been typed.** Up, Down, the
+  wheel, the step buttons and an assistive `Increment` stepped from the value
+  last committed, so 35 typed over 10 in a field stepping by 5 became 15 on
+  `Up`. A step now reads the typed text first, as `Enter` would, and moves on
+  from it: 40, with one `on_value_changed`. Text that cannot be read steps
+  nothing and the held value is shown again, as in Qt. `Enter` and focus loss
+  now commit keystrokes delivered in the same batch as the key that commits
+  them, which they used to miss by a frame. **Behaviour change.**
 
 #### Data views
 

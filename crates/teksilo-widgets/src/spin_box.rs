@@ -24,6 +24,14 @@
 //!   at commit time the text is parsed, clamped into `[min, max]`
 //!   (or wrapped, per [`WrapMode`]), and reformatted. Invalid input
 //!   reverts to the last known good value.
+//! - **Stepping over typed text**: every step (key, wheel, button,
+//!   assistive `Increment` / `Decrement`) starts from what the field
+//!   shows. Text typed and not yet committed is read first, exactly as
+//!   `Enter` would read it, and the step moves on from there: type 35,
+//!   press `Up` with a step of 5, and the value is 40, reported once.
+//!   Text that cannot be read steps nothing; the value goes back into
+//!   the field, and the next press steps from it. This is
+//!   `QAbstractSpinBox::stepBy`.
 //! - **Keyboard**:
 //!   - `Up` / `Down` → ±[`single_step`](SpinBox::single_step)
 //!   - `PageUp` / `PageDown` → ±[`page_step`](SpinBox::page_step)
@@ -182,6 +190,7 @@ mod step_button;
 mod tests;
 mod value;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub use self::value::SpinValue;
@@ -199,7 +208,7 @@ use teksilo_tokens::{CornerRadius, InputTokens, TargetRole, TextStyle};
 
 use crate::common::range_nav::{self, RangeAxis, RangeKind, RangeMove};
 use crate::primitives::icon_widget::IconWidget;
-use crate::primitives::text_input_field::TextInputField;
+use crate::primitives::text_input_field::{TextFieldHandle, TextInputField};
 use crate::primitives::{MinSize, Padding};
 
 use self::step_button::StepButton;
@@ -283,6 +292,18 @@ pub enum WidthPolicy {
 type TextFromValue<T> = Rc<dyn Fn(T) -> LocalizedString>;
 type ValueFromText<T> = Rc<dyn Fn(&str) -> Option<T>>;
 type OnValueChangedFn<T> = Rc<dyn Fn(T, &mut EventContext)>;
+
+/// What one step did, for a caller that has an `EventContext` to report it
+/// with.
+enum StepOutcome<T> {
+    /// Nothing moved and the field already showed the value.
+    Unchanged,
+    /// The value stayed, and the field was put back to showing it over text
+    /// the user had typed.
+    Restored,
+    /// The value moved to this.
+    Changed(T),
+}
 
 /// Minimum total width. Below this the stacked step buttons stop
 /// fitting next to the field. Widgets narrower than this are
@@ -861,19 +882,45 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // the closures below re-resolve on the next build.
         let presentation = NumberPresentation::resolve(self.localized, self.use_grouping);
 
+        // A handle on the editing field, handed out before the field exists
+        // (it is built further down) so the commit and step closures can
+        // read what the field holds rather than the signal it mirrors into
+        // a frame late. `share_handle` binds it when the field is built.
+        let field_handle = TextFieldHandle::detached();
+
+        // Every string this widget puts in the field goes through `show`,
+        // which remembers it. The field's text is the user's to edit, so
+        // whatever it holds that differs from `last_shown` was typed. That
+        // comparison is exact whatever the locale, the formatter or the
+        // special-value text made of the number: telling typing from the
+        // widget's own output never means rendering the value again and
+        // hoping it comes out the same.
+        //
+        // The write is unconditional. The bound signal can still hold this
+        // very string while the field shows something typed since (typing
+        // reaches the signal a frame late), and only a write makes the field
+        // replace its text; the field compares before it rewrites, so a
+        // redundant write costs one string comparison.
+        let last_shown: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
+        let show: Rc<dyn Fn(String)> = {
+            let text_signal = self.text_signal.clone();
+            let last_shown = last_shown.clone();
+            Rc::new(move |text: String| {
+                last_shown.replace(text.clone());
+                text_signal.set(text);
+            })
+        };
+
         // Seed the text signal from the current value.
-        {
-            let initial = format_for_display(
-                self.value.get(),
-                decimals,
-                special_text.as_ref(),
-                text_from_value.as_deref(),
-                min,
-                false,
-                &presentation,
-            );
-            self.text_signal.set(initial);
-        }
+        show(format_for_display(
+            self.value.get(),
+            decimals,
+            special_text.as_ref(),
+            text_from_value.as_deref(),
+            min,
+            false,
+            &presentation,
+        ));
 
         // Effect: when the value signal changes externally, reformat
         // the text. This also fires on startup with the initial value
@@ -881,7 +928,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // focused so typing isn't interrupted by our own round-trip
         // writes — on commit we explicitly re-sync.
         {
-            let text_signal = self.text_signal.clone();
+            let show = show.clone();
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
             let focused = self.focused.clone();
@@ -903,7 +950,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     can_down.set(*new_value > min_cap);
                 }
                 if !is_focused {
-                    let formatted = format_for_display(
+                    show(format_for_display(
                         *new_value,
                         decimals,
                         special_text.as_ref(),
@@ -911,10 +958,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         min_cap,
                         false,
                         &presentation,
-                    );
-                    if text_signal.get() != formatted {
-                        text_signal.set(formatted);
-                    }
+                    ));
                 }
             });
         }
@@ -922,7 +966,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // Effect: re-format on locale change so special_value_text
         // and custom formatters re-resolve with the new locale.
         {
-            let text_signal = self.text_signal.clone();
+            let show = show.clone();
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
             let value_signal = self.value.clone();
@@ -935,7 +979,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let grouping = self.use_grouping;
             ctx.effect(&locale_signal, move |_| {
                 let presentation = NumberPresentation::resolve(localized, grouping);
-                let formatted = format_for_display(
+                show(format_for_display(
                     value_signal.get(),
                     decimals,
                     special_text.as_ref(),
@@ -943,10 +987,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     min,
                     focused.get(),
                     &presentation,
-                );
-                if text_signal.get() != formatted {
-                    text_signal.set(formatted);
-                }
+                ));
             });
         }
 
@@ -963,7 +1004,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // even when the value is unchanged, so `007` still normalises to `7`.
         let set_committed: Rc<dyn Fn(T, &mut EventContext)> = {
             let value_signal = self.value.clone();
-            let text_signal = self.text_signal.clone();
+            let show = show.clone();
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
             let on_value_changed = on_value_changed.clone();
@@ -971,7 +1012,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             Rc::new(move |candidate: T, ctx: &mut EventContext| {
                 let old = value_signal.get();
                 let new_value = candidate.clamp_value(min, max);
-                let formatted = format_for_display(
+                show(format_for_display(
                     new_value,
                     decimals,
                     special_text.as_ref(),
@@ -979,10 +1020,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     min,
                     false,
                     &presentation,
-                );
-                if text_signal.get() != formatted {
-                    text_signal.set(formatted);
-                }
+                ));
                 if approx_ne(new_value, old) {
                     value_signal.set(new_value);
                     if let Some(cb) = on_value_changed.as_ref() {
@@ -999,20 +1037,28 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // string parsed; on failure the display is restored from the value the
         // field still holds — the revert a typed rubbish string gets — and the
         // caller decides how loudly to say so.
-        let commit_text: Rc<dyn Fn(&str, &mut EventContext) -> bool> = {
-            let value_signal = self.value.clone();
+        //
+        // The parse itself is its own closure because a step reads typed text
+        // too, and must read it exactly as Enter would.
+        let parse: Rc<dyn Fn(&str) -> Option<T>> = {
             let value_from_text = value_from_text.clone();
-            let commit_presentation = presentation.clone();
-            let set_committed = set_committed.clone();
-            Rc::new(move |raw: &str, ctx: &mut EventContext| {
+            let presentation = presentation.clone();
+            Rc::new(move |raw: &str| {
                 // A user-supplied parser gets the raw text: it owns the
                 // whole convention, and de-localizing first would hand it
                 // a string it never agreed to read.
-                let parsed: Option<T> = match value_from_text.as_deref() {
+                match value_from_text.as_deref() {
                     Some(f) => f(raw.trim()),
-                    None => commit_presentation.parse::<T>(raw),
-                };
-                match parsed {
+                    None => presentation.parse::<T>(raw),
+                }
+            })
+        };
+        let commit_text: Rc<dyn Fn(&str, &mut EventContext) -> bool> = {
+            let value_signal = self.value.clone();
+            let parse = parse.clone();
+            let set_committed = set_committed.clone();
+            Rc::new(move |raw: &str, ctx: &mut EventContext| {
+                match parse(raw) {
                     Some(v) => {
                         set_committed(v, ctx);
                         true
@@ -1028,9 +1074,16 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         let commit: Rc<dyn Fn(&mut EventContext)> = {
             let text_signal = self.text_signal.clone();
+            let field_handle = field_handle.clone();
             let commit_text = commit_text.clone();
             Rc::new(move |ctx: &mut EventContext| {
-                let raw = text_signal.get();
+                // The field, not the signal it mirrors typing into a frame
+                // late: Enter delivered in the same batch as the digit before
+                // it would otherwise commit the text without that digit. The
+                // signal is the fallback for a field that cannot answer.
+                let raw = field_handle
+                    .text_as_typed()
+                    .unwrap_or_else(|| text_signal.get());
                 let _ = commit_text(&raw, ctx);
             })
         };
@@ -1090,21 +1143,64 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             }
         }
 
-        // Signal-only step: mutates `value` and `text_signal` and
-        // returns the previous/new pair so the caller can fire any
-        // extra side-effect (e.g. `on_value_changed`) after the
-        // fact. When nothing changed returns `None`.
-        let step_silent: Rc<dyn Fn(i32, bool) -> Option<T>> = {
+        // Signal-only step: publishes the new value and its text, and says
+        // what it did so the caller can fire `on_value_changed` after the
+        // fact.
+        //
+        // A step starts from what the field shows, which is not always the
+        // value: somebody who types 35 and presses Up has just heard the field
+        // say 35, and stepping from the value committed before the typing
+        // threw the typing away and moved from a number nobody could hear.
+        // This is `QAbstractSpinBox::stepBy`, which interprets the pending text
+        // before it steps. So typed text (anything the field holds that
+        // `show` did not put there) is read first, exactly as Enter reads it:
+        // parsed, clamped, and stepped from. The typed number and the step are
+        // one change, with one signal write and one notification.
+        //
+        // Text that does not parse steps nothing: the value goes back into the
+        // field and the press ends there, so what the user hears is the number
+        // the next press will step from, not one two moves removed from
+        // anything they were told. Qt does the same, for the same reason.
+        //
+        // The auto-repeat of a held step button calls this directly. Its first
+        // step went through `step` below, which has already read the typing,
+        // so every repeat finds the field showing what `show` wrote.
+        let step_silent: Rc<dyn Fn(i32, bool) -> StepOutcome<T>> = {
             let value_signal = self.value.clone();
-            let text_signal = self.text_signal.clone();
+            let field_handle = field_handle.clone();
+            let last_shown = last_shown.clone();
+            let parse = parse.clone();
+            let show = show.clone();
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
             let presentation = presentation.clone();
             Rc::new(move |dir: i32, page: bool| {
                 if read_only {
-                    return None;
+                    return StepOutcome::Unchanged;
                 }
+                let display = |value: T| {
+                    format_for_display(
+                        value,
+                        decimals,
+                        special_text.as_ref(),
+                        text_from_value.as_deref(),
+                        min,
+                        false,
+                        &presentation,
+                    )
+                };
                 let current = value_signal.get();
+                let typed = field_handle
+                    .text_as_typed()
+                    .filter(|text| *text != *last_shown.borrow());
+                let from = match typed.as_deref().map(|text| parse(text)) {
+                    None => current,
+                    Some(Some(read)) => read.clamp_value(min, max),
+                    Some(None) => {
+                        show(display(current));
+                        return StepOutcome::Restored;
+                    }
+                };
                 let new_value = apply_step(
                     dir,
                     page,
@@ -1114,25 +1210,21 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     page_step,
                     min,
                     max,
-                    current,
+                    from,
                 );
                 if approx_eq(new_value, current) {
-                    return None;
+                    // Typing that came to the value already held still leaves
+                    // the field showing the typing; put the value's own text
+                    // back.
+                    if typed.is_some() {
+                        show(display(new_value));
+                        return StepOutcome::Restored;
+                    }
+                    return StepOutcome::Unchanged;
                 }
                 value_signal.set(new_value);
-                let formatted = format_for_display(
-                    new_value,
-                    decimals,
-                    special_text.as_ref(),
-                    text_from_value.as_deref(),
-                    min,
-                    false,
-                    &presentation,
-                );
-                if text_signal.get() != formatted {
-                    text_signal.set(formatted);
-                }
-                Some(new_value)
+                show(display(new_value));
+                StepOutcome::Changed(new_value)
             })
         };
 
@@ -1142,11 +1234,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let step_silent = step_silent.clone();
             let on_value_changed = on_value_changed.clone();
             Rc::new(move |dir: i32, page: bool, ctx: &mut EventContext| {
-                if let Some(new_value) = step_silent(dir, page) {
-                    if let Some(cb) = on_value_changed.as_ref() {
-                        cb(new_value, ctx);
+                match step_silent(dir, page) {
+                    StepOutcome::Changed(new_value) => {
+                        if let Some(cb) = on_value_changed.as_ref() {
+                            cb(new_value, ctx);
+                        }
+                        ctx.request_frame();
                     }
-                    ctx.request_frame();
+                    StepOutcome::Restored => ctx.request_frame(),
+                    StepOutcome::Unchanged => {}
                 }
             })
         };
@@ -1164,6 +1260,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let mut field = TextInputField::new(self.text_signal.clone())
+            .share_handle(&field_handle)
             .enabled(enabled)
             // An assistive-technology `SetValue` on the inner text node is a
             // finished edit, not a keystroke, so it takes the same parse,
@@ -1272,7 +1369,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // secondary effect on the SpinBox's focus_within signal.
         {
             let focused_for_text = self.focused.clone();
-            let text_signal = self.text_signal.clone();
+            let show = show.clone();
             let value_signal = self.value.clone();
             let text_from_value = text_from_value.clone();
             let min_cap = min;
@@ -1281,7 +1378,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     // On focus, swap any special_value_text out for
                     // the plain formatted number so the user can
                     // edit it with the keyboard.
-                    let plain = format_for_display(
+                    show(format_for_display(
                         value_signal.get(),
                         decimals,
                         None,
@@ -1289,10 +1386,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         min_cap,
                         true,
                         &presentation,
-                    );
-                    if text_signal.get() != plain {
-                        text_signal.set(plain);
-                    }
+                    ));
                 }
             });
         }
@@ -1728,7 +1822,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 fn build_step_buttons<T: SpinValue>(
     ctx: &mut BuildContext,
     step: &Rc<dyn Fn(i32, bool, &mut EventContext)>,
-    step_silent: &Rc<dyn Fn(i32, bool) -> Option<T>>,
+    step_silent: &Rc<dyn Fn(i32, bool) -> StepOutcome<T>>,
     can_up: Signal<bool>,
     can_down: Signal<bool>,
     enabled: bool,
