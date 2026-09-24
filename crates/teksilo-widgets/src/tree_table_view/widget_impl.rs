@@ -97,6 +97,13 @@ impl<T: 'static> Widget for TreeTableView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        crate::table_view::selection::follow_the_selection_in_single_mode(
+            ctx,
+            self.selection_mode,
+            &self.focused_cell,
+            self.row_selection.as_ref(),
+            self.cell_selection.as_ref(),
+        );
         self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
@@ -129,6 +136,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let src = self.source.clone();
             let row_sel = self.row_selection.clone();
             let cell_sel = self.cell_selection.clone();
+            let selection_mode = self.selection_mode;
+            let focused = self.focused_cell.clone();
             let prev_visible_count = prev_visible_count.clone();
             move |_| {
                 metrics
@@ -159,6 +168,15 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     cs.clear();
                 }
                 prev_visible_count.set(new_visible_count);
+                // A keyed selection follows its node through an expand, a
+                // sort or an insert above it without being written, so no
+                // selection observer hears it: put the cursor back on it here.
+                crate::table_view::selection::put_the_cursor_on_the_selection(
+                    selection_mode,
+                    &focused,
+                    row_sel.as_ref(),
+                    cell_sel.as_ref(),
+                );
                 let next = proj_ver.get() + 1;
                 proj_ver.set(next);
                 v_for_proj.set(next);

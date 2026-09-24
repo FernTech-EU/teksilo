@@ -1130,6 +1130,131 @@ fn default_selection_mode_is_multi_row() {
     );
 }
 
+/// In a single-row tree table every navigation chord moves the selection
+/// with the cursor. The rule lives in the keyboard module `TableView` shares,
+/// so this pins that the tree table reaches it too.
+#[test]
+fn a_single_row_tree_table_moves_the_selection_with_the_cursor() {
+    use teksilo_core::event::{Key, Modifiers};
+    let proxy = SortFilterTreeModel::new(wide_tree(5));
+    let selection = teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TreeTableView::from_projection(proxy)
+            .add_column(name_col())
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(selection.clone())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    tree.focus(id);
+    {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.set_focused_cell(0, 0);
+    }
+    selection.select(0);
+
+    let cursor_row = |tree: &WidgetTree| {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.focused_cell_signal().get().map(|(row, _)| row)
+    };
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(cursor_row(&tree), Some(1));
+    assert_eq!(
+        selection.selected_indices(),
+        vec![1],
+        "Ctrl+ArrowDown selects"
+    );
+
+    tree.press_key(Key::End, Modifiers::COMMAND);
+    assert_eq!(cursor_row(&tree), Some(4));
+    assert_eq!(
+        selection.selected_indices(),
+        vec![4],
+        "so does the accelerator with End"
+    );
+}
+
+/// A selection the application writes moves the tree table's cursor onto it,
+/// in a single-row tree table — the helper `TableView` shares with it.
+#[test]
+fn a_selection_set_from_outside_moves_the_tree_table_cursor_in_single_mode() {
+    let proxy = SortFilterTreeModel::new(wide_tree(5));
+    let selection = teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TreeTableView::from_projection(proxy)
+            .add_column(name_col())
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(selection.clone())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    tree.focus(id);
+    {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.set_focused_cell(0, 0);
+    }
+    selection.select(0);
+
+    selection.select(3);
+    let any = tree.widget_as_any(id).unwrap();
+    let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+    assert_eq!(tt.focused_cell_signal().get(), Some((3, 0)));
+}
+
+/// A keyed selection follows its node through a sort without being written,
+/// so no selection observer hears it. The tree table's version effect puts
+/// the cursor back on it.
+#[test]
+fn a_keyed_tree_table_keeps_its_cursor_on_the_selection_through_a_sort() {
+    let model = TreeModel::new();
+    let ids: Vec<_> = ["c", "a", "b", "e", "d"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| model.insert_root(i, name))
+        .collect();
+    let proxy = SortFilterTreeModel::new(model).with_comparator("name", |a, b| a.cmp(b));
+    let keyed = teksilo_data::KeyedSelectionModel::new(teksilo_data::SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TreeTableView::from_projection(proxy.clone())
+            .add_column(name_col())
+            .selection_mode(TableSelectionMode::SingleRow)
+            .keyed_selection(keyed.clone())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    tree.focus(id);
+    {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.set_focused_cell(1, 0);
+    }
+    keyed.select(ids[1]);
+
+    proxy.set_sort(Some("name"), teksilo_data::SortDirection::Ascending);
+    let any = tree.widget_as_any(id).unwrap();
+    let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+    assert_eq!(
+        tt.focused_cell_signal().get(),
+        Some((0, 0)),
+        "\"a\" sorts to the top, and the cursor goes with it"
+    );
+}
+
 #[test]
 fn ctrl_arrow_moves_cursor_without_touching_selection() {
     // Explorer/Finder convention (shared with `TableView` via the

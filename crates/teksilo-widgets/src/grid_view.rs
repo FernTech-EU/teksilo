@@ -688,6 +688,42 @@ impl<T: 'static> GridView<T> {
         self.ensure_index_visible(index, anchor);
     }
 
+    /// In a single selection, put the keyboard cursor back on the selection
+    /// whenever the selection moves without it.
+    ///
+    /// `ListView::follow_the_selection_in_single_mode` states the defect: a
+    /// selection written from outside left the cursor, which the view
+    /// publishes as its active descendant, on a tile no action used. The
+    /// cursor is **moved** onto the selected tile rather than cleared, because
+    /// a grid nominates `focused_index` alone as its active descendant and
+    /// paints its focus ring there — cleared, the grid would announce and show
+    /// no current tile at all. The model-change observer shifts the cursor
+    /// before it shifts the selection, so a move made here is never shifted a
+    /// second time. A grid with no cursor yet gets none from here.
+    ///
+    /// The selection is read live, never from the notification's value: an
+    /// observer registered earlier may rewrite the selection while it is being
+    /// notified, and the notification it interrupted still arrives afterwards,
+    /// carrying the value that was just discarded.
+    fn follow_the_selection_in_single_mode(&self, ctx: &mut BuildContext) {
+        let Some(selection) = self.selection.clone() else {
+            return;
+        };
+        if selection.mode() != teksilo_data::SelectionMode::Single {
+            return;
+        }
+        let focused_index = self.focused_index.clone();
+        let live = selection.clone();
+        ctx.effect(&selection.selection_signal(), move |_| {
+            if let Some(cursor) = focused_index.get()
+                && !live.is_selected(cursor)
+                && let Some(&tile) = live.selected_indices().first()
+            {
+                focused_index.set(Some(tile));
+            }
+        });
+    }
+
     /// Scroll the tile the keyboard is on into view when this grid takes
     /// focus.
     ///
@@ -1149,6 +1185,7 @@ impl<T: 'static> Widget for GridView<T> {
             BindingLevel::AccessibilityOnly,
         );
 
+        self.follow_the_selection_in_single_mode(ctx);
         // Taking focus scrolls the current tile into the realized window,
         // which is what gives `accessibility` a tile id to nominate.
         self.reveal_focused_tile_on_focus(ctx, strategy.clone());
@@ -1163,6 +1200,22 @@ impl<T: 'static> Widget for GridView<T> {
             let scroll_reset = self.scroll_y.clone();
             let focused_obs = self.focused_index.clone();
             let handle = (self.source.observe_fn)(Box::new(move |change| {
+                // Keep the keyboard-focus anchor in step too — otherwise it
+                // silently points at the wrong tile after an insert / remove
+                // / move (reachable not just from local edits but from a
+                // live watcher pushing in a peer process's write), and the
+                // next Enter/Space acts on the wrong item. Mirrors
+                // `ListView`'s `focused_index` adjustment.
+                //
+                // Before the selection is adjusted, not after: in a single
+                // selection the selection's own observer puts the cursor on
+                // the selected tile (`follow_the_selection_in_single_mode`),
+                // and a cursor shifted after that would move twice.
+                if let Some(current) = focused_obs.get() {
+                    focused_obs.set(teksilo_data::data_change::adjust_single_index_for_change(
+                        current, change,
+                    ));
+                }
                 match change {
                     DataChange::ItemsInserted { range } => {
                         strategy_obs.invalidate_rows(range.start..usize::MAX);
@@ -1198,17 +1251,6 @@ impl<T: 'static> Widget for GridView<T> {
                         }
                         scroll_reset.set(0.0);
                     }
-                }
-                // Keep the keyboard-focus anchor in step too — otherwise it
-                // silently points at the wrong tile after an insert / remove
-                // / move (reachable not just from local edits but from a
-                // live watcher pushing in a peer process's write), and the
-                // next Enter/Space acts on the wrong item. Mirrors
-                // `ListView`'s `focused_index` adjustment.
-                if let Some(current) = focused_obs.get() {
-                    focused_obs.set(teksilo_data::data_change::adjust_single_index_for_change(
-                        current, change,
-                    ));
                 }
                 let next = counter.get() + 1;
                 counter.set(next);

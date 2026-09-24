@@ -13,6 +13,25 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Data views
+
+- **A single-selection data view could move its cursor off the selection.**
+  `Ctrl`+arrow and `Ctrl` (⌘ on macOS) + `Home` / `End` / `Page` moved the
+  cursor and left the selection behind, so a screen reader announced one row
+  while actions used another. They now move the selection with the cursor in
+  any of the five data views whose selection holds one entry: a
+  `SelectionMode::Single` model — including one handed to a table in the
+  default `MultiRow` mode — or a `TableSelectionMode::SingleRow` / `SingleCell`
+  table. Multi-selection views are unchanged. **Behaviour change.**
+- **A selection set by the application left the cursor behind.** In a
+  single-selection data view the keyboard cursor stayed on the row the user
+  last reached, so a screen reader went on announcing it and the next arrow
+  key started from it. The cursor now moves with the selection when the
+  application or a model change moves the selection. Multi-selection views are
+  unchanged. **Behaviour change.**
+
 ## [0.13.1] - 2026-09-22
 
 ### Fixed

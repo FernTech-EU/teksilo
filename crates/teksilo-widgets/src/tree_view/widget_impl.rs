@@ -29,6 +29,33 @@ impl<T: 'static> TreeView<T> {
         map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
     }
 
+    /// In a single selection, hand the keyboard cursor back to the selection
+    /// whenever the selection moves without it — see `ListView`'s method of the
+    /// same name for why.
+    ///
+    /// A structural change is not a selection move, and is left as
+    /// [`TreeView::selection`](crate::TreeView::selection) documents it: over
+    /// an index selection the cursor follows its row by identity while the
+    /// selection keeps its position. A keyed selection follows the row too.
+    fn follow_the_selection_in_single_mode(
+        &self,
+        ctx: &mut teksilo_core::build_context::BuildContext,
+    ) {
+        let Some(selection) = self.row_selection.clone() else {
+            return;
+        };
+        if selection.mode() != teksilo_data::SelectionMode::Single {
+            return;
+        }
+        let focused_index = self.focused_index.clone();
+        let focused_anchor = self.focused_anchor.clone();
+        let observed = selection.clone();
+        let handle = observed.observe_for_rebuild(move || {
+            hand_the_cursor_to_the_selection(&selection, &focused_index, &focused_anchor);
+        });
+        ctx.own_handle(handle);
+    }
+
     /// Scroll the row the keyboard is on into view when this tree takes focus.
     ///
     /// Only the rows near the viewport are realized, so on a tree taller than
@@ -74,6 +101,27 @@ impl<T: 'static> TreeView<T> {
                 scroll_y.set(target);
             }
         });
+    }
+}
+
+/// In a single selection, clear a keyboard cursor that is off the selection,
+/// so every reader falls back to the first selected row.
+///
+/// The cursor is cleared with its identity anchor, or the next source version
+/// bump would resolve the anchor and put the stale row back. A selection with
+/// no row this view shows — emptied, or keyed on a node inside a collapsed
+/// branch — leaves the cursor alone: there is no row to hand it to.
+fn hand_the_cursor_to_the_selection(
+    selection: &crate::data_views::RowSelection,
+    focused_index: &Cell<Option<usize>>,
+    focused_anchor: &RefCell<Option<crate::data_views::RowAnchor>>,
+) {
+    if let Some(index) = focused_index.get()
+        && !selection.is_selected(index)
+        && !selection.selected_indices().is_empty()
+    {
+        focused_index.set(None);
+        *focused_anchor.borrow_mut() = None;
     }
 }
 
@@ -145,6 +193,7 @@ impl<T: 'static> Widget for TreeView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        self.follow_the_selection_in_single_mode(ctx);
         self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
@@ -220,6 +269,7 @@ impl<T: 'static> Widget for TreeView<T> {
                         }
                     }
                 }
+
                 let next = dv.get() + 1;
                 dv.set(next);
                 ver.set(next);
@@ -759,8 +809,9 @@ impl<T: 'static> Widget for TreeView<T> {
                             }
                             Key::Space if modifiers.ctrl() => {
                                 // Ctrl+Space toggles the focused row's selection —
-                                // the keyboard equivalent of Ctrl+click. Pairs
-                                // with Ctrl+Arrow's cursor-only move so a user can
+                                // the keyboard equivalent of Ctrl+click. In a
+                                // multiple selection it pairs with Ctrl+Arrow's
+                                // cursor-only move so a user can
                                 // walk the cursor without disturbing the existing
                                 // selection, then Ctrl+Space to add rows one at a
                                 // time.
@@ -831,7 +882,8 @@ impl<T: 'static> Widget for TreeView<T> {
                         // edge-and-page keys carry their own answer from
                         // `list_nav`; the arrows keep reading literal `ctrl()`,
                         // which is what leaves ⌘↑/⌘↓ free for the macOS
-                        // aliases above.
+                        // aliases above. A single selection moves with the
+                        // cursor either way (`for_cardinality`).
                         let op = match nav {
                             Some(chord) => chord.selection,
                             None if modifiers.ctrl()
@@ -844,7 +896,7 @@ impl<T: 'static> Widget for TreeView<T> {
                             None => list_nav::SelectionOp::Replace,
                         };
                         if let Some(ref sel) = sel_for_key {
-                            match op {
+                            match op.for_cardinality(sel.mode().into()) {
                                 list_nav::SelectionOp::Replace => sel.select(idx),
                                 list_nav::SelectionOp::Suppress => {}
                                 list_nav::SelectionOp::Extend => sel.extend_to(idx),

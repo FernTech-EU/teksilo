@@ -239,7 +239,7 @@ rebuild when only the focus ring moves, etc.).
 | [`column_widths_signal`](../crates/teksilo-widgets/src/table_view.rs)      | `Signal<HashMap<String, f32>>`                | header drag-resize, `set_column_width`                    | `SettingsFile<T>` |
 | [`column_order_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Vec<String>>`                         | header drag-reorder, `set_column_order`                   | `SettingsStore` key (e.g. `table.order`) |
 | [`column_pinning_signal`](../crates/teksilo-widgets/src/table_view.rs)     | `Signal<HashMap<String, PinnedSide>>`         | drag across pane boundary, `set_column_pinning`           | `SettingsFile<T>` |
-| [`focused_cell_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Option<(usize, usize)>>`              | keyboard nav, `set_focused_cell`, `clear_focused_cell`    | (transient)     |
+| [`focused_cell_signal`](../crates/teksilo-widgets/src/table_view.rs)       | `Signal<Option<(usize, usize)>>`              | keyboard nav, `set_focused_cell`, `clear_focused_cell`, a selection change in a single-selection table | (transient)     |
 
 ### Persistence
 
@@ -493,11 +493,11 @@ clear behaviour).
 |-----------------------------|---------------------------------------------------------------------------------------|
 | Arrow keys                  | move focused cell within the visible grid                                             |
 | Home / End                  | cell modes: first / last column of the row. Row modes: first / last **row**            |
-| Ctrl-Home / Ctrl-End        | first / last row without moving the selection (a flat table in a cell mode jumps to the corner cell; `TreeTableView` keeps the column) |
+| Ctrl-Home / Ctrl-End        | first / last row without moving a selection that can hold several rows or cells; a single one follows the cursor (a flat table in a cell mode jumps to the corner cell; `TreeTableView` keeps the column) |
 | PgUp / PgDn                 | scroll one page; focus moves the same number of rows                                  |
 | Tab / Shift+Tab             | next / previous cell in row order, wrapping rows (configurable via `tab_traversal`)   |
 | Shift + Arrow               | extend selection in `MultiRow` / `MultiCell` modes                                    |
-| Ctrl + Arrow                | move the focused cell without touching the selection                                  |
+| Ctrl + Arrow                | move the focused cell without touching a selection that can hold several rows or cells; a single one follows the cursor |
 | Ctrl-Tab / Ctrl-Shift-Tab   | leave the table (next / previous focusable widget) — the escape from cell traversal   |
 | Space                       | check the focused cell if it holds a checkbox, else toggle selection at focus          |
 | Ctrl-Space / Shift-Space    | `MultiCell`: select the column / the row (Excel and the ARIA grid pattern)             |

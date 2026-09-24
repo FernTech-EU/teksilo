@@ -1176,6 +1176,319 @@ fn ctrl_home_end_jump_to_corners_in_a_cell_grid() {
     assert_eq!(read_focused_cell(&tree, table), Some((0, 0)));
 }
 
+/// A row table over `n` rows in `mode`, holding a `model_mode` selection
+/// model, focused on `row` with that row selected.
+fn row_table(
+    n: u32,
+    mode: TableSelectionMode,
+    model_mode: teksilo_data::SelectionMode,
+    row: usize,
+) -> (WidgetTree, WidgetId, teksilo_data::SelectionModel) {
+    let sel = teksilo_data::SelectionModel::new(model_mode);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(n))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(mode)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, row, 0);
+    sel.select(row);
+    (tree, table, sel)
+}
+
+/// In a table that holds one row the accelerator has nothing to assemble, so
+/// every navigation chord moves the selection with the cursor — the arrows,
+/// which read literal Control, and the edge-and-page keys, which read the
+/// platform accelerator. The row announced stays the row selected.
+#[test]
+fn a_single_row_table_moves_the_selection_with_every_navigation_chord() {
+    let (mut tree, table, sel) =
+        row_table(30, TableSelectionMode::SingleRow, SelectionMode::Single, 3);
+
+    // Each chord moves from where the previous one left the two, so every
+    // press has somewhere to go.
+    for (key, mods) in [
+        (Key::ArrowDown, Modifiers::CTRL),
+        (Key::End, Modifiers::COMMAND),
+        (Key::ArrowUp, Modifiers::CTRL),
+        (Key::Home, Modifiers::COMMAND),
+        (Key::PageDown, Modifiers::COMMAND),
+        (Key::PageUp, Modifiers::COMMAND),
+    ] {
+        let before = sel.selected_indices();
+        tree.press_key(key, mods);
+        let selected = sel.selected_indices();
+        assert_ne!(
+            selected, before,
+            "{key:?} with {mods:?} moves the selection"
+        );
+        let cursor_row = read_focused_cell(&tree, table).map(|(row, _)| row);
+        assert_eq!(
+            selected,
+            cursor_row.into_iter().collect::<Vec<_>>(),
+            "onto the cursor's row, after {key:?}"
+        );
+    }
+}
+
+/// The mode and the model are set separately, so either can hold a table to
+/// one row. A table left in its default `MultiRow` can be handed a `Single`
+/// model, which holds one row whatever the mode says; a `SingleRow` table
+/// holds one whatever its model allows. The accelerator reads both that way.
+#[test]
+fn a_table_whose_mode_or_model_holds_one_row_moves_the_selection_with_the_cursor() {
+    for (mode, model_mode) in [
+        (TableSelectionMode::MultiRow, SelectionMode::Single),
+        (TableSelectionMode::SingleRow, SelectionMode::Multi),
+    ] {
+        let (mut tree, table, sel) = row_table(10, mode, model_mode, 3);
+        tree.press_key(Key::End, Modifiers::COMMAND);
+        assert_eq!(read_focused_cell(&tree, table), Some((9, 0)));
+        assert_eq!(
+            sel.selected_indices(),
+            vec![9],
+            "a {mode:?} table over a {model_mode:?} model"
+        );
+    }
+}
+
+/// A cell table in `mode` over five rows and two columns, holding a
+/// `model_mode` cell model, focused on (2, 1) with that cell selected.
+fn cell_table(
+    mode: TableSelectionMode,
+    model_mode: TableSelectionMode,
+) -> (WidgetTree, WidgetId, super::CellSelectionModel) {
+    let cs = super::CellSelectionModel::new(model_mode);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(mode)
+            .cell_selection(cs.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 2, 1);
+    cs.select(2, 1);
+    (tree, table, cs)
+}
+
+fn selected_cells(cs: &super::CellSelectionModel) -> Vec<(usize, usize)> {
+    cs.selection_signal().get().into_iter().collect()
+}
+
+/// A single-cell table the same way, where the accelerator still escalates
+/// `Home` to the corner and all four arrows move the cell cursor.
+#[test]
+fn a_single_cell_table_moves_the_selected_cell_with_the_cursor() {
+    let (mut tree, table, cs) = cell_table(
+        TableSelectionMode::SingleCell,
+        TableSelectionMode::SingleCell,
+    );
+
+    // Each chord moves from where the previous one left the two.
+    for (key, mods, cell) in [
+        (Key::Home, Modifiers::COMMAND, (0, 0)),
+        (Key::ArrowRight, Modifiers::CTRL, (0, 1)),
+        (Key::ArrowDown, Modifiers::CTRL, (1, 1)),
+        (Key::ArrowLeft, Modifiers::CTRL, (1, 0)),
+        (Key::ArrowUp, Modifiers::CTRL, (0, 0)),
+    ] {
+        tree.press_key(key, mods);
+        assert_eq!(read_focused_cell(&tree, table), Some(cell), "{key:?}");
+        assert_eq!(selected_cells(&cs), vec![cell], "{key:?} selects the cell");
+    }
+}
+
+/// And the cell twin of the row case: a table whose mode or whose cell model
+/// holds one cell moves that cell with the cursor.
+#[test]
+fn a_table_whose_mode_or_model_holds_one_cell_moves_the_selection_with_the_cursor() {
+    for (mode, model_mode) in [
+        (
+            TableSelectionMode::MultiCell,
+            TableSelectionMode::SingleCell,
+        ),
+        (
+            TableSelectionMode::SingleCell,
+            TableSelectionMode::MultiCell,
+        ),
+    ] {
+        let (mut tree, table, cs) = cell_table(mode, model_mode);
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        assert_eq!(read_focused_cell(&tree, table), Some((3, 1)));
+        assert_eq!(
+            selected_cells(&cs),
+            vec![(3, 1)],
+            "a {mode:?} table over a {model_mode:?} cell model"
+        );
+    }
+}
+
+/// A selection the application writes moves the table's cell cursor onto it,
+/// in a single-row table, keeping the cursor's column. The cursor is the
+/// table's active descendant, so a screen reader follows it there. A table
+/// that holds several rows keeps its cursor where the user left it.
+#[test]
+fn a_selection_set_from_outside_moves_the_table_cursor_in_single_mode() {
+    let (mut tree, table, sel) =
+        row_table(10, TableSelectionMode::SingleRow, SelectionMode::Single, 3);
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((3, 1)));
+
+    sel.select(7);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((7, 1)),
+        "the cursor is on the selected row, in the same column"
+    );
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![8]);
+
+    let (mut tree, table, sel) =
+        row_table(10, TableSelectionMode::MultiRow, SelectionMode::Multi, 3);
+    sel.select(7);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((3, 0)),
+        "a multi-row cursor stays"
+    );
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![4]);
+}
+
+/// A table in `TableSelectionMode::None` selects nothing of its own, so a
+/// model it is handed — one another view drives, say — does not move its
+/// cursor.
+#[test]
+fn a_table_that_selects_nothing_leaves_its_cursor_alone() {
+    let (tree, table, sel) = row_table(10, TableSelectionMode::None, SelectionMode::Single, 3);
+    sel.select(7);
+    assert_eq!(read_focused_cell(&tree, table), Some((3, 0)));
+}
+
+/// A single-cell table moves its cursor onto a cell the application selects.
+#[test]
+fn a_cell_set_from_outside_moves_the_table_cursor_in_single_mode() {
+    let (tree, table, cs) = cell_table(
+        TableSelectionMode::SingleCell,
+        TableSelectionMode::SingleCell,
+    );
+    cs.select(4, 0);
+    assert_eq!(read_focused_cell(&tree, table), Some((4, 0)));
+}
+
+/// The cell twin of the grid's redirect case: the table reads the live cell
+/// selection, not the value a notification carries, because an observer
+/// registered before it may have rewritten the selection in between.
+#[test]
+fn a_redirected_cell_selection_takes_the_table_cursor_where_it_ended() {
+    let cs = super::CellSelectionModel::new(TableSelectionMode::SingleCell);
+    let redirect_to = cs.clone();
+    let _redirect = cs.selection_signal().observe(move |selected| {
+        if selected.contains(&(4, 0)) {
+            redirect_to.select(3, 1);
+        }
+    });
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleCell)
+            .cell_selection(cs.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 2, 1);
+    cs.select(2, 1);
+
+    cs.select(4, 0);
+    assert_eq!(selected_cells(&cs), vec![(3, 1)]);
+    assert_eq!(read_focused_cell(&tree, table), Some((3, 1)));
+}
+
+/// A keyed selection follows its row through a sort without being written, so
+/// no selection observer hears it. The table's data observer puts the cursor
+/// back on it, or the table would announce whatever row the sort moved under
+/// the cursor.
+#[test]
+fn a_keyed_single_row_table_keeps_its_cursor_on_the_selection_through_a_sort() {
+    use teksilo_data::{KeyedSelectionModel, SortFilterListModel};
+    let proxy = SortFilterListModel::new(rows(10))
+        .with_comparator("id", |a: &Row, b: &Row| a.id.cmp(&b.id));
+    let keyed = KeyedSelectionModel::<usize>::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::from_source_keyed(proxy.clone(), keyed.clone())
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleRow),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 3, 1);
+    keyed.select(3);
+
+    proxy.set_sort(Some("id"), SortDirection::Descending);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((6, 1)),
+        "row id 3 sorts to position 6, and the cursor goes with it"
+    );
+}
+
+/// A table never shifted its cursor on a data change. In a single-row table
+/// it now follows the selection, which the model shifts past an insert above
+/// it, so the cursor stays on its row.
+#[test]
+fn an_insert_above_the_cursor_brings_it_along_in_a_single_row_table() {
+    let model = rows(10);
+    let sel = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(model.clone())
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 3, 0);
+    sel.select(3);
+
+    model.insert(
+        0,
+        Row {
+            id: 99,
+            name: "new".into(),
+        },
+    );
+    assert_eq!(sel.selected_indices(), vec![4]);
+    assert_eq!(read_focused_cell(&tree, table), Some((4, 0)));
+}
+
 #[test]
 fn the_accelerator_moves_the_row_cursor_without_selecting() {
     use teksilo_data::{SelectionMode, SelectionModel};

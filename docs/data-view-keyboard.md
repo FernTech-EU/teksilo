@@ -8,8 +8,8 @@ The five data views — [`ListView`](../crates/teksilo-widgets/src/list_view.rs)
 [`TableView`](../crates/teksilo-widgets/src/table_view.rs),
 [`TreeTableView`](../crates/teksilo-widgets/src/tree_table_view.rs) and
 [`GridView`](../crates/teksilo-widgets/src/grid_view.rs) — answer one keyboard
-contract. This page is that contract, plus the two places Teksilo knowingly
-departs from a platform and why.
+contract. This page is that contract, plus the three places Teksilo knowingly
+departs from a platform, a toolkit or an ARIA pattern, and why.
 
 The chord table itself lives in one module,
 [`common/list_nav.rs`](../crates/teksilo-widgets/src/common/list_nav.rs), as
@@ -26,11 +26,11 @@ as `Linear`.
 | Chord | Linear | TileGrid | CellGrid |
 |---|---|---|---|
 | `Home` / `End` | first / last item | first / last item | first / last cell **of the row** |
-| `Ctrl`+`Home` / `End` | the same, selection untouched | the same, selection untouched | the corner (`TableView`) or the same column (`TreeTableView`), selection untouched |
+| `Ctrl`+`Home` / `End` | the same, selection untouched¹ | the same, selection untouched¹ | the corner (`TableView`) or the same column (`TreeTableView`), selection untouched¹ |
 | `PageUp` / `PageDown` | ± one viewport of rows | ± one viewport of rows | ± one viewport of rows, column kept |
 | `Shift`+*any of the above* | extend from the anchor | " | " |
 | `Ctrl`+`Shift`+*any* | extend **additively** | " | " |
-| `Ctrl`+`↑`/`↓` | move the cursor only | move the cursor only | move the cursor only |
+| `Ctrl`+`↑`/`↓` | move the cursor only¹ | move the cursor only¹ | move the cursor only¹ |
 | `Space` | **check the row** if it has a checkbox, else toggle (Multi) / select (Single) | **check the tile** if it has a checkbox, else toggle (Multi) / select (Single) | **check the cell** if it has a checkbox, else toggle its selection |
 | `Ctrl`+`Space` | toggle the focused row | toggle the focused tile | **select the column** (`MultiCell`) |
 | `Shift`+`Space` | — | — | **select the row** (`MultiCell`) |
@@ -41,16 +41,49 @@ as `Linear`.
 | `*` / `+` / `-` | tree only: expand the subtree / one level / collapse | — | tree table: the same |
 | `←` / `→` | tree only: collapse-or-ascend / expand-then-descend | ±1 tile | ±1 cell (tree column: expand / collapse) |
 
+¹ In a multiple selection. A single selection moves with the cursor on every
+navigation key; see the next section.
+
 ### The modifier rules, stated once
 
-**`Ctrl` (⌘ on macOS) on a navigation key never changes the selection.** It may
-still change the *destination* — in a cell grid `Ctrl+Home` escalates from the
-row's start to the table's corner — but it always suppresses the selection
-update. GTK4's `GtkListBase` registers every navigation key with a
-`(select, modify, extend)` triple whose `modify` variant skips the selection
-call; Qt's `extendedSelectionCommand` returns `NoUpdate` for any navigation key
-with Control held. Teksilo's arrows already followed this rule; the edge and
+**In a multiple selection, `Ctrl` (⌘ on macOS) on a navigation key never
+changes the selection.** It may still change the *destination* — in a cell
+grid `Ctrl+Home` escalates from the row's start to the table's corner — but it
+suppresses the selection update. GTK4's `GtkListBase` registers every
+navigation key with a `(select, modify, extend)` triple, and its Control
+variant clears `select`, which skips the selection call; Qt's
+`extendedSelectionCommand` returns `NoUpdate` for any navigation key with
+Control held. Teksilo's arrows already followed this rule; the edge and
 page keys now do too, which makes it the general case rather than an exception.
+
+**In a single selection, every navigation key moves the selection with the
+cursor**, the accelerator included. Moving the cursor alone is there to
+assemble a multiple selection, one `Ctrl+Space` at a time. A view that holds
+one entry has nothing to assemble, and would be left with two current rows:
+the cursor, which the view publishes as its active descendant and a screen
+reader announces, and the selection, which the application's actions read.
+This is Qt's `SingleSelection`, whose `selectionCommand` answers a key press
+onto an unselected index with `ClearAndSelect`, Control held or not. The ARIA
+single-select listbox defines no Control chords, so nothing in it asks for a
+cursor-only move. It applies wherever the selection holds one entry: a
+`SelectionMode::Single` model, a `TableSelectionMode::SingleRow` or
+`SingleCell` table, and a `MultiRow` or `MultiCell` table handed a model that
+is itself single. GTK4 reads it differently; see the deviations below.
+
+**And the cursor moves with the selection.** A selection the application sets
+— a list landing on today's entry each time it takes focus, a model shifting
+the selected row past an insert — moves the cursor onto it, in the same views.
+Otherwise the row the user last reached would stay the one announced, and the
+next arrow key would start from it. A multiple selection keeps its cursor where
+the user left it, and so does a selection with no row the view shows (emptied,
+or keyed on a row this view filters out). A grid or a table with no cursor yet
+gets none this way; its cursor appears with the first key or click.
+
+One pairing still parts them: a `TreeView` over an index `SelectionModel`. A
+structural change — an insert above, an expand — carries no delta, so the
+cursor follows its row by identity while the selection keeps its position, as
+`TreeView::selection` documents. Use `keyed_selection` and both follow the
+row.
 
 ## A row's own controls
 
@@ -126,9 +159,9 @@ two answers differ, and the estimate drifts as measurements converge. Paging
 always moves at least one row, even when a single row is taller than the
 viewport.
 
-## Two deliberate deviations
+## Three deliberate deviations
 
-Both are recorded here so there is a link to hand whoever files them.
+All three are recorded here so there is a link to hand whoever files them.
 
 ### macOS: `Home`/`End`/`PageUp`/`PageDown` move the selection
 
@@ -159,6 +192,16 @@ Mac list those chords already mean parent and open, so binding them to the ends
 of the collection would collide with the platform rather than conform to it.
 `⌥→` is macOS-only for the mirror-image reason: on Windows `Alt+Right` is
 history-forward.
+
+### A single selection: the accelerator selects
+
+GTK4 does not. `GtkListBase` binds Control with every navigation key to a move
+that skips the selection, whatever the selection model, so a `GtkListView` over
+a `GtkSingleSelection` can walk its cursor away from the selected row. Teksilo
+keeps that move only where it assembles a multiple selection. In a single one
+it leaves a screen reader announcing a row that no action uses, and a
+`ListView` or `TreeView` row paints nothing to show where the cursor went.
+Teksilo follows Qt's `SingleSelection` instead, in all five views.
 
 ### `GridView`: `Home` ignores the ARIA grid rule
 
@@ -209,7 +252,10 @@ type-to-edit on bare letters, and the editor wins; the WinForms default
   only cell role AccessKit gives the UIA `SelectionItem` pattern.
 - Focus and selection are published as two independent facts. `Ctrl`+arrow
   exists precisely to make them disagree, and binding active-descendant to the
-  selection would hide disjoint selection from assistive technology.
+  selection would hide disjoint selection from assistive technology. In a
+  single selection neither a navigation key nor a selection the application
+  sets makes them disagree; the one pairing that still can is a `TreeView`
+  over an index selection, above.
 - All five views **advertise and** answer `Action::ScrollIntoView`, the one
   scroll action every AccessKit adapter consumes. Advertising is the load-bearing
   half: each adapter gates its scroll pattern on the node *supporting* the

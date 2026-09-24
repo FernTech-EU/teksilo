@@ -312,8 +312,9 @@ pub(crate) fn build_grid_key_handler(
                 }
                 Key::Space if modifiers.ctrl() => {
                     // Ctrl+Space toggles the focused tile's selection — the
-                    // keyboard equivalent of Ctrl+click. Pairs with
-                    // Ctrl+Arrow's cursor-only move so a user can walk the
+                    // keyboard equivalent of Ctrl+click. In a multiple
+                    // selection it pairs with Ctrl+Arrow's cursor-only move so
+                    // a user can walk the
                     // cursor without disturbing the existing selection,
                     // then Ctrl+Space to add tiles one at a time.
                     //
@@ -372,7 +373,9 @@ pub(crate) fn build_grid_key_handler(
         cfg.focused_index.set(Some(idx));
         // What the chord does to the selection. The edge-and-page keys carry
         // their own answer from `list_nav`, where the accelerator means "move
-        // the cursor, leave the selection alone".
+        // the cursor, leave the selection alone" — in a multiple selection. A
+        // single selection moves with the cursor (`for_cardinality`), whatever
+        // the chord.
         //
         // The arrows keep reading literal `ctrl()`: ⌘Space is Spotlight and
         // ⌘↑/⌘↓ mean something else in a Finder icon view, so this pair has no
@@ -395,7 +398,7 @@ pub(crate) fn build_grid_key_handler(
             None => list_nav::SelectionOp::Replace,
         };
         if let Some(ref sel) = cfg.selection {
-            match op {
+            match op.for_cardinality(sel.mode().into()) {
                 list_nav::SelectionOp::Replace => sel.select(idx),
                 list_nav::SelectionOp::Suppress => {}
                 list_nav::SelectionOp::Extend => sel.extend_to(idx),

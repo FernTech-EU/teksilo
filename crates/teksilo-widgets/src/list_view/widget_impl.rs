@@ -71,6 +71,7 @@ impl<T: 'static> Widget for ListView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        self.follow_the_selection_in_single_mode(ctx);
         self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
@@ -352,7 +353,17 @@ impl<T: 'static> Widget for ListView<T> {
                         && !modifiers.super_key()
                         && let Some(c) = key.to_char()
                     {
-                        let current = fi.get().unwrap_or(0).min(count - 1);
+                        // From the cursor, which is the selection when no key
+                        // has moved it — as every other reader of `fi` does.
+                        let current = fi
+                            .get()
+                            .or_else(|| {
+                                sel_for_key
+                                    .as_ref()
+                                    .and_then(|s| s.selected_indices().first().copied())
+                            })
+                            .unwrap_or(0)
+                            .min(count - 1);
                         let label = ta_label.as_ref().unwrap();
                         if let Some(idx) = ta_state.search(c, current, count, ta_timeout, |i| {
                             (with_item_str)(i, &|item| label(item))
@@ -497,11 +508,11 @@ impl<T: 'static> Widget for ListView<T> {
                                 // the keyboard equivalent of Ctrl+click. Distinct
                                 // from plain Space below: it always toggles (even
                                 // in Single mode, via `SelectionModel::toggle`'s
-                                // own Single-mode fallback to `select`), pairing
-                                // with Ctrl+Arrow's cursor-only move so a user can
-                                // walk the cursor without disturbing the existing
-                                // selection, then Ctrl+Space to add rows one at a
-                                // time.
+                                // own Single-mode fallback to `select`). In a
+                                // multiple selection it pairs with Ctrl+Arrow's
+                                // cursor-only move so a user can walk the cursor
+                                // without disturbing the existing selection, then
+                                // Ctrl+Space to add rows one at a time.
                                 //
                                 // Both halves stay on literal `ctrl()`, macOS
                                 // included: ⌘Space is Spotlight and never reaches
@@ -576,14 +587,18 @@ impl<T: 'static> Widget for ListView<T> {
                         // What the chord does to the selection. The edge-and-page
                         // keys carry their own answer from `list_nav`, where the
                         // accelerator means "move the cursor, leave the selection
-                        // alone" — the rule GTK4 and Qt both apply to *every*
-                        // navigation key.
+                        // alone" — the rule GTK4 applies to every navigation key,
+                        // and Qt in its multi-selection modes.
                         //
                         // The arrows keep reading literal `ctrl()` instead: ⌘↑/⌘↓
                         // already mean something else in a Finder list (see the
                         // Ctrl+Space arm above), so this pair has no ⌘ counterpart
                         // to move to. That asymmetry is deliberate — it is also
                         // what leaves ⌘↑/⌘↓ free for the macOS aliases.
+                        //
+                        // Either way a single selection moves with the cursor:
+                        // `for_cardinality` takes the cursor-only move away there,
+                        // so the row announced is always the row selected.
                         let op = match nav {
                             Some(chord) => chord.selection,
                             None if modifiers.ctrl()
@@ -596,7 +611,7 @@ impl<T: 'static> Widget for ListView<T> {
                             None => list_nav::SelectionOp::Replace,
                         };
                         if let Some(ref sel) = sel_for_key {
-                            match op {
+                            match op.for_cardinality(sel.mode().into()) {
                                 list_nav::SelectionOp::Replace => sel.select(idx),
                                 list_nav::SelectionOp::Suppress => {}
                                 list_nav::SelectionOp::Extend => sel.extend_to(idx),

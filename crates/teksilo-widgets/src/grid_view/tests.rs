@@ -616,50 +616,29 @@ fn ctrl_arrow_moves_cursor_without_selecting() {
     assert_eq!(selection.selected_indices(), vec![5]);
 }
 
+/// In a single selection the accelerator moves the selection with the cursor:
+/// there is nothing to assemble, and a cursor off the selection would be a
+/// second current tile. See the `ListView` twin.
 #[test]
-fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
-    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
-    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
-    let selection = SelectionModel::new(SelectionMode::Single);
-    let sel = selection.clone();
-    let mut tree = WidgetTree::new();
-    let id = tree.add(
-        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
-            .tile_size(100.0, 50.0)
-            .selection(sel),
-    );
-    tree.layout(SizeProposal::exact(400.0, 300.0));
-    tree.focus(id);
+fn ctrl_arrow_moves_the_selection_with_the_cursor_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, selection) = grid_keyboard_fixture(SelectionMode::Single);
 
-    tree.dispatch_event(WidgetEvent::KeyDown {
-        key: Key::ArrowRight,
-        modifiers: Modifiers::default(),
-        text: None,
-    });
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
     assert_eq!(selection.selected_indices(), vec![0]);
 
-    tree.dispatch_event(WidgetEvent::KeyDown {
-        key: Key::ArrowRight,
-        modifiers: Modifiers::CTRL,
-        text: None,
-    });
+    tree.press_key(Key::ArrowRight, Modifiers::CTRL);
     assert_eq!(
         selection.selected_indices(),
-        vec![0],
-        "Ctrl+ArrowRight must not select in Single mode either"
+        vec![1],
+        "Ctrl+ArrowRight selects in Single mode"
     );
-    let focused = tree
-        .widget_as_any(id)
-        .and_then(|any| any.downcast_ref::<GridView<usize>>())
-        .and_then(|g| g.focused_index.get());
-    assert_eq!(focused, Some(1));
+    assert_eq!(grid_focus(&tree, id), Some(1), "and the cursor is on it");
 
-    tree.dispatch_event(WidgetEvent::KeyDown {
-        key: Key::ArrowRight,
-        modifiers: Modifiers::default(),
-        text: None,
-    });
-    assert_eq!(selection.selected_indices(), vec![2]);
+    // The vertical pair too: one row of three columns down.
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![4]);
+    assert_eq!(grid_focus(&tree, id), Some(4));
 }
 
 #[test]
@@ -1573,6 +1552,129 @@ fn the_accelerator_moves_the_grid_cursor_without_selecting() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     assert_eq!(grid_focus(&tree, id), Some(29), "the cursor moved");
     assert_eq!(sel.selected_indices(), vec![13], "the selection did not");
+}
+
+/// The edge-and-page keys follow the same rule in a single selection.
+#[test]
+fn the_accelerator_moves_the_selection_with_the_grid_cursor_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, sel) = grid_keyboard_fixture(SelectionMode::Single);
+    sel.select(13);
+    let p = SizeProposal::exact(400.0, 300.0);
+    tree.layout(p);
+
+    for key in [Key::End, Key::Home, Key::PageDown, Key::PageUp] {
+        let before = sel.selected_indices();
+        tree.press_key(key, Modifiers::COMMAND);
+        tree.layout(p);
+        let selected = sel.selected_indices();
+        assert_ne!(
+            selected, before,
+            "the accelerator with {key:?} moves the selection"
+        );
+        assert_eq!(
+            selected,
+            grid_focus(&tree, id).into_iter().collect::<Vec<_>>(),
+            "onto the cursor's tile, after {key:?}"
+        );
+    }
+}
+
+/// A selection the application writes moves the grid cursor onto it, in a
+/// single selection — see the `ListView` twin. A grid publishes its cursor
+/// alone as the active descendant, so the cursor is moved, not cleared.
+#[test]
+fn a_selection_set_from_outside_moves_the_grid_cursor_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, sel) = grid_keyboard_fixture(SelectionMode::Single);
+    for _ in 0..3 {
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    }
+    assert_eq!(grid_focus(&tree, id), Some(2));
+
+    sel.select(7);
+    assert_eq!(
+        grid_focus(&tree, id),
+        Some(7),
+        "the cursor is on the selection"
+    );
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![8]);
+
+    // A multiple selection keeps its cursor where the user left it.
+    let (mut tree, id, sel) = grid_keyboard_fixture(SelectionMode::Multi);
+    for _ in 0..3 {
+        tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    }
+    sel.select(7);
+    assert_eq!(grid_focus(&tree, id), Some(2), "a Multi cursor stays");
+}
+
+/// An insert above the cursor shifts the cursor and the selection by the same
+/// one tile. The cursor is shifted before the selection, because shifting the
+/// selection puts the cursor on it in a single selection — shifted after, it
+/// would move twice.
+#[test]
+fn an_insert_above_the_cursor_shifts_it_once_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model.clone(), |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    for key in [Key::ArrowRight, Key::ArrowDown, Key::ArrowRight] {
+        tree.press_key(key, Modifiers::NONE);
+    }
+    let before = grid_focus(&tree, id).expect("a cursor");
+    assert!(before > 0, "the cursor has left the first tile");
+    assert_eq!(selection.selected_indices(), vec![before]);
+
+    model.insert(0, 100);
+    assert_eq!(selection.selected_indices(), vec![before + 1]);
+    assert_eq!(
+        grid_focus(&tree, id),
+        Some(before + 1),
+        "the cursor moved once"
+    );
+}
+
+/// An observer registered before the grid may rewrite the selection while it
+/// is being notified — a redirect, a normaliser. The notification it
+/// interrupted still reaches the grid afterwards, carrying the discarded
+/// value, so the grid reads the live selection: read from the notification,
+/// the cursor would land on the tile nothing selects.
+#[test]
+fn a_redirected_selection_takes_the_grid_cursor_where_it_ended() {
+    use teksilo_core::event::{Key, Modifiers};
+    let model = ListModel::from_vec((0..30).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let redirect_to = selection.clone();
+    let _redirect = selection.selection_signal().observe(move |selected| {
+        if selected.contains(&7) {
+            redirect_to.select(8);
+        }
+    });
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+
+    selection.select(7);
+    assert_eq!(selection.selected_indices(), vec![8]);
+    assert_eq!(grid_focus(&tree, id), Some(8));
 }
 
 #[test]

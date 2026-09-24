@@ -16,7 +16,11 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
+use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
+
+use crate::common::list_nav::Cardinality;
+use crate::data_views::RowSelection;
 
 /// Selection mode for a `TableView` or `TreeTableView`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -44,6 +48,125 @@ impl TableSelectionMode {
     /// Whether the mode allows more than one entry to be selected.
     pub fn is_multi(self) -> bool {
         matches!(self, Self::MultiRow | Self::MultiCell)
+    }
+}
+
+/// How many rows or cells a table's selection can hold.
+///
+/// The mode and the model are set separately, so either can hold the table
+/// to one entry: a `SingleRow` or `SingleCell` table holds one whatever its
+/// model allows, and a `MultiRow` or `MultiCell` table handed a model that is
+/// itself single holds one row or cell whatever the mode claims — which is how
+/// the key handler's `apply_selection_extension` already reads a `MultiRow`
+/// table.
+pub(crate) fn cardinality(
+    mode: TableSelectionMode,
+    selection: Option<&RowSelection>,
+    cell_selection: Option<&CellSelectionModel>,
+) -> Cardinality {
+    let multi = match mode {
+        TableSelectionMode::MultiRow => {
+            selection.is_none_or(|s| s.mode() == teksilo_data::SelectionMode::Multi)
+        }
+        TableSelectionMode::MultiCell => cell_selection.is_none_or(|cs| cs.mode().is_multi()),
+        TableSelectionMode::SingleRow
+        | TableSelectionMode::SingleCell
+        | TableSelectionMode::None => false,
+    };
+    if multi {
+        Cardinality::Multi
+    } else {
+        Cardinality::Single
+    }
+}
+
+/// In a table whose selection holds one entry, put the cell cursor back on
+/// the selection whenever the selection moves without it.
+///
+/// `ListView::follow_the_selection_in_single_mode` states the defect: a
+/// selection written from outside left the cursor, which the view publishes
+/// as its active descendant, on a row no action used. The observers
+/// registered here catch a selection the application writes. A data change
+/// that moves the selected row without writing the selection — a keyed
+/// selection carried through a sort or an insert above it — is caught by each
+/// table's own data observer, which calls [`put_the_cursor_on_the_selection`]
+/// after adjusting the selection.
+///
+/// A table in `TableSelectionMode::None` selects nothing of its own and is
+/// left alone, whatever model it is handed.
+pub(crate) fn follow_the_selection_in_single_mode(
+    ctx: &mut BuildContext,
+    mode: TableSelectionMode,
+    focused_cell: &Signal<Option<(usize, usize)>>,
+    selection: Option<&RowSelection>,
+    cell_selection: Option<&CellSelectionModel>,
+) {
+    if mode == TableSelectionMode::None
+        || cardinality(mode, selection, cell_selection) != Cardinality::Single
+    {
+        return;
+    }
+    let focused = focused_cell.clone();
+    let rows = selection.cloned();
+    let cells = cell_selection.cloned();
+    let follow = move || {
+        put_the_cursor_on_the_selection(mode, &focused, rows.as_ref(), cells.as_ref());
+    };
+    if mode.is_cell_mode() {
+        if let Some(cells) = cell_selection {
+            ctx.effect(&cells.selection_signal(), move |_| follow());
+        }
+    } else if let Some(rows) = selection {
+        let handle = rows.observe_for_rebuild(follow);
+        ctx.own_handle(handle);
+    }
+}
+
+/// If the table holds one entry and its cell cursor is off the selection,
+/// move the cursor onto it.
+///
+/// Moved rather than cleared: a table publishes `focused_cell` alone as its
+/// active descendant, with no fallback to the selection, so a cleared cursor
+/// would leave a screen reader told nothing. A row selection keeps the
+/// cursor's column. A cursor that does not exist yet, or a selection with no
+/// row this table shows, leaves the cursor as it is.
+///
+/// The selection is read live, never from a notification's value: an
+/// observer registered earlier may rewrite the selection while it is being
+/// notified, and the notification it interrupted still arrives afterwards,
+/// carrying the value that was just discarded.
+pub(crate) fn put_the_cursor_on_the_selection(
+    mode: TableSelectionMode,
+    focused_cell: &Signal<Option<(usize, usize)>>,
+    selection: Option<&RowSelection>,
+    cell_selection: Option<&CellSelectionModel>,
+) {
+    if mode == TableSelectionMode::None
+        || cardinality(mode, selection, cell_selection) != Cardinality::Single
+    {
+        return;
+    }
+    let Some((row, col)) = focused_cell.get() else {
+        return;
+    };
+    if mode.is_cell_mode() {
+        let Some(cells) = cell_selection else {
+            return;
+        };
+        if !cells.is_selected(row, col)
+            && let Some(&cell) = cells.selection_signal().get().iter().next()
+        {
+            focused_cell.set(Some(cell));
+        }
+    } else {
+        let Some(rows) = selection else {
+            return;
+        };
+        if !rows.is_selected(row)
+            && let Some(&selected) = rows.selected_indices().first()
+        {
+            focused_cell.set(Some((selected, col)));
+        }
     }
 }
 

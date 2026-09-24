@@ -554,8 +554,11 @@ fn ctrl_arrow_moves_cursor_without_selecting_in_multi_mode() {
     assert_eq!(selection.selected_indices(), vec![3]);
 }
 
+/// In a single selection the accelerator moves the selection with the cursor:
+/// there is nothing to assemble, and a cursor off the selection would be a
+/// second current row. See the `ListView` twin.
 #[test]
-fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
+fn ctrl_arrow_moves_the_selection_with_the_cursor_in_single_mode() {
     use teksilo_core::event::{Key, Modifiers};
     let (mut wtree, tv, selection) = flat_tree_view(6, teksilo_data::SelectionMode::Single);
     wtree.layout(SizeProposal::exact(400.0, 300.0));
@@ -567,17 +570,135 @@ fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
     wtree.press_key(Key::ArrowDown, Modifiers::CTRL);
     assert_eq!(
         selection.selected_indices(),
-        vec![0],
-        "Ctrl+ArrowDown must not select in Single mode either"
+        vec![1],
+        "Ctrl+ArrowDown selects in Single mode"
     );
     let focused = wtree
         .widget_as_any(tv)
         .and_then(|any| any.downcast_ref::<TreeView<String>>())
         .and_then(|v| v.focused_index.get());
-    assert_eq!(focused, Some(1));
+    assert_eq!(focused, Some(1), "and the cursor is on the selected row");
 
-    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    wtree.press_key(Key::ArrowUp, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0]);
+}
+
+/// The edge-and-page keys follow the same rule in a single selection.
+#[test]
+fn the_accelerator_moves_the_selection_with_the_cursor_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut wtree, tv, selection) = flat_tree_view(60, teksilo_data::SelectionMode::Single);
+    let p = SizeProposal::exact(400.0, 300.0);
+    wtree.layout(p);
+    wtree.focus(tv);
+    selection.select(30);
+
+    for key in [Key::End, Key::Home, Key::PageDown, Key::PageUp] {
+        let before = selection.selected_indices();
+        wtree.press_key(key, Modifiers::COMMAND);
+        wtree.layout(p);
+        let selected = selection.selected_indices();
+        assert_ne!(
+            selected, before,
+            "the accelerator with {key:?} moves the selection"
+        );
+        let focused = wtree
+            .widget_as_any(tv)
+            .and_then(|any| any.downcast_ref::<TreeView<String>>())
+            .and_then(|v| v.focused_index.get());
+        assert_eq!(
+            selected,
+            focused.into_iter().collect::<Vec<_>>(),
+            "onto the cursor's row, after {key:?}"
+        );
+    }
+}
+
+/// A selection the application writes moves the keyboard cursor with it, in a
+/// single selection — see the `ListView` twin. The tree also clears the
+/// cursor's identity anchor, or the next source version bump would resolve
+/// the anchor and put the stale row back; the root added below is that bump.
+#[test]
+fn a_selection_set_from_outside_moves_the_cursor_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+    let model = TreeModel::new();
+    for i in 0..10 {
+        model.insert_root(i, format!("Node {i}"));
+    }
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new(model.clone(), |_item, _entry, _sel| {
+            Box::new(FixedLeaf(120.0, 20.0))
+        })
+        .item_height(20.0)
+        .selection(sel),
+    );
+    let p = SizeProposal::exact(400.0, 300.0);
+    wtree.layout(p);
+    wtree.focus(tv);
+    for _ in 0..3 {
+        wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    }
     assert_eq!(selection.selected_indices(), vec![2]);
+
+    selection.select(7);
+    model.insert_root(10, "Node 10".to_string());
+    wtree.layout(p);
+    let focused = wtree
+        .widget_as_any(tv)
+        .and_then(|any| any.downcast_ref::<TreeView<String>>())
+        .and_then(|v| v.focused_index.get());
+    assert_ne!(focused, Some(2), "the stale cursor must not come back");
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![8],
+        "the keyboard continues from the application's selection"
+    );
+}
+
+/// A keyed selection on a node inside a collapsed branch has no row this tree
+/// shows, so there is nowhere to hand the cursor: it stays where the user
+/// left it, and the next arrow steps from there.
+#[test]
+fn a_keyed_selection_on_a_collapsed_node_leaves_the_tree_cursor_alone() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{KeyedSelectionModel, SelectionMode};
+    let model = TreeModel::new();
+    let roots: Vec<_> = (0..5)
+        .map(|i| model.insert_root(i, format!("Root {i}")))
+        .collect();
+    let hidden = model.insert_child(roots[1], 0, "Child".to_string());
+    let keyed = KeyedSelectionModel::new(SelectionMode::Single);
+    let mut wtree = WidgetTree::new();
+    let tv = wtree.add(
+        TreeView::new(model.clone(), |_item, _entry, _sel| {
+            Box::new(FixedLeaf(120.0, 20.0))
+        })
+        .item_height(20.0)
+        .keyed_selection(keyed.clone()),
+    );
+    wtree.layout(SizeProposal::exact(400.0, 300.0));
+    wtree.focus(tv);
+    for _ in 0..3 {
+        wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    }
+    assert_eq!(
+        keyed.selected_keys(),
+        vec![roots[2]],
+        "precondition: R1 is collapsed"
+    );
+
+    keyed.select(hidden);
+    wtree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        keyed.selected_keys(),
+        vec![roots[3]],
+        "the row after the cursor, not the first row"
+    );
 }
 
 #[test]

@@ -1080,6 +1080,10 @@ impl<T: 'static> TreeTableView<T> {
     }
 
     /// Keyboard-focused cell as `(row, display_column_index)`, or `None`.
+    ///
+    /// In a tree table whose selection holds one row or cell, a selection
+    /// change that leaves an existing cursor off the selection moves the
+    /// cursor onto it.
     pub fn focused_cell_signal(&self) -> &Signal<Option<(usize, usize)>> {
         &self.focused_cell
     }

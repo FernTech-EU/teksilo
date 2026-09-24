@@ -48,16 +48,20 @@
 //! sits on the container because AccessKit resolves an item's set size by
 //! walking up from it, unlike ARIA's per-item `aria-setsize`.
 //!
-//! The container is the focusable node and rows deliberately are not, so
-//! `set_selected` is the only signal telling assistive technology which row is
-//! current — and the row subtree is kept out of the Tab order, so a control the
-//! delegate puts in a row (the checkbox `StandardListItem` embeds, most often)
-//! never becomes a Tab stop of its own. Such a control publishes a keyboard
-//! toggle instead, which `Space` runs. Full keyboard navigation: arrows, Home,
-//! End, PageUp, PageDown (each moving the selection, or only the cursor when
-//! the accelerator is held), Shift for a range and Ctrl+Shift for an additive
-//! one, Space (checks the row when it carries a checkbox, else select/toggle),
-//! Enter (activate), Ctrl+A / Ctrl+Shift+A (select all /
+//! The container is the focusable node and rows deliberately are not. The
+//! container names the cursor's row as its active descendant, which is the row
+//! assistive technology calls current, and each row says through
+//! `set_selected` whether it is selected. In a single selection the two are one
+//! row: the keys move them together, and a selection the application sets
+//! moves the cursor onto it. The row subtree is kept out of the Tab order, so a
+//! control the delegate puts in a row (the checkbox `StandardListItem` embeds,
+//! most often) never becomes a Tab stop of its own. Such a control publishes a
+//! keyboard toggle instead, which `Space` runs. Full
+//! keyboard navigation: arrows, Home, End, PageUp, PageDown (each moving the
+//! selection; in a multiple selection, Ctrl on an arrow or the accelerator on
+//! the others moves only the cursor), Shift for a range and Ctrl+Shift for an
+//! additive one, Space (checks the row when it carries a checkbox, else
+//! select/toggle), Enter (activate), Ctrl+A / Ctrl+Shift+A (select all /
 //! deselect), Ctrl+Arrow and Ctrl+Space (the disjoint-selection pair),
 //! type-ahead (opt-in via `type_ahead_label`), and Shift+F10 or the Menu key
 //! for the selected row's context menu. On macOS, Cmd+Down opens the focused
@@ -501,6 +505,50 @@ impl<T: 'static> ListView<T> {
     pub fn selection(mut self, sel: SelectionModel) -> Self {
         self.row_selection = Some(RowSelection::from_index(sel));
         self
+    }
+
+    /// In a single selection, hand the keyboard cursor back to the selection
+    /// whenever the selection moves without it.
+    ///
+    /// The view's own keys, clicks and actions move the two together. A
+    /// selection written from outside does not — an application landing on a
+    /// row as the list takes focus, a model re-sourcing its selection — and
+    /// `focused_index` stayed on the row the user last reached. The view
+    /// publishes that row as its active descendant, so a screen reader went on
+    /// announcing it as current while every action read the selection, and the
+    /// next arrow press stepped from a row nobody was on.
+    ///
+    /// Cleared rather than overwritten: every reader of `focused_index` falls
+    /// back to the first selected row, so `None` makes the selection the
+    /// cursor. The cursor is left alone when there is no row to hand it to —
+    /// an emptied selection, or a keyed one on a row this view does not show
+    /// (filtered out here, visible in another view sharing the model) — and in
+    /// a multiple selection, where walking the cursor away from the selection
+    /// is how one is assembled.
+    ///
+    /// Registered before [`Self::reveal_current_row_on_focus`], whose own
+    /// selection observer reads the cursor and must find the one resynced here.
+    fn follow_the_selection_in_single_mode(
+        &self,
+        ctx: &mut teksilo_core::build_context::BuildContext,
+    ) {
+        let Some(selection) = self.row_selection.clone() else {
+            return;
+        };
+        if selection.mode() != teksilo_data::SelectionMode::Single {
+            return;
+        }
+        let focused_index = self.focused_index.clone();
+        let observed = selection.clone();
+        let handle = observed.observe_for_rebuild(move || {
+            if let Some(index) = focused_index.get()
+                && !selection.is_selected(index)
+                && !selection.selected_indices().is_empty()
+            {
+                focused_index.set(None);
+            }
+        });
+        ctx.own_handle(handle);
     }
 
     /// Keep the row the keyboard is on inside the realized window.

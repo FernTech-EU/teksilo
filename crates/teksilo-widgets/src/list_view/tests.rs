@@ -1302,8 +1302,8 @@ fn the_accelerator_moves_the_cursor_without_disturbing_the_selection() {
     selection.select(40);
 
     // Ctrl/⌘+End walks the cursor to the last row and leaves row 40 picked
-    // — the rule GTK4 and Qt apply to every navigation key, and the one
-    // Ctrl+Arrow already followed here.
+    // — the rule GTK4 applies to every navigation key and Qt in its
+    // multi-selection modes, and the one Ctrl+Arrow already followed here.
     tree.press_key(Key::End, Modifiers::COMMAND);
     tree.layout(p);
     assert_eq!(selection.selected_indices(), vec![40]);
@@ -1515,8 +1515,12 @@ fn ctrl_arrow_moves_cursor_without_selecting_in_multi_mode() {
     assert_eq!(selection.selected_indices(), vec![3]);
 }
 
+/// In a single selection the accelerator has nothing to assemble, so it moves
+/// the selection with the cursor rather than leaving a second current row
+/// behind it: the row the view announces stays the row every action reads.
+/// A multiple selection keeps its cursor-only walk (the test above).
 #[test]
-fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
+fn ctrl_arrow_moves_the_selection_with_the_cursor_in_single_mode() {
     use teksilo_core::event::{Key, Modifiers};
     use teksilo_data::{SelectionMode, SelectionModel};
 
@@ -1538,14 +1542,246 @@ fn ctrl_arrow_moves_cursor_without_selecting_in_single_mode() {
     tree.press_key(Key::ArrowDown, Modifiers::CTRL);
     assert_eq!(
         selection.selected_indices(),
-        vec![0],
-        "Ctrl+ArrowDown must not select in Single mode either"
+        vec![1],
+        "Ctrl+ArrowDown selects in Single mode"
     );
     let focused = with_list_view::<usize, _>(&tree, lv, |v| v.focused_index.get());
-    assert_eq!(focused, Some(1));
+    assert_eq!(focused, Some(1), "and the cursor is on the selected row");
 
+    tree.press_key(Key::ArrowUp, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0]);
+}
+
+/// The edge-and-page keys follow the same rule: in a single selection the
+/// accelerator moves the selection with the cursor. Pressed with
+/// `Modifiers::COMMAND`, which is what `list_nav` reads for this family (⌘ on
+/// macOS), so the test states the rule on every platform.
+#[test]
+fn the_accelerator_moves_the_selection_with_the_cursor_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let model = ListModel::from_vec((0..100usize).collect());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+            .item_height(20.0)
+            .selection(sel),
+    );
+    let p = SizeProposal::exact(400.0, 200.0);
+    tree.layout(p);
+    tree.focus(lv);
+    selection.select(40);
+
+    // Each key moves from where the previous one left the two, so every
+    // press has somewhere to go.
+    for key in [Key::End, Key::Home, Key::PageDown, Key::PageUp] {
+        let before = selection.selected_indices();
+        tree.press_key(key, Modifiers::COMMAND);
+        tree.layout(p);
+        let selected = selection.selected_indices();
+        assert_ne!(
+            selected, before,
+            "the accelerator with {key:?} moves the selection"
+        );
+        let focused = with_list_view::<usize, _>(&tree, lv, |v| v.focused_index.get());
+        assert_eq!(
+            selected,
+            focused.into_iter().collect::<Vec<_>>(),
+            "onto the cursor's row, after {key:?}"
+        );
+    }
+}
+
+/// The row a screen reader is told is current, by model index — what
+/// `accesskit_consumer` resolves before an adapter announces a focus change.
+fn announced_row(tree: &mut WidgetTree) -> Option<usize> {
+    let snapshot = tree.accessibility_tree_snapshot();
+    let consumer = accesskit_consumer::Tree::new(snapshot, true);
+    let state = consumer.state();
+    let focused = state.node_by_id(state.focus_id()?)?;
+    focused.active_descendant()?.position_in_set()
+}
+
+/// A selection the application writes moves the row a screen reader announces,
+/// in a single selection, even after the user has navigated.
+///
+/// The keyboard's own cursor used to stay on the row the user last reached:
+/// arrow to a row, then have the application land somewhere else (the
+/// "back to today" a list does on every arrival), and the platform went on
+/// announcing the old row while every action read the new one. The keyboard
+/// continued from the old row too.
+#[test]
+fn a_selection_set_from_outside_moves_the_announced_row_in_single_mode() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let model = ListModel::from_vec((0..10usize).collect());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+            .item_height(20.0)
+            .selection(sel),
+    );
+    let p = SizeProposal::exact(400.0, 200.0);
+    tree.layout(p);
+    tree.focus(lv);
+    for _ in 0..3 {
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    }
+    tree.layout(p);
+    assert_eq!(announced_row(&mut tree), Some(2), "the user reached row 2");
+
+    selection.select(7);
+    tree.layout(p);
+    assert_eq!(
+        announced_row(&mut tree),
+        Some(7),
+        "the application's selection is the row announced"
+    );
     tree.press_key(Key::ArrowDown, Modifiers::NONE);
-    assert_eq!(selection.selected_indices(), vec![2]);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![8],
+        "and the keyboard continues from it"
+    );
+
+    // An emptied selection has no row to hand the cursor to, so the cursor
+    // stays where it was.
+    selection.clear();
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![9]);
+}
+
+/// A multiple selection keeps its cursor where the user left it: walking the
+/// cursor away from the selection is how one is assembled.
+#[test]
+fn a_selection_set_from_outside_leaves_a_multi_selection_cursor_alone() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let model = ListModel::from_vec((0..10usize).collect());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+            .item_height(20.0)
+            .selection(sel),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    tree.focus(lv);
+    for _ in 0..3 {
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    }
+
+    selection.select(7);
+    let focused = with_list_view::<usize, _>(&tree, lv, |v| v.focused_index.get());
+    assert_eq!(focused, Some(2), "the cursor stays on row 2");
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![3]);
+}
+
+/// A keyed selection on a row this list does not show — a key another view
+/// sharing the model shows, or one this list filters out — gives the cursor no
+/// row to go to, so the cursor stays where the user left it.
+#[test]
+fn a_keyed_selection_on_a_row_this_list_hides_leaves_the_cursor_alone() {
+    use std::rc::Rc;
+    use teksilo_core::ObserverHandle;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{KeyedSelectionModel, ListDataSource, SelectionMode};
+
+    struct KeyedSource {
+        items: Vec<(u64, usize)>,
+    }
+    impl ListDataSource for KeyedSource {
+        type Item = usize;
+        type Key = u64;
+        fn len(&self) -> usize {
+            self.items.len()
+        }
+        fn with_item<R>(&self, i: usize, f: impl FnOnce(&usize) -> R) -> Option<R> {
+            self.items.get(i).map(|(_, v)| f(v))
+        }
+        fn key_at(&self, i: usize) -> Option<u64> {
+            self.items.get(i).map(|(k, _)| *k)
+        }
+        fn index_of(&self, key: &u64) -> Option<usize> {
+            self.items.iter().position(|(k, _)| k == key)
+        }
+        fn observe_changes(
+            &self,
+            _f: impl Fn(&teksilo_data::DataChange) + 'static,
+        ) -> ObserverHandle {
+            ObserverHandle::new(Rc::new(()) as Rc<dyn std::any::Any>, 0, Rc::new(|_| {}))
+        }
+    }
+
+    let keyed = KeyedSelectionModel::<u64>::new(SelectionMode::Single);
+    let source = KeyedSource {
+        items: vec![(10, 100), (20, 200), (30, 300)],
+    };
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::from_source_keyed(source, keyed.clone(), |_i, _v, _sel| {
+            Box::new(FixedLeaf(100.0, 30.0))
+        })
+        .item_height(30.0),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(lv);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(keyed.selected_keys(), vec![20]);
+
+    keyed.select(99);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        keyed.selected_keys(),
+        vec![30],
+        "the next row after the cursor, not the first row"
+    );
+}
+
+/// Type-ahead searches from the cursor, and a selection the application set
+/// is the cursor — like every other reader of it.
+#[test]
+fn type_ahead_searches_from_a_selection_set_from_outside() {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let model = ListModel::from_vec(
+        ["Banana", "Apple", "Blueberry", "Cherry", "Bilberry"]
+            .map(String::from)
+            .to_vec(),
+    );
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let sel = selection.clone();
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(
+        ListView::new(model, move |_i, _it, _s| Box::new(FixedLeaf(100.0, 20.0)))
+            .item_height(20.0)
+            .selection(sel)
+            .type_ahead_label(|s: &String| s.clone()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    tree.focus(lv);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![1], "Apple");
+
+    selection.select(4);
+    tree.press_key(Key::B, Modifiers::NONE);
+    assert_eq!(
+        selection.selected_indices(),
+        vec![0],
+        "after Bilberry the search wraps to Banana"
+    );
 }
 
 #[test]

@@ -11,6 +11,26 @@
 //! everywhere the cursor topology is the same, and three separate hand-rolled
 //! answers is how they drifted apart.
 //!
+//! ## Why a single selection never moves the cursor alone
+//!
+//! [`SelectionOp::Suppress`] — the accelerator on a navigation key, moving the
+//! cursor and leaving the selection where it is — is there to assemble a
+//! *multiple* selection: walk the cursor away with `Ctrl`, add the row with
+//! `Ctrl+Space`. A selection that holds one entry has nothing to assemble, and
+//! there the same move leaves the view with two current rows: the cursor,
+//! which the view publishes as its active descendant and a screen reader
+//! announces, and the selection, which every action an application offers
+//! reads. So [`SelectionOp::for_cardinality`] turns `Suppress` into `Replace`
+//! in a single selection. Each view applies it to whatever its chord resolved
+//! to, which covers the arrows as well: those stay each view's own to decide.
+//!
+//! That is Qt's `SingleSelection`, whose `selectionCommand` answers a key press
+//! onto an unselected index with `ClearAndSelect`, Control held or not. The
+//! ARIA single-select listbox defines no Control chords, so nothing in it asks
+//! for a cursor-only move. GTK4 keeps the move in every selection model — its
+//! Control bindings skip the selection whatever the model — and that is the
+//! one deviation, documented in `docs/data-view-keyboard.md`.
+//!
 //! ## Why navigation carries no platform branch
 //!
 //! Unlike [`text_nav`](super::text_nav), where macOS really does lay the
@@ -107,12 +127,13 @@ pub(crate) enum SelectionOp {
     /// Leave the selection and the anchor exactly as they are — move only the
     /// cursor.
     ///
-    /// This is what the accelerator means on a navigation key. GTK4 registers
-    /// every nav key with a `(select, modify, extend)` triple whose `modify`
-    /// variant skips the selection call outright; Qt's
-    /// `extendedSelectionCommand` returns `NoUpdate` for any navigation key
-    /// with Control held. It is the same rule the arrows already follow, which
-    /// is why the arrows are the *general* case and not an exception.
+    /// This is what the accelerator means on a navigation key in a multiple
+    /// selection. GTK4 registers every nav key with a `(select, modify,
+    /// extend)` triple, and its Control variant clears `select`, which skips
+    /// the selection call outright; Qt's `extendedSelectionCommand` returns
+    /// `NoUpdate` for any navigation key with Control held. The arrows follow the same rule. A
+    /// single selection has no use for it, and
+    /// [`for_cardinality`](Self::for_cardinality) takes it away there.
     Suppress,
     /// Select the anchor-to-cursor range, replacing whatever fell outside it —
     /// so reversing a `Shift` gesture shrinks the range instead of growing it.
@@ -121,6 +142,42 @@ pub(crate) enum SelectionOp {
     /// stood when the gesture began, so a second range can be built without
     /// losing the first.
     ExtendAdditive,
+}
+
+impl SelectionOp {
+    /// What this op does to a selection that holds `cardinality` entries.
+    ///
+    /// Only [`Suppress`](Self::Suppress) changes: a single selection turns it
+    /// into [`Replace`](Self::Replace), so the cursor never leaves the one
+    /// selected row. The extends are left alone, since a single selection
+    /// already reads both of them as a plain select. See the module
+    /// documentation for why.
+    pub(crate) fn for_cardinality(self, cardinality: Cardinality) -> Self {
+        match (self, cardinality) {
+            (Self::Suppress, Cardinality::Single) => Self::Replace,
+            (op, _) => op,
+        }
+    }
+}
+
+/// How many entries a view's selection can hold — which decides whether the
+/// cursor may move without it. See [`SelectionOp::for_cardinality`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Cardinality {
+    /// At most one. Also a view that selects nothing, where replacing the
+    /// selection and leaving it alone come to the same thing.
+    Single,
+    /// Any number.
+    Multi,
+}
+
+impl From<teksilo_data::SelectionMode> for Cardinality {
+    fn from(mode: teksilo_data::SelectionMode) -> Self {
+        match mode {
+            teksilo_data::SelectionMode::Multi => Self::Multi,
+            teksilo_data::SelectionMode::Single | teksilo_data::SelectionMode::None => Self::Single,
+        }
+    }
 }
 
 /// A resolved navigation chord: where to go, and what that does to the
@@ -256,7 +313,8 @@ pub(crate) fn mac_alias(key: Key, modifiers: Modifiers, rtl: bool) -> Option<Mac
 /// All four chords are dead in Teksilo today, and all four are claimed by the
 /// platform on macOS, so binding them adds reach without taking anything away.
 /// None of them may be bound off macOS: `Alt+Right` is history-forward on
-/// Windows, and `Ctrl+↑`/`Ctrl+↓` already mean cursor-only movement there.
+/// Windows, and `Ctrl+↑`/`Ctrl+↓` already mean something there (a cursor-only
+/// move in a multiple selection).
 pub(crate) fn mac_alias_for(
     convention: ListNavConvention,
     key: Key,
@@ -357,6 +415,8 @@ mod tests {
         }
     }
 
+    /// The chord's own reading. A single selection then takes `Suppress` back
+    /// out of it: see `a_single_selection_never_moves_the_cursor_alone`.
     #[test]
     fn the_accelerator_moves_the_cursor_without_touching_the_selection() {
         for key in [Key::Home, Key::End, Key::PageUp, Key::PageDown] {
@@ -365,6 +425,31 @@ mod tests {
             assert_eq!(selection(key, SHIFT), SelectionOp::Extend);
             assert_eq!(selection(key, CMD | SHIFT), SelectionOp::ExtendAdditive);
         }
+    }
+
+    #[test]
+    fn a_single_selection_never_moves_the_cursor_alone() {
+        use Cardinality::{Multi, Single};
+        use SelectionOp::{Extend, ExtendAdditive, Replace, Suppress};
+        assert_eq!(Suppress.for_cardinality(Single), Replace);
+        // Nothing else changes, and a multiple selection keeps every op.
+        for op in [Replace, Extend, ExtendAdditive] {
+            assert_eq!(op.for_cardinality(Single), op);
+        }
+        for op in [Replace, Suppress, Extend, ExtendAdditive] {
+            assert_eq!(op.for_cardinality(Multi), op);
+        }
+    }
+
+    #[test]
+    fn only_a_multi_selection_mode_holds_more_than_one_entry() {
+        use teksilo_data::SelectionMode;
+        assert_eq!(Cardinality::from(SelectionMode::Multi), Cardinality::Multi);
+        assert_eq!(
+            Cardinality::from(SelectionMode::Single),
+            Cardinality::Single
+        );
+        assert_eq!(Cardinality::from(SelectionMode::None), Cardinality::Single);
     }
 
     #[test]

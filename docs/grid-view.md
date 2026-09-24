@@ -103,15 +103,17 @@ disables marquee.
 ## Keyboard navigation
 
 Focus (the *current* item) is tracked separately from selection and shown by a
-painted focus ring. Matrix (RTL-aware; horizontal arrows swap):
+painted focus ring. In `Single` mode the two stay one tile: the keys move them
+together, and a selection the application sets moves the focus onto it. Matrix
+(RTL-aware; horizontal arrows swap):
 
 | Keys | Action |
 | --- | --- |
 | Arrow ←/→ | ±1 (within row; `.wrap_navigation(true)` to cross rows) |
 | Arrow ↑/↓ | ±columns |
 | Home / End | first / last item of the collection |
-| Ctrl+Home / Ctrl+End | the same, without moving the selection |
-| Ctrl+Arrow | move the focus without touching the selection |
+| Ctrl+Home / Ctrl+End | the same, without moving a `Multi` selection (a `Single` one follows the cursor) |
+| Ctrl+Arrow | move the focus without touching a `Multi` selection (a `Single` one follows the cursor) |
 | Ctrl+Space | toggle the focused tile's selection |
 | PageUp / PageDown | ± a viewport of rows + scroll |
 | Space | check the focused tile if it holds a checkbox, else toggle (`Multi`) / select (`Single`) |

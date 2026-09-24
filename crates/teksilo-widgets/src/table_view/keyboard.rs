@@ -615,13 +615,13 @@ pub(crate) fn build_key_handler(
         if let Some((nr, nc)) = new_pos {
             cfg.focused_cell.set(Some((nr, nc)));
             // Explorer/Finder convention: Ctrl+Arrow (no Shift) repositions
-            // the keyboard cursor without touching selection — the followed
-            // "select the row you land on" behavior is opt-out only via
-            // Ctrl, exactly like plain Arrow's select-follow is opt-in via
-            // nothing (default) and Shift+Arrow's extend is opt-in via
-            // Shift. `Ctrl+Space` (the `Key::Space` arms above, whose
-            // `toggle_selection` ignores modifiers) then toggles just the row
-            // or cell the cursor moved to — except in a `MultiCell` grid,
+            // the keyboard cursor without touching a multiple selection —
+            // the followed "select the row you land on" behavior is opt-out
+            // only via Ctrl, exactly like plain Arrow's select-follow is
+            // opt-in via nothing (default) and Shift+Arrow's extend is
+            // opt-in via Shift. `Ctrl+Space` (the `Key::Space` arms above,
+            // whose `toggle_selection` ignores modifiers) then toggles just the
+            // row or cell the cursor moved to — except in a `MultiCell` grid,
             // where the ARIA grid pattern spends that chord on "select this
             // column" instead.
             let is_arrow = matches!(
@@ -634,23 +634,25 @@ pub(crate) fn build_key_handler(
             let move_cursor_only = is_arrow && modifiers.ctrl() && !modifiers.shift();
             // The edge-and-page keys carry their own verb from `list_nav`,
             // where the accelerator means "move the cursor, leave the
-            // selection alone" — the rule GTK4 and Qt apply to every
-            // navigation key, and the one the arrows above already follow.
-            match nav.map(|c| c.selection) {
-                Some(list_nav::SelectionOp::Suppress) => {}
-                Some(list_nav::SelectionOp::Extend) => {
-                    apply_selection_extension(&cfg, nr, nc, true)
-                }
-                Some(list_nav::SelectionOp::ExtendAdditive) => {
-                    apply_additive_extension(&cfg, nr, nc)
-                }
-                Some(list_nav::SelectionOp::Replace) => {
-                    apply_selection_extension(&cfg, nr, nc, false)
-                }
-                None if !move_cursor_only => {
-                    apply_selection_extension(&cfg, nr, nc, modifiers.shift())
-                }
-                None => {}
+            // selection alone" — the rule GTK4 applies to every navigation
+            // key, Qt in its multi-selection modes, and the arrows above
+            // too. A table that holds one row or cell moves the selection
+            // with the cursor whatever the chord (`for_cardinality`).
+            let op = match nav {
+                Some(chord) => chord.selection,
+                None if move_cursor_only => list_nav::SelectionOp::Suppress,
+                None if modifiers.shift() => list_nav::SelectionOp::Extend,
+                None => list_nav::SelectionOp::Replace,
+            };
+            match op.for_cardinality(super::selection::cardinality(
+                cfg.selection_mode,
+                cfg.selection.as_ref(),
+                cfg.cell_selection.as_ref(),
+            )) {
+                list_nav::SelectionOp::Suppress => {}
+                list_nav::SelectionOp::Extend => apply_selection_extension(&cfg, nr, nc, true),
+                list_nav::SelectionOp::ExtendAdditive => apply_additive_extension(&cfg, nr, nc),
+                list_nav::SelectionOp::Replace => apply_selection_extension(&cfg, nr, nc, false),
             }
             ensure_row_visible(&cfg, nr, row_count, ctx);
             ensure_col_visible(&cfg, nc);

@@ -141,6 +141,8 @@ impl<T: 'static> Widget for TableView<T> {
             let dv = data_ver.clone();
             let sel_for_adjust = self.row_selection.clone();
             let cell_sel_for_adjust = self.cell_selection.clone();
+            let selection_mode = self.selection_mode;
+            let focused_for_data = self.focused_cell.clone();
             let metrics_for_data = self.row_metrics.clone();
             let len_for_data = self.len_fn.clone();
             let first_changed = self.first_changed_fn.clone();
@@ -184,6 +186,15 @@ impl<T: 'static> Widget for TableView<T> {
                         _ => {}
                     }
                 }
+                // A keyed selection follows its row through a sort or an
+                // insert without being written, so no selection observer
+                // hears it: put the cursor back on it here.
+                crate::table_view::selection::put_the_cursor_on_the_selection(
+                    selection_mode,
+                    &focused_for_data,
+                    sel_for_adjust.as_ref(),
+                    cell_sel_for_adjust.as_ref(),
+                );
                 let next = dv.get() + 1;
                 dv.set(next);
                 v_for_data.set(next);
@@ -318,6 +329,13 @@ impl<T: 'static> Widget for TableView<T> {
         self.view_focused = ctx.begin_view_focus();
         ctx.end_view_focus();
         self.focus_visible = ctx.focus_visible();
+        crate::table_view::selection::follow_the_selection_in_single_mode(
+            ctx,
+            self.selection_mode,
+            &self.focused_cell,
+            self.row_selection.as_ref(),
+            self.cell_selection.as_ref(),
+        );
         self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
