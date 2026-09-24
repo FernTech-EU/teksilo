@@ -16,6 +16,8 @@ mod accessibility_emit_impl;
 mod accessibility_impl;
 #[cfg(test)]
 mod accessibility_proxy_tests;
+#[cfg(test)]
+mod announcement_ring_tests;
 mod drag_drop_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;
@@ -718,21 +720,12 @@ pub struct WidgetTree {
     /// platform adapters agree announces.
     announcer_polite: crate::announcer::Announcer,
     announcer_assertive: crate::announcer::Announcer,
-    /// Ring buffer of captured live-region announcements (see
-    /// [`crate::accessibility::Announcement`]). Filled by a `&mut self`
-    /// post-pass in `sync_accessibility` that diffs `Live::{Polite,
-    /// Assertive}` nodes against `automation_last_text`. Capped at
-    /// [`AUTOMATION_ANNOUNCE_CAP`]; drained by
-    /// [`Self::announcements_since`].
-    automation_announcements: std::collections::VecDeque<crate::accessibility::Announcement>,
-    /// Monotonic sequence number for the next announcement (starts at 0;
-    /// the first announcement is assigned `1`).
-    automation_announce_seq: u64,
-    /// Last announced text per live-region node, so a re-sync only emits a
-    /// new announcement when the text actually changes. Pruned each pass
-    /// to the set of currently-present live nodes, so a node that
-    /// disappears and reappears with the same text re-announces.
-    automation_last_text: std::collections::HashMap<accesskit::NodeId, String>,
+    /// The announcements the platform adapters would have made from the
+    /// updates `sync_accessibility` returned (see
+    /// [`crate::accessibility::Announcement`]), drained by
+    /// [`Self::announcements_since`], while the tree records them
+    /// ([`Self::set_records_announcements`]).
+    announcement_ring: crate::accessibility::announcements::AnnouncementRing,
     /// Whether the `WidgetEvent::AccessAction` currently being dispatched was
     /// consumed by a handler. Written by the dispatcher's `AccessAction` arm,
     /// read (and reset) by [`Self::dispatch_access_action`], which is the only
@@ -752,11 +745,6 @@ pub struct WidgetTree {
     /// signals via `ctx.window()`.
     pub(crate) window_state: Option<crate::window::WindowState>,
 }
-
-/// Maximum number of live-region [`crate::accessibility::Announcement`]s
-/// the [`WidgetTree`] retains. The oldest is evicted when the buffer is
-/// full; `announcements_since` only ever returns the retained tail.
-const AUTOMATION_ANNOUNCE_CAP: usize = 256;
 
 /// How long the shortened reshow delay stays active after the last tooltip
 /// dismisses. Long enough to cover moving between adjacent toolbar icons;
@@ -1025,9 +1013,7 @@ impl WidgetTree {
             announcer_assertive: crate::announcer::Announcer::new(
                 crate::announcer::Politeness::Assertive,
             ),
-            automation_announcements: std::collections::VecDeque::new(),
-            automation_announce_seq: 0,
-            automation_last_text: std::collections::HashMap::new(),
+            announcement_ring: crate::accessibility::announcements::AnnouncementRing::new(),
             access_action_handled: false,
             window_state: None,
         }
@@ -2282,7 +2268,10 @@ impl WidgetTree {
     /// says everything twice — the failure mode [`crate::announcer`] warns
     /// about for `Toast`. This is the check that avoids it: if the last
     /// accessibility tree carried a live region *inside* `widget`'s subtree
-    /// with text in it, the widget is already talking and this stays quiet.
+    /// that the platform adapters would speak for (in the filtered tree, with
+    /// a name), the widget is already talking and this stays quiet. A live
+    /// region that is hidden, or that carries its text where its role takes
+    /// no name from, is silent on every platform and does not count.
     /// Returns whether the message was queued.
     ///
     /// It necessarily reads **one tree behind**. An announcement is queued
@@ -2303,18 +2292,24 @@ impl WidgetTree {
         true
     }
 
-    /// Whether the last built accessibility tree carried a non-empty live
-    /// region anywhere in `widget`'s subtree.
+    /// Whether the last delivered accessibility tree had a live node in
+    /// `widget`'s subtree that the platform adapters would speak for.
+    ///
+    /// Read through `accesskit_consumer`, so by the adapters' rules, whether
+    /// or not this tree records announcements: the node is in the filtered
+    /// tree (not hidden, not inside a hidden subtree), it is live, itself or
+    /// through an ancestor, and it has a name, which for a `Status` is its
+    /// label and not its value.
+    /// A live region no platform can hear does not speak, and must not keep
+    /// the framework quiet. The politeness must be set inside the subtree,
+    /// too: a widget that is live only because it sits in somebody else's
+    /// live region is not the one speaking.
     ///
     /// Synthetic children count too, resolved to their owning widget through
     /// the same parent map the AccessKit action router uses. `teksilo-scene`
     /// can mark a scene item as a live region, and a live region is a live
     /// region wherever it was emitted from.
     fn widget_subtree_speaks(&self, widget: WidgetId) -> bool {
-        use accesskit::Live;
-        let Some(update) = &self.cached_a11y else {
-            return false;
-        };
         let mut wanted: std::collections::HashSet<accesskit::NodeId> =
             std::collections::HashSet::new();
         let mut stack = vec![widget];
@@ -2325,19 +2320,17 @@ impl WidgetTree {
             wanted.insert(crate::accessibility::widget_id_to_node_id(id));
             stack.extend_from_slice(self.arena.children(id));
         }
-        update.nodes.iter().any(|(node_id, node)| {
-            let owned_by_subtree = wanted.contains(node_id)
-                || self.synthetic_parent_map.get(node_id).is_some_and(|owner| {
-                    wanted.contains(&crate::accessibility::widget_id_to_node_id(*owner))
-                });
-            owned_by_subtree
-                && matches!(node.live(), Some(Live::Polite) | Some(Live::Assertive))
-                && !node
-                    .value()
-                    .or_else(|| node.label())
-                    .unwrap_or("")
-                    .trim()
-                    .is_empty()
+        let Some(update) = &self.cached_a11y else {
+            return false;
+        };
+        crate::accessibility::announcements::speaks_within(update, |node_id| {
+            wanted.contains(&node_id)
+                || self
+                    .synthetic_parent_map
+                    .get(&node_id)
+                    .is_some_and(|owner| {
+                        wanted.contains(&crate::accessibility::widget_id_to_node_id(*owner))
+                    })
         })
     }
 

@@ -128,7 +128,10 @@ fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     // up-front; otherwise generate a fresh per-process one.
     let token = std::env::var("TEKSILO_AUTOMATION_TOKEN")
         .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-    builder.on_ready(move |proxy| {
+    // `pull_announcements` reads each window's announcement ring, which a
+    // window records only when asked, from its first update, so the windows
+    // are asked here, before any of them opens.
+    builder.record_announcements().on_ready(move |proxy| {
         if let Err(e) = spawn_bridge_thread(proxy, token) {
             eprintln!("teksilo-automation: bridge failed to start: {e}");
         }
@@ -339,6 +342,18 @@ fn encode_png(rgba: &[u8], w: u32, h: u32) -> Vec<u8> {
 #[cfg(all(debug_assertions, test))]
 mod tests {
     use super::*;
+
+    /// `pull_announcements` reads a window's announcement ring, which a
+    /// window records only when asked, so installing the bridge asks.
+    #[test]
+    fn the_bridge_has_the_windows_record_announcements() {
+        assert!(!TeksiloAppBuilder::new().records_announcements());
+        assert!(
+            TeksiloAppBuilder::new()
+                .install_automation_bridge_in_debug()
+                .records_announcements()
+        );
+    }
 
     #[test]
     fn live_settle_is_clamped() {

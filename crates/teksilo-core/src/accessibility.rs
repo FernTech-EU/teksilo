@@ -5,6 +5,7 @@ use accesskit::{Action, Live, Node, NodeId, Role, TextDirection, TextPosition, T
 
 use crate::widget_id::WidgetId;
 
+pub(crate) mod announcements;
 pub mod audit;
 pub mod target_audit;
 pub mod text_runs;
@@ -284,27 +285,35 @@ pub enum SyntheticKind {
     RichTextBlockquote = 17,
 }
 
-/// A captured live-region announcement — the text a screen reader would
-/// have spoken when a `Live::{Polite,Assertive}` node's value (or label)
-/// changed.
+/// A live-region announcement every platform adapter would have made.
 ///
 /// Teksilo has no OS accessibility layer in headless mode, and even with
 /// one there is no in-process way to observe what the platform *spoke*.
-/// [`crate::WidgetTree::sync_accessibility`] therefore diffs the live
-/// nodes of each freshly-built `TreeUpdate` and records the changes into
-/// a ring buffer that an automation / test harness drains via
-/// [`crate::WidgetTree::announcements_since`]. This is a faithful,
-/// in-process model of the live-region stream, not a replacement for an
-/// OS screen-reader smoke test.
+/// So a tree that [records announcements](crate::WidgetTree::records_announcements)
+/// replays every update [`crate::WidgetTree::sync_accessibility`] returns
+/// through `accesskit_consumer`, the diff the AT-SPI, Windows and
+/// macOS adapters are all built on, and the announcements those adapters
+/// would raise are kept in a ring that an automation or test harness drains
+/// through [`crate::WidgetTree::announcements_since`]: a live node entering
+/// the filtered tree with a name, or a live node in it whose name changed.
+/// A live node the adapters cannot hear, because it is hidden, inside a
+/// hidden subtree, or carries its text as a `value` where its role takes a
+/// label, is not in the ring. This models what the adapters hand a screen
+/// reader, not what the screen reader then says, so it does not replace
+/// listening to one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Announcement {
     /// Monotonic sequence number, starting at 1. `announcements_since(n)`
     /// returns every announcement whose `seq > n`.
     pub seq: u64,
-    /// The announced text — the node's `value`, or its `label` when the
-    /// node carries no value.
+    /// The node's name as every adapter computes it, which is the string the
+    /// platform announces: the `value` of a `Role::Label`, the label of any
+    /// other role, followed through `labelled_by` when the node has none of
+    /// its own.
     pub text: String,
-    /// `true` for `Live::Assertive`, `false` for `Live::Polite`.
+    /// `true` for `Live::Assertive`, `false` for `Live::Polite`. A node with
+    /// no setting of its own takes its nearest live ancestor's, as the
+    /// adapters do.
     pub assertive: bool,
 }
 

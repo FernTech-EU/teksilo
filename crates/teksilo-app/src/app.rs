@@ -3352,6 +3352,9 @@ pub struct TeksiloAppBuilder {
     /// handler at `run`.
     loop_tick: Option<Box<dyn FnMut() -> bool>>,
     loop_tick_poll: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+    /// Whether the windows' trees record announcements. Set by the automation
+    /// bridge, their one reader in a running application.
+    records_announcements: bool,
 }
 
 impl TeksiloAppBuilder {
@@ -3379,7 +3382,26 @@ impl TeksiloAppBuilder {
             telemetry_bundle: None,
             loop_tick: None,
             loop_tick_poll: None,
+            records_announcements: false,
         }
+    }
+
+    /// Make the windows' trees record what the platform adapters announce,
+    /// for a reader in process. The automation bridge is the one reader a
+    /// running application has; see
+    /// [`WidgetTree::set_records_announcements`].
+    // The bridge exists only in a debug build with the `automation` feature,
+    // so any other build has no caller.
+    #[cfg_attr(not(all(feature = "automation", debug_assertions)), allow(dead_code))]
+    pub(crate) fn record_announcements(mut self) -> Self {
+        self.records_announcements = true;
+        self
+    }
+
+    /// Whether [`record_announcements`](Self::record_announcements) was asked.
+    #[cfg(all(test, feature = "automation", debug_assertions))]
+    pub(crate) fn records_announcements(&self) -> bool {
+        self.records_announcements
     }
 
     /// Identify the application for OS-correct path resolution. The
@@ -4317,6 +4339,7 @@ impl TeksiloAppBuilder {
         // rather than threaded through `TeksiloAppHandler::new`'s already long
         // parameter list.
         app.wm.set_pen_batching(self.pen_batching);
+        app.wm.set_records_announcements(self.records_announcements);
         app.external_ctx_handler = self.external_ctx_handler;
         // Hand over any registered loop-tick hook (e.g. the `teksilo-async`
         // executor poll). Async-agnostic: just a closure + a poll flag.

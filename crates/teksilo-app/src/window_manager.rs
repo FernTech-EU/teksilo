@@ -287,6 +287,12 @@ pub struct WindowManager {
     /// How the app resolves its theme (Manual, FollowSystem, Native).
     theme_mode: ThemeMode,
     pen_batching: teksilo_platform::PenBatching,
+    /// Whether each window's tree records what the platform adapters
+    /// announce ([`WidgetTree::set_records_announcements`]). Off unless the
+    /// automation bridge is installed: nothing else in a running application
+    /// reads the ring, and the replay behind it costs every sync a second
+    /// pass over the tree.
+    records_announcements: bool,
     /// Per-tree app context shared with every window's WidgetTree when an
     /// event source is registered on the TeksiloAppBuilder. Each window
     /// receives a clone of this Rc so subscriptions land in a single
@@ -340,6 +346,7 @@ impl WindowManager {
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
             pen_batching: teksilo_platform::PenBatching::default(),
+            records_announcements: false,
             app_context_template: None,
             event_proxy: None,
             pending_token_callbacks: HashMap::new(),
@@ -369,6 +376,21 @@ impl WindowManager {
     /// [`PenBatching`](teksilo_platform::PenBatching).
     pub fn set_pen_batching(&mut self, mode: teksilo_platform::PenBatching) {
         self.pen_batching = mode;
+    }
+
+    /// Whether the windows opened from now on record announcements. See
+    /// [`WidgetTree::set_records_announcements`].
+    pub(crate) fn set_records_announcements(&mut self, record: bool) {
+        self.records_announcements = record;
+    }
+
+    /// The tree a new window starts from. A tree built with
+    /// `WidgetTree::new()` records announcements, for the headless trees
+    /// tests build; a window's records them only for the automation bridge.
+    fn new_window_tree(&self, theme: Theme) -> WidgetTree {
+        let mut tree = WidgetTree::new().with_theme(theme);
+        tree.set_records_announcements(self.records_announcements);
+        tree
     }
 
     /// Set the theme mode (called by TeksiloAppHandler during initialization).
@@ -879,7 +901,7 @@ impl WindowManager {
             None
         };
 
-        let mut tree = WidgetTree::new().with_theme(initial_theme);
+        let mut tree = self.new_window_tree(initial_theme);
         // Surface the window's HiDPI device scale to widgets that bridge to a
         // device-pixel OS resource (e.g. a `WebView` subview). Refreshed on
         // `ScaleFactorChanged`; the tree is otherwise fully logical.
@@ -2728,5 +2750,22 @@ mod window_close_subscription_purge_tests {
             0,
             "and the second window's on its own close"
         );
+    }
+}
+
+#[cfg(test)]
+mod announcement_recording_tests {
+    use super::*;
+
+    /// The announcement ring's replay costs every sync a second pass over the
+    /// tree, and in a running application only the automation bridge reads
+    /// it: a window's tree records nothing unless the manager was asked.
+    #[test]
+    fn a_window_records_announcements_only_when_asked() {
+        let theme = teksilo_core::presets::intui::light();
+        let mut wm = WindowManager::new(theme.clone());
+        assert!(!wm.new_window_tree(theme.clone()).records_announcements());
+        wm.set_records_announcements(true);
+        assert!(wm.new_window_tree(theme).records_announcements());
     }
 }

@@ -17,29 +17,26 @@
 //! What each platform does with a live region, read out of the three adapters
 //! rather than out of anyone's documentation:
 //!
-//! | | node enters the filtered tree | its label changes while it stays in the tree |
-//! |---|---|---|
-//! | Windows (`accesskit_windows-0.35.0`) | announces (`adapter.rs:256-263`) | announces (`adapter.rs:314-324`) |
-//! | macOS (`accesskit_macos-0.27.0`) | announces (`event.rs:236-241`) | announces (`event.rs:300-310`) |
-//! | Linux, AT-SPI (`accesskit_atspi_common-0.20.0`) | announces (`adapter.rs:72-77`) | **never** |
+//! | | node enters the filtered tree | its name changes while it stays in the tree | its name stays the same |
+//! |---|---|---|---|
+//! | Windows (`accesskit_windows-0.35.0`) | announces (`adapter.rs:256-263`) | announces (`adapter.rs:314-324`) | nothing |
+//! | macOS (`accesskit_macos-0.27.0`) | announces (`event.rs:236-241`) | announces (`event.rs:300-310`) | nothing |
+//! | Linux, AT-SPI (`accesskit_atspi_common-0.20.0`) | announces (`adapter.rs:72-77`) | announces (`node.rs:610-622`) | nothing |
 //!
-//! The AT-SPI adapter emits `ObjectEvent::Announcement` from exactly one place,
-//! `add_node`. Its `node_updated` compares interfaces, bounds, text and
-//! selection, and says nothing at all about `live`. So on Linux, changing a
-//! live region's text announces **nothing** — the only thing that speaks is a
-//! node arriving in the filtered tree.
+//! All three speak a live node as it arrives and again when its name changes,
+//! and none of them speaks a name that did not change. That last column is the
+//! one an application trips over: the same thing happening twice in a row ("Saved",
+//! then "Saved" again) produces the same message twice, and a node that already
+//! carries it has nothing new to say, so the second is never heard.
 //!
-//! Meanwhile on Windows and macOS a *repeated* message does not announce
-//! either, because both adapters require the label to have changed.
-//!
-//! The single mechanism that satisfies all three, for both a new message and a
-//! repeat of the previous one, is therefore to **retract the node and put it
-//! back**: hide it, then re-expose it carrying the message. `common_filter`
-//! turns `is_hidden` into `FilterResult::ExcludeSubtree`
+//! The one mechanism that speaks a new message and a repeat of the last one
+//! alike, on all three, is therefore to **retract the node and put it back**:
+//! hide it, then re-expose it carrying the message. `common_filter` turns
+//! `is_hidden` into `FilterResult::ExcludeSubtree`
 //! (`accesskit_consumer-0.39.0/src/filters.rs:22-24`), so hiding removes the
-//! node from the filtered tree and un-hiding is a genuine re-entry — which is
+//! node from the filtered tree and un-hiding is a genuine re-entry, which is
 //! `add_node` on Linux and the `old_filter_result != Include` arm on the other
-//! two.
+//! two, whatever the name was before.
 //!
 //! That is a per-platform detail an application should never have to carry, and
 //! it is why this lives in the framework.
@@ -169,9 +166,9 @@ impl Announcer {
     /// Returns `true` when a *further* update is needed after this one, so the
     /// caller knows to ask for another accessibility sync and another frame.
     /// Every message costs exactly two updates: one that exposes its node, one
-    /// that retracts it. Retracting is not optional — it is what makes the next
-    /// message a re-entry into the filtered tree, which on Linux is the only
-    /// thing that announces at all.
+    /// that retracts it. Retracting is not optional: it is what makes the next
+    /// message a re-entry into the filtered tree, which every platform
+    /// announces even when the message repeats the last one.
     pub(crate) fn step(&mut self) -> bool {
         self.phase = match std::mem::replace(&mut self.phase, Phase::Idle) {
             // This update exposed a message; the next one has to take it away.
@@ -197,9 +194,8 @@ impl Announcer {
                 // The label, not the value. `accesskit_consumer`'s
                 // `label_comes_from_value` is true for `Role::Label` and
                 // nothing else (node.rs:744-746), so every adapter reads the
-                // announced text from `label()`. A live region that sets only
-                // `value` is silent on all three platforms while an in-process
-                // test that reads `value().or(label())` still passes it.
+                // announced text from `label()`, and a live region that sets
+                // only `value` is silent on all three platforms.
                 node.set_label(message.clone());
             }
             Phase::Idle | Phase::Retracting => {
@@ -208,6 +204,15 @@ impl Announcer {
         }
         (self.politeness.node_id(), node)
     }
+}
+
+/// Whether `id` is one of the two reserved nodes the announcers speak through.
+///
+/// They hang directly off the root, where no clipping parent can move them out
+/// of view, which is what lets the announcement ring skip a scroll that has
+/// nothing else live to move.
+pub(crate) fn is_announcer_node(id: NodeId) -> bool {
+    id == Politeness::Polite.node_id() || id == Politeness::Assertive.node_id()
 }
 
 /// How many messages one politeness level will hold before dropping the oldest.
@@ -240,8 +245,9 @@ mod tests {
     }
 
     /// One message costs two syncs: expose, then retract. The retract is not
-    /// optional — it is what makes the *next* message a re-entry into the
-    /// filtered tree, which on Linux is the only thing that announces at all.
+    /// optional: it is what makes the *next* message a re-entry into the
+    /// filtered tree, which every platform announces even when the message
+    /// repeats the last one.
     #[test]
     fn a_message_is_exposed_then_retracted() {
         let mut a = Announcer::new(Politeness::Polite);
@@ -255,10 +261,10 @@ mod tests {
         assert!(hidden(&a), "the node must leave the filtered tree again");
     }
 
-    /// The case the whole retract mechanism exists for. Windows and macOS
-    /// announce a label change; neither announces the *same* label written
+    /// The case the whole retract mechanism exists for. All three platforms
+    /// announce a label change; none announces the *same* label written
     /// twice. Hiding in between makes the second one a re-entry, which all
-    /// three platforms speak.
+    /// three speak.
     #[test]
     fn the_same_message_twice_is_exposed_twice() {
         let mut a = Announcer::new(Politeness::Polite);

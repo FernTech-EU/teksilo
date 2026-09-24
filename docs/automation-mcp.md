@@ -531,11 +531,39 @@ request had timed out while the UI stayed frozen.
 ### Live regions & announcements
 
 Teksilo has no OS AT layer in headless mode, and no in-process way to observe
-what the platform *spoke*. So the `WidgetTree` diffs the live (`Live::Polite` /
-`Live::Assertive`) nodes of each freshly-built `TreeUpdate` and records the
-changes into a ring buffer. `pull_announcements { since_seq }` drains it — a
-faithful, in-process model of the live-region stream. `list_live_regions`
-reports the live nodes themselves.
+what the platform *spoke*. So the `WidgetTree` replays every update it hands
+out through `accesskit_consumer`, the diff the AT-SPI, Windows and macOS
+adapters are all built on, and records in a ring what those adapters would
+announce. `pull_announcements { since_seq }` drains it. An entry is a live
+node's name, as the adapters compute it, when the node enters the filtered
+tree and when its name changes while it stays there, with the politeness the
+node has or inherits from a live ancestor. A node the adapters cannot hear is
+not recorded:
+
+- a hidden node, and anything inside a hidden subtree;
+- a node its clipping parent has scrolled out of view (one scrolled back in
+  is recorded, as an arrival);
+- a live node whose text is only a `value`, unless it is a `Role::Label`,
+  since every other role is named by its label;
+- a blank name.
+
+Two things only some platforms announce are left out, so that a probe never
+reads as heard what one screen reader kept quiet about: a change of
+politeness alone (Windows and macOS announce it, AT-SPI does not), and the
+rest of a subtree that comes back whole (AT-SPI announces every live node in
+it, the others only the nodes that changed). The ring models what the
+adapters are handed, not what the screen reader then does with it: Orca 46.1,
+for one, speaks every announcement by interrupting the one before.
+
+The replay is a second pass of the consumer over every node of every
+update, so a tree records only when asked
+(`WidgetTree::set_records_announcements`). A tree built with
+`WidgetTree::new()` records from its first update, which covers the headless
+server and every test. A window `teksilo-app` opens records only when the app
+called `install_automation_bridge_in_debug()`, which asks for it before any
+window opens. A release build has no bridge, and its windows record nothing.
+
+`list_live_regions` reports the live nodes themselves.
 
 ## Screenshots
 

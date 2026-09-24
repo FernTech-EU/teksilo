@@ -87,7 +87,26 @@ impl WidgetTree {
             // naming a node it has never seen, so a partial update is not
             // an option here.
             let _ = cached;
-            self.patch_accessibility_bounds();
+            let moved = self.patch_accessibility_bounds();
+            // A move alone can still announce: a live node its clipping
+            // parent brings back into view enters the filtered tree, and the
+            // adapters get this update as they get any other. Replaying costs
+            // a pass of the consumer over every node, on every frame of a
+            // scroll, so it is done only when something besides the
+            // announcers is live: nothing else can be announced by a move,
+            // and a live node that appears later arrives through a walk,
+            // which is always replayed. A tree that records nothing skips
+            // even the scan.
+            if moved
+                && self.announcement_ring.is_recording()
+                && let Some(patched) = &self.cached_a11y
+                && patched.nodes.iter().any(|(id, node)| {
+                    !crate::announcer::is_announcer_node(*id)
+                        && node.live().is_some_and(|live| live != accesskit::Live::Off)
+                })
+            {
+                self.announcement_ring.observe(patched);
+            }
             return self
                 .cached_a11y
                 .as_ref()
@@ -96,12 +115,11 @@ impl WidgetTree {
         }
 
         let (update, parents, local_bounds) = self.build_accessibility_tree();
-        // A `&mut self` post-pass: diff the freshly-built live nodes and
-        // record any changed text into the announcement ring buffer. Must
-        // run here (not in the `&self` `build_accessibility_tree`) and
-        // before the cache store, so it sees exactly the update that is
-        // about to become canonical.
-        self.collect_announcements(&update);
+        // What the adapters will announce from this update. Here, in the
+        // `&mut self` half and not in the `&self` walk, because the ring
+        // replays exactly the updates this method hands out, in order. A tree
+        // that does not record only notes that it missed one.
+        self.announcement_ring.observe(&update);
         // Bump the AT version only when the tree's *content* actually changed.
         // A rebuild can be triggered by a shortcut-rebind / locale switch that
         // produces a byte-for-byte identical `TreeUpdate`; bumping then would
@@ -150,13 +168,15 @@ impl WidgetTree {
     /// it is a node the walk deliberately left out — a pruned layout
     /// stack, an excluded or merged descendant — and inventing an entry
     /// for it would put a node in the update that has no parent.
-    fn patch_accessibility_bounds(&mut self) {
+    ///
+    /// Returns whether anything was re-placed.
+    fn patch_accessibility_bounds(&mut self) -> bool {
         let moved = self.arena.take_a11y_moved();
         if moved.is_empty() {
-            return;
+            return false;
         }
         let Some(cached) = self.cached_a11y.as_mut() else {
-            return;
+            return false;
         };
         let index: std::collections::HashMap<accesskit::NodeId, usize> = cached
             .nodes
@@ -211,6 +231,7 @@ impl WidgetTree {
                 });
             }
         }
+        true
     }
 
     /// Build a `TreeUpdate` describing the tree right now, without touching any
@@ -242,64 +263,6 @@ impl WidgetTree {
             self.a11y_dirty = true;
         }
         polite || assertive
-    }
-
-    /// Diff the live-region nodes of a freshly-built `TreeUpdate` against
-    /// the per-node last-announced-text map and push any changes into the
-    /// capped announcement ring buffer. See
-    /// [`crate::accessibility::Announcement`] and
-    /// [`Self::announcements_since`].
-    fn collect_announcements(&mut self, update: &accesskit::TreeUpdate) {
-        use accesskit::Live;
-        let mut seen: std::collections::HashSet<accesskit::NodeId> =
-            std::collections::HashSet::with_capacity(self.automation_last_text.len());
-        for (node_id, node) in &update.nodes {
-            let assertive = match node.live() {
-                Some(Live::Polite) => false,
-                Some(Live::Assertive) => true,
-                // `Live::Off` or unset: not a live region.
-                _ => continue,
-            };
-            // A live region announces its `value` if it has one, else its
-            // `label` (matching how the AT layer voices it).
-            let text = node
-                .value()
-                .or_else(|| node.label())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if text.is_empty() {
-                // A cleared live region: forget its last text (and leave it out
-                // of `seen`, so `retain` drops it too) so the SAME text
-                // reappearing on a later sync is announced as novel rather than
-                // deduped against the stale entry.
-                self.automation_last_text.remove(node_id);
-                continue;
-            }
-            seen.insert(*node_id);
-            let changed = self
-                .automation_last_text
-                .get(node_id)
-                .map(|prev| prev != &text)
-                .unwrap_or(true);
-            if !changed {
-                continue;
-            }
-            self.automation_last_text.insert(*node_id, text.clone());
-            self.automation_announce_seq = self.automation_announce_seq.saturating_add(1);
-            if self.automation_announcements.len() >= super::AUTOMATION_ANNOUNCE_CAP {
-                self.automation_announcements.pop_front();
-            }
-            self.automation_announcements
-                .push_back(crate::accessibility::Announcement {
-                    seq: self.automation_announce_seq,
-                    text,
-                    assertive,
-                });
-        }
-        // Forget nodes that are no longer present (or no longer live), so a
-        // node that reappears with identical text re-announces.
-        self.automation_last_text.retain(|k, _| seen.contains(k));
     }
 
     /// Dispatch a synthetic AccessKit action to the node identified by
@@ -602,13 +565,14 @@ mod tests {
 
     // The framework's announcer.
     //
-    // These assert through `accesskit_consumer`, not only through the tree's
-    // own announcement ring. The ring reads `value().or(label())` while every
-    // platform adapter reads `label()` alone, so a live region can pass the
-    // in-process check and be silent on all three platforms — which is exactly
-    // how two of this framework's own live regions shipped mute. Whether the
-    // node is *in the filtered tree* is what the adapters key on, so that is
-    // what these check.
+    // These assert through `accesskit_consumer` directly, on the node the
+    // announcer emits, as well as through the tree's announcement ring. The
+    // ring used to read `value().or(label())` without the filter, so a live
+    // region could pass the in-process check and be silent on all three
+    // platforms, which is how two of this framework's own live regions
+    // shipped mute. The ring now replays the adapters' rules (see
+    // `crate::accessibility::announcements`), and these keep checking the
+    // one thing the adapters key on: whether the node is in the filtered tree.
 
     /// Is the announcer node one an adapter would see, and what does it say?
     ///
@@ -638,9 +602,9 @@ mod tests {
     /// Distinct from [`announced_by_consumer`] on purpose: a node that stays in
     /// the tree with its label cleared looks "silent" to a label-based check
     /// while remaining present. Present-but-unlabelled is exactly what does NOT
-    /// work — on Linux the announcement is emitted from `add_node` alone, so
-    /// only a node that genuinely leaves and re-enters the filtered tree
-    /// announces twice.
+    /// work: no adapter speaks a name that did not change, so only a node that
+    /// genuinely leaves and re-enters the filtered tree says the same message
+    /// twice.
     fn live_nodes_in_filtered_tree(update: &accesskit::TreeUpdate) -> Vec<String> {
         let consumer = accesskit_consumer::Tree::new(update.clone(), false);
         let state = consumer.state();
@@ -704,9 +668,9 @@ mod tests {
         );
         // The load-bearing half. Clearing the label would satisfy the check
         // above while leaving the node in the tree, and a node that never
-        // leaves the tree never announces again on Linux: the AT-SPI adapter
-        // emits `ObjectEvent::Announcement` from `add_node` and from nowhere
-        // else. So assert the node is genuinely gone from the filtered walk.
+        // leaves the tree cannot say the same message again: every adapter
+        // announces an arrival or a changed name, and a repeat is neither. So
+        // assert the node is genuinely gone from the filtered walk.
         assert_eq!(
             live_nodes_in_filtered_tree(&retracted),
             Vec::<String>::new(),
@@ -887,7 +851,7 @@ mod tests {
     }
 
     /// The in-process ring is what the automation bridge reports, so it has to
-    /// see the same thing the adapters do.
+    /// hear the announcer as the adapters do: once, as the node arrives.
     #[test]
     fn an_announcement_reaches_the_automation_ring() {
         let mut tree = tree_with_one_widget();
@@ -3297,6 +3261,86 @@ mod tests {
     }
 
     #[test]
+    fn a_tree_that_records_no_announcements_still_hears_the_widget_speak() {
+        // The check reads the last update through the consumer on the spot,
+        // not through the announcement ring's replay, which a window of an
+        // application nobody drives does not keep. The long-press menu
+        // announcement goes through here in every application.
+        let mut tree = WidgetTree::new();
+        tree.set_records_announcements(false);
+        use crate::widget_builder::WidgetBuilder;
+        let widget = tree.add(
+            FillWidget::new()
+                .label("Saved")
+                .access_live(accesskit::Live::Polite),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(!tree.announce_unless_widget_speaks(widget, "Saved"));
+    }
+
+    #[test]
+    fn a_live_region_no_platform_hears_does_not_count_as_speaking() {
+        // A `Status` takes its name from its label. One that carries its text
+        // only as a value has no name, so every adapter stays silent about it,
+        // and letting it stand in for the framework's message left the user
+        // with nothing at all.
+        let mut tree = WidgetTree::new();
+        use crate::widget_builder::WidgetBuilder;
+        let widget = tree.add(
+            FillWidget::new()
+                .access_role(accesskit::Role::Status)
+                .access_value("Saved")
+                .access_live(accesskit::Live::Polite),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(tree.announce_unless_widget_speaks(widget, "Saved"));
+    }
+
+    #[test]
+    fn a_hidden_live_region_does_not_count_as_speaking() {
+        // Hidden is outside the filtered tree, where no adapter announces.
+        let mut tree = WidgetTree::new();
+        use crate::widget_builder::WidgetBuilder;
+        let widget = tree.add(
+            FillWidget::new()
+                .label("Saved")
+                .access_live(accesskit::Live::Polite)
+                .access_hidden(true),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(tree.announce_unless_widget_speaks(widget, "Saved"));
+    }
+
+    #[test]
+    fn a_live_region_around_the_widget_does_not_count_as_the_widget_speaking() {
+        // A button inside somebody else's live region, a toast's action or a
+        // row of a live palette, inherits the region's politeness: the adapters
+        // would speak it if its own name changed. That is the region talking,
+        // not the button, and the menu the button just opened is still news
+        // nobody else is giving.
+        let mut tree = WidgetTree::new();
+        use crate::widget_builder::WidgetBuilder;
+        let region = tree.add(
+            StackWidget::new()
+                .access_role(accesskit::Role::Group)
+                .access_label("Notification")
+                .access_live(accesskit::Live::Polite),
+        );
+        let button = tree.add_child(
+            region,
+            FillWidget::new()
+                .label("Annuler")
+                .access_role(accesskit::Role::Button),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let _ = tree.sync_accessibility();
+        assert!(tree.announce_unless_widget_speaks(button, "Menu des actions ouvert"));
+    }
+
+    #[test]
     fn a_live_region_with_no_text_does_not_count_as_speaking() {
         // A live region that is present but empty announces nothing on any
         // platform, so it must not silence the framework's message.
@@ -3309,7 +3353,12 @@ mod tests {
     }
 
     /// A widget that emits a live-region **synthetic** child, the way
-    /// `teksilo-scene` marks a scene item as a live region.
+    /// `teksilo-scene` marks a scene item as a live region: a named item
+    /// pushed through `push_scene_child`, then made live.
+    ///
+    /// It used to be an annotation child, a `Role::Comment` holding its text
+    /// as a value. That node has no name, so no platform speaks it, and the
+    /// check this fixture feeds was passing on a region nobody could hear.
     #[derive(Debug)]
     struct SpeakingSynthetic;
 
@@ -3324,7 +3373,14 @@ mod tests {
 
         fn accessibility(&self, builder: &mut AccessNodeBuilder) {
             builder.set_role(accesskit::Role::Group);
-            let child = builder.push_annotation_child(1, "2 items selected");
+            let child = builder.push_scene_child(
+                1,
+                crate::accessibility::SyntheticKind::SceneItem,
+                |item| {
+                    item.set_role(accesskit::Role::Status);
+                    item.set_name("2 items selected");
+                },
+            );
             builder.with_collected_node(child, |node| node.set_live(accesskit::Live::Polite));
         }
     }

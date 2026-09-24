@@ -1279,6 +1279,51 @@ fn pull(tree: &mut WidgetTree, ops: &mut RecordingWindowOps, since: u64) -> Vec<
     serde_json::from_value(data).unwrap()
 }
 
+/// A `Status` carrying its text as a value is silent on every platform: the
+/// adapters announce a name, and a `Status` takes its name from its label. The
+/// bridge used to report the value, so a probe waiting for that text passed
+/// over a status nobody heard.
+///
+/// A second `Status`, named by its label, changes in the same step and is the
+/// control: it is heard, so the silence of the first is the rule at work and
+/// not a bridge that reports nothing.
+#[test]
+fn pull_announcements_leaves_out_a_status_no_platform_speaks() {
+    let text = Signal::new(String::new());
+    let silent = Probe::new(accesskit::Role::Status, "Statut")
+        .value(text.clone())
+        .live(accesskit::Live::Polite);
+    let heard_probe = Probe::new(accesskit::Role::Status, "Prêt").live(accesskit::Live::Polite);
+    let name = heard_probe.label.clone();
+    let mut tree = WidgetTree::new();
+    tree.add(silent);
+    tree.add(heard_probe);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let mut ops = RecordingWindowOps::new();
+    let baseline = pull(&mut tree, &mut ops, 0)
+        .last()
+        .map(|a| a.seq)
+        .unwrap_or(0);
+
+    text.set("Évènement enregistré".to_string());
+    name.set("Enregistré".to_string());
+    let _ = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::Settle,
+        &default_settle(),
+    );
+    let heard: Vec<String> = pull(&mut tree, &mut ops, baseline)
+        .into_iter()
+        .map(|a| a.text)
+        .collect();
+    assert_eq!(
+        heard,
+        vec!["Enregistré"],
+        "a value is not a Status's name, so no adapter announces it; a label is"
+    );
+}
+
 #[test]
 fn wait_for_condition_succeeds_and_times_out() {
     let (mut tree, id) = laid_out(Probe::new(accesskit::Role::Button, "Wait"));

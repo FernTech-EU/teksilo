@@ -64,6 +64,46 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **The announcement ring recorded text no platform announces.**
+  `WidgetTree::announcements_since`, and the automation bridge's
+  `pull_announcements` that reads it, recorded a live node's `value` before
+  its label, from every live node the walk emitted, whenever that text changed.
+  Every AccessKit adapter announces a node's *name* instead, which is its value
+  only for a `Role::Label`, and only for a node in the filtered tree. So a
+  hidden live region, one inside a hidden subtree, and a `Status` or `Alert`
+  carrying its text as a value were all recorded while every platform stayed
+  silent, and a probe reading the ring passed over the silence. A tree that
+  records announcements now replays every update `sync_accessibility`
+  returns, including the re-placed copy a scroll hands out, through
+  `accesskit_consumer`, and the ring records what all three adapters
+  announce: a live node's name as it enters the filtered tree, and again
+  when it changes while the node stays there, at the
+  politeness the node has or inherits from a live ancestor. A node inside a
+  live region is recorded, as the adapters announce it. A change of politeness
+  alone, which Windows and macOS announce and AT-SPI does not, is not, and
+  neither is a blank name. Several in one update are kept in reading order,
+  so a message the framework's announcer says comes after a change of the
+  application's own live region in the same frame. The replay is a second
+  pass over every node of every update, making a full sync of 3,000 nodes
+  1.4 to 2 times as long, so only a tree that has a reader records: one
+  built with `WidgetTree::new()`, as every headless tree and every test is,
+  and the tree of a window `teksilo-app` opens only when
+  `install_automation_bridge_in_debug()` installed the bridge, which it does
+  in a debug build with the `automation` feature. The new
+  `WidgetTree::set_records_announcements` switches it. **Behaviour change**
+  for anything that read the ring, and for anything that read it from a
+  window without the automation bridge, where it is now empty.
+- **`announce_unless_widget_speaks` kept quiet beside a live region nobody
+  could hear.** It took a widget to be speaking when any node in its subtree
+  carried a politeness and a value or a label, so a hidden live region, or a
+  `Status` holding its text as a value, silenced the framework's own message,
+  and the user heard nothing at all. It now reads the last update through
+  `accesskit_consumer`, whether or not the tree records announcements, and
+  counts only a live node the platform adapters walk, with a name to speak,
+  whose politeness is set inside the widget. A button that is live only
+  because it sits in a toast or another live region is not the one speaking,
+  and does not keep the framework quiet about its own menu. The long-press
+  context-menu announcement goes through it.
 - **A merged name took the text from under a hidden descendant.**
   `access_merge_subtree` skipped a hidden descendant's own name but went on
   merging its children, so text an application hid with `access_hidden(true)`

@@ -156,19 +156,45 @@ impl WidgetTree {
         &self.at_version
     }
 
-    /// Drain the captured live-region announcements with `seq` strictly
-    /// greater than `seq`. See [`crate::accessibility::Announcement`].
-    /// The buffer is capped at 256 entries, so a caller that lags far
-    /// behind sees only the retained tail. Read after a
-    /// [`sync_accessibility`](Self::sync_accessibility) (or a settle that
-    /// ends in one) to observe announcements raised by the latest
-    /// rebuild.
+    /// The live-region announcements with `seq` strictly greater than
+    /// `seq`: what the platform adapters would have announced from the
+    /// updates [`sync_accessibility`](Self::sync_accessibility) has returned.
+    /// See [`crate::accessibility::Announcement`] for what is and is not
+    /// recorded. The ring keeps the last 256, so a caller that lags far
+    /// behind sees only those. Read after a `sync_accessibility` (or a
+    /// settle that ends in one) to observe what the latest update said.
+    ///
+    /// Only a tree that [records announcements](Self::records_announcements)
+    /// has anything here. A tree built with `WidgetTree::new()` does, from
+    /// its first update, so a headless test reads this unchanged; the tree
+    /// of a window `teksilo-app` opens does only when the automation bridge
+    /// is installed.
     pub fn announcements_since(&self, seq: u64) -> Vec<crate::accessibility::Announcement> {
-        self.automation_announcements
-            .iter()
-            .filter(|a| a.seq > seq)
-            .cloned()
-            .collect()
+        self.announcement_ring.since(seq)
+    }
+
+    /// Whether this tree replays each update it hands out through
+    /// `accesskit_consumer` and records what the platform adapters would
+    /// announce, for [`announcements_since`](Self::announcements_since).
+    /// `true` for a tree built with `WidgetTree::new()`.
+    pub fn records_announcements(&self) -> bool {
+        self.announcement_ring.is_recording()
+    }
+
+    /// Start or stop recording announcements.
+    ///
+    /// The replay costs a pass of the consumer over every node of every
+    /// update, on top of the walk, and keeps a second copy of the tree, for
+    /// the benefit of a reader in process: the automation bridge, or a test.
+    /// `teksilo-app` turns it off on the tree of each window it opens unless
+    /// the bridge is installed, so an application that nobody drives pays
+    /// nothing for it. Turned on again, the tree records from its next update
+    /// on: what that update already holds is taken as heard, since the
+    /// updates handed out meanwhile reached whoever was listening, and the
+    /// changes after it are recorded. What was recorded before stays
+    /// readable either way.
+    pub fn set_records_announcements(&mut self, record: bool) {
+        self.announcement_ring.set_recording(record);
     }
 
     /// Parent widget id in the arena graph, or `None` for roots.

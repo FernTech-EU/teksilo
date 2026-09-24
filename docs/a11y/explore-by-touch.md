@@ -130,12 +130,17 @@ last-write-wins drops the first of two things the user needed to hear.
 
 **Quiet when the widget already speaks.**
 `WidgetTree::announce_unless_widget_speaks(widget, message)` skips the message
-if the last built accessibility tree carried a non-empty live region inside
-`widget`'s subtree. It reads *one tree behind* — the announcement is queued
-during dispatch, and the live text it would duplicate belongs to the update
-built before it. A widget speaking for the first time in the same dispatch is
-therefore not yet visible to the check, which errs toward saying something
-rather than toward silence.
+if the last built accessibility tree carried, inside `widget`'s subtree, a live
+node the platform adapters would speak for: in the filtered tree, not hidden,
+with a name, and live through a politeness set inside the subtree. A hidden
+region, or a `Status` holding its text as a value, is silent on every platform
+and does not count; nor does a control that is live only because it sits in
+somebody else's live region, such as a toast's action, since the region saying
+its own name says nothing about that control. It reads *one tree behind*, as
+the announcement is queued during dispatch, and the live text it would
+duplicate belongs to the update built before it. A widget speaking for the
+first time in the same dispatch is therefore not yet visible to the check,
+which errs toward saying something rather than toward silence.
 
 **The words are the application's.** `teksilo-i18n` depends on `teksilo-core`,
 so nothing in core can name a `LocalizedString` or reach a translation bundle.

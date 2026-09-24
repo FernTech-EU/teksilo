@@ -94,9 +94,11 @@ Two rules the framework enforces, and one it cannot:
   pruned stack — used to panic the consumer's relation walk. The walker now
   strips such a target; the relation simply goes quiet.
 - **Live regions are the exception.** `Banner`, `Toast` and `MessageBox`
-  keep their own `set_name` and hide their title label instead: the
-  announcement path reads a node's own value or label, never its relations,
-  so a live region named only through `labelled_by` announces nothing.
+  keep their own `set_name` and hide their title label instead. The adapters
+  do follow `labelled_by` for a live node's name, so such a region is
+  announced by its title as it appears; but they check a node's name only
+  when that node's own data changed, so a new title on the label it points at
+  announces nothing.
 
 A composite whose content carries the title implements
 [`Widget::accessible_title_node`](https://docs.rs/teksilo-core/latest/teksilo_core/widget/trait.Widget.html)
