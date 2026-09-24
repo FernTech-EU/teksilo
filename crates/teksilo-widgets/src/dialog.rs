@@ -25,7 +25,10 @@
 //! Its accessible name defaults to the `DialogContent` title (via
 //! `Widget::accessible_title_hint`) or falls back to the localized
 //! `a11y_dialog_name` message; pass `.title(tr!(…))` to the container for an
-//! explicit override. The trigger button advertises `HasPopup::Dialog` and
+//! explicit override. When the content's own node is already a dialog (a
+//! `MessageBox`'s `Role::AlertDialog`, a `CommandPalette`'s `Role::Dialog`),
+//! the container publishes no node of its own, so a reader meets one dialog
+//! and hears its title once. The trigger button advertises `HasPopup::Dialog` and
 //! `set_expanded` tracks whether the modal is currently open.
 //!
 //! ```ignore
@@ -109,6 +112,10 @@ pub struct ModalContainer {
     /// node's own label over its `labelled_by` targets, so doing both would
     /// silently drop the relation.
     named_by_content: bool,
+    /// True when the content's own node is already a `Role::Dialog` or
+    /// `Role::AlertDialog` (a `MessageBox`, a `CommandPalette`). The
+    /// container then publishes no dialog of its own, see `accessibility`.
+    content_is_dialog: bool,
 }
 
 impl ModalContainer {
@@ -127,6 +134,7 @@ impl ModalContainer {
             style_override: None,
             root_child_id: None,
             named_by_content: false,
+            content_is_dialog: false,
         }
     }
 
@@ -152,7 +160,9 @@ impl ModalContainer {
     /// Accessible title for the dialog, announced as the dialog's name
     /// when the content paints no title of its own. Content that does —
     /// e.g. `DialogContent::title` — names the dialog by pointing at that
-    /// label and wins over this string, so the two should match.
+    /// label and wins over this string, so the two should match. Content
+    /// that is itself a dialog names itself, and the container then
+    /// publishes no node for this title to name.
     pub fn title(mut self, title: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = title.into();
         self.title = Some(ls);
@@ -172,6 +182,15 @@ impl std::fmt::Debug for ModalContainer {
 impl Widget for ModalContainer {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         if let Some(content) = self.pending_content.take() {
+            // Read the content's own role the way the overlay manager does
+            // when it decides what a host surface is: a content widget that
+            // is already a dialog names, describes and announces itself.
+            let mut probe = AccessNodeBuilder::new();
+            content.accessibility(&mut probe);
+            self.content_is_dialog = matches!(
+                probe.role(),
+                teksilo_core::accesskit::Role::Dialog | teksilo_core::accesskit::Role::AlertDialog
+            );
             // If the caller didn't set an explicit `.title(...)`,
             // ask the content widget for a suggested title — e.g.
             // `DialogContent::accessible_title_hint` returns its
@@ -179,6 +198,7 @@ impl Widget for ModalContainer {
             // real name without forcing callers to duplicate the
             // string at both the content and the container level.
             if self.title.is_none()
+                && !self.content_is_dialog
                 && let Some(hint) = content.accessible_title_hint()
             {
                 // The core `accessible_title_hint` trait can only return a
@@ -194,7 +214,9 @@ impl Widget for ModalContainer {
             // now; an explicit `.title(..)` on the container yields to it,
             // because the visible title is what a reader will find when
             // they go looking for the name they heard.
-            if let Some(title_id) = ctx.accessible_title_node(content_id) {
+            if !self.content_is_dialog
+                && let Some(title_id) = ctx.accessible_title_node(content_id)
+            {
                 let self_id = ctx.self_id();
                 ctx.access_labelled_by(self_id, title_id);
                 self.named_by_content = true;
@@ -252,6 +274,21 @@ impl Widget for ModalContainer {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.content_is_dialog {
+            // The content is the dialog: a `MessageBox` is a modal, named
+            // and described `AlertDialog`, a `CommandPalette` a modal, named
+            // `Dialog`. A second dialog around it, named by the same title,
+            // put two dialogs on every path from a control inside to the
+            // window, and Orca speaks each named ancestor a focus change
+            // enters (speech_generator.py `_generateAncestors`; a dialog and
+            // an alert are never layout-only to it, script_utilities.py
+            // `isLayoutOnly` and `_topLevelRoles`), so the title was heard
+            // twice. A bare `GenericContainer` is dropped by every adapter
+            // with the content kept. A modal is a host surface by its
+            // placement, not by this role (`overlay_is_host_surface`).
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+            return;
+        }
         builder.set_role(teksilo_core::accesskit::Role::Dialog);
         // A container named through a relation must not also set a name:
         // the consumer prefers the node's own label, so setting both would

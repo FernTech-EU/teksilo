@@ -144,7 +144,17 @@ by crate for clarity, not because crates version independently.
   adapters drop while keeping its children. Every `ModalContainer` is
   affected, on the default style and on the macOS and Fluent presets, which
   reuse it. A custom `DialogStyle` should do the same, as
-  `DialogStyle::make_panel` now says.
+  `DialogStyle::make_panel` now says. What that lets through is presented
+  once: a `ModalContainer` whose content is itself a `Role::Dialog` or
+  `Role::AlertDialog`, as a `MessageBox`'s and a `CommandPalette`'s is, now
+  publishes a bare `Role::GenericContainer` instead of a second dialog of the
+  same name, which Orca would speak as focus entered each; and the
+  `CommandPalette`'s content is `Live::Off`, so the polite palette is
+  announced by its name alone, and not row by row. **Behaviour
+  change**: the container of a presented `MessageBox` is no longer a
+  `Role::Dialog` named by the title. A test or a probe that found the box's
+  buttons under that node finds them under the box's `Role::AlertDialog`,
+  which holds them on this version and the last.
 - **The content of a `Card`, a `Panel`, a `Toolbar`, a `StatusBar`, a
   snackbar and a `RadioTile` body was hidden from assistive technology.** The
   frames `RecipeCardStyle`, `RecipePanelStyle`, `RecipeSnackbarStyle` and

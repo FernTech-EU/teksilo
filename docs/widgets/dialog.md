@@ -29,7 +29,10 @@ separated by a `Divider`.
 Its accessible name defaults to the `DialogContent` title (via
 `Widget::accessible_title_hint`) or falls back to the localized
 `a11y_dialog_name` message; pass `.title(tr!(…))` to the container for an
-explicit override. The trigger button advertises `HasPopup::Dialog` and
+explicit override. When the content's own node is already a dialog (a
+`MessageBox`'s `Role::AlertDialog`, a `CommandPalette`'s `Role::Dialog`),
+the container publishes no node of its own, so a reader meets one dialog
+and hears its title once. The trigger button advertises `HasPopup::Dialog` and
 `set_expanded` tracks whether the modal is currently open.
 
 ```ignore
@@ -108,7 +111,9 @@ theme-wide default `DialogStyle` for just this container.
 Accessible title for the dialog, announced as the dialog's name
 when the content paints no title of its own. Content that does —
 e.g. `DialogContent::title` — names the dialog by pointing at that
-label and wins over this string, so the two should match.
+label and wins over this string, so the two should match. Content
+that is itself a dialog names itself, and the container then
+publishes no node for this title to name.
 
 ## `pub struct ModalScrim`
 

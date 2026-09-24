@@ -39,7 +39,8 @@
 //! announced by its name alone while a hidden wrapper kept its content out
 //! is announced once for every named node in that content as soon as the
 //! wrapper lets it through. Each live region in this crate that speaks by
-//! its name gives its content `Live::Off`.
+//! its name gives its content `Live::Off`, and the one-dialog tests hold the
+//! other thing a revealed dialog brought in: a dialog inside a dialog.
 
 #![cfg(test)]
 
@@ -93,17 +94,19 @@ fn reached(update: &TreeUpdate) -> Vec<Reached> {
     out
 }
 
+/// `target`, if the filtered walk down from `node` reaches it.
+fn find<'a>(node: NodeRef<'a>, target: NodeId) -> Option<NodeRef<'a>> {
+    if node.locate().0 == target {
+        return Some(node);
+    }
+    node.filtered_children(&common_filter)
+        .find_map(|child| find(child, target))
+}
+
 /// Every node an adapter reaches below `widget`'s node, which the walk
 /// itself has to reach first.
 #[track_caller]
 fn reached_below(update: &TreeUpdate, widget: WidgetId) -> Vec<Reached> {
-    fn find<'a>(node: NodeRef<'a>, target: NodeId) -> Option<NodeRef<'a>> {
-        if node.locate().0 == target {
-            return Some(node);
-        }
-        node.filtered_children(&common_filter)
-            .find_map(|child| find(child, target))
-    }
     let tree = Tree::new(update.clone(), false);
     let Some(node) = find(tree.state().root(), widget_id_to_node_id(widget)) else {
         panic!("the filtered walk never reaches {widget:?}, so nothing under it can be tested");
@@ -1053,5 +1056,94 @@ mod heard {
             );
         });
         heard.assert_only("a toast arriving", "Saved");
+    }
+}
+
+// ── One dialog ──────────────────────────────────────────────────────────
+
+mod one_dialog {
+    use super::*;
+
+    /// How many dialogs sit between the control `role` names and the
+    /// window, in the tree an adapter walks: the ancestors Orca speaks as a
+    /// focus change enters them (speech_generator.py `_generateAncestors`).
+    #[track_caller]
+    fn dialogs_above(update: &TreeUpdate, control: WidgetId) -> Vec<Option<String>> {
+        let tree = Tree::new(update.clone(), false);
+        let Some(mut node) = find(tree.state().root(), widget_id_to_node_id(control)) else {
+            panic!("the control has to be in the tree an adapter walks");
+        };
+        let mut dialogs = Vec::new();
+        while let Some(parent) = node.filtered_parent(&common_filter) {
+            if matches!(parent.role(), Role::Dialog | Role::AlertDialog) {
+                dialogs.push(parent.label());
+            }
+            node = parent;
+        }
+        dialogs
+    }
+
+    #[test]
+    fn a_message_box_is_one_dialog() {
+        // Presented, a message box sits in a `ModalContainer`. With the
+        // panel between them no longer hiding it, a reader walking up from
+        // a button met the box's `AlertDialog` and the container's
+        // `Dialog`, both named by the title, and Orca speaks each dialog
+        // ancestor a focus change enters: the title twice.
+        let mut tree = themed_tree();
+        tree.add(crate::dialog::ModalContainer::new(
+            crate::message_box::MessageBox::warning(lit!("Delete Lunch?"))
+                .buttons(crate::message_box::MessageBoxButtons::YesNo),
+        ));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let Some(no) = tree.find_by_label("No") else {
+            panic!("a YesNo box has a No button");
+        };
+        let update = laid_out(&mut tree);
+        assert_eq!(
+            dialogs_above(&update, no),
+            vec![Some("Delete Lunch?".to_string())],
+            "one dialog, named once, between a message box's button and the window"
+        );
+    }
+
+    #[test]
+    fn a_command_palette_is_one_dialog() {
+        let mut tree = themed_tree();
+        tree.add(crate::dialog::ModalContainer::new(
+            crate::command_palette::CommandPalette::new(),
+        ));
+        let update = laid_out(&mut tree);
+        let Some(field) = tree.find_by_role(Role::TextInput) else {
+            panic!("the palette has a search field");
+        };
+        let dialogs = dialogs_above(&update, field);
+        assert_eq!(
+            dialogs.len(),
+            1,
+            "one dialog between the palette's field and the window: {dialogs:?}"
+        );
+    }
+
+    #[test]
+    fn a_dialog_around_plain_content_is_still_the_dialog() {
+        // The container stands back only for content that is itself a
+        // dialog. Around a form it is the dialog, named by its title.
+        let mut tree = themed_tree();
+        tree.add(
+            crate::dialog::ModalContainer::new(
+                VStack::new().child(Button::new(lit!("Inner action"))),
+            )
+            .title(lit!("Settings")),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let Some(button) = tree.find_by_label("Inner action") else {
+            panic!("the button is labelled");
+        };
+        let update = laid_out(&mut tree);
+        assert_eq!(
+            dialogs_above(&update, button),
+            vec![Some("Settings".to_string())]
+        );
     }
 }

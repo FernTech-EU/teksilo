@@ -98,13 +98,13 @@ the other routes it is already going away.
 
 ## Accessibility
 
-The widget exposes `Role::AlertDialog` (distinct from
-`ModalContainer`'s `Role::Dialog`), with `set_modal()`,
+The widget exposes `Role::AlertDialog`, with `set_modal()`,
 `set_live(Live::Assertive)`, `set_name(title)`, and
 `set_description(text + informative_text)`, so screen readers
 announce the dialog by its title as it opens and find the text as its
-description and by walking it. The content under it is `Live::Off`, so
-the title is the one thing announced, once.
+description and by walking it. The `ModalContainer` that presents it
+publishes no dialog of its own around it, and the content under it is
+`Live::Off`, so the title is the one thing announced, once.
 
 ## Density
 

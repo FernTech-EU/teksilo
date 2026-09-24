@@ -94,13 +94,13 @@
 //!
 //! ## Accessibility
 //!
-//! The widget exposes `Role::AlertDialog` (distinct from
-//! `ModalContainer`'s `Role::Dialog`), with `set_modal()`,
+//! The widget exposes `Role::AlertDialog`, with `set_modal()`,
 //! `set_live(Live::Assertive)`, `set_name(title)`, and
 //! `set_description(text + informative_text)`, so screen readers
 //! announce the dialog by its title as it opens and find the text as its
-//! description and by walking it. The content under it is `Live::Off`, so
-//! the title is the one thing announced, once.
+//! description and by walking it. The `ModalContainer` that presents it
+//! publishes no dialog of its own around it, and the content under it is
+//! `Live::Off`, so the title is the one thing announced, once.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -1622,14 +1622,30 @@ mod tests {
     }
 
     #[test]
-    fn accessible_title_hint_propagates_to_container() {
+    fn the_presenting_container_is_no_second_dialog() {
+        // This test used to ask for the container to be a `Role::Dialog`
+        // named by the box's title, which was the one dialog a reader met
+        // while the panel between them hid the box. With the box reachable
+        // that is a second dialog of the same name around its
+        // `AlertDialog`, and Orca speaks each dialog a focus change enters,
+        // so the title was heard twice. The box is the dialog; the
+        // container publishes a bare `GenericContainer`, which every
+        // adapter drops.
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let mb = MessageBox::information(lit!("Title propagation test"))
             .text(lit!("Body"))
             .buttons(MessageBoxButtons::Ok);
         let content = present_and_lay_out(&mut tree, mb);
-        let info = tree.accessibility_node(content);
-        assert_eq!(info.role(), teksilo_core::accesskit::Role::Dialog);
+        let container = tree.accessibility_node(content);
+        assert_eq!(
+            container.role(),
+            teksilo_core::accesskit::Role::GenericContainer
+        );
+        assert_eq!(container.name(), None);
+        let panel = tree.children(content).first().copied().unwrap();
+        let mb_id = tree.children(panel).first().copied().unwrap();
+        let info = tree.accessibility_node(mb_id);
+        assert_eq!(info.role(), teksilo_core::accesskit::Role::AlertDialog);
         assert_eq!(info.name(), Some("Title propagation test"));
     }
 
