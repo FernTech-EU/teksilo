@@ -222,8 +222,14 @@ Mark a scene entry as a polite or assertive live region:
 scene.set_a11y_live(A11yNode::Item(toast), accesskit::Live::Polite);
 ```
 
-Updates to the entry's AT name / value are announced. Like relations, this
-lands only on a lightweight item or a logical group (see
+The platform adapters announce the entry's *name*, as the entry appears and
+whenever the name changes. The name is the label (`.access_label(..)`) for
+every role but `Role::Label`, whose name is its value, so the value of any
+other role is announced by none of them: a message meant to be heard goes in
+the name. The entry's politeness is inherited by every node under it that
+sets none, so a named child of a live group is announced as well, as it
+appears or is renamed.
+Like relations, this lands only on a lightweight item or a logical group (see
 [Relations](#relations)); pass `Live::Off` to clear.
 
 ---

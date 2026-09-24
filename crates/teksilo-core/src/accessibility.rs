@@ -131,7 +131,8 @@ pub fn to_accesskit_affine(t: teksilo_canvas::Transform2D) -> accesskit::Affine 
     accesskit::Affine::new([a as f64, b as f64, c as f64, d as f64, tx as f64, ty as f64])
 }
 
-/// The text a node announces, read the way every platform adapter reads it.
+/// The text a node announces as its name, read the way every platform adapter
+/// reads it.
 ///
 /// A `Role::Label` carries its text in `value`, not `label` — Windows UIA
 /// derives the Name from `value` for that role, macOS exposes it as
@@ -139,11 +140,21 @@ pub fn to_accesskit_affine(t: teksilo_canvas::Transform2D) -> accesskit::Affine 
 /// `labelled_by` it. `AccessNodeBuilder::build` moves it there. Everything
 /// else carries its name in `label`. A test or probe that reads one property
 /// sees nothing on half the tree.
+///
+/// Neither falls back to the other. The AT-SPI, UIA and macOS adapters all
+/// take the name from `label_comes_from_value() ? value : label`
+/// (`accesskit_atspi_common` `node.rs:38-44`, `accesskit_windows`
+/// `node.rs:404-413`, `accesskit_macos` `node.rs:328-334`, with
+/// `label_comes_from_value` true for `Role::Label` alone, consumer
+/// `node.rs:744-746`), so a `Status` that holds its text only as a value has
+/// no name, and no platform announces it as one. This reads one node's own
+/// properties: a name that comes through `labelled_by` takes the consumer's
+/// `NodeRef::label` to follow.
 pub fn announced_text(node: &Node) -> Option<&str> {
     if node.role() == Role::Label {
-        node.value().or_else(|| node.label())
+        node.value()
     } else {
-        node.label().or_else(|| node.value())
+        node.label()
     }
 }
 
@@ -2445,5 +2456,29 @@ mod tests {
         let sel = node.text_selection().expect("text selection set");
         assert_eq!(sel.focus.node, run);
         assert_eq!(sel.focus.character_index, 2);
+    }
+
+    /// A `Status` holding its text only as a value has no name on any
+    /// platform, so it announces nothing: the adapters read a value as the
+    /// name for a `Role::Label` alone.
+    #[test]
+    fn a_status_holding_its_text_as_a_value_announces_no_name() {
+        let mut status = Node::new(Role::Status);
+        status.set_value("Enregistré".to_string());
+        assert_eq!(announced_text(&status), None);
+
+        status.set_label("Prêt".to_string());
+        assert_eq!(announced_text(&status), Some("Prêt"));
+    }
+
+    /// A `Role::Label` is named by its value, and by nothing else.
+    #[test]
+    fn a_label_is_named_by_its_value_alone() {
+        let mut label = Node::new(Role::Label);
+        label.set_label("Titre".to_string());
+        assert_eq!(announced_text(&label), None);
+
+        label.set_value("Enregistré".to_string());
+        assert_eq!(announced_text(&label), Some("Enregistré"));
     }
 }

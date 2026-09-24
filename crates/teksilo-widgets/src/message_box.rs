@@ -1353,8 +1353,9 @@ mod tests {
     #[test]
     fn title_label_is_hidden_but_body_label_survives() {
         // The MessageBox's own AlertDialog node already carries the title
-        // as its name (the live-region announcement reads that value, not
-        // a `labelled_by` relation), so the embedded title Label must not
+        // as its name (set on the node, not drawn through `labelled_by`, so
+        // that a new title is a change of the node the adapters announce),
+        // so the embedded title Label must not
         // reach the AT tree as a second, duplicate-named stop. The body
         // text, which is not a duplicate, must still be present.
         use teksilo_core::accessibility::widget_id_to_node_id;

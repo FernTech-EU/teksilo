@@ -140,8 +140,11 @@ impl Widget for Banner {
                 .color(TextRole::Primary)
                 .single_line()
                 // The banner's own Role::Status node carries this title as
-                // its name; the live-region announcement reads that node's
-                // value, not a `labelled_by` relation.
+                // its name, set on the node rather than drawn from this label
+                // through `labelled_by`: the adapters announce a live node
+                // when its own name changes, and `accesskit_consumer` reports
+                // a node as changed only when its own data does, so a title
+                // changing on the label alone would go unannounced.
                 .a11y_hidden(),
         );
         let mut text_column = VStack::new()
@@ -344,8 +347,9 @@ mod tests {
     #[test]
     fn banner_title_label_is_hidden_from_accessibility_tree() {
         // The Banner's Role::Status node already carries the title as its
-        // own name (the live-region announcement reads that value, not a
-        // `labelled_by` relation), so the embedded title Label must not
+        // own name (set on the node, not drawn through `labelled_by`, so
+        // that a new title is a change of the node the adapters announce),
+        // so the embedded title Label must not
         // reach the AT tree as a second, duplicate-named stop. The
         // description is a distinct, non-duplicate label and must stay.
         use teksilo_core::accessibility::widget_id_to_node_id;

@@ -107,6 +107,16 @@ by crate for clarity, not because crates version independently.
   because it sits in a toast or another live region is not the one speaking,
   and does not keep the framework quiet about its own menu. The long-press
   context-menu announcement goes through it.
+- **`accessibility::announced_text` and the label audits took a value for a
+  name.** For any role but `Role::Label`, `announced_text` fell back to the
+  node's `value` when it had no label, and `audit::duplicate_label_leaks`
+  and `labels_without_text_ranges` read names the same way, while no
+  platform adapter takes a value as the name of anything but a label. A
+  `Status` holding its text as a value was reported as announcing it, and a
+  label repeating such a value was reported as repeating a name nobody
+  hears. Both now read a `Role::Label`'s value and any other node's label,
+  and nothing else. **Behaviour change** for a test that found a node by a
+  value through `announced_text`.
 - **A merged name took the text from under a hidden descendant.**
   `access_merge_subtree` skipped a hidden descendant's own name but went on
   merging its children, so text an application hid with `access_hidden(true)`

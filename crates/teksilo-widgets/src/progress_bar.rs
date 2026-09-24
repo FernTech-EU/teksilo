@@ -298,10 +298,14 @@ impl Widget for ProgressBar {
         if let Some(ref label) = self.label {
             builder.set_name(label.clone());
         }
-        // Announce progress updates to assistive tech (WCAG 4.1.3) for BOTH
-        // states: the indeterminate "busy" state and each determinate value
-        // change. Previously only the indeterminate branch was live, so a
-        // determinate bar advancing 0% -> 100% was silent to screen readers.
+        // Polite in both states, so the bar's label is announced as it
+        // appears. Every adapter announces a live node's name, as it enters
+        // the tree and when the name changes, and never a change of its
+        // value: a determinate advance reaches a screen reader as the
+        // value-changed event every numeric value raises, which Orca 46.1
+        // speaks for a progress bar through its own progress-bar updates
+        // (`onValueChanged`, `isProgressBarUpdate`) whether or not it is
+        // live.
         builder.set_live(teksilo_core::accesskit::Live::Polite);
         if !self.indeterminate {
             let value = self.value.get();
@@ -501,9 +505,9 @@ mod tests {
             .map(|(_, n)| n)
             .expect("progress bar node in tree");
         assert_eq!(node.numeric_value(), Some(0.75));
-        // WCAG 4.1.3 (audit G4): a determinate progress bar is a polite live
-        // region so value advances are announced — previously only the
-        // indeterminate branch set this, leaving determinate progress silent.
+        // Audit G4: a determinate progress bar is a polite live region as
+        // well, so its label is announced as it appears; its advance is the
+        // numeric value above, which no adapter announces as a live change.
         assert_eq!(node.live(), Some(teksilo_core::accesskit::Live::Polite));
     }
 

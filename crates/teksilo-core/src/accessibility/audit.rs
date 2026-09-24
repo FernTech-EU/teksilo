@@ -74,13 +74,16 @@ fn locate(node: &NodeRef<'_>) -> NodeId {
 }
 
 /// The name a node announces, by the adapters' own rule: a `Role::Label`
-/// carries its text in `value`, everything else in `label`.
+/// carries its text in `value`, everything else in `label`, followed through
+/// `labelled_by`. Neither falls back to the other, since no adapter does
+/// (see [`crate::accessibility::announced_text`]): a node whose text is only
+/// a value has no name to repeat.
 fn announced_name(node: &NodeRef<'_>) -> Option<String> {
-    let name = node
-        .value()
-        .filter(|_| node.role() == Role::Label)
-        .or_else(|| node.label())
-        .or_else(|| node.value())?;
+    let name = if node.label_comes_from_value() {
+        node.value()
+    } else {
+        node.label()
+    }?;
     let trimmed = name.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
@@ -489,5 +492,40 @@ mod tests {
     fn a_hidden_wrapper_around_decoration_is_not() {
         let update = update_for(FillWidget::new().label("Deco"), true);
         assert!(focusable_nodes_hidden(&update).is_empty());
+    }
+
+    /// A window holding `outer` and, inside it, a label reading `text`.
+    fn label_inside(outer: accesskit::Node, text: &str) -> TreeUpdate {
+        let (root, outer_id, label_id) = (NodeId(1), NodeId(2), NodeId(3));
+        let mut window = accesskit::Node::new(Role::Window);
+        window.set_children(vec![outer_id]);
+        let mut outer = outer;
+        outer.set_children(vec![label_id]);
+        let mut label = accesskit::Node::new(Role::Label);
+        label.set_value(text.to_string());
+        TreeUpdate {
+            nodes: vec![(root, window), (outer_id, outer), (label_id, label)],
+            tree: Some(accesskit::TreeInfo::new(root)),
+            tree_id: accesskit::TreeId::ROOT,
+            focus: root,
+        }
+    }
+
+    /// A label repeating the name of the node around it is heard twice.
+    /// One repeating a value that node carries in place of a name is not:
+    /// no adapter reads a value as the name of anything but a label, so
+    /// the text is heard once, from the label.
+    #[test]
+    fn a_label_repeats_a_name_and_not_a_value() {
+        let mut named = accesskit::Node::new(Role::Status);
+        named.set_label("Enregistré".to_string());
+        assert_eq!(
+            duplicate_label_leaks(&label_inside(named, "Enregistré")).len(),
+            1
+        );
+
+        let mut valued = accesskit::Node::new(Role::Status);
+        valued.set_value("Enregistré".to_string());
+        assert!(duplicate_label_leaks(&label_inside(valued, "Enregistré")).is_empty());
     }
 }

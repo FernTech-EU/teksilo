@@ -468,9 +468,11 @@ mod tests {
     }
 
     /// The title's `TextWidget` duplicates the toast's own announced name. Toast is a
-    /// live region, so it must keep `set_name` on its own node — the announcement path
-    /// reads the node's own value/label, not a `labelled_by` relation — and hide the
-    /// title label instead. The body is a different string and must stay reviewable.
+    /// live region, so it keeps `set_name` on its own node and hides the title label
+    /// instead: the adapters announce a live node when its own name changes, and
+    /// `accesskit_consumer` reports a node as changed only when its own data does, so a
+    /// name drawn through `labelled_by` would change unannounced. The body is a
+    /// different string and must stay reviewable.
     #[test]
     fn toast_title_label_is_hidden_but_the_toast_keeps_its_name_and_the_body_label() {
         let data = ToastSurfaceData {
