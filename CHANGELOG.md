@@ -310,6 +310,14 @@ by crate for clarity, not because crates version independently.
   carries the same words. `grid-view-selection-count` is new, in all 23
   locales. **Behaviour change** for anything that read the value in English.
 
+#### Terminal
+
+- **A `Terminal` never announced its new output.** Each completed line went to
+  a polite `Role::Status` live region as its value. A `Status` is named by its
+  label, and every platform adapter announces a live node's name, so no
+  platform said the line; only the automation ring, which read the value,
+  recorded it. The line is now the region's name.
+
 #### Automation
 
 - **`list_live_regions` listed live regions no screen reader can reach.** It

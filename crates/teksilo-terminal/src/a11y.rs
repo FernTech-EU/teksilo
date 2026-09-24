@@ -198,9 +198,8 @@ fn row_layout(snapshot: &GridSnapshot, row: usize, cell_width: f32) -> RowLayout
 }
 
 /// A zero-size child node that carries the terminal's "new output" live region.
-/// The terminal updates [`Self::text`] with each newly-completed output line; a
-/// polite live region announces it once (the value-diffing is done by the
-/// framework's `collect_announcements`).
+/// The terminal updates [`Self::text`] with each newly-completed output line,
+/// and the platform adapters announce it as the node's name changes.
 #[derive(Debug)]
 pub(crate) struct LiveAnnouncer {
     pub(crate) text: Signal<String>,
@@ -227,7 +226,11 @@ impl Widget for LiveAnnouncer {
         builder.set_live(Live::Polite);
         let text = self.text.get();
         if !text.is_empty() {
-            builder.set_value(text);
+            // The name, not the value. Every AccessKit adapter announces a live
+            // node's name, and `accesskit_consumer` takes a name from the value
+            // for a `Role::Label` only (`node.rs:744-746`), so a `Status`
+            // holding its line as a value was silent on all three platforms.
+            builder.set_name(text);
         }
     }
 }
@@ -236,6 +239,31 @@ impl Widget for LiveAnnouncer {
 mod tests {
     use super::*;
     use crate::engine::{Cell, CursorInfo, TermCursorShape};
+
+    /// A completed line of output is announced, by its words. The announcer
+    /// used to hold the line as a value, which no platform announces for a
+    /// `Status`; the announcement ring used to read the value and record it
+    /// anyway. It now replays the adapters' own rules, so it hears what they
+    /// would.
+    #[test]
+    fn a_completed_line_is_announced() {
+        let text = Signal::new(String::new());
+        let mut tree = teksilo_core::widget_tree::WidgetTree::new();
+        tree.add(LiveAnnouncer { text: text.clone() });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.sync_accessibility();
+        let seen = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+
+        text.set("total 12".to_string());
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let _ = tree.sync_accessibility();
+        let heard: Vec<String> = tree
+            .announcements_since(seen)
+            .into_iter()
+            .map(|a| a.text)
+            .collect();
+        assert_eq!(heard, vec!["total 12"]);
+    }
 
     const METRICS: CellMetrics = CellMetrics {
         width: 8.0,
