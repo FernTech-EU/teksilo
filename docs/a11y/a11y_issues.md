@@ -73,24 +73,43 @@ line-height multiplier), the tokens threaded through `TypographyTokens` →
 spacing-override mechanism); text enlargement is covered by the text-scale
 control. Defensible under EN 301 549 / RGAA per WCAG2ICT.
 
-## `described_by` reaches no assistive technology (AccessKit-blocked)
+## `described_by` reaches no assistive technology by itself (AccessKit-shaped, met in Teksilo)
 
-**Status: not met upstream. There is nothing for Teksilo to write.**
+**Status: met. The relation is still unexported upstream; Teksilo computes the
+description a browser would.**
 
 AccessKit 0.25 carries a `described_by` relation on the node, but nothing
 resolves it: `accesskit_consumer::Node::description()` reads only the node's own
 `description` property, and none of the three adapters exports the relation —
 macOS maps `AXHelp` from `description()`, Windows maps
 `UIA_FullDescriptionPropertyId` from `description`, and the AT-SPI relation set
-carries `controls` alone. A node described *only* through the relation therefore
-describes itself to nobody.
+carries `controls` alone. A node described *only* through the relation would
+describe itself to nobody, and until 2026-09-24 that was every validated field
+in the framework: `TextInput`, `PasswordField`, `DateTimeEdit` and
+`DateRangeEdit` pointed at their error message and nobody heard it on arriving
+at the field.
 
-Teksilo consequently copies the description string onto the described node
-(`set_description`) wherever a description must actually be heard — the plain
-tooltip tier does this — and keeps the relation for the day upstream resolves
-it. Note also that VoiceOver exposes a description as `AXHelp`, a *hint*: it is
-read after a delay or on VO-Shift-H, not in the focus utterance, so the ARIA
-`aria-describedby` reading behaviour is an NVDA / Orca one on AccessKit 0.25.
+The tree's last pass now does what a browser's accessible-description
+computation does with `aria-describedby`: it writes each target's text into the
+node's `description`, which all three adapters read (see
+[A description from `described_by`](../accessibility-overrides.md#a-description-from-described_by)).
+The relation is kept beside it.
+
+Three platform facts remain, and shape that pass rather than block it:
+
+- VoiceOver exposes a description as `AXHelp`, a *hint*: it is read after a
+  delay or on VO-Shift-H, not in the focus utterance. Orca and NVDA read it as
+  focus arrives.
+- Orca speaks any change to the description of the node it holds as focus,
+  without checking that the text is new, while NVDA and VoiceOver speak none;
+  and it still holds the node focus is leaving while it hears the changes of
+  the update focus leaves in. So around focus the pass adds nothing new while
+  focus stays or as it leaves: the message appearing is the live region's to
+  say, and the description is for coming back.
+- Orca cuts an announcement made in the update focus moves in, to read the new
+  focus; NVDA reads the new focus after it. So a text announced as focus
+  arrives is left out of the arrival on Windows, and kept in it elsewhere, where
+  the arrival is the one voice left.
 
 ## Text-run colour and per-run language (AccessKit-shaped, Teksilo-side work)
 

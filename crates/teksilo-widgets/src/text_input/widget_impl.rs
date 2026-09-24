@@ -320,11 +320,15 @@ impl Widget for TextInput {
         });
         let strip_id = ctx.add(ValidationStrip::new(strip_feedback));
 
-        // WCAG 3.3.1 / 3.3.3 (EN 301 549 11.5.2.7): associate the inline
-        // validation strip with the field so a screen reader announces the
-        // error / warning / correction message as the field's description when
-        // it gains focus. The strip renders nothing while Pristine, but the
-        // relation is harmless then and live the moment a message appears.
+        // WCAG 3.3.1 / 3.3.3 (EN 301 549 11.5.2.7): the field points at the
+        // strip. The relation alone reaches no screen reader through AccessKit
+        // 0.25, so the tree writes the strip's message into the field's
+        // description, which every adapter exposes and a reader says as focus
+        // arrives (`teksilo_core`'s `accessibility_description_impl`). The strip is
+        // the voice for a message appearing, as a live region; the tree keeps
+        // it out of the field's description while focus stays, so a reader
+        // that speaks description changes does not say it twice. Harmless
+        // while Pristine: an empty strip describes nothing.
         ctx.access_described_by(field_id, strip_id);
 
         // Wrap frame + strip in a VStack with the configured gap. The frame is

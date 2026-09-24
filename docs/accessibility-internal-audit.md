@@ -171,7 +171,7 @@ The rightmost column records what the previous revision got wrong about each.
 | G2 | 1.4.3 Contrast — WCAG luminance formula, CI-gated themes | `relative_luminance` [color.rs:261-270](../crates/teksilo-tokens/src/color.rs), `contrast_ratio` `:278-283`. Test `default_themes_meet_wcag_contrast_minimums` at [theme.rs:844-887](../crates/teksilo-tokens/src/theme.rs) | Was cited at `color.rs:266-277` / `theme.rs:784-826`. **Scope was overstated:** the gate iterates only `light_default()`/`dark_default()` — the IntUI preset — and never asserts `text_primary`. See §5.4 |
 | G3 | 1.4.11 Non-text contrast — focus indicators retuned | IntUI light `border_focused`/`focus_ring` = `#0C8294` at [theme.rs:319, :378](../crates/teksilo-tokens/src/theme.rs) (4.53:1 on `surface_content`, 4.26:1 on `surface_main`); IntUI dark = `#19BDD4` at `:456, :520` (7.28:1 / 6.10:1) | Was cited at `theme.rs:286-289,342-345`. The claim is IntUI-specific and does not generalise: Fluent binds focus to `focus_stroke_outer` (deliberately never the accent), macOS to the raw accent, Material 3 to `m.primary` |
 | G4 | 4.1.3 Status messages — ProgressBar value + `Live::Polite` | [progress_bar.rs:250-254, :292-301](../crates/teksilo-widgets/src/progress_bar.rs); test `accessibility_values` at `:480` | Citation intact, **claim overstated**: every AccessKit adapter announces a live node's *name* (as it appears and when the name changes), never a change of its value, so the politeness speaks the bar's label as it appears and nothing as it advances. The advance reaches a screen reader as a value-changed event on the bar, which Orca 46.1 speaks through its own progress-bar updates, focused or not, for a bar in the active application by default (`onValueChanged`, `isProgressBarUpdate`, `progressBarVerbosity`, at most every `progressBarUpdateInterval` seconds, 10 by default); NVDA's and VoiceOver's handling is unverified |
-| G5 | 3.3.1 Error identification — field↔error `access_described_by` | [text_input.rs:738](../crates/teksilo-widgets/src/text_input.rs), `password_field.rs`, `date_time_edit.rs`, `date_range_edit.rs` | Line drift on three of four; behaviour intact on all four |
+| G5 | 3.3.1 Error identification: field↔error `access_described_by` | [text_input/widget_impl.rs](../crates/teksilo-widgets/src/text_input/widget_impl.rs), `password_field.rs`, `date_time_edit.rs`, `date_range_edit.rs` | Line drift on three of four. **The wiring was intact and reached no reader:** `described_by` is inert in AccessKit 0.25 (§5.8). Since 2026-09-24 the tree writes each target's text into the field's description ([accessibility_description_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_description_impl.rs)), which is what a reader hears on arriving at the field |
 | G6 | 2.5.7 Dragging movements — Alt+Arrow scene nudge | [gestures_impl.rs](../crates/teksilo-scene/src/view/gestures_impl.rs); test `alt_arrow_nudges_all_selected_items` at [view/tests.rs:1020](../crates/teksilo-scene/src/view/tests.rs) | Line drift only. Now joined by two further keyboard drag-alternatives — Splitter and scene magnetism (§3.2) |
 | G7 | EN 11.5.2.9 — text run attributes reach AT | `TextRunAttributes` at [accessibility.rs:178-187](../crates/teksilo-core/src/accessibility.rs); rich-text walk in [rich_text.rs](../crates/teksilo-widgets/src/rich_text.rs) | Line drift (~+1900 lines in `rich_text.rs`). The struct gained `font_weight` since; still **no colour and no language** — see §5.9 |
 | G8 | 3.3.2 Labels — `FormLayout` wires `access_labelled_by` | [form_layout.rs:210-219](../crates/teksilo-widgets/src/primitives/form_layout.rs); test `line_wires_field_labelled_by_label` | **Accurate as written** |
@@ -249,7 +249,7 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 | 3.2.2 On Input | A | author | ✅ | No stock widget triggers a context change purely on value change without explicit activation |
 | 3.2.3 Consistent Navigation | AA | author | ➖ | **Previously absent.** Set-of-screens criterion, author-scope like 2.4.5. Framework enablers exist (one `MenuModel` drives both the in-window and native menu bars) but do not enforce it |
 | 3.2.4 Consistent Identification | AA | author | ➖ | **Previously absent.** Same footing as 3.2.3 |
-| 3.3.1 Error Identification | A | framework-enabled | ✅ | G5 — `described_by` wiring across all validated stock inputs |
+| 3.3.1 Error Identification | A | framework-enabled | ✅ | G5: `described_by` wiring across all validated stock inputs, heard as the field's description the tree writes from it. Before 2026-09-24 only the strip's live announcement reached a reader, and nothing on returning to the field |
 | 3.3.2 Labels or Instructions | A | framework-enabled | ✅ | G8, G9. Plus the tooltip description-owner fix (`1b253c77`), without which a hint sat on an unnamed box beside the control it described, for roughly two dozen widgets |
 | 3.3.3 Error Suggestion | AA | framework-enabled | ✅ | **Previously absent.** `ValidationStrip` announces `Invalid` at `Live::Assertive` and `Corrected` at `Live::Polite` under `Role::Status` ([validation_strip.rs:4-15, :154-163](../crates/teksilo-widgets/src/primitives/validation_strip.rs)); `InputDialog` adds live validation. Suggestion *text* is author-supplied |
 | 3.3.4 Error Prevention | AA | framework-enabled | ✅ | **Previously absent.** `WindowConfig::on_close_requested` → `CloseResponse::Veto` plus `MessageBox`/`Dialog` give the confirm-before-destructive pattern. Which actions are guarded is author-scope |
@@ -295,7 +295,7 @@ Chapter 5 applies to all ICT including software and is not subsumed by either.
 
 | Clause | Topic | Status | Note |
 |---|---|---|---|
-| 11.5.2.5 | Relationships | ✅ | `described_by`, `labelled_by`, `controls`, and — new since — `details` for the ARIA annotations pattern ([accessibility.rs:323, :331](../crates/teksilo-core/src/accessibility.rs)) |
+| 11.5.2.5 | Relationships | ✅ | `described_by`, `labelled_by`, `controls`, and, new since, `details` for the ARIA annotations pattern ([accessibility.rs:323, :331](../crates/teksilo-core/src/accessibility.rs)). No adapter exports `described_by`; it reaches a reader as the description the tree writes from it |
 | 11.5.2.9 | Text attributes | 🟡 | Bold/italic/underline/strikethrough reach AT (G7); `font_weight` added since. **Colour and per-run language do not:** `set_foreground_color` and `set_background_color` have zero occurrences workspace-wide, and `accessibility.rs:189-203` documents the omission explicitly, hardcoding decorations to opaque black. Now applies to three text stacks, not one — `CodeEditor` exposes syntax-highlighted runs whose colours AT cannot see |
 | — | Rows, columns, headers | ✅ | `Role::Table`/`TreeGrid`/`Grid` with per-cell position. Cell navigation was *not* AT-followable until `15837b69`/`79b916f3` added `active_descendant` for the keyboard-focused cell; column reorder also silently relabelled focused cells onto whatever column took the old position |
 | — | List of available actions | 🟡 | Advertisement is now derived for context menus ([accessibility_impl.rs:754-790](../crates/teksilo-core/src/widget_tree/accessibility_impl.rs)) and for list/tree rows. `LogView` advertises no scroll actions despite having a windowed tree (§5.5) |
@@ -753,9 +753,17 @@ Two defects fell out of the same change and are worth recording separately:
 - **`described_by` is inert in AccessKit 0.25.** `Node::description()` reads only the
   node's own property, and no adapter exports the relation — macOS maps `AXHelp` from
   `description()`, Windows `UIA_FullDescriptionPropertyId` from `description`, and the
-  AT-SPI relation set carries `controls` alone. The walker's shown-tooltip
-  `push_described_by` therefore announces nothing today. Revisit when upstream resolves
-  it; the copied-string fallback is what actually reaches a reader.
+  AT-SPI relation set carries `controls` alone. So the walker's shown-tooltip
+  `push_described_by` announced nothing, and a shown tooltip took away the copied
+  description its anchor had while hidden; and every validated field's message (G5)
+  was heard only as the strip announced it. **Closed 2026-09-24** by computing the
+  description in the tree: its last pass writes each target's text into the node's
+  description, as a browser does for `aria-describedby`, holding new text back from the
+  focused node while focus stays and as it leaves, so Orca, which speaks description
+  changes, does not say a message twice, and leaving an announced text out of the arrival
+  on Windows alone, where NVDA says the announcement (Orca cuts it to read the new focus,
+  so elsewhere the arrival keeps the text)
+  ([accessibility_description_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_description_impl.rs)).
 
 ### 5.9 Text-run colour and per-run language never reach AT — EN 11.5.2.9, WCAG 3.1.2 · framework
 

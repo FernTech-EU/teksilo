@@ -623,7 +623,9 @@ impl Widget for DateRangeEdit {
             self.feedback.clone(),
         ));
         // WCAG 3.3.1 / 3.3.3: both editable halves are described by the shared
-        // validation message.
+        // validation message. The tree writes it into each half's description,
+        // which a reader hears on arriving at either; the relation alone
+        // reaches no adapter. See the same wiring in `TextInput`.
         ctx.access_described_by(start_inner_id, strip_id);
         ctx.access_described_by(end_inner_id, strip_id);
         // Wrap the frame in `Expand::horizontal().respect_intrinsic()` so it

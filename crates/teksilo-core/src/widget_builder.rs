@@ -1606,7 +1606,21 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    /// Append a `described_by` relationship.
+    /// Append a `described_by` relationship: `target`'s text describes this
+    /// node, as `aria-describedby` does (WCAG 3.3.1 for a field and its error).
+    ///
+    /// AccessKit 0.25 passes the relation to no screen reader, so the tree
+    /// also writes the target's text into this node's `description`, after
+    /// any description of its own. That is what a reader says as focus
+    /// arrives. The text follows the target, except around focus, where it
+    /// would be said twice: while focus stays, and in the update focus leaves,
+    /// a text that was not in the description waits (for the next arrival,
+    /// or for the next update once focus has gone). On Windows a text a live
+    /// region announces in the update focus arrives in is also left out of
+    /// that arrival, since NVDA says the announcement; elsewhere the arrival
+    /// keeps it, since Orca cuts an announcement to read the new focus.
+    /// A message appearing is for a live region to say, the target itself or
+    /// an announcement; the description is for coming back.
     pub fn access_described_by(mut self, target: WidgetId) -> Self {
         self.handler_set.access_mut().described_by.push(target);
         self

@@ -15,6 +15,8 @@
 
 #[cfg(test)]
 pub(crate) mod a11y_container_naming;
+#[cfg(test)]
+mod a11y_field_errors;
 pub(crate) mod a11y_label_invariant;
 pub(crate) mod a11y_reachability;
 pub(crate) mod a11y_set_semantics;

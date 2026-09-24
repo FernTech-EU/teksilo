@@ -114,7 +114,7 @@ impl WidgetTree {
                 .clone();
         }
 
-        let (update, parents, local_bounds) = self.build_accessibility_tree();
+        let (update, parents, local_bounds, descriptions) = self.build_accessibility_tree();
         // What the adapters will announce from this update. Here, in the
         // `&mut self` half and not in the `&self` walk, because the ring
         // replays exactly the updates this method hands out, in order. A tree
@@ -130,6 +130,14 @@ impl WidgetTree {
         self.cached_a11y = Some(update.clone());
         self.synthetic_parent_map = parents;
         self.synthetic_local_bounds = local_bounds;
+        // What the next update's descriptions are measured against: only a
+        // delivered update is something a screen reader has heard. A node
+        // focus has just left held a text back from this update, so as not to
+        // say it on the way out; nothing else may rebuild the tree before
+        // focus comes back, and the text is owed to anyone who reads the node
+        // without focusing it, so the next update is asked for here.
+        let descriptions_catching_up = descriptions.catching_up;
+        self.description_memory = descriptions;
         self.a11y_dirty = false;
         // A walk has just described every node's current position, so the
         // moves recorded up to now are already reflected.
@@ -141,7 +149,7 @@ impl WidgetTree {
             // documented "monotonic" contract holds even past `u64::MAX`.
             self.at_version.set(self.at_version.get().saturating_add(1));
         }
-        if announcers_busy {
+        if announcers_busy || descriptions_catching_up {
             self.request_accessibility_update();
             self.request_frame();
         }
@@ -1941,7 +1949,10 @@ mod tests {
     #[test]
     fn a_shown_tooltip_switches_the_anchor_to_the_described_by_relation() {
         // Once the content is genuinely in the tree, the richer relation is
-        // used instead of the copied string.
+        // used instead of the copied string. The relation reaches no screen
+        // reader through AccessKit, so the tree writes the content's text back
+        // into the description (`accessibility_description_impl`): showing the
+        // tooltip used to take the only description a reader had away.
         let mut tree = WidgetTree::new();
         let anchor = tree.add(FillWidget::new().label("Save"));
         let tip = tree.add(FillWidget::new().label("Save the file"));
@@ -1957,6 +1968,11 @@ mod tests {
         assert!(
             !node.described_by().is_empty(),
             "a shown tooltip is wired as a described_by relation"
+        );
+        assert_eq!(
+            node.description(),
+            Some("Save the file"),
+            "and the anchor still describes itself with the tooltip's text"
         );
     }
 

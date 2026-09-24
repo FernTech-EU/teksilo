@@ -18,6 +18,7 @@ impl WidgetTree {
         accesskit::TreeUpdate,
         std::collections::HashMap<accesskit::NodeId, WidgetId>,
         std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
+        super::accessibility_description_impl::DescriptionMemory,
     ) {
         use crate::accessibility::{root_node_id, widget_id_to_node_id};
 
@@ -365,6 +366,12 @@ impl WidgetTree {
             }
         }
 
+        // Last, on the nodes this update carries: a `described_by` relation
+        // reaches no screen reader through AccessKit, so its targets' text is
+        // written onto the node's `description`, which every adapter exposes.
+        // After the relation strip, so every target named is present.
+        let descriptions = self.describe_from_relations(&mut nodes, focus);
+
         (
             accesskit::TreeUpdate {
                 nodes,
@@ -374,6 +381,7 @@ impl WidgetTree {
             },
             synthetic_parents,
             local_bounds,
+            descriptions,
         )
     }
 
@@ -621,6 +629,11 @@ impl WidgetTree {
             {
                 // Shown: the content node is live in the AT tree, so the
                 // richer `described_by` relation can point straight at it.
+                // Its text still reaches a reader as this node's description,
+                // which `describe_from_relations` writes from the relation at
+                // the end of the build: no adapter reads the relation itself,
+                // and showing the tooltip used to take away the only
+                // description the control had.
                 builder
                     .inner_mut()
                     .push_described_by(widget_id_to_node_id(self.tooltip_content_node(content_id)));

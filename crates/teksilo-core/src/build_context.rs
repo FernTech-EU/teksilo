@@ -1201,7 +1201,9 @@ impl<'a> BuildContext<'a> {
     /// Wire an accessibility `described_by` relation from an already-mounted
     /// child (`id`) to a description/error node (`target_id`) — the
     /// post-mount, override-preserving counterpart of the
-    /// `.access_described_by(..)` builder method (WCAG 3.3.1).
+    /// `.access_described_by(..)` builder method (WCAG 3.3.1), whose docs say
+    /// how the target's text reaches a screen reader: as `id`'s description,
+    /// which the tree writes, since no AccessKit adapter reads the relation.
     pub fn access_described_by(
         &mut self,
         id: crate::widget_id::WidgetId,

@@ -616,6 +616,10 @@ is currently on screen:
 
 - **Shown** — `described_by` pointing at the live tooltip content node, the
   richer relation, since the node is genuinely in the tree and navigable.
+  No AccessKit 0.25 adapter reads that relation, so the tree's last pass
+  writes the content's text back into the anchor's `description` (see
+  [A description from `described_by`](accessibility-overrides.md#a-description-from-described_by)):
+  a reader hears the same text whether the tooltip is on screen or not.
 - **Not shown** — the content's announced text copied onto the anchor as a
   static `description`, harvested from the content widget's own
   `accessibility()` (all three tiers publish their body as the node *name*).
@@ -774,6 +778,7 @@ by the `attach_*` call.
   `ShortcutRegistry` that backs `TooltipContent::for_shortcut`.
 - [accessibility-overrides.md](accessibility-overrides.md) — builder-level
   AT augmentation, including `.access_described_by(tooltip_content_id)`
-  for explicit `aria-describedby` wiring.
+  for explicit `aria-describedby` wiring, and how its text becomes the
+  described node's description.
 - [idle-and-animation.md](idle-and-animation.md) — how the idle event loop
   uses `next_timer_deadline()` to schedule pending-tooltip wake-ups.

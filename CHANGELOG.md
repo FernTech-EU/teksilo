@@ -126,6 +126,26 @@ by crate for clarity, not because crates version independently.
   `access_hidden` said the flag was local to its node; it now says that it
   hides the subtree and that a wrapper which is only chrome is a
   `Role::GenericContainer` instead.
+- **A field's validation message was never read on arriving at the field.**
+  `access_described_by`, and the four stock inputs that wire their
+  `ValidationStrip` with it (`TextInput`, `PasswordField`, `DateTimeEdit`,
+  `DateRangeEdit`), promised WCAG 3.3.1: the message read as the field's
+  description when it gains focus. AccessKit 0.25 passes the relation to no
+  screen reader, on any platform: the consumer never derives a description from
+  it, and no adapter exports it. So coming back to a refused field said its name
+  and value and not why. The tree now writes each `described_by` target's text
+  into the node's `description`, after its own, which Orca, NVDA and VoiceOver
+  read. Around focus it holds new text back, because Orca speaks a change to
+  the description of the node it holds as focus: a message appearing while the
+  user is in the field is said once, by its live region, is not begun again as
+  the user leaves, and is read with the field on the next visit. A shown tooltip
+  no longer takes away its anchor's description either. **Behaviour change**: a
+  node carrying `described_by` now carries a description. An application that
+  announces a message itself as it sends focus to the field showing it is heard
+  once on each platform, by a different voice: on Windows the arrival leaves
+  the announced text out, since NVDA says the announcement; on Linux and macOS
+  the arrival reads it, since Orca cuts an announcement to read the new focus
+  (VoiceOver is unverified and treated the same way).
 - **A throttled frame-tick subscriber held back every frame requested while it
   was on screen.** A widget on `subscribe_frame_tick_throttled` set the pace not
   only of its own tick but of every `request_frame`: with a once-a-minute clock

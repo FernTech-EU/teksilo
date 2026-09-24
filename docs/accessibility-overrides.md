@@ -63,7 +63,7 @@ Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 |---|---|---|
 | `.access_identifier(s)` | `Node::author_id` | Stable test/debug id (like `data-testid`). Not user-visible. |
 | `.access_controls(target_id)` | `Node::controls` | Append. ARIA `aria-controls`. |
-| `.access_described_by(target_id)` | `Node::described_by` | Append. |
+| `.access_described_by(target_id)` | `Node::described_by`, and `Node::description` | Append. ARIA `aria-describedby`. No AccessKit 0.25 adapter reads the relation, so the tree also writes the target's text into the node's description, which every platform does read; see [A description from `described_by`](#a-description-from-described_by). |
 | `.access_labelled_by(target_id)` | `Node::labelled_by` | Append. |
 | `.access_live(mode)` | `Node::live` | Politeness for status regions (`Polite`, `Assertive`). Inherited by every descendant that sets none, and the adapters announce each named one; `Off` stops it (see [Hidden is for decoration, never for a wrapper](#hidden-is-for-decoration-never-for-a-wrapper)). |
 | `.access_current(c)` | `Node::aria_current` | Mark this as the current item in its container (`aria-current`). |
@@ -407,10 +407,57 @@ For each widget the AT walker visits, the sequence is:
     1. Push child NodeIds (skipped for Exclude / Merge).
     2. Inject layout bounds (plus a transform at a content-transform boundary such as `SceneView`).
     3. Re-apply `set_disabled()` from the arena's enabled-flag UNLESS the override has `disabled: Some(false)`.
-    4. Tooltip → `push_described_by` when the tooltip is shown, otherwise its text as a static `description`.
+    4. Tooltip → `push_described_by` when the tooltip is shown (its text then comes back as the description in the tree-wide pass below), otherwise its text as a static `description`.
     5. `builder.build(id)` → produces `(NodeId, accesskit::Node, synthetic_children, synthetic_local_bounds)`.
 
-After every widget has been visited, **tree-wide passes** run over the assembled node list: a relation target naming a composite with a proxy is pointed at the proxy; a nameless `TreeItem` / `ListBoxOption` row takes its name from its first named descendant; semantically-empty `GenericContainer` / `Unknown` nodes are dropped and their children promoted to the parent, exempting the root, the focused node, and relationship targets (see [Automatic presentational collapse](#automatic-presentational-collapse-no-opt-in)); and children and relation targets (`controls` / `described_by` / `labelled_by`) naming a node absent from the update are stripped.
+After every widget has been visited, **tree-wide passes** run over the assembled node list: a relation target naming a composite with a proxy is pointed at the proxy; a nameless `TreeItem` / `ListBoxOption` row takes its name from its first named descendant; semantically-empty `GenericContainer` / `Unknown` nodes are dropped and their children promoted to the parent, exempting the root, the focused node, and relationship targets (see [Automatic presentational collapse](#automatic-presentational-collapse-no-opt-in)); children and relation targets (`controls` / `described_by` / `labelled_by`) naming a node absent from the update are stripped; and, last, every node's `described_by` targets are written into its `description` (below).
+
+### A description from `described_by`
+
+`aria-describedby` works in a browser because the browser computes the
+description from the referenced nodes. AccessKit 0.25 does not:
+`accesskit_consumer` gives a node a description from its own property only,
+and no adapter exports the relation (the AT-SPI relation set carries
+`ControllerFor` alone, UIA answers `ControllerFor` and never `DescribedBy`,
+macOS links `controls`). A field described only by the relation is described
+to nobody. So the last tree-wide pass does the browser's part: each target's
+text (its name, or failing that the text of what it contains, without its
+hidden parts) is appended to the node's own description, and that is what
+Orca, NVDA and VoiceOver read (AT-SPI `Description`, UIA `FullDescription`,
+`AXHelp`). The relation is kept; Orca, which follows it, reads it only when
+the description is empty, so nothing is read twice.
+
+A description is what a reader says **as focus arrives**. A message
+*appearing* is the business of a live region: the target itself, as a
+`ValidationStrip` is, or an announcement. Two facts about the readers shape
+what the pass writes around focus, both read from their sources:
+
+- Orca speaks a change to the description of the node it holds as focus, and
+  does not check that the text is new. The adapters send an update's node
+  changes before its focus move, so while Orca hears them it still holds the
+  node focus is *leaving*.
+- A focus move cuts an announcement made in the same update on Orca, which
+  stops speaking to read the new focus, and not on NVDA, which reads the new
+  focus after it.
+
+So, on the node focus is on and every node it is inside:
+
+- while focus stays, and in the update focus leaves, the description gains
+  nothing new; a message that went away is dropped at once, so the
+  description is never stale. A node focus has left takes what it held back
+  in the next update, which the tree asks for;
+- on Windows, a text that a live region announces in the update focus arrives
+  in is left out of that arrival, so a field focused in the very update its
+  error is announced says the error once, through NVDA's announcement. On
+  Linux the arrival keeps it, since Orca cuts the announcement and the arrival
+  is the one voice left; macOS does the same, since VoiceOver is unverified and
+  a text left out of both would reach nobody.
+
+What is held back is read the next time focus arrives. Only Orca speaks a
+change while focus stays: NVDA maps no event to a `FullDescription` change,
+and macOS posts no notification for one. So a message that must be heard the
+moment it appears needs a live region on every platform, and one without it
+is heard on the next arrival, the same on all three.
 
 ---
 
@@ -495,4 +542,5 @@ The Tier-3 styling system (see [styling-system.md](styling-system.md)) lets an a
 - [crates/teksilo-core/src/widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs) — `AccessibilityOverrides` struct, `AccessSubtreeMode` enum, every `access_*` method definition.
 - [crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs) — walker integration, the tree-wide passes, `merge_descendants_into` helper.
 - [crates/teksilo-core/src/widget_tree/accessibility_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_impl.rs) — `sync_accessibility`, the test accessors, and the unit tests.
+- [crates/teksilo-core/src/widget_tree/accessibility_description_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_description_impl.rs): the description written from `described_by`, and the platform sources its rules rest on.
 - [automation-mcp.md](automation-mcp.md) — the in-process AT tree + AT-action channel exposed as a Model Context Protocol server, so an agent can observe and drive the same accessibility surface these overrides shape.

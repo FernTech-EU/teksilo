@@ -201,6 +201,11 @@ scene.add_a11y_relation(A11yNode::Item(node_a), A11yRelation::FlowTo,      A11yN
   editors use this so VoiceOver / NVDA "next item" follows
   data-flow order rather than scene-insertion order.
 
+A reader hears a `DescribedBy` target's text as the `from` node's
+description, which the tree writes from the relation (see
+[A description from `described_by`](accessibility-overrides.md#a-description-from-described_by)):
+no AccessKit adapter reads the relation itself.
+
 **Where a relation lands.** Relations — and the live-region and landmark
 decorations below — are written onto the synthetic nodes the scene emits
 itself, so the `from` end must be a **lightweight item** or a **logical

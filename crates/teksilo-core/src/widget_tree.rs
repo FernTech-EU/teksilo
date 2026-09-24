@@ -12,6 +12,9 @@ use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
 use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use crate::widget_id::WidgetId;
 
+mod accessibility_description_impl;
+#[cfg(test)]
+mod accessibility_description_tests;
 mod accessibility_emit_impl;
 mod accessibility_impl;
 #[cfg(test)]
@@ -726,6 +729,10 @@ pub struct WidgetTree {
     /// [`Self::announcements_since`], while the tree records them
     /// ([`Self::set_records_announcements`]).
     announcement_ring: crate::accessibility::announcements::AnnouncementRing,
+    /// What the last delivered update said about descriptions and live
+    /// regions, which is what the next one's descriptions are measured
+    /// against. See [`accessibility_description_impl`].
+    description_memory: accessibility_description_impl::DescriptionMemory,
     /// Whether the `WidgetEvent::AccessAction` currently being dispatched was
     /// consumed by a handler. Written by the dispatcher's `AccessAction` arm,
     /// read (and reset) by [`Self::dispatch_access_action`], which is the only
@@ -1014,6 +1021,7 @@ impl WidgetTree {
                 crate::announcer::Politeness::Assertive,
             ),
             announcement_ring: crate::accessibility::announcements::AnnouncementRing::new(),
+            description_memory: Default::default(),
             access_action_handled: false,
             window_state: None,
         }

@@ -1163,9 +1163,11 @@ impl WidgetTree {
     /// out of the Tab order (see `cycle_focus`).
     ///
     /// Plain tooltips (no `sticky_after`) are deliberately NOT
-    /// auto-shown on focus — their text reaches assistive tech via
-    /// the anchor's `aria-describedby` relationship wired in the
-    /// a11y tree pass, which is the W3C-recommended pattern for
+    /// auto-shown on focus: their text reaches assistive tech as the
+    /// anchor's description, copied onto it by the a11y tree pass while
+    /// the tooltip is hidden and written from its `described_by`
+    /// relation while it is shown (no AccessKit adapter reads the
+    /// relation itself). That is the W3C-recommended pattern for
     /// supplementary hints.
     pub(super) fn tooltip_focus_enter(&mut self, widget_id: WidgetId) {
         // Two ways a registered rich/composite tooltip can relate to the

@@ -595,7 +595,9 @@ impl AccessNodeBuilder {
     /// Append one node to the `described_by` relationship list. Mirror of
     /// the existing `push_controlled`; used by the override layer's
     /// `access_described_by` builder method and by the framework's
-    /// tooltip wiring.
+    /// tooltip wiring. The relation by itself reaches no screen reader
+    /// through AccessKit 0.25; the tree writes each target's text into the
+    /// node's description when it builds the update.
     pub fn push_described_by(&mut self, id: NodeId) {
         self.inner.push_described_by(id);
     }
