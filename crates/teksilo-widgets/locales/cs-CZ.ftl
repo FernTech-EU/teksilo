@@ -391,3 +391,14 @@ command-palette-result-count =
         [many] { $count } příkazu
        *[other] { $count } příkazů
     }
+
+# Mřížka dlaždic. Viz en-US.ftl pro úplný kontext a
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Není vybrána žádná položka
+        [one] Vybrána 1 položka
+        [few] Vybrány { $count } položky
+        [many] Vybráno { $count } položky
+       *[other] Vybráno { $count } položek
+    }

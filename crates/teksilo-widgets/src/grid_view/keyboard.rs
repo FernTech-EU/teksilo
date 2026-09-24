@@ -42,6 +42,13 @@ pub(crate) struct GridKeyConfig {
     pub(crate) col_count: Signal<usize>,
     pub(crate) focused_index: Signal<Option<usize>>,
     pub(crate) selection: Option<SelectionModel>,
+    /// Says the new count when Space changes how many tiles are selected.
+    /// Space reaches the selection through `row_space_activate`, which runs
+    /// after this handler has returned, outside the voice the grid puts
+    /// around the handler itself. A tile that is not realized is selected
+    /// inside the handler instead, and the voice, shared by both, then counts
+    /// once. See `selection_count`.
+    pub(crate) count_voice: Option<super::selection_count::SelectionCountVoice>,
     pub(crate) scroll_y: Signal<f32>,
     pub(crate) max_scroll_y: Signal<f32>,
     pub(crate) viewport_height: Rc<Cell<f32>>,
@@ -337,13 +344,21 @@ pub(crate) fn build_grid_key_handler(
                     // follow. (This used to select unconditionally, so Space
                     // could never unpick a tile.)
                     let selection = cfg.selection.clone();
-                    let fallback = std::rc::Rc::new(move |_ctx: &mut EventContext| {
-                        if let Some(ref sel) = selection {
+                    let voice = cfg.count_voice.clone();
+                    let fallback = std::rc::Rc::new(move |ctx: &mut EventContext| {
+                        let Some(ref sel) = selection else {
+                            return;
+                        };
+                        let pick = |_: &mut EventContext| {
                             if sel.mode() == teksilo_data::SelectionMode::Multi {
                                 sel.toggle(current);
                             } else {
                                 sel.select(current);
                             }
+                        };
+                        match &voice {
+                            Some(voice) => voice.around(ctx, pick),
+                            None => pick(ctx),
                         }
                     });
                     match cfg

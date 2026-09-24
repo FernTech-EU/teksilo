@@ -1391,23 +1391,39 @@ mod grid_view_tile_reorder {
         );
     }
 
-    /// **Announces once** — and the grid's own selection live region does not
-    /// speak beside it. A grid publishes "N items selected" as a live value, so
-    /// this is the one view where the coalescing has to be checked against a
-    /// widget that already talks: the selection the move carries forward is the
-    /// selection the user already had, the value does not change, and the move
-    /// is the only thing said.
+    /// **Announces once**, and the grid's own count does not speak beside it.
+    /// A grid says "N items selected" when the user changes how many tiles are
+    /// selected, so this is the one view where the coalescing has to be checked
+    /// against a widget that already talks: the selection the move carries
+    /// forward is the selection the user already had, the count does not
+    /// change, and the move is the only thing said.
+    ///
+    /// The selection is made the way a user makes it, with Space on the focused
+    /// grid. It used to be set by the test and heard through a live value on
+    /// the grid, which no platform announces: a `Grid` is named by its label.
     #[test]
     fn a_completed_move_announces_its_new_position_once() {
+        use teksilo_i18n::{I18nConfig, I18nManager, thread_local};
+        thread_local::clear();
+        thread_local::install(I18nManager::from_config(
+            &I18nConfig::new().framework_locales(teksilo_widgets::framework_locales()),
+        ));
         let mut f = fixture();
-        f.selection.select(0);
         f.tree.focus(f.view);
-        // The frame in which the user made that selection — which is where the
+        f.tree.press_key(Key::Space, Modifiers::NONE);
+        assert_eq!(f.selection.selected_indices(), vec![0]);
+        // The frame in which the user made that selection, which is where the
         // grid says "1 item selected".
         assert_eq!(spoken(&mut f.tree), vec!["1 item selected"]);
         let before = f.tree.announcements_since(0).len() as u64;
         f.tree.press_key(Key::ArrowRight, Modifiers::ALT);
-        let _ = f.tree.sync_accessibility();
+        // The announcer speaks one message per two updates, exposing it and
+        // then taking it back, and the count is still being taken back when
+        // the move arrives. The frames a real window runs are what carry the
+        // move to the adapters, so run enough of them for it.
+        for _ in 0..4 {
+            let _ = f.tree.sync_accessibility();
+        }
         let after: Vec<String> = f
             .tree
             .announcements_since(before)
@@ -1415,6 +1431,7 @@ mod grid_view_tile_reorder {
             .map(|a| a.text)
             .collect();
         assert_eq!(after, vec!["a moved to 2 of 6"]);
+        thread_local::clear();
     }
 }
 

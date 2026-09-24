@@ -392,3 +392,11 @@ command-palette-result-count =
         [0] 一致するコマンドがありません
        *[other] { $count }件のコマンド
     }
+
+# タイルグリッド。完全な文脈は en-US.ftl と
+# crates/teksilo-widgets/src/grid_view/selection_count.rs を参照。
+grid-view-selection-count =
+    { $count ->
+        [0] 選択中の項目はありません
+       *[other] { $count }件の項目を選択中
+    }

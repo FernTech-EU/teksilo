@@ -397,3 +397,16 @@ command-palette-result-count =
         [many] { $count } أمرًا
        *[other] { $count } أمر
     }
+
+# شبكة المربعات. راجع en-US.ftl للسياق الكامل و
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] لم يُحدَّد أي عنصر
+        [zero] لم يُحدَّد أي عنصر
+        [one] عنصر واحد محدَّد
+        [two] عنصران محدَّدان
+        [few] { $count } عناصر محدَّدة
+        [many] { $count } عنصرًا محدَّدًا
+       *[other] { $count } عنصر محدَّد
+    }

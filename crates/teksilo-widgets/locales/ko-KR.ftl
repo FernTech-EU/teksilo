@@ -386,3 +386,11 @@ command-palette-result-count =
         [0] 일치하는 명령 없음
        *[other] 명령 { $count }개
     }
+
+# 타일 그리드. 전체 맥락은 en-US.ftl 및
+# crates/teksilo-widgets/src/grid_view/selection_count.rs 참조.
+grid-view-selection-count =
+    { $count ->
+        [0] 선택된 항목 없음
+       *[other] 항목 { $count }개 선택됨
+    }

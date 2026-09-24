@@ -254,6 +254,18 @@ by crate for clarity, not because crates version independently.
   key started from it. The cursor now moves with the selection when the
   application or a model change moves the selection. Multi-selection views are
   unchanged. **Behaviour change.**
+- **A `GridView` never said how many tiles were selected, and announced each
+  tile it realized.** The count was an English value on a grid marked as a
+  live region. A grid takes its name from its label, so no platform announced
+  the value, while every tile inherited the live setting and was announced as
+  it scrolled into the realized window. The grid is no longer live. A click, a
+  key, an assistive click or a marquee that changes how many tiles are
+  selected now says the new count once, through the tree's announcer, in the
+  user's language ("3 éléments sélectionnés"), Space on a tile the grid has
+  not realized included. Moving a single selection says no count, since the
+  tile the reader lands on says it is selected. The grid's value
+  carries the same words. `grid-view-selection-count` is new, in all 23
+  locales. **Behaviour change** for anything that read the value in English.
 
 ## [0.13.1] - 2026-09-22
 

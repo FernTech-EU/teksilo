@@ -390,3 +390,14 @@ command-palette-result-count =
         [many] { $count } команд
        *[other] { $count } команди
     }
+
+# Сітка плиток. Див. en-US.ftl для повного контексту
+# та crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Жодного елемента не вибрано
+        [one] Вибрано { $count } елемент
+        [few] Вибрано { $count } елементи
+        [many] Вибрано { $count } елементів
+       *[other] Вибрано { $count } елемента
+    }

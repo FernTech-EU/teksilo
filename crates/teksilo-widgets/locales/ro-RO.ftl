@@ -399,3 +399,13 @@ command-palette-result-count =
         [few] { $count } comenzi
        *[other] { $count } de comenzi
     }
+
+# Grilă de dale. Vezi en-US.ftl pentru contextul complet și
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Niciun element selectat
+        [one] Un element selectat
+        [few] { $count } elemente selectate
+       *[other] { $count } de elemente selectate
+    }

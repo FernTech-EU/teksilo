@@ -84,6 +84,7 @@ pub(crate) mod keyboard;
 pub mod layout;
 pub mod sections;
 pub(crate) mod selection;
+pub(crate) mod selection_count;
 #[cfg(test)]
 mod tests;
 
@@ -127,6 +128,7 @@ use layout::uniform::UniformGrid;
 use layout::variable_row::VariableRowGrid;
 use sections::{SectionData, SectionProvider};
 use selection::{MarqueeConfig, MarqueeState, build_marquee_handler};
+use selection_count::{SelectionCountVoice, selection_count_words};
 
 pub use sections::{GroupingSections, SectionProvider as GridSectionProvider, grouping_sections};
 
@@ -1385,11 +1387,17 @@ impl<T: 'static> Widget for GridView<T> {
             ) as Rc<dyn Fn(usize, usize, &mut teksilo_core::widget::EventContext)>
         });
 
-        handlers = handlers.on_key(build_grid_key_handler(GridKeyConfig {
+        // Every user action that can change how many tiles are selected runs
+        // inside this, so the count is said once, by the action that changed
+        // it. See `selection_count`.
+        let count_voice = self.selection.clone().map(SelectionCountVoice::new);
+
+        let mut on_key = build_grid_key_handler(GridKeyConfig {
             len_fn: self.source.len_fn.clone(),
             col_count: self.column_count.clone(),
             focused_index: self.focused_index.clone(),
             selection: self.selection.clone(),
+            count_voice: count_voice.clone(),
             scroll_y: self.scroll_y.clone(),
             max_scroll_y: self.max_scroll_y.clone(),
             viewport_height: self.viewport_height.clone(),
@@ -1415,7 +1423,14 @@ impl<T: 'static> Widget for GridView<T> {
                 Rc::new(move |i: usize| (with_item_str)(i, &|_item: &T| label(i)))
                     as Rc<dyn Fn(usize) -> Option<String>>
             }),
-        }));
+        });
+        {
+            let voice = count_voice.clone();
+            handlers = handlers.on_key(move |event, ctx| match &voice {
+                Some(voice) => voice.around(ctx, |ctx| on_key(event, ctx)),
+                None => on_key(event, ctx),
+            });
+        }
 
         // Rubber-band marquee (Multi mode only). A container pointer handler
         // records the modifier state at press time for additive selection;
@@ -1450,7 +1465,7 @@ impl<T: 'static> Widget for GridView<T> {
             // ancestor of whatever takes the press, which is the one shape the
             // tree arms `DragActivation` for: `Immediate` for a mouse (5 dp,
             // exactly as before), `AfterLongPress` for a finger.
-            marquee_drag = Some(build_marquee_handler(MarqueeConfig {
+            let mut sweep = build_marquee_handler(MarqueeConfig {
                 marquee: self.marquee.clone(),
                 selection: self.selection.clone().unwrap(),
                 strategy: strategy.clone(),
@@ -1458,7 +1473,15 @@ impl<T: 'static> Widget for GridView<T> {
                 viewport_width: self.viewport_width.clone(),
                 len_fn: self.source.len_fn.clone(),
                 additive_mods,
-            }));
+            });
+            let voice = count_voice.clone();
+            marquee_drag = Some(
+                move |phase: teksilo_core::gesture::DragPhase,
+                      ctx: &mut teksilo_core::widget::EventContext| match &voice {
+                    Some(voice) => voice.around(ctx, |ctx| sweep(phase, ctx)),
+                    None => sweep(phase, ctx),
+                },
+            );
 
             // Viewport-edge auto-scroll while the marquee is active, so a
             // rubber-band selection can extend past the visible window —
@@ -1642,6 +1665,7 @@ impl<T: 'static> Widget for GridView<T> {
                 column_count: self.column_count.clone(),
                 scroll_y: self.scroll_y.clone(),
                 selection: self.selection.clone(),
+                count_voice: count_voice.clone(),
                 focused_index: self.focused_index.clone(),
                 on_tile_activate: self.on_tile_activate.clone(),
                 activate_on: self.activate_on,
@@ -1935,15 +1959,16 @@ impl<T: 'static> Widget for GridView<T> {
             if sel.mode() == SelectionMode::Multi {
                 builder.set_multiselectable(true);
             }
+            // The count as the grid's value, for a screen reader that reports
+            // it with the grid. Not a live region: a `Grid` is named by its
+            // label, so no platform announced the value, and every tile
+            // inherited the setting and was announced as it scrolled into
+            // view. The count is spoken by the action that changes it; see
+            // `selection_count`.
             let count = sel.count();
             if count > 0 {
-                builder.set_value(format!(
-                    "{} item{} selected",
-                    count,
-                    if count == 1 { "" } else { "s" }
-                ));
+                builder.set_value(selection_count_words(count));
             }
-            builder.set_live(teksilo_core::accesskit::Live::Polite);
         }
 
         // Roving focus: point active_descendant at the focused tile node.

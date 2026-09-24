@@ -384,3 +384,12 @@ command-palette-result-count =
         [one] 1 commande
        *[other] { $count } commandes
     }
+
+# Grille de vignettes. Voir en-US.ftl pour le contexte complet et
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Aucun élément sélectionné
+        [one] 1 élément sélectionné
+       *[other] { $count } éléments sélectionnés
+    }

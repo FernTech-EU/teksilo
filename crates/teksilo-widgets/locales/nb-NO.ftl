@@ -400,3 +400,12 @@ command-palette-result-count =
         [one] 1 kommando
        *[other] { $count } kommandoer
     }
+
+# Flisrutenett. Se en-US.ftl for full kontekst og
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Ingen elementer valgt
+        [one] 1 element valgt
+       *[other] { $count } elementer valgt
+    }

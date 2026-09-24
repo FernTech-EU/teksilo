@@ -387,3 +387,14 @@ command-palette-result-count =
         [many] { $count } פקודות
        *[other] { $count } פקודות
     }
+
+# רשת אריחים. ראו en-US.ftl להקשר המלא ואת
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] לא נבחר אף פריט
+        [one] פריט אחד נבחר
+        [two] שני פריטים נבחרו
+        [many] { $count } פריטים נבחרו
+       *[other] { $count } פריטים נבחרו
+    }

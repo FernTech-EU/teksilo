@@ -386,3 +386,12 @@ command-palette-result-count =
         [one] 1 komut
        *[other] { $count } komut
     }
+
+# Döşeme ızgarası. Tam bağlam için en-US.ftl ve
+# crates/teksilo-widgets/src/grid_view/selection_count.rs dosyasına bakın.
+grid-view-selection-count =
+    { $count ->
+        [0] Seçili öğe yok
+        [one] 1 öğe seçili
+       *[other] { $count } öğe seçili
+    }

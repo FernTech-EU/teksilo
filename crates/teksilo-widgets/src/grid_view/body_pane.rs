@@ -24,7 +24,7 @@ use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::signal::Signal;
-use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
+use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{DragEligibility, RowState, SelectionModel};
@@ -76,6 +76,9 @@ pub(crate) struct GridBodyPane<T: 'static> {
 
     pub(crate) scroll_y: Signal<f32>,
     pub(crate) selection: Option<SelectionModel>,
+    /// Says the new count when a click or an assistive click on a tile
+    /// changes how many are selected. See `selection_count`.
+    pub(crate) count_voice: Option<super::selection_count::SelectionCountVoice>,
     /// Read-only snapshot for `TileContext::is_focused`. The pane does NOT
     /// rebuild on focus change — the focus ring is painted by `GridOverlay`.
     pub(crate) focused_index: Signal<Option<usize>>,
@@ -347,43 +350,48 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                 let focused_set = self.focused_index.clone();
                 let idx = i;
                 let pending_collapse = crate::data_views::deferred_select::pending_cell();
+                let voice = self.count_voice.clone();
+                let on_press = move |event: &WidgetEvent, ctx: &mut EventContext| match event {
+                    WidgetEvent::PointerDown {
+                        button: PointerButton::Primary,
+                        modifiers,
+                        ..
+                    } => {
+                        if crate::data_views::deferred_select::on_down(
+                            &sel_click,
+                            idx,
+                            *modifiers,
+                            &pending_collapse,
+                            ctx,
+                        ) {
+                            focused_set.set(Some(idx));
+                        }
+                        EventResponse::Ignored
+                    }
+                    WidgetEvent::PointerUp {
+                        button: PointerButton::Primary,
+                        ..
+                    } => {
+                        // The nav cursor travels with the applied
+                        // selection, not with the press: for a direct
+                        // pointer the whole decision is made here.
+                        if crate::data_views::deferred_select::on_up(
+                            &sel_click,
+                            idx,
+                            &pending_collapse,
+                            ctx,
+                        ) {
+                            focused_set.set(Some(idx));
+                        }
+                        EventResponse::Ignored
+                    }
+                    _ => EventResponse::Ignored,
+                };
                 ctx.apply_handlers(
                     tile_id,
-                    HandlerSet::new().on_pointer_event(move |event, ctx| match event {
-                        WidgetEvent::PointerDown {
-                            button: PointerButton::Primary,
-                            modifiers,
-                            ..
-                        } => {
-                            if crate::data_views::deferred_select::on_down(
-                                &sel_click,
-                                idx,
-                                *modifiers,
-                                &pending_collapse,
-                                ctx,
-                            ) {
-                                focused_set.set(Some(idx));
-                            }
-                            EventResponse::Ignored
-                        }
-                        WidgetEvent::PointerUp {
-                            button: PointerButton::Primary,
-                            ..
-                        } => {
-                            // The nav cursor travels with the applied
-                            // selection, not with the press: for a direct
-                            // pointer the whole decision is made here.
-                            if crate::data_views::deferred_select::on_up(
-                                &sel_click,
-                                idx,
-                                &pending_collapse,
-                                ctx,
-                            ) {
-                                focused_set.set(Some(idx));
-                            }
-                            EventResponse::Ignored
-                        }
-                        _ => EventResponse::Ignored,
+                    HandlerSet::new().on_pointer_event(move |event, ctx| match voice.as_ref() {
+                        Some(voice) => voice.around(ctx, |ctx| on_press(event, ctx)),
+                        None => on_press(event, ctx),
                     }),
                 );
             }
@@ -488,6 +496,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             // — so select, and activate only when a single click would.
             {
                 let sel = self.selection.clone();
+                let voice = self.count_voice.clone();
                 let focused_set = self.focused_index.clone();
                 let activate = self.on_tile_activate.clone();
                 let activate_on = self.activate_on;
@@ -523,7 +532,10 @@ impl<T: 'static> Widget for GridBodyPane<T> {
                     }
                     focused_set.set(Some(idx));
                     if let Some(sel) = sel.as_ref() {
-                        sel.select(idx);
+                        match voice.as_ref() {
+                            Some(voice) => voice.around(ctx, |_| sel.select(idx)),
+                            None => sel.select(idx),
+                        }
                     }
                     if activate_on == crate::data_views::ActivateOn::SingleClick
                         && let Some(cb) = activate.as_ref()

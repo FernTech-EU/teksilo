@@ -406,3 +406,13 @@ command-palette-result-count =
         [many] { $count } di comandi
        *[other] { $count } comandi
     }
+
+# Griglia di riquadri. Vedi en-US.ftl per il contesto completo e
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Nessun elemento selezionato
+        [one] 1 elemento selezionato
+        [many] { $count } di elementi selezionati
+       *[other] { $count } elementi selezionati
+    }

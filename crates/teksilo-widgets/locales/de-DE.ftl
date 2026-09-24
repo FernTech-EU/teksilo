@@ -390,3 +390,12 @@ command-palette-result-count =
         [one] 1 Befehl
        *[other] { $count } Befehle
     }
+
+# Kachelraster. Siehe en-US.ftl für den vollständigen Kontext und
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Kein Element ausgewählt
+        [one] 1 Element ausgewählt
+       *[other] { $count } Elemente ausgewählt
+    }

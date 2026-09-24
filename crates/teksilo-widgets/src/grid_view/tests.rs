@@ -678,6 +678,247 @@ fn tile_a11y_label_names_each_gridcell() {
     );
 }
 
+// ── What the grid says about its selection ─────────────────────────────
+
+/// Every live node the platform adapters walk in `update`, with the name they
+/// would announce, read through `accesskit_consumer` the way all three do: in
+/// the filtered tree, live itself or through an ancestor, and named (a
+/// `Label` by its value, anything else by its label).
+fn live_names(update: &teksilo_core::accesskit::TreeUpdate) -> Vec<String> {
+    use accesskit_consumer::{FilterResult, Tree, common_filter};
+    let tree = Tree::new(update.clone(), true);
+    let state = tree.state();
+    let mut out = Vec::new();
+    let mut stack = vec![state.root()];
+    while let Some(node) = stack.pop() {
+        let name = if node.label_comes_from_value() {
+            node.value()
+        } else {
+            node.label()
+        };
+        if common_filter(&node) == FilterResult::Include
+            && node.live() != teksilo_core::accesskit::Live::Off
+            && let Some(name) = name
+        {
+            out.push(name);
+        }
+        stack.extend(node.children());
+    }
+    out
+}
+
+/// A French grid of twelve named tiles over `mode`, laid out and focused.
+fn french_grid(mode: SelectionMode) -> (WidgetTree, WidgetId, SelectionModel) {
+    let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(mode);
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(selection.clone())
+            .tile_a11y_label(|i| format!("Photo {i}")),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    let _ = tree.sync_accessibility();
+    (tree, id, selection)
+}
+
+fn press(
+    tree: &mut WidgetTree,
+    key: teksilo_core::event::Key,
+    modifiers: teksilo_core::event::Modifiers,
+) {
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::KeyDown {
+        key,
+        modifiers,
+        text: None,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+}
+
+/// The grid is not a live region, and so neither is any tile. It used to be
+/// one whenever it had a selection model, and `accesskit_consumer` hands a
+/// node's `live` down to every descendant that sets none, so each named tile
+/// was announced by every platform as it arrived in the realized window.
+#[test]
+fn neither_the_grid_nor_its_tiles_are_live() {
+    let (mut tree, _id, _selection) = french_grid(SelectionMode::Multi);
+    let update = tree.sync_accessibility();
+    assert_eq!(live_names(&update), Vec::<String>::new());
+    teksilo_i18n::thread_local::clear();
+}
+
+/// What the grid used to hold as a silent live value is said when the user
+/// changes it, once per change, in the user's language.
+#[test]
+fn a_selection_the_user_changes_is_counted_aloud() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _id, selection) = french_grid(SelectionMode::Multi);
+
+    press(&mut tree, Key::Space, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![0]);
+    let update = tree.sync_accessibility();
+    assert_eq!(live_names(&update), vec!["1 élément sélectionné"]);
+
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    press(&mut tree, Key::Space, Modifiers::CTRL);
+    assert_eq!(selection.selected_indices(), vec![0, 1]);
+    let _ = tree.sync_accessibility(); // the announcer retracts the first
+    let update = tree.sync_accessibility();
+    assert_eq!(live_names(&update), vec!["2 éléments sélectionnés"]);
+    teksilo_i18n::thread_local::clear();
+}
+
+/// In a single selection the cursor carries the selection, so an arrow changes
+/// which tile is selected and not how many. The tile the reader lands on says
+/// it is selected; a count on top of it would be said on every key.
+#[test]
+fn moving_a_single_selection_says_no_count() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _id, selection) = french_grid(SelectionMode::Single);
+    press(&mut tree, Key::Space, Modifiers::NONE);
+    let _ = tree.sync_accessibility();
+    let _ = tree.sync_accessibility();
+    let seen = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![1]);
+    let update = tree.sync_accessibility();
+    assert_eq!(live_names(&update), Vec::<String>::new());
+    assert!(tree.announcements_since(seen).is_empty());
+    teksilo_i18n::thread_local::clear();
+}
+
+/// A click on a tile is a user's change like a key.
+#[test]
+fn a_click_that_selects_a_tile_is_counted_aloud() {
+    let (mut tree, id, selection) = french_grid(SelectionMode::Multi);
+    let t = tiles(&tree, id);
+    tree.click(t[2]);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(selection.is_selected(2));
+    let update = tree.sync_accessibility();
+    assert_eq!(live_names(&update), vec!["1 élément sélectionné"]);
+    teksilo_i18n::thread_local::clear();
+}
+
+/// An assistive click on a tile selects it, as a click does, and is counted
+/// the same way: it is how a screen reader user selects one directly.
+#[test]
+fn an_assistive_click_that_selects_a_tile_is_counted_aloud() {
+    let (mut tree, id, selection) = french_grid(SelectionMode::Multi);
+    let t = tiles(&tree, id);
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(t[3]),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(selection.is_selected(3));
+    let update = tree.sync_accessibility();
+    assert_eq!(live_names(&update), vec!["1 élément sélectionné"]);
+    teksilo_i18n::thread_local::clear();
+}
+
+/// A marquee is a user's change too, said once, when the band is let go and
+/// the tiles under it are selected.
+#[test]
+fn a_marquee_that_selects_tiles_is_counted_aloud() {
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+    // One 100px column in a 150px viewport, so the strip right of the tiles
+    // is background, where a press starts a marquee rather than a tile drag.
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(selection.clone()),
+    );
+    tree.layout(SizeProposal::exact(150.0, 150.0));
+    let _ = tree.sync_accessibility();
+
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(120.0, 10.0),
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(120.0, 16.0)));
+    let end = Point::new(50.0, 120.0);
+    tree.dispatch_event(WidgetEvent::pointer_move(end));
+    tree.layout(SizeProposal::exact(150.0, 150.0));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        end,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.layout(SizeProposal::exact(150.0, 150.0));
+    assert_eq!(selection.selected_indices(), vec![0, 1, 2]);
+    let update = tree.sync_accessibility();
+    assert_eq!(live_names(&update), vec!["3 éléments sélectionnés"]);
+    teksilo_i18n::thread_local::clear();
+}
+
+/// The grid's value is the count in the user's language, for a screen reader
+/// that reports the value with the grid. It was English in every language.
+#[test]
+fn the_grids_value_is_the_count_in_the_users_language() {
+    let (mut tree, id, selection) = french_grid(SelectionMode::Multi);
+    selection.select_all(3);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let update = tree.sync_accessibility();
+    let grid = teksilo_core::accessibility::widget_id_to_node_id(id);
+    let value = update
+        .nodes
+        .iter()
+        .find(|(node_id, _)| *node_id == grid)
+        .and_then(|(_, node)| node.value());
+    assert_eq!(value, Some("3 éléments sélectionnés"));
+    teksilo_i18n::thread_local::clear();
+}
+
+/// Space on a tile the grid has not realized, because the view was scrolled
+/// away from the cursor, selects it there and then, inside the key handler,
+/// rather than after it through `row_space_activate`. Both the handler and
+/// that selection are wrapped to count aloud, and the count must still be
+/// said once, not once by each.
+#[test]
+fn space_on_a_tile_scrolled_out_of_the_window_is_counted_once() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+    let model = ListModel::from_vec((0..300).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let grid = GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+        .tile_size(100.0, 50.0)
+        .selection(selection.clone())
+        .tile_a11y_label(|i| format!("Photo {i}"));
+    let scroll = grid.scroll_y_signal().clone();
+    let max_scroll = grid.max_scroll_y_signal().clone();
+    let id = tree.add(grid);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    scroll.set(max_scroll.get());
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.sync_accessibility();
+    let seen = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+
+    press(&mut tree, Key::Space, Modifiers::NONE);
+    assert_eq!(selection.selected_indices(), vec![0]);
+    for _ in 0..6 {
+        let _ = tree.sync_accessibility();
+    }
+    let heard: Vec<String> = tree
+        .announcements_since(seen)
+        .into_iter()
+        .map(|a| a.text)
+        .collect();
+    assert_eq!(heard, vec!["1 élément sélectionné"]);
+    teksilo_i18n::thread_local::clear();
+}
+
 // ── Phase 2: variable row heights + anchoring ───────────────────────────
 
 #[test]

@@ -388,3 +388,12 @@ command-palette-result-count =
         [one] 1 parancs
        *[other] { $count } parancs
     }
+
+# Csempés rács. Lásd en-US.ftl a teljes kontextusért és
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Nincs kiválasztott elem
+        [one] 1 elem kiválasztva
+       *[other] { $count } elem kiválasztva
+    }

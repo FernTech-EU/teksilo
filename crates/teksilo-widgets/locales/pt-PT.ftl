@@ -400,3 +400,13 @@ command-palette-result-count =
         [many] { $count } comandos
        *[other] { $count } comandos
     }
+
+# Grelha de mosaicos. Ver en-US.ftl para o contexto completo e
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Nenhum item selecionado
+        [one] 1 item selecionado
+        [many] { $count } itens selecionados
+       *[other] { $count } itens selecionados
+    }

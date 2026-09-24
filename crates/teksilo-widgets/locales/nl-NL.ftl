@@ -394,3 +394,12 @@ command-palette-result-count =
         [one] 1 opdracht
        *[other] { $count } opdrachten
     }
+
+# Tegelraster. Zie en-US.ftl voor de volledige context en
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Geen item geselecteerd
+        [one] 1 item geselecteerd
+       *[other] { $count } items geselecteerd
+    }

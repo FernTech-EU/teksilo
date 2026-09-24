@@ -390,3 +390,12 @@ command-palette-result-count =
         [one] 1 komento
        *[other] { $count } komentoa
     }
+
+# Ruudukkonäkymä. Katso en-US.ftl koko kontekstista ja
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Ei valittuja kohteita
+        [one] 1 kohde valittu
+       *[other] { $count } kohdetta valittu
+    }

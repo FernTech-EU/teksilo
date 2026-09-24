@@ -393,3 +393,14 @@ command-palette-result-count =
         [many] { $count } команд
        *[other] { $count } команды
     }
+
+# Сетка плиток. См. en-US.ftl для полного контекста и
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Ни один элемент не выбран
+        [one] Выбран { $count } элемент
+        [few] Выбрано { $count } элемента
+        [many] Выбрано { $count } элементов
+       *[other] Выбрано { $count } элемента
+    }

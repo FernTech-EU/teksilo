@@ -390,3 +390,14 @@ command-palette-result-count =
         [many] { $count } poleceń
        *[other] { $count } polecenia
     }
+
+# Siatka kafelków. Zobacz en-US.ftl po pełny kontekst
+# i crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Nie wybrano żadnego elementu
+        [one] Wybrano 1 element
+        [few] Wybrano { $count } elementy
+        [many] Wybrano { $count } elementów
+       *[other] Wybrano { $count } elementu
+    }

@@ -402,3 +402,13 @@ command-palette-result-count =
         [many] { $count } de comandos
        *[other] { $count } comandos
     }
+
+# Cuadrícula de mosaicos. Consulte en-US.ftl para el contexto completo y
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Ningún elemento seleccionado
+        [one] 1 elemento seleccionado
+        [many] { $count } de elementos seleccionados
+       *[other] { $count } elementos seleccionados
+    }

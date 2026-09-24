@@ -391,3 +391,12 @@ command-palette-result-count =
         [one] 1 εντολή
        *[other] { $count } εντολές
     }
+
+# Πλέγμα πλακιδίων. Δείτε το en-US.ftl για το πλήρες πλαίσιο και
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Κανένα επιλεγμένο στοιχείο
+        [one] 1 επιλεγμένο στοιχείο
+       *[other] { $count } επιλεγμένα στοιχεία
+    }

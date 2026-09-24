@@ -386,3 +386,12 @@ command-palette-result-count =
         [one] 1 kommando
        *[other] { $count } kommandon
     }
+
+# Rutnät med paneler. Se en-US.ftl för fullständig kontext och
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] Inget objekt valt
+        [one] 1 objekt valt
+       *[other] { $count } objekt valda
+    }

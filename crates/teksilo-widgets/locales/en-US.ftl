@@ -432,3 +432,13 @@ command-palette-result-count =
         [one] 1 command
        *[other] { $count } commands
     }
+
+# Said when a click, a key or a marquee changes how many tiles of a GridView
+# are selected, and carried as the grid's value. See
+# crates/teksilo-widgets/src/grid_view/selection_count.rs.
+grid-view-selection-count =
+    { $count ->
+        [0] No item selected
+        [one] 1 item selected
+       *[other] { $count } items selected
+    }
