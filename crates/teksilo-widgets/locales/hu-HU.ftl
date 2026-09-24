@@ -226,8 +226,11 @@ calendar-week-number-column = Hét
 calendar-name = Naptár
 calendar-months-grid-label = Hónapok
 calendar-years-grid-label = Évek
-calendar-name-with-month = Naptár, { $year }. { $month }
-calendar-cell-name = { $year }. { $month } { $day }., { $weekday }
+calendar-name-with-month = Naptár, { $month }
+calendar-value-with-selection = { $focused } (kijelölve: { $selection })
+calendar-value-on-selection = { $date } (kijelölve)
+calendar-date-range = { $start } – { $end }
+calendar-decade = { $start }–{ $end }
 calendar-range-status = Kijelölve: { $start } – { $end }
 
 date-edit-segment-year = Év

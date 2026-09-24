@@ -226,8 +226,11 @@ calendar-week-number-column = V.
 calendar-name = Kalender
 calendar-months-grid-label = Månader
 calendar-years-grid-label = År
-calendar-name-with-month = Kalender, { $month } { $year }
-calendar-cell-name = { $weekday } { $day } { $month } { $year }
+calendar-name-with-month = Kalender, { $month }
+calendar-value-with-selection = { $focused } (valt: { $selection })
+calendar-value-on-selection = { $date } (vald)
+calendar-date-range = från { $start } till { $end }
+calendar-decade = från { $start } till { $end }
 calendar-range-status = Valt: { $start } – { $end }
 
 date-edit-segment-year = År

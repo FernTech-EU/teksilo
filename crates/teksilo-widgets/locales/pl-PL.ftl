@@ -226,8 +226,11 @@ calendar-week-number-column = Tydz.
 calendar-name = Kalendarz
 calendar-months-grid-label = Miesiące
 calendar-years-grid-label = Lata
-calendar-name-with-month = Kalendarz, { $month } { $year }
-calendar-cell-name = { $weekday }, { $day }, { $month } { $year }
+calendar-name-with-month = Kalendarz, { $month }
+calendar-value-with-selection = { $focused } (zaznaczono: { $selection })
+calendar-value-on-selection = { $date } (zaznaczono)
+calendar-date-range = { $start } – { $end }
+calendar-decade = od { $start } do { $end }
 calendar-range-status = Zaznaczono: { $start } – { $end }
 
 date-edit-segment-year = Rok

@@ -21,11 +21,11 @@ use teksilo_core::styles::{CalendarDayConfig, CalendarDayFill, SharedCalendarSty
 use teksilo_core::widget::{CursorIcon, EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_i18n::resolve_message_widget;
+use teksilo_i18n::LanguageIdentifier;
 
 use crate::common::datetime::Date;
 use crate::common::datetime::types::{YearMonth, today_local};
-use crate::common::datetime::{month_long_key, weekday_long_key};
+use crate::common::datetime::written::full_date;
 use crate::styles::recipe_calendar_style::RecipeCalendarStyle;
 
 use super::{
@@ -51,7 +51,8 @@ pub(crate) struct DayCell {
     on_selection_changed: Option<OnSelectionChanged>,
     on_range_changed: Option<OnRangeChanged>,
     on_activate: Option<OnActivate>,
-    range_status: Signal<String>,
+    /// The locale the cell's name is written in; the calendar's.
+    lang: LanguageIdentifier,
     root_id: Option<WidgetId>,
     is_today: bool,
 }
@@ -78,7 +79,7 @@ impl DayCell {
         on_selection_changed: Option<OnSelectionChanged>,
         on_range_changed: Option<OnRangeChanged>,
         on_activate: Option<OnActivate>,
-        range_status: Signal<String>,
+        lang: LanguageIdentifier,
     ) -> Self {
         let today = today_local();
         Self {
@@ -95,7 +96,7 @@ impl DayCell {
             on_selection_changed,
             on_range_changed,
             on_activate,
-            range_status,
+            lang,
             root_id: None,
             is_today: date == today,
         }
@@ -187,7 +188,6 @@ impl Widget for DayCell {
         let on_activate = self.on_activate.clone();
         let visible_month = self.visible_month.clone();
         let focused_date = self.focused_date.clone();
-        let range_status = self.range_status.clone();
 
         // One selection closure, two entry points: a pointer tap and an
         // AT / automation `Action::Click`. The cell advertises
@@ -214,7 +214,6 @@ impl Widget for DayCell {
                 on_activate.as_ref(),
                 ctx_evt,
             );
-            update_range_status(&selection, &range_status);
             ctx_evt.request_frame();
         });
 
@@ -277,16 +276,11 @@ impl Widget for DayCell {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::GridCell);
 
-        let weekday_label = resolve_message_widget(weekday_long_key(self.date.weekday()), &[]);
-        let month_label = resolve_message_widget(month_long_key(self.date.month()), &[]);
-        let name = format!(
-            "{} {} {}, {}",
-            weekday_label,
-            month_label,
-            self.date.day(),
-            self.date.year()
-        );
-        builder.set_name(name);
+        // The day in full, written by ICU in the locale's order and grammar:
+        // "samedi 2 mai 2026", "Saturday, May 2, 2026". Never assembled from
+        // translated weekday and month names, which put a French day after
+        // its month and leave a Russian month in the nominative.
+        builder.set_name(full_date(self.date, &self.lang));
 
         // Selected state.
         let date = self.date;
@@ -332,24 +326,4 @@ fn resolve_calendar_style(ctx: &BuildContext) -> SharedCalendarStyle {
         .unwrap_or_else(|| {
             Rc::new(RecipeCalendarStyle::for_tokens(&ctx.theme().input)) as SharedCalendarStyle
         })
-}
-
-fn update_range_status(selection: &SelectionBinding, status: &Signal<String>) {
-    if let SelectionBinding::Range { value, .. } = selection {
-        let s = match value.get() {
-            Some(r) => format!(
-                "{:04}-{:02}-{:02} – {:04}-{:02}-{:02}",
-                r.start.year(),
-                r.start.month(),
-                r.start.day(),
-                r.end.year(),
-                r.end.month(),
-                r.end.day(),
-            ),
-            None => String::new(),
-        };
-        if status.get() != s {
-            status.set(s);
-        }
-    }
 }

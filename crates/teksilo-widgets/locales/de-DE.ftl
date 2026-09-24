@@ -227,8 +227,11 @@ calendar-week-number-column = KW
 calendar-name = Kalender
 calendar-months-grid-label = Monate
 calendar-years-grid-label = Jahre
-calendar-name-with-month = Kalender, { $month } { $year }
-calendar-cell-name = { $weekday }, { $day }. { $month } { $year }
+calendar-name-with-month = Kalender, { $month }
+calendar-value-with-selection = { $focused } (ausgewählt: { $selection })
+calendar-value-on-selection = { $date } (ausgewählt)
+calendar-date-range = vom { $start } bis { $end }
+calendar-decade = { $start } bis { $end }
 calendar-range-status = Auswahl: { $start } – { $end }
 
 date-edit-segment-year = Jahr

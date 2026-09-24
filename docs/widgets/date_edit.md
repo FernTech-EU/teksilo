@@ -37,9 +37,12 @@ popover anchored below the field for graphical date selection.
 
 # Accessibility
 
-- Container — `Role::DateInput`, `set_value` to ISO selection,
-  `set_label` from `.label()` builder, `set_placeholder` when
-  value is `None`.
+- Container: `Role::DateInput`, named from the `.label()` builder, its
+  value the selected day in full in the tree's locale ("samedi 2 mai
+  2026", "Saturday, May 2, 2026"), and `set_placeholder` when the value
+  is `None`. The field inside shows the editable pattern; this value is
+  written for someone listening, not for a parser. UIA and macOS expose
+  it; AT-SPI carries a string value on no interface.
 - Calendar trigger button — `Role::Button`, named from its tooltip.
   `set_has_popup(HasPopup::Grid)` and `set_expanded(open)` sit on the
   container node above, not on the button.

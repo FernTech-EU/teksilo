@@ -42,8 +42,10 @@
 //!
 //! # Accessibility
 //!
-//! - Container — `Role::DateInput` with `set_value` formatted as
-//!   `YYYY-MM-DD/YYYY-MM-DD` (ISO range).
+//! - Container: `Role::DateInput`, its value the two days in full joined
+//!   by words in the tree's locale ("du vendredi premier mai 2026 au mardi
+//!   5 mai 2026", "Friday, May 1, 2026 to Tuesday, May 5, 2026"), the same
+//!   `calendar-date-range` message the range calendar speaks.
 //! - Each `TextInputField` carries its own AT node, re-roled to
 //!   `Role::DateInput` and named for its half; the wrapper's
 //!   `Role::DateInput` provides the range semantics.
@@ -82,7 +84,7 @@ use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_i18n::resolve_message_widget;
+use teksilo_i18n::{FluentValue, LanguageIdentifier, resolve_message_widget};
 use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::calendar::{Calendar, DateRange};
@@ -92,6 +94,7 @@ use crate::common::datetime::pattern::{
     segment_at_position, step_date_field,
 };
 use crate::common::datetime::types::today_local;
+use crate::common::datetime::written::{date_locale, full_date};
 use crate::date_edit::{ValidationBehavior, build_date_validator, calendar_glyph_icon, clamp_date};
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
@@ -142,6 +145,9 @@ pub struct DateRangeEdit {
     on_value_changed: Option<OnRangeChanged>,
     style_override: Option<teksilo_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
+    /// The locale the accessibility value writes the dates in, resolved
+    /// from the tree's locale in `build()`, which a locale switch re-runs.
+    lang: LanguageIdentifier,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
     /// the last call wins.
@@ -187,6 +193,7 @@ impl DateRangeEdit {
             on_value_changed: None,
             style_override: None,
             root_child_id: None,
+            lang: date_locale(None),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -364,6 +371,7 @@ impl Widget for DateRangeEdit {
             teksilo_core::binding::BindingLevel::Rebuild,
         );
 
+        self.lang = date_locale(ctx.locale_signal().get().as_deref());
         let pattern_string = self.pattern.clone().unwrap_or_else(|| {
             let tag = ctx.locale_signal().get().unwrap_or_default();
             crate::common::datetime::format_pattern_for_locale(&tag).to_string()
@@ -734,14 +742,12 @@ impl Widget for DateRangeEdit {
         }
         match self.value.get() {
             Some(r) => {
-                builder.set_value(format!(
-                    "{:04}-{:02}-{:02}/{:04}-{:02}-{:02}",
-                    r.start.year(),
-                    r.start.month(),
-                    r.start.day(),
-                    r.end.year(),
-                    r.end.month(),
-                    r.end.day(),
+                builder.set_value(resolve_message_widget(
+                    "calendar-date-range",
+                    &[
+                        ("start", FluentValue::from(full_date(r.start, &self.lang))),
+                        ("end", FluentValue::from(full_date(r.end, &self.lang))),
+                    ],
                 ));
             }
             None => {

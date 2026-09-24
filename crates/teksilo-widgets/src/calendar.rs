@@ -41,25 +41,39 @@
 //!
 //! # Accessibility
 //!
-//! - Container — `Role::Grid` with `set_name("Calendar, May 2026")`
-//!   (localized) and `set_live(Live::Polite)`, so every `set_value`
-//!   change is announced. That value always carries the
-//!   keyboard-focused day as `YYYY-MM-DD`, with `(selected: …)`
-//!   appended when a selection exists; a range renders as
-//!   `YYYY-MM-DD to YYYY-MM-DD`, ASCII " to " rather than an
-//!   en-dash because some screen readers skip U+2013.
-//! - Header arrow buttons — `Role::Button` with localized labels
+//! Every string below is in the user's language. The words come from the
+//! framework's Fluent bundle, so an application that registers
+//! `framework_locales()` gets them translated; every date inside them is
+//! written by ICU for the widget tree's locale, in the locale's own order
+//! and grammar and on the Gregorian calendar the grid is laid out in, never
+//! assembled from numbers or from translated names (see
+//! `common::datetime::written`).
+//!
+//! - Container: `Role::Grid`, named after the visible month
+//!   ("Calendar, May 2026", "Calendrier, mai 2026"), and a polite live
+//!   region. The AT-SPI, UIA and macOS adapters announce a live node when
+//!   its *name* changes, so a change of month is announced on all three. The
+//!   value is the day under the keyboard cursor in full, then the
+//!   selection when there is one: "Saturday, May 2, 2026 (selected:
+//!   Friday, May 1, 2026)". With the cursor on the one selected day, the
+//!   day is said once: "Friday, May 1, 2026 (selected)". A range is joined
+//!   by words ("… to …"), not an en-dash, which some screen readers skip.
+//!   UIA and macOS raise a value-changed event on it; AT-SPI carries a
+//!   string value on no interface, so the value never reaches an AT-SPI
+//!   client at all.
+//! - Header arrow buttons: `Role::Button` with localized labels
 //!   ("Previous month", "Next month") and `Action::Click` advertised.
-//! - Header month/year label — `Role::Button` (a `Ghost` `Button`
-//!   whose activation demotes [`CalendarMode`] one level, swapping the
-//!   body for the coarser grid in place — no popup is opened).
-//! - Weekday header row — `Role::Row` of `Role::ColumnHeader` cells,
-//!   each labelled with the long weekday name (e.g. "Monday").
-//! - Day cells — `Role::GridCell` with localized long-form labels
-//!   ("Saturday May 2, 2026"), `set_selected`, `set_aria_current(Date)`
-//!   on today, `set_disabled` for filter rejections, and
-//!   `Action::Click` advertised. Keyboard focus roves on the Calendar
-//!   root, so a cell never carries a focused flag.
+//! - Header month/year label: `Role::Button`, a `Ghost` `Button` whose
+//!   activation demotes [`CalendarMode`] one level, swapping the body for
+//!   the coarser grid in place; no popup is opened. Its name is its title:
+//!   the month and year, the year, or the decade in words ("2020 to 2029").
+//! - Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
+//!   labelled with the long weekday name (e.g. "Monday").
+//! - Day cells: `Role::GridCell` named by the day in full
+//!   ("Saturday, May 2, 2026", "samedi 2 mai 2026"), `set_selected`,
+//!   `set_aria_current(Date)` on today, `set_disabled` for filter
+//!   rejections, and `Action::Click` advertised. Keyboard focus roves on
+//!   the Calendar root, so a cell never carries a focused flag.
 //!
 //! # Example
 //!
@@ -110,15 +124,15 @@ use teksilo_tokens::{TextRole, TextStyleRole};
 
 use crate::button::{Button, ButtonVariant};
 use crate::common::datetime::Date;
-use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::{YearMonth, today_local, weekday_from_monday_zero};
 use crate::common::datetime::weekday_short_key;
+use crate::common::datetime::written::{date_locale, full_date, medium_date, month_and_year};
 use crate::primitives::{Center, Divider, FixedSize, HStack, Padding, Spacer, TextWidget, VStack};
 use crate::styles::recipe_calendar_style as cal_recipe;
 
 use self::cell::DayCell;
 use self::header::CalendarHeader;
-use teksilo_i18n::LocalizedString;
+use teksilo_i18n::{FluentValue, LanguageIdentifier, LocalizedString};
 
 // ── Public types ──────────────────────────────────────────────────────
 
@@ -172,7 +186,7 @@ pub enum CalendarMode {
     /// 4×3 grid of months. Title shows "2026". Header chevrons step
     /// by ±1 year. Picking a cell zooms back into [`Self::Days`].
     Months,
-    /// 4×3 grid of years (current decade). Title shows "2020 — 2029".
+    /// 4×3 grid of years (current decade). Title shows "2020 to 2029".
     /// Header chevrons step by ±10 years (one decade). Picking a cell
     /// zooms back into [`Self::Months`].
     Years,
@@ -235,9 +249,11 @@ pub struct Calendar {
     on_range_changed: Option<OnRangeChanged>,
     on_month_changed: Option<OnMonthChanged>,
     on_activate: Option<OnActivate>,
-    /// Status message shown at the bottom in range mode while a range
-    /// is committed.
-    range_status: Signal<String>,
+    /// The locale every date the calendar writes is written in, resolved
+    /// from the tree's locale in `build()`. Read again by `accessibility()`,
+    /// which has no context of its own; a locale switch rebuilds the
+    /// calendar (the binding sits at `Rebuild`), so it cannot go stale.
+    lang: LanguageIdentifier,
     /// `true` while the Calendar root holds keyboard focus. Drives the
     /// roving-focus ring on the cell at `focused_date` so keyboard
     /// users see where the next arrow key will land. Written by
@@ -290,7 +306,7 @@ impl Calendar {
             on_range_changed: None,
             on_month_changed: None,
             on_activate: None,
-            range_status: Signal::new(String::new()),
+            lang: date_locale(None),
             focused: Signal::new(false),
             root_child_id: None,
         }
@@ -456,10 +472,13 @@ impl Widget for Calendar {
         );
 
         // Resolve first day of week: explicit override → locale default → Monday.
+        let tree_locale = ctx.locale_signal().get();
         let first_dow = self.first_day_of_week_override.unwrap_or_else(|| {
-            let tag = ctx.locale_signal().get().unwrap_or_default();
-            crate::common::datetime::first_day_of_week_for_locale(&tag)
+            crate::common::datetime::first_day_of_week_for_locale(
+                tree_locale.as_deref().unwrap_or_default(),
+            )
         });
+        self.lang = date_locale(tree_locale.as_deref());
 
         // ── Header (prev / month-label / next) ──────────────────
         let header_id = if self.show_navigation {
@@ -468,6 +487,7 @@ impl Widget for Calendar {
                 self.focused_date.clone(),
                 self.mode.clone(),
                 self.on_month_changed.clone(),
+                self.lang.clone(),
             ))
         } else {
             // Empty placeholder so layout shape stays consistent.
@@ -502,7 +522,7 @@ impl Widget for Calendar {
             on_selection_changed: self.on_selection_changed.clone(),
             on_range_changed: self.on_range_changed.clone(),
             on_activate: self.on_activate.clone(),
-            range_status: self.range_status.clone(),
+            lang: self.lang.clone(),
         });
         // Cell footprint for zoom modes derived from day grid cell
         // size so the body's overall width matches the day grid (7
@@ -547,8 +567,7 @@ impl Widget for Calendar {
                     self.selection.clone(),
                     self.on_selection_changed.clone(),
                     self.on_month_changed.clone(),
-                    self.range_status.clone(),
-                    matches!(self.selection, SelectionBinding::Range { .. }),
+                    &self.lang,
                 ))
             } else {
                 None
@@ -706,58 +725,78 @@ impl Widget for Calendar {
 
         let label = match &self.label {
             Some(s) => s.resolve_now(),
-            None => {
-                let month_name = resolve_message_widget(month_long_key(ym.month()), &[]);
-                format!("Calendar, {} {}", month_name, ym.year())
-            }
+            None => resolve_message_widget(
+                "calendar-name-with-month",
+                &[("month", FluentValue::from(month_and_year(ym, &self.lang)))],
+            ),
         };
         builder.set_name(label);
 
-        // Live region: month-change AND roving-focus announcements
-        // both propagate by mutating `set_value`. The framework
-        // marks the node a11y-dirty when `visible_month` /
-        // `focused_date` / `selection` change (bindings registered
-        // in `build()` at `AccessibilityOnly` level), accessibility()
-        // re-runs, and AT picks up the new value as a polite
-        // announcement.
+        // A polite live region. The AT-SPI, UIA and macOS adapters all
+        // announce a live node's *name* when it changes, and only a label
+        // takes its name from its value, so this speaks a change of month
+        // (the name above). The cursor lives in the value below, which UIA
+        // and macOS report as a value change on the focused grid instead.
+        // The bindings registered in `build()` at `AccessibilityOnly`
+        // re-run this on every change of month, cursor or selection.
         builder.set_live(Live::Polite);
 
-        // Compose the value: keyboard focus first (drives roving
-        // focus announcements), then the committed selection. ASCII
-        // " to " instead of an en-dash because some screen readers
-        // skip U+2013.
-        let focused = self.focused_date.get();
-        let focused_str = format!(
-            "{:04}-{:02}-{:02}",
-            focused.year(),
-            focused.month(),
-            focused.day()
-        );
-        let selection_str = match &self.selection {
-            SelectionBinding::Single(sig) => sig
-                .get()
-                .map(|d| format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day())),
-            SelectionBinding::Range { value, .. } => value.get().map(|r| {
-                format!(
-                    "{:04}-{:02}-{:02} to {:04}-{:02}-{:02}",
-                    r.start.year(),
-                    r.start.month(),
-                    r.start.day(),
-                    r.end.year(),
-                    r.end.month(),
-                    r.end.day(),
-                )
-            }),
-        };
-        let value_text = match selection_str {
-            Some(sel) => format!("{} (selected: {})", focused_str, sel),
-            None => focused_str,
+        // Compose the value: keyboard focus first, then the committed
+        // selection, every date in full. It is heard, not parsed: UIA and
+        // macOS report its changes on the focused grid, which is how the day
+        // under the cursor reaches a screen reader there. The words around
+        // the dates are the framework's messages, and a range is joined by
+        // words (`calendar-date-range`), not an en-dash some readers skip.
+        let cursor = self.focused_date.get();
+        let focused = full_date(cursor, &self.lang);
+        let value_text = match &self.selection {
+            SelectionBinding::Single(sig) => match sig.get() {
+                // The cursor on the one selected day is that day, said once
+                // and marked selected: "vendredi 12 mars 2027 (sélectionné)".
+                // Written out as the cursor followed by the selection, it was
+                // the same date twice, and that is where a single calendar
+                // opens: a date field's popover puts its cursor on the date
+                // the field holds. A range keeps both, since a day inside a
+                // range is not the range.
+                Some(day) if day == cursor => resolve_message_widget(
+                    "calendar-value-on-selection",
+                    &[("date", FluentValue::from(focused))],
+                ),
+                Some(day) => with_selection(focused, full_date(day, &self.lang)),
+                None => focused,
+            },
+            SelectionBinding::Range { value, .. } => match value.get() {
+                Some(r) => with_selection(
+                    focused,
+                    resolve_message_widget(
+                        "calendar-date-range",
+                        &[
+                            ("start", FluentValue::from(full_date(r.start, &self.lang))),
+                            ("end", FluentValue::from(full_date(r.end, &self.lang))),
+                        ],
+                    ),
+                ),
+                None => focused,
+            },
         };
         builder.set_value(value_text);
 
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(Action::Focus);
     }
+}
+
+/// The grid's value when something other than the day under the cursor is
+/// selected: the cursor, then the selection, "samedi 13 mars 2027
+/// (sélection : vendredi 12 mars 2027)".
+fn with_selection(focused: String, selection: String) -> String {
+    resolve_message_widget(
+        "calendar-value-with-selection",
+        &[
+            ("focused", FluentValue::from(focused)),
+            ("selection", FluentValue::from(selection)),
+        ],
+    )
 }
 
 // ── Internal builders ─────────────────────────────────────────────────
@@ -822,7 +861,8 @@ struct BuildGridParams {
     on_selection_changed: Option<OnSelectionChanged>,
     on_range_changed: Option<OnRangeChanged>,
     on_activate: Option<OnActivate>,
-    range_status: Signal<String>,
+    /// The locale the day cells name their dates in.
+    lang: LanguageIdentifier,
 }
 
 fn build_footer(
@@ -833,8 +873,7 @@ fn build_footer(
     selection: SelectionBinding,
     on_selection_changed: Option<OnSelectionChanged>,
     on_month_changed: Option<OnMonthChanged>,
-    range_status: Signal<String>,
-    is_range_mode: bool,
+    lang: &LanguageIdentifier,
 ) -> WidgetId {
     let mut row = HStack::new().spacing(8.0);
     if show_today {
@@ -868,11 +907,11 @@ fn build_footer(
             });
         row = row.child(today_btn);
     }
-    if is_range_mode {
+    if let SelectionBinding::Range { value, .. } = &selection {
         let status_label = TextWidget::new(lit!(""))
             .style(TextStyleRole::Body)
             .color(TextRole::Secondary)
-            .text(range_status.clone())
+            .text(range_status(value, lang))
             .single_line()
             .a11y_hidden();
         let spacer = ctx.add(Spacer::new());
@@ -881,6 +920,27 @@ fn build_footer(
         row = row.child(Spacer::new());
     }
     ctx.add(row)
+}
+
+/// The line under a range calendar saying what is selected: "Sélection :
+/// 1er mars 2027 – 12 mars 2027".
+///
+/// Derived from the committed range itself, so it follows a commit from the
+/// keyboard or from the application as well as a click. It is on screen only
+/// (the grid's value already says it, in words), so the shorter medium date
+/// keeps it on one line and the en-dash costs nobody anything.
+fn range_status(value: &Signal<Option<DateRange>>, lang: &LanguageIdentifier) -> Signal<String> {
+    let lang = lang.clone();
+    value.map(move |range| match range {
+        Some(r) => resolve_message_widget(
+            "calendar-range-status",
+            &[
+                ("start", FluentValue::from(medium_date(r.start, &lang))),
+                ("end", FluentValue::from(medium_date(r.end, &lang))),
+            ],
+        ),
+        None => String::new(),
+    })
 }
 
 // ── Weekday header cell (per-cell a11y wrapper) ───────────────────────
@@ -1031,7 +1091,7 @@ impl Widget for CalendarBody {
                     self.params.on_selection_changed.clone(),
                     self.params.on_range_changed.clone(),
                     self.params.on_activate.clone(),
-                    self.params.range_status.clone(),
+                    self.params.lang.clone(),
                 );
                 row = row.child(ctx.add(cell));
             }

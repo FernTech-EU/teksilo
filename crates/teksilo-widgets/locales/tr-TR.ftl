@@ -226,8 +226,11 @@ calendar-week-number-column = Hafta
 calendar-name = Takvim
 calendar-months-grid-label = Aylar
 calendar-years-grid-label = Yıllar
-calendar-name-with-month = Takvim, { $month } { $year }
-calendar-cell-name = { $day } { $month } { $year }, { $weekday }
+calendar-name-with-month = Takvim, { $month }
+calendar-value-with-selection = { $focused } (seçilen: { $selection })
+calendar-value-on-selection = { $date } (seçili)
+calendar-date-range = { $start } – { $end }
+calendar-decade = { $start }–{ $end }
 calendar-range-status = Seçilen: { $start } – { $end }
 
 date-edit-segment-year = Yıl

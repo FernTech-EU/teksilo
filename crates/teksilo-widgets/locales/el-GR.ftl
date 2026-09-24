@@ -229,8 +229,11 @@ calendar-week-number-column = Εβδ.
 calendar-name = Ημερολόγιο
 calendar-months-grid-label = Μήνες
 calendar-years-grid-label = Έτη
-calendar-name-with-month = Ημερολόγιο, { $month } { $year }
-calendar-cell-name = { $weekday } { $day }, { $month } { $year }
+calendar-name-with-month = Ημερολόγιο, { $month }
+calendar-value-with-selection = { $focused } (επιλογή: { $selection })
+calendar-value-on-selection = { $date } (επιλεγμένη)
+calendar-date-range = από { $start } έως { $end }
+calendar-decade = από { $start } έως { $end }
 calendar-range-status = Επιλογή: { $start } – { $end }
 
 date-edit-segment-year = Έτος

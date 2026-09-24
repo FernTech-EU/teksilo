@@ -227,8 +227,11 @@ calendar-week-number-column = Săpt.
 calendar-name = Calendar
 calendar-months-grid-label = Luni
 calendar-years-grid-label = Ani
-calendar-name-with-month = Calendar, { $month } { $year }
-calendar-cell-name = { $weekday }, { $day } { $month } { $year }
+calendar-name-with-month = Calendar, { $month }
+calendar-value-with-selection = { $focused } (selectat: { $selection })
+calendar-value-on-selection = { $date } (selectat)
+calendar-date-range = de la { $start } până la { $end }
+calendar-decade = din { $start } până în { $end }
 calendar-range-status = Selecție: { $start } – { $end }
 
 date-edit-segment-year = An

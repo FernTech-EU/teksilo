@@ -228,8 +228,11 @@ calendar-week-number-column = أسبوع
 calendar-name = التقويم
 calendar-months-grid-label = الأشهر
 calendar-years-grid-label = السنوات
-calendar-name-with-month = التقويم، { $month } { $year }
-calendar-cell-name = { $weekday }، { $day } { $month } { $year }
+calendar-name-with-month = التقويم، { $month }
+calendar-value-with-selection = { $focused } (المحدَّد: { $selection })
+calendar-value-on-selection = { $date } (المحدَّد)
+calendar-date-range = من { $start } إلى { $end }
+calendar-decade = من { $start } إلى { $end }
 calendar-range-status = المحدَّد: { $start } – { $end }
 
 date-edit-segment-year = السنة

@@ -23,13 +23,13 @@ use teksilo_core::styles::{CalendarHeaderConfig, CalendarStyle, SharedCalendarSt
 use teksilo_core::widget::{CursorIcon, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_i18n::resolve_message_widget;
+use teksilo_i18n::{FluentValue, LanguageIdentifier, resolve_message_widget};
 use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::common::conformance_box::{conformance_box, conformance_box_size};
 use crate::common::datetime::Date;
-use crate::common::datetime::month_long_key;
 use crate::common::datetime::types::YearMonth;
+use crate::common::datetime::written::month_and_year;
 use crate::primitives::{Center, FixedSize, IconWidget, RectWidget, ZStack};
 use crate::styles::recipe_calendar_style::{CALENDAR_NAV_ARROW_RADIUS, RecipeCalendarStyle};
 
@@ -42,6 +42,8 @@ pub(crate) struct CalendarHeader {
     /// (b) the title-button's demote target.
     mode: Signal<CalendarMode>,
     on_month_changed: Option<OnMonthChanged>,
+    /// The locale the title writes its month in; the calendar's.
+    lang: LanguageIdentifier,
     root_id: Option<WidgetId>,
 }
 
@@ -57,12 +59,14 @@ impl CalendarHeader {
         focused_date: Signal<Date>,
         mode: Signal<CalendarMode>,
         on_month_changed: Option<OnMonthChanged>,
+        lang: LanguageIdentifier,
     ) -> Self {
         Self {
             visible_month,
             focused_date,
             mode,
             on_month_changed,
+            lang,
             root_id: None,
         }
     }
@@ -164,19 +168,31 @@ impl Widget for CalendarHeader {
 
         // Center label — a Flat Button bound to a derived label
         // signal (mode + visible_month → "May 2026" / "2026" /
-        // "2020 — 2029"). Reactive via `Button::label`, so
-        // the calendar doesn't have to rebuild on mode flips.
-        let label_signal = self.visible_month.zip(&self.mode).map(|(ym, m)| match m {
-            CalendarMode::Days => {
-                let month_name = resolve_message_widget(month_long_key(ym.month()), &[]);
-                format!("{} {}", month_name, ym.year())
-            }
-            CalendarMode::Months => format!("{}", ym.year()),
-            CalendarMode::Years => {
-                let start = (ym.year() / 10) * 10;
-                format!("{} — {}", start, start + 9)
-            }
-        });
+        // "2020 to 2029"). Reactive via `Button::label`, so
+        // the calendar doesn't have to rebuild on mode flips. It is also
+        // the button's accessible name, so the month is ICU's month with
+        // its year (whose order is the locale's: "2026年5月") and the decade
+        // is joined by words, where a dash would be skipped by some screen
+        // readers. The years go to Fluent as strings: as numbers they would
+        // be grouped, and French would read "2 020".
+        let lang = self.lang.clone();
+        let label_signal = self
+            .visible_month
+            .zip(&self.mode)
+            .map(move |(ym, m)| match m {
+                CalendarMode::Days => month_and_year(*ym, &lang),
+                CalendarMode::Months => format!("{}", ym.year()),
+                CalendarMode::Years => {
+                    let start = (ym.year() / 10) * 10;
+                    resolve_message_widget(
+                        "calendar-decade",
+                        &[
+                            ("start", FluentValue::from(start.to_string())),
+                            ("end", FluentValue::from((start + 9).to_string())),
+                        ],
+                    )
+                }
+            });
         let mode_for_action = self.mode.clone();
         let title_btn = crate::button::Button::new(lit!(""))
             .label(label_signal)

@@ -46,8 +46,10 @@ to from booking sites and analytics dashboards.
 
 # Accessibility
 
-- Container — `Role::DateInput` with `set_value` formatted as
-  `YYYY-MM-DD/YYYY-MM-DD` (ISO range).
+- Container: `Role::DateInput`, its value the two days in full joined
+  by words in the tree's locale ("du vendredi premier mai 2026 au mardi
+  5 mai 2026", "Friday, May 1, 2026 to Tuesday, May 5, 2026"), the same
+  `calendar-date-range` message the range calendar speaks.
 - Each `TextInputField` carries its own AT node, re-roled to
   `Role::DateInput` and named for its half; the wrapper's
   `Role::DateInput` provides the range semantics.

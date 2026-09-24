@@ -228,8 +228,11 @@ calendar-week-number-column = Týd.
 calendar-name = Kalendář
 calendar-months-grid-label = Měsíce
 calendar-years-grid-label = Roky
-calendar-name-with-month = Kalendář, { $month } { $year }
-calendar-cell-name = { $weekday } { $day }. { $month } { $year }
+calendar-name-with-month = Kalendář, { $month }
+calendar-value-with-selection = { $focused } (vybráno: { $selection })
+calendar-value-on-selection = { $date } (vybráno)
+calendar-date-range = { $start } až { $end }
+calendar-decade = { $start } až { $end }
 calendar-range-status = Vybráno: { $start } – { $end }
 
 date-edit-segment-year = Rok

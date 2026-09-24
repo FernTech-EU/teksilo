@@ -944,6 +944,13 @@ impl Widget for TextWidget {
         }
     }
 
+    /// Exposed so a test can read what a label draws. A label hidden from
+    /// assistive technology publishes no node, so there is nowhere else to
+    /// read its text from.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         if self.a11y_hidden {
             return;

@@ -237,8 +237,11 @@ calendar-week-number-column = Sem.
 calendar-name = Calendario
 calendar-months-grid-label = Meses
 calendar-years-grid-label = Años
-calendar-name-with-month = Calendario, { $month } de { $year }
-calendar-cell-name = { $weekday }, { $day } de { $month } de { $year }
+calendar-name-with-month = Calendario, { $month }
+calendar-value-with-selection = { $focused } (seleccionado: { $selection })
+calendar-value-on-selection = { $date } (seleccionado)
+calendar-date-range = del { $start } al { $end }
+calendar-decade = de { $start } a { $end }
 calendar-range-status = Selección: { $start } – { $end }
 
 date-edit-segment-year = Año

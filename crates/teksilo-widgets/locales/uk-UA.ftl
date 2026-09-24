@@ -227,8 +227,11 @@ calendar-week-number-column = Тиж.
 calendar-name = Календар
 calendar-months-grid-label = Місяці
 calendar-years-grid-label = Роки
-calendar-name-with-month = Календар, { $month } { $year }
-calendar-cell-name = { $weekday }, { $day }, { $month } { $year }
+calendar-name-with-month = Календар, { $month }
+calendar-value-with-selection = { $focused } (вибрано: { $selection })
+calendar-value-on-selection = { $date } (вибрано)
+calendar-date-range = { $start } – { $end }
+calendar-decade = з { $start } по { $end }
 calendar-range-status = Вибрано: { $start } – { $end }
 
 date-edit-segment-year = Рік

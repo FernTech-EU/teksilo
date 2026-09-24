@@ -33,9 +33,12 @@
 //!
 //! # Accessibility
 //!
-//! - Container — `Role::DateInput`, `set_value` to ISO selection,
-//!   `set_label` from `.label()` builder, `set_placeholder` when
-//!   value is `None`.
+//! - Container: `Role::DateInput`, named from the `.label()` builder, its
+//!   value the selected day in full in the tree's locale ("samedi 2 mai
+//!   2026", "Saturday, May 2, 2026"), and `set_placeholder` when the value
+//!   is `None`. The field inside shows the editable pattern; this value is
+//!   written for someone listening, not for a parser. UIA and macOS expose
+//!   it; AT-SPI carries a string value on no interface.
 //! - Calendar trigger button — `Role::Button`, named from its tooltip.
 //!   `set_has_popup(HasPopup::Grid)` and `set_expanded(open)` sit on the
 //!   container node above, not on the button.
@@ -90,7 +93,7 @@ use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_i18n::resolve_message_widget;
+use teksilo_i18n::{LanguageIdentifier, resolve_message_widget};
 
 use crate::calendar::Calendar;
 use crate::common::datetime::Date;
@@ -99,6 +102,7 @@ use crate::common::datetime::pattern::{
     mask_for_pattern, parse_value, segment_at_position, step_date_field,
 };
 use crate::common::datetime::types::{YearMonth, today_local};
+use crate::common::datetime::written::{date_locale, full_date};
 use crate::common::range_nav;
 use crate::icon_button::{IconButton, IconButtonSize};
 use crate::primitives::IconWidget;
@@ -202,6 +206,9 @@ pub struct DateEdit {
     style_override: Option<teksilo_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
     calendar_id: Option<WidgetId>,
+    /// The locale the accessibility value writes the date in, resolved
+    /// from the tree's locale in `build()`, which a locale switch re-runs.
+    lang: LanguageIdentifier,
 }
 
 impl std::fmt::Debug for DateEdit {
@@ -243,6 +250,7 @@ impl DateEdit {
             style_override: None,
             root_child_id: None,
             calendar_id: None,
+            lang: date_locale(None),
         }
     }
 
@@ -479,6 +487,8 @@ impl Widget for DateEdit {
             ctx.binding_registry(),
             teksilo_core::binding::BindingLevel::Rebuild,
         );
+
+        self.lang = date_locale(ctx.locale_signal().get().as_deref());
 
         // Resolve pattern: explicit override → locale default.
         let pattern_string = self.pattern.clone().unwrap_or_else(|| {
@@ -1077,7 +1087,7 @@ impl Widget for DateEdit {
         }
         match self.value.get() {
             Some(d) => {
-                builder.set_value(format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day()));
+                builder.set_value(full_date(d, &self.lang));
             }
             None => {
                 if !self.placeholder.resolve_now().is_empty() {

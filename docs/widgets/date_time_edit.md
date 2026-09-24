@@ -48,8 +48,11 @@ is used to from booking sites, calendar apps, and form builders.
 
 # Accessibility
 
-- Container — `Role::DateTimeInput` with `set_value` formatted as
-  `YYYY-MM-DDTHH:MM:SS` (ISO 8601 datetime).
+- Container: `Role::DateTimeInput`, its value the day in full and the
+  time in the tree's locale ("samedi 2 mai 2026 à 14:35", "Saturday,
+  May 2, 2026 at 2:35 PM"), with the seconds only when the field shows
+  them. The clock is the locale's: an explicit `.time_format(...)`
+  changes what the field shows, not how the value is read.
 - Each `TextInputField` keeps its own AT node, re-roled per half to
   `Role::DateInput` / `Role::TimeInput`; the wrapper's
   `Role::DateTimeInput` provides the datetime semantics.

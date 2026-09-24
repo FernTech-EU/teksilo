@@ -44,8 +44,11 @@
 //!
 //! # Accessibility
 //!
-//! - Container — `Role::DateTimeInput` with `set_value` formatted as
-//!   `YYYY-MM-DDTHH:MM:SS` (ISO 8601 datetime).
+//! - Container: `Role::DateTimeInput`, its value the day in full and the
+//!   time in the tree's locale ("samedi 2 mai 2026 à 14:35", "Saturday,
+//!   May 2, 2026 at 2:35 PM"), with the seconds only when the field shows
+//!   them. The clock is the locale's: an explicit `.time_format(...)`
+//!   changes what the field shows, not how the value is read.
 //! - Each `TextInputField` keeps its own AT node, re-roled per half to
 //!   `Role::DateInput` / `Role::TimeInput`; the wrapper's
 //!   `Role::DateTimeInput` provides the datetime semantics.
@@ -85,7 +88,7 @@ use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_i18n::resolve_message_widget;
+use teksilo_i18n::{LanguageIdentifier, resolve_message_widget};
 use teksilo_tokens::{BorderRole, CornerRadius, SurfaceRole};
 
 use crate::calendar::Calendar;
@@ -94,6 +97,7 @@ use crate::common::datetime::pattern::{
     segment_at_position, step_date_field, step_time_field,
 };
 use crate::common::datetime::types::today_local;
+use crate::common::datetime::written::{date_locale, full_date_time};
 use crate::common::datetime::{Date, DateTime, Time};
 use crate::date_edit::{ValidationBehavior, build_date_validator, calendar_glyph_icon, clamp_date};
 use crate::icon_button::{IconButton, IconButtonSize};
@@ -160,6 +164,10 @@ pub struct DateTimeEdit {
     style_override: Option<teksilo_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
     calendar_id: Option<WidgetId>,
+    /// The locale the accessibility value writes the date and time in,
+    /// resolved from the tree's locale in `build()`, which a locale switch
+    /// re-runs.
+    lang: LanguageIdentifier,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
     /// the last call wins.
@@ -211,6 +219,7 @@ impl DateTimeEdit {
             style_override: None,
             root_child_id: None,
             calendar_id: None,
+            lang: date_locale(None),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -464,6 +473,7 @@ impl Widget for DateTimeEdit {
             teksilo_core::binding::BindingLevel::Rebuild,
         );
 
+        self.lang = date_locale(ctx.locale_signal().get().as_deref());
         let date_pattern_string = self.date_format_pattern.clone().unwrap_or_else(|| {
             let tag = ctx.locale_signal().get().unwrap_or_default();
             crate::common::datetime::format_pattern_for_locale(&tag).to_string()
@@ -900,15 +910,8 @@ impl Widget for DateTimeEdit {
         }
         match self.value.get() {
             Some(dt) => {
-                builder.set_value(format!(
-                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-                    dt.date().year(),
-                    dt.date().month(),
-                    dt.date().day(),
-                    dt.time().hour(),
-                    dt.time().minute(),
-                    dt.time().second(),
-                ));
+                let seconds = matches!(self.seconds, SecondsMode::Editable);
+                builder.set_value(full_date_time(dt, seconds, &self.lang));
             }
             None => {
                 if !self.placeholder.resolve_now().is_empty() {

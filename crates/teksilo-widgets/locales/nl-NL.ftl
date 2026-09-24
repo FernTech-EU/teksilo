@@ -234,8 +234,11 @@ calendar-week-number-column = Wk
 calendar-name = Kalender
 calendar-months-grid-label = Maanden
 calendar-years-grid-label = Jaren
-calendar-name-with-month = Kalender, { $month } { $year }
-calendar-cell-name = { $weekday } { $day } { $month } { $year }
+calendar-name-with-month = Kalender, { $month }
+calendar-value-with-selection = { $focused } (geselecteerd: { $selection })
+calendar-value-on-selection = { $date } (geselecteerd)
+calendar-date-range = { $start } tot en met { $end }
+calendar-decade = { $start } tot en met { $end }
 calendar-range-status = Geselecteerd: { $start } – { $end }
 
 date-edit-segment-year = Jaar

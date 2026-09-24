@@ -96,6 +96,48 @@ by crate for clarity, not because crates version independently.
   nothing and the held value is shown again, as in Qt. `Enter` and focus loss
   now commit keystrokes delivered in the same batch as the key that commits
   them, which they used to miss by a frame. **Behaviour change.**
+- **The calendar spoke English and ISO dates to a user in any language.**
+  In French the grid was "Calendar, septembre 2026", a day was "lundi août 31,
+  2026", and the value read "2026-09-24 (selected: 2027-03-12)". Every string
+  `Calendar` gives assistive technology is now in the user's language: the
+  words from the framework bundle, and every date written by ICU for the tree's
+  locale, in the locale's order and grammar, and on the Gregorian calendar the
+  grid is laid out in even where the locale prefers another. French says the
+  first of the month as "premier" ("1er" on screen), where ICU's bare "1" is
+  read "un" by a speech engine, and Italian and Romanian say it "primo" and
+  "întâi", where the digit is read "uno" and "unu" (Serianni, cited by the
+  Accademia della Crusca; DOOM2): "lunedì primo marzo 2027", "luni, întâi
+  martie 2027". The Italian date drawn under a range calendar writes "1º mar
+  2027", and the Romanian one keeps the digit, which is how Romanian writes
+  it. No other shipped language is rewritten: Spanish and Portuguese read the
+  digit right as it stands, and the languages that read every day as an
+  ordinal are a question for every day, not the first. The same grid now
+  reads "Calendrier, septembre 2026", "lundi 31 août 2026" and "jeudi 24
+  septembre 2026 (sélection : vendredi 12 mars 2027)", and a range is joined
+  by words ("du … au …"). With the cursor on the one selected day, which is
+  where a date field's popover opens, the day is said once, marked selected,
+  where the value used to say it twice: "vendredi 12 mars 2027
+  (sélectionné)". The title is ICU's month with its year, so Japanese reads
+  "2027年3月"; the decade title reads "2020 to 2029" instead of joining the
+  years with an em-dash; the line under a range calendar uses the locale's
+  medium date and now follows a range committed from the keyboard or by the
+  application, not only by a click. `DateEdit`, `DateRangeEdit` and
+  `DateTimeEdit` open this calendar, so their popovers are fixed with it.
+  `calendar-name-with-month` now takes the month with its year as its one
+  `$month`, the unused `calendar-cell-name` is gone, and
+  `calendar-value-with-selection`, `calendar-value-on-selection`,
+  `calendar-date-range` and `calendar-decade` are new, in all 23 locales.
+  **Behaviour change** for anything that read the grid's value as an ISO
+  date.
+- **`DateEdit`, `DateRangeEdit` and `DateTimeEdit` gave assistive technology an
+  ISO value.** The value on the node standing for the whole field was
+  "2026-05-02", "2026-05-01/2026-05-10" or "2026-05-02T14:35:07", which UIA
+  and macOS hand to a screen reader as it stands. It is now the day in full in
+  the tree's locale, "samedi 2 mai 2026", the range joined by words, "du
+  vendredi premier mai 2026 au dimanche 10 mai 2026", and the day with its time,
+  "samedi 2 mai 2026 à 14:35", with the seconds only when the field shows
+  them. The editable text inside keeps its pattern. **Behaviour change** for
+  anything that parsed those values.
 
 #### Data views
 

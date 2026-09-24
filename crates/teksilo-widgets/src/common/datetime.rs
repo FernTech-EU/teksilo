@@ -14,6 +14,7 @@ pub mod month_names;
 pub mod pattern;
 pub mod types;
 pub mod weekday_names;
+pub(crate) mod written;
 
 pub use self::locale::{
     first_day_of_week_for_locale, format_pattern_for_locale, prefers_12_hour_clock,

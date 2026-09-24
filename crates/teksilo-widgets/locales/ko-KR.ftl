@@ -224,8 +224,11 @@ calendar-week-number-column = 주
 calendar-name = 달력
 calendar-months-grid-label = 월
 calendar-years-grid-label = 연도
-calendar-name-with-month = 달력, { $year }년 { $month }
-calendar-cell-name = { $year }년 { $month } { $day }일 { $weekday }
+calendar-name-with-month = 달력, { $month }
+calendar-value-with-selection = { $focused } (선택: { $selection })
+calendar-value-on-selection = { $date } (선택됨)
+calendar-date-range = { $start }부터 { $end }까지
+calendar-decade = { $start }년부터 { $end }년까지
 calendar-range-status = 선택: { $start } – { $end }
 
 date-edit-segment-year = 연도

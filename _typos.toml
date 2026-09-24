@@ -36,6 +36,13 @@ extend-exclude = [
   "crates/teksilo-corpus/corpus/",
 ]
 
+[default]
+# Italian in `common::datetime::written`: a date ICU writes, "lunedì primo
+# marzo 2027 alle ore 01:05" ("at 01:05"), read verbatim by its tests, and the
+# academy its rule for the first of the month cites. Phrases rather than
+# words, so "alle" and "Accademia" stay typos everywhere else.
+extend-ignore-re = ["alle ore", "Accademia della Crusca"]
+
 [default.extend-words]
 # Project / domain vocabulary
 teksu = "teksu"

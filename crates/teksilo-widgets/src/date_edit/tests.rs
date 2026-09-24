@@ -51,23 +51,35 @@ fn date_edit_role_is_date_input() {
     assert_eq!(info.role(), teksilo_core::accesskit::Role::DateInput);
 }
 
-#[test]
-fn date_edit_value_iso_in_at_tree() {
-    let mut tree = light_tree();
-    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
-    let id = tree.add(DateEdit::new(value));
-    tree.layout(SizeProposal {
-        width: Some(300.0),
-        height: None,
-    });
+/// The value published on the `DateInput` node itself.
+fn spoken_value(tree: &mut WidgetTree, id: WidgetId) -> String {
     let update = tree.sync_accessibility();
     let target = teksilo_core::accessibility::widget_id_to_node_id(id);
-    let (_, node) = update
+    update
         .nodes
         .iter()
         .find(|(nid, _)| *nid == target)
-        .expect("date edit node");
-    assert_eq!(node.value().unwrap_or_default(), "2026-05-02");
+        .and_then(|(_, node)| node.value().map(str::to_string))
+        .expect("date edit node with a value")
+}
+
+#[test]
+fn the_value_is_the_day_in_full_in_the_users_language() {
+    // The value on the field's own node is written for someone listening:
+    // the day in full, the way the locale writes it, not the ISO
+    // "2026-05-02" it used to be. It follows a switch of language too.
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value));
+    laid_out(&mut tree);
+    assert_eq!(spoken_value(&mut tree, id), "Saturday, May 2, 2026");
+
+    mgr.set_locale("fr-FR".parse().unwrap());
+    tree.set_locale("fr-FR".to_string());
+    laid_out(&mut tree);
+    assert_eq!(spoken_value(&mut tree, id), "samedi 2 mai 2026");
+    teksilo_i18n::thread_local::clear();
 }
 
 #[test]
@@ -450,4 +462,28 @@ fn an_accelerator_chord_does_not_step_the_date() {
             "{key:?} with {mods:?} must fall through"
         );
     }
+}
+
+// ── The popover speaks the user's language ────────────────────────
+
+#[test]
+fn the_popover_calendar_speaks_the_users_language() {
+    // The popover is the shared `Calendar`. Opened on a French tree it used
+    // to be "Calendar, mai 2026", valued "2026-05-02 (selected: 2026-05-02)".
+    use crate::common::locale_switch_test::{speaking, spoken_grid};
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(
+        spoken_grid(&mut tree),
+        (
+            "Calendrier, mai 2026".to_string(),
+            "samedi 2 mai 2026 (sélectionné)".to_string(),
+        )
+    );
+    teksilo_i18n::thread_local::clear();
 }

@@ -226,8 +226,11 @@ calendar-week-number-column = שבוע
 calendar-name = לוח שנה
 calendar-months-grid-label = חודשים
 calendar-years-grid-label = שנים
-calendar-name-with-month = לוח שנה, { $month } { $year }
-calendar-cell-name = { $weekday }, { $day } ב{ $month } { $year }
+calendar-name-with-month = לוח שנה, { $month }
+calendar-value-with-selection = { $focused } (נבחר: { $selection })
+calendar-value-on-selection = { $date } (נבחר)
+calendar-date-range = { $start } עד { $end }
+calendar-decade = { $start } עד { $end }
 calendar-range-status = נבחר: { $start } – { $end }
 
 date-edit-segment-year = שנה

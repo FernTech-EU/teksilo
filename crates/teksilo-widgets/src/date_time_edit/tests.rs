@@ -41,23 +41,48 @@ fn date_time_edit_role_is_date_time_input() {
     assert_eq!(info.role(), teksilo_core::accesskit::Role::DateTimeInput);
 }
 
-#[test]
-fn date_time_edit_value_in_at_tree() {
-    let mut tree = light_tree();
-    let value = Signal::new(Some(make_dt()));
-    let id = tree.add(DateTimeEdit::new(value));
+/// The value published on the `DateTimeInput` node itself.
+fn spoken_value(tree: &mut WidgetTree, id: WidgetId) -> String {
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: None,
     });
     let update = tree.sync_accessibility();
     let target = teksilo_core::accessibility::widget_id_to_node_id(id);
-    let (_, node) = update
+    update
         .nodes
         .iter()
         .find(|(nid, _)| *nid == target)
-        .expect("date time edit node");
-    assert_eq!(node.value().unwrap_or_default(), "2026-05-02T14:35:07");
+        .and_then(|(_, node)| node.value().map(str::to_string))
+        .expect("date time edit node with a value")
+}
+
+#[test]
+fn the_value_is_the_day_and_time_in_the_users_language() {
+    // The value on the field's own node is written for someone listening:
+    // the day in full and the time, the way the locale writes them, not the
+    // ISO "2026-05-02T14:35:07" it used to be. The seconds are written only
+    // when the field shows them. The locale is read in `build()`, so the
+    // fields are built in English and must speak French after a switch.
+    use crate::common::locale_switch_test::speaking;
+    use crate::time_edit::SecondsMode;
+    let (mgr, mut tree) = speaking("en-US");
+    let hidden = tree.add(DateTimeEdit::new(Signal::new(Some(make_dt()))));
+    let shown =
+        tree.add(DateTimeEdit::new(Signal::new(Some(make_dt()))).seconds(SecondsMode::Editable));
+    assert_eq!(
+        spoken_value(&mut tree, hidden),
+        "Saturday, May 2, 2026 at 2:35\u{202f}PM"
+    );
+
+    mgr.set_locale("fr-FR".parse().unwrap());
+    tree.set_locale("fr-FR".to_string());
+    assert_eq!(spoken_value(&mut tree, hidden), "samedi 2 mai 2026 à 14:35");
+    assert_eq!(
+        spoken_value(&mut tree, shown),
+        "samedi 2 mai 2026 à 14:35:07"
+    );
+    teksilo_i18n::thread_local::clear();
 }
 
 #[test]
@@ -190,4 +215,39 @@ fn date_time_edit_re_derives_pattern_and_clock_when_the_locale_switches() {
         fr.iter().any(|t| t.starts_with("14")) && !fr.iter().any(|t| t.contains("PM")),
         "fr-FR should render a 24-hour clock after the switch; got {fr:?}"
     );
+}
+
+#[test]
+fn the_popover_calendar_speaks_the_users_language() {
+    // The popover is the shared `Calendar`, seeded with the date half.
+    // Opened on a French tree it used to be "Calendar, mai 2026", valued
+    // "2026-05-02 (selected: 2026-05-02)".
+    use crate::common::locale_switch_test::{speaking, spoken_grid};
+    let (_mgr, mut tree) = speaking("fr-FR");
+    tree.add(DateTimeEdit::new(Signal::new(Some(make_dt()))));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    lay_out(&mut tree);
+    let trigger = tree
+        .find_by_label("Ouvrir le calendrier")
+        .expect("the calendar trigger, named in French");
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(trigger),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    lay_out(&mut tree);
+    assert_eq!(
+        spoken_grid(&mut tree),
+        (
+            "Calendrier, mai 2026".to_string(),
+            "samedi 2 mai 2026 (sélectionné)".to_string(),
+        )
+    );
+    teksilo_i18n::thread_local::clear();
 }

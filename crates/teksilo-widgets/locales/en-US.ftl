@@ -244,8 +244,21 @@ calendar-week-number-column = Week
 calendar-name = Calendar
 calendar-months-grid-label = Months
 calendar-years-grid-label = Years
-calendar-name-with-month = Calendar, { $month } { $year }
-calendar-cell-name = { $weekday }, { $month } { $day }, { $year }
+# $month is the visible month with its year, already written by ICU for
+# the locale: "September 2026", "septembre 2026". A day cell is named by ICU
+# alone ("Monday, August 31, 2026"), so no message assembles a date.
+calendar-name-with-month = Calendar, { $month }
+# The calendar's accessibility value: the day under the keyboard cursor,
+# then the selection. $focused and $selection are dates written in full by
+# ICU; in range mode $selection is calendar-date-range. Words rather than an
+# en-dash between two dates, because some screen readers skip U+2013.
+calendar-value-with-selection = { $focused } (selected: { $selection })
+# The value when the day under the cursor is the one selected day: the day
+# said once, marked selected. $date is written in full by ICU.
+calendar-value-on-selection = { $date } (selected)
+calendar-date-range = { $start } to { $end }
+# The title of the years view: $start and $end are years, as digits.
+calendar-decade = { $start } to { $end }
 calendar-range-status = Selected: { $start } – { $end }
 
 date-edit-segment-year = Year

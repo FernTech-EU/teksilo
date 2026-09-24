@@ -227,8 +227,11 @@ calendar-week-number-column = Нед.
 calendar-name = Календарь
 calendar-months-grid-label = Месяцы
 calendar-years-grid-label = Годы
-calendar-name-with-month = Календарь, { $month } { $year }
-calendar-cell-name = { $weekday }, { $day }, { $month } { $year }
+calendar-name-with-month = Календарь, { $month }
+calendar-value-with-selection = { $focused } (выбрано: { $selection })
+calendar-value-on-selection = { $date } (выбрано)
+calendar-date-range = { $start } – { $end }
+calendar-decade = с { $start } по { $end }
 calendar-range-status = Выбрано: { $start } – { $end }
 
 date-edit-segment-year = Год

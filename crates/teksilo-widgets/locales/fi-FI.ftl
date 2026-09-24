@@ -164,10 +164,9 @@ privacy-inspect-summary = Näytetään viimeisimmät tapahtumat ({ $count } kpl)
 # Kalenteri / DateEdit / TimeEdit / DateTimeEdit. Katso
 # crates/teksilo-widgets/src/{calendar,date_edit,time_edit,date_time_edit}.rs
 # ja yhteiset moduulit polussa crates/teksilo-widgets/src/common/datetime/.
-# Kuukausien nimet ovat CLDR:n erillismuotoja (nominatiivi), koska samaa
-# avainta käytetään kalenterin otsikossa ja kuukausiruudukossa; päivämäärän
-# sisällä tarvittava partitiivi muodostetaan avaimessa calendar-cell-name
-# päätteellä -ta (kaikki kuukaudet päättyvät -kuu).
+# Kuukausien nimet ovat CLDR:n erillismuotoja (nominatiivi), koska niitä
+# käytetään yksinään kuukausiruudukossa. Kokonaiset päivämäärät, joissa
+# kuukausi on partitiivissa, muotoilee ICU, eivätkä ne tule tästä tiedostosta.
 calendar-month-long-january = tammikuu
 calendar-month-long-february = helmikuu
 calendar-month-long-march = maaliskuu
@@ -229,8 +228,11 @@ calendar-week-number-column = Vk
 calendar-name = Kalenteri
 calendar-months-grid-label = Kuukaudet
 calendar-years-grid-label = Vuodet
-calendar-name-with-month = Kalenteri, { $month } { $year }
-calendar-cell-name = { $weekday } { $day }. { $month }ta { $year }
+calendar-name-with-month = Kalenteri, { $month }
+calendar-value-with-selection = { $focused } (valittu: { $selection })
+calendar-value-on-selection = { $date } (valittu)
+calendar-date-range = { $start } – { $end }
+calendar-decade = vuodet { $start }–{ $end }
 calendar-range-status = Valittu: { $start } – { $end }
 
 date-edit-segment-year = Vuosi

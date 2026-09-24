@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::common::datetime::Date;
+use crate::common::locale_switch_test::{speaking, spoken_grid as grid};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget_tree::WidgetTree;
 
@@ -64,56 +65,317 @@ fn calendar_role_is_grid() {
     assert_eq!(info.role(), teksilo_core::accesskit::Role::Grid);
 }
 
-#[test]
-fn calendar_label_includes_month_and_year() {
-    let mut tree = light_tree();
-    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
-    let id = tree.add(Calendar::single(date));
+fn twelfth_of_march() -> Calendar {
+    Calendar::single(Signal::new(Some(Date::constant(2027, 3, 12))))
+}
+
+// ── What the calendar says, in the user's language ──────────────
+
+fn lay_out(tree: &mut WidgetTree) {
     tree.layout(SizeProposal {
         width: Some(400.0),
         height: None,
     });
-    let info = tree.accessibility_node(id);
-    let name = info.name().unwrap_or("");
-    // Without a registered i18n manager (headless tests), the resolver
-    // returns the Fluent key as a fallback. Either form satisfies the
-    // structural assertion: month identifier + year present.
-    assert!(
-        (name.contains("May") || name.contains("may")) && name.contains("2026"),
-        "got: {name}"
-    );
+}
+
+/// Name and value of every published node with `role`, in tree order.
+fn spoken(tree: &mut WidgetTree, role: teksilo_core::accesskit::Role) -> Vec<(String, String)> {
+    tree.sync_accessibility()
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == role)
+        .map(|(_, node)| {
+            (
+                node.label().unwrap_or_default().to_string(),
+                node.value().unwrap_or_default().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn day_names(tree: &mut WidgetTree) -> Vec<String> {
+    spoken(tree, teksilo_core::accesskit::Role::GridCell)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+fn button_named(tree: &mut WidgetTree, name: &str) -> bool {
+    spoken(tree, teksilo_core::accesskit::Role::Button)
+        .iter()
+        .any(|(label, _)| label == name)
 }
 
 #[test]
-fn calendar_value_emits_iso_string_in_single_mode() {
-    // `AccessibilityInfo` only exposes role/name/etc. — read the
-    // value field directly off the AccessKit `TreeUpdate`. The
-    // value composes the focused-cell ISO date with a "selected:"
-    // suffix when a committed selection differs (or, here, matches);
-    // both halves use ISO format for AT-friendly parsing.
-    let mut tree = light_tree();
-    let date = Signal::new(Some(Date::constant(2026, 5, 2)));
+fn the_calendar_speaks_french_to_a_french_user() {
+    // What a French screen reader user meets when a date picker opens on
+    // 12 March 2027: no English word, no ISO date, every day the way French
+    // writes it. 1 March 2027 is a Monday, the first day of a French week,
+    // so it opens the grid. The cursor opens on the selected day, which the
+    // value says once, not as the cursor and then the selection.
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    tree.add(Calendar::single(date));
+    lay_out(&mut tree);
+
+    assert_eq!(
+        grid(&mut tree),
+        (
+            "Calendrier, mars 2027".to_string(),
+            "vendredi 12 mars 2027 (sélectionné)".to_string(),
+        )
+    );
+    let days = day_names(&mut tree);
+    assert_eq!(days.len(), 42, "six weeks of days: {days:?}");
+    assert_eq!(days[0], "lundi premier mars 2027");
+    assert!(
+        days.contains(&"vendredi 12 mars 2027".to_string()),
+        "{days:?}"
+    );
+    assert_eq!(days[41], "dimanche 11 avril 2027");
+    assert!(
+        button_named(&mut tree, "mars 2027"),
+        "the title button is the month and its year"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_calendar_speaks_english_to_an_english_user() {
+    let (_mgr, mut tree) = speaking("en-US");
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    tree.add(Calendar::single(date));
+    lay_out(&mut tree);
+
+    assert_eq!(
+        grid(&mut tree),
+        (
+            "Calendar, March 2027".to_string(),
+            "Friday, March 12, 2027 (selected)".to_string(),
+        )
+    );
+    let days = day_names(&mut tree);
+    // en-US starts the week on Sunday.
+    assert_eq!(days[0], "Sunday, February 28, 2027");
+    assert!(
+        days.contains(&"Friday, March 12, 2027".to_string()),
+        "{days:?}"
+    );
+    assert!(button_named(&mut tree, "March 2027"));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_month_and_the_year_are_in_the_order_the_locale_writes_them() {
+    // Japanese writes the year first. A title assembled as "<month> <year>"
+    // from the translated month name gives "3月 2027"; the month and its
+    // year come from ICU as one field set, in the locale's order.
+    let (_mgr, mut tree) = speaking("ja-JP");
+    tree.add(Calendar::single(Signal::new(Some(Date::constant(
+        2027, 3, 12,
+    )))));
+    lay_out(&mut tree);
+    assert_eq!(grid(&mut tree).0, "カレンダー、2027年3月");
+    assert!(
+        button_named(&mut tree, "2027年3月"),
+        "buttons: {:?}",
+        spoken(&mut tree, teksilo_core::accesskit::Role::Button)
+    );
+    assert!(day_names(&mut tree).contains(&"2027年3月12日金曜日".to_string()));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_grid_is_named_on_the_calendar_it_is_laid_out_in() {
+    // CLDR gives Persian the Persian calendar, and the grid lays March 2027
+    // out on the Gregorian one. Written in the locale's calendar, its title
+    // would be Esfand 1405, a month most of the days under it do not belong
+    // to, and each cell would name a different day number from the one drawn
+    // in it. The words stay English here: only the tree speaks Persian.
+    let (_mgr, mut tree) = speaking("en-US");
+    tree.set_locale("fa-IR".to_string());
+    tree.add(Calendar::single(Signal::new(Some(Date::constant(
+        2027, 3, 12,
+    )))));
+    lay_out(&mut tree);
+    assert_eq!(grid(&mut tree).0, "Calendar, مارس ۲۰۲۷");
+    assert!(
+        button_named(&mut tree, "مارس ۲۰۲۷"),
+        "buttons: {:?}",
+        spoken(&mut tree, teksilo_core::accesskit::Role::Button)
+    );
+    let days = day_names(&mut tree);
+    assert!(days.contains(&"جمعه ۱۲ مارس ۲۰۲۷".to_string()), "{days:?}");
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_first_of_the_month_is_an_ordinal_in_italian_and_romanian() {
+    // Only the tree speaks Italian or Romanian here, so the framework's words
+    // stay English while every date is the locale's. The grid of March 2027
+    // opens on Monday the first in both.
+    for (tag, first, twelfth) in [
+        ("it-IT", "lunedì primo marzo 2027", "venerdì 12 marzo 2027"),
+        ("ro-RO", "luni, întâi martie 2027", "vineri, 12 martie 2027"),
+    ] {
+        let (_mgr, mut tree) = speaking("en-US");
+        tree.set_locale(tag.to_string());
+        tree.add(twelfth_of_march());
+        lay_out(&mut tree);
+        let days = day_names(&mut tree);
+        assert_eq!(days[0], first, "{tag}");
+        assert!(days.contains(&twelfth.to_string()), "{tag}: {days:?}");
+        teksilo_i18n::thread_local::clear();
+    }
+}
+
+#[test]
+fn the_cursor_is_spoken_in_full_and_apart_from_the_selection() {
+    // The value leads with the day under the keyboard cursor, the part that
+    // changes as the user arrows, and keeps the selection after it.
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
     let id = tree.add(Calendar::single(date));
-    tree.layout(SizeProposal {
-        width: Some(400.0),
-        height: None,
+    lay_out(&mut tree);
+    tree.focus(id);
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::NONE,
+        text: None,
     });
-    let update = tree.sync_accessibility();
-    let target_node_id = teksilo_core::accessibility::widget_id_to_node_id(id);
-    let (_, node) = update
-        .nodes
-        .iter()
-        .find(|(nid, _)| *nid == target_node_id)
-        .expect("calendar node present in AT update");
-    let value = node.value().unwrap_or_default();
-    assert!(
-        value.contains("2026-05-02"),
-        "expected ISO date in value, got: {value}"
+    lay_out(&mut tree);
+    assert_eq!(
+        grid(&mut tree).1,
+        "samedi 13 mars 2027 (sélection : vendredi 12 mars 2027)"
     );
-    assert!(
-        value.contains("selected"),
-        "expected `selected: ...` suffix when value is set, got: {value}"
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn an_empty_calendar_speaks_only_the_cursor() {
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let calendar = Calendar::single(Signal::new(None));
+    calendar
+        .focused_date_signal()
+        .set(Date::constant(2027, 3, 12));
+    calendar
+        .visible_month_signal()
+        .set(crate::common::datetime::types::YearMonth::new(2027, 3));
+    tree.add(calendar);
+    lay_out(&mut tree);
+    assert_eq!(grid(&mut tree).1, "vendredi 12 mars 2027");
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_range_is_spoken_in_words() {
+    // The grid's value joins the two ends with words, where an en-dash
+    // would be skipped by some screen readers.
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let range = Signal::new(Some(DateRange::new(
+        Date::constant(2027, 3, 1),
+        Date::constant(2027, 3, 12),
+    )));
+    tree.add(Calendar::range(range));
+    lay_out(&mut tree);
+
+    assert_eq!(
+        grid(&mut tree).1,
+        "lundi premier mars 2027 (sélection : du lundi premier mars 2027 au vendredi 12 mars 2027)"
     );
+    teksilo_i18n::thread_local::clear();
+}
+
+/// The text of every `TextWidget` at or below `root`, hidden from assistive
+/// technology or not: what a sighted user reads. Read off the widgets
+/// themselves, because a hidden label publishes no node to read it from.
+fn drawn_texts(tree: &WidgetTree, root: WidgetId) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut queue = vec![root];
+    while let Some(id) = queue.pop() {
+        if let Some(text) = tree
+            .widget_as_any(id)
+            .and_then(|widget| widget.downcast_ref::<TextWidget>())
+        {
+            found.push(text.resolved_text());
+        }
+        queue.extend(tree.children(id));
+    }
+    found
+}
+
+#[test]
+fn the_range_status_line_follows_the_range_in_the_users_language() {
+    // The line under a range calendar is on screen only, hidden from
+    // assistive technology because the value says the same in words, so it
+    // is read from the labels the footer draws. It follows the committed
+    // range wherever the commit came from: here the application commits one
+    // after the calendar is built, which no click on a cell ever saw.
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let range = Signal::new(None);
+    let root = tree.add(Calendar::range(range.clone()));
+    lay_out(&mut tree);
+    let before = drawn_texts(&tree, root);
+    assert!(
+        !before.iter().any(|text| text.starts_with("Sélection")),
+        "nothing is selected yet: {before:?}"
+    );
+
+    range.set(Some(DateRange::new(
+        Date::constant(2027, 3, 1),
+        Date::constant(2027, 3, 12),
+    )));
+    lay_out(&mut tree);
+    let after = drawn_texts(&tree, root);
+    assert!(
+        after.contains(&"Sélection : 1er mars 2027 – 12 mars 2027".to_string()),
+        "{after:?}"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_decade_title_is_spoken_in_words() {
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let calendar = Calendar::single(Signal::new(Some(Date::constant(2027, 3, 12))));
+    calendar.mode_signal().set(CalendarMode::Years);
+    tree.add(calendar);
+    lay_out(&mut tree);
+    assert!(
+        button_named(&mut tree, "de 2020 à 2029"),
+        "buttons: {:?}",
+        spoken(&mut tree, teksilo_core::accesskit::Role::Button)
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_language_switch_reaches_every_date_the_calendar_speaks() {
+    // The dates are written when the calendar builds, and a switch rebuilds
+    // it: the same widget, switched from English to French, must speak
+    // French everywhere, not keep the English it was first built in.
+    let (mgr, mut tree) = speaking("en-US");
+    tree.add(Calendar::single(Signal::new(Some(Date::constant(
+        2027, 3, 12,
+    )))));
+    lay_out(&mut tree);
+    assert_eq!(grid(&mut tree).0, "Calendar, March 2027");
+
+    mgr.set_locale("fr-FR".parse().unwrap());
+    tree.set_locale("fr-FR".to_string());
+    lay_out(&mut tree);
+    assert_eq!(
+        grid(&mut tree),
+        (
+            "Calendrier, mars 2027".to_string(),
+            "vendredi 12 mars 2027 (sélectionné)".to_string(),
+        )
+    );
+    // Monday first now, where en-US had Sunday 28 February.
+    assert_eq!(day_names(&mut tree)[0], "lundi premier mars 2027");
+    assert!(button_named(&mut tree, "mars 2027"));
+    teksilo_i18n::thread_local::clear();
 }
 
 #[test]
@@ -182,7 +444,8 @@ fn count_descendants(tree: &WidgetTree, root: WidgetId) -> usize {
 
 /// Find a day cell by the AT name it publishes — the same way a screen
 /// reader addresses it. `DayCell` is `Role::GridCell` and names itself
-/// "<weekday> <month> <day>, <year>".
+/// with the full date, which with no locale installed is en-US's
+/// "<weekday>, <month> <day>, <year>".
 fn find_day_cell(tree: &WidgetTree, root: WidgetId, day: u8) -> WidgetId {
     let needle = format!(" {day}, ");
     let mut queue = vec![root];

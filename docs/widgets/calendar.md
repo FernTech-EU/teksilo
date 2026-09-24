@@ -45,25 +45,39 @@ Used standalone for event apps and scheduling, and embedded in
 
 # Accessibility
 
-- Container — `Role::Grid` with `set_name("Calendar, May 2026")`
-  (localized) and `set_live(Live::Polite)`, so every `set_value`
-  change is announced. That value always carries the
-  keyboard-focused day as `YYYY-MM-DD`, with `(selected: …)`
-  appended when a selection exists; a range renders as
-  `YYYY-MM-DD to YYYY-MM-DD`, ASCII " to " rather than an
-  en-dash because some screen readers skip U+2013.
-- Header arrow buttons — `Role::Button` with localized labels
+Every string below is in the user's language. The words come from the
+framework's Fluent bundle, so an application that registers
+`framework_locales()` gets them translated; every date inside them is
+written by ICU for the widget tree's locale, in the locale's own order
+and grammar and on the Gregorian calendar the grid is laid out in, never
+assembled from numbers or from translated names (see
+`common::datetime::written`).
+
+- Container: `Role::Grid`, named after the visible month
+  ("Calendar, May 2026", "Calendrier, mai 2026"), and a polite live
+  region. The AT-SPI, UIA and macOS adapters announce a live node when
+  its *name* changes, so a change of month is announced on all three. The
+  value is the day under the keyboard cursor in full, then the
+  selection when there is one: "Saturday, May 2, 2026 (selected:
+  Friday, May 1, 2026)". With the cursor on the one selected day, the
+  day is said once: "Friday, May 1, 2026 (selected)". A range is joined
+  by words ("… to …"), not an en-dash, which some screen readers skip.
+  UIA and macOS raise a value-changed event on it; AT-SPI carries a
+  string value on no interface, so the value never reaches an AT-SPI
+  client at all.
+- Header arrow buttons: `Role::Button` with localized labels
   ("Previous month", "Next month") and `Action::Click` advertised.
-- Header month/year label — `Role::Button` (a `Ghost` `Button`
-  whose activation demotes `CalendarMode` one level, swapping the
-  body for the coarser grid in place — no popup is opened).
-- Weekday header row — `Role::Row` of `Role::ColumnHeader` cells,
-  each labelled with the long weekday name (e.g. "Monday").
-- Day cells — `Role::GridCell` with localized long-form labels
-  ("Saturday May 2, 2026"), `set_selected`, `set_aria_current(Date)`
-  on today, `set_disabled` for filter rejections, and
-  `Action::Click` advertised. Keyboard focus roves on the Calendar
-  root, so a cell never carries a focused flag.
+- Header month/year label: `Role::Button`, a `Ghost` `Button` whose
+  activation demotes `CalendarMode` one level, swapping the body for
+  the coarser grid in place; no popup is opened. Its name is its title:
+  the month and year, the year, or the decade in words ("2020 to 2029").
+- Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
+  labelled with the long weekday name (e.g. "Monday").
+- Day cells: `Role::GridCell` named by the day in full
+  ("Saturday, May 2, 2026", "samedi 2 mai 2026"), `set_selected`,
+  `set_aria_current(Date)` on today, `set_disabled` for filter
+  rejections, and `Action::Click` advertised. Keyboard focus roves on
+  the Calendar root, so a cell never carries a focused flag.
 
 # Example
 
@@ -140,7 +154,7 @@ pub enum CalendarMode { /* variants */ }
 
 - **`Days`** — 6×7 day grid for the visible month. Title shows "May 2026". Header chevrons step by ±1 month and ±1 year.
 - **`Months`** — 4×3 grid of months. Title shows "2026". Header chevrons step by ±1 year. Picking a cell zooms back into `Self::Days`.
-- **`Years`** — 4×3 grid of years (current decade). Title shows "2020 — 2029". Header chevrons step by ±10 years (one decade). Picking a cell zooms back into `Self::Months`.
+- **`Years`** — 4×3 grid of years (current decade). Title shows "2020 to 2029". Header chevrons step by ±10 years (one decade). Picking a cell zooms back into `Self::Months`.
 
 ### Methods
 

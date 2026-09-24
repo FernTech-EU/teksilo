@@ -110,28 +110,45 @@ fn date_range_swaps_when_end_before_start() {
 }
 
 #[test]
-fn date_range_edit_value_iso_in_at_tree() {
-    let mut tree = light_tree();
+fn the_value_is_the_two_days_in_full_joined_by_words() {
+    // The value on the field's own node is written for someone listening:
+    // the two days the way the locale writes them, joined by the locale's
+    // words, not the ISO "2026-05-01/2026-05-10" it used to be. The locale
+    // is read in `build()`, so the field is built in English and must speak
+    // French after a switch.
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut tree) = speaking("en-US");
     let range = Signal::new(Some(DateRange::new(
         Date::constant(2026, 5, 1),
         Date::constant(2026, 5, 10),
     )));
     let id = tree.add(DateRangeEdit::new(range));
-    tree.layout(SizeProposal {
-        width: Some(600.0),
-        height: None,
-    });
-    let update = tree.sync_accessibility();
-    let target = teksilo_core::accessibility::widget_id_to_node_id(id);
-    let (_, node) = update
-        .nodes
-        .iter()
-        .find(|(nid, _)| *nid == target)
-        .expect("date range edit node");
-    let v = node.value().unwrap_or_default();
-    assert!(v.contains("2026-05-01"));
-    assert!(v.contains("2026-05-10"));
-    assert!(v.contains("/"));
+    let spoken_value = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        });
+        let update = tree.sync_accessibility();
+        let target = teksilo_core::accessibility::widget_id_to_node_id(id);
+        update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == target)
+            .and_then(|(_, node)| node.value().map(str::to_string))
+            .expect("date range edit node with a value")
+    };
+    assert_eq!(
+        spoken_value(&mut tree),
+        "Friday, May 1, 2026 to Sunday, May 10, 2026"
+    );
+
+    mgr.set_locale("fr-FR".parse().unwrap());
+    tree.set_locale("fr-FR".to_string());
+    assert_eq!(
+        spoken_value(&mut tree),
+        "du vendredi premier mai 2026 au dimanche 10 mai 2026"
+    );
+    teksilo_i18n::thread_local::clear();
 }
 
 #[test]
@@ -171,4 +188,44 @@ fn date_range_edit_re_derives_its_pattern_when_the_locale_switches() {
         fr.iter().any(|t| t.starts_with("03/06/2026")),
         "the range end must follow too; got {fr:?}"
     );
+}
+
+#[test]
+fn the_popover_calendar_speaks_the_users_language() {
+    // The popover is the shared `Calendar` in range mode. Opened on a French
+    // tree it used to be "Calendar, mai 2026", valued
+    // "2026-05-01 (selected: 2026-05-01 to 2026-05-05)".
+    use crate::common::locale_switch_test::{speaking, spoken_grid};
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let range = Signal::new(Some(DateRange::new(
+        Date::constant(2026, 5, 1),
+        Date::constant(2026, 5, 5),
+    )));
+    tree.add(DateRangeEdit::new(range));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    lay_out(&mut tree);
+    let trigger = tree
+        .find_by_label("Ouvrir le calendrier de plage")
+        .expect("the calendar trigger, named in French");
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(trigger),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    lay_out(&mut tree);
+    assert_eq!(
+        spoken_grid(&mut tree),
+        (
+            "Calendrier, mai 2026".to_string(),
+            "vendredi premier mai 2026 (sélection : du vendredi premier mai 2026 au mardi 5 mai 2026)"
+                .to_string(),
+        )
+    );
+    teksilo_i18n::thread_local::clear();
 }

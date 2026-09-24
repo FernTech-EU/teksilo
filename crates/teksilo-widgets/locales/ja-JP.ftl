@@ -228,8 +228,11 @@ calendar-week-number-column = 週
 calendar-name = カレンダー
 calendar-months-grid-label = 月の一覧
 calendar-years-grid-label = 年の一覧
-calendar-name-with-month = カレンダー、{ $year }年{ $month }
-calendar-cell-name = { $year }年{ $month }{ $day }日 { $weekday }
+calendar-name-with-month = カレンダー、{ $month }
+calendar-value-with-selection = { $focused }（選択：{ $selection }）
+calendar-value-on-selection = { $date }（選択中）
+calendar-date-range = { $start }から{ $end }まで
+calendar-decade = { $start }年から{ $end }年まで
 calendar-range-status = 選択：{ $start } – { $end }
 
 date-edit-segment-year = 年
