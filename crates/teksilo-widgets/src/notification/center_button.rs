@@ -14,7 +14,9 @@
 //! ## Accessibility
 //!
 //! The inner `IconButton` carries the bell `Role::Button` label; the outer
-//! container is `set_hidden` (presentational). The badge count is not
+//! container is a bare `Role::GenericContainer`, which every adapter steps
+//! through to the button. It is never hidden: a hidden node takes its whole
+//! subtree out of every platform's tree, the button with it. The badge count is not
 //! separately announced — the button label and badge label together convey
 //! the state to sighted users; AT users interact through the button itself.
 //!
@@ -381,10 +383,11 @@ impl Widget for NotificationCenterButton {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // The IconButton inside contributes its own role + name;
-        // we pass through as a generic container.
+        // The IconButton inside contributes its own role + name; we pass
+        // through as a bare generic container, which every adapter drops
+        // with the button kept. Never `set_hidden()`, which an adapter reads
+        // as hiding the button with it.
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
-        builder.set_hidden();
     }
 
     fn children(&self) -> Vec<WidgetId> {

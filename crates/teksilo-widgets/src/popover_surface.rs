@@ -33,10 +33,11 @@ pub struct PopoverSurface {
     background: SurfaceRole,
     /// Panel corner radius in logical pixels.
     corner_radius: f32,
-    /// When true the surface emits no semantic node (`set_hidden`) —
-    /// used by the Menu variant, where the caller (`MenuList`,
-    /// `DropdownPanel`, `SuggestionListBox`) already carries the
-    /// container role. Default/Tooltip surfaces emit `Role::Dialog`.
+    /// When true the surface emits no semantic node of its own (a bare
+    /// `GenericContainer`, dropped with its content kept): used by the
+    /// Menu variant, where the caller (`MenuList`, `DropdownPanel`,
+    /// `SuggestionListBox`) already carries the container role.
+    /// Default/Tooltip surfaces emit `Role::Dialog`.
     presentational: bool,
 }
 
@@ -250,8 +251,12 @@ impl Widget for PopoverSurface {
         if self.presentational {
             // Menu-variant container: the caller (`MenuList`,
             // `DropdownPanel`, `SuggestionListBox`) already owns the
-            // semantic role, so the surface contributes nothing.
-            builder.set_hidden();
+            // semantic role, so the surface contributes nothing. A bare
+            // `GenericContainer` is dropped by the walker and by every
+            // adapter with its children kept. `set_hidden()` took the menu
+            // items with it, so a menu listed no items and only the one
+            // under the cursor could be heard.
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
             return;
         }
         // Popover surface is modeled as a non-modal Dialog: ARIA has

@@ -1152,11 +1152,12 @@ impl Widget for CalendarBody {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Body itself is structural — the parent Calendar carries the
-        // Role::Grid name. Hide this from AT so screen readers don't
-        // double-announce.
-        builder.set_role(Role::Group);
-        builder.set_hidden();
+        // Body itself is structural: the parent Calendar carries the
+        // Role::Grid name. A bare `GenericContainer` keeps it from being
+        // announced a second time, since every adapter drops it and
+        // promotes the day cells. Never `set_hidden()`, which an adapter
+        // reads as hiding the subtree: every day cell went with it.
+        builder.set_role(Role::GenericContainer);
     }
 }
 

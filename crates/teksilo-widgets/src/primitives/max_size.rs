@@ -186,7 +186,11 @@ impl Widget for MaxSize {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_hidden();
+        // A layout wrapper says nothing of its own: a bare `GenericContainer`,
+        // which the walker prunes and every adapter drops with its child
+        // kept. Never `set_hidden()`, which an adapter reads as hiding the
+        // whole subtree: whatever this wraps, a capped menu's rows among them, went with it.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

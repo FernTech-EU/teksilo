@@ -189,9 +189,15 @@ impl Widget for DialogPanel {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Presentational — the parent `ModalContainer` emits the modal
-        // `Role::Dialog` node with the accessible name.
-        builder.set_hidden();
+        // Presentational: the parent `ModalContainer` emits the modal
+        // `Role::Dialog` node and its name. A bare `GenericContainer` is how
+        // chrome says so. The walker prunes it and promotes the content, and
+        // the consumer every adapter reads through drops such a node while
+        // keeping its children (`ExcludeNode`). Never `set_hidden()`: the
+        // consumer reads a hidden node as `ExcludeSubtree`, and every field,
+        // button and line of text in the dialog went with the panel, leaving
+        // a reader only the focused control, orphaned from the dialog.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

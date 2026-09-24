@@ -40,6 +40,10 @@ pub struct CardStyleConfig {
 }
 
 pub trait CardStyle: 'static {
+    /// The body wraps `cfg.content` and is chrome: its accessibility node has
+    /// to let the content through. `Role::GenericContainer` and nothing else,
+    /// which the platform adapters drop while keeping its children. Never
+    /// `set_hidden()`, which an adapter reads as hiding the whole subtree.
     fn make_body(&self, cfg: &CardStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
 

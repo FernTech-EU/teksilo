@@ -586,28 +586,18 @@ Everything inside the card is walked by the framework's ordinary walker — the
 header's text, the trailing button and a body that publishes `Role::TextRun`
 children all hang off the group in the emitted tree.
 
-> ⚠ **They do not currently reach a screen reader, and the card is not what
-> stops them.** The default surface is `teksilo_widgets::Card`, whose
-> `RecipeCardStyle` body calls `AccessNodeBuilder::set_hidden()` on itself to
-> mean "presentational". `set_hidden` is `FilterResult::ExcludeSubtree` in
-> `accesskit_consumer::common_filter` — the filter every platform adapter and
-> this repo's own `accessibility::audit` read through — so it removes the
-> surface **and everything under it**. Measured through a real consumer tree:
->
-> ```text
-> SceneCard  →  Window > Pane > Group "Note"          (title and body gone)
-> Panel      →  Window > Group                        (its children gone)
-> StatusBar  →  Window > Status "Status"              (its items gone)
-> ```
->
-> The parity test below passes because the `Panel` baseline is broken in exactly
-> the same way. The intended "presentational" is one line away and the card
-> already uses it on the surface's *own* node: `Role::GenericContainer` with no
-> properties is `ExcludeNode` — the node goes, its children are promoted.
-> Fixing it is a sweep across every content-wrapping recipe surface
-> (`recipe_card_style.rs`, `panel.rs`'s `a11y_presentational`, `popover_surface.rs`,
-> `tool_box.rs`, `splitter.rs`, `aspect_ratio.rs`, …) rather than a change to the
-> card, so it is recorded here rather than made here.
+They reach a screen reader, too. The default surface is
+`teksilo_widgets::Card`, whose `RecipeCardStyle` frame is a bare
+`Role::GenericContainer`: the walker prunes it, and
+`accesskit_consumer::common_filter`, which every platform adapter and this
+repo's own `accessibility::audit` read through, drops such a node while keeping
+its children. The frame once said "presentational" with `set_hidden()`
+instead, which that filter reads as `ExcludeSubtree`, and a card with a title
+and a body read `Window > Pane > Group "Note"` with nothing inside it; a
+`Panel` and a `StatusBar` were empty the same way. The parity test counts
+nodes in the update, where a hidden subtree still sits node for node, so it
+could not see that; `a_cards_title_and_body_reach_a_screen_reader` walks the
+filtered tree the way an adapter does and pins it.
 
 ### Tab stops, and the one thing the card does not decide
 

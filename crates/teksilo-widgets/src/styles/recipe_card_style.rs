@@ -236,8 +236,11 @@ impl Widget for CardFrame {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Presentational — the parent Card emits Role::Group.
-        builder.set_hidden();
+        // Presentational: the parent Card emits Role::Group. A bare
+        // `GenericContainer` is dropped by the walker and by every adapter
+        // with its children kept; `set_hidden()` would take the card's
+        // header, content and footer out of reach with it.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

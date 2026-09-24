@@ -84,9 +84,10 @@ pub(crate) struct BodyRow {
     /// splits the row into bands; read directly in the flat, no-pinning
     /// path's own cumulative walk.
     scroll_x: Signal<f32>,
-    /// When `false`, the row is invisible to AccessKit — used by
-    /// TreeTableView, which wraps BodyRow in `TreeRowA11y` and wants the
-    /// outer wrapper to carry `Role::Row` instead.
+    /// When `false`, the row publishes no node of its own, its cells
+    /// promoted to its parent. Used by TreeTableView, which wraps BodyRow
+    /// in `TreeRowA11y` and wants the outer wrapper to carry `Role::Row`
+    /// instead.
     announce_a11y: bool,
 
     // Build state — populated by `build()`.
@@ -254,7 +255,10 @@ impl Widget for BodyRow {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         if !self.announce_a11y {
-            builder.set_hidden();
+            // The wrapper above carries the row. A bare `GenericContainer`
+            // is dropped by every adapter with the cells promoted to it;
+            // `set_hidden()` took every cell of a `TreeTableView` with it.
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
             return;
         }
         builder.set_role(teksilo_core::accesskit::Role::Row);

@@ -19,6 +19,8 @@
 //! Emits `Role::Group` by default. Call `.a11y_presentational()` to suppress
 //! the group node when the panel is purely decorative (e.g. a toolbar
 //! background that should not introduce a spurious container in the AT tree).
+//! Either way the content is reachable: a presentational panel drops its own
+//! node and keeps its children.
 //!
 //! ```rust
 //! # use teksilo_widgets::Panel;
@@ -105,10 +107,11 @@ impl Panel {
     }
 
     /// Mark the panel as presentational for assistive tech: the panel's
-    /// own a11y node is hidden so its wrapping chrome (background,
-    /// border, padding) doesn't introduce a spurious `Group` node
-    /// between an outer widget (Toolbar, StatusBar, etc.) and the
-    /// real content. Children remain visible in the a11y tree.
+    /// own node becomes a bare `GenericContainer`, which the platform
+    /// adapters drop, so its wrapping chrome (background, border,
+    /// padding) doesn't introduce a spurious `Group` node between an
+    /// outer widget (Toolbar, StatusBar, etc.) and the real content.
+    /// The children stay in the tree, promoted to the panel's parent.
     pub fn a11y_presentational(mut self) -> Self {
         self.a11y_presentational = true;
         self
@@ -242,7 +245,10 @@ impl Widget for Panel {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         if self.a11y_presentational {
-            builder.set_hidden();
+            // Dropped by the walker and by every adapter, children kept.
+            // Not `set_hidden()`, which an adapter reads as hiding the whole
+            // subtree: every toolbar and status bar item went with it.
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
             return;
         }
         builder.set_role(teksilo_core::accesskit::Role::Group);

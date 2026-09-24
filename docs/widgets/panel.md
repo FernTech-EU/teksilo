@@ -23,6 +23,8 @@ own `impl PanelStyle` per-call (`.style(...)`) or theme-wide via
 Emits `Role::Group` by default. Call `.a11y_presentational()` to suppress
 the group node when the panel is purely decorative (e.g. a toolbar
 background that should not introduce a spurious container in the AT tree).
+Either way the content is reachable: a presentational panel drops its own
+node and keeps its children.
 
 ```rust
 # use teksilo_widgets::Panel;
@@ -83,10 +85,11 @@ them.
 #### `pub fn a11y_presentational(mut self) -> Self`
 
 Mark the panel as presentational for assistive tech: the panel's
-own a11y node is hidden so its wrapping chrome (background,
-border, padding) doesn't introduce a spurious `Group` node
-between an outer widget (Toolbar, StatusBar, etc.) and the
-real content. Children remain visible in the a11y tree.
+own node becomes a bare `GenericContainer`, which the platform
+adapters drop, so its wrapping chrome (background, border,
+padding) doesn't introduce a spurious `Group` node between an
+outer widget (Toolbar, StatusBar, etc.) and the real content.
+The children stay in the tree, promoted to the panel's parent.
 
 #### `pub fn child(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 

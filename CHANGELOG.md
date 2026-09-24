@@ -69,6 +69,79 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A dialog's content was hidden from assistive technology.** The panel
+  `RecipeDialogStyle` draws around a `ModalContainer`'s content called
+  `set_hidden()` to say it was only chrome, and the consumer every platform
+  adapter reads through treats a hidden node as hiding everything under it.
+  So on Linux, Windows and macOS a screen reader reached the focused control
+  of a dialog and nothing else: not the title or the message as text, not the
+  other fields and buttons, and not even the focused control when walking the
+  dialog, whose children it no longer listed. Orca's flat review gathers
+  what it reviews from those children (`getOnScreenObjects` in its
+  `script_utilities.py`), so it had nothing to review, and a walk of the UIA
+  tree met the same empty dialog, since the Windows adapter lists children
+  through the same filter; what NVDA's object navigation made of it was not
+  observed. The panel is now a bare `Role::GenericContainer`, which the
+  adapters drop while keeping its children. Every `ModalContainer` is
+  affected, on the default style and on the macOS and Fluent presets, which
+  reuse it. A custom `DialogStyle` should do the same, as
+  `DialogStyle::make_panel` now says.
+- **The content of a `Card`, a `Panel`, a `Toolbar`, a `StatusBar`, a
+  snackbar and a `RadioTile` body was hidden from assistive technology.** The
+  frames `RecipeCardStyle`, `RecipePanelStyle`, `RecipeSnackbarStyle` and
+  `RecipeRadioTileStyle` draw, and a `Panel` marked `a11y_presentational`,
+  called `set_hidden()` the way the dialog panel did. A screen reader found a
+  card, a panel, a toolbar, a status bar or a snackbar empty except for
+  whichever of its controls held focus, and never reached a tile's `body`.
+  Each is now a bare `Role::GenericContainer`. The macOS and Fluent presets
+  build their cards, panels and snackbars from these frames, and Material 3
+  its cards, so they are fixed with them. The `make_body` of `CardStyle`,
+  `PanelStyle`, `SnackbarStyle` and `RadioTileStyle` now says what a custom
+  frame has to do.
+- **An open menu listed none of its items to assistive technology.** The
+  panel `RecipePopoverStyle` draws for its `Menu` variant, under every
+  `MenuList`, `ComboBox` drop-down and search suggestion list, called
+  `set_hidden()`. Whatever held focus could still be heard, since the filter
+  lets a focused node and an active descendant through, but the menu listed
+  no children, so a screen reader could not review the items around it. The
+  surface is now a bare `Role::GenericContainer`, and
+  `PopoverStyle::make_body` says what a custom one has to do.
+- **Toasts were never announced and could not be reached.** The `ToastHost`
+  every toast is mounted under called `set_hidden()`, so no toast ever
+  entered the tree a platform adapter reads. The AT-SPI, UIA and macOS
+  adapters all announce a live region as it enters that tree and pass over
+  one that is filtered out, so a toast's `Role::Status` or `Role::Alert` said
+  nothing on any platform, and its text and actions could not be reviewed or
+  used from a screen reader. The host is now a bare `Role::GenericContainer`.
+- **A `TabWidget`'s panel, a `Stepper`'s step and anything inside a
+  `Switcher`, `MaxSize` or `AspectRatio` was hidden from assistive
+  technology.** The three layout primitives called `set_hidden()` to publish
+  no node of their own, and a hidden node takes its whole subtree out of
+  every platform's tree. `TabWidget` and `Stepper` show their pages through a
+  `Switcher`, so the selected `Role::TabPanel` and everything in it could not
+  be reached, and neither could a `Calendar`'s day grid, the title bar's
+  maximize button or the debug inspector's panel, while a menu capped by
+  `max_visible_items` lost its rows to the `MaxSize` around them. A screen
+  reader met a control inside them only once focus reached it. All three are
+  now a bare `Role::GenericContainer`, pruned from the tree, and the page a
+  `Switcher` shows takes its place; its other pages stay out of the tree as
+  before, because they are dormant. **Behaviour change**: none of the three
+  publishes a node of its own any more, so what one wraps is a child of the
+  node around it, in the update `sync_accessibility` returns and in an
+  automation snapshot alike. The snapshot, which ignores the hidden flag,
+  held the same pages before, under the hidden node.
+- **A `Snackbar`'s button, the notification bell, a `TitleBar`'s centre
+  content, an unlabelled `Splitter` pane and every `TreeTableView` cell were
+  hidden from assistive technology.** Each sits inside a shell that called
+  `set_hidden()` to keep itself out of the tree: the `Snackbar` around its
+  trigger, `NotificationCenterButton` around its `IconButton`, the title
+  bar's drag region around `TitleBar::center`, a splitter pane that has no
+  `pane_label` (or a labelled one while collapsed, sliver and all), and the
+  row inside each `TreeTableView` row. A screen reader could reach any of
+  them only while it held focus, and a tree table's cells not at all. Each
+  shell is now a bare `Role::GenericContainer`. **Behaviour change** for a
+  test that read the drag region's hidden flag: it is no longer hidden, and
+  still no stop.
 - **A focused `SpinBox` reported a nameless text field.** Focus lands on the
   spin box's editing field, while its name, value and range sat on a node
   around it, so a screen reader named the field once or not at all, and could
@@ -138,6 +211,16 @@ by crate for clarity, not because crates version independently.
   "samedi 2 mai 2026 à 14:35", with the seconds only when the field shows
   them. The editable text inside keeps its pattern. **Behaviour change** for
   anything that parsed those values.
+- **A `Calendar`'s days and header buttons could not be reached.** The day
+  grid's body and the header row called `set_hidden()` so as not to be
+  announced beside the `Role::Grid`, and hid what they hold with them: the 42
+  cells, each naming its date in full with its selected and today states, and
+  the arrows and the title button. A screen reader found nothing inside the
+  grid to review, and reached a header button only once it held focus. Both
+  are now a bare `Role::GenericContainer`, so the days are in the platform's
+  tree, six rows of seven cells under the grid, and so are the header's five
+  buttons. `DateEdit`, `DateRangeEdit` and `DateTimeEdit` open this calendar
+  and are fixed with it.
 
 #### Data views
 

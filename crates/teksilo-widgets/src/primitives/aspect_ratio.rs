@@ -7,9 +7,11 @@
 //! Given a proposal, `AspectRatio` computes the largest rectangle that fits
 //! within both dimensions while satisfying `width / height == ratio`. When
 //! only one axis is constrained by the parent, the other is derived from the
-//! ratio. The child is stretched to the resulting rectangle. The widget is
-//! invisible to assistive technology (`set_hidden`); its child carries all
-//! semantic meaning.
+//! ratio. The child is stretched to the resulting rectangle. The widget
+//! publishes no node of its own to assistive technology: it is a bare
+//! `Role::GenericContainer`, which the walker prunes, and its child carries
+//! all semantic meaning. It is never hidden, which would take the child out of
+//! every platform's tree with it.
 //!
 //! ## When to use
 //!
@@ -133,7 +135,11 @@ impl Widget for AspectRatio {
     fn paint(&self, _bounds: Rect, _canvas: &mut teksilo_canvas::Canvas, _ctx: &PaintContext) {}
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_hidden();
+        // A layout wrapper says nothing of its own: a bare `GenericContainer`,
+        // which the walker prunes and every adapter drops with its child
+        // kept. Never `set_hidden()`, which an adapter reads as hiding the
+        // whole subtree: whatever this wraps went with it.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

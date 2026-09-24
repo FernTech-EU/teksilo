@@ -275,11 +275,14 @@ impl Widget for DragRegion {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Pointer-only affordance — no keyboard or AT analogue for
-        // "drag the window by its title". Hide the node so it doesn't
-        // show up as an unnamed Unknown stop between the title bar
-        // landmark and its real content.
-        builder.set_hidden();
+        // Pointer-only affordance: no keyboard or AT analogue for "drag the
+        // window by its title". A bare `GenericContainer` keeps the region
+        // from showing up as an unnamed stop between the title bar landmark
+        // and its real content, since every adapter drops it and promotes
+        // what it holds. Never `set_hidden()`: the region holds
+        // `TitleBar::center`, a search box or breadcrumbs, and an adapter
+        // reads a hidden node as hiding all of that with it.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

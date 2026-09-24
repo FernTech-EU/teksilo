@@ -607,14 +607,15 @@ impl Widget for Splitter {
 /// the pane's placement so it can't bleed into a gutter or sibling pane.
 /// When `labeled`, it becomes a named `Role::Group` region (the name is
 /// supplied via the builder-level `access_label` override); otherwise it
-/// is hidden from the AT tree (its content represents itself).
+/// is a bare `GenericContainer` the adapters drop, and its content
+/// represents itself.
 #[derive(Debug)]
 struct ClipPane {
     child_id: Option<WidgetId>,
     labeled: bool,
     /// Effective visibility (collapse × visible) of this pane, `1` = shown.
-    /// When ~0 the clip's region is hidden from the a11y tree so a
-    /// folded-away or hidden labeled pane doesn't linger as an empty group.
+    /// When ~0 the clip drops its `Group` role so a folded-away or hidden
+    /// labeled pane doesn't linger as an empty group.
     effective_progress: Option<Signal<f32>>,
     /// The pane's full (uncollapsed) main-axis size, set by the parent each
     /// layout. The content is laid out at this size and clipped to the
@@ -667,8 +668,15 @@ impl Widget for ClipPane {
             .as_ref()
             .map(|p| p.get() <= COLLAPSED_VISIBLE_EPSILON)
             .unwrap_or(false);
+        // Transparent unless it is a labelled, open pane: a bare
+        // `GenericContainer`, which every adapter drops with the content
+        // kept, even when an `access_label` gives it a name. Never
+        // `set_hidden()`, which an adapter reads as hiding the subtree: an
+        // unlabelled pane's content went with it, and so did the sliver a
+        // collapsed pane with a `collapsed_size` keeps on screen. A folded
+        // pane's content is dormant anyway, which is what keeps it out.
         if collapsed || !self.labeled {
-            builder.set_hidden();
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
         } else {
             builder.set_role(teksilo_core::accesskit::Role::Group);
         }

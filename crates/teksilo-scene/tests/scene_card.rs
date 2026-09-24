@@ -1217,3 +1217,63 @@ fn the_focus_gate_does_not_move_a_keyboard_that_is_already_inside() {
         "and it queued nothing to do it with"
     );
 }
+
+/// **The card's content reaches a screen reader.**
+///
+/// The parity test above counts nodes in the update, where a hidden subtree
+/// still sits node for node. What a platform adapter exposes is the walk
+/// through `accesskit_consumer::common_filter`, which drops a hidden node with
+/// everything under it: while `Card`'s frame said "presentational" with
+/// `set_hidden()`, this walk found `Group "Note"` and nothing inside it.
+#[test]
+fn a_cards_title_and_body_reach_a_screen_reader() {
+    fn find<'a>(
+        node: accesskit_consumer::NodeRef<'a>,
+        role: accesskit::Role,
+        name: &str,
+    ) -> Option<accesskit_consumer::NodeRef<'a>> {
+        if node.role() == role && node.label().as_deref() == Some(name) {
+            return Some(node);
+        }
+        node.filtered_children(&accesskit_consumer::common_filter)
+            .find_map(|child| find(child, role, name))
+    }
+    fn spoken_below(node: accesskit_consumer::NodeRef<'_>, out: &mut Vec<String>) {
+        for child in node.filtered_children(&accesskit_consumer::common_filter) {
+            if child.role() == accesskit::Role::Label
+                && let Some(text) = child.value()
+            {
+                out.push(text);
+            }
+            spoken_below(child, out);
+        }
+    }
+
+    let model = SceneModel::new();
+    model.add_widget_item(0u32, CARD);
+    let m = model.clone();
+    let view = SceneView::with_model(model).delegate_typed::<u32>(move |_w, id| {
+        Box::new(
+            SceneCard::new(m.clone(), id)
+                .label(lit!("Note"))
+                .header(TextWidget::new(lit!("Title")))
+                .body(TextWidget::new(lit!("Body"))),
+        ) as Box<dyn Widget>
+    });
+    let mut tree = WidgetTree::new().with_text_backend(Rc::new(RefCell::new(
+        teksilo_canvas::MockTextBackend::new(),
+    )));
+    tree.add(view);
+    tree.layout(VIEWPORT);
+    let consumer = accesskit_consumer::Tree::new(tree.sync_accessibility(), false);
+    let Some(card) = find(consumer.state().root(), accesskit::Role::Group, "Note") else {
+        panic!("the card's named group must be in the tree an adapter walks");
+    };
+    let mut spoken = Vec::new();
+    spoken_below(card, &mut spoken);
+    assert_eq!(
+        spoken,
+        vec!["Title".to_string(), "Body".to_string()],
+        "a reader inside the card must find its title and its body"
+    );
+}

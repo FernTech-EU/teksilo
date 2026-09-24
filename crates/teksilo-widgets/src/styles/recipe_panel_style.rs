@@ -232,8 +232,11 @@ impl Widget for PanelFrame {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Presentational chrome — the parent Panel emits `Role::Group`.
-        builder.set_hidden();
+        // Presentational chrome: the parent Panel emits `Role::Group`. A bare
+        // `GenericContainer` is dropped by the walker and by every adapter
+        // with its children kept; `set_hidden()` would take the panel's
+        // content out of reach with it.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

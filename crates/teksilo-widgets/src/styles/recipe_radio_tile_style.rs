@@ -330,8 +330,12 @@ impl Widget for RadioTileFrame {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // Presentational — the parent RadioTile emits Role::RadioButton.
-        builder.set_hidden();
+        // Presentational: the parent RadioTile emits Role::RadioButton, and
+        // hides the typed title and description it folds into that node
+        // itself. A bare `GenericContainer` is dropped by the walker and by
+        // every adapter with its children kept; `set_hidden()` would also
+        // take a `body` the tile documents as exposed.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {

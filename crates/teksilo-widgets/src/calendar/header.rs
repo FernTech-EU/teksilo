@@ -253,8 +253,10 @@ impl Widget for CalendarHeader {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(Role::Group);
-        builder.set_hidden();
+        // Structural: a bare `GenericContainer`, which every adapter drops
+        // with the arrows and the title button promoted into the grid. Never
+        // `set_hidden()`, which an adapter reads as hiding them with it.
+        builder.set_role(Role::GenericContainer);
     }
 }
 

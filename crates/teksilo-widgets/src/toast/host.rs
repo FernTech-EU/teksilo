@@ -486,11 +486,14 @@ impl Widget for ToastHost {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        // The host is invisible chrome — toasts contribute their own
-        // AT nodes as descendants. Mark generic + hidden so VoiceOver
-        // / NVDA don't insert a dead GenericContainer in the tree.
+        // The host is invisible chrome; toasts contribute their own AT nodes
+        // as descendants. A bare `GenericContainer` is pruned by the walker
+        // and dropped by every adapter with its children promoted, so no
+        // dead container sits in the tree. Never `set_hidden()`: an adapter
+        // reads that as hiding the subtree, and every toast went with it,
+        // unreachable and, since AT-SPI announces a live node only when it
+        // enters the filtered tree, never announced.
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
-        builder.set_hidden();
     }
 
     fn children(&self) -> Vec<WidgetId> {

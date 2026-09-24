@@ -35,6 +35,12 @@ pub struct DialogStyleConfig {
 pub trait DialogStyle: 'static {
     /// The modal panel surface that wraps `content` — rounded surface
     /// fill, border stroke, and the content-padding inset.
+    ///
+    /// The panel is chrome, and its accessibility node has to let the content
+    /// through: `Role::GenericContainer` and nothing else, which the platform
+    /// adapters drop while keeping its children. Never `set_hidden()`: an
+    /// adapter reads a hidden node as hiding its whole subtree, and the
+    /// dialog's text, fields and buttons would go with the panel.
     fn make_panel(&self, cfg: &DialogStyleConfig, ctx: &mut BuildContext) -> WidgetId;
     /// The full-window scrim that dims the content behind the modal
     /// panel. Mounted by the modal-presentation pipeline, not by

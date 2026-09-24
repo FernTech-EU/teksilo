@@ -307,7 +307,7 @@ MaxSize::new(800.0, 600.0).child(dialog_content)
 MaxSize::width(9999.0).max_width(panel_width).child(content)
 ```
 
-Symmetric to `MinSize`: proposal clamped *downward*, wanted size clamped downward. **Sets `clips_children: true`** when any constraint is active — content that exceeds the cap is scissored, not bled. Hidden from the accessibility tree (`builder.set_hidden()`).
+Symmetric to `MinSize`: proposal clamped *downward*, wanted size clamped downward. **Sets `clips_children: true`** when any constraint is active: content that exceeds the cap is scissored, not bled. Publishes no node of its own: a bare `Role::GenericContainer`, which the walker prunes and the adapters drop, so the child is reached as if the cap were not there.
 
 ### 4.4 `AspectRatio`
 
@@ -558,7 +558,7 @@ Switcher::new(page.clone())
 // Elsewhere: page.set(2);   // jumps to about_view
 ```
 
-Use for tab content, wizard pages, or any "one of N visible" pattern. Hidden from the accessibility tree itself — the visible child supplies the AT presentation. `Switcher::capture_child_ids_into(rc)` exposes child IDs to callers that need to wire AT relationships (TabWidget does this for the `Tab → TabPanel` `controls` link).
+Use for tab content, wizard pages, or any "one of N visible" pattern. Publishes no node of its own (a bare `Role::GenericContainer`), so the visible child supplies the AT presentation; the pages not shown are dormant, which keeps them out of the tree. `Switcher::capture_child_ids_into(rc)` exposes child IDs to callers that need to wire AT relationships (TabWidget does this for the `Tab → TabPanel` `controls` link).
 
 ---
 

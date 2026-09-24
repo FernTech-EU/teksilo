@@ -18,7 +18,9 @@ slot; all popover behaviour is self-managed with no further wiring.
 ## Accessibility
 
 The inner `IconButton` carries the bell `Role::Button` label; the outer
-container is `set_hidden` (presentational). The badge count is not
+container is a bare `Role::GenericContainer`, which every adapter steps
+through to the button. It is never hidden: a hidden node takes its whole
+subtree out of every platform's tree, the button with it. The badge count is not
 separately announced — the button label and badge label together convey
 the state to sighted users; AT users interact through the button itself.
 

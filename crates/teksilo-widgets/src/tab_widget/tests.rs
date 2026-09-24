@@ -3259,3 +3259,53 @@ fn per_state_tab_backgrounds_build_with_and_without() {
 fn _orientation_export_used() {
     let _ = TabBarOrientation::Horizontal;
 }
+
+/// What is inside the tab on show reaches a screen reader.
+///
+/// The panes sit in a `Switcher`, which marked itself hidden, and a hidden
+/// node takes its whole subtree out of every platform's tree
+/// (`accesskit_consumer` `filters.rs:17-24`). So the tab panel and all it
+/// held were absent, and a screen reader met a control inside it only once
+/// Tab had put focus on it, which lets a focused node through.
+#[test]
+fn the_content_of_the_tab_on_show_reaches_a_screen_reader() {
+    #[derive(Debug)]
+    struct NamedButton;
+    impl Widget for NamedButton {
+        fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            Size::new(80.0, 24.0).into()
+        }
+        fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
+            builder.set_role(accesskit::Role::Button);
+            builder.set_name("Inside Alpha");
+        }
+    }
+    fn walk(node: accesskit_consumer::NodeRef<'_>, out: &mut Vec<(accesskit::Role, String)>) {
+        out.push((node.role(), node.label().unwrap_or_default()));
+        for child in node.filtered_children(&accesskit_consumer::common_filter) {
+            walk(child, out);
+        }
+    }
+
+    let selected: Signal<Option<TabId>> = Signal::new(None);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(
+        TabWidget::new(selected).static_tab(TabInfo::new().title(label("Alpha")), NamedButton),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+
+    let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), false);
+    let mut found = Vec::new();
+    walk(platform.state().root(), &mut found);
+    assert!(
+        found
+            .iter()
+            .any(|(role, _)| *role == accesskit::Role::TabPanel),
+        "the tab panel: {found:?}"
+    );
+    assert!(
+        found.contains(&(accesskit::Role::Button, "Inside Alpha".to_string())),
+        "the button inside it: {found:?}"
+    );
+}

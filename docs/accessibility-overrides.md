@@ -3,7 +3,7 @@
 
 # Accessibility Overrides Reference
 
-Teksilo widgets declare their own a11y info via `Widget::accessibility(&self, builder: &mut AccessNodeBuilder)` — Button emits `Role::Button` + label, Slider emits `Role::Slider` + numeric range, Panel marks itself `set_hidden()` when it's `a11y_presentational`, etc. That covers ~95% of cases. The remaining 5% — when an icon-only Button needs an accessible label, when a card composite should read as one AT element, when a status region needs `aria-live`, when a custom action should appear in VoiceOver's Actions rotor — is where **builder-level accessibility overrides** come in.
+Teksilo widgets declare their own a11y info via `Widget::accessibility(&self, builder: &mut AccessNodeBuilder)`: Button emits `Role::Button` + label, Slider emits `Role::Slider` + numeric range, a Panel that is `a11y_presentational` publishes a bare `Role::GenericContainer` the adapters drop, etc. That covers ~95% of cases. The remaining 5% (when an icon-only Button needs an accessible label, when a card composite should read as one AT element, when a status region needs `aria-live`, when a custom action should appear in VoiceOver's Actions rotor) is where **builder-level accessibility overrides** come in.
 
 The override layer is a one-method-per-concern surface (`.access_label`, `.access_role`, `.access_merge_subtree`, …) on `WidgetBuilder` and `WidgetWithHandlers`, analogous to SwiftUI's `.accessibility*` modifiers and Flutter's `Semantics(...)`. App authors annotate widgets from the outside without touching widget internals.
 
@@ -223,7 +223,7 @@ Layout primitives (`HStack`, `VStack`, `ZStack`, `Center`, `Grid`, `Wrap`, `Padd
 
 This is automatic and requires no annotation. A node is collapsed only when, after the framework's structural additions (children, bounds, arena-driven `disabled`) are set aside, it is a bare node of its role — i.e. role is `GenericContainer` or `Unknown` **and** it carries no name, value, description, live region, popup, relationship, identifier, action, or any other author/widget property. The moment a container gains semantic content it is kept:
 
-- An `HStack` with `.access_label(lit!("Toolbar"))` → `Role::GenericContainer` **with a name** → kept (a named group).
+- An `HStack` with `.access_label(lit!("Toolbar"))` → `Role::GenericContainer` **with a name** → kept in the update. The platform adapters still drop a `GenericContainer` from the tree they expose, name or no name (`accesskit_consumer`'s `common_filter` answers the role with `ExcludeNode`), so the name is not heard; add `access_role(Role::Group)` for a named group.
 - A `Panel` (`Role::Group`) or `GroupBox` → non-presentational role → kept.
 - The Window root, the currently-focused node, and any node referenced by another node's `controls` / `described_by` / `labelled_by` → always kept.
 
@@ -339,16 +339,22 @@ For explicitly-untranslated AT strings, wrap with `lit!(...)`: `access_label(lit
 
 ## State clearing
 
-`AccessNodeBuilder::set_hidden()` and `set_disabled()` flip flags on. Some widgets call those setters unconditionally (e.g. [Panel](../crates/teksilo-widgets/src/panel.rs) calls `set_hidden()` when `a11y_presentational`). To **un-set** widget-emitted state, the override system exposes:
+`AccessNodeBuilder::set_hidden()` and `set_disabled()` flip flags on. Some widgets call those setters unconditionally (e.g. an [ImageWidget](../crates/teksilo-widgets/src/primitives/image_widget.rs) marked `a11y_hidden()` calls `set_hidden()`). To **un-set** widget-emitted state, the override system exposes:
 
-- `.access_hidden(false)` — clears even widget-emitted `set_hidden()`. Full clear (no framework re-application of hidden).
-- `.access_disabled(false)` — clears widget-emitted disabled AND arena-driven disabled. The framework's gate at [`accessibility_emit_impl.rs`](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs) respects the override, so even a `.disabled(true)` set on the widget's enabled-state can be overridden for AT purposes.
+- `.access_hidden(false)` clears even widget-emitted `set_hidden()` on this node. Full clear (no framework re-application of hidden).
+- `.access_disabled(false)` clears widget-emitted disabled AND arena-driven disabled. The framework's gate at [`accessibility_emit_impl.rs`](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs) respects the override, so even a `.disabled(true)` set on the widget's enabled-state can be overridden for AT purposes.
 
 Real use cases:
 
-1. App author wraps a `Panel` configured as decorative but a screen reader user *does* need to know about it ("Settings panel — collapsed").
+1. App author uses an image marked decorative in a place where a screen reader user *does* need it, and gives it `.access_hidden(false)` with an `.access_label(...)`.
 2. App author force-disables a Button visually pending a save, but wants AT to keep announcing it as enabled because the disabled state is transient.
-3. Test scaffolding asserts a widget is exposed regardless of internal `a11y_presentational` plumbing.
+3. Test scaffolding asserts a widget is exposed regardless of internal decorative plumbing.
+
+### Hidden is for decoration, never for a wrapper
+
+`set_hidden()` hides the node **and everything under it**. `accesskit_consumer`, which the AT-SPI, UIA and macOS adapters all read the tree through, treats a node as hidden when any ancestor is and filters a hidden node out with its whole subtree (`ExcludeSubtree`). Only the focused node is let back through, alone: a reader lands on it by Tab and finds nothing around it, and its parent does not list it. Use it for what really is decoration: an icon, a separator, a scroll bar, a painter, a label that repeats a name its parent already carries.
+
+A widget that is only chrome around content a reader needs (a panel, a frame a style draws, a layout shell, a row wrapper) publishes a bare `Role::GenericContainer` instead. The walker prunes it (see [Automatic presentational collapse](#automatic-presentational-collapse-no-opt-in)) and, if something keeps it in the update, the adapters still drop it and promote its children (`ExcludeNode`). Every style protocol that wraps content (`DialogStyle::make_panel`, and `make_body` on `CardStyle`, `PanelStyle`, `SnackbarStyle`, `PopoverStyle` for its `Menu` variant and `RadioTileStyle`) says so.
 
 ---
 

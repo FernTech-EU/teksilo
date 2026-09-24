@@ -46,6 +46,12 @@ pub struct PopoverStyleConfig {
 }
 
 pub trait PopoverStyle: 'static {
+    /// The body wraps `cfg.content`. For `PopoverVariant::Menu` the owner
+    /// already carries the container role and the body is chrome, whose node
+    /// has to let the content through: `Role::GenericContainer` and nothing
+    /// else, which the platform adapters drop while keeping its children.
+    /// Never `set_hidden()`, which an adapter reads as hiding the whole
+    /// subtree.
     fn make_body(&self, cfg: &PopoverStyleConfig, ctx: &mut BuildContext) -> WidgetId;
 }
 

@@ -346,7 +346,13 @@ impl Widget for Switcher {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_hidden();
+        // A bare `GenericContainer`, which the walker prunes and every
+        // adapter drops with the shown page kept. The pages not shown are
+        // dormant, which is what keeps them out of the tree. Never
+        // `set_hidden()`, which an adapter reads as hiding the whole
+        // subtree: the shown page went with it, and so did every
+        // `TabWidget` panel and `Stepper` step, which are shown through here.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -547,6 +553,64 @@ mod tests {
             !tree.is_active(page1),
             "previously-shown page must now be dormant"
         );
+    }
+
+    /// A leaf a screen reader can find: a named button.
+    #[derive(Debug)]
+    struct NamedLeaf(&'static str);
+    impl Widget for NamedLeaf {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            Size::new(40.0, 20.0).into()
+        }
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            builder.set_role(teksilo_core::accesskit::Role::Button);
+            builder.set_name(self.0);
+        }
+    }
+
+    /// The names a platform adapter would find walking `tree`, which is the
+    /// tree after `accesskit_consumer`'s `common_filter`, the filter AT-SPI,
+    /// UIA and macOS all walk with.
+    fn names_a_screen_reader_finds(tree: &mut WidgetTree) -> Vec<String> {
+        fn walk(node: accesskit_consumer::NodeRef<'_>, out: &mut Vec<String>) {
+            if let Some(name) = node.label() {
+                out.push(name);
+            }
+            for child in node.filtered_children(&accesskit_consumer::common_filter) {
+                walk(child, out);
+            }
+        }
+        let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), false);
+        let mut out = Vec::new();
+        walk(platform.state().root(), &mut out);
+        out
+    }
+
+    /// The page on show reaches assistive technology, and only that page.
+    ///
+    /// The switcher marked itself hidden, and a hidden node takes its whole
+    /// subtree out of every platform's tree, so the page on show was as
+    /// absent as the others: the day grid of every `Calendar` sits in a
+    /// switcher, and none of its days reached a screen reader.
+    #[test]
+    fn the_page_on_show_reaches_a_screen_reader() {
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new();
+        let _switcher = tree.add(
+            Switcher::new(selected.clone())
+                .child(NamedLeaf("first page"))
+                .child(NamedLeaf("second page")),
+        );
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        assert_eq!(names_a_screen_reader_finds(&mut tree), vec!["first page"]);
+
+        selected.set(1);
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        assert_eq!(names_a_screen_reader_finds(&mut tree), vec!["second page"]);
     }
 
     /// `child_id` pages are pre-mounted by the caller, so unlike a

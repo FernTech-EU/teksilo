@@ -1254,15 +1254,34 @@ mod tests {
     }
 
     #[test]
-    fn drag_region_is_hidden_from_a11y() {
+    fn drag_region_is_no_stop_for_assistive_technology() {
+        // Pointer-only, so a reader must never stop on it. It says so as a
+        // bare `GenericContainer`, which every adapter drops while keeping
+        // what it holds. This test used to ask for the hidden flag, which
+        // pinned the defect: an adapter reads a hidden node as hiding its
+        // subtree, and `TitleBar::center` sits inside the region.
         let host = Rc::new(TestHost::default());
-        let (tree, bar) = build_realistic_tree(host, |b| b);
+        let (mut tree, bar) = build_realistic_tree(host, |b| b);
         let drag = locate_drag_region(&tree, bar);
         let info = tree.accessibility_node(drag);
+        assert_eq!(info.role(), teksilo_core::accesskit::Role::GenericContainer);
         assert!(
-            info.is_hidden(),
-            "DragRegion is pointer-only; should be hidden from AT"
+            !info.is_hidden(),
+            "a hidden DragRegion hides the title bar's centre content with it"
         );
+
+        let update = tree.sync_accessibility();
+        let target = teksilo_core::accessibility::widget_id_to_node_id(drag);
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let mut stack = vec![consumer.state().root()];
+        while let Some(node) = stack.pop() {
+            assert_ne!(
+                node.locate().0,
+                target,
+                "the DragRegion must not be a stop in the tree an adapter walks"
+            );
+            stack.extend(node.filtered_children(&accesskit_consumer::common_filter));
+        }
     }
 
     /// Render one frame so `after_paint` runs and the host receives a
