@@ -6544,6 +6544,96 @@ mod tests {
     }
 
     #[test]
+    fn a_clipper_that_does_not_scroll_passes_the_pin_on() {
+        // The shape of every capped text column: the editor inside a `MaxSize`
+        // (which clips once a cap is set, and has no `on_scroll`) inside the
+        // page's scroll area. The wrapper cannot act on a `ScrollIntoView`, so
+        // it must not be the one the pin is spent on. Otherwise the scroll
+        // area is handed a plain reveal and typewriter scrolling silently
+        // becomes ordinary caret-following.
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let outer_rec: Rc<Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>> =
+            Rc::new(Cell::new(None));
+
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let clipper = tree.add(StackWidget::new().child(actor).clips_children_on(true));
+        let _scroller = recording_align_container(&mut tree, clipper, outer_rec.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Inside the viewport, so only a pin (never a minimal reveal) reaches
+        // the scroller at all.
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible_aligned(
+            Rect::new(10.0, 10.0, 20.0, 15.0),
+            0.5,
+            crate::event::ScrollMotion::Instant,
+        );
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            outer_rec.get().map(|(a, _)| a),
+            Some(crate::event::ScrollAlign::Fraction(0.5)),
+            "a clipping wrapper with no scroll handler must pass the pin through \
+             to the scroll container above it"
+        );
+    }
+
+    #[test]
+    fn a_scroller_that_declines_to_move_still_holds_the_pin() {
+        // What the scroller does with the pin is its own business: a `SceneView`
+        // already holding the target where asked answers `Ignored`, since it
+        // moved nothing. That is not an invitation for the next container out
+        // to align a rectangle inside a viewport it does not own.
+        use crate::test_widgets::StackWidget;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let inner_rec: Rc<Cell<Option<crate::event::ScrollAlign>>> = Rc::new(Cell::new(None));
+        let outer_rec: Rc<Cell<Option<(crate::event::ScrollAlign, crate::event::ScrollMotion)>>> =
+            Rc::new(Cell::new(None));
+
+        let mut tree = WidgetTree::new();
+        let actor = tree.add(FillWidget::new());
+        let rec = inner_rec.clone();
+        let inner = tree.add(
+            StackWidget::new()
+                .child(actor)
+                .on_scroll(move |ev, _ctx| match ev {
+                    WidgetEvent::ScrollIntoView { align, .. } => {
+                        rec.set(Some(*align));
+                        EventResponse::Ignored
+                    }
+                    _ => EventResponse::Ignored,
+                })
+                .clips_children(true),
+        );
+        let _outer = recording_align_container(&mut tree, inner, outer_rec.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        // Off-screen, so the outer container is asked too.
+        let mut ctx = EventContext::new();
+        ctx.ensure_visible_aligned(
+            Rect::new(10.0, 500.0, 20.0, 15.0),
+            0.5,
+            crate::event::ScrollMotion::Instant,
+        );
+        tree.collect_from_ctx(ctx, actor);
+
+        assert_eq!(
+            inner_rec.get(),
+            Some(crate::event::ScrollAlign::Fraction(0.5)),
+            "the innermost scroller is offered the pin"
+        );
+        assert_eq!(
+            outer_rec.get().map(|(a, _)| a),
+            Some(crate::event::ScrollAlign::Minimal),
+            "declining to move must not pass the pin outward"
+        );
+    }
+
+    #[test]
     fn ensure_widget_visible_uses_target_arena_bounds() {
         use std::cell::Cell;
         use std::rc::Rc;

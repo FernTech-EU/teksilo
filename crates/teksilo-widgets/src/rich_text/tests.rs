@@ -6963,6 +6963,71 @@ fn a_drag_selection_is_never_interrupted_by_the_pin() {
     assert_eq!(recorded.get(), Some(ScrollAlign::Fraction(0.5)));
 }
 
+/// Where a real `ScrollArea` ends up after the caret walks `presses` lines down
+/// a typewriter editor pinned at the middle: through a width-capping `MaxSize`
+/// when `capped`, straight inside the area otherwise.
+fn page_offset_after_arrow_downs(capped: bool, presses: usize) -> f32 {
+    use super::ScrollPolicy;
+    use crate::ScrollArea;
+    use crate::primitives::MaxSize;
+
+    let viewport = SizeProposal::exact(400.0, 400.0);
+    let doc = TextDocument::new();
+    doc.set_plain_text(
+        &(1..=80)
+            .map(|i| format!("Line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    let editor = RichTextEditor::editor(doc)
+        .min_lines(1)
+        .v_scroll_policy(ScrollPolicy::AlwaysOff)
+        .typewriter(Some(0.5));
+    let area = if capped {
+        ScrollArea::new()
+            .scroll_past_end(0.5)
+            .child(MaxSize::width(400.0).child(editor))
+    } else {
+        ScrollArea::new().scroll_past_end(0.5).child(editor)
+    };
+    let scroll_y = area.scroll_y_signal().clone();
+
+    let mut tree = WidgetTree::new();
+    tree.add(area);
+    tree.layout(viewport);
+    let _ = tree.render();
+    click_at(&mut tree, 8.0);
+    for _ in 0..presses {
+        key(&mut tree, teksilo_core::event::Key::ArrowDown);
+        tree.layout(viewport);
+        let _ = tree.render();
+    }
+    scroll_y.get()
+}
+
+#[test]
+fn a_width_cap_between_the_editor_and_its_page_does_not_swallow_the_pin() {
+    // A `MaxSize` clips once a cap is set and has no scroll handler of its own.
+    // When the reveal walk spent the pin on it, the page was handed a plain
+    // reveal instead: nothing moved until the caret reached the bottom edge,
+    // and typewriter scrolling was ordinary caret-following with no error
+    // anywhere. Sixteen lines down a 400 px page is past the middle but still
+    // well on screen, so only a pin scrolls here.
+    let bare = page_offset_after_arrow_downs(false, 16);
+    let capped = page_offset_after_arrow_downs(true, 16);
+
+    assert!(
+        bare > 0.0,
+        "sanity: the pin must already be scrolling the page at this depth"
+    );
+    assert!(
+        (capped - bare).abs() < 0.5,
+        "a width cap must not change where the pin holds the caret \
+         (capped {capped}, bare {bare})"
+    );
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // The ambient caret band, through a mounted editor
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

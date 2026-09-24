@@ -186,7 +186,7 @@ impl WidgetTree {
     /// camera had gone, and anything further out received a rectangle from a
     /// coordinate system it had never heard of.
     ///
-    /// **Alignment applies to the innermost clipping ancestor only.** A
+    /// **Alignment applies to the innermost scrolling ancestor only.** A
     /// [`ScrollAlign::Fraction`] request names a height in *one* viewport; the
     /// containers further out have their own, differently-sized viewports and no
     /// claim on where the rect should sit inside them, so they fall back to
@@ -194,6 +194,13 @@ impl WidgetTree {
     /// screen. A `Fraction` request also bypasses the already-visible gate on
     /// that innermost container: pinning is unconditional by definition, whereas
     /// `Minimal` keeps the "don't scroll what's already visible" behaviour.
+    ///
+    /// "Scrolling" means a clipping ancestor with an `on_scroll` handler, the
+    /// only kind of node `ScrollIntoView` can reach at all. A clipper without
+    /// one (a `MaxSize` capping a text column, an animation wrapper) is deaf to
+    /// the event, so it neither holds the pin nor spends it: the pin passes
+    /// through to the scroller above it. Spending it there would degrade every
+    /// pin under such a wrapper to a plain reveal, with nothing reporting it.
     ///
     /// [`ScrollAlign::Fraction`]: crate::event::ScrollAlign::Fraction
     /// [`ScrollAlign::Minimal`]: crate::event::ScrollAlign::Minimal
@@ -214,7 +221,7 @@ impl WidgetTree {
         let applied = std::sync::Arc::new(std::sync::Mutex::new(Point::ZERO));
         let mut rect = rect;
         let mut current = self.arena.parent(from);
-        // Consumed by the first clipping ancestor reached; every one after it
+        // Consumed by the first scrolling ancestor reached; every one after it
         // reveals minimally.
         let mut pending_align = align;
         while let Some(ancestor_id) = current {
@@ -243,8 +250,15 @@ impl WidgetTree {
                 .get(ancestor_id)
                 .is_some_and(|n| n.content_transform);
 
+            // Only a node with an `on_scroll` handler can act on
+            // `ScrollIntoView`, so a clipper without one is passed over rather
+            // than asked. Asking would reach no handler and change nothing, but
+            // it would spend the pin, and every scroller above would then be
+            // handed a plain reveal. That is how a `MaxSize` capping a text
+            // column turned typewriter scrolling into ordinary caret-following.
             if let Some(node) = self.arena.get(ancestor_id)
                 && node.clips_children
+                && (node.handlers.on_scroll.is_some() || node.external_handlers.on_scroll.is_some())
             {
                 let viewport = node.bounds;
                 // Which space the viewport is stated in decides which rectangle

@@ -307,10 +307,13 @@ already fully visible. `ensure_visible_aligned` is `ScrollAlign::Fraction(f)` â€
 `0.0` flush top, `0.5` centred, `1.0` flush bottom â€” and scrolls **whether or not
 the target is already visible**, which is what makes typewriter scrolling
 possible; a caret that only moved the view once it fell off the edge would not be
-pinned to anything. Alignment applies to the **innermost** clipping ancestor
+pinned to anything. Alignment applies to the **innermost** scroll container
 only; everything further out falls back to a minimal reveal, because an outer
 container's job is to bring the inner viewport on screen, not to align a
-rectangle it does not own.
+rectangle it does not own. A clipping wrapper that does not scroll (a `MaxSize`
+capping a text column, an animation) is passed over: it has no `on_scroll`
+handler, so it could not act on the pin, and it must not use it up for the
+`ScrollArea` above it.
 
 `ScrollMotion::{Instant, Smooth}` is separate from the container's own
 `smooth_scrolling` because the right answer depends on the request: a caret

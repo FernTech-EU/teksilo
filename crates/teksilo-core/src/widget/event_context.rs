@@ -1894,10 +1894,11 @@ impl<'ops> EventContext<'ops> {
     /// it usable for typewriter scrolling: a caret that only moved the view once
     /// it fell off the edge would not be pinned to anything.
     ///
-    /// Only the **innermost** clipping ancestor aligns; any further ancestors
+    /// Only the **innermost** scroll container aligns; any further ancestors
     /// out fall back to a minimal reveal, since an outer container's job is to
     /// bring the inner viewport on screen, not to align a rectangle it does not
-    /// own.
+    /// own. A clipping wrapper that does not scroll (a `MaxSize` capping the
+    /// column, say) sits between them without taking the pin.
     ///
     /// `fraction` is clamped to `0.0..=1.0`. The container additionally clamps
     /// to its own scroll range, so a target near the start or end of the content
