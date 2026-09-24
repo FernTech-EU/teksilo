@@ -1002,10 +1002,10 @@ mod tests {
     }
 
     /// A composite that is not itself focusable but publishes one AT node and
-    /// keeps its keyboard focus on an inner leaf — the shape `SpinBox`,
-    /// `ComboBox` and `DateEdit` all have. What marks it as one is that it
-    /// advertises `Action::Focus` from its own `accessibility()`, which is
-    /// exactly what those three do.
+    /// keeps its keyboard focus on an inner leaf: the shape `ComboBox` and
+    /// `DateEdit` have, and `SpinBox` had before it published through its
+    /// field. What marks it as one is that it advertises `Action::Focus` from
+    /// its own `accessibility()`, which is exactly what those two do.
     #[derive(Debug)]
     struct CompositeWidget {
         child_ids: Vec<WidgetId>,

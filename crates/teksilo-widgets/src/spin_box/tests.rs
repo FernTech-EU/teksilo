@@ -37,6 +37,16 @@ fn focus_field(tree: &mut WidgetTree, spin_id: teksilo_core::widget_id::WidgetId
     tree.focus(field);
 }
 
+/// The spin button node: the editing field, which holds focus and publishes
+/// the role, the name and the numbers. The composite's own node is structure.
+fn spin_button(
+    tree: &WidgetTree,
+    spin_id: teksilo_core::widget_id::WidgetId,
+) -> teksilo_core::widget_id::WidgetId {
+    tree.first_focusable_descendant(spin_id)
+        .expect("SpinBox should have a focusable inner field")
+}
+
 // ── Construction ────────────────────────────────────────────────────
 
 #[test]
@@ -236,7 +246,7 @@ fn external_value_set_reformats_text() {
 #[test]
 fn a11y_role_is_spin_button() {
     let (tree, _v, id) = setup_int(50, 0, 100);
-    let info = tree.accessibility_node(id);
+    let info = tree.accessibility_node(spin_button(&tree, id));
     assert_eq!(info.role(), teksilo_core::accesskit::Role::SpinButton);
     // Increment / Decrement / SetValue / Focus actions all exposed.
     let actions = info.actions();
@@ -398,7 +408,7 @@ fn a11y_numeric_value_matches_signal() {
     // `AccessibilityInfo` wrapper used here doesn't expose the
     // numeric_value itself, so the closest smoke test is that the
     // node exists and advertises the expected actions.
-    let info = tree.accessibility_node(id);
+    let info = tree.accessibility_node(spin_button(&tree, id));
     assert_eq!(info.role(), teksilo_core::accesskit::Role::SpinButton);
     let actions = info.actions();
     for required in [
@@ -422,7 +432,7 @@ fn a11y_name_uses_label() {
     let id = tree.add(SpinBox::new(value, 0, 100).label(lit!("Font size")));
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
-    let info = tree.accessibility_node(id);
+    let info = tree.accessibility_node(spin_button(&tree, id));
     assert_eq!(info.name(), Some("Font size"));
 }
 
@@ -468,7 +478,7 @@ fn reactive_suffix_survives_value_transitions() {
     tick(&mut tree);
     // Widget is still alive and value signal intact.
     assert_eq!(value.get(), 120);
-    let info = tree.accessibility_node(id);
+    let info = tree.accessibility_node(spin_button(&tree, id));
     assert_eq!(info.role(), teksilo_core::accesskit::Role::SpinButton);
 }
 
@@ -730,11 +740,11 @@ fn wheel_mode_disabled_ignores_the_notch() {
 
 // ── Locale-aware display and input ─────────────────────────────────
 
-/// The SpinBox publishes its displayed text (number + suffix) as the AT
-/// node's value, so that is the observable for the rendered form.
+/// The spin button node publishes the field's text as its value, so that is
+/// the observable for the rendered form. The painted suffix is not in it.
 fn at_value(tree: &mut WidgetTree, id: teksilo_core::widget_id::WidgetId) -> String {
+    let target = teksilo_core::accessibility::widget_id_to_node_id(spin_button(tree, id));
     let update = tree.sync_accessibility();
-    let target = teksilo_core::accessibility::widget_id_to_node_id(id);
     update
         .nodes
         .iter()
@@ -989,15 +999,20 @@ fn page_down_uses_page_step() {
 /// Drive an AccessKit action the way a platform adapter does, and report
 /// whether anything acted on it — which is what the automation bridge reports
 /// back to its caller.
+///
+/// Aimed at the spin button node, the field, since that is the node an
+/// adapter exposes; stepping and numeric writes reach the spin box by
+/// bubbling up from it. Given the field itself, it stays on the field.
 fn access(
     tree: &mut WidgetTree,
     id: teksilo_core::widget_id::WidgetId,
     action: teksilo_core::accesskit::Action,
     data: Option<teksilo_core::accesskit::ActionData>,
 ) -> bool {
+    let target = tree.first_focusable_descendant(id).unwrap_or(id);
     let mut ops = teksilo_core::window::NoopWindowOps;
     let handled = tree.dispatch_access_action(
-        teksilo_core::accessibility::widget_id_to_node_id(id),
+        teksilo_core::accessibility::widget_id_to_node_id(target),
         action,
         data,
         &mut ops,
@@ -1153,7 +1168,10 @@ fn a11y_read_only_refuses_and_does_not_advertise_the_mutating_actions() {
     tree.layout(SizeProposal::exact(300.0, 60.0));
     tick(&mut tree);
 
-    let actions = tree.accessibility_node(id).actions().to_vec();
+    let actions = tree
+        .accessibility_node(spin_button(&tree, id))
+        .actions()
+        .to_vec();
     for refused in [Action::SetValue, Action::Increment, Action::Decrement] {
         assert!(
             !actions.contains(&refused),
@@ -1168,10 +1186,10 @@ fn a11y_read_only_refuses_and_does_not_advertise_the_mutating_actions() {
     ));
     assert_eq!(value.get(), 10);
 
-    // …and the *inner text node* refuses too. Not advertising an action is not
-    // the same as refusing it: an adapter dispatches what the technology asks
-    // for, and AT-SPI publishes `EditableText` off the interface set rather
-    // than off the action list, so a write aimed at the field went straight
+    // …and a string write refuses too. Not advertising an action is not the
+    // same as refusing it: an adapter dispatches what the technology asks for,
+    // and AT-SPI publishes `EditableText` off the interface set rather than
+    // off the action list, so a write aimed at the field went straight
     // through the composite's read-only gate and rewrote the value.
     let field = tree
         .first_focusable_descendant(id)
@@ -1203,9 +1221,8 @@ fn a11y_increment_survives_the_move_to_the_payload_handler() {
 
 #[test]
 fn a11y_set_value_on_the_inner_field_still_commits() {
-    // The composite publishes two AT nodes: a `Role::SpinButton` root and the
-    // `Role::TextInput` beneath it. Setting the *root* goes through the spin
-    // box's own handler; setting the *field* used to replace the displayed
+    // The field is the spin button node, and a string written to it goes
+    // through the field's own `SetValue`. That used to replace the displayed
     // string and stop there, so the typed value stayed stale until the next
     // blur and `on_value_changed` never fired — an assistive technology or an
     // automation client that resolved the text node saw a success and the
@@ -1368,7 +1385,7 @@ fn the_value_is_reachable_without_the_step_buttons() {
     focus_field(&mut tree, spin);
     tree.press_key(Key::ArrowUp, Modifiers::NONE);
     assert_eq!(value.get(), 6, "Up steps the value");
-    let node = tree.accessibility_node(spin);
+    let node = tree.accessibility_node(spin_button(&tree, spin));
     let actions = node.actions();
     assert!(
         actions.contains(&teksilo_core::accesskit::Action::Increment)
@@ -1872,4 +1889,223 @@ fn enter_in_the_same_batch_as_the_digits_commits_them() {
     tree.press_key(Key::Enter, Modifiers::NONE);
     tick(&mut tree);
     assert_eq!(value.get(), 35);
+}
+
+// ---------------------------------------------------------------------------
+// The node that holds focus is the spin button
+// ---------------------------------------------------------------------------
+//
+// A focus change reports the node that took focus, and a screen reader names
+// the field from it. That node used to be a nameless text field inside a named
+// `SpinButton`: announced without a name, or, named as well, announced twice.
+
+fn node_of(
+    update: &teksilo_core::accesskit::TreeUpdate,
+    id: teksilo_core::widget_id::WidgetId,
+) -> Option<&teksilo_core::accesskit::Node> {
+    let nid = teksilo_core::accessibility::widget_id_to_node_id(id);
+    update.nodes.iter().find(|(n, _)| *n == nid).map(|(_, n)| n)
+}
+
+fn day_box(value: Signal<i32>) -> (WidgetTree, teksilo_core::widget_id::WidgetId) {
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(SpinBox::new(value, 1, 31).label(lit!("Day")));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    (tree, spin)
+}
+
+#[test]
+fn focus_lands_on_the_named_spin_button() {
+    use teksilo_core::accesskit::{Role, TreeId};
+    let (mut tree, spin) = day_box(Signal::new(12));
+    focus_field(&mut tree, spin);
+    let update = tree.sync_accessibility();
+
+    let focused = update
+        .nodes
+        .iter()
+        .find(|(n, _)| *n == update.focus)
+        .map(|(_, n)| n)
+        .expect("the focus is a node in the update");
+    assert_eq!(focused.role(), Role::SpinButton);
+    assert_eq!(focused.label(), Some("Day"));
+    assert_eq!(focused.value(), Some("12"));
+    assert_eq!(focused.numeric_value(), Some(12.0));
+    assert_eq!(focused.min_numeric_value(), Some(1.0));
+    assert_eq!(focused.max_numeric_value(), Some(31.0));
+    assert_eq!(focused.numeric_value_step(), Some(1.0));
+
+    // What an adapter is handed: the focused node says the name, carries the
+    // editable text (so AT-SPI gives it Text and EditableText, UIA the Text
+    // pattern), and no other node says the name again.
+    let consumer = accesskit_consumer::Tree::new(update.clone(), true);
+    let state = consumer.state();
+    let focus = state.focus().expect("the consumer resolves the focus");
+    assert_eq!(focus.label().as_deref(), Some("Day"));
+    assert!(
+        focus.supports_text_ranges(),
+        "the spin button is the text field"
+    );
+    let said = update
+        .nodes
+        .iter()
+        .filter(|(nid, _)| {
+            state
+                .node_by_tree_local_id(*nid, TreeId::ROOT)
+                .and_then(|n| n.label())
+                .is_some_and(|label| label == "Day")
+        })
+        .count();
+    assert_eq!(said, 1, "the name is said once");
+    assert_eq!(
+        update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == Role::SpinButton)
+            .count(),
+        1,
+        "one spin button"
+    );
+}
+
+#[test]
+fn a_step_moves_the_number_on_the_node_that_has_focus() {
+    // Orca speaks a value change only on the object that has focus
+    // (`scripts/default.py`, `onValueChanged`), so the number has to move
+    // there or an arrow press is silent.
+    let (mut tree, spin) = day_box(Signal::new(12));
+    focus_field(&mut tree, spin);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    let update = tree.sync_accessibility();
+    let node = node_of(&update, spin_button(&tree, spin)).expect("the spin button");
+    assert_eq!(
+        update.focus,
+        teksilo_core::accessibility::widget_id_to_node_id(spin_button(&tree, spin))
+    );
+    assert_eq!(node.numeric_value(), Some(13.0));
+    assert_eq!(node.value(), Some("13"));
+}
+
+#[test]
+fn what_is_announced_is_what_is_reviewed() {
+    // The spin button owns its text runs, so its value has to be the text they
+    // review. A unit painted beside the number is in neither: announcing
+    // "12 pt" over a reviewable "12" is a reader hearing one thing and
+    // reviewing another.
+    use teksilo_core::accessibility::audit;
+    let value = Signal::new(12_i32);
+    let backend: std::rc::Rc<std::cell::RefCell<dyn teksilo_canvas::TextBackend>> =
+        std::rc::Rc::new(std::cell::RefCell::new(
+            teksilo_canvas::MockTextBackend::new(),
+        ));
+    let mut tree = WidgetTree::new()
+        .with_theme(teksilo_core::presets::intui::light())
+        .with_text_backend(backend);
+    let spin = tree.add(SpinBox::new(value, 0, 72).suffix(" pt").label(lit!("Size")));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    assert_eq!(at_value(&mut tree, spin), "12");
+    let update = tree.sync_accessibility();
+    assert_eq!(audit::text_range_divergences(&update), Vec::new());
+}
+
+#[test]
+fn a_special_value_is_announced_as_shown() {
+    let value = Signal::new(0_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(
+        SpinBox::new(value, 0, 3600)
+            .suffix(" s")
+            .special_value_text(lit!("Never")),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    assert_eq!(at_value(&mut tree, spin), "Never");
+}
+
+#[test]
+fn a_name_given_to_the_spin_box_names_the_focused_node() {
+    // `label` documents `access_label` on the spin box as the other way to
+    // name it, and the spin box's id is all an application has.
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let value = Signal::new(12_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(SpinBox::new(value, 1, 31).access_label(lit!("Day of the month")));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    let update = tree.sync_accessibility();
+    let node = node_of(&update, spin_button(&tree, spin)).expect("the spin button");
+    assert_eq!(node.label(), Some("Day of the month"));
+}
+
+#[test]
+fn a_form_layout_names_the_spin_box_it_pairs() {
+    use crate::primitives::{FormLayout, TextWidget};
+    use teksilo_core::accesskit::TreeId;
+    let value = Signal::new(12_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let label = tree.add(TextWidget::new(lit!("Size")));
+    let spin = tree.add(SpinBox::new(value, 1, 72));
+    tree.add(FormLayout::new().line(label, spin));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    let update = tree.sync_accessibility();
+    let field = spin_button(&tree, spin);
+    let node = node_of(&update, field).expect("the spin button");
+    assert_eq!(
+        node.labelled_by(),
+        &[teksilo_core::accessibility::widget_id_to_node_id(label)]
+    );
+    let consumer = accesskit_consumer::Tree::new(update.clone(), true);
+    let name = consumer
+        .state()
+        .node_by_tree_local_id(
+            teksilo_core::accessibility::widget_id_to_node_id(field),
+            TreeId::ROOT,
+        )
+        .and_then(|n| n.label());
+    assert_eq!(name.as_deref(), Some("Size"));
+}
+
+#[test]
+fn a_description_given_to_the_spin_box_reaches_the_focused_node() {
+    use crate::primitives::TextWidget;
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let value = Signal::new(12_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let hint = tree.add(TextWidget::new(lit!("This date does not exist")));
+    let spin = tree.add(
+        SpinBox::new(value, 1, 31)
+            .label(lit!("Day"))
+            .access_described_by(hint),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    let update = tree.sync_accessibility();
+    let node = node_of(&update, spin_button(&tree, spin)).expect("the spin button");
+    assert_eq!(
+        node.described_by(),
+        &[teksilo_core::accessibility::widget_id_to_node_id(hint)]
+    );
+}
+
+#[test]
+fn the_tooltip_describes_the_focused_node() {
+    // A plain tooltip is never shown on focus, so its text as the node's
+    // description is the only way a keyboard user meets it.
+    let value = Signal::new(12_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(
+        SpinBox::new(value, 0, 59)
+            .label(lit!("Minutes"))
+            .tooltip(lit!("Past the hour")),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    let update = tree.sync_accessibility();
+    let node = node_of(&update, spin_button(&tree, spin)).expect("the spin button");
+    assert_eq!(node.description(), Some("Past the hour"));
 }

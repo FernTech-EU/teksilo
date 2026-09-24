@@ -731,12 +731,16 @@ Two defects fell out of the same change and are worth recording separately:
   line navigation on every platform, and in `CodeGutter`.
 - **A composite input announces a summary its sub-fields do not spell out.**
   `supports_text_ranges` walks *through* intermediates, so a `DateTimeEdit`
-  over three fields, a `DateRangeEdit` over two, or a `SpinBox` over one reports
-  the concatenation of its descendants' runs as its reviewable text while its
-  own `value` is a synthesized string: `"09:30:00"` announced against `"09:30"`
-  reviewed, `"2026-03-02/2026-03-14"` against `"2026-03-022026-03-14"`,
-  `"100 %"` against `"100"`. A reader therefore hears seconds, a separator or a
-  unit it cannot then review character by character. Not flagged by
+  over three fields or a `DateRangeEdit` over two reports the concatenation of
+  its descendants' runs as its reviewable text while its own `value` is a
+  synthesized string: `"09:30:00"` announced against `"09:30"` reviewed,
+  `"2026-03-02/2026-03-14"` against `"2026-03-022026-03-14"`. A reader
+  therefore hears seconds or a separator it cannot then review character by
+  character. A `SpinBox` was the third case (`"100 %"` announced against
+  `"100"`) until its editing field became the spin button node (2026-09-24):
+  that node owns its runs, so its value is the field's text, and the unit,
+  which is painted beside the text and not in it, is now announced nowhere.
+  Hearing it again means the field emitting its suffix as text. Not flagged by
   `audit::text_range_divergences`, which only compares a node against runs it
   owns directly — the two properties mean different things on a composite, and a
   gate has to be free of false positives to be worth running. Closing it means

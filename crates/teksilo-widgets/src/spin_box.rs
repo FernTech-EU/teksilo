@@ -85,14 +85,24 @@
 //!
 //! # Accessibility
 //!
-//! The composite exposes itself as
-//! [`Role::SpinButton`](teksilo_core::accesskit::Role::SpinButton)
-//! with numeric value, min, max, step, and jump properties set on
-//! the AccessKit node; the AT receives
+//! The editing field is the spin button: one AccessKit node with
+//! [`Role::SpinButton`](teksilo_core::accesskit::Role::SpinButton),
+//! the [`label`](SpinBox::label) as its name, the numeric value, min,
+//! max, step and jump, the field's text as its value and its text
+//! runs, and the
 //! [`Increment`](teksilo_core::accesskit::Action::Increment),
 //! [`Decrement`](teksilo_core::accesskit::Action::Decrement),
 //! [`SetValue`](teksilo_core::accesskit::Action::SetValue), and
-//! [`Focus`](teksilo_core::accesskit::Action::Focus) actions.
+//! [`Focus`](teksilo_core::accesskit::Action::Focus) actions. It is
+//! the node that holds focus, so a focus change reports the field's
+//! name and value once, and a step moves the number a screen reader
+//! is following. The composite's own node is structure and collapses;
+//! it names the field as its
+//! [`accessibility_proxy`](teksilo_core::widget::Widget::accessibility_proxy),
+//! so an `access_label`, a `FormLayout` label, an
+//! `access_described_by` or a tooltip given to the spin box lands on
+//! the field. The [`suffix`](SpinBox::suffix) is painted and not part
+//! of the text, so it is not announced.
 //!
 //! `SetValue` accepts either payload shape, because both are sent in
 //! the field: a number (macOS `setAccessibilityValue:` with an
@@ -105,7 +115,7 @@
 //! [`read_only`](SpinBox::read_only) spin box advertises and services
 //! none of the three mutating actions. The step buttons are
 //! structurally part of the SpinBox and publish no separate a11y
-//! nodes.
+//! nodes; stepping is the spin button's `Increment` and `Decrement`.
 //!
 //! # Example
 //!
@@ -201,7 +211,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, ScrollDelta, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::{EventContext, LayoutContext, Widget, WidgetPlacement};
-use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::SharedTypesetter;
 use teksilo_tokens::{CornerRadius, InputTokens, TargetRole, TextStyle};
@@ -683,7 +693,9 @@ impl<T: SpinValue> SpinBox<T> {
     /// Set the accessible name announced by screen readers as the
     /// control's label. ARIA requires spin buttons to have a label;
     /// when none is set here the caller is responsible for labelling
-    /// via a wrapping element or `access_label`.
+    /// via a `FormLayout` line, `access_labelled_by` or `access_label`
+    /// on the spin box, which all reach the editing field that holds
+    /// focus and publishes the spin button.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
@@ -1391,6 +1403,54 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             });
         }
 
+        // The field is the spin button. It holds focus, the caret and the
+        // text, so it is the node a focus change reports and the one a
+        // screen reader names. The ARIA spinbutton pattern puts the role on
+        // the focusable element, which is usually the one taking the text, and
+        // AccessKit's consumer counts `Role::SpinButton` as a text input
+        // (`NodeRef::is_text_input`), so this one node carries the text runs
+        // and gets AT-SPI's Text, EditableText and Value interfaces, UIA's
+        // Text, Value and RangeValue patterns, and on macOS an
+        // `AXIncrementor` with the text attributes. With the name on an outer
+        // node instead, a focus change reported a nameless text field; with
+        // it on both, two nodes said it. And Orca speaks a value change only
+        // on the object with focus, so the number moves where the focus is,
+        // or an arrow press is silent.
+        //
+        // The composite's own node is structure (see `accessibility` and
+        // `accessibility_proxy` below), and whatever an application attaches
+        // to the spin box's id lands here, after this.
+        //
+        // Its value stays the field's own, the text as shown and typed, which
+        // is what its text runs review. The suffix is painted beside that text
+        // and is in neither: appending it here made the node announce "100 %"
+        // and review "100", the divergence `audit::text_range_divergences`
+        // exists to catch. The unit reaches a reader once the field emits it
+        // as text; `docs/accessibility-internal-audit.md` records the gap.
+        let field = field.access_customize({
+            let label = self.label.clone();
+            let value = self.value.clone();
+            move |builder: &mut AccessNodeBuilder| {
+                use teksilo_core::accesskit::{Action, Role};
+                builder.set_role(Role::SpinButton);
+                if let Some(label) = &label {
+                    builder.set_name(label.resolve_now());
+                }
+                builder.set_numeric_value(value.get().to_f64());
+                builder.set_min_numeric_value(min.to_f64());
+                builder.set_max_numeric_value(max.to_f64());
+                builder.set_numeric_value_step(single_step.to_f64());
+                builder.set_numeric_value_jump(page_step.to_f64());
+                // The field advertises `SetValue` and `Focus` itself; stepping
+                // is the spin box's, serviced by its handler when the action
+                // bubbles up from here. A read-only spin box offers neither:
+                // macOS gates settability on the advertisement alone.
+                if !read_only {
+                    builder.add_action(Action::Increment);
+                    builder.add_action(Action::Decrement);
+                }
+            }
+        });
         let field_id = ctx.add(field);
         self.field_id = Some(field_id);
 
@@ -1513,7 +1573,6 @@ impl<T: SpinValue> Widget for SpinBox<T> {
 
         let step_for_key = step.clone();
         let step_for_wheel = step.clone();
-        let value_for_a11y = self.value.clone();
         let set_committed_for_a11y = set_committed.clone();
         let commit_text_for_a11y = commit_text.clone();
 
@@ -1621,8 +1680,10 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             //     whether or not the action is advertised.
             //   * `Value(Box<str>)` — macOS with an `NSString`, and Teksilo's
             //     own automation `set_value` tool, which sends only this shape.
-            // `Action::Focus` has no arm: the dispatcher services it before any
-            // widget sees it, and now walks to the focusable inner field.
+            // These arrive from the field, which is the spin button node and
+            // leaves stepping to its host: an action unhandled there bubbles up
+            // to here. `Action::Focus` has no arm: the dispatcher services it
+            // before any widget sees it, on the field, which is focusable.
             .on_access_action_request(move |action, _target_node, data, ctx| {
                 use teksilo_core::accesskit::{Action, ActionData};
                 // A read-only spin box refuses every mutating action rather
@@ -1669,11 +1730,11 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     _ => EventResponse::Ignored,
                 }
             });
-        // Bind `value` so the SpinButton a11y node refreshes on
-        // every change (numeric_value setter reads it live).
-        let self_id = ctx.self_id();
-        value_for_a11y.bind_to(
-            self_id,
+        // Bind `value` to the field, which publishes the spin button's numeric
+        // value, so that node refreshes on every change even when the text
+        // does not (a formatter can show two values alike).
+        self.value.bind_to(
+            field_id,
             ctx.binding_registry(),
             teksilo_core::binding::BindingLevel::AccessibilityOnly,
         );
@@ -1755,58 +1816,21 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         self.root_child_id.into_iter().collect()
     }
 
+    /// Structure. The spin button is the editing field, which holds focus
+    /// and says the name, the value and the range (see `build`); a second
+    /// node saying them around it is what made a screen reader either name
+    /// the field twice or not at all. `GenericContainer` is what the
+    /// presentational pass collapses.
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        use teksilo_core::accesskit::{Action, Role};
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+    }
 
-        builder.set_role(Role::SpinButton);
-        if let Some(ref label) = self.label {
-            builder.set_name(label.resolve_now());
-        }
-        builder.set_numeric_value(self.value.get().to_f64());
-        builder.set_min_numeric_value(self.min.to_f64());
-        builder.set_max_numeric_value(self.max.to_f64());
-        builder.set_numeric_value_step(self.single_step.to_f64());
-        if let Some(page) = self.page_step {
-            builder.set_numeric_value_jump(page.to_f64());
-        } else {
-            builder.set_numeric_value_jump(self.single_step.saturating_mul_u32(10).to_f64());
-        }
-        // String-valued representation so screen readers can read
-        // out the suffix / special-value text when applicable. The
-        // suffix is elided when `special_value_text` has kicked in
-        // (value == min), matching the visual rendering.
-        let value = self.value.get();
-        let using_special = self.special_value_text.is_some() && approx_eq(value, self.min);
-        let display = format_for_display(
-            value,
-            self.decimals,
-            self.special_value_text.as_ref(),
-            self.text_from_value.as_deref(),
-            self.min,
-            false,
-            &NumberPresentation::resolve(self.localized, self.use_grouping),
-        );
-        let full = if !self.suffix.is_empty() && !using_special {
-            format!("{}{}", display, self.suffix)
-        } else {
-            display
-        };
-        builder.set_value(full);
-
-        // Framework a11y walker sets `set_disabled` from arena state.
-        if self.read_only {
-            builder.set_read_only();
-        } else {
-            // A read-only spin box advertises none of the three mutating
-            // actions. macOS gates `setAccessibilityValue:` settability on
-            // `supports_action(SetValue, ..)` alone — `is_read_only` does not
-            // veto it — so advertising here is precisely what would tell
-            // VoiceOver the value is settable when it is not.
-            builder.add_action(Action::Increment);
-            builder.add_action(Action::Decrement);
-            builder.add_action(Action::SetValue);
-        }
-        builder.add_action(Action::Focus);
+    /// The editing field stands for the spin box, so what an application
+    /// attaches to the spin box's id (`access_label`, a `FormLayout`'s
+    /// `labelled_by`, `access_described_by`, the tooltip) lands on the node
+    /// that holds focus.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.field_id
     }
 }
 

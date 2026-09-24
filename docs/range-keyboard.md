@@ -262,17 +262,22 @@ settability on the advertisement, which is why both widgets advertise it — and
 why a read-only `SpinBox` advertises none of the three mutating actions rather
 than claiming a settability it does not have.
 
-A composite publishes **two** nodes — the `Role::SpinButton` root and the
-`Role::TextInput` beneath it — and an assistive technology may resolve either.
-Setting the root goes through the widget's own handler; setting the *field*
-used to replace the displayed string and stop there, leaving the typed value
-stale until the next blur and never firing `on_value_changed`. The field now
-commits through its host when the host asks it to
+A date or time editor publishes **two** nodes, its own root and the
+`Role::TextInput` of its field beneath it, and an assistive technology may
+resolve either. Setting the root goes through the widget's own handler; setting
+the *field* used to replace the displayed string and stop there, leaving the
+typed value stale until the next blur and never firing `on_value_changed`. The
+field now commits through its host when the host asks it to
 (`TextInputField::on_access_set_value`, which `SpinBox` and the date and time
-editors install), so both nodes land the same value by the same parse. The host
-is handed the string rather than left to re-read the bound signal, which the
-field syncs only on the next frame tick. A plain `TextInput` installs nothing:
-its bound `Signal<String>` *is* the value, so the write has already landed.
+editors install), so both nodes land the same value by the same parse. A
+`SpinBox` publishes one node, because its editing field is the
+`Role::SpinButton` (see `Widget::accessibility_proxy` in
+[accessibility-overrides.md](accessibility-overrides.md)): a string written to
+it takes the same route, and a number or a step bubbles from the field to the
+spin box's own handler. The host is handed the string rather than left to
+re-read the bound signal, which the field syncs only on the next frame tick. A
+plain `TextInput` installs nothing: its bound `Signal<String>` *is* the value,
+so the write has already landed.
 
 `ScrollBar` is the exception: its node is `set_hidden()` and it is
 `focusable(false)`, because assistive technology scrolls through the parent

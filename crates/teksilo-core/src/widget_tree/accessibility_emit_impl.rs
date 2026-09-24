@@ -856,12 +856,13 @@ impl WidgetTree {
     ///
     /// This is the gate on the `Action::Focus` walk into a subtree. A focusable
     /// leaf gets the action from `announce_focusable` and resolves to itself; a
-    /// composite that keeps focus on an inner leaf — `SpinBox`, `ComboBox`,
-    /// `DateEdit` and its siblings — adds the action in its own
-    /// `accessibility()` and means the walk. Everything else — a `Panel`, a
-    /// `GroupBox`, a landmark, a label — offers no `Focus`, and moving focus
-    /// into it would land the keyboard on a descendant the assistive technology
-    /// could have named itself and did not.
+    /// composite that keeps focus on an inner leaf and publishes its own node
+    /// (`ComboBox`, `DateEdit` and its siblings) adds the action in its own
+    /// `accessibility()` and means the walk. `SpinBox` publishes through its
+    /// field instead, which is focusable and resolves to itself. Everything
+    /// else (a `Panel`, a `GroupBox`, a landmark, a label) offers no `Focus`,
+    /// and moving focus into it would land the keyboard on a descendant the
+    /// assistive technology could have named itself and did not.
     pub(crate) fn advertises_focus_action(&self, id: WidgetId) -> bool {
         self.arena.get(id).is_some()
             && self

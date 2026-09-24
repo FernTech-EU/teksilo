@@ -53,6 +53,20 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A focused `SpinBox` reported a nameless text field.** Focus lands on the
+  spin box's editing field, while its name, value and range sat on a node
+  around it, so a screen reader named the field once or not at all, and could
+  not hear a step move the number. The editing field is now the spin button:
+  `Role::SpinButton`, the `label` as its name, the value, range and step,
+  `Increment` and `Decrement`, and its own text runs. A focus change says the
+  name and value once, and a step changes the node the reader is on. What an
+  application gives the spin box's id (`access_label`, a `FormLayout` label,
+  `access_described_by`, a tooltip) reaches that node through the new
+  `Widget::accessibility_proxy`. The accessible value is now exactly the text a
+  reader can review, so a painted `suffix` is no longer in it.
+  **Behaviour change**: a test that read the spin button off the `SpinBox`'s
+  own id finds a `GenericContainer` there; the spin button is the field,
+  `first_focusable_descendant` of that id.
 - **A `SpinBox` with a custom `value_from_text` could not be typed in words.**
   The numeric input filter ran whatever the parser, so a month field that reads
   `"march"` as 3 dropped the letters as they were typed, and the commit put the

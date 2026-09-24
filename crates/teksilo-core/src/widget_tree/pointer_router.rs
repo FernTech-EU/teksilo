@@ -1162,9 +1162,9 @@ impl WidgetTree {
                 if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
                     if *action == accesskit::Action::Focus {
                         // Land where the keys go. A composite publishes one AT
-                        // node on a root that is not itself focusable — a
-                        // `SpinBox`, `ComboBox` or `DateEdit` keeps focus on an
-                        // inner leaf — and `ctx.request_focus` has always walked
+                        // node on a root that is not itself focusable (a
+                        // `ComboBox` or a `DateEdit` keeps focus on an inner
+                        // leaf), and `ctx.request_focus` has always walked
                         // into the subtree for exactly that reason. The AT path
                         // must too: focusing the root parks `self.focused` on a
                         // node that takes no keystrokes, and because

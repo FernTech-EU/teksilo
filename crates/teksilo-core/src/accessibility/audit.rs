@@ -184,10 +184,10 @@ pub fn text_range_divergences(update: &TreeUpdate) -> Vec<TextRangeDivergence> {
             continue;
         }
         // Only where the node owns its text. `supports_text_ranges` walks
-        // *through* intermediates, so a composite input — a `DateTimeEdit`
-        // over three fields, a `SpinBox` over one — reports the
-        // concatenation of its descendants' runs while its own value is a
-        // synthesized summary ("09:30:00" over fields reading "09:30").
+        // *through* intermediates, so a composite input (a `DateTimeEdit`
+        // over three fields) reports the concatenation of its descendants'
+        // runs while its own value is a synthesized summary ("09:30:00"
+        // over fields reading "09:30").
         // Those two are different things by design; comparing them is a
         // category error, and the residual inconsistency is recorded in
         // `docs/accessibility-internal-audit.md` rather than flagged here.

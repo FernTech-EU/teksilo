@@ -406,11 +406,11 @@ impl Widget for StepButton {
     }
 
     fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
-        // Hidden from a11y: the SpinBox root is Role::SpinButton and
-        // owns the Increment/Decrement actions. Exposing the buttons
-        // separately would make screen readers announce a redundant
-        // Button under the SpinButton, which is the wrong mental
-        // model (the step buttons are affordances of the SpinBox
+        // Hidden from a11y: the SpinBox's editing field is the
+        // Role::SpinButton node and offers Increment/Decrement. Exposing
+        // the buttons separately would make screen readers announce a
+        // redundant Button beside the SpinButton, which is the wrong
+        // mental model (the step buttons are affordances of the SpinBox
         // itself, not standalone controls).
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
