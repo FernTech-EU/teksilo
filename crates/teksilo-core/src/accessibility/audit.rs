@@ -3,7 +3,7 @@
 
 //! Invariant checks over an emitted accessibility tree.
 //!
-//! Three classes of defect are easy to introduce, invisible in a
+//! Four classes of defect are easy to introduce, invisible in a
 //! screenshot, and only discovered when someone runs a screen reader:
 //!
 //! 1. **A label repeating its control's name.** A `Button` named "Save"
@@ -18,12 +18,18 @@
 //!    derives a node's document text from its runs while every platform
 //!    announces the node's own value; a divergence is a place where what
 //!    a reader hears and what it reviews are different strings.
+//! 4. **A focusable control inside a hidden subtree.** A hidden node hides
+//!    everything under it, but the filter still lets the focused node
+//!    through, so Tab lands a reader on a control with nothing around it
+//!    and no parent that lists it. It is the mark of a wrapper that meant
+//!    "I am only chrome" and said it with `set_hidden()`, which is how a
+//!    dialog's, a menu's and a toolbar's content were once hidden.
 //!
 //! These run against a real [`TreeUpdate`] through `accesskit_consumer`,
 //! so they measure what an adapter measures rather than what the
 //! framework meant.
 
-use accesskit::{NodeId, Role, TreeUpdate};
+use accesskit::{Action, NodeId, Role, TreeUpdate};
 use accesskit_consumer::{NodeRef, Tree};
 
 /// A label repeating an ancestor's accessible name.
@@ -121,6 +127,32 @@ pub fn duplicate_label_leaks(update: &TreeUpdate) -> Vec<LabelLeak> {
         }
     }
     leaks
+}
+
+/// Every node that offers keyboard focus while hidden from assistive
+/// technology.
+///
+/// `NodeRef::is_hidden` is inherited from every ancestor and `common_filter`
+/// answers a hidden node with `ExcludeSubtree`, so such a node is outside the
+/// tree every adapter walks until it takes focus; then the filter lets it
+/// through alone, and a reader hears a control whose parent does not list it
+/// and whose neighbours cannot be reached. A disabled node is exempt: it
+/// takes no focus. A wrapper that is only chrome around such a control is a
+/// bare `Role::GenericContainer`, never hidden.
+pub fn focusable_nodes_hidden(update: &TreeUpdate) -> Vec<NodeId> {
+    let tree = Tree::new(update.clone(), false);
+    let state = tree.state();
+    let mut out = Vec::new();
+    let mut stack = vec![state.root()];
+    while let Some(node) = stack.pop() {
+        if node.data().supports_action(Action::Focus) && node.is_hidden() && !node.is_disabled() {
+            out.push(locate(&node));
+        }
+        for child in node.children() {
+            stack.push(child);
+        }
+    }
+    out
 }
 
 /// Whether `owner` names itself through a relation pointing at `label`.
@@ -394,4 +426,46 @@ pub fn resolved_names(update: &TreeUpdate) -> std::collections::HashMap<NodeId, 
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_widgets::{FillWidget, StackWidget};
+    use crate::widget_builder::WidgetBuilder;
+    use crate::widget_tree::WidgetTree;
+    use teksilo_canvas::SizeProposal;
+
+    /// `inner` inside a wrapper that is either hidden or a bare
+    /// `GenericContainer`, the two ways a wrapper has said "only chrome".
+    fn update_for(inner: FillWidget, hidden: bool) -> TreeUpdate {
+        let mut tree = WidgetTree::new();
+        let inner = tree.add(inner);
+        let wrapper = StackWidget::new().child(inner);
+        if hidden {
+            tree.add(wrapper.access_hidden(true));
+        } else {
+            tree.add(wrapper.access_role(Role::GenericContainer));
+        }
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.sync_accessibility()
+    }
+
+    #[test]
+    fn a_focusable_control_under_a_hidden_wrapper_is_reported() {
+        let update = update_for(FillWidget::new().focusable(), true);
+        assert_eq!(focusable_nodes_hidden(&update).len(), 1);
+    }
+
+    #[test]
+    fn the_same_control_under_a_presentational_wrapper_is_not() {
+        let update = update_for(FillWidget::new().focusable(), false);
+        assert!(focusable_nodes_hidden(&update).is_empty());
+    }
+
+    #[test]
+    fn a_hidden_wrapper_around_decoration_is_not() {
+        let update = update_for(FillWidget::new().label("Deco"), true);
+        assert!(focusable_nodes_hidden(&update).is_empty());
+    }
 }

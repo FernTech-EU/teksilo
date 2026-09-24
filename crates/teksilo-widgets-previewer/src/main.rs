@@ -413,6 +413,33 @@ mod tests {
         );
     }
 
+    /// No control a keyboard can reach sits inside a hidden subtree.
+    ///
+    /// A hidden node hides everything under it in the tree every platform
+    /// adapter reads, and only the focused node is let back through, alone:
+    /// a reader lands on the control and finds nothing around it. That is
+    /// what a wrapper does when it says "only chrome" with `set_hidden()`
+    /// instead of a bare `Role::GenericContainer`, and it is how a dialog's,
+    /// a menu's and a toolbar's content were once hidden. The catalog is the
+    /// census that keeps a new wrapper from doing it again.
+    #[test]
+    fn no_focusable_control_is_hidden_from_assistive_technology() {
+        let mut failures: Vec<String> = Vec::new();
+        for_every_catalog_subject(|label, tree| {
+            let update = tree.sync_accessibility();
+            for id in teksilo_core::accessibility::audit::focusable_nodes_hidden(&update) {
+                failures.push(format!(
+                    "{label}: {id:?} takes focus inside a hidden subtree"
+                ));
+            }
+        });
+        assert!(
+            failures.is_empty(),
+            "these controls take focus where a screen reader cannot reach them:\n  {}",
+            failures.join("\n  "),
+        );
+    }
+
     /// Build, lay out and hand every catalog subject — each (widget,
     /// variant) pair and every documentation snippet — to `check`.
     ///

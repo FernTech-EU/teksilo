@@ -26,6 +26,13 @@ by crate for clarity, not because crates version independently.
   `labelled_by`, `access_described_by`, the tooltip it owns) to that widget's
   node, after the widget's own, and point relations naming the composite at
   it. The overrides guide has a section on it.
+- **`accessibility::audit::focusable_nodes_hidden`: a control that takes
+  focus inside a hidden subtree.** A hidden node hides everything under it
+  from every platform adapter, and only the focused node is let back through,
+  alone, so a reader lands on the control and finds nothing around it. The
+  audit lists every node that offers `Action::Focus` while hidden, itself or
+  through an ancestor, and is not disabled. The widget previewer's catalog
+  census now runs it over every widget and documentation snippet.
 
 #### Internationalization
 
