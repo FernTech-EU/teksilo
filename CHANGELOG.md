@@ -37,6 +37,14 @@ by crate for clarity, not because crates version independently.
   subscriber's own tick and nothing else; a requested frame is due at 60 Hz
   whatever is subscribed.
 
+#### Widgets
+
+- **A `SpinBox` with a custom `value_from_text` could not be typed in words.**
+  The numeric input filter ran whatever the parser, so a month field that reads
+  `"march"` as 3 dropped the letters as they were typed, and the commit put the
+  old month back. A custom parser now receives every character and alone
+  decides, at commit, what it can read; the default parser keeps its filter.
+
 #### Data views
 
 - **A single-selection data view could move its cursor off the selection.**

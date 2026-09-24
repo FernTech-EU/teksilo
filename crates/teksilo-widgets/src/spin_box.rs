@@ -17,7 +17,9 @@
 //!   Typing and stepping update it; external writes re-format the
 //!   editable text.
 //! - **Commit model**: the user can type freely (subject to the
-//!   per-character input filter). The value is *committed* on
+//!   per-character input filter, which only the default parser has:
+//!   a custom [`value_from_text`](SpinBox::value_from_text) is handed
+//!   every character). The value is *committed* on
 //!   [`Enter`](teksilo_core::event::Key::Enter) or on focus loss —
 //!   at commit time the text is parsed, clamped into `[min, max]`
 //!   (or wrapped, per [`WrapMode`]), and reformatted. Invalid input
@@ -706,6 +708,12 @@ impl<T: SpinValue> SpinBox<T> {
     /// content); returns `Some(value)` to accept or `None` to
     /// reject. Invalid input reverts to the last good value on
     /// commit.
+    ///
+    /// Installing a parser also lifts the per-character input filter,
+    /// which admits only what the default numeric parse can read. The
+    /// parser owns the text convention, so a month field reading
+    /// `"march"` as 3 can be typed by name: every character reaches the
+    /// field, and whatever the parser refuses is reverted at commit.
     pub fn value_from_text(mut self, f: impl Fn(&str) -> Option<T> + 'static) -> Self {
         self.value_from_text = Some(Rc::new(f));
         self
@@ -1167,11 +1175,21 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             })
             .read_only(read_only)
             .placeholder(self.placeholder.clone())
-            .text_height(text_area_height)
-            .char_filter({
+            .text_height(text_area_height);
+        // The per-character filter speaks for the default parser and for it
+        // alone: it admits exactly what `NumberPresentation::parse` can read. A
+        // custom `value_from_text` owns the whole text convention (a month
+        // typed as "march", a duration as "1h30"), and filtering for digits in
+        // front of it dropped the very characters it was installed to read,
+        // before it ever saw them. So with one installed every character
+        // reaches the field, and the parser is the only judge, at commit, with
+        // the usual revert for what it refuses.
+        if value_from_text.is_none() {
+            field = field.char_filter({
                 let presentation = presentation.clone();
                 move |c| presentation.accepts_char::<T>(c)
             });
+        }
         // Suffix wiring:
         //   • plain static suffix              → `.suffix(..)` (no signal)
         //   • static suffix + special_value    → reactive: hide suffix when

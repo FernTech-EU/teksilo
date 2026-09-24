@@ -1582,3 +1582,107 @@ fn a_finger_pan_over_a_hover_wheel_spin_box_scrolls_its_container() {
         "an ungated wheel handler must still never see a finger's pan",
     );
 }
+
+// ---------------------------------------------------------------------------
+// A custom parser owns the text
+// ---------------------------------------------------------------------------
+
+const MONTHS: [&str; 12] = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+];
+
+/// A month shown by name and read back by name or by number: the shape of a
+/// date form's month field, which is where this surfaced.
+fn month_box(value: Signal<i32>) -> SpinBox<i32> {
+    SpinBox::new(value, 1, 12)
+        .text_from_value(|month| {
+            let name = usize::try_from(month - 1)
+                .ok()
+                .and_then(|i| MONTHS.get(i))
+                .copied()
+                .unwrap_or_default();
+            teksilo_i18n::LocalizedString::literal(name.to_string())
+        })
+        .value_from_text(|text| {
+            if let Ok(number) = text.parse::<i32>() {
+                return (1..=12).contains(&number).then_some(number);
+            }
+            let typed = text.to_lowercase();
+            MONTHS
+                .iter()
+                .position(|name| *name == typed)
+                .and_then(|i| i32::try_from(i + 1).ok())
+        })
+}
+
+/// Focus the field of `spin` and type `text` over whatever it shows, the way a
+/// keyboard user does: select all, then type. Leaves the text uncommitted.
+fn type_over(tree: &mut WidgetTree, spin: teksilo_core::widget_id::WidgetId, text: &str) {
+    focus_field(tree, spin);
+    let field = tree.focused().expect("the field holds focus");
+    // Focus arriving selects the whole text, but Enter keeps focus, so a
+    // second entry in a row has to ask for the selection itself.
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    tree.type_text(field, text);
+}
+
+/// [`type_over`], then Enter.
+fn type_and_commit(tree: &mut WidgetTree, spin: teksilo_core::widget_id::WidgetId, text: &str) {
+    type_over(tree, spin, text);
+    tick(tree);
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    tick(tree);
+}
+
+#[test]
+fn a_custom_parser_is_handed_the_letters_it_reads() {
+    // The numeric input filter used to run whatever the parser, so the letters
+    // of "march" were dropped as they were typed, the parser saw an empty
+    // string, and the commit put back the month that was there before.
+    let value = Signal::new(9);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(month_box(value.clone()));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    type_and_commit(&mut tree, spin, "march");
+    assert_eq!(value.get(), 3, "a month typed by name is read by name");
+
+    type_and_commit(&mut tree, spin, "11");
+    assert_eq!(value.get(), 11, "and a number still types");
+}
+
+#[test]
+fn a_custom_parser_that_refuses_the_text_still_reverts() {
+    // Lifting the filter hands the parser everything, so what it cannot read
+    // is its refusal to make: the commit keeps the value it had, as Enter does
+    // on any unreadable text.
+    let value = Signal::new(9);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(month_box(value.clone()));
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+
+    type_and_commit(&mut tree, spin, "smarch");
+    assert_eq!(value.get(), 9);
+}
+
+#[test]
+fn the_default_parser_still_filters_what_it_cannot_read() {
+    // The filter stays where it belongs: with no custom parser, a letter typed
+    // into a number is dropped as it is typed, and the digits around it land.
+    let (mut tree, value, spin) = setup_int(10, 0, 100);
+    type_and_commit(&mut tree, spin, "4x2");
+    assert_eq!(value.get(), 42);
+}
