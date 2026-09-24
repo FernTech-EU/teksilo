@@ -2622,6 +2622,26 @@ mod tests {
         assert!(find_node(&update, subtitle).is_none());
     }
 
+    #[test]
+    fn access_merge_subtree_takes_nothing_from_under_a_hidden_descendant() {
+        // A hidden node hides its subtree: the consumer every platform
+        // adapter reads through treats a node as hidden when any ancestor
+        // is. A merged name that still took the text under a hidden
+        // wrapper would say aloud what the widget hid from the reader.
+        let mut tree = WidgetTree::new();
+        let title = tree.add(FillWidget::new().label("Title"));
+        let secret = tree.add(FillWidget::new().label("Secret"));
+        let hidden = tree.add(StackWidget::new().child(secret).access_hidden(true));
+        let card = tree.add(
+            StackWidget::new()
+                .child(title)
+                .child(hidden)
+                .access_merge_subtree(),
+        );
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.text_content(card), Some("Title".to_string()));
+    }
+
     // Test 29
     #[test]
     fn access_merge_subtree_unions_actions() {

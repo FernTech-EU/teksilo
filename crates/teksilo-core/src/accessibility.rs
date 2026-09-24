@@ -872,21 +872,31 @@ impl AccessNodeBuilder {
         self.inner.set_max_numeric_value(value);
     }
 
-    /// Hide this node from all assistive technologies (equivalent to
-    /// `aria-hidden="true"`). The node is still in the widget tree but
-    /// is invisible to screen readers and other ATs. Use for purely
-    /// decorative elements — e.g. scrollbars (AT scrolls via the
-    /// parent `ScrollView`'s scroll actions instead).
+    /// Hide this node **and everything under it** from all assistive
+    /// technologies (equivalent to `aria-hidden="true"`). The node is still
+    /// in the widget tree but is invisible to screen readers and other ATs.
+    /// Use for purely decorative elements, e.g. scrollbars (AT scrolls via
+    /// the parent `ScrollView`'s scroll actions instead).
+    ///
+    /// The flag covers the subtree. `accesskit_consumer`, which the AT-SPI,
+    /// UIA and macOS adapters all read the tree through, reads a hidden node
+    /// as `ExcludeSubtree` and treats a node as hidden when any ancestor is,
+    /// so nothing below it reaches a screen reader except a node that holds
+    /// focus, and that one is not listed among its parent's children. A
+    /// wrapper that is only chrome around content a reader needs (a panel,
+    /// a frame, a layout shell) must not call this: it is a
+    /// `Role::GenericContainer` carrying nothing else, which the walker
+    /// prunes and the adapters drop while keeping its children.
     pub fn set_hidden(&mut self) {
         self.hidden = true;
         self.inner.set_hidden();
     }
 
-    /// Clear the hidden flag set by an earlier `set_hidden()` call. Used
-    /// by the override layer to re-expose a widget that marked itself
-    /// presentational. AccessKit's Node `hidden` is local — un-hiding this
-    /// node does not propagate to descendants, but descendants are not
-    /// transitively hidden by their ancestor's `hidden` either.
+    /// Clear the hidden flag set by an earlier `set_hidden()` call on this
+    /// node. Used by the override layer to re-expose a widget that hid
+    /// itself. It clears this node's own flag only: a node under a hidden
+    /// ancestor stays hidden, because the consumer the platform adapters
+    /// read through inherits the flag from every ancestor.
     pub fn clear_hidden(&mut self) {
         self.hidden = false;
         self.inner.clear_hidden();

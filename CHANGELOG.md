@@ -57,6 +57,15 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **A merged name took the text from under a hidden descendant.**
+  `access_merge_subtree` skipped a hidden descendant's own name but went on
+  merging its children, so text an application hid with `access_hidden(true)`
+  on a wrapper was read aloud on the merged node. A hidden descendant and its
+  whole subtree now contribute nothing, as the adapters treat them. The
+  rustdoc of `AccessNodeBuilder::set_hidden`, `clear_hidden` and
+  `access_hidden` said the flag was local to its node; it now says that it
+  hides the subtree and that a wrapper which is only chrome is a
+  `Role::GenericContainer` instead.
 - **A throttled frame-tick subscriber held back every frame requested while it
   was on screen.** A widget on `subscribe_frame_tick_throttled` set the pace not
   only of its own tick but of every `request_frame`: with a once-a-minute clock

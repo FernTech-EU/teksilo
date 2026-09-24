@@ -1119,7 +1119,8 @@ fn is_presentational_container(node: &accesskit::Node) -> bool {
 //
 // The accumulator deliberately discards descendant role and numeric
 // fields (parent's role wins for the merged element) and discards
-// hidden / disabled (parent's state governs the whole merged subtree).
+// disabled (parent's state governs the whole merged subtree). A hidden
+// descendant is not merged at all, and neither is its subtree.
 // Action lists union with deduplication so two child Buttons each
 // emitting `Click` don't pollute the merged parent with two copies.
 
@@ -1174,10 +1175,14 @@ fn merge_collect_recursive(
     }
     // Skip nodes that opted out of AT entirely: a child marked
     // `access_hidden(true)` (or whose widget called `set_hidden()`)
-    // contributes nothing to the merge.
-    if !tmp.is_hidden() {
-        acc.absorb(&tmp);
+    // contributes nothing to the merge, and neither does anything under it.
+    // The consumer the adapters read through treats a node as hidden when
+    // any ancestor is, so text below a hidden node is text the widget hid;
+    // merging it would say it aloud on the merged node.
+    if tmp.is_hidden() {
+        return;
     }
+    acc.absorb(&tmp);
 
     match node.access_subtree {
         AccessSubtreeMode::Exclude => {

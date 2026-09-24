@@ -54,7 +54,7 @@ Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 | `.access_value(s)` | `Node::value` | Current value (sliders, spin boxes, text input). |
 | `.access_value(lit!(s))` | same | Explicitly untranslated string — `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
 | `.access_role(role)` | `Node::role` | Replace widget-emitted role. |
-| `.access_hidden(b)` | `Node::hidden` flag | `impl Into<Prop<bool>>` — a `bool` or a `Signal<bool>` (bound at `AccessibilityOnly`, so the node appears / disappears reactively). `true` hides from AT, `false` un-hides (clears even widget-emitted hidden). |
+| `.access_hidden(b)` | `Node::hidden` flag | `impl Into<Prop<bool>>`: a `bool` or a `Signal<bool>` (bound at `AccessibilityOnly`, so the node appears / disappears reactively). `true` hides the node **and its whole subtree** from AT (to drop only the node's own role and keep its content, use `access_role(Role::GenericContainer)`); `false` un-hides (clears even widget-emitted hidden on this node, but cannot reveal a node under a hidden ancestor). |
 | `.access_disabled(bool)` | `Node::disabled` flag | `true` marks disabled, `false` clears even arena-driven disabled. A plain `bool` — unlike `access_hidden`, not reactive. |
 
 ### Tier 2 — relationships, live regions, identity
@@ -209,6 +209,8 @@ VoiceOver announces the card as one element: "New message From Alice Hey, are we
 | descendant `hidden` / `disabled` | — | Discarded — except that a hidden descendant (`access_hidden(true)` or widget-emitted `set_hidden()`) contributes nothing at all to the merge. Parent's state governs the merged element. |
 | descendant `description` / `controls` / `described_by` / `labelled_by` | — | Currently dropped (no `AccessNodeBuilder` getters); use `access_customize` on the parent if you need them. |
 
+A hidden descendant keeps its whole subtree out of the merge, not only its own name: the adapters treat everything under a hidden node as hidden, so text merged from there would be read aloud on the merged node after the widget hid it.
+
 **Nested subtree modes:**
 
 - `Merge` containing `Exclude` somewhere — Exclude wins for that subtree (descendants of the excluded node contribute nothing to the merge).
@@ -341,7 +343,7 @@ For explicitly-untranslated AT strings, wrap with `lit!(...)`: `access_label(lit
 
 `AccessNodeBuilder::set_hidden()` and `set_disabled()` flip flags on. Some widgets call those setters unconditionally (e.g. an [ImageWidget](../crates/teksilo-widgets/src/primitives/image_widget.rs) marked `a11y_hidden()` calls `set_hidden()`). To **un-set** widget-emitted state, the override system exposes:
 
-- `.access_hidden(false)` clears even widget-emitted `set_hidden()` on this node. Full clear (no framework re-application of hidden).
+- `.access_hidden(false)` clears even widget-emitted `set_hidden()` on this node. Full clear (no framework re-application of hidden). It reaches this node's own flag only: a node under a hidden ancestor stays hidden, because the adapters inherit the flag from every ancestor.
 - `.access_disabled(false)` clears widget-emitted disabled AND arena-driven disabled. The framework's gate at [`accessibility_emit_impl.rs`](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs) respects the override, so even a `.disabled(true)` set on the widget's enabled-state can be overridden for AT purposes.
 
 Real use cases:

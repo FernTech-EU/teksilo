@@ -81,7 +81,8 @@ pub struct AccessibilityOverrides {
     pub value: Option<Prop<String>>,
     pub role: Option<accesskit::Role>,
     /// Reactive hidden-from-AT flag. `Some(prop)` where the prop reads
-    /// `true` hides the node from assistive technologies; `false` un-sets a
+    /// `true` hides the node and its whole subtree from assistive
+    /// technologies; `false` un-sets a
     /// hidden state the inner widget emitted unconditionally. Bound props are
     /// registered at `AccessibilityOnly` so the AT tree re-walks when they
     /// flip (see the insertion paths in `widget_tree.rs`).
@@ -1567,12 +1568,16 @@ impl<W: Widget> WidgetWithHandlers<W> {
         self
     }
 
-    /// Hide (or un-hide) this node from assistive technologies. Accepts a
-    /// plain `bool`, a `Signal<bool>`, or a `Prop<bool>`: a bound value makes
-    /// the node appear/disappear from the AT tree reactively (the binding is
-    /// registered at `AccessibilityOnly`, so the tree re-walks on change).
-    /// `false` un-sets a hidden state the inner widget may have emitted
-    /// unconditionally (e.g. `Panel::a11y_presentational`).
+    /// Hide (or un-hide) this node, and everything under it, from assistive
+    /// technologies. Accepts a plain `bool`, a `Signal<bool>`, or a
+    /// `Prop<bool>`: a bound value makes the node appear/disappear from the
+    /// AT tree reactively (the binding is registered at `AccessibilityOnly`,
+    /// so the tree re-walks on change). `true` hides the whole subtree, as
+    /// [`AccessNodeBuilder::set_hidden`](crate::accessibility::AccessNodeBuilder::set_hidden)
+    /// explains; to drop only this node's own role and keep its content,
+    /// use `access_role(Role::GenericContainer)` instead. `false` un-sets a
+    /// hidden state the inner widget emitted on this node, and cannot reveal
+    /// a node under a hidden ancestor.
     pub fn access_hidden(mut self, hidden: impl Into<Prop<bool>>) -> Self {
         self.handler_set.access_mut().hidden = Some(hidden.into());
         self
