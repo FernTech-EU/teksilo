@@ -563,7 +563,9 @@ server and every test. A window `teksilo-app` opens records only when the app
 called `install_automation_bridge_in_debug()`, which asks for it before any
 window opens. A release build has no bridge, and its windows record nothing.
 
-`list_live_regions` reports the live nodes themselves.
+`list_live_regions` reports the nodes that declare a politeness and that a
+platform adapter walks, so a hidden region and the framework's idle
+announcer nodes are not in it.
 
 ## Screenshots
 

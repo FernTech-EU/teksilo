@@ -32,7 +32,10 @@ by crate for clarity, not because crates version independently.
   alone, so a reader lands on the control and finds nothing around it. The
   audit lists every node that offers `Action::Focus` while hidden, itself or
   through an ancestor, and is not disabled. The widget previewer's catalog
-  census now runs it over every widget and documentation snippet.
+  census now runs it over every widget and documentation snippet. Beside it,
+  `audit::nodes_in_filtered_tree` lists the nodes `accesskit_consumer`'s
+  filter keeps, which are the ones a platform adapter walks and can
+  announce.
 
 #### Internationalization
 
@@ -306,6 +309,17 @@ by crate for clarity, not because crates version independently.
   tile the reader lands on says it is selected. The grid's value
   carries the same words. `grid-view-selection-count` is new, in all 23
   locales. **Behaviour change** for anything that read the value in English.
+
+#### Automation
+
+- **`list_live_regions` listed live regions no screen reader can reach.** It
+  listed every node that declared a politeness: a hidden one, one inside a
+  hidden subtree, and the framework's two announcer nodes, which are hidden
+  while they have nothing to say. It now lists only the ones
+  `accesskit_consumer`'s filter keeps, which are the ones a platform adapter
+  walks and can announce. The set comes from
+  `teksilo_core::accessibility::audit::nodes_in_filtered_tree`.
+  **Behaviour change.**
 
 ## [0.13.1] - 2026-09-22
 

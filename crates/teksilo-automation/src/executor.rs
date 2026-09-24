@@ -614,14 +614,19 @@ fn execute_op(
             let update = tree.sync_accessibility();
             let focus = update.focus;
             let semantic_ctx = SemanticContext::new(&update);
+            // Only the regions a platform adapter walks. A hidden live region,
+            // or one inside a hidden subtree, is no region any reader has: the
+            // adapters announce nothing from a node their filter excludes, and
+            // the framework's own idle announcer nodes are exactly that.
+            let reachable = teksilo_core::accessibility::audit::nodes_in_filtered_tree(&update);
             let regions: Vec<SemanticNode> = update
                 .nodes
                 .iter()
-                .filter(|(_, n)| {
+                .filter(|(id, n)| {
                     matches!(
                         n.live(),
                         Some(accesskit::Live::Polite) | Some(accesskit::Live::Assertive)
-                    )
+                    ) && reachable.contains(id)
                 })
                 .map(|(id, n)| semantic_node(*id, n, focus, &semantic_ctx))
                 .collect();

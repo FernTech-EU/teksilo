@@ -1801,6 +1801,40 @@ fn list_live_regions_finds_polite_node() {
     assert_eq!(regions[0].live.as_deref(), Some("polite"));
 }
 
+/// Only the regions a platform adapter walks. The framework's two announcer
+/// nodes are always in the tree and hidden while idle, and a region an
+/// application hid is no region either; listing them told a caller that
+/// something could speak when nothing could.
+#[test]
+fn list_live_regions_leaves_out_what_no_reader_reaches() {
+    let mut tree = WidgetTree::new();
+    let shown = tree.add(Probe::new(accesskit::Role::Status, "Prêt").live(accesskit::Live::Polite));
+    let hidden = tree.add(
+        Probe::new(accesskit::Role::Status, "Caché")
+            .live(accesskit::Live::Polite)
+            .access_hidden(true),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::ListLiveRegions,
+        &default_settle(),
+    );
+    let AutomationReply::Ok { data } = reply else {
+        panic!("{reply:?}");
+    };
+    let regions: Vec<SemanticNode> = serde_json::from_value(data).unwrap();
+    let ids: Vec<u64> = regions.iter().map(|n| n.id).collect();
+    assert_eq!(
+        ids,
+        vec![node_ref(shown)],
+        "only the region a reader can reach; the hidden one is {}",
+        node_ref(hidden)
+    );
+}
+
 #[test]
 fn get_overlays_empty_on_plain_tree() {
     let (mut tree, _id) = laid_out(Probe::new(accesskit::Role::Button, "B"));

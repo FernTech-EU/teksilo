@@ -428,6 +428,28 @@ pub fn resolved_names(update: &TreeUpdate) -> std::collections::HashMap<NodeId, 
     out
 }
 
+/// Every node a platform adapter walks: the ones `accesskit_consumer`'s
+/// `common_filter` includes.
+///
+/// Left out are a hidden node, everything inside a hidden subtree, a node its
+/// clipping parent has scrolled out of view, and the `GenericContainer` and
+/// text-run nodes the consumer steps through. The window is taken to have
+/// focus, so the focused node is always in, as it is for a user working in
+/// the window.
+pub fn nodes_in_filtered_tree(update: &TreeUpdate) -> std::collections::HashSet<NodeId> {
+    let tree = Tree::new(update.clone(), true);
+    let state = tree.state();
+    let mut out = std::collections::HashSet::new();
+    let mut stack = vec![state.root()];
+    while let Some(node) = stack.pop() {
+        if accesskit_consumer::common_filter(&node) == accesskit_consumer::FilterResult::Include {
+            out.insert(locate(&node));
+        }
+        stack.extend(node.children());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
