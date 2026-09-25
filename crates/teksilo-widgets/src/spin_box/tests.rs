@@ -2109,3 +2109,252 @@ fn the_tooltip_describes_the_focused_node() {
     let node = node_of(&update, spin_button(&tree, spin)).expect("the spin button");
     assert_eq!(node.description(), Some("Past the hour"));
 }
+
+// ---------------------------------------------------------------------------
+// What a reader reads, after a live change of language
+// ---------------------------------------------------------------------------
+//
+// `tools/reader/` switched the spin-box gallery to French and found every box
+// re-rendered in French, then read back, stepped, filtered and committed in
+// English: focus turned `440,00` into `440.00`, Down on Gain said "-0.5", a
+// comma typed into Frequency was dropped as it was typed so `12,5` wrote 125,
+// and the grouped population was read "1,234,567", a decimal to a French ear.
+// A language switch does not rebuild a widget, and every path but the
+// re-render kept the conventions resolved when the spin box was built.
+
+/// The spin button of `spin` as an adapter reads it: through
+/// `accesskit_consumer`, which all three adapters are built on, its number
+/// (AT-SPI `Value.CurrentValue`, `accesskit_atspi_common` `node.rs:577`) and
+/// the text of its runs, which AT-SPI serves and diffs into its text-changed
+/// events (`document_range().text()`, `adapter.rs:130-131`). That text is what
+/// Orca 46.1 says of a spin button, with the name as focus arrives and alone
+/// on every step (`formatting.py`, `SPIN_BUTTON`: `displayedText or value`).
+fn as_read(
+    tree: &mut WidgetTree,
+    spin: teksilo_core::widget_id::WidgetId,
+) -> (Option<f64>, String) {
+    use accesskit_consumer::{FilterResult, common_filter};
+    let field = teksilo_core::accessibility::widget_id_to_node_id(spin_button(tree, spin));
+    let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+    let state = platform.state();
+    let node = state
+        .node_by_tree_local_id(field, teksilo_core::accesskit::TreeId::ROOT)
+        .expect("the spin button is in the tree");
+    assert_eq!(
+        common_filter(&node),
+        FilterResult::Include,
+        "an adapter lists the spin button"
+    );
+    (node.numeric_value(), node.document_range().text())
+}
+
+/// Change a running application's language as `WindowManager::set_locale`
+/// does: the i18n manager first, then the tree, which lays out and repaints
+/// again and rebuilds nothing.
+fn switch_language(mgr: &teksilo_i18n::I18nManager, tree: &mut WidgetTree, tag: &str) {
+    mgr.set_locale(tag.parse().unwrap());
+    tree.set_locale(tag.to_string());
+    tick(tree);
+}
+
+#[test]
+fn a_french_decimal_typed_after_a_switch_to_french_is_the_decimal_point() {
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(440.0_f64);
+    let spin = tree.add(SpinBox::new(value.clone(), 0.1, 20_000.0).label(lit!("Frequency")));
+    tick(&mut tree);
+    switch_language(&mgr, &mut tree, "fr-FR");
+    assert_eq!(as_read(&mut tree, spin).1, "440,00");
+
+    type_and_commit(&mut tree, spin, "12,5");
+    assert_eq!(
+        value.get(),
+        12.5,
+        "the comma is French's decimal point, not a character to drop"
+    );
+    assert_eq!(as_read(&mut tree, spin), (Some(12.5), "12,50".to_string()));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn focus_a_step_and_leaving_keep_the_language_switched_to() {
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut tree) = speaking("en-US");
+    let gain = Signal::new(0.0_f64);
+    let spin = tree.add(
+        SpinBox::new(gain, -60.0, 12.0)
+            .single_step(0.5)
+            .decimals(1)
+            .label(lit!("Gain")),
+    );
+    let next = tree.add(SpinBox::new(Signal::new(0_i32), 0, 10).label(lit!("Next")));
+    tick(&mut tree);
+    switch_language(&mgr, &mut tree, "fr-FR");
+    let mut listener = Listener::attach(&mut tree);
+
+    focus_field(&mut tree, spin);
+    tick(&mut tree);
+    let arrived = listener.heard(&mut tree);
+    assert_eq!(
+        as_read(&mut tree, spin).1,
+        "0,0",
+        "focus arrives on the number as it was shown"
+    );
+    assert_eq!(arrived, vec![Heard::Focus("Gain".to_string())]);
+
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::FocusValue("-0,5".to_string())],
+        "a step says the number in French"
+    );
+
+    focus_field(&mut tree, next);
+    tick(&mut tree);
+    assert_eq!(
+        as_read(&mut tree, spin),
+        (Some(-0.5), "-0,5".to_string()),
+        "leaving commits the number in French too"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_grouped_number_stays_french_as_focus_arrives_and_steps() {
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut tree) = speaking("en-US");
+    let spin = tree.add(
+        SpinBox::new(Signal::new(1_234_567_i64), 0, 99_999_999)
+            .use_grouping(true)
+            .label(lit!("Population")),
+    );
+    tick(&mut tree);
+    switch_language(&mgr, &mut tree, "fr-FR");
+    assert_eq!(as_read(&mut tree, spin).1, "1\u{202f}234\u{202f}567");
+    let mut listener = Listener::attach(&mut tree);
+
+    focus_field(&mut tree, spin);
+    tick(&mut tree);
+    let _ = listener.heard(&mut tree);
+    assert_eq!(
+        as_read(&mut tree, spin).1,
+        "1\u{202f}234\u{202f}567",
+        "a comma between the groups reads as a decimal point to a French reader"
+    );
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::FocusValue("1\u{202f}234\u{202f}568".to_string())]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+// ---------------------------------------------------------------------------
+// The special value text stays while the field has focus
+// ---------------------------------------------------------------------------
+//
+// The field used to swap "Auto" for "0" as focus arrived, in the update that
+// moved focus, so a reader Tabbing in heard "Timeout 0 spin button" and never
+// what 0 means here, while a step down to the minimum and Enter there both put
+// "Auto" back into the focused field. Qt's `QSpinBox` keeps
+// `specialValueText` through a Tab focus, selected (Qt 5.15, measured), and so
+// does this now.
+
+fn timeout_box() -> (WidgetTree, Signal<i32>, teksilo_core::widget_id::WidgetId) {
+    let value = Signal::new(0_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(
+        SpinBox::new(value.clone(), 0, 3600)
+            .suffix(" s")
+            .special_value_text(lit!("Auto"))
+            .label(lit!("Timeout")),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    (tree, value, spin)
+}
+
+#[test]
+fn arriving_at_the_minimum_says_the_special_text() {
+    use crate::common::heard_test::{Heard, Listener};
+    let (mut tree, _value, spin) = timeout_box();
+    let mut listener = Listener::attach(&mut tree);
+
+    focus_field(&mut tree, spin);
+    tick(&mut tree);
+    let arrived = listener.heard(&mut tree);
+    assert_eq!(
+        as_read(&mut tree, spin),
+        (Some(0.0), "Auto".to_string()),
+        "the reader arrives on what the minimum means here"
+    );
+    assert_eq!(arrived, vec![Heard::Focus("Timeout".to_string())]);
+
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::FocusValue("1".to_string())]
+    );
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::FocusValue("Auto".to_string())],
+        "back at the minimum, the same word as on arrival"
+    );
+}
+
+#[test]
+fn a_number_typed_over_the_special_text_replaces_it() {
+    // Focus that a click did not give selects the whole text, so the special
+    // text is typed over as the number was.
+    let (mut tree, value, spin) = timeout_box();
+    focus_field(&mut tree, spin);
+    tick(&mut tree);
+    let field = tree.focused().expect("the field holds focus");
+    tree.type_text(field, "30");
+    tick(&mut tree);
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    tick(&mut tree);
+    assert_eq!(value.get(), 30);
+    assert_eq!(as_read(&mut tree, spin), (Some(30.0), "30".to_string()));
+}
+
+/// The suffix the spin box's editing field shows now.
+fn suffix_of(tree: &WidgetTree, spin: teksilo_core::widget_id::WidgetId) -> String {
+    tree.widget_as_any(spin_button(tree, spin))
+        .and_then(|w| w.downcast_ref::<crate::primitives::TextInputField>())
+        .map(crate::primitives::TextInputField::suffix_shown)
+        .expect("the spin button is a TextInputField")
+}
+
+#[test]
+fn a_special_value_box_built_off_its_minimum_shows_its_unit() {
+    // The unit is hidden only where the special text stands in for the
+    // number. A box built at 30 once showed "30" with no unit until the
+    // value first changed, because nothing wrote the suffix before then.
+    let value = Signal::new(30_i32);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let spin = tree.add(
+        SpinBox::new(value.clone(), 0, 3600)
+            .suffix(" s")
+            .special_value_text(lit!("Auto"))
+            .label(lit!("Timeout")),
+    );
+    tree.layout(SizeProposal::exact(300.0, 60.0));
+    tick(&mut tree);
+    assert_eq!(suffix_of(&tree, spin), " s");
+
+    value.set(0);
+    tick(&mut tree);
+    assert_eq!(suffix_of(&tree, spin), "", "\"Auto\" takes no unit");
+
+    let (tree, _value, spin) = timeout_box();
+    assert_eq!(suffix_of(&tree, spin), "", "built at the minimum: \"Auto\"");
+}

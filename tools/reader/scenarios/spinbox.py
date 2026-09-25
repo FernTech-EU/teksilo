@@ -16,9 +16,8 @@ Where each piece of a reader's experience is produced
   (`accessibility` in `spin_box.rs`, `spin_box/step_button.rs`).
 * The suffix (" pt", " dB", ...) is painted beside the text and is in neither
   the text nor the value.
-* `special_value_text` ("Auto" on Timeout) is shown at the minimum while the
-  box is unfocused; the effect on `focused` swaps it for the plain number on
-  focus, and `commit` (on blur) puts it back.
+* `special_value_text` ("Auto" on Timeout) is shown at the minimum, focused
+  or not (`format_for_display`); keyboard focus selects it.
 * The chrome (`styles/recipe_spin_box_style.rs`) puts a `Divider` between
   the field and the buttons, and `Divider::accessibility` claims
   `Role::Splitter`.

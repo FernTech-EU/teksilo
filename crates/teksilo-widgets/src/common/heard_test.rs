@@ -294,7 +294,13 @@ impl TreeChangeHandler for Handler<'_> {
             {
                 self.tell(new, Heard::FocusToggled(toggled));
             }
-            if let Some(number) = new.numeric_value()
+            // A node that carries its value as text is heard by that text:
+            // Orca speaks a spin button's displayed text, not its number
+            // (`formatting.py`, SPIN_BUTTON "focused"), and UIA and macOS
+            // read the value string. Only a node with no value text, such as
+            // a slider, is heard by its number.
+            if new.value().is_none()
+                && let Some(number) = new.numeric_value()
                 && old.numeric_value() != Some(number)
             {
                 self.tell(new, Heard::FocusNumber(as_orca_speaks(number)));

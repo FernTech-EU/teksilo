@@ -55,7 +55,9 @@
 //! - **Special value text**: when the current value equals `min`
 //!   and [`special_value_text`](SpinBox::special_value_text) is
 //!   set, the field shows that string instead of the formatted
-//!   number — Qt's "Auto" / "None" / "Unlimited" affordance.
+//!   number (Qt's "Auto" / "None" / "Unlimited" affordance). It
+//!   stays while the field has focus, as in Qt: keyboard focus
+//!   selects it, so a number typed replaces it.
 //! - **Adaptive step**: with
 //!   [`StepType::Adaptive`], the effective step
 //!   tracks the decimal magnitude of the current value (Qt's
@@ -66,11 +68,12 @@
 //!   ([`localized`](SpinBox::localized), on by default); thousands
 //!   separators are opt-in
 //!   ([`use_grouping`](SpinBox::use_grouping), off by default, as in
-//!   Qt). Display, commit parse and the per-character input filter
-//!   all resolve from one `NumberPresentation`, so they cannot
-//!   disagree about which separator the field is using — a French
-//!   user sees `12,5`, types `12,5`, and the numeric keypad's `.`
-//!   still works. Rendering is a string transform over the value's
+//!   Qt). Display, commit parse, stepping and the per-character
+//!   input filter all read one `NumberPresentation`, which a live
+//!   language switch replaces, so they cannot disagree about which
+//!   separator the field is using: a French user sees `12,5`,
+//!   types `12,5`, and the numeric keypad's `.` still works.
+//!   Rendering is a string transform over the value's
 //!   own `Display`, never an `f64` round-trip, so a `SpinBox<i64>`
 //!   stays exact past 2^53. Turn it off for a number that is an
 //!   *identifier* rather than a quantity (port, version component,
@@ -591,8 +594,9 @@ impl<T: SpinValue> SpinBox<T> {
     /// Text shown in place of the formatted value when the current
     /// value equals `min`. Use for "Auto", "None", "Off",
     /// "Unlimited" affordances where the minimum has special
-    /// semantics. When the field is focused the real number is
-    /// shown instead so the user can type.
+    /// semantics. The text stays while the field has focus, as
+    /// Qt's `specialValueText` does: keyboard focus selects it, so a
+    /// number typed replaces it, and a step moves off it.
     pub fn special_value_text(mut self, text: impl Into<LocalizedString>) -> Self {
         self.special_value_text = Some(text.into());
         self
@@ -882,17 +886,24 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         let read_only = self.read_only;
         let wheel_mode = self.wheel_mode;
 
-        // Resolve the locale's number conventions once, and hand the
-        // *same* value to the display path, the commit parse and the
-        // input filter. Split resolution would let the three disagree
-        // about which separator this field uses — the failure mode
-        // `DateEdit` avoids by deriving format, parse and mask from one
-        // `ParsedPattern`.
+        // The locale's number conventions, and the *same* value for the
+        // display path, the commit parse, the step and the input filter.
+        // Split resolution would let them disagree about which separator
+        // this field uses, which `DateEdit` avoids by deriving format, parse
+        // and mask from one `ParsedPattern`.
         //
-        // Rebuild-level reactivity is not needed: the effect on
-        // `ctx.locale_signal()` below re-formats the text in place, and
-        // the closures below re-resolve on the next build.
-        let presentation = NumberPresentation::resolve(self.localized, self.use_grouping);
+        // A cell every path reads as it runs, not a copy each captures. A
+        // locale switch rebuilds nothing (`WidgetTree::set_locale` marks the
+        // tree dirty and stops there), so a copy taken here kept every path
+        // but the re-render in the build-time locale: after a switch to
+        // French the field showed `12,5`, dropped the comma typed into it,
+        // and committed 125. The effect on `ctx.locale_signal()` below
+        // replaces the value in the step that re-renders the text, so the
+        // text shown and the conventions it is read with are one locale's.
+        let presentation = LivePresentation::new(NumberPresentation::resolve(
+            self.localized,
+            self.use_grouping,
+        ));
 
         // A handle on the editing field, handed out before the field exists
         // (it is built further down) so the commit and step closures can
@@ -930,8 +941,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             special_text.as_ref(),
             text_from_value.as_deref(),
             min,
-            false,
-            &presentation,
+            &presentation.get(),
         ));
 
         // Effect: when the value signal changes externally, reformat
@@ -968,8 +978,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         special_text.as_ref(),
                         text_from_value.as_deref(),
                         min_cap,
-                        false,
-                        &presentation,
+                        &presentation.get(),
                     ));
                 }
             });
@@ -982,23 +991,22 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             let text_from_value = text_from_value.clone();
             let special_text = special_text.clone();
             let value_signal = self.value.clone();
-            let focused = self.focused.clone();
             let locale_signal = ctx.locale_signal();
-            // A locale switch re-renders the number in place. The
-            // presentation resolved at build time is stale by then, so
-            // re-resolve inside the effect rather than capturing it.
+            let presentation = presentation.clone();
+            // A locale switch re-renders the number in place, in the new
+            // locale's conventions, which from here on are the ones every
+            // other path reads the number with.
             let localized = self.localized;
             let grouping = self.use_grouping;
             ctx.effect(&locale_signal, move |_| {
-                let presentation = NumberPresentation::resolve(localized, grouping);
+                presentation.set(NumberPresentation::resolve(localized, grouping));
                 show(format_for_display(
                     value_signal.get(),
                     decimals,
                     special_text.as_ref(),
                     text_from_value.as_deref(),
                     min,
-                    focused.get(),
-                    &presentation,
+                    &presentation.get(),
                 ));
             });
         }
@@ -1030,8 +1038,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                     special_text.as_ref(),
                     text_from_value.as_deref(),
                     min,
-                    false,
-                    &presentation,
+                    &presentation.get(),
                 ));
                 if approx_ne(new_value, old) {
                     value_signal.set(new_value);
@@ -1061,7 +1068,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                 // a string it never agreed to read.
                 match value_from_text.as_deref() {
                     Some(f) => f(raw.trim()),
-                    None => presentation.parse::<T>(raw),
+                    None => presentation.get().parse::<T>(raw),
                 }
             })
         };
@@ -1197,8 +1204,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
                         special_text.as_ref(),
                         text_from_value.as_deref(),
                         min,
-                        false,
-                        &presentation,
+                        &presentation.get(),
                     )
                 };
                 let current = value_signal.get();
@@ -1296,16 +1302,16 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         if value_from_text.is_none() {
             field = field.char_filter({
                 let presentation = presentation.clone();
-                move |c| presentation.accepts_char::<T>(c)
+                move |c| presentation.get().accepts_char::<T>(c)
             });
         }
         // Suffix wiring:
         //   • plain static suffix              → `.suffix(..)` (no signal)
-        //   • static suffix + special_value    → reactive: hide suffix when
-        //     `value == min` AND the field isn't focused, so `"Auto"` reads
-        //     cleanly without a trailing unit but typing at `min` still
-        //     shows the unit. Matches Qt's `QSpinBox::specialValueText`
-        //     behavior.
+        //   • static suffix + special_value    → reactive: hide the suffix
+        //     when `value == min`, where the field shows the special text
+        //     whether or not it has focus, so `"Auto"` reads cleanly without
+        //     a trailing unit. A number typed over it takes its unit when it
+        //     is committed.
         //   • no suffix and no special         → nothing to do.
         //
         // The reactive case uses a mutable intermediate signal
@@ -1313,51 +1319,31 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // derived signal directly — `ctx.effect` requires a
         // mutable source, and the field needs to drive a
         // relayout + re-measure when the suffix flips on/off.
+        // Driven by the value, never by the text: the field writes its text
+        // out while it holds its own state, and a suffix change re-enters
+        // that state to measure the new suffix.
         if !suffix_str.is_empty() {
             if self.special_value_text.is_some() {
-                let suffix_live = ctx.signal(suffix_str.clone());
-                let resolve = {
-                    let suffix_str = suffix_str.clone();
-                    let min_cap = min;
-                    move |v: T, focused: bool| -> String {
-                        let at_min = approx_eq(v, min_cap);
-                        if at_min && !focused {
+                let unit_for = {
+                    let unit = suffix_str.clone();
+                    move |v: T| {
+                        if approx_eq(v, min) {
                             String::new()
                         } else {
-                            suffix_str.clone()
+                            unit.clone()
                         }
                     }
                 };
-                // Seed from the current state.
-                {
-                    let current_focused = self.focused.get();
-                    suffix_live.set(resolve(self.value.get(), current_focused));
-                }
-                // Observe value.
-                {
-                    let suffix_live = suffix_live.clone();
-                    let focused = self.focused.clone();
-                    let resolve = resolve.clone();
-                    ctx.effect(&self.value, move |v| {
-                        let is_focused = focused.get();
-                        let next = resolve(*v, is_focused);
-                        if suffix_live.get() != next {
-                            suffix_live.set(next);
-                        }
-                    });
-                }
-                // Observe focus.
-                {
-                    let suffix_live = suffix_live.clone();
-                    let value_signal = self.value.clone();
-                    let resolve = resolve.clone();
-                    ctx.effect(&self.focused, move |is_focused| {
-                        let next = resolve(value_signal.get(), *is_focused);
-                        if suffix_live.get() != next {
-                            suffix_live.set(next);
-                        }
-                    });
-                }
+                // Seeded here: an effect fires on a change, never as it is
+                // registered, and the field reads its first suffix at build.
+                let suffix_live = ctx.signal(unit_for(self.value.get()));
+                let suffix_for_value = suffix_live.clone();
+                ctx.effect(&self.value, move |v| {
+                    let next = unit_for(*v);
+                    if suffix_for_value.get() != next {
+                        suffix_for_value.set(next);
+                    }
+                });
                 field = field.suffix(suffix_live);
             } else {
                 field = field.suffix(suffix_str.clone());
@@ -1375,33 +1361,15 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             field = field.on_blur_fn(move |ctx| commit(ctx));
         }
 
-        // Also: when the field gains focus, show the raw editable
-        // text instead of any `special_value_text`. TextInputField
-        // itself doesn't know about our formatter so we bind a
-        // secondary effect on the SpinBox's focus_within signal.
-        {
-            let focused_for_text = self.focused.clone();
-            let show = show.clone();
-            let value_signal = self.value.clone();
-            let text_from_value = text_from_value.clone();
-            let min_cap = min;
-            ctx.effect(&focused_for_text, move |is_focused| {
-                if *is_focused {
-                    // On focus, swap any special_value_text out for
-                    // the plain formatted number so the user can
-                    // edit it with the keyboard.
-                    show(format_for_display(
-                        value_signal.get(),
-                        decimals,
-                        None,
-                        text_from_value.as_deref(),
-                        min_cap,
-                        true,
-                        &presentation,
-                    ));
-                }
-            });
-        }
+        // Focus changes nothing in the text. The field used to swap a
+        // `special_value_text` for the plain number as focus arrived, in the
+        // update that moved focus, so a screen reader landing on "Auto" was
+        // told "0" and never what 0 means here; a step back to `min` and a
+        // commit there both put the special text back into the focused field
+        // anyway. Qt's `QSpinBox` keeps `specialValueText` through focus (Qt
+        // 5.15, measured: a Tab focus leaves "Auto" in the field, selected),
+        // and so does this: keyboard focus selects the whole text, so a number
+        // typed replaces it, and a step moves off it.
 
         // The field is the spin button. It holds focus, the caret and the
         // text, so it is the node a focus change reports and the one a
@@ -1927,10 +1895,10 @@ fn chevron_down_icon(size: f32) -> IconWidget {
 /// How the number itself is rendered and read back: the locale's
 /// conventions, or the C locale.
 ///
-/// Resolved once per `build()` and threaded through the format and
-/// parse paths together, so the two can never disagree about which
-/// separator this field is using — the same single-source discipline
-/// `DateEdit` gets from its one `ParsedPattern`.
+/// Held in one [`LivePresentation`] per spin box and read from there by
+/// the format and parse paths together, so the two can never disagree
+/// about which separator this field is using: the single-source
+/// discipline `DateEdit` gets from its one `ParsedPattern`.
 #[derive(Clone)]
 pub(crate) struct NumberPresentation {
     symbols: Option<Rc<teksilo_i18n::NumberSymbols>>,
@@ -1998,12 +1966,30 @@ impl NumberPresentation {
     }
 }
 
+/// The [`NumberPresentation`] one spin box renders and reads its number
+/// with, shared by every path that does either and replaced in place when
+/// the locale changes. See `build` for why a copy per path does not do.
+#[derive(Clone)]
+struct LivePresentation(Rc<RefCell<NumberPresentation>>);
+
+impl LivePresentation {
+    fn new(presentation: NumberPresentation) -> Self {
+        Self(Rc::new(RefCell::new(presentation)))
+    }
+
+    /// The presentation in force now. A clone, two words, so no borrow is
+    /// held across the call that uses it.
+    fn get(&self) -> NumberPresentation {
+        self.0.borrow().clone()
+    }
+
+    fn set(&self, presentation: NumberPresentation) {
+        self.0.replace(presentation);
+    }
+}
+
 /// Format `value` for display, honoring `special_value_text` when
 /// applicable and deferring to a user-supplied formatter when set.
-///
-/// `force_plain` bypasses `special_value_text` even when the value
-/// equals `min` — used when the field is focused so the user can
-/// edit the number instead of a placeholder string.
 ///
 /// A user-supplied `custom` formatter owns the whole string and is
 /// **not** localized afterwards: it already returns exactly what the
@@ -2015,11 +2001,9 @@ fn format_for_display<T: SpinValue>(
     special: Option<&LocalizedString>,
     custom: Option<&dyn Fn(T) -> LocalizedString>,
     min: T,
-    force_plain: bool,
     presentation: &NumberPresentation,
 ) -> String {
-    if !force_plain
-        && let Some(special_text) = special
+    if let Some(special_text) = special
         && approx_eq(value, min)
     {
         return special_text.resolve_now();

@@ -434,6 +434,23 @@ by crate for clarity, not because crates version independently.
   nothing and the held value is shown again, as in Qt. `Enter` and focus loss
   now commit keystrokes delivered in the same batch as the key that commits
   them, which they used to miss by a frame. **Behaviour change.**
+- **After a live change of language, a `SpinBox` wrote wrong values.** Switched
+  to French, every spin box showed `440,00`, and then went on reading, stepping
+  and filtering in the language it was built in: focus turned the text back to
+  `440.00`, a step said `-0.5`, a grouped `1 234 567` was read "1,234,567",
+  which is a decimal to a French reader, and the comma typed into a decimal
+  field was dropped, so `12,5` wrote 125. The field now shows, reads, steps,
+  commits and accepts the number in the language switched to: `12,5` writes
+  12.5, shown and spoken `12,50`.
+- **A `SpinBox` at its `special_value_text` told a screen reader "0".** Focus
+  replaced "Auto" with the minimum as it arrived, so a reader moving to a
+  timeout heard "Timeout 0 spin button" and never what 0 means there, while a
+  step back down to the minimum said "Auto". The special text now stays while
+  the field has focus, as Qt's `specialValueText` does: arriving says "Timeout
+  Auto spin button", keyboard focus selects it so a number typed replaces it,
+  and leaving the field no longer rewrites its text, which Orca spoke as "Text
+  unselected.". **Behaviour change**: a click into the field puts the caret in
+  the special text, not in the number; select it, or step, to replace it.
 - **The calendar spoke English and ISO dates to a user in any language.**
   In French the grid was "Calendar, septembre 2026", a day was "lundi août 31,
   2026", and the value read "2026-09-24 (selected: 2027-03-12)". Every string

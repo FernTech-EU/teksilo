@@ -758,6 +758,13 @@ impl TextInputField {
             .as_ref()
             .expect("TextInputField::state called before build")
     }
+
+    /// The suffix the field lays out and paints now, for the tests of the
+    /// widgets that drive it.
+    #[cfg(test)]
+    pub(crate) fn suffix_shown(&self) -> String {
+        self.state().borrow().suffix.clone()
+    }
 }
 
 /// The reading direction the field's runs are announced with.
