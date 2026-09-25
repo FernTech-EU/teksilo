@@ -181,6 +181,20 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A check box, a switch, a radio button or a slider changed without a
+  screen reader being told.** On Space, an arrow key, a click or a screen
+  reader's own activation, `Checkbox`, `Toggle`, `RadioButton` and `Slider`
+  changed their state and no platform heard of it: the new state reached the
+  accessibility tree only with the next unrelated update, most often the focus
+  move that followed, where Orca's "checked" or "52" was cut by the new focus.
+  Each change now reaches every platform in the frame that makes it, whether
+  the user, a screen reader or the application made it, and so does a
+  `Checkbox` in a `ListView` or `TreeView` row checked with Space on the row.
+  A `Slider` also gives the platform its figures as they are written: an
+  `f32` 0.3 was published as 0.30000001192092896, which Orca spoke digit by
+  digit, and is now 0.3, as are its minimum, maximum and steps. A value the
+  arrow keys reach reads as the step it reached: three steps of 0.01 up from
+  0.3 are read as 0.33, not as the 0.32999998 the `f32` sums come to.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

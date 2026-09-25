@@ -41,6 +41,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
@@ -229,6 +230,14 @@ impl Widget for RadioButton {
         let effective_enabled = ctx.effective_enabled_signal(self_id);
 
         let interaction = ctx.signal(InteractionState::Idle);
+
+        // `accessibility()` reads the selection only when the tree is walked,
+        // and the style's repaint does not walk it; see `Checkbox::build`.
+        selected.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
 
         let is_selected = selected.map(move |s| *s == value);
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
@@ -542,6 +551,57 @@ mod tests {
         assert_eq!(selected.get(), 2);
         tree.click(r0);
         assert_eq!(selected.get(), 0);
+    }
+
+    #[test]
+    fn a_reader_is_told_each_change_as_it_happens() {
+        // Space on a radio button, or a screen reader's own click, moved the
+        // selection and told no platform: both buttons kept their old state
+        // until something unrelated walked the tree again.
+        use crate::common::heard_test::{Heard, Listener};
+        use crate::primitives::VStack;
+        use teksilo_core::accesskit::{Role, Toggled};
+
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let a = tree.add(RadioButton::new(0, selected.clone()).label(lit!("A")));
+        let b = tree.add(RadioButton::new(1, selected.clone()).label(lit!("B")));
+        let _root = tree.add(VStack::new().child(a).child(b));
+        let p = SizeProposal::exact(200.0, 200.0);
+        tree.layout(p);
+        tree.focus(b);
+        tree.layout(p);
+        let mut listener = Listener::attach(&mut tree);
+
+        tree.press_key(teksilo_core::event::Key::Space, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusToggled(Toggled::True)],
+            "Space"
+        );
+        assert_eq!(
+            listener.toggled(Role::RadioButton, "A"),
+            Some(Toggled::False),
+            "and the button it replaced is cleared on the platform too"
+        );
+
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(a),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusToggled(Toggled::False)],
+            "a screen reader's click on the other button"
+        );
+        assert_eq!(
+            listener.toggled(Role::RadioButton, "A"),
+            Some(Toggled::True)
+        );
     }
 
     #[test]

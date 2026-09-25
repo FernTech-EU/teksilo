@@ -39,6 +39,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
@@ -249,6 +250,13 @@ impl Widget for Toggle {
         // Forward the enabled state into the arena; see IconButton.
         ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
+        // `accessibility()` reads `on` only when the tree is walked, and the
+        // style's repaint does not walk it; see `Checkbox::build`.
+        self.on.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeToggleStyle` default.
         let style: SharedToggleStyle = self
@@ -700,6 +708,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_reader_is_told_each_change_as_it_happens() {
+        // The switch told no platform when Space or a screen reader's own
+        // click turned it: "pressed" came out only with the next unrelated
+        // walk of the tree, and was cut by the focus move that caused it.
+        use crate::common::heard_test::{Heard, Listener};
+        use teksilo_core::accesskit::Toggled;
+
+        let on = Signal::new(false);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let t = tree.add(Toggle::new(on.clone()).label(lit!("Dark mode")));
+        let p = SizeProposal::exact(200.0, 60.0);
+        tree.layout(p);
+        tree.focus(t);
+        tree.layout(p);
+        let mut listener = Listener::attach(&mut tree);
+
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusToggled(Toggled::True)],
+            "Space"
+        );
+
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(t),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusToggled(Toggled::False)],
+            "a screen reader's click"
+        );
     }
 
     #[test]

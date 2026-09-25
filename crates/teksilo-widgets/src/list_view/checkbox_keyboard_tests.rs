@@ -82,6 +82,43 @@ fn space_checks_the_focused_row_and_ctrl_space_still_selects() {
 }
 
 #[test]
+fn space_on_a_row_reaches_the_platform_at_once() {
+    // Space checked the row's box and told no platform: the tree the reader
+    // walks kept the old state until something unrelated walked it again, so
+    // a second Space (clearing it) could leave the reader told "checked".
+    use crate::common::heard_test::Listener;
+    use teksilo_core::accesskit::{Role, Toggled};
+
+    let (mut tree, sel, checks, p) = checked_list();
+    sel.select(3);
+    tree.layout(p);
+    let mut listener = Listener::attach(&mut tree);
+    assert_eq!(
+        listener.toggled(Role::CheckBox, "Row 3"),
+        Some(Toggled::False)
+    );
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    let _ = listener.heard(&mut tree);
+    assert!(checks.signal_for(3).get(), "Space checked the row");
+    assert_eq!(
+        listener.toggled(Role::CheckBox, "Row 3"),
+        Some(Toggled::True),
+        "and the platform holds it checked"
+    );
+
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(p);
+    let _ = listener.heard(&mut tree);
+    assert_eq!(
+        listener.toggled(Role::CheckBox, "Row 3"),
+        Some(Toggled::False),
+        "and cleared again"
+    );
+}
+
+#[test]
 fn space_on_a_row_fires_the_checkbox_on_change() {
     // The path this test exists for: a checkbox inside a data-view row is out
     // of the Tab order, so `Space` on the focused row is its only keyboard

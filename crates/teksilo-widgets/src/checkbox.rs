@@ -53,6 +53,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
@@ -385,6 +386,14 @@ impl Widget for Checkbox {
             CheckState::Checked => CheckboxState::Checked,
             CheckState::Indeterminate => CheckboxState::Indeterminate,
         });
+        // The body's repaint is not a walk of the accessibility tree, and
+        // `accessibility()` reads the state only when one happens: without this
+        // a change reaches no platform until something unrelated re-walks it.
+        kind.check_state_signal().bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
 
         let is_hovered = interaction.map(|s| matches!(s, InteractionState::Hovered));
         let is_pressed = interaction.map(|s| matches!(s, InteractionState::Pressed));
@@ -748,6 +757,54 @@ mod tests {
         assert!(checked.get());
         tree.press_key(Key::Space, Modifiers::NONE);
         assert!(!checked.get());
+    }
+
+    #[test]
+    fn a_reader_is_told_each_change_as_it_happens() {
+        // Space, a screen reader's own click and a write from the app each
+        // changed the box and told no platform: its state reached the tree only
+        // when something unrelated walked it again, most often the next focus
+        // move, where Orca's "checked" was cut by the new focus.
+        use crate::common::heard_test::{Heard, Listener};
+        use teksilo_core::accesskit::Toggled;
+
+        let state = Signal::new(CheckState::Unchecked);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let cb = tree.add(Checkbox::tristate(state.clone()).label(lit!("Accept")));
+        let p = SizeProposal::exact(200.0, 80.0);
+        tree.layout(p);
+        tree.focus(cb);
+        tree.layout(p);
+        let mut listener = Listener::attach(&mut tree);
+
+        tree.press_key(Key::Space, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusToggled(Toggled::True)],
+            "Space"
+        );
+
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(cb),
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::NoopWindowOps,
+        );
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusToggled(Toggled::False)],
+            "a screen reader's click"
+        );
+
+        state.set(CheckState::Indeterminate);
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusToggled(Toggled::Mixed)],
+            "a write from the app"
+        );
     }
 
     #[test]

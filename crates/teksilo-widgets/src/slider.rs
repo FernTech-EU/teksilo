@@ -74,6 +74,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::focus::FocusOrigin;
 use teksilo_core::gesture::DragPhase;
@@ -346,6 +347,13 @@ impl Widget for Slider {
         // Forward the enabled state into the arena; see IconButton.
         ctx.enabled_when(self_id, self.enabled.clone());
         let effective_enabled = ctx.effective_enabled_signal(self_id);
+        // `accessibility()` reads the value only when the tree is walked, and
+        // the style's repaint does not walk it; see `Checkbox::build`.
+        self.value.bind_to(
+            self_id,
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
 
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeSliderStyle` default.
@@ -788,15 +796,16 @@ impl Widget for Slider {
         if let Some(ref label) = self.label {
             builder.set_name(label.resolve_now());
         }
-        builder.set_numeric_value(self.value.get() as f64);
-        builder.set_min_numeric_value(self.min as f64);
-        builder.set_max_numeric_value(self.max as f64);
+        let step = self.effective_step();
+        builder.set_numeric_value(on_grid(self.value.get(), self.min, step));
+        builder.set_min_numeric_value(as_written(self.min));
+        builder.set_max_numeric_value(as_written(self.max));
         // Publish both keyboard distances so Orca / VoiceOver can announce
         // "step by N" for an arrow and the coarser figure for a page key.
         // Both come from the same helpers the handlers use, so the announced
         // number and the applied one cannot drift.
-        builder.set_numeric_value_step(self.effective_step() as f64);
-        builder.set_numeric_value_jump(self.effective_page_step() as f64);
+        builder.set_numeric_value_step(on_grid(step, self.min, step));
+        builder.set_numeric_value_jump(on_grid(self.effective_page_step(), self.min, step));
         let orientation = match self.orientation {
             Orientation::Horizontal => teksilo_core::accesskit::Orientation::Horizontal,
             Orientation::Vertical => teksilo_core::accesskit::Orientation::Vertical,
@@ -810,6 +819,43 @@ impl Widget for Slider {
         // VoiceOver's value entry reachable at all.
         builder.add_action(teksilo_core::accesskit::Action::SetValue);
         builder.add_action(teksilo_core::accesskit::Action::Focus);
+    }
+}
+
+/// The `f64` a platform is handed for one of the slider's `f32`s: the one
+/// nearest the shortest decimal that reads back as that `f32`, rather than the
+/// `f32`'s exact binary value. `0.3_f32 as f64` is 0.30000001192092896, and a
+/// screen reader speaks the number it is given: Orca reads every digit of a
+/// value below 1 (`orca/ax_value.py`, `get_current_value_text`), and AT-SPI
+/// carries no value text to say it otherwise.
+fn as_written(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or(f64::from(value))
+}
+
+/// [`as_written`] for a figure on the grid the arrows walk from `min` by
+/// `step`, put back on that grid when `f32` arithmetic has only drifted off
+/// it. An arrow adds an `f32` step to an `f32` value and rounds the sum to an
+/// `f32`, so 0.65 + 0.01 is 0.65999997, the third step up from 0.3 is
+/// 0.32999998, and ten steps of 0.01 are 0.099999994. Every point of the grid
+/// is written with no more decimal places than `min` and `step` take, so a
+/// figure within a thousandth of a step of such a decimal is published as
+/// that decimal. Any other figure, such as a value the application set
+/// between two steps, is published as it is.
+fn on_grid(figure: f32, min: f32, step: f32) -> f64 {
+    fn places(value: f32) -> usize {
+        // `Display` never writes an `f32` with an exponent.
+        value
+            .to_string()
+            .split_once('.')
+            .map_or(0, |(_, fraction)| fraction.len())
+    }
+    let written = as_written(figure);
+    let places = places(min).max(places(step));
+    let rounded: f64 = format!("{written:.places$}").parse().unwrap_or(written);
+    if (rounded - written).abs() <= as_written(step).abs() * 1e-3 {
+        rounded
+    } else {
+        written
     }
 }
 
@@ -1076,6 +1122,133 @@ mod tests {
         let s = tree.add(Slider::new(Signal::new(50.0_f32), 0.0, 100.0).page_step(25.0));
         tree.layout(SizeProposal::exact(200.0, 60.0));
         assert_eq!(a11y_steps(&mut tree, s).1, Some(25.0));
+    }
+
+    #[test]
+    fn a_reader_is_told_each_new_value_as_it_happens() {
+        // An arrow moved the value and told no platform: the new figure came
+        // out only with the next unrelated walk of the tree, most often the
+        // next focus move, where Orca's "52" was cut by the new focus.
+        use crate::common::heard_test::{Heard, Listener};
+
+        let value = Signal::new(50.0_f32);
+        let mut tree = WidgetTree::new();
+        let s =
+            tree.add(Slider::new(value.clone(), 0.0, 100.0).label(teksilo_i18n::lit!("Volume")));
+        let p = SizeProposal::exact(200.0, 60.0);
+        tree.layout(p);
+        tree.focus(s);
+        tree.layout(p);
+        let mut listener = Listener::attach(&mut tree);
+
+        for heard in ["51", "52"] {
+            tree.press_key(Key::ArrowRight, Modifiers::NONE);
+            tree.layout(p);
+            assert_eq!(
+                listener.heard(&mut tree),
+                vec![Heard::FocusNumber(heard.to_string())],
+                "Right"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reader_hears_the_figure_the_app_holds_not_its_binary_noise() {
+        // An `f32` widened as it is reads 0.3 as 0.30000001192092896, and Orca
+        // speaks every digit of a value under 1 (`ax_value.py`,
+        // `get_current_value_text`).
+        use crate::common::heard_test::{Heard, Listener};
+
+        let value = Signal::new(0.3_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(
+            Slider::new(value.clone(), 0.0, 1.0)
+                .step(0.01)
+                .orientation(Orientation::Vertical)
+                .label(teksilo_i18n::lit!("Opacity")),
+        );
+        let p = SizeProposal::exact(60.0, 200.0);
+        tree.layout(p);
+
+        let update = tree.sync_accessibility();
+        let nid = teksilo_core::accessibility::widget_id_to_node_id(s);
+        let node = &update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == nid)
+            .expect("the slider publishes an AT node")
+            .1;
+        assert_eq!(
+            (node.numeric_value(), node.numeric_value_step()),
+            (Some(0.3), Some(0.01)),
+        );
+
+        tree.focus(s);
+        tree.layout(p);
+        let mut listener = Listener::attach(&mut tree);
+        tree.press_key(Key::ArrowUp, Modifiers::NONE);
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusNumber("0.31".to_string())],
+        );
+    }
+
+    #[test]
+    fn a_reader_hears_each_step_on_its_grid_not_the_drift_of_f32_sums() {
+        // Each arrow adds an `f32` step to an `f32` value and rounds the sum
+        // to an `f32`, so the value drifts off the step's grid: 0.65 + 0.01 is
+        // 0.65999997, the third step up from 0.3 is 0.32999998, and ten steps
+        // of 0.01 are 0.099999994. Orca speaks every digit it is given below 1.
+        use crate::common::heard_test::{Heard, Listener};
+
+        // No step: the arrows walk 1 % of the range, as the menus example's
+        // Opacity slider does from 0.65.
+        let value = Signal::new(0.65_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 1.0).label(teksilo_i18n::lit!("Opacity")));
+        let p = SizeProposal::exact(200.0, 60.0);
+        tree.layout(p);
+        assert_eq!(
+            a11y_steps(&mut tree, s),
+            (Some(0.01), Some(0.1)),
+            "the arrow and page distances"
+        );
+        tree.focus(s);
+        tree.layout(p);
+        let mut listener = Listener::attach(&mut tree);
+        for heard in ["0.66", "0.67", "0.68"] {
+            tree.press_key(Key::ArrowRight, Modifiers::NONE);
+            tree.layout(p);
+            assert_eq!(
+                listener.heard(&mut tree),
+                vec![Heard::FocusNumber(heard.to_string())],
+                "Right"
+            );
+        }
+
+        value.set(0.3);
+        tree.layout(p);
+        let _ = listener.heard(&mut tree);
+        for heard in ["0.31", "0.32", "0.33"] {
+            tree.press_key(Key::ArrowRight, Modifiers::NONE);
+            tree.layout(p);
+            assert_eq!(
+                listener.heard(&mut tree),
+                vec![Heard::FocusNumber(heard.to_string())],
+                "Right from 0.3"
+            );
+        }
+
+        // A value the app set between two steps is not its neighbour on the
+        // grid, and is published as it is.
+        value.set(0.655);
+        tree.layout(p);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::FocusNumber("0.655".to_string())],
+            "a value off the grid"
+        );
     }
 
     #[test]

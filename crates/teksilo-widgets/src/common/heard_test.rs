@@ -17,24 +17,29 @@
 //! `accesskit_atspi_common-0.20.0`, `accesskit_windows-0.35.0` and
 //! `accesskit_macos-0.27.0`.
 //!
-//! Two events are raised and deliberately not kept: a name or value change
-//! on a node that is not the focus. Orca speaks a name change only for its
-//! locus of focus (`orca/scripts/default.py`, `onNameChanged`, Orca 46.1),
-//! and AT-SPI carries no string value at all (`accesskit_atspi_common`
-//! `node.rs:650-658` raises only a numeric one). That NVDA and VoiceOver
-//! likewise speak a name or value change only on their focus object is not
-//! verified here: neither's source is on this machine.
+//! Some events are raised and deliberately not kept: a change of name, value,
+//! checked state or number on a node that is not the focus. Orca speaks a
+//! name change only for its locus of focus (`orca/scripts/default.py`,
+//! `onNameChanged`, Orca 46.1), and a checked state or a number likewise
+//! (`onCheckedChanged`, `onPressedChanged`, `onValueChanged`, which also
+//! speaks a progress bar's number wherever it is; that is not modelled), and
+//! AT-SPI carries no string value at all (`accesskit_atspi_common`
+//! `node.rs:650-658` raises only a numeric one). [`Listener::toggled`] reads
+//! the checked state of a node that is not the focus, as a reader who goes
+//! to it finds it. That NVDA and VoiceOver likewise speak these changes only
+//! on their focus object is not verified here: neither's source is on this
+//! machine.
 //!
 //! Two things a reader can be told are not modelled, so a test about either
-//! must not rest on this alone. A state change on the focus: Orca says
-//! "selected" when Space selects its locus of focus (`onSelectedChanged`).
-//! And the descendants of a node that stops being hidden: AT-SPI adds that
-//! whole subtree in one walk and announces each live node in it
-//! (`accesskit_atspi_common` `adapter.rs`, `add_subtree`), where the consumer
-//! reports only the node whose own data changed.
+//! must not rest on this alone. A state change on the focus other than its
+//! checked state: Orca says "selected" when Space selects its locus of focus
+//! (`onSelectedChanged`). And the descendants of a node that stops being
+//! hidden: AT-SPI adds that whole subtree in one walk and announces each live
+//! node in it (`accesskit_atspi_common` `adapter.rs`, `add_subtree`), where
+//! the consumer reports only the node whose own data changed.
 
 use accesskit_consumer::{FilterResult, NodeRef, Tree, TreeChangeHandler, common_filter};
-use teksilo_core::accesskit::Role;
+use teksilo_core::accesskit::{Role, Toggled};
 use teksilo_core::widget_tree::WidgetTree;
 
 /// One thing a screen reader is told.
@@ -64,6 +69,35 @@ pub(crate) enum Heard {
     /// (`accesskit_windows` `node.rs:1346`, `accesskit_macos`
     /// `event.rs:262-289`); AT-SPI does not, for a string.
     FocusValue(String),
+    /// The node that holds focus was checked, cleared or made mixed. AT-SPI
+    /// raises `state-changed:checked`, `:pressed` (a toggle button) or
+    /// `:indeterminate` on it (`accesskit_atspi_common` `node.rs:366-374`,
+    /// `594-608`), UIA a toggle-state property change (`accesskit_windows`
+    /// `node.rs:743`, `1333-1334`), macOS `AXValueChanged` (`accesskit_macos`
+    /// `node.rs:344-351`, `event.rs:268-288`). Orca speaks it for its locus of
+    /// focus (`onCheckedChanged`, `onPressedChanged`), a radio button's only
+    /// after a Space it saw itself.
+    FocusToggled(Toggled),
+    /// The node that holds focus took a new number, written as Orca speaks it
+    /// (`orca/ax_value.py`, `get_current_value_text`): with every digit of the
+    /// `f64`'s shortest form below 1, rounded to a whole number from 1 up.
+    /// AT-SPI raises `property-change:accessible-value` (`node.rs:651-658`),
+    /// UIA a range-value property change (`accesskit_windows` `node.rs:743`,
+    /// `1356-1357`), macOS `AXValueChanged` (`accesskit_macos` `node.rs:361`).
+    /// Orca speaks it for its locus of focus (`onValueChanged`).
+    FocusNumber(String),
+}
+
+/// A number as Orca 46.1 speaks a node's value (`ax_value.py`,
+/// `get_current_value_text`, with no value text, which AT-SPI never carries).
+fn as_orca_speaks(value: f64) -> String {
+    if value.abs() < 1.0 && value != 0.0 {
+        // Python's `str` of a float is its shortest round-trip form, as
+        // Rust's `Display` is.
+        value.to_string()
+    } else {
+        format!("{value:.0}")
+    }
 }
 
 /// A screen reader attached to a tree, hearing what each change tells it.
@@ -115,6 +149,21 @@ impl Listener {
         }
         walk(self.platform.state().root(), role, name)
     }
+
+    /// The checked state the reader is given for the node of `role` named
+    /// `name`, in the tree as it stood at the last call: what a screen reader
+    /// reads when it asks, focused or not. `None` when no such node is
+    /// reachable, or when it has no checked state.
+    pub(crate) fn toggled(&self, role: Role, name: &str) -> Option<Toggled> {
+        fn walk<'a>(node: NodeRef<'a>, role: Role, name: &str) -> Option<NodeRef<'a>> {
+            if node.role() == role && node.label().as_deref() == Some(name) {
+                return Some(node);
+            }
+            node.filtered_children(&common_filter)
+                .find_map(|child| walk(child, role, name))
+        }
+        walk(self.platform.state().root(), role, name).and_then(|node| node.toggled())
+    }
 }
 
 struct Handler {
@@ -158,6 +207,16 @@ impl TreeChangeHandler for Handler {
                 && old.value().as_ref() != Some(&value)
             {
                 self.heard.push(Heard::FocusValue(value));
+            }
+            if let Some(toggled) = new.toggled()
+                && old.toggled() != Some(toggled)
+            {
+                self.heard.push(Heard::FocusToggled(toggled));
+            }
+            if let Some(number) = new.numeric_value()
+                && old.numeric_value() != Some(number)
+            {
+                self.heard.push(Heard::FocusNumber(as_orca_speaks(number)));
             }
         }
     }
