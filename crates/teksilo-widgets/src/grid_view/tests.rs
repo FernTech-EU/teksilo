@@ -755,18 +755,27 @@ fn neither_the_grid_nor_its_tiles_are_live() {
 fn a_selection_the_user_changes_is_counted_aloud() {
     use teksilo_core::event::{Key, Modifiers};
     let (mut tree, _id, selection) = french_grid(SelectionMode::Multi);
+    // What arrives, as the adapters announce it: the announcer's node for a
+    // message stays in the tree for a while after it is said, so a live name
+    // present in an update is not a message said in it.
+    let mut seen = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+    let mut heard = |tree: &mut teksilo_core::widget_tree::WidgetTree| {
+        let _ = tree.sync_accessibility();
+        let got = tree.announcements_since(seen);
+        if let Some(last) = got.last() {
+            seen = last.seq;
+        }
+        got.into_iter().map(|a| a.text).collect::<Vec<_>>()
+    };
 
     press(&mut tree, Key::Space, Modifiers::NONE);
     assert_eq!(selection.selected_indices(), vec![0]);
-    let update = tree.sync_accessibility();
-    assert_eq!(live_names(&update), vec!["1 élément sélectionné"]);
+    assert_eq!(heard(&mut tree), vec!["1 élément sélectionné"]);
 
     press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
     press(&mut tree, Key::Space, Modifiers::CTRL);
     assert_eq!(selection.selected_indices(), vec![0, 1]);
-    let _ = tree.sync_accessibility(); // the announcer retracts the first
-    let update = tree.sync_accessibility();
-    assert_eq!(live_names(&update), vec!["2 éléments sélectionnés"]);
+    assert_eq!(heard(&mut tree), vec!["2 éléments sélectionnés"]);
     teksilo_i18n::thread_local::clear();
 }
 
@@ -784,9 +793,11 @@ fn moving_a_single_selection_says_no_count() {
 
     press(&mut tree, Key::ArrowRight, Modifiers::NONE);
     assert_eq!(selection.selected_indices(), vec![1]);
-    let update = tree.sync_accessibility();
-    assert_eq!(live_names(&update), Vec::<String>::new());
-    assert!(tree.announcements_since(seen).is_empty());
+    let _ = tree.sync_accessibility();
+    assert!(
+        tree.announcements_since(seen).is_empty(),
+        "an arrow that moves a single selection must say no count"
+    );
     teksilo_i18n::thread_local::clear();
 }
 

@@ -76,6 +76,15 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **Orca heard only the first message the framework's announcer said.** Every
+  `announce` in every Teksilo application, after the first of a session, was
+  dropped by Orca 46.1, and even a first one was lost whenever Orca handled the
+  event after its node had gone. Each message is now spoken from a node the
+  tree has never had, which stays in the tree for five seconds
+  (`teksilo_core::announcer::LINGER`) and then leaves for good. A burst keeps
+  at most eight in the tree at once. The tree no longer carries two hidden
+  announcer nodes while nothing is being said, so a `TreeUpdate` of an idle
+  tree has two nodes fewer.
 - **The announcement ring recorded text no platform announces.**
   `WidgetTree::announcements_since`, and the automation bridge's
   `pull_announcements` that reads it, recorded a live node's `value` before

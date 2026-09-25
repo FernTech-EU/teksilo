@@ -1679,10 +1679,9 @@ mod tests {
             Some(first),
             "the focused datum is the readout"
         );
-        // Two syncs per message: the framework's announcer exposes a live
-        // region carrying the text, then retracts it, because retracting is
-        // what makes the next message a re-entry into the filtered tree (the
-        // only thing AT-SPI announces at all). See `teksilo_core::announcer`.
+        // Two syncs per key, as two frames would run: the framework's announcer
+        // puts one queued message in the tree an update. See
+        // `teksilo_core::announcer`.
         let _ = tree.sync_accessibility();
         let _ = tree.sync_accessibility();
         tree.press_key(Key::ArrowRight, Modifiers::NONE);

@@ -30,13 +30,40 @@
 //! carries it has nothing new to say, so the second is never heard.
 //!
 //! The one mechanism that speaks a new message and a repeat of the last one
-//! alike, on all three, is therefore to **retract the node and put it back**:
-//! hide it, then re-expose it carrying the message. `common_filter` turns
-//! `is_hidden` into `FilterResult::ExcludeSubtree`
-//! (`accesskit_consumer-0.39.0/src/filters.rs:22-24`), so hiding removes the
-//! node from the filtered tree and un-hiding is a genuine re-entry, which is
-//! `add_node` on Linux and the `old_filter_result != Include` arm on the other
-//! two, whatever the name was before.
+//! alike, on all three, is therefore to **put a node that was not there into
+//! the filtered tree**, carrying the message: that is `add_node` on Linux and
+//! the `old_filter_result != Include` arm on the other two, whatever was said
+//! before.
+//!
+//! ## Why every message is a node the tree has never had
+//!
+//! Two ways of doing that fail on Linux, both measured with Orca 46.1 by
+//! `tools/reader/` (the `announcer-calendar-arrows` scenario, three presses of
+//! a calendar's Next month arrow):
+//!
+//! - **Bringing one node back.** The announcer used to own two reserved nodes
+//!   and hide one between messages. `accesskit_atspi_common` announces a node
+//!   that leaves the tree defunct (`adapter.rs`, `remove_node`), nothing
+//!   unsays it when the same id comes back, and Orca's AT-SPI library keeps
+//!   that state for the node's path: every message after the first came from a
+//!   node Orca held for dead, and Orca dropped it ("Ignoring defunct object",
+//!   `event_manager.py`). The first message of a session was the only one
+//!   heard.
+//! - **Taking a node away on the next update.** Orca does not read an
+//!   announcement from the event alone: it asks the source for its role as it
+//!   receives the event and again as it takes it from its queue. Behind the
+//!   burst of events a calendar's month change sends, that was already after
+//!   the node had been retracted, one update (about 20 ms) after it appeared:
+//!   the application answered "Unknown object", and Orca dropped even a first
+//!   message as defunct.
+//!
+//! So each message is spoken from a node id the tree has never used, drawn
+//! from a range no widget or synthetic id can reach (`AnnouncerIds`), and the
+//! node stays in the tree for [`LINGER`] before it leaves, never to come back.
+//! Windows is owed the same time: `accesskit_windows` raises
+//! `LiveRegionChanged` on the node with no text (`adapter.rs:256-263`), so a
+//! UIA client has to ask the node for its name. macOS is not: its announcement
+//! request carries the string (`accesskit_macos` `event.rs:65-99`).
 //!
 //! That is a per-platform detail an application should never have to carry, and
 //! it is why this lives in the framework.
@@ -59,8 +86,29 @@
 //! and no automatic detection is possible from either side.
 
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 use accesskit::{Live, NodeId, Role};
+
+/// How long a message's node stays in the tree after it is spoken.
+///
+/// A reader asks the node for its role or name when it handles the event, not
+/// when the event is sent, and a node that has gone by then is dropped as
+/// defunct: Orca 46.1 behind a month change's burst of events came after a
+/// one-update lifetime, and a UIA client has only the node to ask (see the
+/// module documentation). Five seconds is far past that, and it is what
+/// CalendrierAccessible's own voice measured working. The node then leaves so
+/// that somebody walking the window later does not meet a sentence about
+/// something long past.
+pub const LINGER: Duration = Duration::from_secs(5);
+
+/// How many spoken messages one politeness level keeps in the tree at once.
+///
+/// A burst of announcements, one a frame, would otherwise grow the tree by
+/// one node a frame for [`LINGER`]. The oldest leaves early instead; it has
+/// been in the tree for as many updates as there are slots, which is far
+/// longer than the one update that lost messages before.
+const MAX_SHOWN: usize = 8;
 
 /// How urgently a message should interrupt.
 ///
@@ -95,36 +143,70 @@ impl Politeness {
             Self::Assertive => Role::Alert,
         }
     }
+}
 
-    /// The reserved node this politeness level speaks through.
-    ///
-    /// `NodeId(0)` is the tree root ([`crate::accessibility::root_node_id`]).
-    /// Widget-derived ids come from slotmap's `KeyData::as_ffi`, whose upper 32
-    /// bits hold a version counter that starts at 1, so every one of them is at
-    /// least `1 << 32`. Synthetic child ids always set bit 63
-    /// ([`crate::accessibility::SYNTHETIC_BIT`]). So 1 and 2 belong to nobody
-    /// and cannot begin to.
-    fn node_id(self) -> NodeId {
-        match self {
-            Self::Polite => NodeId(1),
-            Self::Assertive => NodeId(2),
-        }
+/// The first id the announcers speak from.
+///
+/// `NodeId(0)` is the tree root ([`crate::accessibility::root_node_id`]).
+/// Widget-derived ids come from slotmap's `KeyData::as_ffi`, whose upper 32
+/// bits hold a version counter that starts at 1, so every one of them is at
+/// least `1 << 32`. Synthetic child ids always set bit 63
+/// ([`crate::accessibility::SYNTHETIC_BIT`]). So `1 .. 1 << 32` belongs to
+/// nobody and cannot begin to.
+const FIRST_ID: u64 = 1;
+/// One past the last id the announcers speak from.
+const END_ID: u64 = 1 << 32;
+
+/// Where the next message's node id comes from: one counter for both
+/// politeness levels, so the two never speak from the same id, and every id
+/// is used once.
+///
+/// Four billion messages in a tree's life before the counter would come back
+/// to the start, at which point the ids it hands out were retired long before.
+#[derive(Debug)]
+pub(crate) struct AnnouncerIds {
+    next: u64,
+}
+
+impl AnnouncerIds {
+    pub(crate) fn new() -> Self {
+        Self { next: FIRST_ID }
+    }
+
+    fn take(&mut self) -> NodeId {
+        let id = NodeId(self.next);
+        self.next = if self.next + 1 >= END_ID {
+            FIRST_ID
+        } else {
+            self.next + 1
+        };
+        id
     }
 }
 
-/// Where one politeness level's announcer is in its expose / retract cycle.
+/// One message in the tree: the node it is spoken from, and when it leaves.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Phase {
-    /// Nothing to say. The node is emitted hidden and unlabelled.
-    Idle,
-    /// This message is being spoken: the node is emitted visible, carrying it.
-    Speaking(String),
-    /// The message has been delivered. The node is emitted hidden again, so
-    /// that the next one is a genuine re-entry rather than a label edit.
-    Retracting,
+struct Shown {
+    id: NodeId,
+    message: String,
+    until: Instant,
 }
 
-/// One politeness level's queue and cycle position.
+/// What one step changed, for the tree that asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Step {
+    /// The update about to be built differs from the last one: a message
+    /// arrived or one left.
+    pub(crate) changed: bool,
+    /// Messages are still queued, so another update is owed at the next
+    /// frame: one message is put in the tree an update, in order.
+    pub(crate) busy: bool,
+    /// When the next spoken message is due to leave, so the tree can ask the
+    /// event loop to wake then.
+    pub(crate) next_retirement: Option<Instant>,
+}
+
+/// One politeness level's queue and the messages it has in the tree.
 ///
 /// Messages are queued rather than coalesced. Two things happening in quick
 /// succession are two things the user needs to hear, and the alternative —
@@ -132,22 +214,23 @@ enum Phase {
 #[derive(Debug)]
 pub(crate) struct Announcer {
     politeness: Politeness,
-    phase: Phase,
     pending: VecDeque<String>,
+    /// Messages in the tree, oldest first.
+    shown: VecDeque<Shown>,
 }
 
 impl Announcer {
     pub(crate) fn new(politeness: Politeness) -> Self {
         Self {
             politeness,
-            phase: Phase::Idle,
             pending: VecDeque::new(),
+            shown: VecDeque::new(),
         }
     }
 
     /// Queue a message. Empty and whitespace-only messages are dropped: they
     /// would produce a node with no label, which announces nothing on any
-    /// platform, while still costing a full expose / retract cycle.
+    /// platform.
     pub(crate) fn push(&mut self, message: String) {
         if message.trim().is_empty() {
             return;
@@ -161,58 +244,72 @@ impl Announcer {
         self.pending.push_back(message);
     }
 
-    /// Move to the state the `TreeUpdate` about to be built should describe.
+    /// Move to the state the `TreeUpdate` about to be built should describe,
+    /// at `now` on the tree's clock.
     ///
-    /// Returns `true` when a *further* update is needed after this one, so the
-    /// caller knows to ask for another accessibility sync and another frame.
-    /// Every message costs exactly two updates: one that exposes its node, one
-    /// that retracts it. Retracting is not optional: it is what makes the next
-    /// message a re-entry into the filtered tree, which every platform
-    /// announces even when the message repeats the last one.
-    pub(crate) fn step(&mut self) -> bool {
-        self.phase = match std::mem::replace(&mut self.phase, Phase::Idle) {
-            // This update exposed a message; the next one has to take it away.
-            Phase::Speaking(_) => Phase::Retracting,
-            // Idle or Retracting: both emit the same hidden node, so both are
-            // free to pick up the next message.
-            _ => match self.pending.pop_front() {
-                Some(message) => Phase::Speaking(message),
-                None => Phase::Idle,
-            },
-        };
-        // A retract that has nothing queued behind it is the last update this
-        // announcer needs: `Idle` emits exactly what `Retracting` does.
-        matches!(self.phase, Phase::Speaking(_)) || !self.pending.is_empty()
+    /// A message whose [`LINGER`] is over leaves the tree, and the next queued
+    /// one enters it from a fresh id. One message enters an update, so two
+    /// queued together are spoken in the order they were asked for: the
+    /// adapters raise an update's events in no particular order.
+    pub(crate) fn step(&mut self, now: Instant, ids: &mut AnnouncerIds) -> Step {
+        let before = self.shown.len();
+        self.shown.retain(|shown| shown.until > now);
+        let mut changed = self.shown.len() != before;
+        if let Some(message) = self.pending.pop_front() {
+            if self.shown.len() >= MAX_SHOWN {
+                self.shown.pop_front();
+            }
+            self.shown.push_back(Shown {
+                id: ids.take(),
+                message,
+                until: now + LINGER,
+            });
+            changed = true;
+        }
+        Step {
+            changed,
+            busy: !self.pending.is_empty(),
+            next_retirement: self.shown.iter().map(|shown| shown.until).min(),
+        }
     }
 
-    /// The node to place in the `TreeUpdate` for the current phase.
-    pub(crate) fn node(&self) -> (NodeId, accesskit::Node) {
-        let mut node = accesskit::Node::new(self.politeness.role());
-        node.set_live(self.politeness.live());
-        match &self.phase {
-            Phase::Speaking(message) => {
-                // The label, not the value. `accesskit_consumer`'s
-                // `label_comes_from_value` is true for `Role::Label` and
-                // nothing else (node.rs:744-746), so every adapter reads the
-                // announced text from `label()`, and a live region that sets
-                // only `value` is silent on all three platforms.
-                node.set_label(message.clone());
-            }
-            Phase::Idle | Phase::Retracting => {
-                node.set_hidden();
-            }
+    /// Shift every retirement by the distance between two clocks, when the
+    /// tree moves between the wall clock and its simulated one. See
+    /// [`crate::animation::AnimationScheduler::rebase`], which this mirrors.
+    pub(crate) fn rebase(&mut self, from: Instant, to: Instant) {
+        for shown in &mut self.shown {
+            shown.until = if to >= from {
+                shown.until + (to - from)
+            } else {
+                shown.until.checked_sub(from - to).unwrap_or(to)
+            };
         }
-        (self.politeness.node_id(), node)
+    }
+
+    /// The nodes to place in the `TreeUpdate`: one for each message in the
+    /// tree, oldest first.
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = (NodeId, accesskit::Node)> + '_ {
+        self.shown.iter().map(|shown| {
+            let mut node = accesskit::Node::new(self.politeness.role());
+            node.set_live(self.politeness.live());
+            // The label, not the value. `accesskit_consumer`'s
+            // `label_comes_from_value` is true for `Role::Label` and nothing
+            // else (node.rs:744-746), so every adapter reads the announced
+            // text from `label()`, and a live region that sets only `value`
+            // is silent on all three platforms.
+            node.set_label(shown.message.clone());
+            (shown.id, node)
+        })
     }
 }
 
-/// Whether `id` is one of the two reserved nodes the announcers speak through.
+/// Whether `id` is one the announcers speak through.
 ///
 /// They hang directly off the root, where no clipping parent can move them out
 /// of view, which is what lets the announcement ring skip a scroll that has
 /// nothing else live to move.
 pub(crate) fn is_announcer_node(id: NodeId) -> bool {
-    id == Politeness::Polite.node_id() || id == Politeness::Assertive.node_id()
+    (FIRST_ID..END_ID).contains(&id.0)
 }
 
 /// How many messages one politeness level will hold before dropping the oldest.
@@ -222,129 +319,211 @@ const MAX_QUEUED: usize = 32;
 mod tests {
     use super::*;
 
-    fn label_of(a: &Announcer) -> Option<String> {
-        let (_, node) = a.node();
-        node.label().map(|s| s.to_string())
+    fn at(start: Instant, millis: u64) -> Instant {
+        start + Duration::from_millis(millis)
     }
 
-    fn hidden(a: &Announcer) -> bool {
-        let (_, node) = a.node();
-        node.is_hidden()
+    fn labels(a: &Announcer) -> Vec<String> {
+        a.nodes()
+            .map(|(_, node)| node.label().unwrap_or_default().to_string())
+            .collect()
     }
 
-    fn node_id(a: &Announcer) -> NodeId {
-        a.node().0
+    fn ids(a: &Announcer) -> Vec<NodeId> {
+        a.nodes().map(|(id, _)| id).collect()
     }
 
     #[test]
-    fn an_idle_announcer_is_hidden_and_unlabelled() {
+    fn an_idle_announcer_puts_nothing_in_the_tree() {
+        let mut ids_ = AnnouncerIds::new();
         let mut a = Announcer::new(Politeness::Polite);
-        assert!(hidden(&a));
-        assert_eq!(label_of(&a), None);
-        assert!(!a.step(), "an idle announcer has nothing to do");
+        let step = a.step(Instant::now(), &mut ids_);
+        assert_eq!(step, Step::default());
+        assert_eq!(a.nodes().count(), 0);
     }
 
-    /// One message costs two syncs: expose, then retract. The retract is not
-    /// optional: it is what makes the *next* message a re-entry into the
-    /// filtered tree, which every platform announces even when the message
-    /// repeats the last one.
+    /// A message enters the tree from a fresh node, stays for [`LINGER`], and
+    /// leaves.
     #[test]
-    fn a_message_is_exposed_then_retracted() {
+    fn a_message_stays_for_its_linger_and_then_leaves() {
+        let start = Instant::now();
+        let mut ids_ = AnnouncerIds::new();
         let mut a = Announcer::new(Politeness::Polite);
         a.push("Event added".to_string());
 
-        assert!(a.step(), "still busy: the retract is yet to come");
-        assert!(!hidden(&a), "the node must enter the filtered tree");
-        assert_eq!(label_of(&a).as_deref(), Some("Event added"));
+        let step = a.step(start, &mut ids_);
+        assert!(step.changed && !step.busy);
+        assert_eq!(step.next_retirement, Some(start + LINGER));
+        assert_eq!(labels(&a), ["Event added"]);
 
-        assert!(!a.step(), "nothing left after the retract");
-        assert!(hidden(&a), "the node must leave the filtered tree again");
+        let step = a.step(start + LINGER - Duration::from_millis(1), &mut ids_);
+        assert!(!step.changed, "nothing changes while the message lingers");
+        assert_eq!(labels(&a), ["Event added"]);
+
+        let step = a.step(start + LINGER, &mut ids_);
+        assert!(step.changed);
+        assert_eq!(step.next_retirement, None);
+        assert_eq!(a.nodes().count(), 0);
     }
 
-    /// The case the whole retract mechanism exists for. All three platforms
-    /// announce a label change; none announces the *same* label written
-    /// twice. Hiding in between makes the second one a re-entry, which all
-    /// three speak.
+    /// The case the whole mechanism exists for. All three platforms announce a
+    /// node entering; none announces the *same* label written twice; and on
+    /// AT-SPI a node that has left once is defunct for good. So the second
+    /// "Saved" must come from a node that has never been in the tree.
     #[test]
-    fn the_same_message_twice_is_exposed_twice() {
+    fn the_same_message_twice_is_two_new_nodes() {
+        let start = Instant::now();
+        let mut ids_ = AnnouncerIds::new();
         let mut a = Announcer::new(Politeness::Polite);
         a.push("Saved".to_string());
+        a.step(start, &mut ids_);
+        let first = ids(&a);
+        a.step(start + LINGER, &mut ids_);
         a.push("Saved".to_string());
-
-        a.step();
-        assert!(!hidden(&a));
-        assert_eq!(label_of(&a).as_deref(), Some("Saved"));
-
-        a.step();
-        assert!(hidden(&a), "the node must be retracted between the two");
-
-        a.step();
-        assert!(!hidden(&a));
-        assert_eq!(label_of(&a).as_deref(), Some("Saved"));
-
-        assert!(!a.step());
-        assert!(hidden(&a));
+        a.step(at(start + LINGER, 1), &mut ids_);
+        let second = ids(&a);
+        assert_eq!(labels(&a), ["Saved"]);
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_ne!(
+            first, second,
+            "a message must never be spoken from an id used before"
+        );
     }
 
-    /// Two things happening in quick succession are two things to say. A
-    /// coalescing announcer would drop the first without a trace.
+    /// Two things happening in quick succession are two things to say, one an
+    /// update, in order, and the first stays while the second is spoken.
     #[test]
-    fn messages_queue_rather_than_replace_one_another() {
+    fn messages_queue_one_an_update_and_keep_their_order() {
+        let start = Instant::now();
+        let mut ids_ = AnnouncerIds::new();
         let mut a = Announcer::new(Politeness::Polite);
         a.push("first".to_string());
         a.push("second".to_string());
 
-        let mut spoken = Vec::new();
-        for _ in 0..4 {
-            a.step();
-            if let Some(l) = label_of(&a) {
-                spoken.push(l);
-            }
-        }
-        assert_eq!(spoken, vec!["first", "second"]);
-    }
+        let step = a.step(start, &mut ids_);
+        assert!(step.busy, "the second message is owed an update of its own");
+        assert_eq!(labels(&a), ["first"]);
 
-    #[test]
-    fn an_empty_message_is_dropped_rather_than_costing_a_cycle() {
-        let mut a = Announcer::new(Politeness::Polite);
-        a.push(String::new());
-        a.push("   \n\t ".to_string());
-        assert!(!a.step());
-    }
-
-    #[test]
-    fn a_runaway_queue_drops_the_oldest_not_the_newest() {
-        let mut a = Announcer::new(Politeness::Polite);
-        for i in 0..(MAX_QUEUED + 5) {
-            a.push(format!("message {i}"));
-        }
-        a.step();
+        let step = a.step(at(start, 16), &mut ids_);
+        assert!(!step.busy);
+        assert_eq!(labels(&a), ["first", "second"]);
         assert_eq!(
-            label_of(&a).as_deref(),
-            Some("message 5"),
-            "the five oldest must be the ones dropped"
+            step.next_retirement,
+            Some(start + LINGER),
+            "the earliest leaves first"
         );
     }
 
     #[test]
-    fn the_two_politeness_levels_use_distinct_reserved_nodes() {
-        let polite = node_id(&Announcer::new(Politeness::Polite));
-        let assertive = node_id(&Announcer::new(Politeness::Assertive));
-        assert_ne!(polite, assertive);
-        assert_ne!(polite, crate::accessibility::root_node_id());
-        assert_ne!(assertive, crate::accessibility::root_node_id());
-        assert!(!crate::accessibility::is_synthetic(polite));
-        assert!(!crate::accessibility::is_synthetic(assertive));
+    fn an_empty_message_is_dropped() {
+        let mut ids_ = AnnouncerIds::new();
+        let mut a = Announcer::new(Politeness::Polite);
+        a.push(String::new());
+        a.push("   \n\t ".to_string());
+        assert_eq!(a.step(Instant::now(), &mut ids_), Step::default());
+    }
+
+    #[test]
+    fn a_runaway_queue_drops_the_oldest_not_the_newest() {
+        let mut ids_ = AnnouncerIds::new();
+        let mut a = Announcer::new(Politeness::Polite);
+        for i in 0..(MAX_QUEUED + 5) {
+            a.push(format!("message {i}"));
+        }
+        a.step(Instant::now(), &mut ids_);
+        assert_eq!(
+            labels(&a),
+            ["message 5"],
+            "the five oldest must be the ones dropped"
+        );
+    }
+
+    /// A burst does not grow the tree past [`MAX_SHOWN`]: the oldest leaves
+    /// early, and every message is still spoken in turn.
+    #[test]
+    fn a_burst_keeps_at_most_max_shown_in_the_tree() {
+        let start = Instant::now();
+        let mut ids_ = AnnouncerIds::new();
+        let mut a = Announcer::new(Politeness::Polite);
+        for i in 0..20 {
+            a.push(format!("row {i}"));
+        }
+        for frame in 0..20 {
+            a.step(at(start, frame * 16), &mut ids_);
+            assert!(a.nodes().count() <= MAX_SHOWN);
+        }
+        let last: Vec<String> = (12..20).map(|i| format!("row {i}")).collect();
+        assert_eq!(labels(&a), last);
+    }
+
+    /// Both politeness levels draw from one counter, so they never share an
+    /// id, and no id is ever one the tree gives a widget, a synthetic child or
+    /// the root.
+    #[test]
+    fn announcer_ids_are_unique_and_outside_every_other_range() {
+        let start = Instant::now();
+        let mut ids_ = AnnouncerIds::new();
+        let mut polite = Announcer::new(Politeness::Polite);
+        let mut assertive = Announcer::new(Politeness::Assertive);
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..20 {
+            polite.push(format!("p{i}"));
+            assertive.push(format!("a{i}"));
+            polite.step(at(start, i * 16), &mut ids_);
+            assertive.step(at(start, i * 16), &mut ids_);
+            for id in ids(&polite).into_iter().chain(ids(&assertive)) {
+                seen.insert(id);
+                assert!(is_announcer_node(id));
+                assert_ne!(id, crate::accessibility::root_node_id());
+                assert!(!crate::accessibility::is_synthetic(id));
+                assert!(id.0 < 1 << 32, "a widget id is at least 1 << 32");
+            }
+        }
+        assert_eq!(seen.len(), 40, "forty messages, forty ids");
+    }
+
+    #[test]
+    fn the_counter_wraps_inside_its_range() {
+        let mut ids_ = AnnouncerIds { next: END_ID - 1 };
+        assert_eq!(ids_.take(), NodeId(END_ID - 1));
+        assert_eq!(ids_.take(), NodeId(FIRST_ID));
+    }
+
+    /// Moving between the wall clock and the simulated one shifts when a
+    /// message leaves, as it shifts an animation: the message keeps the time
+    /// it had left.
+    #[test]
+    fn a_rebase_keeps_the_time_a_message_has_left() {
+        let start = Instant::now();
+        let mut ids_ = AnnouncerIds::new();
+        let mut a = Announcer::new(Politeness::Polite);
+        a.push("Saved".to_string());
+        a.step(start, &mut ids_);
+        let later = start + Duration::from_secs(100);
+        a.rebase(start, later);
+        let step = a.step(later + LINGER - Duration::from_millis(1), &mut ids_);
+        assert!(!step.changed);
+        assert_eq!(labels(&a), ["Saved"]);
+        a.step(later + LINGER, &mut ids_);
+        assert_eq!(a.nodes().count(), 0);
     }
 
     #[test]
     fn politeness_maps_to_the_aria_role_and_live_setting() {
-        let (_, polite) = Announcer::new(Politeness::Polite).node();
-        assert_eq!(polite.role(), Role::Status);
-        assert_eq!(polite.live(), Some(Live::Polite));
+        let mut ids_ = AnnouncerIds::new();
+        let mut polite = Announcer::new(Politeness::Polite);
+        polite.push("p".to_string());
+        polite.step(Instant::now(), &mut ids_);
+        let (_, node) = polite.nodes().next().unwrap();
+        assert_eq!(node.role(), Role::Status);
+        assert_eq!(node.live(), Some(Live::Polite));
 
-        let (_, assertive) = Announcer::new(Politeness::Assertive).node();
-        assert_eq!(assertive.role(), Role::Alert);
-        assert_eq!(assertive.live(), Some(Live::Assertive));
+        let mut assertive = Announcer::new(Politeness::Assertive);
+        assertive.push("a".to_string());
+        assertive.step(Instant::now(), &mut ids_);
+        let (_, node) = assertive.nodes().next().unwrap();
+        assert_eq!(node.role(), Role::Alert);
+        assert_eq!(node.live(), Some(Live::Assertive));
     }
 }

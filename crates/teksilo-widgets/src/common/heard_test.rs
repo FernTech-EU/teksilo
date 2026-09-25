@@ -77,8 +77,9 @@ impl Listener {
     pub(crate) fn attach(tree: &mut WidgetTree) -> Self {
         let platform = Tree::new(tree.sync_accessibility(), true);
         let mut listener = Self { platform };
-        // The framework's announcer takes two updates per message; let any
-        // message queued while the tree was being built go by unheard.
+        // Let any message queued while the tree was being built go by
+        // unheard: the framework's announcer puts one message in the tree an
+        // update.
         let _ = listener.heard(tree);
         listener
     }
@@ -86,9 +87,10 @@ impl Listener {
     /// Everything the reader is told between the last call and now.
     ///
     /// The tree is synced three times, as a running application syncs on
-    /// the frames that follow a change: the framework's announcer exposes a
-    /// message on one update and retracts it on the next, so one sync would
-    /// miss what it says and two would be the least that hears it.
+    /// the frames that follow a change: the framework's announcer puts one
+    /// queued message in the tree an update, so a change that queues two
+    /// needs two syncs to be heard whole, and the third shows that nothing is
+    /// said again.
     pub(crate) fn heard(&mut self, tree: &mut WidgetTree) -> Vec<Heard> {
         let mut handler = Handler { heard: Vec::new() };
         for _ in 0..3 {

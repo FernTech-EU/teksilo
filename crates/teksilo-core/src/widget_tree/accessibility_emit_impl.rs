@@ -67,14 +67,16 @@ impl WidgetTree {
             }
         }
         // The framework's own live regions, last in the root's child list so
-        // they sit after the application's content in reading order. Both are
-        // always present and almost always hidden; see [`crate::announcer`] for
-        // why an announcement is delivered by putting a node back into the
-        // filtered tree rather than by editing a label in place.
-        let announcer_nodes = [
-            self.announcer_polite.node(),
-            self.announcer_assertive.node(),
-        ];
+        // they sit after the application's content in reading order: one node
+        // for each message spoken in the last few seconds, each from an id the
+        // tree has never used. See [`crate::announcer`] for why an
+        // announcement is a node that was never in the tree rather than a
+        // label edited in place or a node shown again.
+        let announcer_nodes: Vec<(accesskit::NodeId, accesskit::Node)> = self
+            .announcer_polite
+            .nodes()
+            .chain(self.announcer_assertive.nodes())
+            .collect();
         for (id, _) in &announcer_nodes {
             root.push_child(*id);
         }

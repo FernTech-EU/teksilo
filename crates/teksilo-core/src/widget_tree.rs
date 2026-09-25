@@ -21,6 +21,8 @@ mod accessibility_impl;
 mod accessibility_proxy_tests;
 #[cfg(test)]
 mod announcement_ring_tests;
+#[cfg(test)]
+mod announcer_tests;
 mod drag_drop_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;
@@ -723,6 +725,9 @@ pub struct WidgetTree {
     /// platform adapters agree announces.
     announcer_polite: crate::announcer::Announcer,
     announcer_assertive: crate::announcer::Announcer,
+    /// Where both announcers draw the id of each message's node from, so no
+    /// message is spoken from an id the tree has used before.
+    announcer_ids: crate::announcer::AnnouncerIds,
     /// The announcements the platform adapters would have made from the
     /// updates `sync_accessibility` returned (see
     /// [`crate::accessibility::Announcement`]), drained by
@@ -1020,6 +1025,7 @@ impl WidgetTree {
             announcer_assertive: crate::announcer::Announcer::new(
                 crate::announcer::Politeness::Assertive,
             ),
+            announcer_ids: crate::announcer::AnnouncerIds::new(),
             announcement_ring: crate::accessibility::announcements::AnnouncementRing::new(),
             description_memory: Default::default(),
             access_action_handled: false,
@@ -1247,10 +1253,10 @@ impl WidgetTree {
                 self.announcer_assertive.push(message.into())
             }
         }
-        // Two syncs are needed per message (expose, then retract), and a sync
-        // only happens on a frame. Without both of these a message queued from
-        // a handler that changed nothing visible would sit unspoken until
-        // something else happened to redraw.
+        // A message is put in the tree by a sync, and a sync only happens on
+        // a frame. Without both of these a message queued from a handler that
+        // changed nothing visible would sit unspoken until something else
+        // happened to redraw.
         self.request_accessibility_update();
         self.request_frame();
     }

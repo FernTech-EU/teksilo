@@ -63,8 +63,10 @@ impl WidgetTree {
     pub(super) fn enter_simulated_mode(&mut self) {
         if !self.sim_time_frozen {
             self.sim_time_frozen = true;
-            self.animation_scheduler
-                .rebase(std::time::Instant::now(), self.sim_clock);
+            let now = std::time::Instant::now();
+            self.animation_scheduler.rebase(now, self.sim_clock);
+            self.announcer_polite.rebase(now, self.sim_clock);
+            self.announcer_assertive.rebase(now, self.sim_clock);
         }
         if self.sim_input_origin.is_none() {
             self.rearm_sim_input_origin();
@@ -109,8 +111,10 @@ impl WidgetTree {
             return;
         }
         self.sim_time_frozen = false;
-        self.animation_scheduler
-            .rebase(self.sim_clock, std::time::Instant::now());
+        let now = std::time::Instant::now();
+        self.animation_scheduler.rebase(self.sim_clock, now);
+        self.announcer_polite.rebase(self.sim_clock, now);
+        self.announcer_assertive.rebase(self.sim_clock, now);
         let Some((base, base_at)) = self.sim_input_origin.take() else {
             // An unanchored clock — a `ManualClock` — *is* the virtual axis and
             // was never frozen against the wall clock, so there is nothing to

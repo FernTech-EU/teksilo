@@ -409,7 +409,7 @@ fn an_announcement_saying_the_line_as_focus_arrives_is_said_once() {
         form.tree
             .announce_with("Enter a title", Politeness::Assertive);
         form.tree.focus(form.field);
-        // Expose, then retract.
+        // The message arrives, and a frame later is still there.
         ears.hear(&mut form.tree);
         ears.hear(&mut form.tree);
         assert_eq!(
