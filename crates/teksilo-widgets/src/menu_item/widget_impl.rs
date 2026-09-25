@@ -33,6 +33,7 @@ fn is_highlight(state: MenuItemState) -> bool {
 impl Widget for MenuItem {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        self.self_id = Some(self_id);
         // Forward enabled (static or signal-bound) into the arena. A bound
         // signal makes enable/disable reactive — the framework's
         // effective_enabled drives paint / AT (and event gating).
@@ -233,7 +234,15 @@ impl Widget for MenuItem {
         // Pre-create submenu content if this is a submenu trigger. Kept
         // dormant until hover opens the overlay.
         let submenu_content_id = if let Some(factory) = self.submenu_factory.take() {
-            let submenu_widget = factory();
+            let mut submenu_widget = factory();
+            // A reader entering the submenu hears it named after this row
+            // ("Recent menu").
+            if let Some(menu) = submenu_widget
+                .as_any_mut()
+                .and_then(|a| a.downcast_mut::<crate::menu_list::MenuList>())
+            {
+                menu.set_opener(self_id);
+            }
             // Detached (a submenu opens in an overlay beside the item, never
             // inline) but owned, so it dies with the item instead of outliving
             // every menu the user ever opened.
@@ -548,6 +557,24 @@ impl Widget for MenuItem {
                 }
             })
         };
+
+        // The enclosing `MenuList` keeps focus while its rows are highlighted,
+        // so it activates this row itself on Enter, Space, the inline-forward
+        // arrow and a mnemonic, and it does so here: the keyboard route, not a
+        // synthesised click. A click is a mouse's, and a submenu a mouse
+        // opens is dismissed 150 ms after the pointer leaves it, so a
+        // keyboard-opened submenu closed itself wherever the mouse happened
+        // to rest. The framework gates a click on a disabled row; this gate
+        // is that one.
+        if let Some(slot) = self.keyboard_activation.as_ref() {
+            let activate = activate_item.clone();
+            let enabled = effective_enabled.clone();
+            *slot.borrow_mut() = Some(std::rc::Rc::new(move |ctx: &mut EventContext| {
+                if enabled.get() {
+                    activate(ctx);
+                }
+            }));
+        }
 
         let mut handler_set = HandlerSet::new();
 
@@ -923,6 +950,15 @@ impl Widget for MenuItem {
         // `MenuLabel` re-parses its own source for the underline.
         let parsed_name = parse_mnemonic(&self.label.resolve_now()).stripped;
         builder.set_name(parsed_name);
+
+        // Where this row stands among its menu's shown rows ("3 of 7"). The
+        // menu carries the count, since AccessKit reads an item's set size
+        // from its container.
+        if let (Some(rows), Some(id)) = (self.menu_rows.as_ref(), self.self_id)
+            && let Some(position) = rows.borrow().position_of(id)
+        {
+            builder.set_position_in_set(position);
+        }
 
         // Toggle state for Check / Radio. Mirrors `Checkbox`:
         // `set_toggled(bool)` for binary, `inner_mut().set_toggled(Toggled::Mixed)`

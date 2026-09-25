@@ -228,6 +228,24 @@ by crate for clarity, not because crates version independently.
   digit, and is now 0.3, as are its minimum, maximum and steps. A value the
   arrow keys reach reads as the step it reached: three steps of 0.01 up from
   0.3 are read as 0.33, not as the 0.32999998 the `f32` sums come to.
+- **A screen reader heard nothing as the highlight moved through a menu.** In
+  every `MenuList`, which is every menu-bar menu, context menu, popover menu
+  and submenu, the arrow keys, Home, End, PageUp, PageDown and type-ahead
+  moved a highlight no platform could see: Orca said "menu." as a menu
+  opened and nothing after it, and Enter ran a command the reader had never
+  heard. Each move of the highlight is now a focus change to the highlighted
+  item on Linux, Windows and macOS, so a reader hears "Open", or "Word Wrap,
+  check menu item, checked", as it goes. A menu is named after what opened
+  it, so opening one says "File menu", "Recent menu" or "Add menu" (a
+  context menu stays unnamed), and each item carries its place among the
+  menu's items for a reader that announces it ("3 of 5").
+- **A submenu opened from the keyboard closed itself.** Right, Enter or
+  Space on a submenu row, or its mnemonic, opened the submenu as a mouse
+  click would, and it closed about 165 ms later whenever the mouse rested
+  anywhere but on the row or the submenu, so a keyboard user could not
+  reach File > Recent in the example, or a docking layout's "Move to"
+  sides. It now stays open until Escape, Left, a choice or a click outside,
+  as one an assistive technology opens always did.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

@@ -55,6 +55,7 @@
 //! color is derived. Those four points live behind `PopoverTrigger`;
 //! everything else is shared by the generic.
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -573,6 +574,9 @@ struct PopoverBody {
     surface_name: String,
     placement: OverlayPlacement,
     body_id: Option<WidgetId>,
+    /// The trigger, once `PopoverWidget::build` has added it: a `MenuList`
+    /// content is named after it.
+    opener: Rc<Cell<Option<WidgetId>>>,
 }
 
 impl std::fmt::Debug for PopoverBody {
@@ -586,9 +590,18 @@ impl Widget for PopoverBody {
         if let Some(id) = self.body_id {
             return vec![id];
         }
-        let Some(content) = self.content.take() else {
+        let Some(mut content) = self.content.take() else {
             return Vec::new();
         };
+        // A menu in a popover is named after the button that opens it, so a
+        // reader entering it hears "Add menu" rather than "menu".
+        if let Some(opener) = self.opener.get()
+            && let Some(menu) = content
+                .as_any_mut()
+                .and_then(|a| a.downcast_mut::<crate::menu_list::MenuList>())
+        {
+            menu.set_opener(opener);
+        }
         // Materialize the inner content first so the surface style sees a ready
         // WidgetId (same pattern as the `Popover` widget).
         let inner_content_id = ctx.add_boxed(content);
@@ -669,6 +682,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
         // returned-as-child / dismissed) is unchanged; only when the subtree
         // under it exists has moved. `materialize_now` in the open handler
         // closes it up before the overlay is placed and focus moves in.
+        let opener: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
         let content_id = ctx.add_deferred(
             self.popover_open.clone(),
             PopoverBody {
@@ -678,6 +692,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 surface_name: self.surface_name.clone(),
                 placement: self.placement.clone(),
                 body_id: None,
+                opener: opener.clone(),
             },
         );
         // Focus targets the panel; `request_focus` walks to its first focusable
@@ -853,6 +868,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                     move |c: &mut EventContext| act(c)
                 });
             let trigger_id = ctx.add(trigger);
+            opener.set(Some(trigger_id));
             let caret_id = ctx.add(DisclosureCaret { role: role_signal });
             let root_id = ctx.add(ZStack::new().child(trigger_id).child(caret_id));
             self.root_child_id = Some(root_id);
@@ -881,6 +897,7 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
             .with_expanded_when(popover_open.clone())
             .with_on_activate(move |c: &mut EventContext| activate(c));
         let trigger_id = ctx.add(trigger);
+        opener.set(Some(trigger_id));
         self.root_child_id = Some(trigger_id);
         if let Some(content) = self.composite_tooltip_content.take() {
             let delay = ctx.theme().motion.tooltip_delay_heavy;

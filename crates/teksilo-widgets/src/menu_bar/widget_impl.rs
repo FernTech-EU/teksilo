@@ -521,7 +521,16 @@ impl Widget for RevealHeightBox {
 }
 impl Widget for MenuOverlayHost {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        let inner_widget = self.inner.take().expect("MenuOverlayHost built twice");
+        let mut inner_widget = self.inner.take().expect("MenuOverlayHost built twice");
+        // A reader entering the menu hears it named after its trigger ("File
+        // menu").
+        if let Some(trigger) = self.menu_ctx.trigger_id(self.menu_index)
+            && let Some(menu) = inner_widget
+                .as_any_mut()
+                .and_then(|a| a.downcast_mut::<crate::menu_list::MenuList>())
+        {
+            menu.set_opener(trigger);
+        }
         let id = ctx.add_boxed(inner_widget);
         self.inner_id = Some(id);
 

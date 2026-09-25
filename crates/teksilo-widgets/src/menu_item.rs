@@ -298,6 +298,18 @@ pub struct MenuItem {
     /// focus. `None` for items that haven't been adopted by a
     /// MenuList (e.g. solo menu items in tests).
     safe_triangle: Option<crate::menu_list::SharedSafeTriangleState>,
+    /// The enclosing menu's rows, installed by
+    /// [`MenuList::build`](crate::menu_list::MenuList::build), so this item
+    /// can publish where it stands among them. `None` outside a `MenuList`.
+    menu_rows: Option<crate::menu_list::SharedMenuRows>,
+    /// Where this item leaves its keyboard activation for the enclosing
+    /// [`MenuList`](crate::menu_list::MenuList), which keeps focus while its
+    /// rows are highlighted and so activates them itself. Filled in by
+    /// `build()`. `None` outside a `MenuList`.
+    keyboard_activation: Option<crate::menu_list::KeyboardActivationSlot>,
+    /// This item's own node, captured in `build()`, to find itself among
+    /// `menu_rows`.
+    self_id: Option<WidgetId>,
 }
 
 impl MenuItem {
@@ -331,6 +343,9 @@ impl MenuItem {
             submenu_content_id: None,
             parsed_mnemonic: None,
             safe_triangle: None,
+            menu_rows: None,
+            keyboard_activation: None,
+            self_id: None,
         }
     }
 
@@ -556,6 +571,9 @@ impl MenuItem {
             submenu_content_id: None,
             parsed_mnemonic: None,
             safe_triangle: None,
+            menu_rows: None,
+            keyboard_activation: None,
+            self_id: None,
         }
     }
 
@@ -689,6 +707,21 @@ impl MenuItem {
         state: crate::menu_list::SharedSafeTriangleState,
     ) {
         self.safe_triangle = Some(state);
+    }
+
+    /// Install the enclosing [`MenuList`](crate::menu_list::MenuList)'s rows,
+    /// so `accessibility()` can publish this item's position among them.
+    pub(crate) fn set_menu_rows(&mut self, rows: crate::menu_list::SharedMenuRows) {
+        self.menu_rows = Some(rows);
+    }
+
+    /// Install the slot the enclosing [`MenuList`](crate::menu_list::MenuList)
+    /// activates this item through from the keyboard. `build()` fills it.
+    pub(crate) fn set_keyboard_activation_slot(
+        &mut self,
+        slot: crate::menu_list::KeyboardActivationSlot,
+    ) {
+        self.keyboard_activation = Some(slot);
     }
 }
 

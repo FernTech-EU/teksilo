@@ -26,9 +26,14 @@
 //!
 //! ## Accessibility
 //!
-//! `Role::Menu`; each row is `Role::MenuItem` / `Role::MenuItemCheckBox` /
-//! `Role::MenuItemRadio` as declared by the item. Radio items in the same
-//! list auto-group via `push_to_radio_group` so AT announces "2 of 3".
+//! `Role::Menu`, named after what opened it (a `MenuBar` trigger, the
+//! `MenuItem::submenu` row, a `PopoverButton`'s button), with the keyboard
+//! highlight as its active descendant: the menu keeps keyboard focus, and a
+//! screen reader is told of each move of the highlight as a focus change to
+//! the row. Each row is `Role::MenuItem` / `Role::MenuItemCheckBox` /
+//! `Role::MenuItemRadio` as declared by the item, and carries its position
+//! among the menu's shown rows, whose count the menu carries. Radio items in
+//! the same list also auto-group via `push_to_radio_group`.
 //!
 //! ```rust
 //! # use teksilo_widgets::{MenuList, MenuItem};
@@ -228,7 +233,9 @@ impl Widget for KeyboardHighlightWrapper {
 ///
 /// Arrow / Home / End / type-ahead navigation moves `focused_index`, **not**
 /// real tree focus (which stays on the panel so the key handler keeps
-/// receiving keys) — so the framework's own focus-follow scroll never runs.
+/// receiving keys; assistive technology follows the highlight through the
+/// panel's active descendant), so the framework's own focus-follow scroll
+/// never runs.
 /// Past `max_visible_items` the panel is a `ScrollArea`, and without this the
 /// highlight walks straight out of the viewport and the menu looks frozen.
 ///
@@ -238,6 +245,25 @@ impl Widget for KeyboardHighlightWrapper {
 fn reveal(idx: usize, item_ids: &[WidgetId], ctx: &mut EventContext) {
     if let Some(&id) = item_ids.get(idx) {
         ctx.ensure_widget_visible(id);
+    }
+}
+
+/// Activate the row at `idx` from the keyboard: through the `MenuItem`'s own
+/// keyboard route when it is one (see [`KeyboardActivationSlot`]), and with a
+/// click on any other row, which has no such route.
+fn activate_row(
+    idx: usize,
+    item_ids: &[WidgetId],
+    activations: &[Option<KeyboardActivationSlot>],
+    ctx: &mut EventContext,
+) {
+    let keyboard = activations
+        .get(idx)
+        .and_then(|slot| slot.as_ref())
+        .and_then(|slot| slot.borrow().clone());
+    match keyboard {
+        Some(activate) => activate(ctx),
+        None => ctx.synthetic_click(item_ids[idx]),
     }
 }
 
@@ -273,7 +299,68 @@ pub struct MenuList {
     /// cleared on the next keypress. Defaults to 500 ms (Windows
     /// menubar convention).
     type_ahead_timeout: Duration,
+    /// The keyboard highlight: the index into `item_widget_ids` of the row
+    /// arrows, Home / End, page keys and type-ahead last moved to. Read by
+    /// `accessibility()` to name that row as the menu's active descendant.
+    highlight: Signal<Option<usize>>,
+    /// The rows a reader counts, shared with every `MenuItem` in the list
+    /// so each can say where it stands ("3 of 7").
+    rows: SharedMenuRows,
+    /// What opened this menu, when the opener said so (a menu-bar trigger,
+    /// a submenu row, a popover's button). The menu is named after it.
+    opener: Option<WidgetId>,
 }
+
+/// The rows of one [`MenuList`], as assistive technology counts them.
+///
+/// A separator and a header are not rows, and a row an `item_when` gate
+/// hides is not one while it is hidden: none of them is in the platform's
+/// tree. Shared with each `MenuItem` so the item can publish its own
+/// position, and read by the list for the set size, because AccessKit reads
+/// an item's set size from its container, never from the item
+/// (`accesskit_consumer` `node.rs:629-641`).
+#[derive(Debug, Default)]
+pub(crate) struct MenuRows {
+    ids: Vec<WidgetId>,
+    visible: Vec<Option<teksilo_core::signal::Prop<bool>>>,
+}
+
+impl MenuRows {
+    fn is_shown(&self, index: usize) -> bool {
+        self.visible
+            .get(index)
+            .and_then(|gate| gate.as_ref())
+            .is_none_or(|gate| gate.get())
+    }
+
+    /// How many rows are shown.
+    fn shown_count(&self) -> usize {
+        (0..self.ids.len()).filter(|&i| self.is_shown(i)).count()
+    }
+
+    /// The 1-based position of the row `id` among the shown rows, or `None`
+    /// when it is not a shown row of this menu.
+    pub(crate) fn position_of(&self, id: WidgetId) -> Option<usize> {
+        let index = self.ids.iter().position(|&row| row == id)?;
+        self.is_shown(index)
+            .then(|| (0..=index).filter(|&i| self.is_shown(i)).count())
+    }
+}
+
+/// Shared handle to a menu's [`MenuRows`].
+pub(crate) type SharedMenuRows = Rc<RefCell<MenuRows>>;
+
+/// How a `MenuItem` is activated from its menu's keyboard: filled in by the
+/// item when it builds, called by the enclosing [`MenuList`] on Enter, Space,
+/// the inline-forward arrow and a mnemonic.
+///
+/// The menu keeps focus while its rows are highlighted, so the item's own key
+/// handler never runs. Activating the row with a synthesised click instead
+/// made every submenu the keyboard opened a *mouse*-opened one, whose
+/// dismissal is the 150 ms pointer-leave grace: a mouse resting anywhere else
+/// closed it at once. This is the item's keyboard and assistive-technology
+/// route, the one `Action::Click` takes.
+pub(crate) type KeyboardActivationSlot = Rc<RefCell<Option<Rc<dyn Fn(&mut EventContext)>>>>;
 
 /// Per-MenuList shared state for the safe-triangle submenu hover gate:
 /// which submenu in this list is currently open, so a sibling row can
@@ -311,7 +398,18 @@ impl MenuList {
             max_visible_items: None,
             attached_side: None,
             type_ahead_timeout: Duration::from_millis(500),
+            highlight: Signal::new(None),
+            rows: SharedMenuRows::default(),
+            opener: None,
         }
+    }
+
+    /// Name this menu after the widget that opened it: a menu-bar trigger,
+    /// the submenu row it hangs from, the button of the popover it sits in.
+    /// A reader then hears "File menu" as focus enters it, where it heard
+    /// "menu" and nothing else. Set by the opener before the menu is built.
+    pub(crate) fn set_opener(&mut self, opener: WidgetId) {
+        self.opener = Some(opener);
     }
 
     /// Override the type-ahead buffer reset window. Defaults to 500ms
@@ -493,8 +591,22 @@ impl Widget for MenuList {
         let _theme_signal = ctx.theme_signal();
 
         // Keyboard-focused item index (shared with the key handler and wrappers).
-        // The binding registry propagates repaints when this changes.
+        // The binding registry propagates repaints when this changes, and
+        // re-walks this node's accessibility, which names the highlighted row
+        // as the menu's active descendant.
         let focused_index: Signal<Option<usize>> = ctx.signal(None);
+        focused_index.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            teksilo_core::binding::BindingLevel::AccessibilityOnly,
+        );
+        self.highlight = focused_index.clone();
+        // The rows as a reader counts them, filled in once every row has an id.
+        let rows: SharedMenuRows = Rc::new(RefCell::new(MenuRows::default()));
+        self.rows = rows.clone();
+        // Each `MenuItem`'s keyboard activation, parallel to `item_widget_ids`;
+        // `None` for a row that is not a `MenuItem`, which is clicked instead.
+        let mut activations: Vec<Option<KeyboardActivationSlot>> = Vec::new();
 
         // Build all entries into a VStack, wrapping items in highlight wrappers
         let mut vstack = VStack::new();
@@ -545,15 +657,17 @@ impl Widget for MenuList {
         for entry in self.entries.drain(..) {
             match entry {
                 MenuEntry::Item { pending, visible } => {
-                    let (item_id, radio_buf, item_label, item_mnemonic) = match pending {
-                        PendingChild::Id(id) => (id, None, None, None),
+                    let (item_id, radio_buf, item_label, item_mnemonic, activation) = match pending
+                    {
+                        PendingChild::Id(id) => (id, None, None, None, None),
                         PendingChild::Deferred(mut w) => {
                             // Single downcast pass: read the radio
                             // selection signal AND the parsed mnemonic
                             // AND install the safe-triangle shared
-                            // state, before moving the box into the
-                            // arena.
-                            let (radio_buf, item_label, item_mnemonic) = w
+                            // state, the shared rows and the keyboard
+                            // activation slot, before moving the box
+                            // into the arena.
+                            let (radio_buf, item_label, item_mnemonic, activation) = w
                                 .as_any_mut()
                                 .and_then(|a| a.downcast_mut::<crate::menu_item::MenuItem>())
                                 .map(|mi| {
@@ -580,14 +694,24 @@ impl Widget for MenuList {
                                         buf
                                     });
                                     mi.set_safe_triangle_state(safe_triangle.clone());
-                                    (radio, label, mnemonic)
+                                    mi.set_menu_rows(rows.clone());
+                                    let activation = KeyboardActivationSlot::default();
+                                    mi.set_keyboard_activation_slot(activation.clone());
+                                    (radio, label, mnemonic, Some(activation))
                                 })
-                                .unwrap_or((None, None, None));
-                            (ctx.add_boxed(w), radio_buf, item_label, item_mnemonic)
+                                .unwrap_or((None, None, None, None));
+                            (
+                                ctx.add_boxed(w),
+                                radio_buf,
+                                item_label,
+                                item_mnemonic,
+                                activation,
+                            )
                         }
                     };
                     self.item_widget_ids.push(item_id);
                     self.item_visibility.push(visible.clone());
+                    activations.push(activation);
                     let item_idx = self.item_widget_ids.len() - 1;
                     if let Some(buf) = radio_buf {
                         pending_radio_pushes.push((item_idx, buf));
@@ -614,7 +738,8 @@ impl Widget for MenuList {
                     // A per-item visibility gate is applied to the WRAPPER (not
                     // the inner item) so a hidden row collapses to zero height
                     // — no empty gap — while keeping `item_widget_ids` pointing
-                    // at the real, clickable item for `synthetic_click`.
+                    // at the real item, the one keyboard activation reaches and
+                    // the active descendant names.
                     let wrapper_id = ctx.add(KeyboardHighlightWrapper {
                         item_id,
                         index: item_counter,
@@ -650,6 +775,10 @@ impl Widget for MenuList {
         for (item_idx, buf) in pending_radio_pushes {
             buf.borrow_mut().push(self.item_widget_ids[item_idx]);
         }
+        *rows.borrow_mut() = MenuRows {
+            ids: self.item_widget_ids.clone(),
+            visible: self.item_visibility.clone(),
+        };
 
         let vstack_id = ctx.add(vstack);
 
@@ -714,6 +843,7 @@ impl Widget for MenuList {
         let mnemonic_table = Rc::new(mnemonic_table);
         // Per-item visibility gates, so navigation skips collapsed rows.
         let visibilities = Rc::new(self.item_visibility.clone());
+        let activations = Rc::new(activations);
         let handler_set = HandlerSet::new()
             .on_key(
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
@@ -824,13 +954,13 @@ impl Widget for MenuList {
                             EventResponse::Handled
                         }
                         Key::Enter | Key::Space => {
-                            // Activate the focused item via synthetic click —
+                            // Activate the focused item (see `activate_row`),
                             // but only if it is currently visible.
                             if let Some(idx) = focused_index.get()
                                 && visible_indices.contains(&idx)
                                 && idx < item_ids.len()
                             {
-                                ctx.synthetic_click(item_ids[idx]);
+                                activate_row(idx, &item_ids, &activations, ctx);
                                 return EventResponse::Handled;
                             }
                             EventResponse::Ignored
@@ -844,7 +974,7 @@ impl Widget for MenuList {
                                 && idx < sub_flags.len()
                                 && sub_flags[idx]
                             {
-                                ctx.synthetic_click(item_ids[idx]);
+                                activate_row(idx, &item_ids, &activations, ctx);
                                 return EventResponse::Handled;
                             }
                             EventResponse::Ignored
@@ -899,7 +1029,7 @@ impl Widget for MenuList {
                             if let Some(idx) = mnemonic_table.get(&ch).and_then(|claims| {
                                 claims.iter().copied().find(|i| visible_indices.contains(i))
                             }) {
-                                ctx.synthetic_click(item_ids[idx]);
+                                activate_row(idx, &item_ids, &activations, ctx);
                                 return EventResponse::Handled;
                             }
 
@@ -989,7 +1119,40 @@ impl Widget for MenuList {
     // wrapper resolved in `build()`.
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        use teksilo_core::accessibility::widget_id_to_node_id;
+
         builder.set_role(teksilo_core::accesskit::Role::Menu);
+        // "File menu", not "menu": named after what opened it, through the
+        // opener's own name, so the two cannot disagree.
+        if let Some(opener) = self.opener {
+            builder.push_labelled_by(widget_id_to_node_id(opener));
+        }
+        let rows = self.rows.borrow();
+        builder.set_size_of_set(rows.shown_count());
+
+        // The highlighted row, as the menu's active descendant.
+        //
+        // Focus stays on this panel while the arrows, Home / End, the page
+        // keys and type-ahead move a highlight through its rows, so a reader
+        // is told about the highlight only if it becomes a focus change.
+        // `accesskit_consumer` resolves the platform's focus as
+        // `focused.active_descendant().unwrap_or(focused)` (`tree.rs:537-543`)
+        // and hands that node to all three adapters: AT-SPI raises
+        // `state-changed:focused` on it (`accesskit_atspi_common`
+        // `adapter.rs:324-340`), which Orca speaks as its new locus of focus;
+        // UIA raises its focus-changed event (`accesskit_windows`
+        // `adapter.rs:341-345`); macOS `FocusedUIElementChanged`
+        // (`accesskit_macos` `event.rs:319-326`). Without it every move was
+        // silent: Orca said "menu." as the menu opened and nothing after, and
+        // Enter ran a command the reader had never heard. It is `ListView`'s
+        // current row again (see `list_view/widget_impl.rs`). A highlight on a
+        // row that is hidden names nothing, and the menu stays the focus.
+        if let Some(index) = self.highlight.get()
+            && rows.is_shown(index)
+            && let Some(&row) = rows.ids.get(index)
+        {
+            builder.set_active_descendant(widget_id_to_node_id(row));
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -998,7 +1161,20 @@ impl Widget for MenuList {
             None => Vec::new(),
         }
     }
+
+    /// Opt into reflection so an opener holding the menu as a boxed widget
+    /// can name the menu after itself.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
 }
+
+#[cfg(test)]
+mod reader_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1180,13 +1356,14 @@ mod tests {
     #[test]
     fn keyboard_activation_keeps_the_window_ops() {
         // Enter on a menu row does not dispatch the click the pointer
-        // would: it queues `EventContext::synthetic_click`, which the tree
-        // drains as a *nested* dispatch — and the row's own handler runs
-        // inside it. Draining that tap standalone handed the handler a
-        // context with no window sink, so a row that opened a window by
-        // mouse panicked in `NoopWindowOps::open_window` by keyboard
-        // (Skribisto's Help ▸ Help Topics). Same for Space, a mnemonic and
-        // type-ahead: all four activate through `synthetic_click`.
+        // would: it runs the row's keyboard activation inside the menu's own
+        // key dispatch (a row that is not a `MenuItem` gets a queued
+        // `EventContext::synthetic_click`, which the tree drains as a
+        // *nested* dispatch). Draining that tap standalone once handed the
+        // handler a context with no window sink, so a row that opened a
+        // window by mouse panicked in `NoopWindowOps::open_window` by
+        // keyboard (Skribisto's Help ▸ Help Topics). Same for Space, a
+        // mnemonic and type-ahead.
         for activate in [Key::Enter, Key::Space] {
             let mut tree = light_tree();
             let menu = MenuList::new().item(MenuItem::new(lit!("Help")).on_activate_fn(|ctx| {
@@ -1211,6 +1388,30 @@ mod tests {
                 ops.opened, 1,
                 "{activate:?} on a menu row must reach the caller's WindowOps"
             );
+        }
+    }
+
+    #[test]
+    fn keyboard_activation_leaves_a_disabled_row_alone() {
+        // Enter, Space and a mnemonic reach a `MenuItem` through its keyboard
+        // route, not through a click the framework would refuse a disabled
+        // row: the route has to refuse it itself.
+        for key in [Key::Enter, Key::Space, Key::D] {
+            let fired = StdRc::new(StdCell::new(false));
+            let mut tree = light_tree();
+            let fired_for_row = fired.clone();
+            let menu_id = tree.add(
+                MenuList::new().item(
+                    MenuItem::new(lit!("&Delete"))
+                        .enabled(false)
+                        .on_activate_fn(move |_| fired_for_row.set(true)),
+                ),
+            );
+            tree.layout(SizeProposal::with_width(300.0));
+            tree.focus(menu_id);
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+            tree.press_key(key, Modifiers::NONE);
+            assert!(!fired.get(), "{key:?} must not run a disabled row");
         }
     }
 
