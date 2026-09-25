@@ -1668,8 +1668,11 @@ impl WidgetTree {
     }
 
     /// Drain overlays whose fade-out tween has completed (set up by
-    /// `OverlayRequest::with_fade`). Same dormant-and-restore-focus
-    /// flow as the normal dismiss path; called once per layout pass
+    /// `OverlayRequest::with_fade`). Parks the content as the normal
+    /// dismiss path does, and hands focus back only when that leaves it
+    /// nowhere ([`restore_focus_left_behind`](Self::restore_focus_left_behind)):
+    /// the dismissal that started the fade may have meant to leave focus
+    /// alone, and the user may have moved it on since; called once per layout pass
     /// after `process_auto_dismiss_overlays_real` so an overlay that
     /// hits its auto-dismiss deadline kicks off its fade-out tween
     /// in the same pass.
@@ -1681,11 +1684,7 @@ impl WidgetTree {
         let pending = self.overlay_manager.process_pending_fade_dismissals(now);
         for (_id, dismissed, focus_restore) in pending {
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+            self.restore_focus_left_behind(focus_restore, &mut *ops);
         }
     }
 
@@ -1699,11 +1698,29 @@ impl WidgetTree {
             .process_pending_fade_dismissals_sim(self.sim_clock);
         for (_id, dismissed, focus_restore) in pending {
             self.dormant_dismissed_content(&dismissed, &mut noop);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut noop);
-            }
+            self.restore_focus_left_behind(focus_restore, &mut noop);
+        }
+    }
+
+    /// Hand focus to `restore` after an overlay has gone of its own accord
+    /// (its auto-dismiss timer ran out, or its fade-out ended), but only when
+    /// focus is left nowhere: the overlay held it and
+    /// [`dormant_dismissed_content`](Self::dormant_dismissed_content) has just
+    /// taken it away with the content, or nothing held it. Focus the user has
+    /// moved elsewhere since the overlay opened stays where they put it. A tip
+    /// that focus summoned holds its anchor as `restore`, and restoring that
+    /// whatever held focus sent a reader who had Tabbed on back to the control
+    /// they had just left.
+    fn restore_focus_left_behind(
+        &mut self,
+        restore: Option<WidgetId>,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if let Some(restore) = restore
+            && self.arena.is_active(restore)
+            && self.focused.is_none_or(|id| !self.arena.is_active(id))
+        {
+            self.focus_ops(restore, ops);
         }
     }
 
@@ -1737,11 +1754,7 @@ impl WidgetTree {
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+            self.restore_focus_left_behind(focus_restore, &mut *ops);
         }
     }
 

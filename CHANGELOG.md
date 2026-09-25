@@ -76,6 +76,15 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **Tabbing away from a control whose tooltip was showing sent focus back to
+  it.** Once focus had brought up a control's rich or composite tooltip, Tab
+  moved on to the next control and then, about 120 ms later as the tooltip
+  faded out, focus returned to the control just left: a screen reader's
+  reading of the next control was cut, the old control was read again, and
+  only a second Tab got away. Tabbing out of a tooltip that had turned sticky
+  did the same. Focus now stays where Tab put it. A `Snackbar` that times out
+  no longer sends focus back to its trigger after the user has moved on
+  either.
 - **Every window was an unnamed "frame" to Orca.** The accessibility tree's
   root, which AT-SPI presents as the window, carried no name, so Orca 46.1
   announced each window as it came up with the bare word "frame". The root now

@@ -689,6 +689,95 @@ mod tests {
         assert!(tree.active_overlays().is_empty());
     }
 
+    /// A snackbar that times out leaves focus where the reader has taken it.
+    ///
+    /// The snackbar's overlay records the focus it opened over (its trigger)
+    /// as its focus restore, and its timer running out handed focus back to
+    /// that trigger even after the reader had moved on: a reader who Tabbed
+    /// away was sent back to the button when the snackbar went.
+    #[test]
+    fn a_timed_out_snackbar_leaves_focus_where_the_reader_moved_it() {
+        use crate::button::Button;
+        use crate::common::heard_test::{Heard, Listener};
+        use crate::primitives::VStack;
+        use teksilo_core::event::Modifiers;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(
+            VStack::new()
+                .child(
+                    Snackbar::new(lit!("Show snackbar"))
+                        .content(FixedLeaf(220.0, 40.0))
+                        .auto_dismiss_after(Duration::from_millis(300)),
+                )
+                .child(Button::new(lit!("Elsewhere"))),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Show snackbar").unwrap();
+        tree.focus(trigger);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 1, "the snackbar is up");
+        let mut reader = Listener::attach(&mut tree);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![Heard::Focus("Elsewhere".into())],
+            "Tab moves on"
+        );
+
+        tree.advance_time(Duration::from_millis(400));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the snackbar has timed out"
+        );
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![],
+            "the snackbar timing out must not move focus back to its trigger"
+        );
+    }
+
+    /// A snackbar that times out while focus is inside it hands focus back to
+    /// its trigger rather than leaving the reader nowhere. The test above
+    /// passes just as well if a timeout never restores focus at all; this one
+    /// does not.
+    #[test]
+    fn a_snackbar_timing_out_with_focus_inside_hands_it_back_to_its_trigger() {
+        use crate::button::Button;
+        use crate::common::heard_test::{Heard, Listener};
+        use teksilo_core::event::Modifiers;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(
+            Snackbar::new(lit!("Show snackbar"))
+                .content(Button::new(lit!("Undo")))
+                .auto_dismiss_after(Duration::from_millis(300)),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let trigger = tree.find_by_label("Show snackbar").unwrap();
+        tree.focus(trigger);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(tree.active_overlays().len(), 1, "the snackbar is up");
+        let undo = tree.find_by_label("Undo").expect("the snackbar's action");
+        tree.focus(undo);
+        let mut reader = Listener::attach(&mut tree);
+
+        tree.advance_time(Duration::from_millis(400));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the snackbar has timed out"
+        );
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![Heard::Focus("Show snackbar".into())],
+            "the snackbar timing out hands focus back to its trigger"
+        );
+        assert_eq!(tree.focused(), Some(trigger));
+    }
+
     #[test]
     #[should_panic(expected = "Snackbar requires .content(...)")]
     fn snackbar_without_content_panics_on_build() {

@@ -946,6 +946,15 @@ mod tests {
     /// real call site has, and the one Tab traversal can be reasoned about in.
     fn two_buttons_first_with_tooltip()
     -> (teksilo_core::widget_tree::WidgetTree, WidgetId, WidgetId) {
+        two_buttons_first_with_tooltip_with(true)
+    }
+
+    /// [`two_buttons_first_with_tooltip`], choosing whether motion is reduced.
+    /// With motion on, a dismissed tip stays on the stack while it fades out
+    /// over `duration_fast`, and leaves it when the fade ends.
+    fn two_buttons_first_with_tooltip_with(
+        reduced_motion: bool,
+    ) -> (teksilo_core::widget_tree::WidgetTree, WidgetId, WidgetId) {
         use crate::button::Button;
         use std::cell::RefCell;
         use teksilo_canvas::MockTextBackend;
@@ -953,7 +962,7 @@ mod tests {
 
         let mut tree =
             WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())));
-        tree.set_accessibility_preferences(false, true, 1.0);
+        tree.set_accessibility_preferences(false, reduced_motion, 1.0);
         let first = tree.add(
             Button::new(lit!("First")).rich_tooltip_content(TooltipContent::new(
                 "first-tip",
@@ -1038,6 +1047,125 @@ mod tests {
             Some(second),
             "an unpromoted tip is informational and must not capture Tab"
         );
+    }
+
+    /// Tab away from a control whose tip is showing, and focus stays where Tab
+    /// put it once the tip has faded out.
+    ///
+    /// `tools/reader/` found focus going back to the control just left about
+    /// 120 ms after the Tab, on every control whose tip focus had summoned:
+    /// the tip's overlay held that control as its focus restore, and the end
+    /// of its fade handed focus back to it whatever held focus by then. Orca
+    /// cut its reading of the next control and read the old one again, and
+    /// only a second Tab got away. With motion reduced there is no fade and no
+    /// bounce, which is why the tests above, all run that way, never saw it.
+    #[test]
+    fn tabbing_away_from_a_shown_tooltip_keeps_focus_where_tab_put_it() {
+        use crate::common::heard_test::{Heard, Listener};
+        use teksilo_core::event::{Key, Modifiers};
+
+        let (mut tree, first, second) = two_buttons_first_with_tooltip_with(false);
+        tree.focus(first);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        assert_eq!(tree.active_overlays().len(), 1, "the tip is showing");
+        let mut reader = Listener::attach(&mut tree);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![Heard::Focus("Second".into())],
+            "Tab moves focus on to the next control"
+        );
+
+        // The tip fades out behind the Tab; run past the end of that fade.
+        tree.advance_time(tree.theme().motion.duration_fast * 2);
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![],
+            "the end of the tip's fade must not move focus back to the control \
+             the reader has just left"
+        );
+        assert_eq!(tree.focused(), Some(second));
+    }
+
+    /// The same, leaving a tip that has turned sticky and been Tabbed into:
+    /// the next Tab goes on to the next control, and focus stays there.
+    #[test]
+    fn tabbing_out_of_a_sticky_tooltip_keeps_focus_where_tab_put_it() {
+        use crate::common::heard_test::{Heard, Listener};
+        use teksilo_core::event::{Key, Modifiers};
+
+        let (mut tree, first, second) = two_buttons_first_with_tooltip_with(false);
+        tree.focus(first);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        let tip = tree
+            .tooltip_content_within(first)
+            .expect("the button registered a tooltip");
+        tree.promote_tooltip_to_sticky(tip);
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let inside = tree.focused().expect("Tab landed somewhere");
+        assert!(
+            inside == tip || tree.is_descendant_of(inside, tip),
+            "Tab goes into the sticky tip first"
+        );
+        let mut reader = Listener::attach(&mut tree);
+
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![Heard::Focus("Second".into())],
+            "the next Tab leaves the tip for the next control"
+        );
+
+        tree.advance_time(tree.theme().motion.duration_fast * 2);
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![],
+            "the end of the tip's fade must not move focus back to its anchor"
+        );
+        assert_eq!(tree.focused(), Some(second));
+    }
+
+    /// The other half of that rule: a tip that goes while focus is inside it
+    /// hands focus back to its anchor when its fade ends, and does not leave
+    /// the reader nowhere. The two tests above pass just as well if the end of
+    /// a fade never restores focus at all; this one does not.
+    #[test]
+    fn a_tip_that_fades_out_holding_focus_hands_it_back_to_its_anchor() {
+        use crate::common::heard_test::{Heard, Listener};
+        use teksilo_core::event::{Key, Modifiers};
+
+        let (mut tree, first, _second) = two_buttons_first_with_tooltip_with(false);
+        tree.focus(first);
+        tree.advance_time(tree.theme().motion.tooltip_delay + Duration::from_millis(50));
+        let tip = tree
+            .tooltip_content_within(first)
+            .expect("the button registered a tooltip");
+        tree.promote_tooltip_to_sticky(tip);
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let inside = tree.focused().expect("Tab landed somewhere");
+        assert!(
+            inside == tip || tree.is_descendant_of(inside, tip),
+            "Tab goes into the sticky tip first"
+        );
+        let overlay = tree
+            .overlay_manager()
+            .find_by_content(tip)
+            .expect("the tip is up");
+        let mut reader = Listener::attach(&mut tree);
+
+        // A plain dismissal restores nothing itself; the tip starts to fade
+        // with focus still inside it.
+        tree.dismiss_overlay(overlay);
+        assert_eq!(tree.focused(), Some(inside), "focus is in the fading tip");
+
+        tree.advance_time(tree.theme().motion.duration_fast * 2);
+        assert_eq!(
+            reader.heard(&mut tree),
+            vec![Heard::Focus("First".into())],
+            "the end of the fade hands focus back to the anchor"
+        );
+        assert_eq!(tree.focused(), Some(first));
     }
 
     /// A promoted panel takes the Tab stop **directly after its anchor** —
