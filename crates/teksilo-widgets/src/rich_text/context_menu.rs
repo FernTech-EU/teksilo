@@ -65,6 +65,7 @@ use teksilo_core::event::Key;
 use teksilo_core::intent::Intent;
 use teksilo_core::shortcut::KeyStroke;
 use teksilo_core::widget::Widget;
+use teksilo_core::widget_builder::ContextMenuTrigger;
 
 use crate::keystroke_format::format_keystroke;
 use crate::menu_item::MenuItem;
@@ -107,16 +108,25 @@ pub(super) fn default_factory(state: SharedState) -> RichTextContextMenuFactory 
     // once and cloned for each menu item's action closure; the
     // `Rc<RefCell<...>>` behind `SharedState` makes that cheap. The
     // built-in menu is unconditional — it always returns
-    // `Some(menu)`, ignoring position and ctx. Callers needing a
+    // `Some(menu)`, whatever the position. Callers needing a
     // position-aware menu install their own via
     // `RichTextEditor::context_menu`.
-    Box::new(move |pos, _ctx| {
+    Box::new(move |pos, ctx| {
         // Reposition the caret to the click point (unless it lands inside the
         // current selection) so Paste — and every other item — acts where the
         // user right-clicked, matching the single-line field and the platform
         // convention. Without this a right-click leaves the caret wherever it
         // last was, and Paste inserted there instead of under the cursor.
-        super::mouse::reposition_caret_for_context_menu(&state, pos);
+        //
+        // A pointer's point only. The keyboard's menu is anchored in the
+        // middle of the editor, and moving the caret there sent the menu's
+        // Paste to a place the user had never been.
+        if ctx
+            .context_menu_trigger()
+            .is_none_or(ContextMenuTrigger::is_pointer)
+        {
+            super::mouse::reposition_caret_for_context_menu(&state, pos);
+        }
         let state_for_build = state.clone();
         Some(Box::new(build_menu(state_for_build)) as Box<dyn Widget>)
     })

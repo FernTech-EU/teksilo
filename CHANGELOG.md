@@ -84,6 +84,17 @@ by crate for clarity, not because crates version independently.
   calendar where CLDR gives the locale another one: by default `fa-IR` writes
   24 September 2026 as the 2nd of Mehr 1405, and `th-TH` counts its year 2569.
 
+#### Core
+
+- **`EventContext::context_menu_trigger`: what asked for a context menu.** A
+  `context_menu` factory is handed a point whatever opened the menu, and only
+  a pointer's is one the user chose. Inside the factory,
+  `ctx.context_menu_trigger()` now says `ContextMenuTrigger::Pointer` (a
+  secondary click, or a hold), `Keyboard` (the Menu key, Shift+F10, Ctrl+Shift+M
+  on macOS) or `Accessibility` (an assistive technology's `ShowContextMenu`),
+  so a factory can act on the point, moving a caret to it or picking the item
+  under it, only when the user pointed there.
+
 ### Changed
 
 #### Data views
@@ -706,6 +717,22 @@ by crate for clarity, not because crates version independently.
   tree's announcer, as the title now reads; the Today button announces the
   day it moved to, in full. Neither announces while the grid itself holds focus.
   **Behaviour change** for anything that listened to the grid's live region.
+- **The context menu opened from the keyboard acted somewhere else.** Shift+F10
+  or the Menu key in a `RichTextEditor`, a `CodeEditor` or a single-line field
+  (`TextInput`, `PasswordField`, `SpinBox`, `SearchField`) moved the caret to
+  the middle of the surface before the menu opened, as a right-click there
+  would have. The reader heard nothing of it, or "Text unselected." when a
+  selection collapsed, and the menu's Paste then wrote into the middle of the
+  text while Cut and Copy found no selection. The caret and the selection now
+  stay where they were, and the menu acts there. A right-click still moves the
+  caret to the click.
+- **Closing a field's context menu selected the whole field.** When focus came
+  back to a single-line field from its own menu (Escape, one of its commands,
+  a click outside it), the field treated it as a keyboard arrival and selected
+  everything: Orca said the field's text followed by "selected", and the next
+  key replaced it all, even right after the menu's Paste. Focus now comes back
+  to the caret and selection the menu found. Arriving by Tab still selects the
+  field.
 
 #### Data views
 

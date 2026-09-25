@@ -2674,6 +2674,11 @@ impl EditorHandle {
     /// [`context_menu`](RichTextEditor::context_menu) factory so the menu's Paste
     /// — and any caret-relative action — operates where the user clicked, exactly
     /// as the built-in menu and the single-line field do.
+    ///
+    /// Only when a pointer opened the menu
+    /// ([`EventContext::context_menu_trigger`](teksilo_core::widget::EventContext::context_menu_trigger)):
+    /// a menu opened from the keyboard is handed an anchor in the middle of the
+    /// editor, and moving the caret there sends Paste away from where the user is.
     pub fn reposition_caret_for_context_menu(&self, window_point: Point) {
         mouse::reposition_caret_for_context_menu(&self.state, window_point);
     }

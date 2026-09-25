@@ -189,7 +189,9 @@ impl CodeEditor {
     ///
     /// A replacement is responsible for repositioning the caret if it wants the
     /// platform convention — the built-in menu does it through
-    /// `context_menu::factory`.
+    /// `context_menu::factory`, and only when a pointer opened the menu
+    /// ([`EventContext::context_menu_trigger`](teksilo_core::widget::EventContext::context_menu_trigger)).
+    /// Shift+F10 hands the factory an anchor, not a place the user chose.
     pub fn context_menu(
         mut self,
         factory: impl Fn(

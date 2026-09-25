@@ -2724,6 +2724,132 @@ fn editor_right_click_outside_selection_repositions_caret() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// The keyboard's route to the same menu
+// ---------------------------------------------------------------------------
+//
+// Shift+F10 opens the menu a right-click opens, but there is no click: the
+// menu is anchored on the editor, and a reader who put the caret somewhere with
+// the keyboard expects the menu to act there. These read the caret and the
+// selection as the platform adapter hands them to a screen reader.
+
+/// A draft long enough that the middle of the editor, where a menu opened from
+/// the keyboard is anchored, is far from where the tests leave the caret.
+fn long_draft() -> String {
+    (1..=30)
+        .map(|n| format!("line {n} of the draft"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// An editor over `long_draft`, focused, with the caret at the start, and a
+/// reader attached.
+fn keyboard_menu_editor() -> (
+    WidgetTree,
+    TextDocument,
+    teksilo_platform::clipboard::ClipboardHandle,
+    super::EditorHandle,
+    crate::common::heard_test::Listener,
+) {
+    use teksilo_core::event::{Key, Modifiers};
+    let doc = TextDocument::new();
+    doc.set_plain_text(&long_draft()).unwrap();
+    let editor = RichTextEditor::editor(doc.clone());
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let clipboard = ctx_with_memory_clipboard(&mut tree);
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    focus_editor(&mut tree, id);
+    tree.press_key(Key::Home, Modifiers::COMMAND);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    let reader = crate::common::heard_test::Listener::attach(&mut tree);
+    (tree, doc, clipboard, handle, reader)
+}
+
+fn shift_f10(tree: &mut WidgetTree, reader: &mut crate::common::heard_test::Listener) {
+    use teksilo_core::event::{Key, Modifiers};
+    tree.press_key(Key::F10, Modifiers::SHIFT);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = reader.heard(tree);
+}
+
+#[test]
+fn shift_f10_leaves_the_caret_where_the_reader_put_it() {
+    let (mut tree, doc, clipboard, _handle, mut reader) = keyboard_menu_editor();
+    clipboard.set_text("PASTED ").unwrap();
+    assert_eq!(
+        reader.text_input().map(|t| t.caret),
+        Some(0),
+        "precondition: Ctrl+Home put the caret at the start"
+    );
+
+    shift_f10(&mut tree, &mut reader);
+    assert!(
+        reader.finds(teksilo_core::accesskit::Role::MenuItem, "Paste"),
+        "Shift+F10 must open the editor's menu"
+    );
+    assert_eq!(
+        reader.text_input().map(|t| t.caret),
+        Some(0),
+        "opening the menu from the keyboard moved the caret: it was treated as \
+         a click at the anchor in the middle of the editor"
+    );
+
+    // The menu's Paste writes where the caret is, which is where the reader
+    // left it.
+    let paste = reader
+        .widget(teksilo_core::accesskit::Role::MenuItem, "Paste")
+        .expect("the reader can reach Paste");
+    tree.click(paste);
+    tick_past_debounce(&mut tree);
+    let text = doc.to_plain_text().unwrap_or_default();
+    assert!(
+        text.starts_with("PASTED line 1 of the draft"),
+        "the menu's Paste must insert at the caret (0); the document now begins {:?} \
+         and the paste went to offset {:?}",
+        text.chars().take(40).collect::<String>(),
+        text.find("PASTED")
+    );
+}
+
+#[test]
+fn shift_f10_keeps_the_selection_the_menu_acts_on() {
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, _doc, _clipboard, handle, mut reader) = keyboard_menu_editor();
+    handle.select_range(0, 4);
+    tick_once(&mut tree);
+    let _ = tree.render();
+    let _ = reader.heard(&mut tree);
+    let before = reader.text_input().and_then(|t| t.selection);
+    assert_eq!(before, Some((0, 4)), "precondition: 'line' is selected");
+
+    shift_f10(&mut tree, &mut reader);
+    assert_eq!(
+        reader.text_input().and_then(|t| t.selection),
+        before,
+        "opening the menu from the keyboard dropped the selection its Cut and \
+         Copy act on"
+    );
+
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = reader.heard(&mut tree);
+    assert!(
+        !reader.finds(teksilo_core::accesskit::Role::MenuItem, "Paste"),
+        "Escape must close the menu"
+    );
+    assert_eq!(
+        reader.text_input().and_then(|t| t.selection),
+        before,
+        "Escape out of the menu must leave the selection as it was"
+    );
+}
+
 #[test]
 fn editor_offset_at_point_hit_tests_window_coordinates() {
     // `EditorHandle::offset_at_point` maps a window-space point (as a

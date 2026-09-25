@@ -486,7 +486,12 @@ impl WidgetTree {
         pending: &PendingTouchRoute,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
-        if !self.show_context_menu_for(pending.target, pending.position, ops) {
+        if !self.show_context_menu_for(
+            pending.target,
+            pending.position,
+            crate::widget_builder::ContextMenuTrigger::Pointer,
+            ops,
+        ) {
             return false;
         }
         if let Some(wording) = self.context_menu_announcement.clone() {

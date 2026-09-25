@@ -322,6 +322,8 @@ Context menus live at a different tier from the four tap-family hooks. Instead o
 })
 ```
 
+**Only a pointer's `position` is a place the user chose.** The keyboard chord and the `ShowContextMenu` action carry no point, so the factory is handed an anchor at the centre of the widget the menu is about (for a data view, the row its `context_menu_key_target` nominates). `ctx.context_menu_trigger()` says which route asked: `ContextMenuTrigger::Pointer`, `Keyboard` or `Accessibility`. Act on the point (move a caret to it, pick what is under it) only for `Pointer`. The built-in text surfaces do exactly that, so Shift+F10 in a field leaves the caret and the selection where the user put them, and the menu's Paste writes there.
+
 The factory is `Fn` (re-entrant) and called fresh on every right-click — the menu's enabled / disabled flags read live state at the moment it opens, so a "Paste" item correctly greys out when the clipboard becomes empty between two right-clicks.
 
 **Returning `None` declines the click** and the framework continues walking up the parent chain to the next ancestor with a factory. This lets a widget conditionally suppress its own menu without uninstalling the factory:

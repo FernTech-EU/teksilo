@@ -404,6 +404,10 @@ pub struct EventContext<'ops> {
     /// invoked while it reads `true` (a focus handler changing context). `None`
     /// for hand-constructed (test) contexts.
     pub(crate) in_focus_dispatch: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+    /// What asked for the context menu whose factory this context is serving.
+    /// Set by `show_context_menu_for` only; `None` everywhere else. Read by
+    /// [`context_menu_trigger`](EventContext::context_menu_trigger).
+    pub(crate) context_menu_trigger: Option<crate::widget_builder::ContextMenuTrigger>,
 }
 
 /// One arbitration act a handler performed on its pointer's sequence.
@@ -557,6 +561,7 @@ impl<'ops> EventContext<'ops> {
             touch_action: TouchAction::AUTO,
             press: None,
             in_focus_dispatch: None,
+            context_menu_trigger: None,
             explicit_capture: false,
             recognized_owning_gesture: false,
             drag_activation_override: None,
@@ -631,6 +636,19 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn with_dispatch_node(mut self, node: WidgetId) -> Self {
         self.dispatch_node = Some(node);
         self
+    }
+
+    /// What asked for the context menu, inside a
+    /// [`ContextMenuFactory`](crate::widget_builder::ContextMenuFactory); `None`
+    /// in any other handler.
+    ///
+    /// The factory's point is where the user pointed only for
+    /// [`Pointer`](crate::widget_builder::ContextMenuTrigger::Pointer). A menu
+    /// the keyboard or an assistive technology asked for is anchored on the
+    /// widget it is about, so a factory that moves a caret or picks an item
+    /// from the point does that for a pointer alone.
+    pub fn context_menu_trigger(&self) -> Option<crate::widget_builder::ContextMenuTrigger> {
+        self.context_menu_trigger
     }
 
     /// The pointer that produced the event being handled.

@@ -697,6 +697,16 @@ impl Widget for TextInputField {
         let state_for_access = self.state().clone();
         let touch_for_access = self.touch.clone();
         let state_for_menu = self.state().clone();
+        // Set when the field's own context menu takes focus from it, and spent
+        // by the next focus gain. That gain is focus coming back from the menu
+        // (Escape, one of its commands, a click outside it), which is a return
+        // to the field as the reader left it, not an arrival: selecting the
+        // whole field there made the next key replace everything in it. Focus
+        // that leaves the menu for somewhere else (Tab) leaves the flag set
+        // until the field's next gain, which then keeps the caret it had
+        // instead of selecting all, once.
+        let menu_took_focus = std::rc::Rc::new(std::cell::Cell::new(false));
+        let menu_took_focus_for_focus = menu_took_focus.clone();
 
         let handlers = HandlerSet::new()
             .focusable(true)
@@ -743,8 +753,9 @@ impl Widget for TextInputField {
                     st.blink.restart();
                     st.caret_visible.set(true);
                     let is_keyboard = !hovered_for_focus.get();
+                    let back_from_menu = menu_took_focus_for_focus.replace(false);
                     drop(st);
-                    if is_keyboard {
+                    if is_keyboard && !back_from_menu {
                         let st = state_for_focus.borrow();
                         st.cursor.select(SelectionType::Document);
                         drop(st);
@@ -846,7 +857,6 @@ impl Widget for TextInputField {
             // clipboard state at the moment the menu opens. The framework
             // handles overlay placement, focus restoration, and dismissal.
             .context_menu(move |position, ctx| {
-                let _ = ctx;
                 // Framework gates pointer events on `arena.is_enabled`
                 // before reaching this closure — a disabled field
                 // never receives the right-click that would open the
@@ -854,8 +864,21 @@ impl Widget for TextInputField {
                 // Reposition the caret to the click position when the
                 // click lands outside the existing selection — the
                 // platform convention for "right-click then Cut /
-                // Copy / Paste at the new caret".
-                mouse::reposition_caret_for_context_menu(&state_for_menu, position);
+                // Copy / Paste at the new caret". A pointer's point only:
+                // the keyboard's menu is anchored in the middle of the
+                // field, and moving the caret there sent Paste elsewhere.
+                if ctx
+                    .context_menu_trigger()
+                    .is_none_or(teksilo_core::widget_builder::ContextMenuTrigger::is_pointer)
+                {
+                    mouse::reposition_caret_for_context_menu(&state_for_menu, position);
+                }
+                // The menu takes focus from the field only if the field has
+                // it; a right-click on an unfocused field hands focus back to
+                // whatever held it.
+                if state_for_menu.borrow().has_focus {
+                    menu_took_focus.set(true);
+                }
                 Some(build_context_menu_widget(&state_for_menu))
             });
 

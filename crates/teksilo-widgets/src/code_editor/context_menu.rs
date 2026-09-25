@@ -200,10 +200,15 @@ fn build_menu(state: SharedState) -> MenuList {
 /// click landed inside the current selection, which is the platform convention
 /// for "right-click, then Cut / Copy / Paste at the new caret". A read-only
 /// surface is exempt: its caret is invisible, so a reposition buys nothing there
-/// and would destroy the selection the reader was about to copy.
+/// and would destroy the selection the reader was about to copy. So is a menu
+/// the keyboard or an assistive technology asked for: its point is an anchor
+/// in the middle of the surface, not a place the user chose.
 pub(super) fn factory(state: SharedState) -> CodeContextMenuFactory {
-    Box::new(move |position, _ctx| {
-        if !state.borrow().policy.is_read_only() {
+    Box::new(move |position, ctx| {
+        let pointed = ctx
+            .context_menu_trigger()
+            .is_none_or(teksilo_core::widget_builder::ContextMenuTrigger::is_pointer);
+        if pointed && !state.borrow().policy.is_read_only() {
             reposition_caret(&state, position);
         }
         Some(Box::new(build_menu(state.clone())) as Box<dyn Widget>)

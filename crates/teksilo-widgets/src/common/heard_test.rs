@@ -51,6 +51,7 @@ use std::collections::HashSet;
 
 use accesskit_consumer::{FilterResult, NodeRef, Tree, TreeChangeHandler, common_filter};
 use teksilo_core::accesskit::{NodeId, Role, Toggled, TreeUpdate};
+use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
 
 /// One thing a screen reader is told.
@@ -253,6 +254,58 @@ impl Listener {
     pub(crate) fn platform(&self) -> &Tree {
         &self.platform
     }
+
+    /// The widget behind the node of `role` named `name` that the reader can
+    /// find, as [`finds`](Self::finds) looks for it, so a test can act on what
+    /// the reader was offered (a menu row, say). Only on a node's first
+    /// appearance: one handed to the adapter under a new id, having come back
+    /// (`WidgetTree::deliver_accessibility`), does not map back to its widget.
+    pub(crate) fn widget(&self, role: Role, name: &str) -> Option<WidgetId> {
+        fn walk(node: NodeRef<'_>, role: Role, name: &str) -> Option<WidgetId> {
+            if node.role() == role && node.label().as_deref() == Some(name) {
+                return teksilo_core::accessibility::node_id_to_widget_id_maybe(node.locate().0);
+            }
+            node.filtered_children(&common_filter)
+                .find_map(|child| walk(child, role, name))
+        }
+        walk(self.platform.state().root(), role, name)
+    }
+
+    /// What AT-SPI's `Text` interface answers for the first text input the
+    /// reader can reach, as the tree stood at the last call: the caret offset
+    /// and the selection, read the way `accesskit_atspi_common` reads them
+    /// (`node.rs`, `caret_offset` and `selection`). `None` when no text input
+    /// with text is in the tree.
+    pub(crate) fn text_input(&self) -> Option<TextAnswer> {
+        fn find<'a>(node: NodeRef<'a>) -> Option<NodeRef<'a>> {
+            if node.is_text_input() && node.supports_text_ranges() {
+                return Some(node);
+            }
+            node.filtered_children(&common_filter).find_map(find)
+        }
+        let node = find(self.platform.state().root())?;
+        let caret = node.text_selection_focus()?.to_global_usv_index();
+        let selection = node
+            .text_selection()
+            .filter(|range| !range.is_degenerate())
+            .map(|range| {
+                (
+                    range.start().to_global_usv_index(),
+                    range.end().to_global_usv_index(),
+                )
+            });
+        Some(TextAnswer { caret, selection })
+    }
+}
+
+/// A text input's caret and selection, as a reader asks for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TextAnswer {
+    /// `caret_offset`: where the selection's focus end is, in characters.
+    pub(crate) caret: usize,
+    /// `selection(0)`: start and end in characters, `None` when nothing is
+    /// selected (`n_selections` is then 0).
+    pub(crate) selection: Option<(usize, usize)>,
 }
 
 struct Handler<'a> {

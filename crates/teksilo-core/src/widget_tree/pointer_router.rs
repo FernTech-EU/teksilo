@@ -926,7 +926,12 @@ impl WidgetTree {
                 let pressing = self.current_input.pointer;
                 if let Some(target) = self.hit_test_for(*position, &pressing) {
                     if *button == PointerButton::Secondary
-                        && self.show_context_menu_for(target, *position, &mut *ops)
+                        && self.show_context_menu_for(
+                            target,
+                            *position,
+                            crate::widget_builder::ContextMenuTrigger::Pointer,
+                            &mut *ops,
+                        )
                     {
                         return;
                     }
@@ -1241,7 +1246,12 @@ impl WidgetTree {
                                 true
                             } else {
                                 let position = self.arena.bounds(id).center();
-                                self.show_context_menu_for(id, position, &mut *ops)
+                                self.show_context_menu_for(
+                                    id,
+                                    position,
+                                    crate::widget_builder::ContextMenuTrigger::Accessibility,
+                                    &mut *ops,
+                                )
                             };
                     } else {
                         self.access_action_handled =
@@ -1298,13 +1308,27 @@ impl WidgetTree {
             x: bounds.x + bounds.width / 2.0,
             y: bounds.y + bounds.height / 2.0,
         };
-        self.show_context_menu_for(target, anchor, ops)
+        self.show_context_menu_for(
+            target,
+            anchor,
+            crate::widget_builder::ContextMenuTrigger::Keyboard,
+            ops,
+        )
     }
 
+    /// Ask the factories from `target` up for a menu, and mount the first one
+    /// offered at `position`.
+    ///
+    /// `trigger` reaches each factory through
+    /// [`EventContext::context_menu_trigger`](crate::widget::EventContext::context_menu_trigger):
+    /// only a pointer's `position` is a place the user chose, and a factory
+    /// that moves a caret to it on a keyboard request writes the menu's Paste
+    /// into the middle of the text.
     pub(super) fn show_context_menu_for(
         &mut self,
         target: WidgetId,
         position: Point,
+        trigger: crate::widget_builder::ContextMenuTrigger,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
         // Walks up the parent chain calling each factory in turn. A
@@ -1313,6 +1337,7 @@ impl WidgetTree {
         // No factory anywhere on the chain → fall through to whatever
         // the caller does with the unconsumed PointerDown.
         let mut ctx = self.make_event_context(&mut *ops);
+        ctx.context_menu_trigger = Some(trigger);
         let mut walker = Some(target);
         let menu_decision: Option<(WidgetId, Box<dyn Widget>)> = loop {
             // Walk to the next ancestor (including `walker` itself)
@@ -5899,6 +5924,70 @@ mod tests {
         assert!(
             saw_key.get(),
             "with no factory anywhere, the key must reach the widget"
+        );
+    }
+
+    /// Every route to a menu tells the factory what asked for it, because only
+    /// a pointer's point is a place the user chose. A text field's factory
+    /// moves the caret to its point for a right-click; told nothing, it did the
+    /// same for Shift+F10, and the menu's Paste wrote into the middle of the
+    /// field.
+    #[test]
+    fn each_route_to_a_menu_tells_the_factory_what_asked_for_it() {
+        use crate::widget_builder::ContextMenuTrigger;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        let mut tree = WidgetTree::new();
+        let widget = tree.add(
+            FillWidget::new()
+                .focusable()
+                .context_menu(move |_pos, ctx| {
+                    log.borrow_mut().push(ctx.context_menu_trigger());
+                    Some(Box::new(StubMenu) as Box<dyn crate::widget::Widget>)
+                }),
+        );
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(widget);
+        let inside = tree.bounds(widget).center();
+
+        press(&mut tree, Key::F10, Modifiers::SHIFT);
+        press(&mut tree, Key::Escape, Modifiers::NONE);
+        press(&mut tree, Key::ContextMenu, Modifiers::NONE);
+        press(&mut tree, Key::Escape, Modifiers::NONE);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            inside,
+            crate::event::PointerButton::Secondary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            inside,
+            crate::event::PointerButton::Secondary,
+            Modifiers::NONE,
+        ));
+        press(&mut tree, Key::Escape, Modifiers::NONE);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: accesskit::Action::ShowContextMenu,
+            target: Some(widget),
+            target_node: crate::accessibility::widget_id_to_node_id(widget),
+            data: None,
+        });
+        press(&mut tree, Key::Escape, Modifiers::NONE);
+        tree.long_press_at(teksilo_tokens::PointerKind::Touch, inside);
+
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                Some(ContextMenuTrigger::Keyboard),
+                Some(ContextMenuTrigger::Keyboard),
+                Some(ContextMenuTrigger::Pointer),
+                Some(ContextMenuTrigger::Accessibility),
+                Some(ContextMenuTrigger::Pointer),
+            ],
+            "Shift+F10, the Menu key, a right-click, the assistive action and a \
+             hold, in that order"
         );
     }
 

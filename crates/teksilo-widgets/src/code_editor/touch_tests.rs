@@ -823,6 +823,41 @@ mod menu {
         assert!(h.selection().is_empty());
     }
 
+    /// Shift+F10 opens the same menu with no click behind it: the menu is
+    /// anchored in the middle of the surface, and the caret must stay where
+    /// the reader put it, as the platform adapter reports it.
+    #[test]
+    fn shift_f10_leaves_the_caret_where_the_reader_put_it() {
+        use teksilo_core::event::{Key, Modifiers};
+        let text = (1..=20)
+            .map(|n| format!("let line_{n} = {n};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut h = Harness::code(&text);
+        select(&h, 0, 0);
+        h.render();
+        let mut reader = crate::common::heard_test::Listener::attach(&mut h.tree);
+        assert_eq!(
+            reader.text_input().map(|t| t.caret),
+            Some(0),
+            "precondition: the caret is at the start"
+        );
+
+        h.tree.press_key(Key::F10, Modifiers::SHIFT);
+        h.render();
+        let _ = reader.heard(&mut h.tree);
+        assert!(
+            reader.finds(teksilo_core::accesskit::Role::MenuItem, "Paste"),
+            "Shift+F10 must open the editor's menu"
+        );
+        assert_eq!(
+            reader.text_input().map(|t| t.caret),
+            Some(0),
+            "opening the menu from the keyboard moved the caret: it was treated as \
+             a click at the anchor in the middle of the editor"
+        );
+    }
+
     /// A read-only surface is exempt from the repositioning: its caret is
     /// invisible, so a reposition buys nothing there and would destroy the
     /// selection the reader was about to copy.

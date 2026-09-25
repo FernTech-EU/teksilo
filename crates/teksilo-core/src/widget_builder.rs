@@ -351,6 +351,14 @@ impl AccessibilityOverrides {
 ///   state, query app state, send intents (e.g. for analytics), or
 ///   update Signals before the menu mounts.
 ///
+/// The same factory also answers the keyboard
+/// ([`ContextMenuTrigger::Keyboard`]) and an assistive technology's
+/// `ShowContextMenu` action. Neither carries a point, so `position` is then an
+/// anchor the framework picked on the widget the menu is about, not a place
+/// the user chose. [`ctx.context_menu_trigger()`](EventContext::context_menu_trigger)
+/// says which it is: act on the point (move a caret to it, pick the item under
+/// it) only for [`ContextMenuTrigger::Pointer`].
+///
 /// The factory returns:
 ///
 /// - `Some(widget)` to mount `widget` as the menu overlay anchored at
@@ -360,6 +368,35 @@ impl AccessibilityOverrides {
 ///   factory. This lets a widget conditionally suppress its own menu
 ///   without uninstalling the factory.
 pub type ContextMenuFactory = Box<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
+
+/// What asked for a context menu, as a [`ContextMenuFactory`] reads it from
+/// [`EventContext::context_menu_trigger`].
+///
+/// A factory is handed a point whatever opened the menu, and only a
+/// pointer's point is one the user chose. For the keyboard and for assistive
+/// technology the point is where the menu is drawn: a factory that treated it
+/// as a click moved the caret of a text field to the middle of the field, and
+/// the menu's Paste then wrote where the user had never been.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextMenuTrigger {
+    /// A secondary click, or a hold with a finger or a pen: the point is
+    /// where the user pointed.
+    Pointer,
+    /// The Menu key, Shift+F10, or on macOS Ctrl+Shift+M, on the focused
+    /// widget.
+    Keyboard,
+    /// An assistive technology's
+    /// [`ShowContextMenu`](accesskit::Action::ShowContextMenu) action.
+    Accessibility,
+}
+
+impl ContextMenuTrigger {
+    /// Whether the factory's point is one the user pointed at.
+    pub const fn is_pointer(self) -> bool {
+        matches!(self, Self::Pointer)
+    }
+}
 
 /// Temporary storage for handlers and metadata accumulated via builder
 /// methods. Transferred to the `WidgetNode` during arena insertion.

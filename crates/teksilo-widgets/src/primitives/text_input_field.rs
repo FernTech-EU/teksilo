@@ -1396,6 +1396,11 @@ mod pointer_tests;
 #[cfg(test)]
 mod key_text_bubbling_tests;
 
+/// **The keyboard's route to the context menu acts where the caret is.** Read
+/// as a screen reader reads the field, through the platform adapter.
+#[cfg(test)]
+mod context_menu_tests;
+
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.
 ///
