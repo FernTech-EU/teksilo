@@ -222,7 +222,7 @@ Legend: ✅ supported · 🟡 partial · ❌ not supported · ➖ not applicable
 | Criterion | Lvl | Resp. | Status | Evidence / note |
 |---|---|---|---|---|
 | 2.1.1 Keyboard | A | framework | 🟡 | Real DFS Tab order + roving tabindex. Strong coverage: Splitter (arrows/Home/End/Enter, [handle.rs:489, :519-528](../crates/teksilo-widgets/src/splitter/handle.rs)), GridView (full 2D nav + Alt+Arrow reorder), SegmentedControl, CommandPalette, table cell navigation (added `15837b69`/`79b916f3`), scene magnetism connect flow. `WebView` **was** never `.focusable()`; it is now in the Tab cycle, with Enter entering the page (§5.10 — leaving an entered page stays outside the toolkit's control). The context-menu gap **is closed**: `Key::ContextMenu`, Shift+F10, and Ctrl+Shift+M on macOS all open the nearest `.context_menu(..)` from the keyboard (§5.8). **One gap remains:** docking's `split_into_tab`/`stack_into_tab` drop zones have no menu equivalent. Charts are also unreachable — no `focusable`/`on_key` outside the legend |
-| 2.1.2 No Keyboard Trap | A | framework | 🟡 | Modal and overlay scopes default to `EscapeOrClickOutside`. `Terminal`'s trap is **fixed at the primitive**: the dispatcher now reserves `Ctrl+Tab` / `Ctrl+Shift+Tab` for *every* `keyboard_capture` node before the widget is consulted, so no capture surface can swallow the one chord that gets focus out ([pointer_router.rs](../crates/teksilo-core/src/widget_tree/pointer_router.rs)); Terminal also declines it itself, no longer consumes keys on the read-only path, and announces the chord to AT (§5.1). **One milder case remains:** the editable `CodeEditor`'s Tab-indent arm lacks the `tab_escape = ctrl` guard `RichTextEditor` has, and is not a capture surface so the dispatcher reservation does not cover it |
+| 2.1.2 No Keyboard Trap | A | framework | 🟡 | Modal and overlay scopes default to `EscapeOrClickOutside`. `Terminal`'s trap is **fixed at the primitive**: the dispatcher now reserves `Ctrl+Tab` / `Ctrl+Shift+Tab` for *every* `keyboard_capture` node before the widget is consulted, so no capture surface can swallow the one chord that gets focus out ([pointer_router.rs](../crates/teksilo-core/src/widget_tree/pointer_router.rs)); Terminal also declines it itself, no longer consumes keys on the read-only path, and announces the chord to AT (§5.1). The editable `CodeEditor`, which is not a capture surface and so is not covered by the dispatcher reservation, now declines a Control-modified Tab itself, as `RichTextEditor` does, and names the chord in its text node's description (§5.1) |
 | 2.1.4 Character Key Shortcuts | A | framework | ✅ | Type-ahead and mnemonics are active only while the owning component holds focus. Scene magnetism's single-character `m` trigger meets the criterion by both available exceptions — remappable via `connect_key(..)` and active-on-focus-only. `4402128c` fixed hidden menu rows claiming a mnemonic and being activatable through it |
 | 2.2.1 Timing Adjustable | A | framework | 🟡 | **Previously scored ➖ n/a on the grounds that "no time-limited interactions exist" — that is false.** `Toast` auto-dismisses after a default 10 s ([toast.rs:65, :443](../crates/teksilo-widgets/src/toast.rs)) and can carry Link/Button actions. Adjustable only by the app author (`auto_dismiss_after`/`persistent`), never by the end user. Partially mitigated: dismissed toasts persist in the notification archive |
 | 2.2.2 Pause, Stop, Hide | A | framework | 🟡 | No auto-updating surface ships a pause affordance. `Cycle` (3 s default) has zero `pause`/`paused` occurrences. Joined since by `LogView` tail-following, `Terminal` scroll-on-output, and streaming charts — the chart demo hand-rolls its own pause signal, i.e. the framework supplies none. `Toast` pauses on a pointer hovering it or holding it down, never on keyboard focus |
@@ -477,9 +477,17 @@ widget. `ctrl_tab_is_not_written_to_the_child` and
 `a_read_only_terminal_declines_keys_it_cannot_use` (teksilo-terminal) pin the
 widget-side behaviour against the `MemoryEngine`.
 
-**Not fixed.** The `CodeEditor` Tab-indent arm still lacks the `tab_escape = ctrl`
-guard `RichTextEditor` has (it is not a `keyboard_capture` surface, so the dispatcher
-reservation does not cover it). The terminal's visual bell (§5.12) is untouched.
+**The `CodeEditor`, fixed later.** Its Tab-indent arm had no counterpart of
+`RichTextEditor`'s `tab_escape` guard, and it is not a `keyboard_capture` surface, so
+the dispatcher reservation did not cover it: Ctrl+Tab indented and Ctrl+Shift+Tab
+dedented. It now leaves both chords to focus traversal
+([keyboard.rs](../crates/teksilo-widgets/src/code_editor/keyboard.rs)), and its text
+node's description names them, in the user's language
+([a11y.rs](../crates/teksilo-widgets/src/code_editor/a11y.rs)). Tests:
+`ctrl_tab_leaves_the_editor_and_writes_nothing` and its neighbours in
+`code_editor/tests.rs`.
+
+**Not fixed.** The terminal's visual bell (§5.12) is untouched.
 
 ### 5.2 Chart series were distinguished by colour alone — WCAG 1.4.1 (A) · framework · **FIXED**
 

@@ -401,3 +401,7 @@ grid-view-selection-count =
         [many] Вибрано { $count } елементів
        *[other] Вибрано { $count } елемента
     }
+
+# Редактор коду. Повний контекст див. у en-US.ftl і
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab додає відступ. { $next } переходить до наступного елемента керування, { $previous } до попереднього.

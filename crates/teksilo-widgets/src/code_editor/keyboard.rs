@@ -24,8 +24,10 @@
 //!   that, pressing Home with two carets on one line silently leaves two carets
 //!   stacked at column 0, and the next keystroke types every character twice.
 
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+use teksilo_core::shortcut::KeyStroke;
 use teksilo_core::widget::EventContext;
+use teksilo_i18n::tr_widget;
 use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
 use super::clipboard;
@@ -36,6 +38,7 @@ use super::state::{CodeEditorState, SharedState};
 use super::sync_cursor_signals;
 use crate::common::editor_runtime::CaretPolicy;
 use crate::common::text_nav::{CaretStep, LineStep, caret_step, deletes_word, line_step};
+use crate::keystroke_format::format_keystroke;
 
 /// What the dispatch decided, so the epilogue knows what to preserve.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -89,6 +92,17 @@ pub(super) fn handle_key(
     if (ctrl || modifiers.ctrl()) && matches!(key, Key::Space) {
         completion::react(state, ctx, Trigger::Forced);
         return EventResponse::Handled;
+    }
+
+    // Tab indents here, so Tab cannot also be the way out; Ctrl+Tab and
+    // Ctrl+Shift+Tab are (WCAG 2.1.2). Left unhandled, they reach the tree's
+    // own Tab handling, which moves focus on or back. Physical Control as well
+    // as the accelerator: ⌘⇥ is the macOS application switcher and never
+    // arrives, so ⌃⇥ is the chord there too. The same rule as `RichTextEditor`'s
+    // `tab_escape` and `TableView`'s cell grid; [`tab_escape_hint`] tells a
+    // reader about it.
+    if matches!(key, Key::Tab) && (ctrl || modifiers.ctrl()) {
+        return EventResponse::Ignored;
     }
 
     // While the completion popup is open it owns navigation, accept, and
@@ -397,6 +411,21 @@ pub(super) fn handle_key(
     }
 
     response
+}
+
+/// What a reader is told about leaving an editor that takes Tab: the two
+/// chords [`handle_key`] leaves to focus traversal, named as this platform and
+/// locale name keys. The accessibility walk puts it in the text node's
+/// description, which AT-SPI, UIA and macOS all read; none of the three
+/// adapters exports `keyboard_shortcut`.
+pub(super) fn tab_escape_hint() -> String {
+    let next = format_keystroke(KeyStroke::new(Key::Tab, Modifiers::CTRL));
+    let previous = format_keystroke(KeyStroke::new(Key::Tab, Modifiers::CTRL | Modifiers::SHIFT));
+    tr_widget!(code_editor_tab_escape_hint(
+        next = next,
+        previous = previous
+    ))
+    .resolve_now()
 }
 
 /// How a handled key should drive completion, or `None` for keys that never do

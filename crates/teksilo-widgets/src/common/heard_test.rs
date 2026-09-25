@@ -216,6 +216,23 @@ impl Listener {
         walk(self.platform.state().root(), &self.defunct, &mut dead);
         dead
     }
+
+    /// The description a reader gets for the first node of `role` it can
+    /// reach, walking the tree as it stood at the last call as the adapters
+    /// walk it (`common_filter`). The consumer takes a description from the
+    /// node's own property alone (`node.rs:796-800`), and that is what AT-SPI
+    /// `Description`, UIA `FullDescription` and macOS `accessibilityHelp`
+    /// read. `None` when no such node is reachable, or it has no description.
+    pub(crate) fn description_of(&self, role: Role) -> Option<String> {
+        fn walk(node: NodeRef<'_>, role: Role) -> Option<NodeRef<'_>> {
+            if node.role() == role {
+                return Some(node);
+            }
+            node.filtered_children(&common_filter)
+                .find_map(|child| walk(child, role))
+        }
+        walk(self.platform.state().root(), role).and_then(|node| node.description())
+    }
 }
 
 struct Handler<'a> {

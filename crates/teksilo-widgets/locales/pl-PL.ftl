@@ -401,3 +401,7 @@ grid-view-selection-count =
         [many] Wybrano { $count } elementów
        *[other] Wybrano { $count } elementu
     }
+
+# Edytor kodu. Pełny kontekst: en-US.ftl oraz
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab wstawia wcięcie. { $next } przechodzi do następnej kontrolki, { $previous } do poprzedniej.

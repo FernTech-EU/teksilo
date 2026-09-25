@@ -105,7 +105,11 @@ is driven by injected configuration and is a single atomic undo step:
 - **Auto-indent on Enter** carries the previous line's indentation (and splits a
   `{}` pair onto its own indented line when the caret is between them).
 - **Smart Tab / Shift+Tab** — soft or hard tabs; with a selection, indent /
-  dedent every touched line.
+  dedent every touched line. Because Tab indents, **Ctrl+Tab / Ctrl+Shift+Tab**
+  move focus out of the editor, forward and back, and write nothing (Control on
+  macOS too, where ⌘⇥ is the application switcher). The editor's text node
+  names both chords in its description, which AT-SPI, UIA and macOS all
+  read. A read-only viewer does not take Tab, so Tab leaves it.
 - **Ctrl+/** toggles the configured line comment on the caret's line or selection.
 - **Ctrl+D** duplicates the selection, or the caret's whole line when there is
   none; **Alt+↑ / Alt+↓** move the line.

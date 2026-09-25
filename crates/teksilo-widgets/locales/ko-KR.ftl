@@ -394,3 +394,7 @@ grid-view-selection-count =
         [0] 선택된 항목 없음
        *[other] 항목 { $count }개 선택됨
     }
+
+# 코드 편집기. 전체 맥락은 en-US.ftl 및 다음 파일을 참조하세요.
+# crates/teksilo-widgets/src/code_editor/keyboard.rs
+code-editor-tab-escape-hint = Tab 키는 들여쓰기합니다. { $next } 키는 다음 컨트롤로, { $previous } 키는 이전 컨트롤로 이동합니다.

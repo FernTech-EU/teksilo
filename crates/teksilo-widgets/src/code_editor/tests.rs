@@ -2036,6 +2036,140 @@ fn min_lines_gives_intrinsic_height() {
     );
 }
 
+// --- The way out ----------------------------------------------------------
+//
+// Tab indents, which is what anyone writing code expects of an editor, so Tab
+// cannot also be how a keyboard user leaves it. Ctrl+Tab and Ctrl+Shift+Tab
+// are, as they are out of a terminal, a table's cell grid and a rich-text
+// table (WCAG 2.1.2), and the editor says so to a reader.
+
+use crate::common::heard_test::{Heard, Listener};
+use teksilo_core::accesskit::Role;
+use teksilo_core::event::{Key, Modifiers};
+
+/// `editor` between a "Before" and an "After" button, with focus Tabbed into
+/// the editor the way a keyboard user reaches it, and a reader attached.
+fn tabbed_into(editor: CodeEditor) -> (WidgetTree, SharedState, Listener) {
+    use crate::button::Button;
+    use crate::primitives::VStack;
+    use teksilo_i18n::lit;
+
+    let st = editor.handle().state_handle();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(
+        VStack::new()
+            .child(Button::new(lit!("Before")))
+            .child(editor)
+            .child(Button::new(lit!("After"))),
+    );
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let reader = Listener::attach(&mut tree);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    assert!(
+        st.borrow().has_focus,
+        "fixture: two Tabs must reach the editor, after the Before button"
+    );
+    (tree, st, reader)
+}
+
+/// Ctrl+Tab leaves the editor for the next control, and writes nothing into
+/// the document on the way. It used to indent: the Tab arm did not look at
+/// Ctrl, so the key that leaves a terminal wrote four spaces into the code,
+/// and focus never left.
+///
+/// Physical Control, not the accelerator: Ctrl+Tab is Ctrl+Tab on macOS too
+/// (⌘⇥ is the application switcher), so this is the same chord everywhere.
+#[test]
+fn ctrl_tab_leaves_the_editor_and_writes_nothing() {
+    let (mut tree, st, mut reader) = tabbed_into(CodeEditor::new(doc("fn main() {}")));
+    reader.heard(&mut tree);
+
+    tree.press_key(Key::Tab, Modifiers::CTRL);
+
+    assert_eq!(
+        text_of(&st),
+        "fn main() {}",
+        "Ctrl+Tab must write nothing into the document"
+    );
+    let heard = reader.heard(&mut tree);
+    assert!(
+        heard.contains(&Heard::Focus("After".into())),
+        "Ctrl+Tab must move focus on to the After button; the reader heard {heard:?}"
+    );
+    assert!(!st.borrow().has_focus, "the editor must have lost focus");
+}
+
+/// Ctrl+Shift+Tab leaves backwards, and dedents nothing on the way. It used to
+/// dedent the caret's line.
+#[test]
+fn ctrl_shift_tab_leaves_the_editor_backwards_and_dedents_nothing() {
+    let (mut tree, st, mut reader) = tabbed_into(CodeEditor::new(doc("        x")));
+    set_caret(&st, 9);
+    reader.heard(&mut tree);
+
+    tree.press_key(Key::Tab, Modifiers::CTRL | Modifiers::SHIFT);
+
+    assert_eq!(
+        text_of(&st),
+        "        x",
+        "Ctrl+Shift+Tab must not dedent the line"
+    );
+    let heard = reader.heard(&mut tree);
+    assert!(
+        heard.contains(&Heard::Focus("Before".into())),
+        "Ctrl+Shift+Tab must move focus back to the Before button; the reader heard {heard:?}"
+    );
+}
+
+/// The way out does not cost the editor its Tab: Tab still indents and
+/// Shift+Tab still dedents, with focus staying where it is.
+#[test]
+fn tab_and_shift_tab_still_indent_in_place() {
+    let (mut tree, st, _reader) = tabbed_into(CodeEditor::new(doc("x")));
+    set_caret(&st, 0);
+
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    assert_eq!(text_of(&st), "    x", "Tab indents");
+    assert!(st.borrow().has_focus, "Tab keeps focus in the editor");
+
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    assert_eq!(text_of(&st), "x", "Shift+Tab dedents");
+    assert!(st.borrow().has_focus, "Shift+Tab keeps focus in the editor");
+}
+
+/// A reader is told the way out, on the node that holds the text, in the
+/// description every platform reads (WCAG 2.1.2 asks for a way out other
+/// than Tab to be made known). It could not find it anywhere before.
+#[test]
+fn the_editor_tells_a_reader_how_to_leave_it() {
+    use crate::keystroke_format::format_keystroke;
+    use teksilo_core::shortcut::KeyStroke;
+
+    let (mut tree, _st, mut reader) = tabbed_into(CodeEditor::new(doc("fn main() {}")));
+    reader.heard(&mut tree);
+
+    let description = reader.description_of(Role::MultilineTextInput);
+    let forward = format_keystroke(KeyStroke::new(Key::Tab, Modifiers::CTRL));
+    let backward = format_keystroke(KeyStroke::new(Key::Tab, Modifiers::CTRL | Modifiers::SHIFT));
+    let Some(description) = description else {
+        panic!("the editor's text node carries no description, so no reader is told a way out");
+    };
+    assert!(
+        description.contains(&forward) && description.contains(&backward),
+        "the description must name {forward} and {backward}; it reads {description:?}"
+    );
+}
+
+/// A viewer does not take Tab (its filter rejects indenting), so Tab already
+/// leaves it and there is no other way out to announce.
+#[test]
+fn a_viewer_describes_no_way_out() {
+    let (mut tree, _st, mut reader) = tabbed_into(CodeEditor::read_only(doc("fn main() {}")));
+    reader.heard(&mut tree);
+    assert_eq!(reader.description_of(Role::Document), None);
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // Completion (Phase 4e)
 // ══════════════════════════════════════════════════════════════════════════

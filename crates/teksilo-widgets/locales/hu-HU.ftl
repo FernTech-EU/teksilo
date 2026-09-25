@@ -397,3 +397,7 @@ grid-view-selection-count =
         [one] 1 elem kiválasztva
        *[other] { $count } elem kiválasztva
     }
+
+# Kódszerkesztő. A teljes háttérért lásd az en-US.ftl fájlt és a
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = A Tab behúz. A { $next } a következő vezérlőre lép, a { $previous } az előzőre.

@@ -403,3 +403,7 @@ grid-view-selection-count =
         [one] 1 item geselecteerd
        *[other] { $count } items geselecteerd
     }
+
+# Code-editor. Zie en-US.ftl voor de volledige context en
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab springt in. { $next } gaat naar het volgende besturingselement, { $previous } naar het vorige.

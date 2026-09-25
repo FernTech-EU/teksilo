@@ -400,3 +400,7 @@ grid-view-selection-count =
         [0] 選択中の項目はありません
        *[other] { $count }件の項目を選択中
     }
+
+# コードエディター。詳しい経緯は en-US.ftl と次のファイルを参照。
+# crates/teksilo-widgets/src/code_editor/keyboard.rs
+code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。

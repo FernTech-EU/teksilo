@@ -409,3 +409,7 @@ grid-view-selection-count =
         [few] { $count } elemente selectate
        *[other] { $count } de elemente selectate
     }
+
+# Editor de cod. Consultați en-US.ftl pentru contextul complet și
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab indentează. { $next } trece la controlul următor, { $previous } la cel anterior.

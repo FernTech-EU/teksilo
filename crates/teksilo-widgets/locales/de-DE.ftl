@@ -399,3 +399,7 @@ grid-view-selection-count =
         [one] 1 Element ausgewählt
        *[other] { $count } Elemente ausgewählt
     }
+
+# Code-Editor. Siehe en-US.ftl für den vollständigen Kontext und
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab rückt ein. { $next } wechselt zum nächsten Steuerelement, { $previous } zum vorherigen.

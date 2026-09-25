@@ -399,3 +399,7 @@ grid-view-selection-count =
         [one] 1 kohde valittu
        *[other] { $count } kohdetta valittu
     }
+
+# Koodieditori. Katso koko konteksti en-US.ftl-tiedostosta ja
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Sarkain sisentää. { $next } siirtyy seuraavaan ohjausobjektiin, { $previous } edelliseen.

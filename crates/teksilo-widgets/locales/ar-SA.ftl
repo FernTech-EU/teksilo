@@ -410,3 +410,7 @@ grid-view-selection-count =
         [many] { $count } عنصرًا محدَّدًا
        *[other] { $count } عنصر محدَّد
     }
+
+# محرر الشيفرة. راجع en-US.ftl للسياق الكامل و
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = يضيف مفتاح Tab مسافة بادئة. ينقل { $next } إلى عنصر التحكم التالي، و{ $previous } إلى السابق.

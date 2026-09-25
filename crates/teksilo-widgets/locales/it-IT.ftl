@@ -416,3 +416,7 @@ grid-view-selection-count =
         [many] { $count } di elementi selezionati
        *[other] { $count } elementi selezionati
     }
+
+# Editor di codice. Vedere en-US.ftl per il contesto completo e
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab aumenta il rientro. { $next } passa al controllo successivo, { $previous } a quello precedente.

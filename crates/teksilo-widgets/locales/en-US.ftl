@@ -442,3 +442,10 @@ grid-view-selection-count =
         [one] 1 item selected
        *[other] { $count } items selected
     }
+
+# The description of a CodeEditor that takes Tab, telling a reader how to
+# leave it (WCAG 2.1.2). $next and $previous are key chords written for the
+# platform and the locale: "Ctrl+Tab" and "Ctrl+Shift+Tab" here, "Strg+Tab"
+# in German, "⌃⇥" on macOS. See
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab indents. { $next } moves to the next control, { $previous } to the previous one.

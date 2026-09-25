@@ -389,6 +389,17 @@ by crate for clarity, not because crates version independently.
   `.access_description(..)` or tooltip attached to one of these widgets now
   names or describes the text. The `rich-text-editor`, `rich-text-viewer`,
   `code_editor` and `log_view` examples name their surfaces.
+- **A keyboard user could not leave a `CodeEditor` or a `PlainTextEditor`.**
+  Tab indents in them, and so did Ctrl+Tab, while Ctrl+Shift+Tab dedented, so
+  every key meant to move focus out wrote into the document instead, and a
+  screen reader heard nothing of it. Ctrl+Tab and Ctrl+Shift+Tab now move
+  focus to the next and the previous control and leave the text alone, as
+  they already do out of a terminal and a table; Tab and Shift+Tab still
+  indent and dedent. The editor's text node now says so in its description
+  ("Tab indents. Ctrl+Tab moves to the next control, Ctrl+Shift+Tab to the
+  previous one."), in the user's language, and Orca reads it as focus
+  arrives there. A read-only viewer does not take Tab, so Tab leaves it and
+  it carries no such description.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

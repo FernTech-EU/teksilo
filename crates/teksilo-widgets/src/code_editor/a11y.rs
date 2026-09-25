@@ -48,6 +48,7 @@ use teksilo_core::widget::EventContext;
 use teksilo_text::RichTextEngine;
 use teksilo_text::text_document::{BlockSnapshot, FlowElementSnapshot, MoveMode};
 
+use super::policy::CodeCommand;
 use super::state::{CodeEditorState, SharedState, SyntheticElementRef};
 use crate::common::editor_runtime::AccessibilityRole;
 
@@ -102,6 +103,11 @@ impl WalkAcc {
 /// is bounded.
 pub(crate) fn build_editor_a11y(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
     set_role(st, builder);
+    // An editor that takes Tab says how to leave it (WCAG 2.1.2). A viewer's
+    // filter rejects indenting, so Tab already leaves it and it says nothing.
+    if st.policy.command_filter.accepts(CodeCommand::IndentLines) {
+        builder.set_description(super::keyboard::tab_escape_hint());
+    }
 
     let snap = {
         let mut cache = st.accessibility_flow_snapshot.borrow_mut();

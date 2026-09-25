@@ -398,3 +398,7 @@ grid-view-selection-count =
         [many] { $count } פריטים נבחרו
        *[other] { $count } פריטים נבחרו
     }
+
+# עורך קוד. ראו en-US.ftl להקשר המלא ואת
+# crates/teksilo-widgets/src/code_editor/keyboard.rs.
+code-editor-tab-escape-hint = Tab מוסיף הזחה. { $next } עובר לפקד הבא, { $previous } לפקד הקודם.
