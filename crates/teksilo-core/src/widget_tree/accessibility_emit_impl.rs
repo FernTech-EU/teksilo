@@ -52,6 +52,16 @@ impl WidgetTree {
         if let Some(locale) = self.locale_signal.get() {
             root.set_language(locale);
         }
+        // The window's name. On AT-SPI the root is the window, and its label
+        // is the only name `accesskit_atspi_common` gives the frame and sends
+        // with `window:activate` (`adapter.rs:551-560`): without it Orca
+        // announces every window as an unnamed "frame". Windows and macOS read
+        // the title from the native window instead (`accesskit_windows`
+        // `node.rs:1061-1068`; `accesskit_macos` `node.rs:316-321` drops a
+        // root window's title on purpose), so this changes nothing there.
+        if let Some(title) = self.window_title_for_accessibility() {
+            root.set_label(title);
+        }
         for &root_id in &roots {
             if self.arena.is_active(root_id) {
                 let child_nid = widget_id_to_node_id(root_id);

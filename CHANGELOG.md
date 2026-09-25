@@ -76,6 +76,11 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **Every window was an unnamed "frame" to Orca.** The accessibility tree's
+  root, which AT-SPI presents as the window, carried no name, so Orca 46.1
+  announced each window as it came up with the bare word "frame". The root now
+  takes the window's title, and follows it when the title changes. Windows and
+  macOS read the title from the native window and are unchanged.
 - **Orca heard only the first message the framework's announcer said.** Every
   `announce` in every Teksilo application, after the first of a session, was
   dropped by Orca 46.1, and even a first one was lost whenever Orca handled the

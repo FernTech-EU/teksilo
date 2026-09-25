@@ -38,6 +38,8 @@ mod query_impl;
 mod rendering_impl;
 mod test_api;
 pub mod touch_route;
+#[cfg(test)]
+mod window_name_tests;
 
 struct AnimatedRegistration {
     weak: crate::signal::WeakAnimatedSignal,
@@ -433,6 +435,10 @@ pub struct WidgetTree {
     /// `Prop<String>`) re-resolves into the announced node — even on a
     /// same-direction switch that doesn't rebuild the composite.
     last_synced_locale: Option<String>,
+    /// The window title the last accessibility walk named the root after.
+    /// A new title re-walks the tree, as a locale switch does, so the
+    /// window's name follows it. See `accessibility_emit_impl`.
+    last_synced_window_title: Option<String>,
     /// Reverse map from synthetic (widget-emitted) AccessKit NodeIds
     /// to the WidgetId that owns them. Rebuilt on every full
     /// accessibility walk. `handle_accessibility_actions` uses this
@@ -971,6 +977,7 @@ impl WidgetTree {
             a11y_dirty: true,
             last_synced_shortcut_version: 0,
             last_synced_locale: None,
+            last_synced_window_title: None,
             synthetic_parent_map: std::collections::HashMap::new(),
             synthetic_local_bounds: std::collections::HashMap::new(),
             a11y_walk_generation: 0,
@@ -1152,6 +1159,14 @@ impl WidgetTree {
 
     pub fn window_state(&self) -> Option<&crate::window::WindowState> {
         self.window_state.as_ref()
+    }
+
+    /// The window's title as its accessible name: `None` without a window
+    /// state or with a blank title, since a name that is empty is still a
+    /// name to every adapter.
+    pub(crate) fn window_title_for_accessibility(&self) -> Option<String> {
+        let title = self.window_state.as_ref()?.title().get();
+        (!title.trim().is_empty()).then_some(title)
     }
 
     /// Clone the shared "frame requested" flag. Widgets stash this

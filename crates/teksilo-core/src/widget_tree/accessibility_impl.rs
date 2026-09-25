@@ -62,6 +62,14 @@ impl WidgetTree {
             self.last_synced_locale = current_locale;
         }
 
+        // The window's title names the root, so a new title is a new name for
+        // the window a screen reader announces: re-walk, as for a locale.
+        let current_title = self.window_title_for_accessibility();
+        if current_title != self.last_synced_window_title {
+            self.a11y_dirty = true;
+            self.last_synced_window_title = current_title;
+        }
+
         // The framework's own live regions. Advancing them here, before the
         // cache check, is what makes a queued announcement able to wake a tree
         // that is otherwise clean: `announce` sets `a11y_update_requested`,
