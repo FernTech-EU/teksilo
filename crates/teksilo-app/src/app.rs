@@ -5092,6 +5092,74 @@ mod tests {
         );
     }
 
+    /// The page behind an in-tree message box, as a screen reader meets it.
+    /// `tools/reader/` (dialogs-08, in `dialogs-and-popovers`): with "Save
+    /// changes?" up, an AT-SPI click on the page's "Welcome" opened a second
+    /// box over it, and `grab_focus` put focus on "Delete file?" behind both.
+    #[test]
+    fn a_screen_reader_cannot_act_behind_an_in_tree_message_box() {
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        use teksilo_core::accesskit::Action;
+        use teksilo_core::window::NoopWindowOps;
+        use teksilo_widgets::{MessageBox, MessageBoxButtons, VStack};
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let opener = tree.add(
+            Button::new(lit!("Save changes?")).on_activate_fn(|ctx| a_question().present(ctx)),
+        );
+        let welcome = tree.add(Button::new(lit!("Welcome")).on_activate_fn(|ctx| {
+            MessageBox::information(lit!("Welcome to Teksilo"))
+                .buttons(MessageBoxButtons::Ok)
+                .present(ctx)
+        }));
+        let delete = tree.add(Button::new(lit!("Delete file?")));
+        tree.add(VStack::new().child(opener).child(welcome).child(delete));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        assert!(tree.dispatch_access_action(
+            widget_id_to_node_id(opener),
+            Action::Click,
+            None,
+            &mut NoopWindowOps,
+        ));
+        let queued = tree
+            .drain_pending_modal_requests()
+            .pop()
+            .expect("the opener queues its message box");
+        present_in_tree_modal_request(&mut tree, queued.source_widget, queued.request);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let in_the_box = tree.focused();
+        assert!(
+            in_the_box.is_some(),
+            "precondition: focus went into the box"
+        );
+
+        assert!(
+            !tree.dispatch_access_action(
+                widget_id_to_node_id(welcome),
+                Action::Click,
+                None,
+                &mut NoopWindowOps,
+            ),
+            "a click behind the box is refused"
+        );
+        assert!(
+            tree.drain_pending_modal_requests().is_empty(),
+            "a click behind 'Save changes?' must not open a second box over it"
+        );
+        assert!(!tree.dispatch_access_action(
+            widget_id_to_node_id(delete),
+            Action::Focus,
+            None,
+            &mut NoopWindowOps,
+        ));
+        assert_eq!(
+            tree.focused(),
+            in_the_box,
+            "focus stays in the box, where the next real key goes"
+        );
+    }
+
     /// `InputDialog` is the worse case: `None` *is* its cancellation
     /// payload, so a dismissal that reports nothing is indistinguishable
     /// from a dialog still sitting open — and unlike `MessageBox` it

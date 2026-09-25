@@ -1071,6 +1071,8 @@ one traps focus so that dismissal never fires.
 
 The root scope is implicitly `Cycle` (whole-tree last↔first wrap, the historical behavior). A **centered modal overlay** folds into the same mechanism: its content subtree becomes the root `Cycle` scope, so Tab is confined to the modal with no special-case code. The `FocusScope` node itself is forced non-focusable (it is a boundary, never a Tab stop). A subtree with no `FocusScope` behaves exactly like the old flat wrapping ring.
 
+A centered modal holds off a screen reader's own requests too. While it is up, an AccessKit action aimed at a node behind it (a click, a focus request, any other) is refused and reported unhandled, so the automation bridge answers it with its unhandled-action error; the modal's content and every overlay opened over it take requests as before. The page stays in the tree a reader walks.
+
 > **Not to be confused with `view_focus_*`.** `BuildContext::begin_view_focus` / `view_focus_active` (formerly the `focus_scope` chrome API) is an unrelated build-time mechanism that tracks "does this data view's subtree hold focus" to drive selection chrome and focus rings. It has nothing to do with Tab traversal. Traversal scopes are the `FocusScope` widget + `set_traversal_scope`.
 
 Implemented in [`cycle_focus`](../crates/teksilo-core/src/widget_tree/focus_impl.rs) (the recursive scope-tree walk) and [`set_traversal_scope`](../crates/teksilo-core/src/widget_tree.rs) (the node marker, directly usable from headless tests).

@@ -688,6 +688,49 @@ impl WidgetTree {
         None
     }
 
+    /// Whether a modal is up and `widget_id` is behind it.
+    ///
+    /// A modal leaves reachable its own content, the content of every overlay
+    /// above it (a drop-down or a menu opened from inside it) and of any
+    /// overlay in a lower band that is anchored in those (the selection
+    /// handles of a field inside it). Everything else, the page and whatever
+    /// it had open, is behind its scrim: the pointer cannot reach it and the
+    /// Tab cycle does not go there. A modal is a `Centered` overlay, the
+    /// discriminator the Tab trap and the pointer's hit test already use, and
+    /// it stays modal while it fades out, as focus stays in it until it has
+    /// gone.
+    ///
+    /// An assistive technology's request is the one input nothing else stops.
+    /// AccessKit's only word for a modal is `Node::set_modal`, a state every
+    /// adapter reports and none acts on (`accesskit_atspi_common`
+    /// `node.rs:342-344`, `accesskit_windows` `node.rs:735-741`,
+    /// `accesskit_macos` `node.rs:1194-1197`): each goes on routing a request
+    /// to any node in the tree, and the page stays in it. Leaving the page out
+    /// of the walk, as a browser leaves out what a modal dialog makes inert,
+    /// is not an option while a node id outlives its removal: AT-SPI declares
+    /// a removed node defunct, libatspi keeps that for its path, and
+    /// `tools/reader/` measured Orca 46.1 dropping the focus event of the
+    /// opener the page came back with ("Ignoring defunct object").
+    pub(super) fn is_behind_modal(&self, widget_id: WidgetId) -> bool {
+        let Some(modal) = self.overlay_manager.topmost_centered() else {
+            return false;
+        };
+        let stack = &self.overlay_manager.stack;
+        let Some(at) = stack.iter().position(|overlay| overlay.id == modal.id) else {
+            return false;
+        };
+        let (below, above) = stack.split_at(at);
+        let in_modal = |id: WidgetId| {
+            above
+                .iter()
+                .any(|overlay| self.is_descendant_of(id, overlay.content_id))
+        };
+        !(in_modal(widget_id)
+            || below.iter().any(|overlay| {
+                self.is_descendant_of(widget_id, overlay.content_id) && in_modal(overlay.anchor)
+            }))
+    }
+
     fn menu_ancestor_for_widget(&self, widget_id: WidgetId) -> Option<WidgetId> {
         let mut current = Some(widget_id);
         while let Some(id) = current {

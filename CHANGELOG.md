@@ -147,6 +147,20 @@ by crate for clarity, not because crates version independently.
   layout) that was the first part, whichever one the user was in. Focus now
   comes back in the innermost part that is still there.
 
+- **A screen reader could act on the page behind a modal.** While an in-tree
+  modal was up (a `MessageBox`, a `Dialog`, any `Centered` overlay), its scrim
+  kept the pointer off the page and Tab stayed inside it, but a screen
+  reader's own requests still reached the controls behind it: an AT-SPI click
+  behind "Save changes?" opened a second box over it, a click behind "Close
+  window?" toggled the document's checkbox so that the next close quit with no
+  question, and a focus request put the keyboard on a control the box covers.
+  An assistive-technology action aimed behind the modal is now refused and
+  reported unhandled, so the reader's click does nothing and focus stays in
+  the modal. The modal's own controls, and a menu or drop-down opened over it,
+  take every request as before. The page stays in the tree, readable, and is
+  as alive to the reader once the modal closes as before it opened. The
+  automation bridge answers such a request (`invoke_action`, `focus_node`,
+  `set_value`, `expand`, `collapse`) with its unhandled-action error.
 - **Every window was an unnamed "frame" to Orca.** The accessibility tree's
   root, which AT-SPI presents as the window, carried no name, so Orca 46.1
   announced each window as it came up with the bare word "frame". The root now

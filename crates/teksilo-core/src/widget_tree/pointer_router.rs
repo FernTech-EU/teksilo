@@ -1159,7 +1159,17 @@ impl WidgetTree {
                 // a stale/inactive target by silently activating something
                 // else. If the target is missing or no longer active, drop the
                 // action rather than redirecting it.
-                if let Some(id) = target.filter(|id| self.arena.is_active(*id)) {
+                //
+                // Drop it too when a modal is up and the target is behind it
+                // (`is_behind_modal`). The scrim keeps the pointer off the page
+                // and the Tab cycle stays in the modal, but the page stays in
+                // the tree a screen reader walks, and its request names a node
+                // there directly. Delivered, a click behind "Save changes?"
+                // opened a second box over it, and a focus request put the
+                // keyboard on a control the box covers.
+                if let Some(id) =
+                    target.filter(|id| self.arena.is_active(*id) && !self.is_behind_modal(*id))
+                {
                     if *action == accesskit::Action::Focus {
                         // Land where the keys go. A composite publishes one AT
                         // node on a root that is not itself focusable (a

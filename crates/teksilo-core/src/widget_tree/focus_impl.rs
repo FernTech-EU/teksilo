@@ -2342,8 +2342,9 @@ mod tests_focus_out_dismissal {
         });
 
         tree.focus(m1);
-        // Force focus out programmatically — Tab could not do this, but an
-        // AccessKit action or app code can, and the modal must survive it.
+        // Force focus out programmatically. Tab could not do this, and an
+        // AccessKit request behind the modal is refused (`is_behind_modal`),
+        // but app code can, and the modal must survive it.
         tree.focus(outside);
 
         assert_eq!(

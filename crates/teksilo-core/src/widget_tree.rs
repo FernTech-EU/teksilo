@@ -31,6 +31,8 @@ mod gesture_dispatch_impl;
 #[cfg(test)]
 mod hit_targeting_tests;
 mod layout_impl;
+#[cfg(test)]
+mod modal_tests;
 mod overlay_impl;
 pub mod pan_arbiter;
 mod pointer_cancel;
