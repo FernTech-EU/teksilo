@@ -1909,3 +1909,39 @@ fn on_select_not_fired_on_external_signal_write() {
         "on_select must fire only on user-driven commits, not external signal writes"
     );
 }
+
+#[test]
+fn a_list_opened_again_is_alive_to_a_screen_reader() {
+    // `menus-combo-reopen` and `verify-winintl-intl-combo-reopen`
+    // (tools/reader): the list is built once and parked dormant on close, so
+    // every opening after the first came back under the ids the AT-SPI
+    // adapter had announced defunct as it closed. Orca 46.1 dropped the list
+    // box and every option ("Ignoring defunct object: [list box]", 3 of 3
+    // runs): the second opening and every arrow in it were silent.
+    use crate::common::heard_test::Listener;
+    use teksilo_core::event::Modifiers;
+    let mut tree = light_tree();
+    let selected = Signal::new(Some("Banana".to_string()));
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).label(lit!("Fruit")));
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    tree.focus(cb);
+    tree.layout(SizeProposal::exact(300.0, 200.0));
+    let mut listener = Listener::attach(&mut tree);
+    for opening in 1..=3 {
+        tree.press_key(Key::ArrowDown, Modifiers::ALT);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        let _ = listener.heard(&mut tree);
+        assert!(
+            listener.finds(teksilo_core::accesskit::Role::ListBoxOption, "Banana"),
+            "opening {opening}: the list is in the tree a reader walks"
+        );
+        assert_eq!(
+            listener.dead(),
+            Vec::<String>::new(),
+            "opening {opening}: a reader can reach these, and Orca drops every event from them"
+        );
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        let _ = listener.heard(&mut tree);
+    }
+}

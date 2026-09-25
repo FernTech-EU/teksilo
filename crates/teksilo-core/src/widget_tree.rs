@@ -20,6 +20,8 @@ mod accessibility_impl;
 #[cfg(test)]
 mod accessibility_proxy_tests;
 #[cfg(test)]
+mod adapter_ids_tests;
+#[cfg(test)]
 mod announcement_ring_tests;
 #[cfg(test)]
 mod announcer_tests;
@@ -740,6 +742,11 @@ pub struct WidgetTree {
     /// [`Self::announcements_since`], while the tree records them
     /// ([`Self::set_records_announcements`]).
     announcement_ring: crate::accessibility::announcements::AnnouncementRing,
+    /// The ids the window's platform adapter holds, which differ from the
+    /// tree's own for a node that left the tree a reader sees and came back.
+    /// See [`crate::accessibility::adapter_ids`] and
+    /// [`Self::deliver_accessibility`].
+    adapter_ids: crate::accessibility::adapter_ids::AdapterIds,
     /// What the last delivered update said about descriptions and live
     /// regions, which is what the next one's descriptions are measured
     /// against. See [`accessibility_description_impl`].
@@ -1034,6 +1041,7 @@ impl WidgetTree {
             ),
             announcer_ids: crate::announcer::AnnouncerIds::new(),
             announcement_ring: crate::accessibility::announcements::AnnouncementRing::new(),
+            adapter_ids: crate::accessibility::adapter_ids::AdapterIds::new(),
             description_memory: Default::default(),
             access_action_handled: false,
             window_state: None,

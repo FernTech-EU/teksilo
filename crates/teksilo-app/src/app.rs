@@ -2188,6 +2188,13 @@ impl TeksiloAppHandler {
 
             let actions = managed.platform_window.drain_accessibility_actions();
             for req in actions {
+                // The adapter names nodes by the ids it was handed, which
+                // differ from the tree's own for a node that came back after
+                // leaving. One it was handed and has since seen replaced
+                // names nothing.
+                let Some(req) = managed.tree.resolve_adapter_action(req) else {
+                    continue;
+                };
                 // Synthetic NodeIds (TextRun children emitted by the
                 // rich text editor) can't be decoded back to a
                 // WidgetId by value alone — look them up via the
@@ -2303,7 +2310,7 @@ impl TeksiloAppHandler {
         // it steps the framework's live-region announcers, fills the
         // automation announcement ring and maintains `at_version` — and all
         // three must run every frame whether or not anything is listening.
-        let a11y_update = current.tree.sync_accessibility();
+        let _ = current.tree.sync_accessibility();
         let walk = current.tree.a11y_walk_generation();
         let delivered_walk = current.a11y_delivered_walk;
         let delivered_at = current.a11y_delivered_at;
@@ -2316,7 +2323,12 @@ impl TeksiloAppHandler {
         let mut attached = false;
         let mut delivered = false;
         {
-            let a11y_update = &a11y_update;
+            // Whatever reaches the adapter goes through the tree's delivery,
+            // which hands a node that left the reader's tree and came back an
+            // id the adapter has never had (`deliver_accessibility`). Both
+            // closures deliver, and only one of them runs.
+            let window_focused = current.focused;
+            let tree = std::cell::RefCell::new(&mut current.tree);
             current.platform_window.update_accessibility_with(
                 || {
                     // Decided in here, not outside: the closure runs only
@@ -2329,10 +2341,10 @@ impl TeksiloAppHandler {
                             .is_none_or(|at| now.duration_since(at) >= MOVE_DELIVERY_INTERVAL);
                     due.then(|| {
                         delivered = true;
-                        a11y_update.clone()
+                        tree.borrow_mut().deliver_accessibility(window_focused)
                     })
                 },
-                || a11y_update.clone(),
+                || tree.borrow_mut().deliver_accessibility(window_focused),
             );
         }
         if delivered {

@@ -517,3 +517,54 @@ fn opening_the_popover_says_the_calendar_once() {
     );
     teksilo_i18n::thread_local::clear();
 }
+
+#[test]
+fn a_reopened_calendar_speaks_as_it_did_the_first_time() {
+    // `datetime-dateedit-popover` (tools/reader): open the calendar, move,
+    // Escape, open it again, move. The calendar is built once and parked
+    // dormant on close, so it used to come back under the ids the AT-SPI
+    // adapter had announced defunct as it closed, and Orca 46.1 said nothing
+    // on the reopening and nothing on a day met before ("Ignoring defunct
+    // object: [table cell: 'Sunday, May 3, 2026']", 4 of 4 runs). The cursor
+    // is brought back to the field's day before closing, so the reopening
+    // lands where the first opening did.
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    let (_mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    let mut listener = Listener::attach(&mut tree);
+    let day = |text: &str| vec![Heard::Focus(text.to_string())];
+
+    tree.press_key(Key::ArrowDown, Modifiers::ALT);
+    laid_out(&mut tree);
+    assert_eq!(listener.heard(&mut tree), day("Saturday, May 2, 2026"));
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(listener.heard(&mut tree), day("Sunday, May 3, 2026"));
+    tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(listener.heard(&mut tree), day("Saturday, May 2, 2026"));
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    laid_out(&mut tree);
+    let _ = listener.heard(&mut tree);
+
+    tree.press_key(Key::ArrowDown, Modifiers::ALT);
+    laid_out(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        day("Saturday, May 2, 2026"),
+        "the reopened calendar is heard"
+    );
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        day("Sunday, May 3, 2026"),
+        "a day met in the first opening is heard"
+    );
+    teksilo_i18n::thread_local::clear();
+}

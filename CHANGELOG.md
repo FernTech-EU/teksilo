@@ -123,6 +123,21 @@ by crate for clarity, not because crates version independently.
   at most eight in the tree at once. The tree no longer carries two hidden
   announcer nodes while nothing is being said, so a `TreeUpdate` of an idle
   tree has two nodes fewer.
+- **A control a reader had met went silent on Orca once it left and came
+  back.** A tab page shown again, a reopened menu, combo list or date picker
+  calendar, a snackbar, tooltip or Caps Lock warning shown a second time, a
+  page of the widget catalog visited twice, a chart or combo box scrolled back
+  into view, an editor focus came back to: each returned to the platform under
+  the id it had left with, which the AT-SPI adapter had announced defunct as
+  it left, and Orca 46.1 dropped every event from it, focus included, so the
+  reader heard nothing from the second visit on. Anything that leaves the tree
+  a reader sees and comes back now reaches the platform under an id it has
+  never had, and is heard as it was the first time. The ids
+  `sync_accessibility` returns, which the automation bridge and tests read,
+  are unchanged. An integration that feeds an AccessKit adapter itself hands
+  it `WidgetTree::deliver_accessibility` and routes the adapter's action
+  requests through `WidgetTree::resolve_adapter_action`. Windows and macOS
+  keep no defunct state, and nothing changes there that a reader can tell.
 - **The announcement ring recorded text no platform announces.**
   `WidgetTree::announcements_since`, and the automation bridge's
   `pull_announcements` that reads it, recorded a live node's `value` before

@@ -137,6 +137,9 @@ impl WidgetTree {
         // acceptable since it only runs on a real rebuild, not a cache hit.
         let content_changed = self.cached_a11y.as_ref() != Some(&update);
         self.cached_a11y = Some(update.clone());
+        if content_changed {
+            self.adapter_ids.source_changed();
+        }
         self.synthetic_parent_map = parents;
         self.synthetic_local_bounds = local_bounds;
         // What the next update's descriptions are measured against: only a
@@ -163,6 +166,53 @@ impl WidgetTree {
             self.request_frame();
         }
         update
+    }
+
+    /// The update the last [`sync_accessibility`](Self::sync_accessibility)
+    /// built, as a platform adapter must be handed it.
+    ///
+    /// A node that leaves the tree a reader sees and comes back (a tab page
+    /// shown again, a reopened menu or combo list, a row scrolled back into
+    /// view, a container focus returns to) would come back under the id it
+    /// left with, and the AT-SPI adapter announced that id defunct as it left:
+    /// libatspi keeps it so, and Orca drops every event from it. This hands
+    /// such a node an id the adapter has never had, and keeps every other id
+    /// as the tree has it.
+    ///
+    /// Call it for every update handed to the adapter, and for nothing else:
+    /// it keeps its own replay of the adapter's tree, which is how it knows
+    /// what the adapter removed. `window_focused` is whether the adapter was
+    /// last told its window has focus (winit's `Focused`). Route every
+    /// `ActionRequest` the adapter sends back through
+    /// [`resolve_adapter_action`](Self::resolve_adapter_action).
+    ///
+    /// Everything else that reads the tree in process (the automation bridge,
+    /// the announcement ring, a test) reads the tree's own ids, from
+    /// `sync_accessibility`.
+    pub fn deliver_accessibility(&mut self, window_focused: bool) -> accesskit::TreeUpdate {
+        if self.cached_a11y.is_none() {
+            let _ = self.sync_accessibility();
+        }
+        let arena = &self.arena;
+        let source = self
+            .cached_a11y
+            .as_ref()
+            .expect("sync_accessibility leaves an update behind");
+        self.adapter_ids.deliver(source, window_focused, |id| {
+            crate::accessibility::node_id_to_widget_id_maybe(id)
+                .is_none_or(|widget| arena.get(widget).is_some())
+        })
+    }
+
+    /// An action a platform adapter asked for, with its node ids back in the
+    /// tree's own. `None` when it names an id that
+    /// [`deliver_accessibility`](Self::deliver_accessibility) handed out once
+    /// and has since replaced, which is no node any more.
+    pub fn resolve_adapter_action(
+        &self,
+        request: accesskit::ActionRequest,
+    ) -> Option<accesskit::ActionRequest> {
+        self.adapter_ids.own_request(request)
     }
 
     /// How many accessibility walks have happened.
@@ -248,6 +298,9 @@ impl WidgetTree {
                 });
             }
         }
+        // A move can take a node out of its clipping parent's view, or bring
+        // one back, which the adapter hears as a removal or an arrival.
+        self.adapter_ids.source_changed();
         true
     }
 

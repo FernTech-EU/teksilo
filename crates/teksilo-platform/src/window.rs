@@ -1014,6 +1014,13 @@ impl PlatformWindow {
     /// window see the application instead of an empty window node: the handler
     /// runs off the UI thread and cannot build a tree, so the last one the UI
     /// thread built is the best answer available synchronously.
+    ///
+    /// Hand it what
+    /// [`WidgetTree::deliver_accessibility`](teksilo_core::WidgetTree::deliver_accessibility)
+    /// returns, not `sync_accessibility`'s update: a node that left the tree a
+    /// reader sees and came back must reach the adapter under an id it has
+    /// never had, or a reader on AT-SPI holds it defunct and hears nothing
+    /// from it.
     pub fn update_accessibility(&mut self, update: accesskit::TreeUpdate) {
         self.a11y_bridge.publish(&update);
         if let Some(adapter) = &mut self.a11y_adapter {
@@ -1082,6 +1089,10 @@ impl PlatformWindow {
     }
 
     /// Drain any pending AccessKit action requests from the adapter.
+    ///
+    /// They name nodes by the ids the adapter was handed; pass each through
+    /// [`WidgetTree::resolve_adapter_action`](teksilo_core::WidgetTree::resolve_adapter_action)
+    /// before looking its target up in the tree.
     pub fn drain_accessibility_actions(&self) -> Vec<ActionRequest> {
         let mut actions = Vec::new();
         while let Ok(req) = self.a11y_action_rx.try_recv() {

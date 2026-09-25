@@ -30,6 +30,15 @@
 //! on their focus object is not verified here: neither's source is on this
 //! machine.
 //!
+//! A node the adapter removed stays dead to Orca. `accesskit_atspi_common`
+//! announces a node that leaves the filtered tree as defunct (`adapter.rs`,
+//! `remove_node`), libatspi keeps the state for the path, and Orca 46.1 drops
+//! every event from it (`event_manager.py:796-798`, "Ignoring defunct
+//! object"). What such a node tells is kept as [`Heard::Dropped`]. The
+//! listener reads what `teksilo-app` hands the adapter,
+//! [`WidgetTree::deliver_accessibility`], so a node that comes back under a
+//! new id is heard as the adapter hears it.
+//!
 //! Two things a reader can be told are not modelled, so a test about either
 //! must not rest on this alone. A state change on the focus other than its
 //! checked state: Orca says "selected" when Space selects its locus of focus
@@ -38,8 +47,10 @@
 //! node in it (`accesskit_atspi_common` `adapter.rs`, `add_subtree`), where
 //! the consumer reports only the node whose own data changed.
 
+use std::collections::HashSet;
+
 use accesskit_consumer::{FilterResult, NodeRef, Tree, TreeChangeHandler, common_filter};
-use teksilo_core::accesskit::{Role, Toggled};
+use teksilo_core::accesskit::{NodeId, Role, Toggled, TreeUpdate};
 use teksilo_core::widget_tree::WidgetTree;
 
 /// One thing a screen reader is told.
@@ -86,6 +97,11 @@ pub(crate) enum Heard {
     /// `1356-1357`), macOS `AXValueChanged` (`accesskit_macos` `node.rs:361`).
     /// Orca speaks it for its locus of focus (`onValueChanged`).
     FocusNumber(String),
+    /// Told from a node whose id the adapter had already removed. AT-SPI
+    /// announced that id defunct as the node left, libatspi keeps it so, and
+    /// Orca drops the event ("Ignoring defunct object"): the reader hears
+    /// nothing.
+    Dropped(Box<Heard>),
 }
 
 /// A number as Orca 46.1 speaks a node's value (`ax_value.py`,
@@ -103,14 +119,25 @@ fn as_orca_speaks(value: f64) -> String {
 /// A screen reader attached to a tree, hearing what each change tells it.
 pub(crate) struct Listener {
     platform: Tree,
+    /// Every id the adapter has removed.
+    defunct: HashSet<NodeId>,
+}
+
+/// What `teksilo-app` hands the adapter on a frame.
+fn delivered(tree: &mut WidgetTree) -> TreeUpdate {
+    let _ = tree.sync_accessibility();
+    tree.deliver_accessibility(true)
 }
 
 impl Listener {
     /// Start listening to `tree` as it stands now. Nothing already in it is
     /// heard: a reader attaching to a window is not told what was said before.
     pub(crate) fn attach(tree: &mut WidgetTree) -> Self {
-        let platform = Tree::new(tree.sync_accessibility(), true);
-        let mut listener = Self { platform };
+        let platform = Tree::new(delivered(tree), true);
+        let mut listener = Self {
+            platform,
+            defunct: HashSet::new(),
+        };
         // Let any message queued while the tree was being built go by
         // unheard: the framework's announcer puts one message in the tree an
         // update.
@@ -126,9 +153,12 @@ impl Listener {
     /// needs two syncs to be heard whole, and the third shows that nothing is
     /// said again.
     pub(crate) fn heard(&mut self, tree: &mut WidgetTree) -> Vec<Heard> {
-        let mut handler = Handler { heard: Vec::new() };
+        let mut handler = Handler {
+            heard: Vec::new(),
+            defunct: &mut self.defunct,
+        };
         for _ in 0..3 {
-            let update = tree.sync_accessibility();
+            let update = delivered(tree);
             self.platform
                 .update_and_process_changes(update, &mut handler);
         }
@@ -164,27 +194,77 @@ impl Listener {
         }
         walk(self.platform.state().root(), role, name).and_then(|node| node.toggled())
     }
+
+    /// The nodes a reader can reach, walking the tree as it stood at the last
+    /// call, under an id the adapter had removed before: dead to Orca, which
+    /// drops every event from them. Each as its role and name.
+    pub(crate) fn dead(&self) -> Vec<String> {
+        fn walk(node: NodeRef<'_>, defunct: &HashSet<NodeId>, dead: &mut Vec<String>) {
+            if defunct.contains(&node.locate().0) {
+                dead.push(format!(
+                    "{:?} {:?}",
+                    node.role(),
+                    node.label().unwrap_or_default()
+                ));
+            }
+            for child in node.filtered_children(&common_filter) {
+                walk(child, defunct, dead);
+            }
+        }
+        let mut dead = Vec::new();
+        walk(self.platform.state().root(), &self.defunct, &mut dead);
+        dead
+    }
 }
 
-struct Handler {
+struct Handler<'a> {
     heard: Vec<Heard>,
+    defunct: &'a mut HashSet<NodeId>,
 }
 
 fn included(node: &NodeRef) -> bool {
     common_filter(node) == FilterResult::Include
 }
 
-impl TreeChangeHandler for Handler {
+impl Handler<'_> {
+    /// Keep what `node` told, as dropped when the adapter had removed it.
+    fn tell(&mut self, node: &NodeRef, heard: Heard) {
+        self.heard.push(if self.defunct.contains(&node.locate().0) {
+            Heard::Dropped(Box::new(heard))
+        } else {
+            heard
+        });
+    }
+
+    /// `remove_subtree`: a node hidden takes its filtered subtree with it.
+    fn remove_subtree(&mut self, node: &NodeRef) {
+        for child in node.filtered_children(&common_filter) {
+            self.remove_subtree(&child);
+        }
+        self.defunct.insert(node.locate().0);
+    }
+}
+
+impl TreeChangeHandler for Handler<'_> {
     fn node_added(&mut self, node: &NodeRef) {
         if included(node) && node.live() != teksilo_core::accesskit::Live::Off {
             if let Some(name) = node.label() {
-                self.heard.push(Heard::Live(name));
+                self.tell(node, Heard::Live(name));
             }
         }
     }
 
     fn node_updated(&mut self, old: &NodeRef, new: &NodeRef) {
         if !included(new) {
+            // The adapter removes a node that stops passing the filter
+            // (`adapter.rs`, `node_updated`).
+            match common_filter(new) {
+                _ if !included(old) => {}
+                FilterResult::ExcludeSubtree => self.remove_subtree(old),
+                _ => {
+                    self.defunct.insert(old.locate().0);
+                }
+            }
             return;
         }
         let name = new.label();
@@ -192,7 +272,7 @@ impl TreeChangeHandler for Handler {
             && let Some(name) = name.clone()
             && (!included(old) || old.label().as_ref() != Some(&name) || old.live() != new.live())
         {
-            self.heard.push(Heard::Live(name));
+            self.tell(new, Heard::Live(name));
         }
         if !included(old) {
             return;
@@ -201,32 +281,35 @@ impl TreeChangeHandler for Handler {
             if let Some(name) = name
                 && old.label().as_ref() != Some(&name)
             {
-                self.heard.push(Heard::FocusName(name));
+                self.tell(new, Heard::FocusName(name));
             }
             if let Some(value) = new.value()
                 && old.value().as_ref() != Some(&value)
             {
-                self.heard.push(Heard::FocusValue(value));
+                self.tell(new, Heard::FocusValue(value));
             }
             if let Some(toggled) = new.toggled()
                 && old.toggled() != Some(toggled)
             {
-                self.heard.push(Heard::FocusToggled(toggled));
+                self.tell(new, Heard::FocusToggled(toggled));
             }
             if let Some(number) = new.numeric_value()
                 && old.numeric_value() != Some(number)
             {
-                self.heard.push(Heard::FocusNumber(as_orca_speaks(number)));
+                self.tell(new, Heard::FocusNumber(as_orca_speaks(number)));
             }
         }
     }
 
     fn focus_moved(&mut self, _old: Option<&NodeRef>, new: Option<&NodeRef>) {
         if let Some(node) = new {
-            self.heard
-                .push(Heard::Focus(node.label().unwrap_or_default()));
+            self.tell(node, Heard::Focus(node.label().unwrap_or_default()));
         }
     }
 
-    fn node_removed(&mut self, _node: &NodeRef) {}
+    fn node_removed(&mut self, node: &NodeRef) {
+        if included(node) {
+            self.defunct.insert(node.locate().0);
+        }
+    }
 }

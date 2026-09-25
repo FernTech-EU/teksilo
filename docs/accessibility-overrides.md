@@ -465,6 +465,8 @@ is heard on the next arrival, the same on all three.
 
 All headless. Assertions go through `WidgetTree::accessibility_node(id)` (synthetic snapshot) or `WidgetTree::sync_accessibility()` (full TreeUpdate, useful when checking pruning, custom_actions, controls relationships, etc.).
 
+A test about what a screen reader is told as a node leaves the tree and comes back reads the update the platform adapter is handed, `WidgetTree::deliver_accessibility(window_focused)`, through `accesskit_consumer`. `sync_accessibility()` keeps every node's own id; a node that returns is handed a new one on its way to the adapter, because the AT-SPI adapter announced the old one defunct as it left.
+
 ```rust
 use teksilo::core::accesskit::{Action, Role, HasPopup};
 

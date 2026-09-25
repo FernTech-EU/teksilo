@@ -391,3 +391,67 @@ fn tab_label_does_not_survive_as_a_duplicate_at_node() {
 
     assert_a11y_tree_valid(&update);
 }
+
+/// The widget of the node named `name` in the tree a reader walks.
+fn widget_named(tree: &WidgetTree, name: &str) -> teksilo_core::WidgetId {
+    let update = tree.accessibility_tree_snapshot();
+    let (id, _) = update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some(name))
+        .unwrap_or_else(|| panic!("no node named {name:?}"));
+    node_id_to_widget_id(*id)
+}
+
+#[test]
+fn a_panel_shown_again_is_alive_to_a_screen_reader() {
+    // `tabs-panel-revisit` (tools/reader): Enter into Settings' panel, go to
+    // Doc 1, come back, Enter into the panel again. A static pane is kept and
+    // parked dormant while another tab shows, so it used to come back under
+    // the ids the AT-SPI adapter had announced defunct as it left, and Orca
+    // 46.1 dropped the focus on its button ("Ignoring defunct object: [push
+    // button: 'Toggle orientation']", 3 of 3 runs): silent, and Space on it
+    // silent too.
+    use crate::common::heard_test::{Heard, Listener};
+    let settings = TabId::fresh();
+    let doc = TabId::fresh();
+    let selected = Signal::new(Some(settings));
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(
+        TabWidget::new(selected.clone())
+            .static_tab_with_id(
+                settings,
+                TabInfo::new().title(lit!("Settings")),
+                crate::Button::new(lit!("Toggle orientation")),
+            )
+            .static_tab_with_id(
+                doc,
+                TabInfo::new().title(lit!("Doc 1")),
+                crate::Button::new(lit!("Make an edit")),
+            )
+            .show_scroll_arrows(false)
+            .show_overflow_dropdown(false),
+    );
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    let toggle = widget_named(&tree, "Toggle orientation");
+    tree.focus(toggle);
+    tree.layout(SizeProposal::exact(640.0, 320.0));
+    let mut listener = Listener::attach(&mut tree);
+
+    for visit in 2..=3 {
+        selected.set(Some(doc));
+        tree.layout(SizeProposal::exact(640.0, 320.0));
+        let _ = listener.heard(&mut tree);
+        selected.set(Some(settings));
+        tree.layout(SizeProposal::exact(640.0, 320.0));
+        let _ = listener.heard(&mut tree);
+        tree.focus(toggle);
+        tree.layout(SizeProposal::exact(640.0, 320.0));
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::Focus("Toggle orientation".to_string())],
+            "visit {visit}: focus on the returned panel's button is heard"
+        );
+        assert_eq!(listener.dead(), Vec::<String>::new(), "visit {visit}");
+    }
+}

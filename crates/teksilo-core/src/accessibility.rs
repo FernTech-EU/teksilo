@@ -5,6 +5,7 @@ use accesskit::{Action, Live, Node, NodeId, Role, TextDirection, TextPosition, T
 
 use crate::widget_id::WidgetId;
 
+pub(crate) mod adapter_ids;
 pub(crate) mod announcements;
 pub mod audit;
 pub mod target_audit;
@@ -1981,6 +1982,12 @@ impl Default for AccessNodeBuilder {
 }
 
 /// Convert a WidgetId to an AccessKit NodeId.
+///
+/// This is the id the tree gives the widget's node, and the one every update
+/// [`crate::WidgetTree::sync_accessibility`] returns carries. A platform
+/// adapter can hold another for the same node: one that left the tree a
+/// reader sees and came back is handed a new id on its way out, see
+/// [`crate::WidgetTree::deliver_accessibility`].
 pub fn widget_id_to_node_id(id: WidgetId) -> NodeId {
     use slotmap::Key;
     let key_data = id.data();
