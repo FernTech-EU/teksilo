@@ -65,7 +65,9 @@ use teksilo_i18n::tr_widget;
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
-use teksilo_core::accessibility::text_runs::{RetainedText, TextRunSource, push_text_runs};
+use teksilo_core::accessibility::text_runs::{
+    RetainedText, TextRunEmission, TextRunSource, push_text_runs,
+};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key};
 use teksilo_core::shortcut::KeyStroke;
@@ -85,8 +87,11 @@ use crate::menu_item::MenuItem;
 use crate::menu_list::{MenuList, MenuSeparator};
 use crate::rich_text::paint::{PaintParams, paint_frame};
 
+use self::state::{
+    AtPublished, SharedState, TextInputConfig, TextInputState, publish_cursor_signals,
+    sync_cursor_signals,
+};
 pub(crate) use self::state::{CharFilter, CommandFactory};
-use self::state::{SharedState, TextInputConfig, TextInputState, sync_cursor_signals};
 
 pub use self::mask::{InputMask, MaskClass, MaskError, MaskPosition};
 pub use self::validator::{ValidationFeedback, ValidationOutcome, ValidatorFn};
@@ -721,22 +726,21 @@ impl TextInputField {
         let Some(state) = self.state.as_ref() else {
             return;
         };
-        let (text, masked) = {
+        let text = {
             let st = state.borrow();
-            (
-                st.document.to_plain_text().unwrap_or_default(),
-                st.should_mask(),
-            )
+            let text = st.document.to_plain_text().unwrap_or_default();
+            if !st.should_mask() {
+                text
+            } else if st.echo_mode == EchoMode::NoEcho {
+                String::new()
+            } else {
+                // Masking happens inside the editing engine precisely so the
+                // secret never reaches the shaper or the glyph atlas; measuring
+                // it here would put it there. Measure what is painted instead,
+                // the mask, which is also the text a masked field's runs carry.
+                st.echo_char.to_string().repeat(text.chars().count())
+            }
         };
-        if masked {
-            // Masking happens inside the editing engine precisely so the
-            // secret never reaches the shaper or the glyph atlas; measuring
-            // it here would put it there. A masked field is also
-            // `Role::PasswordInput`, whose branch emits no runs to carry
-            // geometry anyway.
-            *self.retained.borrow_mut() = None;
-            return;
-        }
         let layout = backend.borrow_mut().layout_single_line(&text, style, None);
         *self.retained.borrow_mut() = Some(RetainedText {
             text,
@@ -1296,11 +1300,12 @@ mod text_run_tests {
     }
 
     #[test]
-    fn a_protected_field_emits_no_text_runs() {
-        // A run publishes the character count, the per-character extents and
-        // the word boundaries of what it carries. On a masked field that is a
-        // description of the password, so the protected branch emits the
-        // bullet string and nothing else.
+    fn a_protected_field_emits_its_mask_and_never_the_secret() {
+        // A masked field shows a reader what it shows a sighted user: one
+        // mask character per character of the secret. The runs carry that
+        // mask, which is what gives the node a Text interface on AT-SPI and
+        // lets a reader hear each keystroke; nothing in the node or its runs
+        // may carry the plaintext.
         let mut tree = tree_with_mock_backend();
         let _id = tree
             .add(TextInputField::new(Signal::new("hunter2".to_string())).secure(EchoMode::Masked));
@@ -1313,26 +1318,61 @@ mod text_run_tests {
             .find(|(_, node)| node.role() == Role::PasswordInput)
             .expect("a masked field reports Role::PasswordInput");
         assert_eq!(field.value(), Some("•••••••"));
+        let runs: Vec<_> = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::TextRun)
+            .collect();
+        assert_eq!(runs.len(), 1, "the mask is one run");
         assert!(
-            field.children().is_empty(),
-            "a masked field must own no text runs"
+            field.children().contains(&runs[0].0),
+            "the run hangs off the field, where a text change can reach a reader"
         );
+        assert_eq!(runs[0].1.value(), Some("•••••••"));
+        for (_, node) in &update.nodes {
+            for text in [node.value(), node.label()].into_iter().flatten() {
+                assert!(!text.contains("hunter"), "the secret leaked: {text:?}");
+            }
+        }
         assert!(
-            !update
-                .nodes
-                .iter()
-                .any(|(_, node)| node.role() == Role::TextRun),
-            "no text run may be emitted anywhere for a masked field"
+            field.text_selection().is_some(),
+            "the caret is reported against the mask, one character per character"
         );
-        assert!(
-            field.text_selection().is_none(),
-            "the caret model stays opaque so no structure about the secret leaks"
-        );
+    }
+
+    #[test]
+    fn a_no_echo_field_emits_one_empty_run_and_no_value() {
+        let mut tree = tree_with_mock_backend();
+        let _id = tree
+            .add(TextInputField::new(Signal::new("hunter2".to_string())).secure(EchoMode::NoEcho));
+        tree.layout(SizeProposal::exact(200.0, 20.0));
+
+        let update = tree.sync_accessibility();
+        let (_, field) = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == Role::PasswordInput)
+            .expect("a NoEcho field reports Role::PasswordInput");
+        assert_eq!(field.value(), None, "NoEcho hides even the length");
+        let runs: Vec<_> = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::TextRun)
+            .collect();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].1.value(), Some(""));
     }
 }
 
 #[cfg(test)]
 mod window_active_tests;
+
+/// **What a screen reader is told as the field is edited**, read through
+/// `accesskit_consumer` the way the AT-SPI adapter reads it: caret moves,
+/// selections, the first character typed into an empty field, and a masked
+/// field's echo.
+#[cfg(test)]
+mod reader_tests;
 
 /// **Pointer editing, both devices.** The mouse half is a baseline the touch
 /// work needed before it could change `mouse.rs`: nothing in this stack

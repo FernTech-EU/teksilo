@@ -265,8 +265,14 @@ impl<'a> TextRunSource<'a> {
         // still hear the whole label. Anything the emitted lines do not
         // reach becomes one unmeasured line below the last, so it is
         // announced and reviewable even though it was never drawn.
+        //
+        // A geometry with no lines at all gets that line too, even for an
+        // empty text: text-typeset measures "" as no lines, and a source
+        // with no line emits no run, so an empty field would support no
+        // text ranges and its first typed character would be dropped by
+        // the adapter. `flat("")` has always had its one line.
         let covered = lines.last().map(|l| l.byte_range.end).unwrap_or(0);
-        if covered < text.len() {
+        if covered < text.len() || lines.is_empty() {
             let anchor = lines
                 .last()
                 .map(|l| Rect::new(l.rect.x, l.rect.y + l.rect.height, 0.0, l.rect.height))
@@ -966,6 +972,30 @@ mod tests {
         // run's bounds, so the box must be the caret: zero-width, full
         // line height, at the leading edge.
         assert_eq!(local[0].1, Rect::new(4.0, 2.0, 0.0, 16.0));
+    }
+
+    #[test]
+    fn measured_empty_text_emits_one_run() {
+        // text-typeset measures "" as a geometry with no lines at all
+        // (`document_flow.rs`, `layout_single_line_with_geometry`), not as
+        // one empty line. An empty field laid out by it must still own the
+        // one run a measured-nothing `flat` source gets, or its first typed
+        // character is a change from a node that supported no text ranges,
+        // which the AT-SPI adapter drops.
+        let mut b = label_builder();
+        let geometry = geometry_of("", Vec::new());
+        let source = TextRunSource::from_geometry("", &geometry, Point::new(4.0, 2.0), 0);
+        let emission = push_text_runs(&mut b, None, &source);
+        assert_eq!(emission.value, "");
+        assert_eq!(
+            emission.runs.len(),
+            1,
+            "an empty measured source must emit its one empty run"
+        );
+        let (_, _, children, local) = b.build(owner());
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].1.value(), Some(""));
+        assert_eq!(local[0].1, Rect::new(4.0, 2.0, 0.0, 0.0));
     }
 
     #[test]

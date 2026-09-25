@@ -234,6 +234,37 @@ pub(crate) struct TextInputState {
     /// `Ime::Preedit`, a self-sustaining feedback loop. Cleared on blur so a
     /// refocus re-seeds the (per-window) OS area a sibling field may have moved.
     pub last_ime_area: Option<teksilo_canvas::Rect>,
+
+    // ── What assistive technology was shown ─────────────────────────
+    /// What the last accessibility walk that published this field's runs put
+    /// in them. Written only by that walk, never by a name probe.
+    pub at_published: Cell<AtPublished>,
+    /// Bound at `AccessibilityOnly`; the frame tick bumps it to re-walk the
+    /// field after a walk that withheld its runs.
+    pub at_republish: Signal<u64>,
+}
+
+/// What a field's runs carried in the last accessibility walk that
+/// published them.
+///
+/// A secure field revealed under [`AtRevealPolicy::SwapRole`] publishes its
+/// plaintext, and masked, its mask. The AT-SPI adapter reports the change
+/// between two published texts as the old text deleted and the new inserted
+/// (`accesskit_atspi_common` `adapter.rs`, `emit_text_change_if_needed_parent`),
+/// so going straight from one to the other put the password on the bus: as
+/// inserted text on a reveal, as deleted text on a hide. The walk that reveals
+/// or hides it therefore publishes no runs at all, which the adapter does not
+/// diff, and the new text follows on the next frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AtPublished {
+    /// No walk has published the field's runs yet.
+    Nothing,
+    /// The plaintext.
+    Plaintext,
+    /// The mask.
+    Mask,
+    /// No runs: the walk that revealed or hid a secure field.
+    Withheld,
 }
 
 /// Configuration bundle passed from `TextInput::build()` to
@@ -374,6 +405,8 @@ impl TextInputState {
             ime_preedit: None,
             ime_preedit_range: None,
             last_ime_area: None,
+            at_published: Cell::new(AtPublished::Nothing),
+            at_republish: Signal::new(0),
         }))
     }
 
@@ -599,7 +632,15 @@ pub(crate) fn sync_cursor_signals_in(st: &mut TextInputState) {
     st.caret_visible.set(true);
 }
 
-fn publish_cursor_signals(st: &TextInputState) {
+/// Write the caret, anchor and has-selection signals from the live cursor,
+/// each only when it changed.
+///
+/// The caret and anchor are bound at `AccessibilityOnly`, so a write here is
+/// what re-walks the field's node for a reader; an unconditional write would
+/// re-walk it on every frame. No blink restart, unlike
+/// [`sync_cursor_signals`]: the frame tick calls this, and a caret that
+/// restarted its blink every frame would never blink.
+pub(crate) fn publish_cursor_signals(st: &TextInputState) {
     let pos = st.cursor.position();
     let anchor = st.cursor.anchor();
     let has_sel = st.cursor.has_selection();

@@ -707,10 +707,11 @@ fn the_field_advertises_the_actions_an_assistive_client_may_invoke() {
 ///
 /// A read-only field cannot be written, so `SetValue` and
 /// `ReplaceSelectedText` come off — advertising them would offer a client a
-/// dictation target that silently drops what it inserts. A *protected* field
-/// (a masked `PasswordField`) additionally hides its caret model from AT, so
-/// `SetTextSelection` comes off with it: there are no character positions
-/// published for a client to select between.
+/// dictation target that silently drops what it inserts. A `NoEcho` password
+/// field hides even its length, so `SetTextSelection` comes off with it: its
+/// runs are always empty, and there are no character positions for a client
+/// to select between. A masked field publishes one mask character per
+/// character, so its caret can be placed and the action stays.
 #[test]
 fn a_read_only_or_protected_field_withdraws_the_actions_it_cannot_service() {
     use teksilo_core::accesskit::Action;
@@ -737,21 +738,26 @@ fn a_read_only_or_protected_field_withdraws_the_actions_it_cannot_service() {
         "but its caret model is still published, so selecting stays on offer",
     );
 
-    let protected = {
+    let password_actions = |echo: crate::primitives::EchoMode| {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
-        tree.add(crate::PasswordField::new(Signal::new(
-            "hunter2".to_string(),
-        )));
+        tree.add(crate::PasswordField::new(Signal::new("hunter2".to_string())).echo_mode(echo));
         tree.layout(SizeProposal::exact(300.0, 40.0));
         let field = tree
             .find_by_role(teksilo_core::accesskit::Role::PasswordInput)
             .expect("a PasswordField builds a Role::PasswordInput field");
         tree.accessibility_node(field).actions().to_vec()
     };
+    let no_echo = password_actions(crate::primitives::EchoMode::NoEcho);
     assert!(
-        !protected.contains(&Action::SetTextSelection),
-        "a masked field publishes no character positions, so it must not offer \
-         a selection action; it advertises {protected:?}",
+        !no_echo.contains(&Action::SetTextSelection),
+        "a NoEcho field publishes no character positions, so it must not offer \
+         a selection action; it advertises {no_echo:?}",
+    );
+    let masked = password_actions(crate::primitives::EchoMode::Masked);
+    assert!(
+        masked.contains(&Action::SetTextSelection),
+        "a masked field publishes its mask's positions, so selecting stays on \
+         offer; it advertises {masked:?}",
     );
 }
 

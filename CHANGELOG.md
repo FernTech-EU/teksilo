@@ -109,6 +109,13 @@ by crate for clarity, not because crates version independently.
   every key more than 200 ms late costs up to 200 ms on each key typed after
   it has caught up. What a reader hears on an X11 session, where Orca reads
   the keyboard itself, on Windows and on macOS is unchanged.
+- **An empty text measured by text-typeset had no text run.**
+  `TextRunSource::from_geometry` built no line from the geometry text-typeset
+  returns for an empty string, so an empty label or field laid out by it
+  offered no Text interface on AT-SPI and none of the text ranges the other
+  platforms read. It now emits the one empty run `TextRunSource::flat` always
+  did, so the first text such a node gains, and the edit that empties it, are
+  reported like any other change.
 - **Every window was an unnamed "frame" to Orca.** The accessibility tree's
   root, which AT-SPI presents as the window, carried no name, so Orca 46.1
   announced each window as it came up with the bare word "frame". The root now
@@ -271,6 +278,18 @@ by crate for clarity, not because crates version independently.
   reach File > Recent in the example, or a docking layout's "Move to"
   sides. It now stays open until Escape, Left, a choice or a click outside,
   as one an assistive technology opens always did.
+- **Text fields told a screen reader nothing of the caret, of an empty
+  field, or of a password.** In every field built on `TextInputField`
+  (`TextInput`, `SearchField`, `SpinBox`, `PasswordField`, the date and time
+  editors), an arrow, Home, End, a Shift selection or Ctrl+A reached no
+  platform: Orca 46.1 said nothing, and a reader was told the caret and
+  selection of the last edit. Each move and selection is now published as it
+  happens, and Orca speaks the character or the selection. An empty field now
+  offers the Text interface on AT-SPI, so the first character typed or pasted
+  into it, and the deletion that empties it, are reported. A masked password
+  field now exposes its mask as its text, one echo character per character and
+  never the plaintext, so Orca echoes each keystroke and deletion; a `NoEcho`
+  field exposes an empty text and reports nothing typed.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

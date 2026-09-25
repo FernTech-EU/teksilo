@@ -253,6 +253,13 @@ impl Widget for TextInputField {
                 reg,
                 teksilo_core::binding::BindingLevel::AccessibilityOnly,
             );
+            // The mask a hiding walk withheld (see `AtPublished`) is
+            // published by the walk this bump asks for.
+            shared_state.borrow().at_republish.bind_to(
+                id,
+                reg,
+                teksilo_core::binding::BindingLevel::AccessibilityOnly,
+            );
         }
 
         let text_signal = shared_state.borrow().text_signal.clone();
@@ -481,6 +488,27 @@ impl Widget for TextInputField {
             );
         }
 
+        // Bind the caret and the selection anchor at AccessibilityOnly.
+        //
+        // A caret-only move (an arrow, Home, End, Shift+arrow, Ctrl+A, a click)
+        // edits nothing, so `text_signal` stays put; without these bindings
+        // the node was never re-walked and every reader was told the caret
+        // and selection of the last edit. `has_selection` is derived from the
+        // two and needs no binding of its own. Same pairing as
+        // `RichTextEditorBody`.
+        {
+            let st = self.state().borrow();
+            let signals = [st.cursor_position.clone(), st.cursor_anchor.clone()];
+            drop(st);
+            for signal in &signals {
+                signal.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    teksilo_core::binding::BindingLevel::AccessibilityOnly,
+                );
+            }
+        }
+
         // Stash frame infrastructure handles and self_id.
         {
             let mut st = self.state().borrow_mut();
@@ -555,7 +583,6 @@ impl Widget for TextInputField {
                 let (more, pending_text) = {
                     let mut st = state.borrow_mut();
                     let more = tick(&mut st, *delta);
-                    st.has_selection.set(st.cursor.has_selection());
                     let pending = st.deferred_text_update.take();
                     (more, pending)
                 };
@@ -563,6 +590,21 @@ impl Widget for TextInputField {
                     let st = state.borrow();
                     if st.text_signal.get() != text {
                         st.text_signal.set(text);
+                    }
+                }
+                // An edit applied by `tick` (typed characters, a paste, a
+                // programmatic rewrite, undo) moves the caret without passing
+                // through a key handler's `sync_cursor_signals`. Publish it
+                // here, or the signals keep the pre-edit caret, and the next
+                // arrow key that lands on that stale value changes no signal
+                // and reaches no reader.
+                {
+                    let st = state.borrow();
+                    publish_cursor_signals(&st);
+                    // The walk that revealed or hid a secure field published
+                    // no runs; ask for the one that publishes its new text.
+                    if st.at_published.get() == AtPublished::Withheld {
+                        st.at_republish.set(st.at_republish.get().wrapping_add(1));
                     }
                 }
                 if more {
@@ -1070,19 +1112,41 @@ impl Widget for TextInputField {
                 AtRevealPolicy::SwapRole => !explicitly_revealed,
             };
 
+        // What a reader may read. A protected field shows it what a sighted
+        // user sees: the mask, one echo character per character of the secret
+        // (nothing at all under `NoEcho`), and never the plaintext.
+        let hide_all = protected && st.echo_mode == EchoMode::NoEcho;
+        // Revealing or hiding a secure field: publish no runs this walk, so
+        // the adapter has no plaintext to report as inserted or deleted (see
+        // `AtPublished`), and have the frame tick ask for the walk that
+        // publishes the new text.
+        let withhold = st.secure
+            && matches!(
+                (st.at_published.get(), protected),
+                (AtPublished::Plaintext, true) | (AtPublished::Mask, false)
+            );
+        if !builder.emits_no_children() {
+            st.at_published.set(if withhold {
+                AtPublished::Withheld
+            } else if protected {
+                AtPublished::Mask
+            } else {
+                AtPublished::Plaintext
+            });
+            if withhold && let Some(frame) = &st.frame_request {
+                frame.set(true);
+            }
+        }
+        let at_text = if !protected {
+            text
+        } else if hide_all {
+            String::new()
+        } else {
+            st.echo_char.to_string().repeat(text.chars().count())
+        };
+
         if protected {
             builder.set_role(Role::PasswordInput);
-            // Expose a bullet string of the right length (NoEcho hides
-            // even that) so AT can announce the character count, never
-            // the secret. Deliberately omit character lengths, word
-            // starts, and the text selection: the caret model stays
-            // opaque so no structure about the secret leaks.
-            if st.echo_mode != EchoMode::NoEcho {
-                let count = text.chars().count();
-                if count > 0 {
-                    builder.set_value(st.echo_char.to_string().repeat(count));
-                }
-            }
         } else {
             // Plain field, or a revealed field under `SwapRole`: report
             // as a text input exposing the real value, mirroring the web
@@ -1090,73 +1154,85 @@ impl Widget for TextInputField {
             // `input_purpose` (WCAG 1.3.5) applies here; `Role::TextInput` is
             // the `Normal` default.
             builder.set_role(self.input_purpose.to_role());
-            // Keep the value on the input node so the focus announcement is
-            // unchanged: accesskit resolves `value()` from `data().value()`
-            // first, falling back to the TextRun text only when unset.
-            if !text.is_empty() {
-                builder.set_value(&text);
-            }
+        }
+        // Keep the value on the input node so the focus announcement is
+        // unchanged: accesskit resolves `value()` from `data().value()`
+        // first, falling back to the TextRun text only when unset.
+        if !at_text.is_empty() {
+            builder.set_value(&at_text);
+        }
 
-            // Expose the editable content as child `Role::TextRun`s, NOT as
-            // `character_lengths` on the input node itself. accesskit_consumer's
-            // `supports_text_ranges()` is false for a childless input that only
-            // hosts character data on its own node, so the macOS adapter never
-            // fires `AXSelectedTextChanged` — VoiceOver reads the value once on
-            // focus but never echoes characters/words while typing. Runs are
-            // emitted even for an empty field so `supports_text_ranges()` is
-            // already true before the first keystroke (the change-diff's *old*
-            // node must support ranges too for the notification to fire).
-            let retained = self.retained.borrow();
-            let source = match retained.as_ref() {
-                // A retained measurement describes the text it was taken of.
-                // The document can move on between two layouts, so compare
-                // rather than trust — a run whose ranges index a text that no
-                // longer exists is worse than one with no extents.
-                Some(placed) if placed.text == text => match placed.geometry.as_deref() {
-                    // The measurement covers the whole line; the field shows a
-                    // window onto it, so slide the rects back by the scroll
-                    // offset to land in the field's own space. `build`
-                    // translates them into window space from there.
-                    Some(geometry) => TextRunSource::from_geometry(
-                        &placed.text,
-                        geometry,
-                        Point::new(-st.scroll_x, 0.0),
-                        0,
-                    )
+        // Expose the content as child `Role::TextRun`s, NOT as
+        // `character_lengths` on the input node itself. accesskit_consumer's
+        // `supports_text_ranges()` is false for a childless input that only
+        // hosts character data on its own node, so the macOS adapter never
+        // fires `AXSelectedTextChanged` (VoiceOver reads the value once on
+        // focus but never echoes characters/words while typing) and AT-SPI
+        // publishes no Text interface. Runs are emitted even for an empty
+        // field so `supports_text_ranges()` is already true before the first
+        // keystroke (the change-diff's *old* node must support ranges too for
+        // the notification to fire). A masked field needs them as much: Orca
+        // 46.1 speaks no key in password text (`default.py`,
+        // `presentKeyboardEvent`) and echoes a keystroke there only from the
+        // text-inserted event (`script_utilities.py`,
+        // `isEchoableTextInsertionEvent`), which the mask's runs raise.
+        let retained = self.retained.borrow();
+        let source = match retained.as_ref() {
+            // A retained measurement describes the text it was taken of.
+            // The document can move on between two layouts, so compare
+            // rather than trust — a run whose ranges index a text that no
+            // longer exists is worse than one with no extents.
+            Some(placed) if placed.text == at_text => match placed.geometry.as_deref() {
+                // The measurement covers the whole line; the field shows a
+                // window onto it, so slide the rects back by the scroll
+                // offset to land in the field's own space. `build`
+                // translates them into window space from there.
+                Some(geometry) => TextRunSource::from_geometry(
+                    &placed.text,
+                    geometry,
+                    Point::new(-st.scroll_x, 0.0),
+                    0,
+                )
+                .with_base_direction(placed.base_direction),
+                None => TextRunSource::flat(&placed.text, 0)
+                    .with_fallback_rect(Rect::new(
+                        0.0,
+                        0.0,
+                        placed.bounds.width,
+                        placed.bounds.height,
+                    ))
                     .with_base_direction(placed.base_direction),
-                    None => TextRunSource::flat(&placed.text, 0)
-                        .with_fallback_rect(Rect::new(
-                            0.0,
-                            0.0,
-                            placed.bounds.width,
-                            placed.bounds.height,
-                        ))
-                        .with_base_direction(placed.base_direction),
-                },
-                // Never placed, painted without a measuring backend, or one
-                // edit ahead of the last measurement.
-                _ => TextRunSource::flat(&text, 0),
-            };
-            let emission = push_text_runs(builder, None, &source);
+            },
+            // Never placed, painted without a measuring backend, or one
+            // edit ahead of the last measurement.
+            _ => TextRunSource::flat(&at_text, 0),
+        };
+        let emission = if withhold {
+            TextRunEmission::default()
+        } else {
+            push_text_runs(builder, None, &source)
+        };
 
-            // While composing (IME preedit active), expose the composition
-            // as a selection so screen readers / braille track the tentative
-            // text — the composing characters are already in `value`. Falls
-            // back to the live cursor/selection when not composing. (The
-            // secure branch above never reaches here, so a password preedit
-            // is never exposed.) `position()` / `anchor()` are character
-            // indices (text-document is char-space), which the emission maps
-            // onto the run that holds them — a caret past 255 characters is
-            // in the second run, at its own offset.
-            let (anchor, pos) = match st.ime_preedit_range.clone() {
-                Some(range) => (range.start, range.end),
-                None => (st.cursor.anchor(), st.cursor.position()),
-            };
-            if let (Some(anchor), Some(focus)) =
-                (emission.position_of(anchor), emission.position_of(pos))
-            {
-                builder.set_text_selection_to(anchor, focus);
-            }
+        // While composing (IME preedit active), expose the composition
+        // as a selection so screen readers / braille track the tentative
+        // text — the composing characters are already in `value`. Falls
+        // back to the live cursor/selection when not composing. A protected
+        // field reports its caret only: the mask has one character per
+        // character, so the offsets are the same, and under `NoEcho` the
+        // caret stays at the start of a text that is always empty, as the
+        // painted caret does. `position()` / `anchor()` are character
+        // indices (text-document is char-space), which the emission maps
+        // onto the run that holds them — a caret past 255 characters is
+        // in the second run, at its own offset.
+        let (anchor, pos) = match st.ime_preedit_range.clone() {
+            _ if hide_all => (0, 0),
+            Some(range) if !protected => (range.start, range.end),
+            _ => (st.cursor.anchor(), st.cursor.position()),
+        };
+        if let (Some(anchor), Some(focus)) =
+            (emission.position_of(anchor), emission.position_of(pos))
+        {
+            builder.set_text_selection_to(anchor, focus);
         }
 
         if !st.placeholder.is_empty() {
@@ -1173,7 +1249,7 @@ impl Widget for TextInputField {
             builder.add_action(Action::ReplaceSelectedText);
         }
         // Only meaningful when the caret model is exposed to AT.
-        if !protected {
+        if !hide_all {
             builder.add_action(Action::SetTextSelection);
         }
 
