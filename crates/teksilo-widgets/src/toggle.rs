@@ -130,32 +130,21 @@ impl Toggle {
     /// the value it now holds.
     ///
     /// Spelled the same way on [`Checkbox`](crate::checkbox::Checkbox).
-    /// Declare that this toggle's accessible name comes from a **sibling label
-    /// widget**, wired by a container after mount (`FormLayout::line` does this
-    /// via `access_labelled_by`).
-    ///
-    /// Without it the debug assertion below fires even though the toggle *is*
-    /// properly labelled: the `labelled_by` relation is pushed post-mount, so
-    /// `accessibility()` cannot see it and every form-hosted toggle looks
-    /// nameless. Setting `.label(..)` instead would satisfy the assert but
-    /// render the text a second time, beside a label column that already has it.
-    /// Run `f` when the **user** flips this switch, with the value the
-    /// activation produced and an `EventContext`, so it can do what a bare
-    /// `Signal` write cannot (`ctx.send_intent(...)`, `ctx.set_theme(...)`,
-    /// opening a window). Fires for the pointer, for `Space`, and for an
-    /// assistive-technology `Click`.
-    ///
-    /// Does **not** fire for programmatic writes to the bound signal — there is
-    /// no event in flight to carry. Observe the signal for that. The signal
-    /// stays the source of truth either way: it is written first, and `f` sees
-    /// the value it now holds.
-    ///
-    /// Spelled the same way on [`Checkbox`](crate::checkbox::Checkbox).
     pub fn on_change(mut self, f: impl Fn(bool, &mut EventContext) + 'static) -> Self {
         self.on_change = Some(Rc::new(f));
         self
     }
 
+    /// Declare that this toggle's accessible name comes from a **sibling label
+    /// widget**, wired by a container after mount (`FormLayout::line` does this
+    /// via `access_labelled_by`).
+    ///
+    /// Without it the debug assertion in `accessibility()` fires even though
+    /// the toggle *is* properly labelled: the `labelled_by` relation is pushed
+    /// post-mount, so `accessibility()` cannot see it and every form-hosted
+    /// toggle looks nameless. Setting `.label(..)` instead would satisfy the
+    /// assert but render the text a second time, beside a label column that
+    /// already has it.
     pub fn labelled_externally(mut self) -> Self {
         self.labelled_externally = true;
         self

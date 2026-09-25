@@ -430,10 +430,12 @@ fn scope_row(
     // The row paints the label once, on its leading edge; the toggle
     // trailing it is named by pointing at that label. Giving the toggle its
     // own `.label(..)` painted the same string a second time — visibly on
-    // screen, and again in the announcement.
+    // screen, and again in the announcement. `labelled_externally` tells the
+    // toggle so: it cannot see a relation set on it after mount, and without
+    // it its debug assertion takes every debug build down as the tree is read.
     let label_id = ctx.add(TextWidget::new(label).style(TextStyleRole::Body));
     let description_id = ctx.add(TextWidget::new(description).style(TextStyleRole::Small));
-    let toggle_id = ctx.add(Toggle::new(signal).enabled(enabled));
+    let toggle_id = ctx.add(Toggle::new(signal).enabled(enabled).labelled_externally());
     ctx.access_labelled_by(toggle_id, label_id);
 
     HStack::new()
@@ -822,10 +824,44 @@ fn build_inspect_accordion(telemetry: &OpenedTelemetry, n: usize) -> Accordion {
     .content(Padding::uniform(10.0).child(body))
 }
 
+/// A tree whose app state carries an [`OpenedTelemetry`], as
+/// `TeksiloAppBuilder::telemetry` registers it, over a stub reporter that
+/// supports every scope. A tree without one only ever builds the
+/// placeholder: no consent row, no `Toggle`.
+#[cfg(test)]
+pub(crate) fn tree_with_telemetry(dir: &std::path::Path) -> teksilo_core::widget_tree::WidgetTree {
+    use std::any::{Any, TypeId};
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    use std::time::Duration;
+    use teksilo_settings::{AppPaths, SettingsStore};
+    use teksilo_telemetry::{StubReporter, TelemetryBundle};
+
+    let settings =
+        SettingsStore::open_with_delay(dir.join("settings.toml"), Duration::ZERO).unwrap();
+    let opened = TelemetryBundle::new(1)
+        .with_anonymous(Rc::new(StubReporter::anonymous()))
+        .with_debounce(Duration::ZERO)
+        .open(&AppPaths::for_testing(dir), &settings)
+        .unwrap();
+    let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+    app_state.insert(TypeId::of::<OpenedTelemetry>(), Box::new(opened));
+
+    let mut tree = teksilo_core::widget_tree::WidgetTree::new()
+        .with_theme(teksilo_core::presets::intui::light());
+    tree.set_app_context(Rc::new(
+        teksilo_core::event_source::TreeAppContext::empty().with_app_state(app_state),
+    ));
+    tree
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::heard_test::{Heard, Listener};
+    use accesskit_consumer::{NodeRef, Tree, common_filter};
     use teksilo_canvas::SizeProposal;
+    use teksilo_core::accesskit::{Role, Toggled};
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::{
         I18nConfig, I18nManager, LanguageIdentifier,
@@ -890,6 +926,67 @@ mod tests {
             group_name(&mut tree),
             "Paramètres de confidentialité et de télémétrie",
             "container name must re-resolve on locale change"
+        );
+        clear();
+    }
+
+    /// Every consent switch, as an adapter lists it: its name and whether
+    /// it is on, in reading order.
+    fn switches(tree: &mut WidgetTree) -> Vec<(Option<String>, Option<Toggled>)> {
+        fn walk(node: NodeRef<'_>, out: &mut Vec<(Option<String>, Option<Toggled>)>) {
+            if node.role() == Role::Switch {
+                out.push((node.label(), node.toggled()));
+            }
+            for child in node.filtered_children(&common_filter) {
+                walk(child, out);
+            }
+        }
+        let replay = Tree::new(tree.sync_accessibility(), true);
+        let mut out = Vec::new();
+        walk(replay.state().root(), &mut out);
+        out
+    }
+
+    /// With telemetry configured, each consent row's switch is named by the
+    /// row's own label and read with its state, and focus on it speaks that
+    /// name. Every debug build used to panic here instead: the switch is
+    /// named through `labelled_by`, which `Toggle::accessibility` cannot see,
+    /// so its "missing an accessible label" assertion fired as the tree was
+    /// built, and the widget catalog's Settings tab took the application
+    /// down with it.
+    #[test]
+    fn each_consent_switch_is_named_by_its_row_label() {
+        clear();
+        let cfg = I18nConfig::test_only("en-US", &[]).framework_locales(crate::framework_locales());
+        install(I18nManager::from_config(&cfg));
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut tree = tree_with_telemetry(dir.path());
+        let root = tree.add(PrivacySettings::new());
+        tree.layout(SizeProposal::exact(800.0, 1200.0));
+
+        let unset = Some(Toggled::False);
+        assert_eq!(
+            switches(&mut tree),
+            vec![
+                (Some("Anonymous usage metrics".to_string()), unset),
+                (Some("Crash reports".to_string()), unset),
+                (Some("Feature flags".to_string()), unset),
+            ],
+            "each switch must carry its row's label, and be off while consent is unknown"
+        );
+
+        let first_switch = tree
+            .tab_stops_within(root)
+            .into_iter()
+            .find(|&id| tree.accessibility_node(id).role() == Role::Switch)
+            .expect("the consent switches are tab stops");
+        let mut listener = Listener::attach(&mut tree);
+        tree.focus(first_switch);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::Focus("Anonymous usage metrics".to_string())],
+            "focus on a consent switch must speak its row's label"
         );
         clear();
     }

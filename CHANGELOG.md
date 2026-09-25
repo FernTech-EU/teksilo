@@ -290,6 +290,14 @@ by crate for clarity, not because crates version independently.
   field now exposes its mask as its text, one echo character per character and
   never the plaintext, so Orca echoes each keystroke and deletion; a `NoEcho`
   field exposes an empty text and reports nothing typed.
+- **A `PrivacySettings` with telemetry configured crashed every debug build.**
+  Its consent switches are named by their row's label, which the switch's own
+  check for a missing name could not see, so the application panicked as its
+  accessibility tree was built, and the widget catalog's Settings tab exited
+  as it opened. The panel now stays up, and a screen reader reaches each
+  switch by Tab, named by its row ("Anonymous usage metrics", "Crash
+  reports", "Feature flags") and read with its state. Release builds did not
+  crash.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

@@ -37,8 +37,15 @@ use teksilo_core::widget_tree::WidgetTree;
 /// than by being right.
 #[track_caller]
 fn assert_invariants(what: &str, widget: impl Widget + 'static) {
+    assert_invariants_in(what, WidgetTree::new(), widget);
+}
+
+/// [`assert_invariants`] in a tree the caller prepared, for a widget that
+/// builds what is under test only from something in its app state.
+#[track_caller]
+fn assert_invariants_in(what: &str, tree: WidgetTree, widget: impl Widget + 'static) {
     let backend: Rc<RefCell<dyn TextBackend>> = Rc::new(RefCell::new(MockTextBackend::new()));
-    let mut tree = WidgetTree::new()
+    let mut tree = tree
         .with_theme(teksilo_core::presets::intui::light())
         .with_text_backend(backend);
     tree.add(widget);
@@ -79,8 +86,12 @@ fn a_calendar_holds_the_invariants() {
 fn a_privacy_settings_row_holds_the_invariants() {
     // These rows painted their label twice: once as the row's own text,
     // once as the toggle's. The screen showed it as well as the reader.
-    assert_invariants(
+    // The rows exist only with telemetry configured; without it this built
+    // the placeholder, and checked no row.
+    let dir = tempfile::tempdir().unwrap();
+    assert_invariants_in(
         "privacy settings",
+        crate::privacy_settings::tree_with_telemetry(dir.path()),
         crate::privacy_settings::PrivacySettings::new(),
     );
 }
