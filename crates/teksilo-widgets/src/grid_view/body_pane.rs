@@ -30,7 +30,7 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{DragEligibility, RowState, SelectionModel};
 
 use super::TileContext;
-use super::a11y::TileA11y;
+use super::a11y::{TileA11y, TileBody};
 use super::layout::GridLayoutStrategy;
 use crate::data_views::{RowSelection, ViewId, default_placeholder};
 
@@ -249,15 +249,11 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             });
         }
 
-        // Selection change → re-render visible tiles (refresh `is_selected`).
-        if let Some(ref sel) = self.selection {
-            let v = version.clone();
-            let counter = Rc::new(Cell::new(0_u64));
-            ctx.effect(&sel.selection_signal(), move |_| {
-                counter.set(counter.get() + 1);
-                v.set(counter.get());
-            });
-        }
+        // A selection change is deliberately NOT observed here. Each tile
+        // watches its own selectedness from inside its `TileA11y` and
+        // rebuilds only what is under it, so a change replaces the delegate
+        // widgets of the tiles it flipped and no tile node. See `TileA11y`
+        // for what that identity is load-bearing for.
 
         // Export completion (move-out): fires on the drag source — THIS
         // pane's own id, the stable id `start_drag` is anchored on below. A
@@ -277,7 +273,6 @@ impl<T: 'static> Widget for GridBodyPane<T> {
         if (self.can_fetch_more_fn)() && end + FETCH_BUFFER_TILES >= total {
             (self.fetch_more_fn)();
         }
-        let focused = self.focused_index.get();
         // Built ONCE per pane build (not per tile) and cheaply `Clone`d
         // per-tile below — the facade's `Rc<dyn Fn>` closures would be
         // real allocations if constructed inside the realize loop.
@@ -292,38 +287,57 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             // waterfall, section-local for a sectioned grid (each section
             // starts its own row band — see `SectionedGrid::tile_row_col`).
             let (row, col) = self.strategy.tile_row_col(i, self.viewport_width.get());
-            let selected = self
-                .selection
-                .as_ref()
-                .map(|s| s.is_selected(i))
-                .unwrap_or(false);
-            let is_focused = focused == Some(i);
-            let delegate = self.delegate.clone();
-            // A `Loading` tile (data not yet resident) renders a placeholder
-            // skeleton instead of being skipped, so the scrollbar and layout
-            // stay stable while the window loads.
-            let widget = (self.with_item_fn)(i, &|item| {
-                let tc = TileContext {
-                    index: i,
-                    row,
-                    col,
-                    item,
-                    is_selected: selected,
-                    is_focused,
-                };
-                delegate(&tc)
-            })
-            .or_else(|| ((self.row_state_fn)(i) == RowState::Loading).then(default_placeholder));
-            let Some(widget) = widget else { continue };
+            // Has this tile anything to show? The wrapper builds the tile
+            // widget itself, so the answer is needed before the wrapper
+            // exists, and `read_item_fn` reports presence without building
+            // anything. A `Loading` tile (data not yet resident) renders a
+            // placeholder skeleton instead of being skipped, so the scrollbar
+            // and layout stay stable while the window loads.
+            let has_item = (self.read_item_fn)(i, &mut |_| {});
+            if !has_item && (self.row_state_fn)(i) != RowState::Loading {
+                continue;
+            }
 
-            let inner_id = ctx.add_boxed(widget);
+            // Everything the tile needs to draw itself, closed over once. The
+            // wrapper calls this on its first build and again whenever this
+            // tile's own selectedness flips.
+            let body: TileBody = {
+                let with_item = self.with_item_fn.clone();
+                let delegate = self.delegate.clone();
+                let row_state = self.row_state_fn.clone();
+                let focused_index = self.focused_index.clone();
+                let scope_owner = self.scope_owner;
+                Rc::new(move |ctx: &mut BuildContext, selected: bool| {
+                    let is_focused = focused_index.get() == Some(i);
+                    let widget = (with_item)(i, &|item| {
+                        delegate(&TileContext {
+                            index: i,
+                            row,
+                            col,
+                            item,
+                            is_selected: selected,
+                            is_focused,
+                        })
+                    })
+                    .or_else(|| ((row_state)(i) == RowState::Loading).then(default_placeholder))?;
+                    // The scope the pane opens around its tiles is closed by
+                    // the time a tile rebuilds on its own, so the tile opens
+                    // it again: a `StandardItem` delegate's focus-aware
+                    // selection reads the grid's keyboard focus through it.
+                    ctx.begin_view_focus_for(scope_owner);
+                    let inner_id = ctx.add_boxed(widget);
+                    ctx.end_view_focus();
+                    Some(inner_id)
+                })
+            };
+
             let a11y_name = self.tile_a11y_label.as_ref().map(|f| f(i));
             let tile_id = ctx.add(TileA11y::new(
-                inner_id,
+                body,
+                sel_facade.clone(),
+                i,
                 row + 1,
                 col + 1,
-                i + 1,
-                selected,
                 a11y_name,
             ));
 

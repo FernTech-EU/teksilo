@@ -10,58 +10,145 @@
 //! upward to (see `GridView::accessibility`), so screen readers announce
 //! "row R, column C, N of M".
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use teksilo_canvas::{Rect, SizeProposal};
 
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::binding::BindingLevel;
+use teksilo_core::build_context::BuildContext;
+use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 
+use crate::data_views::RowSelection;
+
+/// Builds a tile's own widget, and returns its id.
+///
+/// Called with the tile's selectedness at the moment of the build, because
+/// `TileContext::is_selected` hands it to the delegate. Erases the source's
+/// item type: the pane closes over the delegate and the data source, and this
+/// is what is left of them. `None` means the tile had nothing to show after
+/// all.
+pub(crate) type TileBody = Rc<dyn Fn(&mut BuildContext, bool) -> Option<WidgetId>>;
+
 /// Wraps a tile's delegate widget with `Role::GridCell` + grid coordinates.
 ///
-/// 1-based `row_index` / `col_index` follow the ARIA convention. `position`
-/// (`aria-posinset`) is the flat 1-based index in the *logical* set, not in
-/// the realized window, so virtualization stays invisible to assistive tech.
-/// Its `aria-setsize` half is not here: AccessKit reads a set size from the
-/// container, so `GridView`'s own `Role::Grid` node publishes it.
-#[derive(Debug)]
+/// 1-based `row_index` / `col_index` follow the ARIA convention. The position
+/// in set (`aria-posinset`) is `index + 1`, the flat index in the *logical*
+/// set, not in the realized window, so virtualization stays invisible to
+/// assistive tech. Its `aria-setsize` half is not here: AccessKit reads a set
+/// size from the container, so `GridView`'s own `Role::Grid` node publishes
+/// it.
+///
+/// # The rebuild boundary for a selection change
+///
+/// The wrapper builds the delegate's widget itself and watches the selection
+/// for its own tile only, as `ListItemWrapper` does for a list row. A change
+/// of selection rebuilds the tiles whose selectedness it flipped, below this
+/// node; every tile keeps the node id the grid names as its active
+/// descendant. The pane used to rebuild every realized tile instead, so the
+/// tile under the cursor came back as a node the platform had never seen:
+/// each adapter reported a focus change to it, and Orca stopped what it was
+/// saying, the count just announced included, to read the tile again. And the
+/// tile's `selected` state never changed on a node a reader knew, so a toggle
+/// was never heard as one.
+///
+/// The per-tile handlers the pane applies to this node's id survive the
+/// rebuild of its children, which is all that happens here. They must not be
+/// applied a second time: `HandlerSet::merge` chains handlers.
 pub(crate) struct TileA11y {
-    child: WidgetId,
+    body: TileBody,
+    /// The selection to watch, and this tile's flat model index in it.
+    selection: Option<RowSelection>,
+    index: usize,
     row_index: usize, // 1-based
     col_index: usize, // 1-based
-    position: usize,  // 1-based flat index
-    selected: bool,
     /// Concise per-item name (`GridView::tile_a11y_label`); `None` leaves the
     /// cell's name to its contents.
     name: Option<String>,
+    /// Rebuild trigger, bumped only when *this* tile's selectedness flips.
+    version: Signal<u64>,
+
+    // Build state.
+    selected: bool,
+    child: Option<WidgetId>,
 }
 
 impl TileA11y {
     pub(crate) fn new(
-        child: WidgetId,
+        body: TileBody,
+        selection: Option<RowSelection>,
+        index: usize,
         row_index_1based: usize,
         col_index_1based: usize,
-        position_1based: usize,
-        selected: bool,
         name: Option<String>,
     ) -> Self {
         Self {
-            child,
+            body,
+            selection,
+            index,
             row_index: row_index_1based,
             col_index: col_index_1based,
-            position: position_1based,
-            selected,
             name,
+            version: Signal::new(0),
+            selected: false,
+            child: None,
         }
     }
 }
 
+impl std::fmt::Debug for TileA11y {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileA11y")
+            .field("index", &self.index)
+            .field("selected", &self.selected)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Widget for TileA11y {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // A persistent field rather than `ctx.signal`, so the observer
+        // installed below survives into the build it triggers.
+        self.version
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+
+        let selected = self
+            .selection
+            .as_ref()
+            .is_some_and(|s| s.is_selected(self.index));
+        self.selected = selected;
+
+        if let Some(ref selection) = self.selection {
+            let watched = selection.clone();
+            let index = self.index;
+            let version = self.version.clone();
+            // Seeded with what this build is about to draw, so the first
+            // notification after it compares against the truth on screen.
+            let last = Cell::new(selected);
+            let handle = selection.observe_for_rebuild(move || {
+                let now = watched.is_selected(index);
+                if now != last.get() {
+                    last.set(now);
+                    version.set(version.get() + 1);
+                }
+            });
+            ctx.own_handle(handle);
+        }
+
+        self.child = (self.body)(ctx, selected);
+        self.child.into_iter().collect()
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        ctx.child_size(self.child, proposal)
+        self.child
+            .and_then(|child| ctx.child_size(child, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
             .into()
     }
@@ -85,13 +172,23 @@ impl Widget for TileA11y {
             builder.set_name(name.clone());
         }
         builder.set_selected(self.selected);
-        builder.set_position_in_set(self.position);
+        builder.set_position_in_set(self.index + 1);
         // The "of N" half lives on the grid's own `Role::Grid` node, beside
         // the row and column counts.
         builder.set_row_index(self.row_index);
         builder.set_column_index(self.col_index);
         builder.add_action(teksilo_core::accesskit::Action::Click);
-        builder.add_action(teksilo_core::accesskit::Action::Focus);
+        // No `Action::Focus`: a tile is reached through the grid's active
+        // descendant and takes no keys of its own. The dispatcher services
+        // `Focus` itself, moving keyboard focus onto the node named, focusable
+        // or not, so a screen reader's focus request on a tile (UIA
+        // `SetFocus`, AT-SPI `grab_focus`, VoiceOver's keyboard focus following
+        // its cursor) took focus off the grid while the grid's cursor stayed
+        // where it was: Enter opened the cursor's tile rather than the one the
+        // reader was on, and the next key that rebuilt the tiles dropped focus
+        // onto the window. An assistive `Focus` on a tile is now reported
+        // unhandled and moves nothing; `Click` chooses the tile and moves the
+        // cursor to it. `ListItemWrapper` and a calendar day do the same.
         // Advertised, not just handled: every adapter gates its scroll
         // pattern on the node *supporting* the action (UIA's
         // `IScrollItemProvider`, AppKit's `accessibilityScrollToVisible`,
@@ -102,7 +199,7 @@ impl Widget for TileA11y {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        vec![self.child]
+        self.child.into_iter().collect()
     }
 }
 

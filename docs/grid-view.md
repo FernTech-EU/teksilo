@@ -220,6 +220,13 @@ how many tiles are selected says the new count once, through the tree's
 announcer; moving a single selection says no count, since the tile a reader
 lands on says it is selected.
 
+Keyboard focus stays on the grid, which names the tile under the cursor as its
+active descendant. A tile offers `Click` and `ScrollIntoView`, not `Focus`: a
+screen reader's focus request on a tile moves nothing, and its click chooses
+the tile and moves the cursor there. A change of selection rebuilds only the
+tiles whose selectedness it flipped, below their `GridCell` nodes, so the tile
+under the cursor keeps its node and its `selected` state changes in place.
+
 `.tile_a11y_label(|index| String)` sets each `GridCell`'s accessible **name**
 (e.g. `"Title, Type"`) so a screen reader announces a concise item name in
 addition to the row/column position; without it the cell name is left to its

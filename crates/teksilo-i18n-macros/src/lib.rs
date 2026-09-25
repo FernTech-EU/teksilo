@@ -286,9 +286,30 @@ struct MessageInfo {
     /// entirely of literal text and simple `{ $var }` substitutions;
     /// `None` for patterns that use selectors, plural rules, function
     /// calls, or message references (those need the real Fluent
-    /// formatter to produce meaningful output, so the macro leaves
-    /// the runtime fallback as the literal key).
+    /// formatter to produce meaningful output, so the macro formats
+    /// `source` with one at runtime instead).
     fallback: Option<Vec<FallbackPart>>,
+    /// The message as Fluent source, alone, and the entries its value
+    /// refers to. A message with no `fallback` above is formatted from this
+    /// at runtime instead, in the source language, when no bundle answers.
+    source: EntrySource,
+}
+
+/// One entry of the source `.ftl`, re-serialized on its own, and the
+/// entries it refers to.
+#[derive(Clone, Debug)]
+struct EntrySource {
+    /// The entry as Fluent source, without its comment.
+    text: String,
+    /// The messages and terms its patterns refer to.
+    refs: Vec<EntryRef>,
+}
+
+/// A reference from one Fluent entry to another.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum EntryRef {
+    Message(String),
+    Term(String),
 }
 
 /// One piece of a reconstructable source-language fallback template.
@@ -309,6 +330,8 @@ enum FallbackPart {
 #[derive(Clone, Debug)]
 struct KeyMap {
     messages: HashMap<String, MessageInfo>,
+    /// Every term (`-brand = …`), for a message that refers to one.
+    terms: HashMap<String, EntrySource>,
     /// Absolute paths of every `.ftl` file that contributed messages.
     /// For file mode, a single entry. For directory mode, one entry
     /// per file discovered during the walk.
@@ -333,6 +356,7 @@ fn load_key_map_for_source(info: &SourceInfo) -> std::result::Result<KeyMap, Str
 fn parse_ftl_file(
     path: &std::path::Path,
     messages: &mut HashMap<String, MessageInfo>,
+    terms: &mut HashMap<String, EntrySource>,
     watched_files: &mut Vec<PathBuf>,
 ) -> std::result::Result<(), String> {
     let contents = std::fs::read_to_string(path)
@@ -342,6 +366,20 @@ fn parse_ftl_file(
         .map_err(|(_, errs)| format!("Fluent parse errors in `{}`: {:?}", path.display(), errs))?;
 
     for entry in &resource.body {
+        if let ast::Entry::Term(term) = entry {
+            let id = term.id.name.to_string();
+            let mut refs = Vec::new();
+            collect_refs_pattern(&term.value, &mut refs);
+            for attribute in &term.attributes {
+                collect_refs_pattern(&attribute.value, &mut refs);
+            }
+            let mut alone = term.clone();
+            alone.comment = None;
+            terms.entry(id).or_insert(EntrySource {
+                text: serialize_entry(ast::Entry::Term(alone)),
+                refs,
+            });
+        }
         if let ast::Entry::Message(msg) = entry {
             let id = msg.id.name.to_string();
             // Single walk of the pattern: `build_fallback` already
@@ -367,11 +405,24 @@ fn parse_ftl_file(
                     path.display()
                 ));
             }
+            let mut refs = Vec::new();
+            if let Some(pattern) = &msg.value {
+                collect_refs_pattern(pattern, &mut refs);
+            }
+            for attribute in &msg.attributes {
+                collect_refs_pattern(&attribute.value, &mut refs);
+            }
+            let mut alone = msg.clone();
+            alone.comment = None;
             messages.insert(
                 id,
                 MessageInfo {
                     vars: vars_buf,
                     fallback,
+                    source: EntrySource {
+                        text: serialize_entry(ast::Entry::Message(alone)),
+                        refs,
+                    },
                 },
             );
         }
@@ -391,11 +442,13 @@ fn load_key_map(path: &std::path::Path) -> std::result::Result<KeyMap, String> {
     }
 
     let mut messages: HashMap<String, MessageInfo> = HashMap::new();
+    let mut terms: HashMap<String, EntrySource> = HashMap::new();
     let mut watched_files: Vec<PathBuf> = Vec::new();
-    parse_ftl_file(path, &mut messages, &mut watched_files)?;
+    parse_ftl_file(path, &mut messages, &mut terms, &mut watched_files)?;
 
     let map = KeyMap {
         messages,
+        terms,
         watched_files,
     };
     if let Ok(mut guard) = cache().lock() {
@@ -438,13 +491,15 @@ fn load_key_map_from_dir(root: &std::path::Path) -> std::result::Result<KeyMap, 
     }
 
     let mut messages: HashMap<String, MessageInfo> = HashMap::new();
+    let mut terms: HashMap<String, EntrySource> = HashMap::new();
     let mut watched_files: Vec<PathBuf> = Vec::new();
     for file in &ftl_files {
-        parse_ftl_file(file, &mut messages, &mut watched_files)?;
+        parse_ftl_file(file, &mut messages, &mut terms, &mut watched_files)?;
     }
 
     let map = KeyMap {
         messages,
+        terms,
         watched_files,
     };
     if let Ok(mut guard) = cache().lock() {
@@ -555,6 +610,99 @@ fn walk_inline_for_vars(inline: &ast::InlineExpression<&str>, out: &mut Vec<Stri
         | ast::InlineExpression::StringLiteral { .. }
         | ast::InlineExpression::NumberLiteral { .. } => {}
     }
+}
+
+/// One entry as a Fluent resource of its own.
+fn serialize_entry(entry: ast::Entry<&str>) -> String {
+    fluent_syntax::serializer::serialize(&ast::Resource { body: vec![entry] })
+}
+
+/// Every message and term `pattern` refers to, in every branch of every
+/// select.
+fn collect_refs_pattern(pattern: &ast::Pattern<&str>, out: &mut Vec<EntryRef>) {
+    for element in &pattern.elements {
+        if let ast::PatternElement::Placeable { expression } = element {
+            collect_refs_expr(expression, out);
+        }
+    }
+}
+
+fn collect_refs_expr(expr: &ast::Expression<&str>, out: &mut Vec<EntryRef>) {
+    match expr {
+        ast::Expression::Inline(inline) => collect_refs_inline(inline, out),
+        ast::Expression::Select { selector, variants } => {
+            collect_refs_inline(selector, out);
+            for variant in variants {
+                collect_refs_pattern(&variant.value, out);
+            }
+        }
+    }
+}
+
+fn collect_refs_inline(inline: &ast::InlineExpression<&str>, out: &mut Vec<EntryRef>) {
+    let arguments = match inline {
+        ast::InlineExpression::MessageReference { id, .. } => {
+            out.push(EntryRef::Message(id.name.to_string()));
+            None
+        }
+        ast::InlineExpression::TermReference { id, arguments, .. } => {
+            out.push(EntryRef::Term(id.name.to_string()));
+            arguments.as_ref()
+        }
+        ast::InlineExpression::FunctionReference { arguments, .. } => Some(arguments),
+        ast::InlineExpression::Placeable { expression } => {
+            collect_refs_expr(expression, out);
+            None
+        }
+        ast::InlineExpression::VariableReference { .. }
+        | ast::InlineExpression::StringLiteral { .. }
+        | ast::InlineExpression::NumberLiteral { .. } => None,
+    };
+    if let Some(arguments) = arguments {
+        for positional in &arguments.positional {
+            collect_refs_inline(positional, out);
+        }
+        for named in &arguments.named {
+            collect_refs_inline(&named.value, out);
+        }
+    }
+}
+
+/// The Fluent source a bundle needs to format `key` on its own: the message,
+/// then every message and term it reaches through references, once each.
+fn standalone_source(key_map: &KeyMap, key: &str) -> String {
+    let mut text = String::new();
+    let mut seen: std::collections::HashSet<EntryRef> = std::collections::HashSet::new();
+    let mut pending = vec![EntryRef::Message(key.to_string())];
+    while let Some(entry) = pending.pop() {
+        if !seen.insert(entry.clone()) {
+            continue;
+        }
+        let source = match &entry {
+            EntryRef::Message(id) => key_map.messages.get(id).map(|info| &info.source),
+            EntryRef::Term(id) => key_map.terms.get(id),
+        };
+        // A reference to an entry the source does not define is left for
+        // the bundle to report, as it would be with the whole file loaded.
+        if let Some(source) = source {
+            text.push_str(&source.text);
+            pending.extend(source.refs.iter().rev().cloned());
+        }
+    }
+    text
+}
+
+/// The language the source messages are written in, read from the source's
+/// own name (`locales/en-US.ftl`, `locales/en-US/`). The runtime falls back to
+/// `en-US` for a name that is not a language tag.
+fn source_language(info: &SourceInfo) -> String {
+    let path = match info {
+        SourceInfo::File(p) => p.file_stem(),
+        SourceInfo::Dir(p) => p.file_name(),
+    };
+    path.and_then(|name| name.to_str())
+        .unwrap_or("en-US")
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -814,7 +962,8 @@ fn tr_impl(input: TokenStream, kind: SourceKind, signal: bool) -> TokenStream {
     // `Signal<T>` so we read `.get()` first; in `tr!` mode we use the
     // value directly. Patterns that use selectors, plural rules,
     // function calls, or message references bail out at parse time
-    // and fall back to returning the key as a placeholder.
+    // and are formatted from their own source instead (see the `None`
+    // arm below).
     let arg_slice_entries: &[TokenStream2] = if signal {
         &arg_slice_entries_signal
     } else {
@@ -860,9 +1009,31 @@ fn tr_impl(input: TokenStream, kind: SourceKind, signal: bool) -> TokenStream {
                 }
             }
         }
-        None => quote! {
-            #resolver(#key_lit, &[#(#arg_slice_entries),*])
-        },
+        // A selector, a plural, a function call or a reference cannot be put
+        // back together here, so the message's own source goes into the
+        // expansion instead, with the entries it refers to, and a bundle in
+        // the source language formats it at runtime. Returning the key, as
+        // this used to, gave a screen reader "grid-view-selection-count" to
+        // say in place of "1 item selected".
+        None => {
+            let source_lit =
+                proc_macro2::Literal::string(&standalone_source(&key_map, &fluent_key));
+            let language_lit = proc_macro2::Literal::string(&source_language(&source_info));
+            quote! {
+                let __teksilo_result =
+                    #resolver(#key_lit, &[#(#arg_slice_entries),*]);
+                if __teksilo_result == #key_lit {
+                    #i18n_root::format_source_fallback(
+                        #language_lit,
+                        #source_lit,
+                        #key_lit,
+                        &[#(#arg_slice_entries),*],
+                    )
+                } else {
+                    __teksilo_result
+                }
+            }
+        }
     };
 
     let expanded = if signal {

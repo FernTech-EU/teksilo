@@ -166,6 +166,18 @@ impl Listener {
         handler.heard
     }
 
+    /// The node the reader holds as its focus at the last call, after
+    /// `active_descendant` is followed, as its id and whether it is selected.
+    /// The same id before and after a change means the reader's focus node
+    /// survived it, and a `selected` that differs is the state change AT-SPI
+    /// raises on it (`accesskit_atspi_common` `node.rs:594-607`).
+    pub(crate) fn focus(&self) -> Option<(teksilo_core::accesskit::NodeId, Option<bool>)> {
+        let state = self.platform.state();
+        state
+            .focus()
+            .map(|node| (node.locate().0, node.is_selected()))
+    }
+
     /// Whether the reader can find a node of `role` named `name` without
     /// being told about it, walking the tree as it stood at the last call as
     /// the adapters walk it (`common_filter`). A node that is published only

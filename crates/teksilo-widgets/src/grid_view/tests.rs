@@ -939,6 +939,260 @@ fn space_on_a_tile_scrolled_out_of_the_window_is_counted_once() {
     teksilo_i18n::thread_local::clear();
 }
 
+/// With no translations installed, the count is said in the framework's own
+/// English. `grid-view-selection-count` picks its words by a plural, which
+/// `tr_widget!` could not put back together without a manager, so the reader
+/// was handed the message id to say.
+#[test]
+fn the_count_is_said_in_words_with_no_translations_installed() {
+    use crate::common::heard_test::{Heard, Listener};
+    use teksilo_core::event::{Key, Modifiers};
+    teksilo_i18n::thread_local::clear();
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(selection.clone())
+            .tile_a11y_label(|i| format!("Photo {i}")),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    let mut listener = Listener::attach(&mut tree);
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    let _ = listener.heard(&mut tree);
+
+    press(&mut tree, Key::Space, Modifiers::CTRL);
+    assert!(selection.is_selected(0));
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live("1 item selected".to_string())]
+    );
+    press(&mut tree, Key::A, Modifiers::CTRL);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live("12 items selected".to_string())]
+    );
+    press(&mut tree, Key::A, Modifiers::CTRL | Modifiers::SHIFT);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live("No item selected".to_string())]
+    );
+}
+
+/// A change of selection leaves the tile the reader is on as the node it
+/// was. Every realized tile used to be rebuilt, so the focused tile came back
+/// as a new node: each adapter reported a focus change to it, which Orca
+/// takes as a new locus of focus and so stops what it is saying, the count
+/// just announced included, and a reader never heard the tile's `selected`
+/// state change, since no node it knew ever changed.
+#[test]
+fn a_selection_change_keeps_the_readers_tile_and_changes_its_state() {
+    use crate::common::heard_test::{Heard, Listener};
+    use teksilo_core::event::{Key, Modifiers};
+    let (mut tree, id, selection) = french_grid(SelectionMode::Multi);
+    let mut listener = Listener::attach(&mut tree);
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("Photo 0".to_string())]
+    );
+    let (tile, selected) = listener.focus().expect("the reader holds a focus");
+    assert_eq!(selected, Some(false));
+    let realized = tiles(&tree, id);
+
+    press(&mut tree, Key::Space, Modifiers::CTRL);
+    assert!(selection.is_selected(0));
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live("1 élément sélectionné".to_string())],
+        "the count, and no focus change after it"
+    );
+    assert_eq!(
+        listener.focus(),
+        Some((tile, Some(true))),
+        "the reader's tile is the same node, now selected"
+    );
+
+    press(&mut tree, Key::A, Modifiers::CTRL);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Live("12 éléments sélectionnés".to_string())]
+    );
+    assert_eq!(listener.focus(), Some((tile, Some(true))));
+    assert_eq!(
+        tiles(&tree, id),
+        realized,
+        "no realized tile is replaced by a change of selection"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+/// A tile is the grid's active descendant and takes no keys of its own. It
+/// used to offer `Action::Focus`, which the dispatcher services by moving
+/// keyboard focus onto the node named, focusable or not. After a UIA
+/// `SetFocus` on a tile, an AT-SPI `grab_focus`, or VoiceOver's keyboard focus
+/// following its cursor there, keyboard focus sat on that tile while the
+/// grid's cursor stayed where it was: Enter opened the cursor's tile, not the
+/// one the reader had just been told about, and the next key that rebuilt the
+/// tiles dropped focus onto the window.
+#[test]
+fn an_assistive_focus_on_a_tile_leaves_the_keyboard_on_the_grid() {
+    use crate::common::heard_test::{Heard, Listener};
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_core::event::{Key, Modifiers};
+    let activated = Rc::new(Cell::new(None));
+    let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let on_activate = activated.clone();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(selection)
+            .tile_a11y_label(|i| format!("Photo {i}"))
+            .on_tile_activate(move |i, _ctx| on_activate.set(Some(i))),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    let mut listener = Listener::attach(&mut tree);
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("Photo 0".to_string())]
+    );
+
+    let tile = tiles(&tree, id)[2];
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Focus,
+        target: Some(tile),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(tree.focused(), Some(id), "keyboard focus stays on the grid");
+    assert_eq!(listener.heard(&mut tree), vec![]);
+
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        activated.get(),
+        Some(0),
+        "Enter opens the tile the reader is on"
+    );
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(tree.focused(), Some(id));
+    // The count is raised in the update that moves the reader to the next
+    // tile, so it is held back until that move has been heard: Orca stops
+    // speaking to read a new focus, and would cut it.
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![
+            Heard::Focus("Photo 1".to_string()),
+            Heard::Live("1 élément sélectionné".to_string()),
+        ]
+    );
+    assert!(
+        !tree
+            .accessibility_node(tile)
+            .actions()
+            .contains(&teksilo_core::accesskit::Action::Focus),
+        "a tile offers no focus of its own"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+/// A change of selection draws again the tiles whose selectedness it flipped,
+/// and no other. Every tile hears every change of the selection, including a
+/// selection set again to what it was, so a tile that drew itself again on
+/// each would replace its delegate's widgets on every key and every click.
+#[test]
+fn a_selection_change_rebuilds_only_the_tiles_it_flips() {
+    use teksilo_core::event::{Key, Modifiers};
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(selection.clone()),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    let contents = |tree: &WidgetTree| -> Vec<Vec<WidgetId>> {
+        tiles(tree, id)
+            .into_iter()
+            .map(|tile| tree.children(tile))
+            .collect()
+    };
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    let before = contents(&tree);
+
+    press(&mut tree, Key::Space, Modifiers::CTRL);
+    assert!(selection.is_selected(0));
+    let after = contents(&tree);
+    assert_ne!(
+        after[0], before[0],
+        "the tile Space selected is drawn again"
+    );
+    assert_eq!(after[1..], before[1..], "and no other tile is");
+
+    selection.select(0);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        contents(&tree),
+        after,
+        "a selection set again to what it was draws no tile again"
+    );
+}
+
+/// A double click opens a tile that is already selected. Its first click sets
+/// the selection the grid already had. Every realized tile used to be
+/// replaced on that, so the second click landed on a tile that had never
+/// seen the first, and nothing opened.
+#[test]
+fn a_double_click_opens_a_tile_that_is_already_selected() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let model = ListModel::from_vec((0..12).collect::<Vec<usize>>());
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let activated = Rc::new(Cell::new(None));
+    let on_activate = activated.clone();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(
+        GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)))
+            .tile_size(100.0, 50.0)
+            .selection(selection.clone())
+            .on_tile_activate(move |i, _ctx| on_activate.set(Some(i))),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    selection.select(1);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+
+    let bounds = tree.bounds(tiles(&tree, id)[1]);
+    let at = teksilo_canvas::Point::new(
+        bounds.x + bounds.width / 2.0,
+        bounds.y + bounds.height / 2.0,
+    );
+    for _ in 0..2 {
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+    }
+    assert!(selection.is_selected(1));
+    assert_eq!(activated.get(), Some(1), "the double click opens the tile");
+}
+
 // ── Phase 2: variable row heights + anchoring ───────────────────────────
 
 #[test]

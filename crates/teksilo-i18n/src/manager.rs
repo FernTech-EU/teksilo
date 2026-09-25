@@ -465,7 +465,7 @@ fn ftl_files_in(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, Reload
 /// register the `DATETIME()` Fluent function. Called from every site
 /// that creates a `FluentBundle` so all three bundle maps (app, widget,
 /// widget-overrides) share identical behaviour.
-fn configure_bundle(bundle: &mut FluentBundle<FluentResource>) {
+pub(crate) fn configure_bundle(bundle: &mut FluentBundle<FluentResource>) {
     bundle.set_use_isolating(false);
     // `FluentBundle::new` does NOT auto-register Fluent's built-in
     // functions; without this call `{ NUMBER($v) }` resolves to the
@@ -530,7 +530,7 @@ fn build_bundle_from_test_messages(entry: &TestLocaleEntry) -> FluentBundle<Flue
     bundle
 }
 
-fn format_message(
+pub(crate) fn format_message(
     bundle: &FluentBundle<FluentResource>,
     key: &str,
     args: &[(&str, FluentValue<'_>)],

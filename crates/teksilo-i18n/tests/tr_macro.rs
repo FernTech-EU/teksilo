@@ -130,3 +130,32 @@ fn multiple_args_are_all_bound() {
     let ls: LocalizedString = tr!(welcome(name = "Bob".to_string()));
     assert_eq!(ls.resolve_now(), "Hello, Bob!");
 }
+
+#[test]
+fn dynamic_fallback_formats_a_plural_without_manager() {
+    // `items-selected` picks its words by a plural of `$count`, which the
+    // macro cannot rebuild from parts as it does `welcome`. With no manager
+    // installed it used to come back as its own id, `items-selected`, which
+    // is what a screen reader then said in place of the count.
+    teksilo_i18n::thread_local::clear();
+    let say = |count: i64| tr!(items_selected(count = count)).resolve_now().to_string();
+    assert_eq!(say(0), "No item selected");
+    assert_eq!(say(1), "1 item selected");
+    assert_eq!(say(1200), "1,200 items selected");
+}
+
+#[test]
+fn dynamic_fallback_follows_a_term_without_manager() {
+    teksilo_i18n::thread_local::clear();
+    assert_eq!(tr!(about_app()).resolve_now().to_string(), "About Teksilo");
+}
+
+#[test]
+fn reactive_fallback_formats_a_plural_without_manager() {
+    teksilo_i18n::thread_local::clear();
+    let count = teksilo_i18n::Signal::new(1_i64);
+    let words = teksilo_i18n::tr_signal!(items_selected(count = count));
+    assert_eq!(words.get(), "1 item selected");
+    count.set(3);
+    assert_eq!(words.get(), "3 items selected");
+}

@@ -721,6 +721,40 @@ by crate for clarity, not because crates version independently.
   tile the reader lands on says it is selected. The grid's value
   carries the same words. `grid-view-selection-count` is new, in all 23
   locales. **Behaviour change** for anything that read the value in English.
+- **A screen reader's focus on a `GridView` tile made Enter open another
+  tile.** A tile offered a focus of its own, so UIA's `SetFocus`, AT-SPI's
+  `grab_focus` or VoiceOver's keyboard focus following its cursor put
+  keyboard focus on that tile while the grid's cursor stayed where it was.
+  Enter and Space then acted on the cursor's tile, not the one the reader had
+  just heard, and the next key that changed the selection dropped focus onto
+  the window, where the keys did nothing. A tile no longer offers focus: the
+  request moves nothing, the reader's focus and the grid's cursor stay
+  together, and a click on a tile, which a reader's activation sends, chooses
+  it. **Behaviour change** for anything that focused a tile through
+  `Action::Focus`.
+- **Every change of a `GridView`'s selection was heard as a move of focus.**
+  The tile under the cursor came back as a tile the reader had never met, so
+  every platform reported a focus change to it, and Orca stopped reading the
+  selection count it had just been given to read the tile's name again. A
+  toggle was never heard as a change of the tile's selected state. The tile
+  under the cursor now stays the same tile through a change of selection,
+  its selected state changes where the reader is, and the count is heard in
+  full.
+- **A double click on a selected `GridView` tile opened nothing.** Its
+  first click set the selection again, which replaced every tile in view, so
+  the second click reached a tile that had not seen the first. A double click
+  on a tile that is already selected now opens it.
+
+#### Internationalization
+
+- **A message with a plural or a selector was said as its message id when
+  no translations were installed.** Without an `I18nManager`, `tr!`,
+  `tr_widget!` and `tr_signal!` gave a message in the source language only
+  when it was plain text and `{ $var }`; any other came back as its key. A
+  screen reader said "grid-view-selection-count" where "1 item selected" was
+  meant, and a `CommandPalette` gave its result count the same way. Such a
+  message is now formatted in the source language, plurals, functions and
+  the messages and terms it refers to included.
 
 #### Terminal
 

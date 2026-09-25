@@ -44,6 +44,8 @@ pub use format::{
 };
 pub use localized_string::{LocalizedString, localized};
 pub use manager::{I18nManager, LocaleSwitchOutcome, ReloadError};
+#[doc(hidden)]
+pub use resolve::format_source_fallback;
 pub use resolve::{resolve_message, resolve_message_widget};
 pub use teksilo_core::environment::LayoutDirection;
 pub use teksilo_core::signal::{Signal, WeakSignal};
