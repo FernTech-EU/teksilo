@@ -400,6 +400,27 @@ by crate for clarity, not because crates version independently.
   previous one."), in the user's language, and Orca reads it as focus
   arrives there. A read-only viewer does not take Tab, so Tab leaves it and
   it carries no such description.
+- **Arrowing through an open `ComboBox` list was silent, and changed the value
+  at every step.** Focus stayed on the combo box (or on its search field)
+  while the arrows moved its value, and nothing told a screen reader which
+  option they had reached, so Orca heard nothing as a reader moved through a
+  long list, the font list or the list of languages. The keys now move a
+  highlight that the focused node names as its active descendant, so a
+  screen reader on Linux, Windows or macOS hears each option as it is reached,
+  and the option the list opens on. The value changes only on a commit: Enter
+  or Space in the open list, or a click on a row; Escape, Tab and closing the
+  list keep it. `on_select` therefore fires once, on that commit, and a
+  `LanguageSwitcher` no longer switches the application's language (nor a
+  `ThemeSwitcher` its theme) at each arrow while a reader listens to the
+  choices. Down from an empty combo box reaches the first item, where it
+  skipped to the second. A long list is one list box of named options: each
+  option used to sit inside an unnamed, unselected option of a second list
+  box, and on Linux the list box reported no selected option. A searchable
+  list's search field is named after the combo box ("Search" when it has no
+  label), and its placeholder is translated. **Behaviour change**: the arrows,
+  `Home` / `End`, the page keys and type-ahead no longer write the bound
+  `selected` signal or fire `on_select`; code that read the value after an
+  arrow press presses Enter first.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

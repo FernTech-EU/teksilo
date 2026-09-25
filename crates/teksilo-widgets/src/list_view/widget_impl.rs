@@ -165,7 +165,9 @@ impl<T: 'static> Widget for ListView<T> {
         // finger's claimant chain all come from `common::scrollable`. A wheel
         // still takes the path it always did — `handle_scroll_event` branches
         // on the scroll *source*, not the phase.
-        let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
+        let mut handlers = HandlerSet::new()
+            .clips_children(true)
+            .focusable(!self.presentational);
         {
             let behavior = crate::common::scrollable::ScrollableBehavior::new(
                 crate::common::scrollable::ScrollableAxes::vertical(
@@ -795,6 +797,7 @@ impl<T: 'static> Widget for ListView<T> {
             prev_built_end: self.pane_built_end.clone(),
             item_entries: Vec::new(),
             row_roots: Vec::new(),
+            presentational: self.presentational,
         };
         self.body_pane_id = Some(ctx.add(pane));
 
@@ -991,6 +994,10 @@ impl<T: 'static> Widget for ListView<T> {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.presentational {
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+            return;
+        }
         builder.set_role(teksilo_core::accesskit::Role::ListBox);
         // Whether the selection takes more than one row. A real property on
         // both platforms that have one: UIA's `SelectionCanSelectMultiple`

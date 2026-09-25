@@ -136,6 +136,9 @@ pub(crate) struct ListBodyPane<T: 'static> {
     /// `tile_map`. Only realized rows appear; a row outside the virtualization
     /// window has no widget and therefore no id.
     pub(crate) row_map: Rc<RefCell<Vec<(usize, WidgetId)>>>,
+    /// The owning view is [`presentational`](super::ListView::presentational):
+    /// this pane and its row wrappers publish nothing.
+    pub(crate) presentational: bool,
 }
 
 impl<T: 'static> ListBodyPane<T> {
@@ -290,11 +293,10 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             };
 
             {
-                let child_id = ctx.add(crate::list_item_a11y::ListItemWrapper::new(
-                    body,
-                    selection.clone(),
-                    i,
-                ));
+                let child_id = ctx.add(
+                    crate::list_item_a11y::ListItemWrapper::new(body, selection.clone(), i)
+                        .presentational(self.presentational),
+                );
 
                 // A listbox is *one* Tab stop, with a cursor moving inside it.
                 // Any focusable the delegate put in a row — the checkbox
@@ -698,6 +700,10 @@ impl<T: 'static> Widget for ListBodyPane<T> {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.presentational {
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+            return;
+        }
         // The pane stands in as the listbox's `Role::Group` — the
         // ARIA-blessed intermediate between `Role::ListBox` and its
         // `Role::ListBoxOption` children (`listbox` permits `group`

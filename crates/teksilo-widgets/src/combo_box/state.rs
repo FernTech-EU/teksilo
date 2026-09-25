@@ -12,6 +12,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use teksilo_core::ObserverHandle;
+use teksilo_core::signal::Signal;
+use teksilo_core::widget_id::WidgetId;
 use teksilo_data::{DataChange, ListDataSource, ListModel};
 
 /// Default maximum number of items shown before the dropdown scrolls.
@@ -72,6 +74,36 @@ impl<T: Clone + 'static> ItemSource<T> {
             self.item_at.clone(),
             self.observe.clone(),
         )
+    }
+}
+
+/// The option the keyboard is on in the open list, shared by the combo box,
+/// its panel and every row.
+///
+/// It is not the value. Moving through the list commits nothing: a reader
+/// arrowing to hear the options must not change the setting they are
+/// listening to, and an application acting on the value (a language switcher)
+/// must not act on every step. Enter commits the highlight; Escape, and the
+/// keyboard or pointer leaving the list, drop it.
+#[derive(Clone)]
+pub(super) struct Highlight<T: Clone + 'static> {
+    /// The highlighted option. `None` while the list is closed, and in a
+    /// searchable list until an arrow reaches an option: typing clears it, so
+    /// the search field holds the reader's focus while they type.
+    pub(super) value: Signal<Option<T>>,
+    /// The highlighted option's node, published by that row itself while it
+    /// is realized (a virtualized list builds only the rows in view). It is
+    /// what the focused node names as its `active_descendant`, which every
+    /// adapter follows as the focus (`accesskit_consumer` `tree.rs:537-543`).
+    pub(super) node: Signal<Option<WidgetId>>,
+}
+
+impl<T: Clone + 'static> Highlight<T> {
+    pub(super) fn new() -> Self {
+        Self {
+            value: Signal::new(None),
+            node: Signal::new(None),
+        }
     }
 }
 

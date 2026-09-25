@@ -15,6 +15,17 @@ fn fruits() -> Vec<&'static str> {
     vec!["Apple", "Banana", "Cherry"]
 }
 
+/// Add `combo` to the tree, returning its id and the option the keyboard is
+/// on in its list. The keys move that highlight; only a commit (`Enter`, a
+/// row tap) changes the bound value.
+fn add_combo<T: Clone + PartialEq + 'static>(
+    tree: &mut WidgetTree,
+    combo: ComboBox<T>,
+) -> (WidgetId, Signal<Option<T>>) {
+    let highlight = combo.highlight.value.clone();
+    (tree.add(combo), highlight)
+}
+
 // ─── Basic layout & role ──────────────────────────────────────────
 
 #[test]
@@ -106,32 +117,35 @@ fn arrow_keys_walk_the_list_and_stop_at_the_ends() {
     // menus wrap because a menu is a list of commands, not a value.
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);
 
+    // From no value, the first press reaches the first item.
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Apple"));
 
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Cherry"));
+    tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
+    assert_eq!(highlight.get().as_deref(), Some("Cherry"));
 
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
     assert_eq!(
-        selected.get().as_deref(),
+        highlight.get().as_deref(),
         Some("Cherry"),
         "the last item is the last item"
     );
 
     tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
     tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::NONE);
     tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::NONE);
     assert_eq!(
-        selected.get().as_deref(),
+        highlight.get().as_deref(),
         Some("Apple"),
         "the first item is the first item"
     );
+    assert_eq!(selected.get(), None, "moving commits nothing");
 }
 
 #[test]
@@ -143,7 +157,7 @@ fn a_modified_letter_chord_falls_through_instead_of_running_type_ahead() {
     // so it was the *unbound* chords that were being eaten.
     let mut tree = light_tree();
     let selected = Signal::new(Some("Apple".to_string()));
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);
 
@@ -157,7 +171,7 @@ fn a_modified_letter_chord_falls_through_instead_of_running_type_ahead() {
     // `Shift` is deliberately still type-ahead: a capital letter is how people
     // type, and the shifted character arrives with SHIFT still set.
     tree.press_key(Key::C, teksilo_core::event::Modifiers::SHIFT);
-    assert_eq!(selected.get().as_deref(), Some("Cherry"));
+    assert_eq!(highlight.get().as_deref(), Some("Cherry"));
 }
 
 #[test]
@@ -173,16 +187,16 @@ fn an_alt_gr_character_is_type_ahead_not_an_accelerator() {
 
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(
-        vec!["Apple", "€uro", "Zürich"],
-        selected.clone(),
-    ));
+    let (cb, highlight) = add_combo(
+        &mut tree,
+        ComboBox::new(vec!["Apple", "€uro", "Zürich"], selected.clone()),
+    );
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);
 
     tree.press_key(Key::Character('€'), alt_gr);
     assert_eq!(
-        selected.get().as_deref(),
+        highlight.get().as_deref(),
         Some("€uro"),
         "an AltGr-composed character types"
     );
@@ -192,7 +206,7 @@ fn an_alt_gr_character_is_type_ahead_not_an_accelerator() {
     for mods in [Modifiers::CTRL, Modifiers::ALT, Modifiers::SUPER] {
         tree.press_key(Key::Z, mods);
         assert_eq!(
-            selected.get().as_deref(),
+            highlight.get().as_deref(),
             Some("€uro"),
             "Z with {mods:?} must fall through"
         );
@@ -201,9 +215,10 @@ fn an_alt_gr_character_is_type_ahead_not_an_accelerator() {
 
 #[test]
 fn a_modified_nav_key_falls_through_too() {
-    // `Ctrl+Home` used to pick item 0 and eat the chord. A combo box's cursor
-    // *is* its value, so there is nothing for the accelerator to scope — unlike
-    // a data view, where it separates the cursor from the selection.
+    // `Ctrl+Home` used to pick item 0 and eat the chord. A combo box has one
+    // highlight and no multi-selection, so there is nothing for the
+    // accelerator to scope, unlike a data view, where it separates the
+    // cursor from the selection.
     let mut tree = light_tree();
     let selected = Signal::new(Some("Cherry".to_string()));
     let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
@@ -252,7 +267,7 @@ fn an_altgr_chord_types_but_does_not_navigate() {
     // back through the plain arrow arm.
     let mut tree = light_tree();
     let selected = Signal::new(Some("Apple".to_string()));
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 200.0));
     tree.focus(cb);
 
@@ -279,7 +294,7 @@ fn an_altgr_chord_types_but_does_not_navigate() {
 
     // …and the character path is untouched.
     tree.press_key(Key::C, altgr);
-    assert_eq!(selected.get().as_deref(), Some("Cherry"));
+    assert_eq!(highlight.get().as_deref(), Some("Cherry"));
 }
 
 #[test]
@@ -354,45 +369,48 @@ fn access_click_opens_overlay() {
 fn type_ahead_jumps_to_matching_item() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(
-        vec!["Apple", "Banana", "Cherry", "Blueberry"],
-        selected.clone(),
-    ));
+    let (cb, highlight) = add_combo(
+        &mut tree,
+        ComboBox::new(
+            vec!["Apple", "Banana", "Cherry", "Blueberry"],
+            selected.clone(),
+        ),
+    );
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);
 
     tree.press_key(Key::B, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
 
     tree.press_key(Key::L, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Blueberry"));
+    assert_eq!(highlight.get().as_deref(), Some("Blueberry"));
 }
 
 #[test]
 fn type_ahead_with_character_key() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(
-        vec!["100px", "200px", "300px"],
-        selected.clone(),
-    ));
+    let (cb, highlight) = add_combo(
+        &mut tree,
+        ComboBox::new(vec!["100px", "200px", "300px"], selected.clone()),
+    );
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);
 
     tree.press_key(Key::Character('2'), teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("200px"));
+    assert_eq!(highlight.get().as_deref(), Some("200px"));
 }
 
 #[test]
 fn type_ahead_case_insensitive() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);
 
     tree.press_key(Key::C, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Cherry"));
+    assert_eq!(highlight.get().as_deref(), Some("Cherry"));
 }
 
 #[test]
@@ -414,27 +432,27 @@ fn type_ahead_matches_accented_label() {
     // accented input never matched an accented label.
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(
-        vec!["Apple", "École", "Zürich"],
-        selected.clone(),
-    ));
+    let (cb, highlight) = add_combo(
+        &mut tree,
+        ComboBox::new(vec!["Apple", "École", "Zürich"], selected.clone()),
+    );
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb);
 
     // Uppercase accented input matches the accented label.
     tree.press_key(Key::Character('É'), teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("École"));
+    assert_eq!(highlight.get().as_deref(), Some("École"));
 
     // Lowercase accented input matches too.
     let selected2 = Signal::new(None::<String>);
-    let cb2 = tree.add(ComboBox::new(
-        vec!["Apple", "école", "Zürich"],
-        selected2.clone(),
-    ));
+    let (cb2, highlight2) = add_combo(
+        &mut tree,
+        ComboBox::new(vec!["Apple", "école", "Zürich"], selected2.clone()),
+    );
     tree.layout(SizeProposal::exact(300.0, 50.0));
     tree.focus(cb2);
     tree.press_key(Key::Character('é'), teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected2.get().as_deref(), Some("école"));
+    assert_eq!(highlight2.get().as_deref(), Some("école"));
 }
 
 #[test]
@@ -444,7 +462,8 @@ fn type_ahead_timeout_zero_treats_each_keystroke_independently() {
     // (no item starts with it) instead of extending to "bl" → Blueberry.
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(
+    let (cb, highlight) = add_combo(
+        &mut tree,
         ComboBox::new(vec!["Apple", "Banana", "Blueberry"], selected.clone())
             .type_ahead_timeout(std::time::Duration::ZERO),
     );
@@ -452,18 +471,18 @@ fn type_ahead_timeout_zero_treats_each_keystroke_independently() {
     tree.focus(cb);
 
     tree.press_key(Key::B, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
 
     tree.press_key(Key::L, teksilo_core::event::Modifiers::NONE);
-    // Prefix reset: "l" matches nothing, selection unchanged.
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    // Prefix reset: "l" matches nothing, highlight unchanged.
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
 }
 
 #[test]
 fn enter_toggles_dropdown_open_close() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 200.0));
     tree.focus(cb);
 
@@ -471,9 +490,13 @@ fn enter_toggles_dropdown_open_close() {
     tree.layout(SizeProposal::exact(300.0, 200.0));
     assert_eq!(tree.active_overlays().len(), 1);
 
+    // Opened on the first item; the arrow moves the highlight, not the value.
+    assert_eq!(highlight.get().as_deref(), Some("Apple"));
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
+    assert_eq!(selected.get(), None);
 
+    // Enter commits it and closes.
     tree.press_key(Key::Enter, teksilo_core::event::Modifiers::NONE);
     assert!(tree.active_overlays().is_empty());
     assert_eq!(selected.get().as_deref(), Some("Banana"));
@@ -499,21 +522,22 @@ fn escape_closes_dropdown() {
 fn arrow_down_opens_dropdown_when_closed() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 200.0));
     tree.focus(cb);
 
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
     tree.layout(SizeProposal::exact(300.0, 200.0));
     assert_eq!(tree.active_overlays().len(), 1);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Apple"));
+    assert_eq!(selected.get(), None);
 }
 
 #[test]
 fn type_ahead_highlights_in_open_dropdown() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(fruits(), selected.clone()));
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
     tree.layout(SizeProposal::exact(300.0, 300.0));
     tree.focus(cb);
 
@@ -523,7 +547,7 @@ fn type_ahead_highlights_in_open_dropdown() {
     let frame_before = tree.render();
 
     tree.press_key(Key::B, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
 
     tree.layout(SizeProposal::exact(300.0, 300.0));
     let frame_after = tree.render();
@@ -682,18 +706,18 @@ fn typed_selection_survives_reorder() {
 fn home_end_keys_jump_to_first_and_last() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
-    let cb = tree.add(ComboBox::new(
-        vec!["Apple", "Banana", "Cherry", "Date"],
-        selected.clone(),
-    ));
+    let (cb, highlight) = add_combo(
+        &mut tree,
+        ComboBox::new(vec!["Apple", "Banana", "Cherry", "Date"], selected.clone()),
+    );
     tree.layout(SizeProposal::exact(300.0, 200.0));
     tree.focus(cb);
 
     tree.press_key(Key::End, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Date"));
+    assert_eq!(highlight.get().as_deref(), Some("Date"));
 
     tree.press_key(Key::Home, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Apple"));
+    assert_eq!(highlight.get().as_deref(), Some("Apple"));
 }
 
 #[test]
@@ -1037,7 +1061,10 @@ fn page_up_down_scrolls_by_viewport_in_virtualized_combo() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let labels: Vec<String> = (0..200).map(|i| format!("Row {i}")).collect();
-    let cb = tree.add(ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8));
+    let (cb, highlight) = add_combo(
+        &mut tree,
+        ComboBox::new(labels.clone(), selected.clone()).max_visible_items(8),
+    );
     tree.layout(SizeProposal::exact(300.0, 600.0));
     tree.focus(cb);
     tree.click(cb);
@@ -1045,21 +1072,21 @@ fn page_up_down_scrolls_by_viewport_in_virtualized_combo() {
 
     tree.press_key(Key::PageDown, teksilo_core::event::Modifiers::NONE);
     assert_eq!(
-        selected.get().as_deref(),
+        highlight.get().as_deref(),
         Some("Row 8"),
-        "first PageDown from unselected should jump to row max_visible_items"
+        "first PageDown from the first row (where the list opens) should jump to row max_visible_items"
     );
 
     tree.press_key(Key::PageDown, teksilo_core::event::Modifiers::NONE);
     assert_eq!(
-        selected.get().as_deref(),
+        highlight.get().as_deref(),
         Some("Row 16"),
         "second PageDown should advance by another page"
     );
 
     tree.press_key(Key::PageUp, teksilo_core::event::Modifiers::NONE);
     assert_eq!(
-        selected.get().as_deref(),
+        highlight.get().as_deref(),
         Some("Row 8"),
         "PageUp should retreat by one page"
     );
@@ -1069,7 +1096,7 @@ fn page_up_down_scrolls_by_viewport_in_virtualized_combo() {
         tree.press_key(Key::PageUp, teksilo_core::event::Modifiers::NONE);
     }
     assert_eq!(
-        selected.get().as_deref(),
+        highlight.get().as_deref(),
         Some("Row 0"),
         "PageUp should clamp at the first row"
     );
@@ -1731,7 +1758,7 @@ fn shift_tab_dismisses_open_searchable_dropdown() {
 #[test]
 fn arrow_keys_navigate_filtered_list_from_search() {
     // Regression: while typing in the search field, ArrowDown /
-    // ArrowUp must advance the selection through the currently
+    // ArrowUp must move the highlight through the currently
     // filtered items. Previously the arrow handling lived only on
     // the combo trigger, so bubble events from the search input
     // fell through the framework without moving the highlight.
@@ -1742,7 +1769,8 @@ fn arrow_keys_navigate_filtered_list_from_search() {
     let mut tree = light_tree();
     let selected = Signal::new(None::<String>);
     let query = Signal::new(String::new());
-    let cb = tree.add(
+    let (cb, highlight) = add_combo(
+        &mut tree,
         ComboBox::new(
             vec!["Apple", "Banana", "Blueberry", "Cherry"],
             selected.clone(),
@@ -1758,12 +1786,16 @@ fn arrow_keys_navigate_filtered_list_from_search() {
     tree.layout(SizeProposal::exact(400.0, 500.0));
 
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
 
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
-    assert_eq!(selected.get().as_deref(), Some("Blueberry"));
+    assert_eq!(highlight.get().as_deref(), Some("Blueberry"));
 
     tree.press_key(Key::ArrowUp, teksilo_core::event::Modifiers::NONE);
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
+
+    // Enter in the search field commits the highlighted match.
+    tree.press_key(Key::Enter, teksilo_core::event::Modifiers::NONE);
     assert_eq!(selected.get().as_deref(), Some("Banana"));
 }
 
@@ -1851,6 +1883,9 @@ fn on_select_fires_once_on_keyboard_pick() {
     tree.focus(cb);
 
     tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
+    tree.press_key(Key::ArrowDown, teksilo_core::event::Modifiers::NONE);
+    assert!(picks.borrow().is_empty(), "moving is not a pick");
+    tree.press_key(Key::Enter, teksilo_core::event::Modifiers::NONE);
 
     assert_eq!(selected.get().as_deref(), Some("Banana"));
     assert_eq!(

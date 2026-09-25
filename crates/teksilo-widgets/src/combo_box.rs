@@ -17,22 +17,36 @@
 //!
 //! # Keyboard
 //!
-//! - `Enter` / `Space` — toggle the list.
-//! - `ArrowDown` / `ArrowUp` — open the list *and* move the selection one
-//!   item, stopping at the ends. Win32's combo box, `QComboBox`, GTK and the
-//!   W3C ARIA listbox pattern all stop rather than wrap; a combo box is a
-//!   value, and wrapping is the menu convention.
-//! - `Alt+ArrowDown` — open the list **without** moving the selection, and
-//!   `Alt+ArrowUp` — close it. The Win32 / WinForms / WPF chord and the ARIA
-//!   combobox pattern.
-//! - `F4` — toggle the list (Win32 / Qt / WPF).
-//! - `Home` / `End` — first / last item.
-//! - `PageUp` / `PageDown` — one page, where a page is
+//! The keys move a *highlight* through the list, and only a commit changes
+//! the value: the W3C ARIA select-only combobox pattern. A reader arrowing to
+//! hear the options changes nothing, and an application acting on the value
+//! (a language switcher) acts once, on the option the user picked.
+//!
+//! - `Enter` / `Space`: open the list; in the open list, commit the
+//!   highlighted option and close.
+//! - `ArrowDown` / `ArrowUp`: open the list *and* move the highlight one
+//!   item from the value, stopping at the ends; with no value, `ArrowDown`
+//!   reaches the first item. Win32's combo box, `QComboBox`, GTK and the W3C
+//!   ARIA listbox pattern all stop rather than wrap; a combo box is a value,
+//!   and wrapping is the menu convention.
+//! - `Alt+ArrowDown` / `Alt+ArrowUp`: open the list on the value (or the
+//!   first item) **without** moving, and close it. The Win32 / WinForms /
+//!   WPF chord and the ARIA combobox pattern.
+//! - `F4`: toggle the list (Win32 / Qt / WPF).
+//! - `Escape`: close the list and keep the value.
+//! - `Home` / `End`: first / last item.
+//! - `PageUp` / `PageDown`: one page, where a page is
 //!   [`max_visible_items`](ComboBox::max_visible_items) rows.
-//! - Printable characters — type-ahead, within
+//! - Printable characters: type-ahead, within
 //!   [`type_ahead_timeout`](ComboBox::type_ahead_timeout).
 //! - A chord holding `Ctrl`, `Alt` or `Super` is not the combo box's and falls
 //!   through to the application; `Shift` is, so a capital letter still types.
+//!
+//! Every key that moves the highlight opens the list first when it is
+//! closed, so the reader hears the option it reaches. Focus stays on the
+//! combo box (or, in a [`searchable`](ComboBox::searchable) list, on its
+//! search field), which names the highlighted option as its
+//! `active_descendant`: every platform adapter follows that as the focus.
 //!
 //! The widget is split across four internal modules:
 //! - `state` holds the `ItemSource` accessor, the default
@@ -81,10 +95,12 @@ mod panel;
 mod state;
 
 #[cfg(test)]
+mod reader_tests;
+#[cfg(test)]
 mod tests;
 
-use self::panel::DropdownPanel;
-use self::state::{DEFAULT_MAX_VISIBLE_ITEMS, ItemSource, resolve_index};
+use self::panel::{DropdownPanel, commit_highlight};
+use self::state::{DEFAULT_MAX_VISIBLE_ITEMS, Highlight, ItemSource, resolve_index};
 
 // Re-export so callers can write `ComboBox::new(...).variant(ComboBoxVariant::Filled)`
 // without reaching into `teksilo::core::styles`.
@@ -123,8 +139,8 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// own typeface. Rebuilt on every selection change (see
     /// [`render_selected`](Self::render_selected)).
     render_selected: Option<Rc<dyn Fn(&T) -> Box<dyn Widget>>>,
-    /// Optional callback fired whenever the user commits a selection —
-    /// from a dropdown-row tap or keyboard pick — with a live
+    /// Optional callback fired whenever the user commits a selection
+    /// (a dropdown-row tap, or `Enter`), with a live
     /// `EventContext`. Distinct from observing the `selected` signal:
     /// it provides the `EventContext` needed for context-bearing actions
     /// (navigation, `set_locale`, opening overlays). Fires only on
@@ -197,6 +213,12 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     is_hovered: Signal<bool>,
     is_focused: Signal<bool>,
     is_disabled: Signal<bool>,
+    /// The option the keyboard is on while the list is open. See
+    /// [`Highlight`].
+    highlight: Highlight<T>,
+    /// The open list's `Role::ListBox` node, written by the panel (or its
+    /// filtered list) as it builds; what this node `controls`.
+    list_box: Signal<Option<WidgetId>>,
     root_child_id: Option<WidgetId>,
     dropdown_content_id: Option<WidgetId>,
 }
@@ -253,6 +275,8 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             is_hovered: Signal::new(false),
             is_focused: Signal::new(false),
             is_disabled: Signal::new(false),
+            highlight: Highlight::new(),
+            list_box: Signal::new(None),
             root_child_id: None,
             dropdown_content_id: None,
             selected_index_hint: Rc::new(Cell::new(None)),
@@ -358,11 +382,17 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     }
 
     /// Register a callback fired when the user commits a selection — by
-    /// tapping a dropdown row or picking one with the keyboard (arrows /
-    /// type-ahead / Home / End). The callback receives the chosen value
-    /// and a live [`EventContext`], so it can run context-bearing actions
-    /// that observing the bound `selected` signal cannot — e.g.
+    /// tapping a dropdown row, or pressing `Enter` (or `Space`) on the
+    /// option the keyboard highlighted. The callback receives the chosen
+    /// value and a live [`EventContext`], so it can run context-bearing
+    /// actions that observing the bound `selected` signal cannot, such as
     /// `ctx.set_locale(...)`, navigation, or opening another overlay.
+    ///
+    /// Moving through the list (arrows, type-ahead, `Home` / `End`, the page
+    /// keys) is not a commit and fires nothing, and neither does `Enter` on
+    /// the option that is the value already. So a context change made here
+    /// happens once, on the user's choice, never while they are still
+    /// listening to the options (WCAG 3.2.2).
     ///
     /// It fires **only on user-driven commits**, not on external writes
     /// to the `selected` signal (those are observed via `ctx.effect`).
@@ -582,6 +612,23 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         self.is_open.set(false);
         self.is_hovered.set(false);
         self.is_focused.set(false);
+        self.highlight.value.set(None);
+        self.list_box.set(None);
+        // What this node publishes while the list is open (the list box it
+        // controls, and the option it names as its active descendant) moves
+        // without a rebuild, so each move must re-walk the accessibility tree.
+        {
+            use teksilo_core::binding::BindingLevel::AccessibilityOnly;
+            let registry = ctx.binding_registry();
+            self.is_open.bind_to(self_id, registry, AccessibilityOnly);
+            self.highlight
+                .node
+                .bind_to(self_id, registry, AccessibilityOnly);
+            self.highlight
+                .value
+                .bind_to(self_id, registry, AccessibilityOnly);
+            self.list_box.bind_to(self_id, registry, AccessibilityOnly);
+        }
         // Drive `self.is_disabled` from the arena's effective_enabled.
         // Replace with a derived signal — but `self.is_disabled` is
         // owned by the widget and may have observers, so push the
@@ -610,6 +657,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let observe_handle = (self.source.observe)(Box::new({
             let source = self.source.clone();
             let selected = self.selected.clone();
+            let highlight = self.highlight.value.clone();
             let hint = self.selected_index_hint.clone();
             move |_change: &DataChange| {
                 // If the currently-selected value is no longer present
@@ -622,6 +670,12 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                     && resolve_index(&source, &cur, &hint).is_none()
                 {
                     selected.set(None);
+                }
+                // Likewise the highlight, which Enter would otherwise commit.
+                if let Some(cur) = highlight.get()
+                    && state::index_of(&source, &cur).is_none()
+                {
+                    highlight.set(None);
                 }
                 pv.set(pv.get().wrapping_add(1));
             }
@@ -772,6 +826,12 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         let dropdown_panel = DropdownPanel {
             source: self.source.clone(),
             selected: self.selected.clone(),
+            highlight: self.highlight.clone(),
+            list_box: self.list_box.clone(),
+            search_label: self
+                .label
+                .clone()
+                .unwrap_or_else(|| teksilo_i18n::tr_widget!(a11y_builtin_search())),
             item_label: self.item_label.clone(),
             render_item: self.render_item.clone(),
             on_select: self.on_select.clone(),
@@ -814,9 +874,15 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
         // truthful about the popup state.
         let dismiss_callback: OverlayDismissCallback = {
             let is_open = self.is_open.clone();
+            let highlight = self.highlight.value.clone();
             Rc::new(move |_, _| {
                 if is_open.get() {
                     is_open.set(false);
+                }
+                // However the list closed, the highlight goes with it: a
+                // commit has already read it, and anything else drops it.
+                if highlight.get().is_some() {
+                    highlight.set(None);
                 }
             })
         };
@@ -826,7 +892,24 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             let is_open = self.is_open.clone();
             let dismiss_callback = dismiss_callback.clone();
             let searchable = self.searchable;
+            let highlight = self.highlight.value.clone();
+            let selected = self.selected.clone();
+            let source = self.source.clone();
+            let hint = self.selected_index_hint.clone();
             Rc::new(move |ctx: &mut EventContext| {
+                // Open on the value, or on the first option when there is
+                // none, so the reader hears where they are as the list opens.
+                // A searchable list opens on its search field instead and
+                // highlights nothing until an arrow reaches an option.
+                let initial = if searchable {
+                    None
+                } else {
+                    selected
+                        .get()
+                        .filter(|v| resolve_index(&source, v, &hint).is_some())
+                        .or_else(|| source.get(0))
+                };
+                highlight.set(initial);
                 is_open.set(true);
                 // Build the panel if this is its first open, before the overlay
                 // below is measured against it and before focus moves into it.
@@ -885,6 +968,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             .on_key({
                 let is_open = self.is_open.clone();
                 let selected = self.selected.clone();
+                let highlight = self.highlight.value.clone();
                 let source = self.source.clone();
                 let item_label_for_keys = self.item_label.clone();
                 let hint = self.selected_index_hint.clone();
@@ -896,24 +980,43 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 let typeahead: Rc<RefCell<(String, Instant)>> =
                     Rc::new(RefCell::new((String::new(), Instant::now())));
                 let type_ahead_timeout = self.type_ahead_timeout;
-                // Helper: set selection to the item at `index`, update the
-                // cached hint, and fire `on_select` (with the live
-                // `EventContext`) in one shot — mirroring the dropdown-row
-                // tap path so keyboard and mouse commits are equivalent.
                 let on_select_for_keys = self.on_select.clone();
-                let pick_at = {
-                    let source = source.clone();
+                // Where the keys move from: the highlight while the list is
+                // open, the value while it is closed. `None` is before the
+                // first item, so `ArrowDown` from an empty combo box reaches
+                // the first item and not the second.
+                let cursor = {
+                    let is_open = is_open.clone();
+                    let highlight = highlight.clone();
                     let selected = selected.clone();
+                    let source = source.clone();
                     let hint = hint.clone();
-                    Rc::new(move |index: usize, ctx: &mut EventContext| {
-                        if let Some(v) = source.get(index) {
-                            hint.set(Some(index));
-                            selected.set(Some(v.clone()));
-                            if let Some(cb) = &on_select_for_keys {
-                                cb(&v, ctx);
-                            }
+                    move || -> Option<usize> {
+                        if is_open.get() {
+                            highlight.get().and_then(|v| state::index_of(&source, &v))
+                        } else {
+                            selected
+                                .get()
+                                .and_then(|v| resolve_index(&source, &v, &hint))
                         }
-                    })
+                    }
+                };
+                // Move the highlight to the item at `index`, opening the list
+                // first when it is closed so the reader hears where the key
+                // landed. Commits nothing: `Enter` does.
+                let move_to = {
+                    let is_open = is_open.clone();
+                    let highlight = highlight.clone();
+                    let source = source.clone();
+                    let open_overlay = open_overlay.clone();
+                    move |index: usize, ctx: &mut EventContext| {
+                        if !is_open.get() {
+                            open_overlay(ctx);
+                        }
+                        if let Some(v) = source.get(index) {
+                            highlight.set(Some(v));
+                        }
+                    }
                 };
                 move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
                     let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
@@ -990,6 +1093,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             ..
                         } if nav => {
                             if is_open.get() {
+                                commit_highlight(&highlight, &selected, &on_select_for_keys, ctx);
                                 is_open.set(false);
                                 ctx.dismiss_all_except_hosts();
                             } else {
@@ -1021,22 +1125,13 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             key: Key::ArrowDown,
                             ..
                         } if nav => {
-                            if !is_open.get() {
-                                open_overlay(ctx);
-                            }
                             let n = source.len();
                             if n == 0 {
+                                if !is_open.get() {
+                                    open_overlay(ctx);
+                                }
                                 return EventResponse::Handled;
                             }
-                            // Treat "no selection" as an implicit cursor at
-                            // index 0 — ArrowDown advances to index 1 from
-                            // nothing (matching the framework convention
-                            // across widgets that keyboard-navigate lists).
-                            let current_idx = selected
-                                .get()
-                                .as_ref()
-                                .and_then(|v| resolve_index(&source, v, &hint))
-                                .unwrap_or(0);
                             // Stop at the last item; do not wrap. The page
                             // keys below already clamped, so the widget
                             // disagreed with itself inside one handler — and a
@@ -1047,34 +1142,29 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             // `ListView` all stop at the ends; menus wrap
                             // because a menu is a list of commands, not a
                             // value.
-                            let target = (current_idx + 1).min(n - 1);
-                            pick_at(target, ctx);
+                            let target = cursor().map_or(0, |i| (i + 1).min(n - 1));
+                            move_to(target, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
                             key: Key::ArrowUp, ..
                         } if nav => {
-                            if !is_open.get() {
-                                open_overlay(ctx);
-                            }
                             let n = source.len();
                             if n == 0 {
+                                if !is_open.get() {
+                                    open_overlay(ctx);
+                                }
                                 return EventResponse::Handled;
                             }
-                            let current_idx = selected
-                                .get()
-                                .as_ref()
-                                .and_then(|v| resolve_index(&source, v, &hint))
-                                .unwrap_or(0);
-                            let target = current_idx.saturating_sub(1);
-                            pick_at(target, ctx);
+                            let target = cursor().map_or(0, |i| i.saturating_sub(1));
+                            move_to(target, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown { key: Key::Home, .. } if nav => {
                             if source.len() == 0 {
                                 return EventResponse::Handled;
                             }
-                            pick_at(0, ctx);
+                            move_to(0, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown { key: Key::End, .. } if nav => {
@@ -1082,10 +1172,10 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             if n == 0 {
                                 return EventResponse::Handled;
                             }
-                            pick_at(n - 1, ctx);
+                            move_to(n - 1, ctx);
                             EventResponse::Handled
                         }
-                        // PageDown / PageUp — advance or retreat selection
+                        // PageDown / PageUp: advance or retreat the highlight
                         // by one page, where a page is `max_visible_items`
                         // rows. Mirrors the standard combo-box keyboard
                         // convention and also gets the visible range to
@@ -1097,16 +1187,13 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             if n == 0 {
                                 return EventResponse::Handled;
                             }
-                            if !is_open.get() {
-                                open_overlay(ctx);
-                            }
-                            let current_idx = selected
-                                .get()
-                                .as_ref()
-                                .and_then(|v| resolve_index(&source, v, &hint))
-                                .unwrap_or(0);
-                            let target = current_idx.saturating_add(page_size).min(n - 1);
-                            pick_at(target, ctx);
+                            // From before the first item a page down lands on
+                            // the page's last item, as one `ArrowDown` lands on
+                            // its first.
+                            let target = cursor()
+                                .map_or(page_size - 1, |i| i.saturating_add(page_size))
+                                .min(n - 1);
+                            move_to(target, ctx);
                             EventResponse::Handled
                         }
                         WidgetEvent::KeyDown {
@@ -1116,16 +1203,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                             if n == 0 {
                                 return EventResponse::Handled;
                             }
-                            if !is_open.get() {
-                                open_overlay(ctx);
-                            }
-                            let current_idx = selected
-                                .get()
-                                .as_ref()
-                                .and_then(|v| resolve_index(&source, v, &hint))
-                                .unwrap_or(0);
-                            let target = current_idx.saturating_sub(page_size);
-                            pick_at(target, ctx);
+                            let target = cursor().map_or(0, |i| i.saturating_sub(page_size));
+                            move_to(target, ctx);
                             EventResponse::Handled
                         }
                         // Type-ahead: letter/character keys jump to matching item.
@@ -1153,7 +1232,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                                 if let Some(v) = source.get(i) {
                                     let label = (item_label_for_keys)(&v).resolve_now();
                                     if label.to_lowercase().starts_with(&prefix) {
-                                        pick_at(i, ctx);
+                                        move_to(i, ctx);
                                         break;
                                     }
                                 }
@@ -1275,11 +1354,25 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         // Only set aria-controls when the popup is open — the listbox node is
         // absent from the tree when closed, and pointing at a missing node
-        // causes AT crashes (VoiceOver unwrap in linked_ui_elements).
-        if self.is_open.get()
-            && let Some(popup_id) = self.dropdown_content_id
-        {
-            builder.push_controlled(widget_id_to_node_id(popup_id));
+        // causes AT crashes (VoiceOver unwrap in linked_ui_elements). It names
+        // the list box itself: naming the popup's host kept that content-free
+        // node in the tree as a relation target, an "[unknown]" between the
+        // combo box and its list.
+        if self.is_open.get() {
+            if let Some(list_box) = self.list_box.get() {
+                builder.push_controlled(widget_id_to_node_id(list_box));
+            }
+            // The option the keyboard is on. Focus stays on this node while
+            // the arrows move, so it is this node's active descendant, which
+            // every adapter follows as the focus (`accesskit_consumer`
+            // `tree.rs:537-543`): a focus event names each option as it is
+            // reached, on AT-SPI, UIA and macOS alike. A searchable combo's
+            // search field holds focus instead and publishes it there.
+            if !self.searchable
+                && let Some(option) = self.highlight.node.get()
+            {
+                builder.set_active_descendant(widget_id_to_node_id(option));
+            }
         }
 
         // ARIA combobox pattern: when the popup is a filtered list, mark

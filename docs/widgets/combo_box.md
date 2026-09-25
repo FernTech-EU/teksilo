@@ -21,22 +21,36 @@ its subtree is deferred — built the first time the combo is opened.
 
 # Keyboard
 
-- `Enter` / `Space` — toggle the list.
-- `ArrowDown` / `ArrowUp` — open the list *and* move the selection one
-  item, stopping at the ends. Win32's combo box, `QComboBox`, GTK and the
-  W3C ARIA listbox pattern all stop rather than wrap; a combo box is a
-  value, and wrapping is the menu convention.
-- `Alt+ArrowDown` — open the list **without** moving the selection, and
-  `Alt+ArrowUp` — close it. The Win32 / WinForms / WPF chord and the ARIA
-  combobox pattern.
-- `F4` — toggle the list (Win32 / Qt / WPF).
-- `Home` / `End` — first / last item.
-- `PageUp` / `PageDown` — one page, where a page is
+The keys move a *highlight* through the list, and only a commit changes
+the value: the W3C ARIA select-only combobox pattern. A reader arrowing to
+hear the options changes nothing, and an application acting on the value
+(a language switcher) acts once, on the option the user picked.
+
+- `Enter` / `Space`: open the list; in the open list, commit the
+  highlighted option and close.
+- `ArrowDown` / `ArrowUp`: open the list *and* move the highlight one
+  item from the value, stopping at the ends; with no value, `ArrowDown`
+  reaches the first item. Win32's combo box, `QComboBox`, GTK and the W3C
+  ARIA listbox pattern all stop rather than wrap; a combo box is a value,
+  and wrapping is the menu convention.
+- `Alt+ArrowDown` / `Alt+ArrowUp`: open the list on the value (or the
+  first item) **without** moving, and close it. The Win32 / WinForms /
+  WPF chord and the ARIA combobox pattern.
+- `F4`: toggle the list (Win32 / Qt / WPF).
+- `Escape`: close the list and keep the value.
+- `Home` / `End`: first / last item.
+- `PageUp` / `PageDown`: one page, where a page is
   `max_visible_items` rows.
-- Printable characters — type-ahead, within
+- Printable characters: type-ahead, within
   `type_ahead_timeout`.
 - A chord holding `Ctrl`, `Alt` or `Super` is not the combo box's and falls
   through to the application; `Shift` is, so a capital letter still types.
+
+Every key that moves the highlight opens the list first when it is
+closed, so the reader hears the option it reaches. Focus stays on the
+combo box (or, in a `searchable` list, on its
+search field), which names the highlighted option as its
+`active_descendant`: every platform adapter follows that as the focus.
 
 The widget is split across four internal modules:
 - `state` holds the `ItemSource` accessor, the default
@@ -181,11 +195,17 @@ trigger shows the `placeholder` text.
 #### `pub fn on_select(mut self, f: impl Fn(&T, &mut EventContext) + 'static) -> Self`
 
 Register a callback fired when the user commits a selection — by
-tapping a dropdown row or picking one with the keyboard (arrows /
-type-ahead / Home / End). The callback receives the chosen value
-and a live `EventContext`, so it can run context-bearing actions
-that observing the bound `selected` signal cannot — e.g.
+tapping a dropdown row, or pressing `Enter` (or `Space`) on the
+option the keyboard highlighted. The callback receives the chosen
+value and a live `EventContext`, so it can run context-bearing
+actions that observing the bound `selected` signal cannot, such as
 `ctx.set_locale(...)`, navigation, or opening another overlay.
+
+Moving through the list (arrows, type-ahead, `Home` / `End`, the page
+keys) is not a commit and fires nothing, and neither does `Enter` on
+the option that is the value already. So a context change made here
+happens once, on the user's choice, never while they are still
+listening to the options (WCAG 3.2.2).
 
 It fires **only on user-driven commits**, not on external writes
 to the `selected` signal (those are observed via `ctx.effect`).

@@ -14,7 +14,6 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use teksilo_i18n::lit;
 
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -32,12 +31,35 @@ use crate::primitives::{FixedSize, HStack, Padding, VStack};
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation};
 
 use super::item::DropdownItem;
-use super::state::ItemSource;
+use super::state::{Highlight, ItemSource};
 use teksilo_i18n::LocalizedString;
 
 /// Selection-commit callback threaded down from `ComboBox::on_select`,
 /// fired by each `DropdownItem`'s tap with a live `EventContext`.
 pub(super) type OnSelect<T> = Option<Rc<dyn Fn(&T, &mut EventContext)>>;
+
+/// Commit the highlighted option: make it the value and tell the application.
+///
+/// Nothing happens when nothing is highlighted, or when the highlight is the
+/// value already, so Enter on a list opened only to be read closes it without
+/// a commit the user did not make.
+pub(super) fn commit_highlight<T: Clone + PartialEq + 'static>(
+    highlight: &Signal<Option<T>>,
+    selected: &Signal<Option<T>>,
+    on_select: &OnSelect<T>,
+    ctx: &mut EventContext,
+) {
+    let Some(value) = highlight.get() else {
+        return;
+    };
+    if selected.get().as_ref() == Some(&value) {
+        return;
+    }
+    selected.set(Some(value.clone()));
+    if let Some(cb) = on_select {
+        cb(&value, ctx);
+    }
+}
 
 /// Build the static (unfiltered) item list subtree.
 ///
@@ -59,6 +81,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: &ItemSource<T>,
     selected: &Signal<Option<T>>,
+    highlight: &Highlight<T>,
     item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     on_select: &OnSelect<T>,
@@ -79,6 +102,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
                     position: i + 1,
                     total,
                     selected_signal: selected.clone(),
+                    highlight: highlight.clone(),
                     render: render_item.clone(),
                     on_select: on_select.clone(),
                     root_child_id: None,
@@ -93,6 +117,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
         ctx,
         source,
         selected,
+        highlight,
         item_label,
         render_item,
         on_select,
@@ -112,6 +137,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: &ItemSource<T>,
     selected: &Signal<Option<T>>,
+    highlight: &Highlight<T>,
     item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     on_select: &OnSelect<T>,
@@ -163,6 +189,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     // user — which is also what `position_in_set` / `size_of_set`
     // should reflect.
     let selected_for_delegate = selected.clone();
+    let highlight_for_delegate = highlight.clone();
     let item_label_for_delegate = item_label.clone();
     let render_item_for_delegate = render_item.clone();
     let on_select_for_delegate = on_select.clone();
@@ -177,6 +204,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
             position: index + 1,
             total: visible_count,
             selected_signal: selected_for_delegate.clone(),
+            highlight: highlight_for_delegate.clone(),
             render: render_item_for_delegate.clone(),
             on_select: on_select_for_delegate.clone(),
             root_child_id: None,
@@ -190,9 +218,14 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     // (triggered when the visible range crosses the buffer mid-drag)
     // would destroy the scrollbar widget and cancel its in-flight
     // gesture, making the drag look like it does nothing.
+    //
+    // Presentational: the view only realizes the rows in view. The list a
+    // screen reader walks is the combo box's own `Role::ListBox` (this list's
+    // owner), and its options are the `DropdownItem`s, one level down.
     let list_view = ListView::from_list_source(list_source, delegate)
         .item_height(item_height)
-        .show_scrollbar(false);
+        .show_scrollbar(false)
+        .presentational(true);
     let scroll_y = list_view.scroll_y_signal().clone();
     let max_scroll_y = list_view.max_scroll_y_signal().clone();
     let viewport_ratio_y = list_view.viewport_ratio_y_signal().clone();
@@ -224,10 +257,16 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     let outer_height = viewport_height + 8.0;
     let sized_id = ctx.add(FixedSize::new().height(outer_height).child(padded_id));
 
+    // Keep the reader's place in view: the highlight, or while there is none
+    // (a searchable list before an arrow) the value.
+    let current = highlight
+        .value
+        .zip(selected)
+        .map(|(highlight, selected)| highlight.clone().or_else(|| selected.clone()));
     register_scroll_into_view(
         ctx,
         source.clone(),
-        selected.clone(),
+        current,
         scroll_y,
         filtered_indices,
         item_height,
@@ -237,8 +276,8 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     sized_id
 }
 
-/// Register a `ctx.effect` on `selected` that scrolls the `ListView`'s
-/// scroll signal so the currently-selected row stays inside the
+/// Register a `ctx.effect` on `current` that scrolls the `ListView`'s
+/// scroll signal so the row the reader is on stays inside the
 /// viewport. Called once synchronously to sync the initial scroll
 /// position, then registered as an effect for subsequent selection
 /// changes. Shared by both `build_static_item_list` and
@@ -255,7 +294,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
 fn register_scroll_into_view<T: Clone + PartialEq + 'static>(
     ctx: &mut BuildContext,
     source: ItemSource<T>,
-    selected: Signal<Option<T>>,
+    current: Signal<Option<T>>,
     scroll_y: Signal<f32>,
     filtered_indices: Option<Rc<Vec<usize>>>,
     item_height: f32,
@@ -291,8 +330,8 @@ fn register_scroll_into_view<T: Clone + PartialEq + 'static>(
         }
     };
     // Initial sync so a pre-selected value opens already in view.
-    scroll_into_view(&selected.get());
-    ctx.effect(&selected, move |sel| scroll_into_view(sel));
+    scroll_into_view(&current.get());
+    ctx.effect(&current, move |sel| scroll_into_view(sel));
 }
 
 /// Dropdown panel content (internal widget — shown as overlay).
@@ -306,6 +345,13 @@ fn register_scroll_into_view<T: Clone + PartialEq + 'static>(
 pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     pub(super) source: ItemSource<T>,
     pub(super) selected: Signal<Option<T>>,
+    pub(super) highlight: Highlight<T>,
+    /// Written with the node that carries `Role::ListBox` (this panel, or in
+    /// a searchable combo the filtered list under the search field), for the
+    /// `controls` relation of the node that holds focus.
+    pub(super) list_box: Signal<Option<WidgetId>>,
+    /// The search field's accessible name (searchable mode only).
+    pub(super) search_label: LocalizedString,
     pub(super) item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     pub(super) render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     /// Fired (with a live `EventContext`) when the user commits a row by
@@ -326,8 +372,8 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     /// slot would still be empty on the very first open.
     pub(super) search_input_slot: Rc<Cell<Option<WidgetId>>>,
     /// How many options are currently visible, written by whichever build path
-    /// ran (filtered, virtualized or plain) and read by this panel's
-    /// accessibility node.
+    /// ran (filtered, virtualized or plain) and read by the accessibility node
+    /// that is the list box: this panel's, or the `FilteredItemList`'s.
     ///
     /// The count has to reach the `Role::ListBox` container rather than each
     /// `Role::ListBoxOption`: AccessKit's `size_of_set` belongs on the
@@ -347,6 +393,10 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
 struct FilteredItemList<T: Clone + PartialEq + 'static> {
     source: ItemSource<T>,
     selected: Signal<Option<T>>,
+    highlight: Highlight<T>,
+    /// Written with this widget's own node: in a searchable combo it is the
+    /// list box, a sibling of the search field.
+    list_box: Signal<Option<WidgetId>>,
     item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     on_select: OnSelect<T>,
@@ -355,8 +405,7 @@ struct FilteredItemList<T: Clone + PartialEq + 'static> {
     search_query: Signal<String>,
     filter: Option<Rc<dyn Fn(&str, &T) -> bool>>,
     /// The owning panel's count slot. Filled here because this is where the
-    /// filter runs, and read by `DropdownPanel::accessibility`, which owns the
-    /// `Role::ListBox` node the count has to sit on.
+    /// filter runs, and read by this widget's own `Role::ListBox` node.
     visible_count_slot: Rc<Cell<usize>>,
     root_child_id: Option<WidgetId>,
 }
@@ -380,6 +429,9 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
         self.search_query
             .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        if self.list_box.get() != Some(ctx.self_id()) {
+            self.list_box.set(Some(ctx.self_id()));
+        }
 
         let total = self.source.len();
         let q = self.search_query.get();
@@ -416,6 +468,7 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                 ctx,
                 &self.source,
                 &self.selected,
+                &self.highlight,
                 &self.item_label,
                 &self.render_item,
                 &self.on_select,
@@ -436,6 +489,7 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                         position: pos + 1,
                         total: visible_count,
                         selected_signal: self.selected.clone(),
+                        highlight: self.highlight.clone(),
                         render: self.render_item.clone(),
                         on_select: self.on_select.clone(),
                         root_child_id: None,
@@ -476,6 +530,14 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
         }
     }
 
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(teksilo_core::accesskit::Role::ListBox);
+        let count = self.visible_count_slot.get();
+        if count > 0 {
+            builder.set_size_of_set(count);
+        }
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
     }
@@ -503,6 +565,10 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             use teksilo_core::binding::BindingLevel;
             self.version
                 .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+            // Without a search field this panel is the list box.
+            if self.list_box.get() != Some(ctx.self_id()) {
+                self.list_box.set(Some(ctx.self_id()));
+            }
         }
 
         // Build the item-list portion of the panel. In searchable mode
@@ -512,6 +578,8 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             ctx.add(FilteredItemList {
                 source: self.source.clone(),
                 selected: self.selected.clone(),
+                highlight: self.highlight.clone(),
+                list_box: self.list_box.clone(),
                 item_label: self.item_label.clone(),
                 render_item: self.render_item.clone(),
                 on_select: self.on_select.clone(),
@@ -529,6 +597,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 ctx,
                 &self.source,
                 &self.selected,
+                &self.highlight,
                 &self.item_label,
                 &self.render_item,
                 &self.on_select,
@@ -554,17 +623,32 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
             // TextInput's build) just to register
             // `ctx.visible_when`.
             //
-            // `on_submit` dismisses the overlay on Enter. The
-            // `TextInputField` consumes `Enter` before it can
-            // bubble to the panel's own key handler, so we
-            // rely on this hook instead. The selection
-            // tracked in `selected` (driven by the panel's
-            // ArrowDown/ArrowUp handler) is already correct
-            // when the user confirms.
+            // `on_submit` commits the highlighted option and dismisses
+            // the overlay on Enter. The `TextInputField` consumes
+            // `Enter` before it can bubble to the panel's own key
+            // handler, so we rely on this hook instead.
+            //
+            // The field holds focus while the arrows move through the
+            // list, so it is the node that names the highlighted option
+            // as its `active_descendant` (the ARIA combobox pattern), and
+            // it is named: it used to carry only a placeholder, and a
+            // reader heard "list box, Search…" for a field of no name.
+            let commit = {
+                let highlight = self.highlight.value.clone();
+                let selected = self.selected.clone();
+                let on_select = self.on_select.clone();
+                move |ctx: &mut EventContext| {
+                    commit_highlight(&highlight, &selected, &on_select, ctx);
+                    ctx.dismiss_top_overlay();
+                }
+            };
             let search_input = crate::text_input::TextInput::new(query.clone())
-                .placeholder(lit!("Search…"))
+                .label(self.search_label.clone())
+                .placeholder(teksilo_i18n::tr_widget!(a11y_builtin_search()))
                 .show_clear_button(true)
-                .on_submit_fn(|ctx| ctx.dismiss_top_overlay());
+                .active_descendant(self.highlight.node.clone())
+                .controls(self.list_box.clone())
+                .on_submit_fn(commit);
             let search_id = ctx.add(search_input);
             self.search_input_slot.set(Some(search_id));
             let search_wrapped = ctx.add(Padding::new(4.0, 4.0, 0.0, 4.0).child(search_id));
@@ -572,6 +656,16 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 .spacing(0.0)
                 .child(search_wrapped)
                 .child(list_id);
+            // Typing starts a new search: the highlight goes, and with it the
+            // active descendant, so the reader's focus is the field they are
+            // typing in and each character is echoed there. An arrow finds
+            // the matches again.
+            let highlight = self.highlight.value.clone();
+            ctx.effect(query, move |_| {
+                if highlight.get().is_some() {
+                    highlight.set(None);
+                }
+            });
             ctx.add(col)
         } else {
             list_id
@@ -606,16 +700,14 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // in searchable mode (non-searchable combos keep focus on the
         // trigger and navigate there). Handles:
         //
-        // - ArrowDown / ArrowUp: navigate the filtered
+        // - ArrowDown / ArrowUp: move the highlight through the filtered
         //   item list while the search field retains focus, so the
         //   user can type a query then arrow through the matches
         //   without losing the cursor. Home / End are left to the search
         //   field's own caret semantics — see below.
         // - Enter is not handled here: `TextInputField` consumes it, so
-        //   the search field's `on_submit` dismisses instead. The
-        //   `selected` signal was already updated by the arrow keys;
-        //   the item's own tap handler would duplicate that, so the
-        //   submit hook just dismisses.
+        //   the search field's `on_submit` commits the highlight and
+        //   dismisses instead.
         //
         // Tab is deliberately absent: the framework dismisses a non-modal
         // overlay the keyboard walks out of, so letting Tab reach the ordinary
@@ -625,7 +717,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
         // handling (arrows would otherwise fall through as printable-
         // character candidates and be rejected as non-text).
         let source_for_nav = self.source.clone();
-        let selected_for_nav = self.selected.clone();
+        let highlight_for_nav = self.highlight.value.clone();
         let item_label_for_nav = self.item_label.clone();
         let search_query_for_nav = self.search_query.clone();
         let filter_for_nav = self.filter.clone();
@@ -681,10 +773,10 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 return EventResponse::Handled;
             }
 
-            // Find the currently-selected value's position within the
-            // filtered list. A selection that has been filtered out
-            // counts as no-selection for navigation purposes.
-            let current = selected_for_nav.get();
+            // Find the highlighted option's position within the
+            // filtered list. A highlight that has been filtered out
+            // counts as none for navigation purposes.
+            let current = highlight_for_nav.get();
             let current_in_filtered = current.as_ref().and_then(|v| {
                 filtered
                     .iter()
@@ -703,7 +795,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 _ => return EventResponse::Handled,
             };
             if let Some(v) = source_for_nav.get(filtered[next_idx]) {
-                selected_for_nav.set(Some(v));
+                highlight_for_nav.set(Some(v));
             }
             EventResponse::Handled
         });
@@ -744,6 +836,12 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
     // by the active `PopoverStyle` in `build`.
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // With a search field, the list box is the filtered list beside it,
+        // and this panel publishes nothing: a text field inside a list box
+        // is not a thing a screen reader can present.
+        if self.search_query.is_some() {
+            return;
+        }
         builder.set_role(teksilo_core::accesskit::Role::ListBox);
         let count = self.visible_count_slot.get();
         if count > 0 {

@@ -16,6 +16,7 @@ use std::rc::Rc;
 use teksilo_i18n::lit;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
+use teksilo_core::ObserverHandle;
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Signal;
@@ -25,6 +26,8 @@ use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, SurfaceRole, TextRole, TextStyleRole};
 
 use crate::primitives::{HStack, Padding, RectWidget, Spacer, TextWidget, ZStack};
+
+use super::state::Highlight;
 
 /// Add the default label-plus-padding subtree into the arena and return
 /// its root id. Used when `render_item` is not provided.
@@ -70,7 +73,8 @@ pub(super) fn build_default_item(
 
 /// A single row in the dropdown. Wraps the user-rendered (or default)
 /// subtree with the `Role::ListBoxOption` accessibility role, a
-/// tap-to-select handler, and a selection-driven highlight background.
+/// tap-to-select handler, and a highlight background that follows the
+/// keyboard (or, while the keyboard is on no row, the value).
 pub(super) struct DropdownItem<T: Clone + PartialEq + 'static> {
     pub(super) value: T,
     pub(super) label: String,
@@ -78,6 +82,10 @@ pub(super) struct DropdownItem<T: Clone + PartialEq + 'static> {
     pub(super) position: usize,
     pub(super) total: usize,
     pub(super) selected_signal: Signal<Option<T>>,
+    /// The keyboard's place in the list. This row is `selected` to assistive
+    /// technology while it holds it, and publishes its node for the focused
+    /// node's `active_descendant`.
+    pub(super) highlight: Highlight<T>,
     pub(super) render: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
     /// Fired after the tap commits this row's value to `selected_signal`,
     /// with a live `EventContext`. Threaded down from `ComboBox::on_select`.
@@ -101,23 +109,61 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         let selected_signal = self.selected_signal.clone();
         let value_for_tap = self.value.clone();
         let on_select = self.on_select.clone();
+        let self_id = ctx.self_id();
 
-        // Track whether this item is highlighted (hovered or selected).
-        let highlighted = ctx.signal(false);
-
-        // Sync highlight with the currently-selected value.
-        {
-            let highlighted = highlighted.clone();
+        let hovered = ctx.signal(false);
+        // The row the keyboard is on or, while it is on none (a searchable
+        // list before an arrow), the value: where the reader is.
+        let current = {
             let value = self.value.clone();
-            ctx.effect(&self.selected_signal, move |sel| {
-                highlighted.set(sel.as_ref() == Some(&value));
+            self.highlight
+                .value
+                .zip(&self.selected_signal)
+                .map(move |(highlight, selected)| match highlight {
+                    Some(highlight) => *highlight == value,
+                    None => selected.as_ref() == Some(&value),
+                })
+        };
+
+        // Publish this row's node while it holds the highlight, for the
+        // focused node's `active_descendant`. The row does it rather than the
+        // list because only the row knows its node, and a virtualized list
+        // builds a row only when it scrolls into view, after the arrow that
+        // moved the highlight there.
+        {
+            let node = self.highlight.node.clone();
+            let value = self.value.clone();
+            if self.highlight.value.get().as_ref() == Some(&value) {
+                node.set(Some(self_id));
+            }
+            ctx.effect(&self.highlight.value, move |highlight| {
+                if highlight.as_ref() == Some(&value) {
+                    if node.get() != Some(self_id) {
+                        node.set(Some(self_id));
+                    }
+                } else if node.get() == Some(self_id) {
+                    node.set(None);
+                }
             });
+            // …and withdraw it when the row is destroyed (scrolled out of the
+            // realized window, or rebuilt by a model change), so the focused
+            // node never names a node that no longer exists.
+            let node = self.highlight.node.clone();
+            ctx.own_handle(ObserverHandle::new(
+                Rc::new(()),
+                0,
+                Rc::new(move |_| {
+                    if node.get() == Some(self_id) {
+                        node.set(None);
+                    }
+                }),
+            ));
         }
 
         // Highlight uses the accent-subtle background token (designed for
         // this exact "hinted selection" purpose); falls back to transparent
         // when not highlighted. Role-based so paint resolves against theme.
-        let bg_role = highlighted.map(|h| {
+        let bg_role = current.or(&hovered).map(|h| {
             if *h {
                 SurfaceRole::AccentSubtle
             } else {
@@ -156,9 +202,9 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
                 ctx.dismiss_self_overlay_chain();
             })
             .on_hover({
-                let highlighted = highlighted.clone();
+                let hovered = hovered.clone();
                 move |entered: bool, _ctx: &mut EventContext| {
-                    highlighted.set(entered);
+                    hovered.set(entered);
                 }
             })
             .cursor(CursorIcon::Pointer);
@@ -208,9 +254,12 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::ListBoxOption);
         builder.set_name(&self.label);
-        // A11y gap #1: announce selection state so screen readers can
-        // say "selected, Apple" instead of just "Apple".
-        let is_selected = self.selected_signal.get().as_ref() == Some(&self.value);
+        // Selected while the keyboard is on this row, as in the ARIA
+        // select-only combobox pattern, and never for the value alone. It is
+        // what AT-SPI's Selection interface reports and Orca reads on the list
+        // box's `selection-changed`; a selected row the keyboard is not on
+        // would pull Orca's focus off a search field the user is typing in.
+        let is_selected = self.highlight.value.get().as_ref() == Some(&self.value);
         builder.set_selected(is_selected);
         builder.set_position_in_set(self.position);
         // The "of N" half lives on the `DropdownPanel`'s `Role::ListBox`.

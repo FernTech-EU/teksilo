@@ -233,6 +233,14 @@ impl Listener {
         }
         walk(self.platform.state().root(), role).and_then(|node| node.description())
     }
+
+    /// The tree as the adapters held it at the last call, for a test that
+    /// reads a property no change event carries: a relation, or what AT-SPI's
+    /// Selection interface counts (`accesskit_atspi_common` `node.rs`,
+    /// `n_selected_children`, over `NodeRef::items`).
+    pub(crate) fn platform(&self) -> &Tree {
+        &self.platform
+    }
 }
 
 struct Handler<'a> {

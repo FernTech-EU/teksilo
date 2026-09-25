@@ -189,6 +189,9 @@ pub struct ListView<T: 'static> {
     /// mounts their own, wired through `scroll_y_signal` /
     /// `max_scroll_y_signal` / `viewport_ratio_y_signal`.
     show_scrollbar: bool,
+    /// The view is a virtualizer for a list another widget owns and publishes;
+    /// see [`presentational`](Self::presentational).
+    presentational: bool,
 
     // Persistent state (survives rebuild)
     scroll_y: Signal<f32>,
@@ -388,6 +391,7 @@ impl<T: 'static> ListView<T> {
             type_ahead: crate::common::type_ahead::TypeAheadState::new(),
             reorderable: false,
             show_scrollbar: true,
+            presentational: false,
             drop_feedback: Signal::new(None),
             // Replaced at build with the live tree signals.
             view_focused: Signal::new(false),
@@ -878,6 +882,24 @@ impl<T: 'static> ListView<T> {
     /// [`viewport_ratio_y_signal`](Self::viewport_ratio_y_signal).
     pub fn show_scrollbar(mut self, show: bool) -> Self {
         self.show_scrollbar = show;
+        self
+    }
+
+    /// Lay out and virtualize the rows, and publish nothing of the list itself.
+    ///
+    /// For a widget that uses the view only to realize a window of rows and
+    /// owns the list a screen reader walks: the `ComboBox` dropdown, whose
+    /// panel is the `Role::ListBox` and whose rows are the options. A view
+    /// publishing its own list box there nested a second list box, a group and
+    /// one unselected, unnamed option around each of the combo box's options,
+    /// and AT-SPI's Selection interface then counted the unselected wrappers,
+    /// so Orca had nothing to read as the selection moved.
+    ///
+    /// The root, the body pane and every row wrapper become content-free
+    /// containers, which the accessibility walk prunes, and the root is not
+    /// focusable: focus stays wherever the owner keeps it.
+    pub(crate) fn presentational(mut self, presentational: bool) -> Self {
+        self.presentational = presentational;
         self
     }
 

@@ -83,6 +83,9 @@ pub(crate) struct ListItemWrapper {
     index: usize,
     /// Rebuild trigger, bumped only when *this* row's selectedness flips.
     version: Signal<u64>,
+    /// Publish nothing: the row widget inside is the option (see
+    /// `ListView::presentational`).
+    presentational: bool,
 
     // Build state.
     selected: bool,
@@ -96,9 +99,17 @@ impl ListItemWrapper {
             selection,
             index,
             version: Signal::new(0),
+            presentational: false,
             selected: false,
             child: None,
         }
+    }
+
+    /// Publish nothing of the row, for a view that is
+    /// [`presentational`](crate::list_view::ListView::presentational).
+    pub fn presentational(mut self, presentational: bool) -> Self {
+        self.presentational = presentational;
+        self
     }
 }
 
@@ -174,6 +185,10 @@ impl Widget for ListItemWrapper {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        if self.presentational {
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+            return;
+        }
         builder.set_role(teksilo_core::accesskit::Role::ListBoxOption);
         builder.set_selected(self.selected);
         // A row is a real AT target: a screen reader's "activate" and an

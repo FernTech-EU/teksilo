@@ -440,10 +440,19 @@ mod tests {
 
         let combo = inner_combo(&tree, id);
         tree.focus(combo);
-        // Seeded at Light (entry 0); ArrowDown commits Dark (entry 1), firing
-        // on_select → set_theme, which parks a pending theme request.
+        // Seeded at Light (entry 0); ArrowDown moves to Dark (entry 1) and
+        // Enter commits it, firing on_select → set_theme, which parks a
+        // pending theme request. The arrow alone switches nothing.
         tree.press_key(
             teksilo_core::event::Key::ArrowDown,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        assert!(
+            tree.take_pending_theme_request().is_none(),
+            "moving to Dark must not switch to it"
+        );
+        tree.press_key(
+            teksilo_core::event::Key::Enter,
             teksilo_core::event::Modifiers::NONE,
         );
         let pending = tree.take_pending_theme_request();
@@ -486,15 +495,18 @@ mod tests {
 
         let combo = inner_combo(&tree, id);
         tree.focus(combo);
-        // Light → Dark → System: two ArrowDowns land on System.
-        tree.press_key(
+        // Light → Dark → System: two ArrowDowns land on System, and Enter
+        // picks it.
+        for key in [
             teksilo_core::event::Key::ArrowDown,
-            teksilo_core::event::Modifiers::NONE,
-        );
-        let _ = tree.take_pending_theme_request(); // clear the Dark request
-        tree.press_key(
             teksilo_core::event::Key::ArrowDown,
-            teksilo_core::event::Modifiers::NONE,
+            teksilo_core::event::Key::Enter,
+        ] {
+            tree.press_key(key, teksilo_core::event::Modifiers::NONE);
+        }
+        assert!(
+            tree.take_pending_theme_request().is_none(),
+            "passing Dark on the way must not switch to it"
         );
         assert!(
             tree.take_pending_follow_system_request(),
