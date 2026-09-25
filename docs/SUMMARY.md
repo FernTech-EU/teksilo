@@ -22,6 +22,7 @@
 - [Accessibility overrides](accessibility-overrides.md)
 - [Explore by touch](a11y/explore-by-touch.md)
 - [Accessibility issues](a11y/a11y_issues.md)
+- [Testing what a screen reader gets](a11y/reader-harness.md)
 - [Non-drag alternatives](a11y/non-drag-alternatives.md)
 - [Global text scale](text-scale.md)
 - [Density & targets](density-and-targets.md)

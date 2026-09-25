@@ -17,6 +17,15 @@ by crate for clarity, not because crates version independently.
 
 #### Accessibility
 
+- **`tools/reader/`: what a screen reader gets from an example, recorded.**
+  `tools/reader/reader.py` runs an example in a private, invisible desktop
+  session (its own D-Bus, AT-SPI bus, KWin and runtime directory, no
+  `DISPLAY`, no sound) and records the AT-SPI events it emits, the tree a
+  reader walks, and what Orca 46.1 says, speaking to nothing. Acts are real
+  key presses through the private compositor, AT-SPI actions, or the
+  automation bridge. Scenarios state what a reader should get; `tabwalk` and
+  `tree` need no scenario. Linux only. See
+  `docs/a11y/reader-harness.md`.
 - **`Widget::accessibility_proxy`: a composite can publish itself through the
   field that holds focus.** Where a composite keeps its focus, text and value
   on one inner widget, that widget is the node a screen reader lands on and has

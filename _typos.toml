@@ -26,6 +26,9 @@ extend-exclude = [
   "examples/rich_text_editor/src/highlighters.rs",
   "examples/rich_text_editor/src/highlight_controls.rs",
   "examples/rich_text_editor/src/main.rs",
+  # Reader-harness scenarios that type and find the rich-text editor demo's
+  # deliberate misspellings.
+  "tools/reader/scenarios/verify_text.py",
   # Language spec documents an intentional `Buton` typo to illustrate an error.
   "docs/teksu-language-spec-v3.md",
   # Generated corpus: one index.json holding every chunk's text verbatim, plus
@@ -80,6 +83,7 @@ ba = "ba"          # appears inside commit hash substrings in docs
 caf = "caf"        # appears inside `percent_decode("caf%C3%A9")` test input
 optin = "optin"    # `opt-in` written as one word in a test fn name
 abd = "abd"        # test fixture: the one-character variation of "abc"
+AADD = "AADD"      # inside the hex colour #55AADD a reader-harness scenario expects
 
 # Win32 API constants
 TME = "TME"
