@@ -49,9 +49,15 @@
 //!   May 2, 2026 at 2:35 PM"), with the seconds only when the field shows
 //!   them. The clock is the locale's: an explicit `.time_format(...)`
 //!   changes what the field shows, not how the value is read.
-//! - Each `TextInputField` keeps its own AT node, re-roled per half to
-//!   `Role::DateInput` / `Role::TimeInput`; the wrapper's
-//!   `Role::DateTimeInput` provides the datetime semantics.
+//! - Each `TextInputField` keeps its own AT node, a `Role::TextInput`
+//!   named for its half ("Date", "Time"); the wrapper's
+//!   `Role::DateTimeInput` provides the datetime semantics. The halves were
+//!   re-roled `Role::DateInput` / `Role::TimeInput`, which the AT-SPI
+//!   adapter hands a reader as a date editor, and Orca reads a date editor
+//!   by its name and role alone: "Date date editor.", never the date. An
+//!   editable text field is read with its text.
+//! - The calendar opens on the date the date half holds, on its days,
+//!   whatever an earlier opening left.
 //!
 //! ```ignore
 //! // Requires ctx.signal() — shown as ignore per convention.
@@ -643,6 +649,7 @@ impl Widget for DateTimeEdit {
             if let Some(fdow) = self.first_day_of_week {
                 calendar = calendar.first_day_of_week(fdow);
             }
+            let opening = calendar.opening();
             // Built the first time the popup is opened, not on every rebuild of the
             // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
             let cal_id = ctx.add_deferred(self.calendar_popover_open.clone(), calendar);
@@ -658,6 +665,7 @@ impl Widget for DateTimeEdit {
                 })
             };
             let trigger_enabled = self.enabled.as_signal().map(move |on| *on && !read_only);
+            let date_part = self.date_part.clone();
             let trigger_btn = IconButton::new(calendar_glyph_icon(de::CALENDAR_ICON_SIZE))
                 .embedded()
                 .size(IconButtonSize::Default)
@@ -670,6 +678,9 @@ impl Widget for DateTimeEdit {
                         popover_open.set(false);
                         ctx_evt.dismiss_all_except_hosts();
                     } else {
+                        // On the date the date half holds, whatever the last
+                        // opening left; see `DateEdit`'s calendar.
+                        opening.open_on(date_part.get());
                         popover_open.set(true);
                         // Build the popup if this is its first open, before the overlay
                         // below is measured against it and focus moves into it.
@@ -1012,7 +1023,6 @@ impl DateTimeEdit {
             self.placeholder.clone(),
             commit,
             "date-time-edit-date-name",
-            Role::DateInput,
             DateTimeHalfKind::Date {
                 pattern: pattern_rc,
                 date_signal,
@@ -1087,7 +1097,6 @@ impl DateTimeEdit {
             LocalizedString::literal(String::new()),
             commit,
             "date-time-edit-time-name",
-            Role::TimeInput,
             DateTimeHalfKind::Time {
                 pattern: pattern_rc,
                 time_signal,
@@ -1113,7 +1122,6 @@ impl DateTimeEdit {
         placeholder: LocalizedString,
         commit: Rc<dyn Fn(&mut EventContext) -> bool>,
         a11y_label_key: &str,
-        a11y_role: Role,
         kind: DateTimeHalfKind,
     ) -> (WidgetId, WidgetId) {
         use crate::styles::recipe_text_input_style as field_dims;
@@ -1201,9 +1209,10 @@ impl DateTimeEdit {
         let caret = field.caret_position();
         let caret_setter = field.caret_setter();
 
-        let field_with_a11y = field
-            .access_role(a11y_role)
-            .access_label(resolve_message_widget(a11y_label_key, &[]));
+        // An editable text field named for its half, which a reader reads
+        // with its text. Not `Role::DateInput` / `Role::TimeInput`: see the
+        // module documentation.
+        let field_with_a11y = field.access_label(resolve_message_widget(a11y_label_key, &[]));
         let field_id = ctx.add(field_with_a11y);
 
         let padded_field_id = ctx.add(
@@ -1312,7 +1321,7 @@ impl DateTimeEdit {
         ));
         // Return both the outer stepping wrapper (used for layout) and the
         // inner editable field id, so the caller can wire `described_by` onto
-        // the node that actually carries `Role::{Date,Time}Input`.
+        // the editable node itself.
         (stepping_id, field_id)
     }
 }

@@ -6,6 +6,7 @@ use crate::common::datetime::Date;
 use teksilo_core::event::Modifiers;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget_tree::WidgetTree;
+use teksilo_i18n::lit;
 
 fn light_tree() -> WidgetTree {
     WidgetTree::new().with_theme(teksilo_core::presets::intui::light())
@@ -85,10 +86,12 @@ fn the_value_is_the_day_in_full_in_the_users_language() {
 #[test]
 fn date_edit_collapses_middle_container_node() {
     // Audit G9: DateEdit must expose exactly DateInput -> TextInput(editable),
-    // not DateInput -> GenericContainer(named) -> TextInput. The label lives
-    // only on the DateInput node; the inner TextInput's now-content-free
-    // GenericContainer is dropped as presentational, so the label never
-    // appears on a duplicated middle node.
+    // not DateInput -> GenericContainer(named) -> TextInput. The label names
+    // the DateInput and the editable field focus lands on (a reader is told
+    // the name of the node it is on, and the field had none), and no other
+    // node: the inner TextInput's container stays content-free and is
+    // dropped as presentational.
+    use teksilo_core::accesskit::Role;
     let mut tree = light_tree();
     let value = Signal::new(Some(Date::constant(2026, 5, 2)));
     let _id =
@@ -102,26 +105,21 @@ fn date_edit_collapses_middle_container_node() {
     let date_inputs = update
         .nodes
         .iter()
-        .filter(|(_, n)| n.role() == teksilo_core::accesskit::Role::DateInput)
+        .filter(|(_, n)| n.role() == Role::DateInput)
         .count();
     assert_eq!(date_inputs, 1, "exactly one DateInput node");
 
-    let named_due = update
+    let mut named_due: Vec<Role> = update
         .nodes
         .iter()
         .filter(|(_, n)| n.label() == Some("Due date"))
-        .count();
+        .map(|(_, n)| n.role())
+        .collect();
+    named_due.sort_by_key(|role| format!("{role:?}"));
     assert_eq!(
-        named_due, 1,
-        "label appears only on the DateInput node, not a duplicated middle container"
-    );
-
-    assert!(
-        update
-            .nodes
-            .iter()
-            .any(|(_, n)| n.role() == teksilo_core::accesskit::Role::TextInput),
-        "the editable TextInput field node is present"
+        named_due,
+        vec![Role::DateInput, Role::TextInput],
+        "the label names the DateInput and the editable field, no middle container"
     );
 }
 
@@ -565,6 +563,208 @@ fn a_reopened_calendar_speaks_as_it_did_the_first_time() {
         listener.heard(&mut tree),
         day("Sunday, May 3, 2026"),
         "a day met in the first opening is heard"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+// ── The calendar opens on the date the field holds ────────────────
+
+/// A `DateEdit` on 2 May 2026 in an English tree, its field focused.
+fn english_date_edit() -> (
+    Rc<teksilo_i18n::I18nManager>,
+    WidgetTree,
+    WidgetId,
+    Signal<Option<Date>>,
+) {
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    (mgr, tree, id, value)
+}
+
+fn press(tree: &mut WidgetTree, key: Key, modifiers: Modifiers) {
+    tree.press_key(key, modifiers);
+    laid_out(tree);
+}
+
+fn said_in_full(date: Date) -> String {
+    full_date(date, &"en-US".parse().unwrap())
+}
+
+#[test]
+fn the_calendar_opens_on_the_date_the_field_holds() {
+    // Up in the field, then Alt+Down: the calendar opened on the day the field
+    // held when it was built, the reader heard that day, and Enter wrote it
+    // back over the field. The date the user had just set was lost, and
+    // nothing said so.
+    use crate::common::heard_test::{Heard, Listener};
+    let (_mgr, mut tree, _id, value) = english_date_edit();
+    press(&mut tree, Key::ArrowUp, Modifiers::NONE);
+    let held = value.get().expect("a date");
+    assert_ne!(held, Date::constant(2026, 5, 2), "the step moved the date");
+
+    let mut listener = Listener::attach(&mut tree);
+    press(&mut tree, Key::ArrowDown, Modifiers::ALT);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus(said_in_full(held))]
+    );
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(value.get(), Some(held), "Enter keeps the field's date");
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_calendar_reopens_on_the_fields_date_not_where_it_was_left() {
+    // Open, move the cursor, close without picking: the next opening landed
+    // where the last one's cursor was, a day the field does not hold.
+    use crate::common::heard_test::{Heard, Listener};
+    let (_mgr, mut tree, _id, value) = english_date_edit();
+    press(&mut tree, Key::F4, Modifiers::NONE);
+    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
+    press(&mut tree, Key::Escape, Modifiers::NONE);
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+
+    let mut listener = Listener::attach(&mut tree);
+    press(&mut tree, Key::F4, Modifiers::NONE);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus(said_in_full(Date::constant(2026, 5, 2)))]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_calendar_reopens_on_its_days_after_closing_on_the_months() {
+    // Closed from the months view, the calendar reopened on the months: the
+    // grid itself took focus with no day to pick, and Enter wrote the hidden
+    // day cursor into the field without a word.
+    use crate::common::heard_test::{Heard, Listener};
+    let (_mgr, mut tree, id, value) = english_date_edit();
+    press(&mut tree, Key::F4, Modifiers::NONE);
+    let title = tree
+        .find_by_label("May 2026")
+        .expect("the calendar's title");
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(title),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    laid_out(&mut tree);
+    assert!(
+        tree.find_by_label("2026").is_some(),
+        "the title now reads the year: the months view"
+    );
+    // A click outside the popup closes it, whatever it shows.
+    tree.pointer_down_button(
+        Point::new(290.0, 1.0),
+        teksilo_core::event::PointerButton::Primary,
+    );
+    tree.pointer_up_button(
+        Point::new(290.0, 1.0),
+        teksilo_core::event::PointerButton::Primary,
+    );
+    laid_out(&mut tree);
+    assert!(
+        !tree.accessibility_node(id).is_expanded(),
+        "the calendar closed"
+    );
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+
+    let mut listener = Listener::attach(&mut tree);
+    press(&mut tree, Key::F4, Modifiers::NONE);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus(said_in_full(Date::constant(2026, 5, 2)))]
+    );
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_date_typed_and_not_yet_committed_is_where_the_calendar_opens() {
+    // Alt+Down straight from typing: the field commits as focus leaves it,
+    // which is after the calendar has opened, so the calendar has to take
+    // the typed date first or it opens on the one before.
+    use crate::common::heard_test::{Heard, Listener};
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let edit = DateEdit::new(value.clone());
+    let text = edit.text_signal.clone();
+    let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("en-US");
+    let id = tree.add(edit);
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    text.set("12/24/2027".to_string());
+    laid_out(&mut tree);
+
+    let mut listener = Listener::attach(&mut tree);
+    press(&mut tree, Key::ArrowDown, Modifiers::ALT);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus(said_in_full(Date::constant(2027, 12, 24)))]
+    );
+    press(&mut tree, Key::Enter, Modifiers::NONE);
+    assert_eq!(value.get(), Some(Date::constant(2027, 12, 24)));
+    teksilo_i18n::thread_local::clear();
+}
+
+// ── The field that takes focus is named ───────────────────────────
+
+#[test]
+fn the_field_focus_lands_on_is_named() {
+    // Focus lands on the field inside the date input, and that field had no
+    // name: Orca said "entry 05/02/2026", with the name on a wrapper it does
+    // not speak. The field carries the date input's name, and what an
+    // application names the date input with reaches it too.
+    use crate::common::heard_test::{Heard, Listener};
+    for (edit, name) in [
+        (
+            Box::new(|e: DateEdit| e) as Box<dyn FnOnce(DateEdit) -> DateEdit>,
+            "Date",
+        ),
+        (
+            Box::new(|e: DateEdit| e.label(lit!("Due date"))),
+            "Due date",
+        ),
+    ] {
+        use crate::common::locale_switch_test::speaking;
+        let (_mgr, mut tree) = speaking("en-US");
+        let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+        let id = tree.add(edit(DateEdit::new(value)));
+        laid_out(&mut tree);
+        let mut listener = Listener::attach(&mut tree);
+        focus_field(&mut tree, id);
+        laid_out(&mut tree);
+        assert_eq!(listener.heard(&mut tree), vec![Heard::Focus(name.into())]);
+        teksilo_i18n::thread_local::clear();
+    }
+}
+
+#[test]
+fn an_accessible_label_given_to_the_date_input_names_the_field() {
+    // `access_label` and a form's `labelled_by` land on the id an application
+    // holds, the date input's. The field that takes focus stands for it.
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let (_mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value).access_label(lit!("Birthday")));
+    laid_out(&mut tree);
+    let mut listener = Listener::attach(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("Birthday".into())]
     );
     teksilo_i18n::thread_local::clear();
 }

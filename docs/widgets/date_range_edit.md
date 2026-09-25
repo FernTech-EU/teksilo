@@ -50,9 +50,13 @@ to from booking sites and analytics dashboards.
   by words in the tree's locale ("du vendredi premier mai 2026 au mardi
   5 mai 2026", "Friday, May 1, 2026 to Tuesday, May 5, 2026"), the same
   `calendar-date-range` message the range calendar speaks.
-- Each `TextInputField` carries its own AT node, re-roled to
-  `Role::DateInput` and named for its half; the wrapper's
-  `Role::DateInput` provides the range semantics.
+- Each `TextInputField` carries its own AT node, a `Role::TextInput`
+  named for its half ("Start date", "End date"); the wrapper's
+  `Role::DateInput` provides the range semantics. A half re-roled
+  `Role::DateInput` reached Orca as a date editor, which it reads
+  without its text.
+- The calendar opens on the start the field holds, on its days, with
+  no range begun, whatever an earlier opening left.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.

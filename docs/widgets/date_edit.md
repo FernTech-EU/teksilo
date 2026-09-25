@@ -48,7 +48,16 @@ popover anchored below the field for graphical date selection.
   container node above, not on the button.
 - Internally the editing surface remains a `Role::TextInput` for
   AT discoverability (so screen readers know it accepts text); the
-  wrapper carries the DateInput role on the outer node.
+  wrapper carries the DateInput role on the outer node. The field is
+  where focus lands, so it carries the same name, and it is the
+  composite's
+  `accessibility_proxy`:
+  an `access_label` or an `access_described_by` given to the `DateEdit`
+  lands on the field. A `labelled_by` relation (a `FormLayout` row's)
+  lands there too, but AccessKit reads a node's own name before its
+  relations, so name a date field in a form with `.label()`.
+- The calendar opens on the date the field holds (the text typed in it
+  is committed first), on its days, whatever an earlier opening left.
 
 # Example
 

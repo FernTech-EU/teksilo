@@ -29,7 +29,13 @@
 //! - Container — `Role::TimeInput` with `set_value` formatted as
 //!   `HH:MM:SS` and `set_label` from `.label()`.
 //! - Underlying TextInputField keeps `Role::TextInput` so AT knows
-//!   it's editable.
+//!   it's editable. It is where focus lands, so it carries the same name
+//!   (the `.label()`, or "Time"), and it is the composite's
+//!   [`accessibility_proxy`](teksilo_core::widget::Widget::accessibility_proxy):
+//!   what an application gives the `TimeEdit` (`access_label`,
+//!   `access_described_by`) lands on the field. As on `DateEdit`, the
+//!   field's own name is read before a `labelled_by` relation, so name a
+//!   time field in a form with `.label()`.
 //!
 //! ```ignore
 //! use teksilo_core::signal::Signal;
@@ -129,6 +135,9 @@ pub struct TimeEdit {
     feedback: Signal<ValidationFeedback>,
     style_override: Option<teksilo_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
+    /// The inner field's id once built: the node focus lands on, which
+    /// stands for this widget (`accessibility_proxy`).
+    field_id: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
     /// the last call wins.
@@ -172,6 +181,7 @@ impl TimeEdit {
             feedback: Signal::new(ValidationFeedback::Pristine),
             style_override: None,
             root_child_id: None,
+            field_id: std::rc::Rc::new(std::cell::Cell::new(None)),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -601,9 +611,15 @@ impl Widget for TimeEdit {
                     commit(ctx_evt);
                 }
             });
-        if let Some(label) = self.label.clone() {
-            text_input = text_input.label(label);
-        }
+        // The field is where focus lands, so it carries the name, the
+        // default one included: only an explicit `.label()` used to reach it,
+        // and two time fields side by side were both read as "entry".
+        text_input = text_input.label(
+            self.label
+                .clone()
+                .unwrap_or_else(|| localized(|| resolve_message_widget("time-edit-name", &[]))),
+        );
+        self.field_id = text_input.field_id();
 
         let caret_for_step = text_input.caret_position();
         let caret_setter_for_step = text_input.caret_setter();
@@ -759,6 +775,12 @@ impl Widget for TimeEdit {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+
+    /// The field stands for the time input: what an application attaches to
+    /// the `TimeEdit`'s id lands on the node that holds focus.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.field_id.get()
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

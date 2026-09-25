@@ -38,6 +38,18 @@
 //!   - Escape: in range mode mid-selection, cancel anchor; otherwise
 //!     bubble (popover hosts close).
 //!   - `T`: jump focus to today.
+//! - **Keyboard in the months and years views**: the cursor is the month
+//!   (or year) shown, highlighted in the grid.
+//!   - Arrow keys: move by one month (year) across a row, by a row of three
+//!     up and down.
+//!   - PageUp / PageDown: a year back or on (a decade in the years view).
+//!   - Enter / Space: open the month under the cursor on its days (the year
+//!     on its months). Nothing is selected.
+//!   - Escape: back to the days of the month under the cursor. A date
+//!     field's popup takes Escape first and closes, and opens again on its
+//!     days.
+//!   - Activating the header title zooms out and takes the keyboard into the
+//!     grid, on the month (year) shown.
 //!
 //! # Accessibility
 //!
@@ -70,8 +82,13 @@
 //!   ("Previous month", "Next month") and `Action::Click` advertised.
 //! - Header month/year label: `Role::Button`, a `Ghost` `Button` whose
 //!   activation demotes [`CalendarMode`] one level, swapping the body for
-//!   the coarser grid in place; no popup is opened. Its name is its title:
-//!   the month and year, the year, or the decade in words ("2020 to 2029").
+//!   the coarser grid in place, and moves focus to the grid; no popup is
+//!   opened. Its name is its title: the month and year, the year, or the
+//!   decade in words ("2020 to 2029").
+//! - Month and year cells of the zoomed views: `Role::GridCell`, a month
+//!   named with its year ("mai 2026"), `Action::Click` advertised, no Tab
+//!   stop of their own: the grid names the one under the cursor as its
+//!   active descendant, as it does a day.
 //! - Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
 //!   labelled with the long weekday name (e.g. "Monday").
 //! - Weeks: `Role::Row`, each holding its seven day cells, so the grid is
@@ -278,6 +295,10 @@ pub struct Calendar {
     /// by every build of the day grid. `accessibility()` finds the cell
     /// under the cursor here to name it as the active descendant.
     day_cells: DayCells,
+    /// The months view's cells, by month number, and the years view's, by
+    /// year: where `accessibility()` finds the one under the cursor there.
+    month_cells: zoom_grid::ZoomCells,
+    year_cells: zoom_grid::ZoomCells,
     // Build state
     root_child_id: Option<WidgetId>,
 }
@@ -328,6 +349,8 @@ impl Calendar {
             lang: date_locale(None),
             focused: Signal::new(false),
             day_cells: DayCells::default(),
+            month_cells: zoom_grid::ZoomCells::default(),
+            year_cells: zoom_grid::ZoomCells::default(),
             root_child_id: None,
         }
     }
@@ -446,6 +469,76 @@ impl Calendar {
     pub fn mode_signal(&self) -> Signal<CalendarMode> {
         self.mode.clone()
     }
+
+    /// What a host that shows this calendar in a popup sets on each opening.
+    /// Take it once the date bounds are set: they clamp the day it opens on.
+    pub(crate) fn opening(&self) -> CalendarOpening {
+        CalendarOpening {
+            visible_month: self.visible_month.clone(),
+            focused_date: self.focused_date.clone(),
+            mode: self.mode.clone(),
+            anchor: match &self.selection {
+                SelectionBinding::Single(_) => None,
+                SelectionBinding::Range { anchor, .. } => Some(anchor.clone()),
+            },
+            min_date: self.min_date,
+            max_date: self.max_date,
+        }
+    }
+}
+
+/// The part of a calendar's state a date field puts back each time it opens
+/// the calendar in its popup.
+///
+/// A date field builds its calendar once and keeps it between openings, and
+/// with it the day under the cursor, the month shown and the view. Left
+/// alone, an opening shows wherever the last one was left, which is not the
+/// date the field holds: a step taken in the field, or a cursor moved and
+/// abandoned with Escape, and the calendar opens on another day, which Enter
+/// then writes over the field's value. Closed from the months view, it
+/// reopens on the months, with no day to pick. A range calendar closed with
+/// one end picked (Escape closes the popup before the calendar can drop that
+/// end) kept it, and one Enter in the next opening wrote a range from that
+/// abandoned day to the cursor over the field's.
+#[derive(Clone)]
+pub(crate) struct CalendarOpening {
+    visible_month: Signal<YearMonth>,
+    focused_date: Signal<Date>,
+    mode: Signal<CalendarMode>,
+    /// A range calendar's first end, picked and waiting for the other.
+    anchor: Option<Signal<Option<Date>>>,
+    min_date: Option<Date>,
+    max_date: Option<Date>,
+}
+
+impl CalendarOpening {
+    /// Show the days of `date`'s month with the cursor on `date`, or on today
+    /// when the field holds no date, kept within the calendar's bounds, with
+    /// no range begun.
+    pub(crate) fn open_on(&self, date: Option<Date>) {
+        if let Some(anchor) = &self.anchor
+            && anchor.get().is_some()
+        {
+            anchor.set(None);
+        }
+        let mut day = date.unwrap_or_else(today_local);
+        if let Some(min) = self.min_date {
+            day = day.max(min);
+        }
+        if let Some(max) = self.max_date {
+            day = day.min(max);
+        }
+        if self.mode.get() != CalendarMode::Days {
+            self.mode.set(CalendarMode::Days);
+        }
+        let month = YearMonth::from_date(day);
+        if self.visible_month.get() != month {
+            self.visible_month.set(month);
+        }
+        if self.focused_date.get() != day {
+            self.focused_date.set(day);
+        }
+    }
 }
 
 impl Widget for Calendar {
@@ -509,6 +602,7 @@ impl Widget for Calendar {
                 self.on_month_changed.clone(),
                 self.lang.clone(),
                 self.focused.clone(),
+                self_id,
             ))
         } else {
             // Empty placeholder so layout shape stays consistent.
@@ -552,16 +646,22 @@ impl Widget for Calendar {
         // calendar's outer width stays constant across mode flips.
         let zoom_cell_height = (cal_recipe::CALENDAR_CELL_SIZE * 1.4).max(36.0) * scale;
         let zoom_cell_width = (cal_recipe::CALENDAR_CELL_SIZE * 7.0 / 3.0).max(64.0) * scale;
+        let zoom = zoom_grid::Zoom {
+            visible_month: self.visible_month.clone(),
+            focused_date: self.focused_date.clone(),
+            mode: self.mode.clone(),
+        };
         let months_body = zoom_grid::MonthsGrid::new(
-            self.visible_month.clone(),
-            self.mode.clone(),
+            zoom.clone(),
+            self.month_cells.clone(),
+            self.lang.clone(),
             enabled,
             zoom_cell_width,
             zoom_cell_height,
         );
         let years_body = zoom_grid::YearsGrid::new(
-            self.visible_month.clone(),
-            self.mode.clone(),
+            zoom,
+            self.year_cells.clone(),
             enabled,
             zoom_cell_width,
             zoom_cell_height,
@@ -673,6 +773,7 @@ impl Widget for Calendar {
         let key_handler = build_keyboard_handler(
             self.visible_month.clone(),
             self.focused_date.clone(),
+            self.mode.clone(),
             self.selection.clone(),
             self.min_date,
             self.max_date,
@@ -825,18 +926,31 @@ impl Widget for Calendar {
         // cursor was, reaches no AT-SPI interface. It is `ListView`'s current
         // row again (see `list_view/widget_impl.rs`), and gated the same way:
         // only while the grid holds focus, since a container without focus
-        // has no descendant to speak of; and only in the day view, since in
-        // the month or year view the day cells are not on screen and the
-        // grid itself is what has focus. A cursor on a day the grid did not
+        // has no descendant to speak of. A cursor on a day the grid did not
         // build names nothing, and the grid stays the focus.
+        //
+        // The months and years views name their cell under the cursor the
+        // same way: the month or year shown. They named nothing before, and
+        // the grid itself took focus there, so a reader zoomed out onto a
+        // view where no key they pressed was ever heard.
+        let under_cursor = match self.mode.get() {
+            CalendarMode::Days => {
+                let cursor = self.focused_date.get();
+                self.day_cells
+                    .borrow()
+                    .iter()
+                    .find(|(date, _)| *date == cursor)
+                    .map(|(_, cell)| *cell)
+            }
+            CalendarMode::Months => {
+                zoom_grid::cell_for(&self.month_cells, self.visible_month.get().month().into())
+            }
+            CalendarMode::Years => {
+                zoom_grid::cell_for(&self.year_cells, self.visible_month.get().year())
+            }
+        };
         if self.focused.get()
-            && self.mode.get() == CalendarMode::Days
-            && let Some(cell) = self
-                .day_cells
-                .borrow()
-                .iter()
-                .find(|(date, _)| *date == self.focused_date.get())
-                .map(|(_, cell)| *cell)
+            && let Some(cell) = under_cursor
         {
             builder.set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(cell));
         }
@@ -846,11 +960,11 @@ impl Widget for Calendar {
         // heard, now that the day under it takes the platform's focus: UIA
         // and macOS raise its value-changed event on the grid, which is not
         // that focus any more, and AT-SPI carries a string value on no
-        // interface. It stays for a client that reads the grid, and for the
-        // month and year views, where the grid itself has focus. The words
-        // around the dates are the framework's messages, and a range is
-        // joined by words (`calendar-date-range`), not an en-dash some
-        // readers skip.
+        // interface. It stays for a client that reads the grid; the month
+        // and year views name their cell under the cursor as the focus too.
+        // The words around the dates are the framework's messages, and a
+        // range is joined by words (`calendar-date-range`), not an en-dash
+        // some readers skip.
         let cursor = self.focused_date.get();
         let focused = full_date(cursor, &self.lang);
         let value_text = match &self.selection {
@@ -1294,6 +1408,7 @@ impl Widget for CalendarBody {
 fn build_keyboard_handler(
     visible_month: Signal<YearMonth>,
     focused_date: Signal<Date>,
+    mode: Signal<CalendarMode>,
     selection: SelectionBinding,
     min_date: Option<Date>,
     max_date: Option<Date>,
@@ -1313,6 +1428,19 @@ fn build_keyboard_handler(
         let WidgetEvent::KeyDown { key, modifiers, .. } = event else {
             return EventResponse::Ignored;
         };
+        // The months and years views have keys of their own. The day keys
+        // below used to run there too, on a day grid nobody could see: an
+        // arrow moved its cursor in silence and Enter wrote that day into the
+        // selection. `T` alone means the same in every view.
+        let view = mode.get();
+        if view != CalendarMode::Days && !matches!(key, Key::Character('t' | 'T')) {
+            let zoom = zoom_grid::Zoom {
+                visible_month: visible_month.clone(),
+                focused_date: focused_date.clone(),
+                mode: mode.clone(),
+            };
+            return zoom.handle_key(*key, view, on_month_changed.as_ref(), ctx);
+        }
         let cur = focused_date.get();
         let mut new_focus: Option<Date> = None;
         let mut new_visible: Option<YearMonth> = None;

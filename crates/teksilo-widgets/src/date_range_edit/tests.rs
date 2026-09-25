@@ -229,3 +229,161 @@ fn the_popover_calendar_speaks_the_users_language() {
     );
     teksilo_i18n::thread_local::clear();
 }
+
+#[test]
+fn the_calendar_opens_on_the_start_the_field_holds() {
+    // Up on the start's year, then the calendar: it opened on the start the
+    // field held when it was built, not the one it holds.
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::event::{Key, Modifiers};
+    let (_mgr, mut tree) = speaking("en-US");
+    let range = Signal::new(Some(DateRange::new(
+        Date::constant(2026, 5, 2),
+        Date::constant(2026, 5, 16),
+    )));
+    let id = tree.add(DateRangeEdit::new(range.clone()));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    lay_out(&mut tree);
+    let start = tree.first_focusable_descendant(id).expect("the start");
+    tree.focus(start);
+    lay_out(&mut tree);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    lay_out(&mut tree);
+    let held = range.get().expect("a range");
+    assert_ne!(
+        (held.start, held.end),
+        (Date::constant(2026, 5, 2), Date::constant(2026, 5, 16)),
+        "the step moved the range"
+    );
+
+    let trigger = tree
+        .find_by_label("Open range calendar")
+        .expect("the trigger");
+    tree.focus(trigger);
+    lay_out(&mut tree);
+    let mut listener = Listener::attach(&mut tree);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    lay_out(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus(crate::common::datetime::written::full_date(
+            held.start,
+            &"en-US".parse().unwrap()
+        ))]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn each_half_is_an_entry_named_for_what_it_holds() {
+    // See `DateTimeEdit`'s test of the same name: a half re-roled
+    // `DateInput` reached Orca as a date editor, read without its text
+    // ("End date date editor.").
+    use crate::common::heard_test::Listener;
+    use crate::common::locale_switch_test::speaking;
+    let (_mgr, mut tree) = speaking("en-US");
+    let id = tree.add(DateRangeEdit::new(Signal::new(Some(DateRange::new(
+        Date::constant(2026, 5, 2),
+        Date::constant(2026, 5, 5),
+    )))));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    lay_out(&mut tree);
+    let _listener = Listener::attach(&mut tree);
+    let stops = tree.tab_stops_within(id);
+    let mut halves = Vec::new();
+    for stop in stops.iter().take(2) {
+        tree.focus(*stop);
+        lay_out(&mut tree);
+        let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+        let focus = platform.state().focus().expect("a focus");
+        halves.push((focus.role(), focus.label().unwrap_or_default()));
+    }
+    assert_eq!(
+        halves,
+        vec![
+            (
+                teksilo_core::accesskit::Role::TextInput,
+                "Start date".to_string()
+            ),
+            (
+                teksilo_core::accesskit::Role::TextInput,
+                "End date".to_string()
+            ),
+        ]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_range_begun_and_abandoned_is_not_finished_by_the_next_opening() {
+    // Enter on a day parks the range's first end, and Escape closes the
+    // popup before the calendar sees it, so nothing drops that end. The next
+    // opening kept it, and one Enter there wrote a range from the abandoned
+    // day to the cursor over the field's, and closed the popup.
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::event::{Key, Modifiers};
+    let (_mgr, mut tree) = speaking("en-US");
+    let held = DateRange::new(Date::constant(2026, 5, 2), Date::constant(2026, 5, 16));
+    let range = Signal::new(Some(held));
+    tree.add(DateRangeEdit::new(range.clone()));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    let press = |tree: &mut WidgetTree, key: Key| {
+        tree.press_key(key, Modifiers::NONE);
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        });
+    };
+    lay_out(&mut tree);
+    let trigger = tree
+        .find_by_label("Open range calendar")
+        .expect("the trigger");
+    tree.focus(trigger);
+    lay_out(&mut tree);
+    press(&mut tree, Key::Space);
+    press(&mut tree, Key::ArrowRight);
+    press(&mut tree, Key::Enter);
+    assert_eq!(range.get(), Some(held), "one end picked: no range yet");
+    let in_the_grid = |tree: &WidgetTree| {
+        tree.focused().is_some_and(|f| {
+            tree.accessibility_node(f).role() == teksilo_core::accesskit::Role::Grid
+        })
+    };
+    assert!(
+        in_the_grid(&tree),
+        "the calendar is open, the keyboard in it"
+    );
+    press(&mut tree, Key::Escape);
+    assert!(!in_the_grid(&tree), "Escape closed the calendar");
+
+    tree.focus(trigger);
+    lay_out(&mut tree);
+    press(&mut tree, Key::Space);
+    press(&mut tree, Key::Enter);
+    assert_eq!(
+        range.get(),
+        Some(held),
+        "a new opening begins a new range: one Enter picks one end"
+    );
+    assert!(
+        in_the_grid(&tree),
+        "the calendar stays open for the other end"
+    );
+    teksilo_i18n::thread_local::clear();
+}

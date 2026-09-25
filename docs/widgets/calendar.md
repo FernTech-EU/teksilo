@@ -42,6 +42,18 @@ Used standalone for event apps and scheduling, and embedded in
   - Escape: in range mode mid-selection, cancel anchor; otherwise
     bubble (popover hosts close).
   - `T`: jump focus to today.
+- **Keyboard in the months and years views**: the cursor is the month
+  (or year) shown, highlighted in the grid.
+  - Arrow keys: move by one month (year) across a row, by a row of three
+    up and down.
+  - PageUp / PageDown: a year back or on (a decade in the years view).
+  - Enter / Space: open the month under the cursor on its days (the year
+    on its months). Nothing is selected.
+  - Escape: back to the days of the month under the cursor. A date
+    field's popup takes Escape first and closes, and opens again on its
+    days.
+  - Activating the header title zooms out and takes the keyboard into the
+    grid, on the month (year) shown.
 
 # Accessibility
 
@@ -74,8 +86,13 @@ assembled from numbers or from translated names (see
   ("Previous month", "Next month") and `Action::Click` advertised.
 - Header month/year label: `Role::Button`, a `Ghost` `Button` whose
   activation demotes `CalendarMode` one level, swapping the body for
-  the coarser grid in place; no popup is opened. Its name is its title:
-  the month and year, the year, or the decade in words ("2020 to 2029").
+  the coarser grid in place, and moves focus to the grid; no popup is
+  opened. Its name is its title: the month and year, the year, or the
+  decade in words ("2020 to 2029").
+- Month and year cells of the zoomed views: `Role::GridCell`, a month
+  named with its year ("mai 2026"), `Action::Click` advertised, no Tab
+  stop of their own: the grid names the one under the cursor as its
+  active descendant, as it does a day.
 - Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
   labelled with the long weekday name (e.g. "Monday").
 - Weeks: `Role::Row`, each holding its seven day cells, so the grid is

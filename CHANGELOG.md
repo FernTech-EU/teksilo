@@ -298,6 +298,38 @@ by crate for clarity, not because crates version independently.
   switch by Tab, named by its row ("Anonymous usage metrics", "Crash
   reports", "Feature flags") and read with its state. Release builds did not
   crash.
+- **A date field's calendar wrote a date over the field that the user had not
+  chosen.** The calendar of a `DateEdit`, a `DateTimeEdit` or a
+  `DateRangeEdit` opened on the date the field held when it was built, or
+  wherever the last opening had left its cursor, or on the months view it was
+  closed on, and Enter wrote that day over the field's value without a word.
+  It now opens on the date the field holds (for a `DateRangeEdit`, the start;
+  for a `DateEdit`, the text typed in it counts), in the day view, and the
+  reader hears that day. A `DateRangeEdit`'s calendar closed with one end of
+  a range picked kept that end, and one Enter in the next opening wrote a
+  range from it to the cursor over the field's and closed the calendar; each
+  opening now begins a new range.
+- **A calendar's months and years views could not be used from the keyboard
+  or by a screen reader.** There the arrows moved the cursor of a day grid no
+  one could see, in silence, and Enter or Space selected that hidden day.
+  Now the arrows move over the months (the years), each heard with its year
+  ("May 2026"), PageUp and PageDown move a year (a decade), Enter or Space
+  opens the one under the cursor, and Escape goes back to the days; nothing
+  is selected on the way. Activating the title takes the keyboard into the
+  grid, on the month shown. A month or a year offers a screen reader's click,
+  and they are one Tab stop, the grid's, where each month was a stop of its
+  own. The years view follows the cursor, or a header arrow, into the next
+  decade. **Behaviour change**: a month cell is named with its year.
+- **The fields of the date and time editors were read without a name, or
+  without their date.** The field focus lands on in a `DateEdit` or a
+  `TimeEdit` had no name, so Orca said "entry 05/02/2026"; it now carries the
+  editor's `.label()`, or "Date" and "Time", and an `access_label` or
+  `access_described_by` given to the editor reaches it. A `DateTimeEdit`'s
+  parts and a `DateRangeEdit`'s halves reached Orca as date editors, read
+  without their text ("End date date editor."); they are now entries, read
+  with their date or time. **Behaviour change**: those parts are
+  `Role::TextInput`, no longer `Role::DateInput` or `Role::TimeInput`; the
+  editor around them keeps its date role.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

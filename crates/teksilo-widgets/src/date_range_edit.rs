@@ -46,9 +46,13 @@
 //!   by words in the tree's locale ("du vendredi premier mai 2026 au mardi
 //!   5 mai 2026", "Friday, May 1, 2026 to Tuesday, May 5, 2026"), the same
 //!   `calendar-date-range` message the range calendar speaks.
-//! - Each `TextInputField` carries its own AT node, re-roled to
-//!   `Role::DateInput` and named for its half; the wrapper's
-//!   `Role::DateInput` provides the range semantics.
+//! - Each `TextInputField` carries its own AT node, a `Role::TextInput`
+//!   named for its half ("Start date", "End date"); the wrapper's
+//!   `Role::DateInput` provides the range semantics. A half re-roled
+//!   `Role::DateInput` reached Orca as a date editor, which it reads
+//!   without its text.
+//! - The calendar opens on the start the field holds, on its days, with
+//!   no range begun, whatever an earlier opening left.
 //!
 //! ```ignore
 //! // Requires ctx.signal() — shown as ignore per convention.
@@ -486,6 +490,7 @@ impl Widget for DateRangeEdit {
         if let Some(fdow) = self.first_day_of_week {
             cal = cal.first_day_of_week(fdow);
         }
+        let opening = cal.opening();
         // Detached rather than a child, and owned rather than orphaned — see
         // `DateEdit`'s calendar for why both halves matter.
         // Built the first time the popup is opened, not on every rebuild of the
@@ -502,6 +507,7 @@ impl Widget for DateRangeEdit {
             })
         };
         let trigger_enabled = self.enabled.as_signal().map(move |on| *on && !read_only);
+        let range = self.value.clone();
         let trigger_btn = IconButton::new(calendar_glyph_icon(de::CALENDAR_ICON_SIZE))
             .embedded()
             .size(IconButtonSize::Default)
@@ -514,6 +520,9 @@ impl Widget for DateRangeEdit {
                     popover_open.set(false);
                     ctx_evt.dismiss_all_except_hosts();
                 } else {
+                    // On the start the field holds, with no range begun,
+                    // whatever the last opening left; see `DateEdit`'s calendar.
+                    opening.open_on(range.get().map(|r| r.start));
                     popover_open.set(true);
                     // Build the popup if this is its first open, before the overlay
                     // below is measured against it and focus moves into it.
@@ -949,14 +958,15 @@ impl DateRangeEdit {
         let caret = field.caret_position();
         let caret_setter = field.caret_setter();
 
-        // A11y: TimeInput-like role + the half's name for screen readers.
+        // A11y: an editable text field named for its half, which a reader
+        // reads with its text. It was re-roled `Role::DateInput`, which the
+        // AT-SPI adapter hands a reader as a date editor, and Orca reads a
+        // date editor without its text: "End date date editor.".
         let half_label_key = match kind {
             HalfKind::Start => "date-range-edit-start-name",
             HalfKind::End => "date-range-edit-end-name",
         };
-        let field_with_a11y = field
-            .access_role(Role::DateInput)
-            .access_label(resolve_message_widget(half_label_key, &[]));
+        let field_with_a11y = field.access_label(resolve_message_widget(half_label_key, &[]));
         let field_id = ctx.add(field_with_a11y);
 
         // Padding around the field for visual alignment with the
@@ -1036,7 +1046,7 @@ impl DateRangeEdit {
             },
         ));
         // (layout wrapper, inner editable field) so the caller can wire
-        // `described_by` onto the node carrying Role::DateInput.
+        // `described_by` onto the editable node itself.
         (stepping_id, field_id)
     }
 }

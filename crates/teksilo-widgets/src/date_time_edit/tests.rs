@@ -251,3 +251,92 @@ fn the_popover_calendar_speaks_the_users_language() {
     );
     teksilo_i18n::thread_local::clear();
 }
+
+#[test]
+fn the_calendar_opens_on_the_date_the_date_part_holds() {
+    // Up on the date part, then the calendar: it opened on the day the field
+    // held when it was built, and Enter wrote that day back, keeping the time.
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::event::{Key, Modifiers};
+    let (_mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(make_dt()));
+    let id = tree.add(DateTimeEdit::new(value.clone()));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    lay_out(&mut tree);
+    let date_part = tree.first_focusable_descendant(id).expect("the date part");
+    tree.focus(date_part);
+    lay_out(&mut tree);
+    tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    lay_out(&mut tree);
+    let held = value.get().expect("a value");
+    assert_ne!(
+        held.date(),
+        Date::constant(2026, 5, 2),
+        "the step moved the date"
+    );
+
+    let trigger = tree.find_by_label("Open calendar").expect("the trigger");
+    tree.focus(trigger);
+    lay_out(&mut tree);
+    let mut listener = Listener::attach(&mut tree);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    lay_out(&mut tree);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus(crate::common::datetime::written::full_date(
+            held.date(),
+            &"en-US".parse().unwrap()
+        ))]
+    );
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    lay_out(&mut tree);
+    assert_eq!(value.get(), Some(held), "Enter keeps the date and the time");
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn each_part_is_an_entry_named_for_what_it_holds() {
+    // The two parts were re-roled `DateInput` and `TimeInput`, which the
+    // AT-SPI adapter hands a reader as a date editor
+    // (`accesskit_atspi_common` `node.rs`, `Role::DateInput |
+    // Role::DateTimeInput | Role::TimeInput => AtspiRole::DateEditor`), and
+    // Orca 46.1 reads a date editor by its name and role alone, with no
+    // text: "Date date editor." (`formatting.py`, the `default` format). A
+    // part is an editable text field, which a reader reads with its text;
+    // the date and time semantics stay on the `DateTimeInput` around them.
+    use crate::common::heard_test::Listener;
+    use crate::common::locale_switch_test::speaking;
+    let (_mgr, mut tree) = speaking("en-US");
+    let id = tree.add(DateTimeEdit::new(Signal::new(Some(make_dt()))));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    lay_out(&mut tree);
+    let _listener = Listener::attach(&mut tree);
+    let stops = tree.tab_stops_within(id);
+    let mut parts = Vec::new();
+    for stop in stops.iter().take(2) {
+        tree.focus(*stop);
+        lay_out(&mut tree);
+        let platform = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+        let focus = platform.state().focus().expect("a focus");
+        parts.push((focus.role(), focus.label().unwrap_or_default()));
+    }
+    assert_eq!(
+        parts,
+        vec![
+            (teksilo_core::accesskit::Role::TextInput, "Date".to_string()),
+            (teksilo_core::accesskit::Role::TextInput, "Time".to_string()),
+        ]
+    );
+    teksilo_i18n::thread_local::clear();
+}

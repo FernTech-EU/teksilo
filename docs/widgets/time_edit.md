@@ -33,7 +33,13 @@ graphical time picker).
 - Container — `Role::TimeInput` with `set_value` formatted as
   `HH:MM:SS` and `set_label` from `.label()`.
 - Underlying TextInputField keeps `Role::TextInput` so AT knows
-  it's editable.
+  it's editable. It is where focus lands, so it carries the same name
+  (the `.label()`, or "Time"), and it is the composite's
+  `accessibility_proxy`:
+  what an application gives the `TimeEdit` (`access_label`,
+  `access_described_by`) lands on the field. As on `DateEdit`, the
+  field's own name is read before a `labelled_by` relation, so name a
+  time field in a form with `.label()`.
 
 ```ignore
 use teksilo_core::signal::Signal;

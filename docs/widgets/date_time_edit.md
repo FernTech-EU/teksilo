@@ -53,9 +53,15 @@ is used to from booking sites, calendar apps, and form builders.
   May 2, 2026 at 2:35 PM"), with the seconds only when the field shows
   them. The clock is the locale's: an explicit `.time_format(...)`
   changes what the field shows, not how the value is read.
-- Each `TextInputField` keeps its own AT node, re-roled per half to
-  `Role::DateInput` / `Role::TimeInput`; the wrapper's
-  `Role::DateTimeInput` provides the datetime semantics.
+- Each `TextInputField` keeps its own AT node, a `Role::TextInput`
+  named for its half ("Date", "Time"); the wrapper's
+  `Role::DateTimeInput` provides the datetime semantics. The halves were
+  re-roled `Role::DateInput` / `Role::TimeInput`, which the AT-SPI
+  adapter hands a reader as a date editor, and Orca reads a date editor
+  by its name and role alone: "Date date editor.", never the date. An
+  editable text field is read with its text.
+- The calendar opens on the date the date half holds, on its days,
+  whatever an earlier opening left.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.

@@ -160,3 +160,44 @@ fn time_edit_re_derives_its_clock_when_the_locale_switches() {
         "fr-FR should render a 24-hour clock after the switch; got `{fr}`"
     );
 }
+
+#[test]
+fn the_field_focus_lands_on_is_named() {
+    // Focus lands on the field inside the time input, which was named only
+    // when the application called `.label()`: two time fields side by side
+    // were both "entry", their "Time" left on a wrapper Orca does not speak.
+    // The field carries the time input's name, default or given, and what
+    // an application names the time input with.
+    use crate::common::heard_test::{Heard, Listener};
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::widget_builder::WidgetBuilder;
+    use teksilo_i18n::lit;
+    let cases: [(Box<dyn Fn(TimeEdit) -> Box<dyn Widget>>, &str); 3] = [
+        (Box::new(|e| Box::new(e)), "Time"),
+        (Box::new(|e| Box::new(e.label(lit!("Start")))), "Start"),
+        (
+            Box::new(|e| Box::new(e.access_label(lit!("Alarm")))),
+            "Alarm",
+        ),
+    ];
+    for (edit, name) in cases {
+        let (_mgr, mut tree) = speaking("en-US");
+        let value = Signal::new(Some(Time::new(14, 35, 0, 0).unwrap()));
+        let id = tree.add_boxed(edit(TimeEdit::new(value)));
+        let lay_out = |tree: &mut WidgetTree| {
+            tree.layout(SizeProposal {
+                width: Some(200.0),
+                height: None,
+            })
+        };
+        lay_out(&mut tree);
+        let mut listener = Listener::attach(&mut tree);
+        let field = tree
+            .first_focusable_descendant(id)
+            .expect("a focusable field");
+        tree.focus(field);
+        lay_out(&mut tree);
+        assert_eq!(listener.heard(&mut tree), vec![Heard::Focus(name.into())]);
+        teksilo_i18n::thread_local::clear();
+    }
+}

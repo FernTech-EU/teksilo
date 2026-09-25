@@ -210,7 +210,9 @@ fn every_day_is_in_the_platform_tree_week_by_week() {
 #[test]
 fn the_grid_names_a_day_only_while_it_holds_focus_in_the_day_view() {
     // A container without focus has no descendant to speak of, and in the
-    // month or year view no day is on screen: the grid itself is the focus.
+    // month or year view no day is on screen. There the grid names the month
+    // (year) under its cursor instead; it used to name nothing and take the
+    // focus itself, on a view no key a reader pressed was heard in.
     let calendar = twelfth_of_march();
     let mode = calendar.mode_signal();
     let (_mgr, mut tree) = speaking("fr-FR");
@@ -240,13 +242,13 @@ fn the_grid_names_a_day_only_while_it_holds_focus_in_the_day_view() {
 
     mode.set(CalendarMode::Months);
     lay_out(&mut tree);
-    assert!(!grid_names_a_day(&mut tree), "no day on screen, none named");
     assert_eq!(
         platform_focus(&mut tree),
         (
-            teksilo_core::accesskit::Role::Grid,
-            "Calendrier, mars 2027".to_string()
-        )
+            teksilo_core::accesskit::Role::GridCell,
+            "mars 2027".to_string()
+        ),
+        "no day on screen: the month under the cursor is named"
     );
     teksilo_i18n::thread_local::clear();
 }
@@ -461,6 +463,211 @@ fn a_day_has_nothing_under_it_a_screen_reader_would_read_instead() {
         .filter(|(_, children)| !children.is_empty())
         .collect();
     assert!(with_children.is_empty(), "{with_children:?}");
+    teksilo_i18n::thread_local::clear();
+}
+
+// ── The months and years views, from the keyboard ───────────────
+
+/// What a test keeps of a calendar it has handed to the tree.
+struct Kept {
+    mode: Signal<CalendarMode>,
+    visible_month: Signal<YearMonth>,
+    opening: CalendarOpening,
+}
+
+/// The French grid of `focused_french_grid` on `date`, zoomed out to `mode`
+/// while it holds focus, with what the zoom said already heard.
+fn zoomed_french_grid(
+    date: Signal<Option<Date>>,
+    mode: CalendarMode,
+) -> (Rc<teksilo_i18n::I18nManager>, WidgetTree, Listener, Kept) {
+    let calendar = Calendar::single(date);
+    let kept = Kept {
+        mode: calendar.mode_signal(),
+        visible_month: calendar.visible_month_signal(),
+        opening: calendar.opening(),
+    };
+    let (mgr, mut tree, mut listener) = focused_french_grid(calendar);
+    kept.mode.set(mode);
+    lay_out(&mut tree);
+    let _ = listener.heard(&mut tree);
+    (mgr, tree, listener, kept)
+}
+
+#[test]
+fn the_months_view_never_commits_the_day_it_hides() {
+    // The day keys used to run in every view. In the months view Down moved
+    // the cursor of a day grid no one could see, and Enter wrote that day
+    // into the selection: 12 March became 19 March, silently, from a view
+    // that shows no day at all.
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    let (_mgr, mut tree, _listener, _cal) = zoomed_french_grid(date.clone(), CalendarMode::Months);
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::Enter);
+    assert_eq!(
+        date.get(),
+        Some(Date::constant(2027, 3, 12)),
+        "a month was picked; no day was"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn an_arrow_in_the_months_view_is_a_focus_change_to_the_month() {
+    // The cursor moves over the months as it does over the days: the grid
+    // names the month under it as its active descendant, so each press is
+    // a focus change to that month, and a reader hears it with its year.
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    let (_mgr, mut tree, mut listener, _cal) =
+        zoomed_french_grid(date.clone(), CalendarMode::Months);
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("avril 2027".to_string())]
+    );
+    press(&mut tree, Key::ArrowDown);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("juillet 2027".to_string())]
+    );
+    assert_eq!(date.get(), Some(Date::constant(2027, 3, 12)));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn enter_on_a_month_shows_its_days_and_escape_goes_back_to_them() {
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    let (_mgr, mut tree, mut listener, cal) =
+        zoomed_french_grid(date.clone(), CalendarMode::Months);
+    press(&mut tree, Key::ArrowRight);
+    let _ = listener.heard(&mut tree);
+    press(&mut tree, Key::Enter);
+    assert_eq!(cal.mode.get(), CalendarMode::Days);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("lundi 12 avril 2027".to_string())],
+        "Enter opens April on the day of the month the cursor was on"
+    );
+
+    // Escape leaves the months view for the days of the month under the
+    // cursor. It used to be ignored there, and nothing but a pick led back.
+    cal.mode.set(CalendarMode::Months);
+    lay_out(&mut tree);
+    let _ = listener.heard(&mut tree);
+    press(&mut tree, Key::ArrowLeft);
+    let _ = listener.heard(&mut tree);
+    press(&mut tree, Key::Escape);
+    assert_eq!(cal.mode.get(), CalendarMode::Days);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("vendredi 12 mars 2027".to_string())]
+    );
+    assert_eq!(date.get(), Some(Date::constant(2027, 3, 12)));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_month_is_a_screen_readers_click_and_no_tab_stop() {
+    // The months had an activation no reader was told of (no `Click` on
+    // AT-SPI), and each was a Tab stop of its own: twelve stops from January,
+    // where the day grid is one. Now they are the grid's, like the days.
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    let (_mgr, mut tree, _listener, cal) = zoomed_french_grid(date, CalendarMode::Months);
+    let june = tree
+        .find_by_label("juin 2027")
+        .expect("June, named with its year");
+    assert!(
+        tree.accessibility_node(june)
+            .actions()
+            .contains(&teksilo_core::accesskit::Action::Click),
+        "a month offers a click"
+    );
+    let root = tree.focused().expect("the grid holds focus");
+    assert!(
+        !tree.tab_stops_within(root).iter().any(|id| {
+            tree.accessibility_node(*id).role() == teksilo_core::accesskit::Role::GridCell
+        }),
+        "no month is a Tab stop"
+    );
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Click,
+        target: Some(june),
+        target_node: teksilo_core::accessibility::root_node_id(),
+        data: None,
+    });
+    lay_out(&mut tree);
+    assert_eq!(cal.mode.get(), CalendarMode::Days);
+    assert_eq!(cal.visible_month.get(), YearMonth::new(2027, 6));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_title_takes_the_keyboard_into_the_months() {
+    // The title zoomed out and kept focus, so the arrows that followed moved
+    // a cursor the reader had no way to follow: all that was heard was the
+    // title's new name, "2027".
+    let (_mgr, mut tree, mut listener) = focused_french_grid(twelfth_of_march());
+    let title = tree.find_by_label("mars 2027").expect("the title");
+    tree.focus(title);
+    lay_out(&mut tree);
+    let _ = listener.heard(&mut tree);
+    press(&mut tree, Key::Space);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("mars 2027".to_string())],
+        "focus goes to March, in the months of 2027"
+    );
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("avril 2027".to_string())]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_years_view_follows_the_cursor_into_the_next_decade() {
+    // The years on show were laid out once, for the decade shown first, so a
+    // year past it had no cell for the grid to name: moving there was silent
+    // and the grid showed the decade before.
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    let (_mgr, mut tree, mut listener, cal) = zoomed_french_grid(date, CalendarMode::Years);
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("2028".to_string())]
+    );
+    for year in ["2029", "2030", "2031"] {
+        press(&mut tree, Key::ArrowRight);
+        assert_eq!(
+            listener.heard(&mut tree),
+            vec![Heard::Focus(year.to_string())]
+        );
+    }
+    press(&mut tree, Key::Enter);
+    assert_eq!(cal.mode.get(), CalendarMode::Months);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("mars 2031".to_string())],
+        "Enter opens the year's months, on the month shown"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_hosts_opening_puts_the_calendar_back_on_a_day() {
+    // What a date field does each time it opens its calendar: the cursor on
+    // the field's date, its month shown, and the day view, whatever the last
+    // opening left.
+    let date = Signal::new(Some(Date::constant(2027, 3, 12)));
+    let (_mgr, mut tree, mut listener, cal) = zoomed_french_grid(date, CalendarMode::Years);
+    cal.opening.open_on(Some(Date::constant(2031, 7, 4)));
+    lay_out(&mut tree);
+    assert_eq!(cal.mode.get(), CalendarMode::Days);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("vendredi 4 juillet 2031".to_string())]
+    );
     teksilo_i18n::thread_local::clear();
 }
 
@@ -1217,32 +1424,26 @@ fn zoom_cell_label_is_hidden_from_accessibility_tree() {
     });
     let update = tree.sync_accessibility();
 
-    // Without a registered i18n manager, resolution falls back to the
-    // literal Fluent key — computed the same way `MonthsGrid::build`
-    // computes the cell's own label, so this matches regardless of
-    // whether a manager is installed.
-    let expected =
+    // The cell is named with its year, written by ICU; the text drawn in it
+    // is the month alone. Without a registered i18n manager that text falls
+    // back to the literal Fluent key, computed the same way `MonthsGrid::build`
+    // computes it, so this matches whether a manager is installed or not.
+    let name = month_and_year(YearMonth::new(2026, 5), &date_locale(None));
+    let drawn =
         teksilo_i18n::resolve_message_widget(crate::common::datetime::month_long_key(5), &[]);
 
-    let cell_node = update
-        .nodes
-        .iter()
-        .find(|(_, node)| {
+    assert!(
+        update.nodes.iter().any(|(_, node)| {
             node.role() == teksilo_core::accesskit::Role::GridCell
-                && node.label() == Some(expected.as_str())
-        })
-        .map(|(_, node)| node)
-        .expect("May zoom cell present in AT update");
-    assert_eq!(
-        cell_node.label(),
-        Some(expected.as_str()),
+                && node.label() == Some(name.as_str())
+        }),
         "hiding the embedded label must not take the cell's own name away with it",
     );
 
     assert!(
         !update.nodes.iter().any(
             |(_, node)| node.role() == teksilo_core::accesskit::Role::Label
-                && node.label() == Some(expected.as_str())
+                && node.label() == Some(drawn.as_str())
         ),
         "the zoom cell's embedded label must not survive as a duplicate-named node",
     );

@@ -44,7 +44,16 @@
 //!   container node above, not on the button.
 //! - Internally the editing surface remains a `Role::TextInput` for
 //!   AT discoverability (so screen readers know it accepts text); the
-//!   wrapper carries the DateInput role on the outer node.
+//!   wrapper carries the DateInput role on the outer node. The field is
+//!   where focus lands, so it carries the same name, and it is the
+//!   composite's
+//!   [`accessibility_proxy`](teksilo_core::widget::Widget::accessibility_proxy):
+//!   an `access_label` or an `access_described_by` given to the `DateEdit`
+//!   lands on the field. A `labelled_by` relation (a `FormLayout` row's)
+//!   lands there too, but AccessKit reads a node's own name before its
+//!   relations, so name a date field in a form with `.label()`.
+//! - The calendar opens on the date the field holds (the text typed in it
+//!   is committed first), on its days, whatever an earlier opening left.
 //!
 //! # Example
 //!
@@ -192,6 +201,9 @@ pub struct DateEdit {
     /// Whether the calendar popover is currently open. Drives
     /// `set_expanded` on the trigger.
     popover_open: Signal<bool>,
+    /// The inner field's id once built: the node focus lands on, which
+    /// stands for this widget (`accessibility_proxy`).
+    field_id: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
     /// the last call wins.
@@ -244,6 +256,7 @@ impl DateEdit {
             text_signal: Signal::new(String::new()),
             focused: Signal::new(false),
             popover_open: Signal::new(false),
+            field_id: std::rc::Rc::new(std::cell::Cell::new(None)),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -642,6 +655,7 @@ impl Widget for DateEdit {
         // ── Calendar popover (pre-built dormant) ──────────────
         // Built before the TextInput composite so the trailing-slot
         // trigger button can capture the calendar's id.
+        let mut calendar_opening = None;
         let calendar_id_opt = if self.show_calendar_button {
             // Bridge signal: the calendar binds to a parallel
             // `Signal<Option<Date>>` so its internal cell-render +
@@ -694,6 +708,7 @@ impl Widget for DateEdit {
             if let Some(fdow) = self.first_day_of_week {
                 calendar = calendar.first_day_of_week(fdow);
             }
+            calendar_opening = Some(calendar.opening());
             // Detached, not a child: the popup must not wake or paint with the
             // field. `add_detached` records the ownership edge anyway, so the
             // calendar dies with this widget and each rebuild reaps the
@@ -734,6 +749,11 @@ impl Widget for DateEdit {
                     popover_open.set(false);
                 })
             };
+            let opening = calendar_opening
+                .clone()
+                .expect("calendar built when button enabled");
+            let value = self.value.clone();
+            let commit = commit.clone();
             let toggle: Rc<dyn Fn(&mut EventContext)> = Rc::new({
                 let popover_open = popover_open.clone();
                 move |ctx_evt: &mut EventContext| {
@@ -741,6 +761,16 @@ impl Widget for DateEdit {
                         popover_open.set(false);
                         ctx_evt.dismiss_all_except_hosts();
                     } else {
+                        // The calendar opens on the date the field holds. It
+                        // is built once and keeps its cursor, month and view
+                        // between openings, and opened wherever the last one
+                        // was left: after a step in the field, or a cursor
+                        // moved and abandoned, Enter wrote that other day
+                        // over the field's value. Text typed and not yet
+                        // committed is committed first, as leaving the field
+                        // would, since that happens only once focus moves.
+                        commit(ctx_evt);
+                        opening.open_on(value.get());
                         popover_open.set(true);
                         // Build the popup if this is its first open, before the overlay
                         // below is measured against it and focus moves into it.
@@ -838,15 +868,17 @@ impl Widget for DateEdit {
                     commit(ctx_evt);
                 }
             });
-        // NB (audit G9): the label is intentionally NOT forwarded to the inner
-        // TextInput. DateEdit's own accessibility() node (Role::DateInput)
-        // already carries the name; naming the inner TextInput too would both
-        // double-label AND give its GenericContainer semantic content, which
-        // stops the AT walker from dropping it as a presentational node — the
-        // exact cause of the redundant middle node. With no name the container
-        // is content-free and collapses, leaving the 2-node tree
-        // DateEdit(DateInput) -> TextInputField(TextInput + character runs),
-        // matching the SpinBox shape.
+        // The field is where focus lands, so it is the node a screen reader
+        // names: unnamed, Orca said "entry 05/02/2026", the name left on the
+        // `DateInput` around it, which it does not speak. `TextInput::label`
+        // names the field itself, not the composite's container, so no named
+        // middle node appears (audit G9).
+        text_input = text_input.label(
+            self.label
+                .clone()
+                .unwrap_or_else(|| localized(|| resolve_message_widget("date-edit-name", &[]))),
+        );
+        self.field_id = text_input.field_id();
         if let Some(trigger) = trigger_widget_opt {
             text_input = text_input.trailing_slot(trigger);
         }
@@ -1078,6 +1110,13 @@ impl Widget for DateEdit {
         self.root_child_id.into_iter().collect()
     }
 
+    /// The field stands for the date input: what an application attaches to
+    /// the `DateEdit`'s id (`access_label`, `access_described_by`, a
+    /// relation) lands on the node that holds focus.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.field_id.get()
+    }
+
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::DateInput);
         if let Some(ref label) = self.label {
@@ -1106,9 +1145,10 @@ impl Widget for DateEdit {
         // TextInputField (Role::TextInput) handles text entry via its own
         // TextInputField semantics; routing through both nodes would
         // double-process AT requests. The intermediate TextInput
-        // GenericContainer is dropped by the presentational-node collapse
-        // (its label is no longer forwarded — see build()), so the AT tree is
-        // exactly DateInput -> TextInput(editable) with its character runs.
+        // GenericContainer carries nothing (its label names the field, not
+        // itself) and is dropped by the presentational-node collapse, so the
+        // AT tree is exactly DateInput -> TextInput(editable) with its
+        // character runs.
         builder.set_has_popup(HasPopup::Grid);
         builder.set_expanded(self.popover_open.get());
         // Wire popup-controlled relationship when the calendar

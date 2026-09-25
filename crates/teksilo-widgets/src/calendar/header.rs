@@ -48,6 +48,8 @@ pub(crate) struct CalendarHeader {
     /// then is heard through the grid; one taken from a header button, where
     /// focus stays on the button, is announced (see `build`).
     calendar_focused: Signal<bool>,
+    /// The calendar root, which the title hands focus to as it zooms out.
+    calendar_id: WidgetId,
     root_id: Option<WidgetId>,
 }
 
@@ -65,6 +67,7 @@ impl CalendarHeader {
         on_month_changed: Option<OnMonthChanged>,
         lang: LanguageIdentifier,
         calendar_focused: Signal<bool>,
+        calendar_id: WidgetId,
     ) -> Self {
         Self {
             visible_month,
@@ -73,6 +76,7 @@ impl CalendarHeader {
             on_month_changed,
             lang,
             calendar_focused,
+            calendar_id,
             root_id: None,
         }
     }
@@ -203,6 +207,11 @@ impl Widget for CalendarHeader {
             .zip(&self.mode)
             .map(move |(ym, m)| title_text(*ym, *m, &lang));
         let mode_for_action = self.mode.clone();
+        let calendar_id = self.calendar_id;
+        // Zooming out takes the keyboard into the grid, on the month (year)
+        // shown, which the grid names as the focus. Focus used to stay on the
+        // title, where the arrows moved a cursor nothing named and a reader
+        // heard only the title's new name, "2026".
         let title_btn = crate::button::Button::new(lit!(""))
             .label(label_signal)
             .variant(crate::button::ButtonVariant::Ghost)
@@ -211,6 +220,7 @@ impl Widget for CalendarHeader {
                 let next = cur.demote();
                 if next != cur {
                     mode_for_action.set(next);
+                    ctx_evt.request_focus(calendar_id);
                     ctx_evt.request_frame();
                 }
             });
