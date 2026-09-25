@@ -157,6 +157,16 @@ impl WidgetTree {
                 None
             })
             .unwrap_or_else(root_node_id);
+        // A composite that hands its node to a proxy hands it the focus too.
+        // An editor takes the keys on a wrapper whose node is structure and
+        // keeps its text on a body the keyboard never lands on; a reader reads
+        // the node named here when focus arrives, and `accesskit_atspi_common`
+        // sends caret and selection events only for that node
+        // (`adapter.rs:215-218`). Published on the wrapper, focus arrives on a
+        // node with no name and no text, and no caret move is ever reported.
+        let focus = Some(proxies.stand_in(focus))
+            .filter(|nid| emitted.contains(nid))
+            .unwrap_or(focus);
 
         // ── Name-from-content for row nodes ───────────────────────────
         // A virtualized row is two nodes: a thin structural wrapper
@@ -526,6 +536,12 @@ impl WidgetTree {
                     .insert(widget_id_to_node_id(id), widget_id_to_node_id(proxy_id));
             }
             None => {
+                // The menu a composite owns is offered where its node went:
+                // focus arrives here now, and the dispatcher already finds the
+                // composite's factory from here by walking up.
+                for &composite in &standing_for {
+                    self.announce_context_menu(composite, &mut builder);
+                }
                 self.apply_access_overrides(id, &mut builder);
                 for &composite in &standing_for {
                     self.apply_access_overrides(composite, &mut builder);
@@ -961,8 +977,12 @@ impl WidgetTree {
         // The walker's rule, reached from the other end: it carries the
         // composites down to their proxy, this climbs from the node to them.
         if self.live_accessibility_proxy(id).is_none() {
+            let behind = self.composites_standing_behind(id);
+            for &composite in &behind {
+                self.announce_context_menu(composite, &mut builder);
+            }
             self.apply_access_overrides(id, &mut builder);
-            for composite in self.composites_standing_behind(id) {
+            for composite in behind {
                 self.apply_access_overrides(composite, &mut builder);
             }
         }
@@ -1050,6 +1070,39 @@ impl WidgetTree {
         found
     }
 
+    /// The composite an assistive `Focus` on `id` gives the keyboard to: the
+    /// innermost focusable, enabled composite `id` stands for, when `id` is not
+    /// focusable itself.
+    ///
+    /// An editor publishes its text on a body the keyboard never lands on, and
+    /// that body is the node a screen reader sees, and the one it asks to
+    /// focus. Parking the keyboard there would pass the keys up to the editor
+    /// by bubbling but run none of its focus handlers, so no caret, no input
+    /// method and no focus ring; and asking again while the editor holds focus
+    /// would take focus away from it.
+    ///
+    /// Anything that gives the keyboard to a widget it found through the
+    /// accessibility tree asks this first: the router does for an assistive
+    /// `Focus`, and the automation toolkit does before it types.
+    pub fn focusable_composite_behind(&self, id: WidgetId) -> Option<WidgetId> {
+        if self
+            .arena
+            .get(id)
+            .is_none_or(|node| self.is_node_focusable(node))
+        {
+            return None;
+        }
+        self.composites_standing_behind(id)
+            .into_iter()
+            .find(|&composite| {
+                self.arena.is_enabled(composite)
+                    && self
+                        .arena
+                        .get(composite)
+                        .is_some_and(|node| self.is_node_focusable(node))
+            })
+    }
+
     /// The `access_disabled` override in force on `id`'s node: its own, unless
     /// it handed its node to a proxy, then those of the composites it stands
     /// for, the last one set winning as it does for every scalar override.
@@ -1112,6 +1165,20 @@ pub(super) struct ProxyLedger {
 }
 
 impl ProxyLedger {
+    /// The node standing for `nid`, through any chain of composites: `nid`
+    /// itself when no composite handed it on.
+    fn stand_in(&self, mut nid: accesskit::NodeId) -> accesskit::NodeId {
+        // A proxy is a strict descendant, so a chain never loops; the bound is
+        // there so that cannot be assumed.
+        for _ in 0..self.nodes.len() {
+            match self.nodes.get(&nid) {
+                Some(&next) => nid = next,
+                None => break,
+            }
+        }
+        nid
+    }
+
     /// Point every `controls`, `described_by` and `labelled_by` target that
     /// names a composite at the node standing for it, through any chain of
     /// composites.
@@ -1119,21 +1186,10 @@ impl ProxyLedger {
         if self.nodes.is_empty() {
             return;
         }
-        let resolve = |mut nid: accesskit::NodeId| {
-            // A proxy is a strict descendant, so a chain never loops; the
-            // bound is there so that cannot be assumed.
-            for _ in 0..self.nodes.len() {
-                match self.nodes.get(&nid) {
-                    Some(&next) => nid = next,
-                    None => break,
-                }
-            }
-            nid
-        };
         let redirected = |ids: &[accesskit::NodeId]| {
             ids.iter()
                 .any(|id| self.nodes.contains_key(id))
-                .then(|| ids.iter().map(|&id| resolve(id)).collect::<Vec<_>>())
+                .then(|| ids.iter().map(|&id| self.stand_in(id)).collect::<Vec<_>>())
         };
         for (_, node) in nodes.iter_mut() {
             if let Some(ids) = redirected(node.controls()) {

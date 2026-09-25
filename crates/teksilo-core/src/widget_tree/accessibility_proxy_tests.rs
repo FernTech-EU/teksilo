@@ -478,3 +478,194 @@ fn a_disabled_override_on_the_composite_governs_the_proxy() {
     );
     assert!(!tree.accessibility_node(field).is_disabled());
 }
+
+// ── Focus ────────────────────────────────────────────────────────────────
+//
+// The other shape a proxy takes is an editor's (`RichTextEditor`,
+// `CodeEditor`, `LogView`): the composite is the widget that takes focus and
+// the keys, and the node that holds the text is a body inside it that the
+// keyboard never lands on. A screen reader reads the node an update names as
+// focus when it arrives, and `accesskit_atspi_common` sends a caret or
+// selection event only for that node (`adapter.rs:215-218`). Focus on the
+// composite has to be published on the body, or the reader lands on a
+// structural node with no name and no text and hears no caret move after it.
+
+/// A focusable composite whose own node is structure, around a text body that
+/// takes no focus of its own: the editors' shape.
+#[derive(Debug)]
+struct TextSurface {
+    hands_on: bool,
+    body: Rc<Cell<Option<WidgetId>>>,
+}
+
+impl TextSurface {
+    fn new(hands_on: bool) -> Self {
+        Self {
+            hands_on,
+            body: Rc::new(Cell::new(None)),
+        }
+    }
+
+    fn body_slot(&self) -> Rc<Cell<Option<WidgetId>>> {
+        self.body.clone()
+    }
+}
+
+impl Widget for TextSurface {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        ctx.apply_self_handlers(HandlerSet::new().focusable(true));
+        let body = ctx.add(TextBody);
+        self.body.set(Some(body));
+        vec![body]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.body.get().into_iter().collect()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(Role::GenericContainer);
+    }
+
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.body.get().filter(|_| self.hands_on)
+    }
+}
+
+/// The text role, and the focus action a text surface offers, on a widget
+/// that is not focusable.
+#[derive(Debug)]
+struct TextBody;
+
+impl Widget for TextBody {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(Role::MultilineTextInput);
+        builder.add_action(accesskit::Action::Focus);
+    }
+}
+
+#[test]
+fn focus_on_a_composite_is_published_on_the_node_that_stands_for_it() {
+    use accesskit_consumer::{FilterResult, common_filter};
+
+    let surface = TextSurface::new(true);
+    let slot = surface.body_slot();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(surface.access_label_literal("Notes"));
+    lay_out(&mut tree);
+    tree.focus(id);
+    let body = field_of(&slot);
+
+    let update = tree.sync_accessibility();
+    let consumer = accesskit_consumer::Tree::new(update.clone(), true);
+    let state = consumer.state();
+    let focus = state.focus().expect("the consumer resolves the focus");
+    assert_eq!(
+        (focus.role(), focus.label().as_deref()),
+        (Role::MultilineTextInput, Some("Notes")),
+        "a reader must land on the node that holds the text, named by the composite, \
+         not on the composite's structural node"
+    );
+    assert_eq!(update.focus, widget_id_to_node_id(body));
+    assert_eq!(common_filter(&focus), FilterResult::Include);
+    let composite = state
+        .node_by_tree_local_id(widget_id_to_node_id(id), accesskit::TreeId::ROOT)
+        .expect("the composite's node is kept: it offers focus");
+    assert_ne!(
+        common_filter(&composite),
+        FilterResult::Include,
+        "no adapter shows the composite's node once it is not the focus"
+    );
+}
+
+#[test]
+fn a_composite_that_keeps_its_node_keeps_the_focus() {
+    // The control for the test above: the same composite, not handing on.
+    let surface = TextSurface::new(false);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(surface);
+    lay_out(&mut tree);
+    tree.focus(id);
+
+    assert_eq!(tree.sync_accessibility().focus, widget_id_to_node_id(id));
+}
+
+#[test]
+fn a_focus_request_on_the_proxy_focuses_the_composite_it_stands_for() {
+    // A screen reader asks for focus on the node it can see, which is the
+    // body. The body takes no keys and runs none of the composite's focus
+    // handlers (caret, IME, focus ring), so the keyboard belongs on the
+    // composite; the published focus is the body either way.
+    let surface = TextSurface::new(true);
+    let slot = surface.body_slot();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(surface);
+    lay_out(&mut tree);
+    let body = field_of(&slot);
+
+    let mut ops = crate::window::NoopWindowOps;
+    for _ in 0..2 {
+        // Twice: asking again while the composite holds focus must leave it
+        // there, not move the keyboard onto the body.
+        assert!(tree.dispatch_access_action(
+            widget_id_to_node_id(body),
+            accesskit::Action::Focus,
+            None,
+            &mut ops,
+        ));
+        assert_eq!(
+            tree.focused(),
+            Some(id),
+            "the keyboard lands on the composite that takes the keys"
+        );
+    }
+    assert_eq!(tree.sync_accessibility().focus, widget_id_to_node_id(body));
+}
+
+#[test]
+fn the_context_menu_the_composite_owns_is_offered_on_its_proxy() {
+    // The editors own their right-click menu on the wrapper. Once focus is
+    // published on the body, the body is where a reader looks for it.
+    let surface = TextSurface::new(true);
+    let slot = surface.body_slot();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(surface.context_menu(|_, _| None));
+    lay_out(&mut tree);
+    tree.focus(id);
+    let body = field_of(&slot);
+
+    let update = tree.sync_accessibility();
+    assert!(
+        node(&update, body)
+            .expect("the body is in the tree")
+            .supports_action(accesskit::Action::ShowContextMenu),
+        "the node focus is published on offers the composite's menu"
+    );
+    assert!(
+        tree.accessibility_node(body)
+            .actions()
+            .contains(&accesskit::Action::ShowContextMenu),
+        "and the tree's own query agrees with the walk"
+    );
+}

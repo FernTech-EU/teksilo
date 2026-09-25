@@ -130,7 +130,17 @@ and the walker then:
 - gives the proxy the tooltip the composite owns, which would otherwise
   fall to the chrome it is anchored on;
 - points every `controls` / `described_by` / `labelled_by` target naming
-  the composite at the proxy.
+  the composite at the proxy;
+- offers the context menu the composite owns on the proxy's node.
+
+The text surfaces are the other shape: `RichTextEditor`, `CodeEditor`,
+`PlainTextEditor` and `LogView` take focus and the keys on the composite
+itself, and keep their text on a body that is not focusable. A screen reader
+reads the node an update names as focus when it arrives, and the Linux
+adapter reports caret and selection moves only for that node, so while a
+composite with a proxy holds keyboard focus, the update names the proxy as
+the focus. An assistive `Focus` on a proxy that is not focusable itself puts
+the keyboard on the composite, where its focus handlers run.
 
 `accessibility_node`, `find_by_label` and `find_by_role` answer the same
 way the walk emits. Only a live, strict descendant counts, and only while

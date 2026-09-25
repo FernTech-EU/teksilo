@@ -116,6 +116,7 @@ impl std::fmt::Debug for LogDemo {
 impl LogDemo {
     fn new() -> Self {
         let log = LogView::new()
+            .label(lit!("Log"))
             .scrollback_limit(SCROLLBACK)
             .severity_highlighter(severity_color)
             .font_family("monospace");

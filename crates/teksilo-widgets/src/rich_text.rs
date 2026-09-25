@@ -93,6 +93,7 @@ use teksilo_core::styles::{
 };
 use teksilo_core::widget::{CursorIcon, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget_builder::WidgetBuilder as _;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::{
     Alignment, BlockFormat, CharVerticalAlignment, LinkExtent, ListStyle, MoveMode, ResourceType,
@@ -201,6 +202,12 @@ pub struct RichTextEditor {
     /// [`RichTextEditorStyle::make_body`]. Cached so layout queries
     /// route through the chrome without re-running the style call.
     root_child_id: Option<WidgetId>,
+    /// The body that holds the text: the node that stands for the editor
+    /// in the accessibility tree (see `Widget::accessibility_proxy`).
+    body_id: Option<WidgetId>,
+    /// Accessible name, set via [`label`](Self::label) and applied to the
+    /// body.
+    label: Option<teksilo_i18n::LocalizedString>,
     /// Vertical scrollbar child id. `None` when
     /// `v_scroll_policy == ScrollPolicy::AlwaysOff` — in that case
     /// the scrollbar isn't even instantiated.
@@ -300,6 +307,8 @@ impl RichTextEditor {
             max_lines: None,
             style_override: None,
             root_child_id: None,
+            body_id: None,
+            label: None,
             v_scrollbar_id: None,
             h_scrollbar_id: None,
             v_scrollbar_bounds: Rc::new(Cell::new(Rect::ZERO)),
@@ -308,6 +317,22 @@ impl RichTextEditor {
             overscroll_behavior: OverscrollBehavior::default(),
             touch,
         }
+    }
+
+    /// Accessible name for the editor.
+    ///
+    /// Applied to the body that holds the text, which is the node focus is
+    /// published on and the one a screen reader announces: "Notes, entry" for
+    /// an editor, "Chapter one, document" for a viewer. The editor's own node
+    /// is structure that no adapter shows. An `.access_label(..)`,
+    /// `.access_labelled_by(..)` or tooltip attached to the editor reaches the
+    /// same node.
+    ///
+    /// Stays locale-reactive: a `tr!(...)` name is re-resolved when the
+    /// locale changes, without a rebuild.
+    pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     /// Per-call style override for the editor chrome (border, padding,
@@ -3508,7 +3533,10 @@ impl EditorHandle {
 ///
 /// Handlers, focus, the context-menu factory, and per-frame ticking
 /// all live on the composing outer [`RichTextEditor`]; the body
-/// itself is non-focusable and has no event handlers. The shared
+/// itself is non-focusable and has no event handlers. It is still the
+/// node that stands for the editor in the accessibility tree
+/// (`accessibility_proxy`), so focus on the editor is published here,
+/// where the text and the caret are. The shared
 /// `state` is what links them — both widgets hold an `Rc` to the
 /// same [`EditorState`], so a key event on the wrapper mutates the
 /// state and the body re-paints on the next frame.
@@ -4020,7 +4048,14 @@ impl Widget for RichTextEditor {
             min_lines: self.min_lines,
             max_lines: self.max_lines,
         };
-        let viewport_id = ctx.add(body);
+        // The name goes on the body, the node focus is published on; see
+        // [`label`](Self::label). `LocalizedString -> Prop<String>` keeps it
+        // locale-reactive.
+        let viewport_id = match self.label.clone() {
+            Some(label) => ctx.add(body.access_label(label)),
+            None => ctx.add(body),
+        };
+        self.body_id = Some(viewport_id);
 
         // Reactive colour overrides: a signal/role-bound `ColorProp` must
         // repaint the body (the leaf that resolves + applies them in `paint`)
@@ -4284,10 +4319,15 @@ impl Widget for RichTextEditor {
         // (`MultilineTextInput` / `Document`) plus the paragraph and
         // text-run children. Without this method the wrapper would
         // emit a `Role::Unknown` node (the `AccessNodeBuilder`
-        // default), which screen readers can't classify. Same
-        // pattern as [`TextInput`](crate::TextInput), which also
-        // wraps a focusable inner field.
+        // default), which screen readers can't classify.
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+    }
+
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        // The body stands for the editor: this widget takes the keys, and the
+        // body holds the text, so focus, a name and anything an application
+        // attaches here are published on the body.
+        self.body_id
     }
 }
 

@@ -1184,8 +1184,16 @@ impl WidgetTree {
                         // not — and reported success. A node that offers no
                         // `Focus` now reports the action unhandled instead,
                         // which is the honest answer.
+                        //
+                        // A node that stands for a focusable composite (an
+                        // editor's text body, see `Widget::accessibility_proxy`)
+                        // is the composite to the assistive technology, so the
+                        // keyboard goes to the composite.
                         if self.advertises_focus_action(id) {
-                            let target = self.first_focusable_descendant(id).unwrap_or(id);
+                            let target = self
+                                .focusable_composite_behind(id)
+                                .or_else(|| self.first_focusable_descendant(id))
+                                .unwrap_or(id);
                             // An assistive move, not a scripted one: the user is
                             // navigating, so the focus ring appears exactly as it
                             // would for a Tab. `Programmatic` — what this used to

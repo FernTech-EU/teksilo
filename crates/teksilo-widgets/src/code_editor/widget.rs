@@ -41,7 +41,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::widget::{
     CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
-use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::TextDocument;
 use teksilo_text::{CursorAffinity, WrapMode};
@@ -101,6 +101,9 @@ pub struct CodeEditor {
     /// A replacement factory, taken (`Option::take`) during `build()` because a
     /// `Box<dyn Fn>` is not `Clone`.
     custom_context_menu: Option<super::context_menu::CodeContextMenuFactory>,
+    /// Accessible name, set via [`label`](CodeEditor::label) and applied to
+    /// the body.
+    label: Option<teksilo_i18n::LocalizedString>,
 }
 
 impl std::fmt::Debug for CodeEditor {
@@ -159,10 +162,26 @@ impl CodeEditor {
             touch,
             default_context_menu_enabled: true,
             custom_context_menu: None,
+            label: None,
         }
     }
 
     // --- Shared builder methods ------------------------------------------
+
+    /// Accessible name for the editor.
+    ///
+    /// Applied to the body that holds the text, which is the node focus is
+    /// published on and the one a screen reader announces ("Code, entry"). The
+    /// editor's own node is structure that no adapter shows. An
+    /// `.access_label(..)`, `.access_labelled_by(..)` or tooltip attached to
+    /// the editor reaches the same node.
+    ///
+    /// Stays locale-reactive: a `tr!(...)` name is re-resolved when the
+    /// locale changes, without a rebuild.
+    pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
 
     /// Replace the built-in right-click menu with `factory`, called on each
     /// right-click with the **window** position of the click. Returning `None`
@@ -717,7 +736,12 @@ impl Widget for CodeEditor {
         // Body — the pure-paint leaf. Always greedy: the wrapper does intrinsic
         // sizing (min/max_lines) and hands the body its final rect.
         let body = body_for(&self.state, None, None);
-        let body_id = ctx.add(body);
+        // The name goes on the body, the node focus is published on; see
+        // [`label`](CodeEditor::label).
+        let body_id = match self.label.clone() {
+            Some(label) => ctx.add(body.access_label(label)),
+            None => ctx.add(body),
+        };
         self.body_id = Some(body_id);
 
         // Reactive colour overrides repaint the body (the leaf that resolves
@@ -986,10 +1010,18 @@ impl Widget for CodeEditor {
         canvas.stroke_rect(bounds, border, 1.0);
     }
 
-    fn accessibility(&self, _builder: &mut AccessNodeBuilder) {
-        // The role, actions, and (in the a11y phase) the paragraph/run tree live
-        // on the body leaf, mirroring RichTextEditor. The wrapper stays a plain
-        // focusable container.
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The role, actions and the run tree live on the body leaf, mirroring
+        // RichTextEditor. The wrapper is structure: with the default
+        // `Role::Unknown` an adapter would show it as an unnamed "unknown".
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+    }
+
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        // The body stands for the editor: this widget takes the keys, and the
+        // body holds the text, so focus, a name and anything an application
+        // attaches here are published on the body.
+        self.body_id
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -1117,6 +1149,12 @@ impl PlainTextEditor {
         self
     }
 
+    /// Accessible name for the editor: see [`CodeEditor::label`].
+    pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self {
+        self.map(|e| e.label(label));
+        self
+    }
+
     /// A cloneable handle to drive the editor.
     pub fn handle(&self) -> CodeEditorHandle {
         self.inner.as_ref().expect("handle() before build").handle()
@@ -1160,5 +1198,10 @@ impl Widget for PlainTextEditor {
 
     fn children(&self) -> Vec<WidgetId> {
         self.inner_id.into_iter().collect()
+    }
+
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        // The inner editor stands for this one, and its body for it in turn.
+        self.inner_id
     }
 }

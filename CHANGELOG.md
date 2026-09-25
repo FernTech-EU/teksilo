@@ -51,6 +51,11 @@ by crate for clarity, not because crates version independently.
   `audit::nodes_in_filtered_tree` lists the nodes `accesskit_consumer`'s
   filter keeps, which are the ones a platform adapter walks and can
   announce.
+- **`RichTextEditor`, `CodeEditor`, `PlainTextEditor` and `LogView` take a
+  `.label(..)`.** It names the text itself, which is what a screen reader
+  lands on and announces ("Notes, entry", "Build output, document"), and stays
+  locale-reactive. Before, nothing could name that text: a name given to the
+  widget went to its outer node, not to the text a reader reads.
 
 - **`HandlerSet::access_customize`: a widget can finish the accessibility
   of a node it reaches by id.** The twin of
@@ -127,6 +132,14 @@ by crate for clarity, not because crates version independently.
   platforms read. It now emits the one empty run `TextRunSource::flat` always
   did, so the first text such a node gains, and the edit that empties it, are
   reported like any other change.
+- **A composite that takes focus itself was announced by its structural
+  node.** Where a focusable widget hands its accessibility node to a
+  descendant (`Widget::accessibility_proxy`), a screen reader now lands on
+  that descendant when the widget takes focus, hears its name and content, and
+  is told of the caret and selection moves AT-SPI reports only for the focused
+  node. A screen reader's own request to focus that descendant puts the
+  keyboard on the composite, where its caret, input method and focus ring
+  live, and a context menu the composite owns is offered on it.
 - **Every window was an unnamed "frame" to Orca.** The accessibility tree's
   root, which AT-SPI presents as the window, carried no name, so Orca 46.1
   announced each window as it came up with the bare word "frame". The root now
@@ -365,6 +378,17 @@ by crate for clarity, not because crates version independently.
   closes the popover. A popover's dialog given no `surface_name` is now named
   by its trigger, where before it had no name. A `bare()` popover with
   nothing to focus leaves focus on its trigger.
+- **Focus in a `RichTextEditor`, `CodeEditor`, `PlainTextEditor` or `LogView`
+  reached no screen reader.** Tabbing or clicking into one put focus on an
+  unnamed node with no text, which Orca 46.1 announced as "section." or not at
+  all, and no caret move that followed was ever reported, so every arrow key
+  was silent. A reader now lands on the text itself, an editable text or a
+  document, hears its name and the line at the caret, and hears each caret
+  move. Coming back to a rich text editor or viewer is heard too, where the
+  return used to be silent. An `.access_label(..)`, `.access_labelled_by(..)`,
+  `.access_description(..)` or tooltip attached to one of these widgets now
+  names or describes the text. The `rich-text-editor`, `rich-text-viewer`,
+  `code_editor` and `log_view` examples name their surfaces.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform
@@ -638,6 +662,11 @@ by crate for clarity, not because crates version independently.
 
 #### Automation
 
+- **`type_text` and `type_ime` on a text editor's own node blurred the editor.**
+  A `RichTextEditor`, `CodeEditor` or `LogView` is found as focused, and by
+  its name, on the node that holds its text. Typing into that node still
+  reached the document, but left the editor without its caret, input method
+  and focus ring. The keyboard now stays on the editor.
 - **`list_live_regions` listed live regions no screen reader can reach.** It
   listed every node that declared a politeness: a hidden one, one inside a
   hidden subtree, and the framework's two announcer nodes, which are hidden

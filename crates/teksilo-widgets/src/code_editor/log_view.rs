@@ -49,7 +49,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::widget::{
     CursorIcon, LayoutContext, LayoutResponse, PaintContext, Widget, WidgetPlacement,
 };
-use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::TextDocument;
 use teksilo_tokens::Color;
@@ -91,6 +91,9 @@ pub struct LogView {
     default_context_menu_enabled: bool,
     /// A replacement factory, taken during `build()`.
     custom_context_menu: Option<super::context_menu::CodeContextMenuFactory>,
+    /// Accessible name, set via [`label`](LogView::label) and applied to the
+    /// body.
+    label: Option<teksilo_i18n::LocalizedString>,
 }
 
 impl std::fmt::Debug for LogView {
@@ -130,7 +133,23 @@ impl LogView {
             touch,
             default_context_menu_enabled: true,
             custom_context_menu: None,
+            label: None,
         }
+    }
+
+    /// Accessible name for the log.
+    ///
+    /// Applied to the body that holds the lines, which is the node focus is
+    /// published on and the one a screen reader announces ("Build output,
+    /// document"). The view's own node is structure that no adapter shows. An
+    /// `.access_label(..)`, `.access_labelled_by(..)` or tooltip attached to
+    /// the view reaches the same node.
+    ///
+    /// Stays locale-reactive: a `tr!(...)` name is re-resolved when the
+    /// locale changes, without a rebuild.
+    pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     /// Replace the built-in right-click menu with `factory`, called on each
@@ -469,7 +488,12 @@ impl Widget for LogView {
         self.touch.build(ctx, self_id);
 
         let body = log_body_for(&self.state);
-        let body_id = ctx.add(body);
+        // The name goes on the body, the node focus is published on; see
+        // [`label`](LogView::label).
+        let body_id = match self.label.clone() {
+            Some(label) => ctx.add(body.access_label(label)),
+            None => ctx.add(body),
+        };
         self.body_id = Some(body_id);
 
         // Reactive colour overrides repaint the body (the leaf that resolves
@@ -648,6 +672,20 @@ impl Widget for LogView {
 
     fn clips_children(&self) -> bool {
         true
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        // The role, the run tree and the actions live on the body. The wrapper
+        // is structure: with the default `Role::Unknown` an adapter would show
+        // it as an unnamed "unknown".
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+    }
+
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        // The body stands for the view: this widget takes the keys, and the
+        // body holds the lines, so focus, a name and anything an application
+        // attaches here are published on the body.
+        self.body_id
     }
 }
 

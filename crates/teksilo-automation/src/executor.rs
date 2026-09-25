@@ -532,7 +532,7 @@ fn execute_op(
                 return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
             };
             // `type_text` routes to the *focused* widget, so focus first.
-            tree.focus_ops(widget, ops);
+            focus_for_typing(tree, ops, widget);
             type_text(tree, ops, text);
             finish_settle(tree, ops, settle)
         }
@@ -545,7 +545,7 @@ fn execute_op(
             let Some(widget) = resolve_widget(tree, &update, *node) else {
                 return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
             };
-            tree.focus_ops(widget, ops);
+            focus_for_typing(tree, ops, widget);
             if let Some(text) = preedit {
                 tree.dispatch_event_with_ops(
                     WidgetEvent::ImeComposition {
@@ -742,6 +742,18 @@ fn press_key(tree: &mut WidgetTree, ops: &mut dyn WindowOps, key: Key, modifiers
         ops,
     );
     tree.dispatch_event_with_ops(WidgetEvent::KeyUp { key, modifiers }, ops);
+}
+
+/// Give the keyboard to `widget`, or to the editor it stands for.
+///
+/// An editor (`RichTextEditor`, `CodeEditor`, `LogView`) takes focus and the
+/// keys on its own widget and publishes its text, and its focus, on a body
+/// that is not focusable, so the body is the node a caller finds as focused or
+/// by the editor's name. Focusing the body would still pass the keys up to the
+/// editor, but blur it: no caret, no input method, no focus ring.
+fn focus_for_typing(tree: &mut WidgetTree, ops: &mut dyn WindowOps, widget: WidgetId) {
+    let target = tree.focusable_composite_behind(widget).unwrap_or(widget);
+    tree.focus_ops(target, ops);
 }
 
 /// Type `text` into the focused widget, one `KeyDown` per character — the

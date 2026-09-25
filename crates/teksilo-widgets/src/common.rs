@@ -15,6 +15,8 @@ pub(crate) mod conformance_box;
 pub mod datetime;
 pub mod drag_autoscroll;
 pub(crate) mod drop_bands;
+#[cfg(test)]
+mod editor_focus_tests;
 pub(crate) mod editor_runtime;
 #[cfg(test)]
 pub(crate) mod heard_test;

@@ -786,6 +786,135 @@ fn focus_then_type_text_routes_to_target() {
     assert_eq!(typed.get(), "hi");
 }
 
+/// The shape of `RichTextEditor`, `CodeEditor` and `LogView`: the composite
+/// takes focus and the keys, and hands its accessibility node to a body inside
+/// it that is not focusable, so the body is the node published as the focus.
+#[derive(Debug)]
+struct TextSurface {
+    body: Option<WidgetId>,
+    typed: Signal<String>,
+    blurs: Signal<u32>,
+}
+
+impl Widget for TextSurface {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let typed = self.typed.clone();
+        let blurs = self.blurs.clone();
+        ctx.apply_self_handlers(
+            HandlerSet::new()
+                .focusable(true)
+                .on_focus(move |gained, _ctx| {
+                    if !gained {
+                        blurs.set(blurs.get() + 1);
+                    }
+                })
+                .on_key(move |event, _ctx| {
+                    if let WidgetEvent::KeyDown {
+                        key: Key::Character(ch),
+                        ..
+                    } = event
+                    {
+                        let mut s = typed.get();
+                        s.push(*ch);
+                        typed.set(s);
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                }),
+        );
+        let body = ctx.add(TextBody);
+        self.body = Some(body);
+        vec![body]
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(200.0, 100.0).into()
+    }
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        self.body.into_iter().collect()
+    }
+    fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
+        builder.set_role(accesskit::Role::GenericContainer);
+    }
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.body
+    }
+}
+
+/// The text body: the role and the focus action, on a widget that is not
+/// focusable.
+#[derive(Debug)]
+struct TextBody;
+
+impl Widget for TextBody {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
+        builder.set_role(accesskit::Role::MultilineTextInput);
+        builder.add_action(accesskit::Action::Focus);
+    }
+}
+
+/// **Typing into an editor's text node keeps the keyboard on the editor.**
+///
+/// The node a caller finds as focused, or by the editor's name, is the body.
+/// Focusing that body directly parked the keyboard on a widget that takes no
+/// focus: the keys still bubbled up to the editor, but the editor was blurred,
+/// so its caret, input method and focus ring went away.
+#[test]
+fn typing_into_the_node_published_as_focus_keeps_the_keyboard_on_the_editor() {
+    let typed = Signal::new(String::new());
+    let blurs = Signal::new(0_u32);
+    let mut tree = WidgetTree::new();
+    let id = tree.add(TextSurface {
+        body: None,
+        typed: typed.clone(),
+        blurs: blurs.clone(),
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(id);
+    let focus = tree.sync_accessibility().focus;
+    assert_ne!(
+        focus,
+        teksilo_core::accessibility::widget_id_to_node_id(id),
+        "the editor's focus is published on its body"
+    );
+
+    let ops = [
+        AutomationOp::TypeText {
+            node: focus.0,
+            text: "hi".into(),
+        },
+        AutomationOp::TypeIme {
+            node: focus.0,
+            preedit: None,
+            commit: Some("!".into()),
+        },
+    ];
+    for op in &ops {
+        let reply = run(&mut tree, op);
+        assert!(reply.is_ok(), "{reply:?}");
+        assert_eq!(
+            (tree.focused(), blurs.get()),
+            (Some(id), 0),
+            "{op:?} must leave the keyboard on the editor the body stands for"
+        );
+    }
+    assert_eq!(typed.get(), "hi");
+}
+
 /// **A misspelled argument is refused, not quietly reinterpreted.**
 ///
 /// serde's default is to ignore a field it does not recognise and take the

@@ -396,8 +396,9 @@ fn main() {
                     // Build the editable view first so the formatting
                     // toolbar can borrow it for signal / handle wiring,
                     // then move the editor into the SplitView.
-                    let editor =
-                        RichTextEditor::editor(doc.clone()).content_padding_symmetric(0.0, 10.0);
+                    let editor = RichTextEditor::editor(doc.clone())
+                        .content_padding_symmetric(0.0, 10.0)
+                        .label(lit!("Editor"));
                     let toolbar = FormatToolbar::new(&editor);
                     let highlight_controls = HighlightControls::new(&doc);
                     let doc_preview = doc.clone();
@@ -424,7 +425,8 @@ fn main() {
                                         // *syntax* viewer would opt back in with
                                         // `.show_highlights(true)`.
                                         RichTextEditor::read_only(doc_preview)
-                                            .v_scroll_policy(ScrollPolicy::Auto),
+                                            .v_scroll_policy(ScrollPolicy::Auto)
+                                            .label(lit!("Preview")),
                                     ),
                                 ),
                             ),

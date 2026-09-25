@@ -97,7 +97,12 @@ fn main() {
                     tree.add(
                         teksilo::widgets::VStack::new()
                             .child(dark_mode_toolbar())
-                            .child(Expand::new().child(RichTextEditor::read_only(doc.clone()))),
+                            .child(
+                                Expand::new().child(
+                                    RichTextEditor::read_only(doc.clone())
+                                        .label(lit!("Sample document")),
+                                ),
+                            ),
                     )
                 }),
         )

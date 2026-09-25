@@ -174,6 +174,7 @@ impl EditorDemo {
         doc.add_syntax_session(Arc::new(CodeHighlighter));
 
         let editor = CodeEditor::new(doc)
+            .label(lit!("Code"))
             .font_family("monospace")
             .line_comment("//")
             .bracket_pairs(COMMON_BRACKETS.to_vec())

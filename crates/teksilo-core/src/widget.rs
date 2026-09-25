@@ -513,6 +513,14 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// `inner`'s own, so the application keeps the last word. A relation that
     /// names this widget is pointed at `inner`.
     ///
+    /// Focus follows the same rule. An editor takes focus and the keys on its
+    /// own widget and keeps its text on a body inside it that is not
+    /// focusable; a reader reads the node an update names as focus when it
+    /// arrives, and the Linux adapter reports a caret move only on that node.
+    /// So while this widget holds keyboard focus, the update names `inner`'s
+    /// node as the focus, and an assistive `Focus` on `inner`, when `inner` is
+    /// not focusable, gives the keyboard to this widget.
+    ///
     /// Only a live, strict descendant counts, and only while the walk reaches
     /// it: this widget and every widget between the two walked normally,
     /// neither excluded nor merged. Anything else is ignored and the overrides

@@ -53,7 +53,7 @@ The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keybo
 
 ## Builder methods at a glance
 
-`context_menu`, `default_context_menu`, `follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
+`label`, `context_menu`, `default_context_menu`, `follow_tail`, `scrollback_limit`, `severity_highlighter`, `announce_appends`, `font_family`, `follow_text_scale`, `v_scroll_policy`, `h_scroll_policy`, `background`, `text_color`, `selection_color`, `handle`
 
 ## API reference
 
@@ -77,6 +77,19 @@ pub struct LogView { /* fields */ }
 
 A fresh, empty log view: read-only, no caret, no wrapping, following the
 tail, unbounded. Attach a `handle` and append to it.
+
+#### `pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self`
+
+Accessible name for the log.
+
+Applied to the body that holds the lines, which is the node focus is
+published on and the one a screen reader announces ("Build output,
+document"). The view's own node is structure that no adapter shows. An
+`.access_label(..)`, `.access_labelled_by(..)` or tooltip attached to
+the view reaches the same node.
+
+Stays locale-reactive: a `tr!(...)` name is re-resolved when the
+locale changes, without a rebuild.
 
 #### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
 
