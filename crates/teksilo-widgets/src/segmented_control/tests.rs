@@ -785,6 +785,184 @@ fn access_click_selects_a_segment() {
     assert_eq!(selected.get(), Some(C));
 }
 
+/// Whether a reader is told a radio button is checked, read off the node as
+/// the three adapters read it. All of them take it from `toggled` and none
+/// from `selected`. AT-SPI sets `CHECKED` from `Toggled::True`
+/// (`accesskit_atspi_common` `node.rs:366-372`), the one state Orca 46.1's
+/// radio phrase reads (`orca/generator.py:661-676`): without it Orca says "not
+/// selected radio button". UIA gives a radio button its `SelectionItem`
+/// pattern only when `toggled` is set, and takes `IsSelected` from it
+/// (`accesskit_windows` `node.rs:648-675`). macOS takes `AXValue` from it
+/// (`accesskit_macos` `node.rs:344-352`). `None` is a radio button that tells
+/// a reader nothing either way.
+fn told_checked(node: &accesskit_consumer::NodeRef<'_>) -> Option<bool> {
+    node.toggled().map(|t| t == accesskit::Toggled::True)
+}
+
+/// The radio buttons in the tree as a reader walks it (`common_filter`), each
+/// with its name and [`told_checked`], and the name of the node the reader is
+/// on. The consumer follows the group's
+/// `active_descendant` to find it (`tree.rs:538-543`), as every adapter does.
+fn segments_as_heard(
+    platform: &accesskit_consumer::Tree,
+) -> (Vec<(String, Option<bool>)>, Option<String>) {
+    fn walk(node: accesskit_consumer::NodeRef<'_>, out: &mut Vec<(String, Option<bool>)>) {
+        if node.role() == accesskit::Role::RadioButton {
+            out.push((node.label().unwrap_or_default(), told_checked(&node)));
+        }
+        for child in node.filtered_children(&accesskit_consumer::common_filter) {
+            walk(child, out);
+        }
+    }
+    let state = platform.state();
+    let mut segments = Vec::new();
+    walk(state.root(), &mut segments);
+    (segments, state.focus().and_then(|node| node.label()))
+}
+
+/// Hears nothing: for a consumer tree kept only to be read.
+struct Unheard;
+
+impl accesskit_consumer::TreeChangeHandler for Unheard {
+    fn node_added(&mut self, _: &accesskit_consumer::NodeRef) {}
+    fn node_updated(&mut self, _: &accesskit_consumer::NodeRef, _: &accesskit_consumer::NodeRef) {}
+    fn focus_moved(
+        &mut self,
+        _: Option<&accesskit_consumer::NodeRef>,
+        _: Option<&accesskit_consumer::NodeRef>,
+    ) {
+    }
+    fn node_removed(&mut self, _: &accesskit_consumer::NodeRef) {}
+}
+
+#[test]
+fn the_reader_hears_the_selected_segment_checked() {
+    // A segment is a radio button, so a reader hears "First, selected radio
+    // button" only if it is checked: a segment that is merely `selected` was
+    // read as "not selected radio button" by Orca, on the segment chosen.
+    let selected = Signal::new(Some(A));
+    let mut t = measured_tree();
+    let control = t.add(abc(selected.clone()).label(lit!("View mode")));
+    settle(&mut t, 300.0, 60.0);
+    t.focus(control);
+    let mut platform = accesskit_consumer::Tree::new(t.sync_accessibility(), true);
+
+    let yes = |name: &str| (name.to_owned(), Some(true));
+    let no = |name: &str| (name.to_owned(), Some(false));
+    assert_eq!(
+        segments_as_heard(&platform),
+        (vec![yes("A"), no("B"), no("C")], Some("A".to_owned())),
+        "the reader is on the selected segment, and it alone is told checked"
+    );
+
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    settle(&mut t, 300.0, 60.0);
+    platform.update_and_process_changes(t.sync_accessibility(), &mut Unheard);
+    assert_eq!(
+        segments_as_heard(&platform),
+        (vec![no("A"), yes("B"), no("C")], Some("B".to_owned())),
+        "after Right the reader is on B, and B is now the one told checked"
+    );
+}
+
+/// Every `selection-changed` AT-SPI raises for one update, by the group it is
+/// raised on. The adapter raises one on an item's selection container, once
+/// an update, when an item carrying `selected == true` enters the tree or an
+/// item's `selected` changes (`accesskit_atspi_common` `adapter.rs:79-81`,
+/// `318-320`, `249-267`). Orca 46.1 answers each by moving its locus of focus
+/// to the group's selected child, and so speaking it, wherever focus was
+/// (`orca/scripts/default.py:1540-1602`, `onSelectionChanged`).
+#[derive(Default)]
+struct SelectionChanged(Vec<String>);
+
+impl SelectionChanged {
+    fn raise(&mut self, item: &accesskit_consumer::NodeRef) {
+        if item.is_item_like()
+            && let Some(group) = item.selection_container(&accesskit_consumer::common_filter)
+        {
+            let name = group.label().unwrap_or_default();
+            if !self.0.contains(&name) {
+                self.0.push(name);
+            }
+        }
+    }
+}
+
+fn included(node: &accesskit_consumer::NodeRef) -> bool {
+    accesskit_consumer::common_filter(node) == accesskit_consumer::FilterResult::Include
+}
+
+impl accesskit_consumer::TreeChangeHandler for SelectionChanged {
+    fn node_added(&mut self, node: &accesskit_consumer::NodeRef) {
+        if included(node) && node.is_selected() == Some(true) {
+            self.raise(node);
+        }
+    }
+    fn node_updated(
+        &mut self,
+        old: &accesskit_consumer::NodeRef,
+        new: &accesskit_consumer::NodeRef,
+    ) {
+        if included(old) && included(new) && old.is_selected() != new.is_selected() {
+            self.raise(new);
+        }
+    }
+    fn focus_moved(
+        &mut self,
+        _: Option<&accesskit_consumer::NodeRef>,
+        _: Option<&accesskit_consumer::NodeRef>,
+    ) {
+    }
+    fn node_removed(&mut self, _: &accesskit_consumer::NodeRef) {}
+}
+
+#[test]
+fn a_segmented_control_raises_no_selection_changed() {
+    // A radio group has no selection in the AT-SPI sense: its state is each
+    // button's `checked`. A segment that also carried `selected` made the
+    // adapter raise `selection-changed` on the group as the control entered
+    // the tree and on every choice, and Orca spoke each one, with focus
+    // elsewhere: chart-demo's launch read five cut "not selected radio button".
+    let selected = Signal::new(Some(A));
+    let shown = Signal::new(false);
+    let mut t = measured_tree();
+    let control = t.add(abc(selected.clone()).label(lit!("View mode")));
+    t.add(
+        crate::primitives::VStack::new().child(
+            crate::primitives::VStack::new()
+                .child(control)
+                .visible_when(shown.clone()),
+        ),
+    );
+    settle(&mut t, 300.0, 60.0);
+    let mut platform = accesskit_consumer::Tree::new(t.sync_accessibility(), true);
+    assert!(
+        segments_as_heard(&platform).0.is_empty(),
+        "the control starts out of the tree"
+    );
+
+    let mut arrival = SelectionChanged::default();
+    shown.set(true);
+    settle(&mut t, 300.0, 60.0);
+    platform.update_and_process_changes(t.sync_accessibility(), &mut arrival);
+    assert_eq!(
+        segments_as_heard(&platform).0.len(),
+        3,
+        "the control entered the tree"
+    );
+    t.focus(control);
+    let mut choice = SelectionChanged::default();
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    settle(&mut t, 300.0, 60.0);
+    platform.update_and_process_changes(t.sync_accessibility(), &mut choice);
+    assert_eq!(selected.get(), Some(B));
+    assert_eq!(
+        (arrival.0, choice.0),
+        (Vec::new(), Vec::new()),
+        "neither the control's arrival nor a choice may raise selection-changed"
+    );
+}
+
 // ────────────────────────── visibility / sizing ──────────────────────────
 
 #[test]

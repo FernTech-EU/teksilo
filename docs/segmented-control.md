@@ -171,7 +171,9 @@ signal for those.
 
 `Role::RadioGroup` on the control, with `active_descendant` pointing at
 the selected segment and `Increment` / `Decrement` AT actions.
-`Role::RadioButton` per segment, carrying "N of M" over the **whole**
+`Role::RadioButton` per segment. The selected segment is checked: it
+carries `toggled`, the field every adapter reads as a radio button's
+state, and no segment carries `selected`. Each carries "N of M" over the **whole**
 segment list — segments in the overflow menu are still part of the set,
 so the count deliberately exceeds the number of rendered radios on a
 narrow control. `push_to_radio_group` lists only the segments actually on

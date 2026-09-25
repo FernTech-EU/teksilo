@@ -484,6 +484,20 @@ by crate for clarity, not because crates version independently.
   notification changed follow the archive. Clear all now says "No
   notifications".
 
+- **The chosen segment of a `SegmentedControl` was read as "not selected".**
+  Each segment is a radio button, and a screen reader tells a radio button's
+  state from whether it is checked, which no segment ever was. Orca read the
+  segment the user had just chosen as "not selected radio button", and by the
+  Windows and macOS adapters' own code NVDA was given no state for it at all
+  and VoiceOver no checked value. The chosen segment is now checked, as a
+  `RadioButton` is, so Orca says "selected radio button". A segment also
+  stopped claiming to be selected in the list sense, which had Orca speak the
+  chosen segment of a control whenever the control came into view or its
+  choice changed, wherever the reader was: five cut "not selected radio
+  button" at the launch of chart-demo, and a Tab onto a field that scrolled a
+  control into view was cut short by that control's segment. **Behaviour
+  change**: a test or a probe that asserted a segment's `selected` asserts its
+  `toggled` now.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

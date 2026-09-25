@@ -284,7 +284,14 @@ impl Widget for SegmentCell {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::RadioButton);
         builder.set_name(self.label.resolve_now());
-        builder.set_selected(self.selected.get() == self.index);
+        // A radio button's state is `toggled` (ARIA `aria-checked`), the field
+        // every adapter reads as that state: AT-SPI's CHECKED, which Orca says
+        // as "selected radio button", UIA's `IsSelected` and the macOS value.
+        // None reads `selected` as it. On an item inside a `Role::RadioGroup`,
+        // `selected` makes AT-SPI raise `selection-changed` on the group, which
+        // Orca answers by speaking the chosen segment wherever focus is. So a
+        // segment carries `toggled` alone, as `RadioButton` does.
+        builder.set_toggled(self.selected.get() == self.index);
         // "N of M" over the live segment list. Hidden segments
         // (`Segment::visible(false)`) are not part of the set at all;
         // *overflowed* ones are — they are still reachable, from the
