@@ -478,16 +478,14 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               around it takes presses, so the miss-only pass is denied at \
               distance zero, and neither `FilterIndicator` nor the \
               `OverlayTrigger` wrapping it declares a `Widget::hit_outset` -- \
-              so the glyph is the whole target. The trigger does carry \
-              `on_tap`, an `on_key` Enter/Space arm and \
-              `on_access_action(Click)`, but `OverlayTrigger` sets no \
-              `focusable`, so the key arm is reachable only if an ancestor \
-              makes it a tab stop; this entry does not claim it does, and the \
-              header cell it sits in is `.focusable(false)`. No SC 2.5.8 \
-              exception is claimed either: there is no conforming equivalent \
-              control for opening a column's filter. The remedy is a bigger \
-              glyph or a `TouchTarget` around it, both of which move Compact \
-              layout, which is the programme's invariant.",
+              so the glyph is the whole target. The trigger carries `on_tap` \
+              on the glyph and, since the glyph takes no focus, is itself a \
+              Tab stop answering Enter/Space and `on_access_action(Click)`; \
+              a keyboard route is not an equivalent pointer target. No SC \
+              2.5.8 exception is claimed either: there is no conforming \
+              equivalent control for opening a column's filter. The remedy \
+              is a bigger glyph or a `TouchTarget` around it, both of which \
+              move Compact layout, which is the programme's invariant.",
     },
     AllowedViolation {
         path: "KeyboardHighlightWrapper > ZStack > MenuItem",

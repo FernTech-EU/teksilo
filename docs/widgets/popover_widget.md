@@ -208,10 +208,10 @@ the per-call override the standalone `Popover` used to offer. No effect under
 
 #### `pub fn surface_name(mut self, name: impl Into<String>) -> Self`
 
-Accessible name for the surface's `Role::Dialog` node. Defaults
-to empty (the wrapped content usually carries its own role and
-name). No effect under `bare` or for the Menu
-variant (which is presentational).
+Accessible name for the surface's `Role::Dialog` node. Without one
+the surface is named by the trigger that opens it. No effect under
+`bare` or for the Menu variant (which is
+presentational).
 
 #### `pub fn tooltip(mut self, text: impl Into<teksilo_i18n::LocalizedString>) -> Self`
 

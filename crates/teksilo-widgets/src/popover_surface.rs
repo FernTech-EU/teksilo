@@ -265,7 +265,13 @@ impl Widget for PopoverSurface {
         // over other content without blocking it. Every dialog node
         // must have an accessible name; use the trigger's label.
         builder.set_role(teksilo_core::accesskit::Role::Dialog);
-        builder.set_name(&self.name);
+        // An empty name is still a name to every adapter, and it would hide
+        // the `labelled_by` relation `PopoverWidget` names the surface with
+        // when its caller gave no name (`accesskit_consumer` reads the
+        // relation only for a node with no label of its own).
+        if !self.name.is_empty() {
+            builder.set_name(&self.name);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -1071,6 +1071,24 @@ impl HandlerSet {
             .push((label.into(), Box::new(handler)));
         self
     }
+
+    /// Finish this node's accessibility with full access to its builder, after
+    /// the widget's own `accessibility()` and every typed override.
+    ///
+    /// The [`WidgetWithHandlers`] twin
+    /// ([`access_customize`](WidgetWithHandlers::access_customize)) is the
+    /// application's; this one is for a **widget** writing onto a node it
+    /// reaches through
+    /// [`BuildContext::apply_handlers`](crate::build_context::BuildContext::apply_handlers),
+    /// such as a wrapper handing its popup state to the control it wraps.
+    /// Chained after any customization the node already carries.
+    pub fn access_customize<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&mut crate::accessibility::AccessNodeBuilder) + 'static,
+    {
+        self.access_mut().customize = Some(Box::new(f));
+        self
+    }
 }
 
 impl Default for HandlerSet {

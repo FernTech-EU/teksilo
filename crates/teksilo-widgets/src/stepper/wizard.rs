@@ -12,13 +12,9 @@ use std::rc::Rc;
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
 use teksilo_core::signal::Prop;
-use teksilo_core::widget::{
-    CursorIcon, EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement,
-};
-use teksilo_core::widget_builder::HandlerSet;
+use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::{LocalizedString, lit};
 
@@ -265,46 +261,21 @@ impl Widget for Wizard {
         let spec = self.spec();
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
-            let handlers = HandlerSet::new()
-                .focusable(true)
-                .cursor(CursorIcon::Pointer)
-                .on_tap({
-                    let spec = spec.clone();
-                    let enabled = enabled.clone();
-                    move |_pos, ctx| {
-                        if enabled.get() {
-                            present_wizard(&spec, ctx);
-                        }
+            // `OverlayTrigger` routes this one opener to the pointer, to
+            // Enter/Space and to the AT `Click`, on the nodes each belongs on.
+            let open = {
+                let spec = spec.clone();
+                let enabled = enabled.clone();
+                move |ctx: &mut EventContext| {
+                    if enabled.get() {
+                        present_wizard(&spec, ctx);
                     }
-                })
-                .on_key({
-                    let spec = spec.clone();
-                    let enabled = enabled.clone();
-                    move |event, ctx| match event {
-                        WidgetEvent::KeyUp {
-                            key: Key::Enter | Key::Space,
-                            ..
-                        } if enabled.get() => {
-                            present_wizard(&spec, ctx);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                })
-                .on_access_action({
-                    let spec = spec.clone();
-                    let enabled = enabled.clone();
-                    move |action, ctx| {
-                        if action == teksilo_core::accesskit::Action::Click && enabled.get() {
-                            present_wizard(&spec, ctx);
-                            EventResponse::Handled
-                        } else {
-                            EventResponse::Ignored
-                        }
-                    }
-                });
+                }
+            };
             ctx.add(
-                OverlayTrigger::new(trigger, handlers)
+                OverlayTrigger::new(trigger)
+                    .on_activate(open)
+                    .activate_on_key_up()
                     .enabled(self.enabled.clone())
                     .name(self.label.clone()),
             )

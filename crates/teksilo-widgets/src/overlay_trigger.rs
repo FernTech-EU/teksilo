@@ -3,33 +3,60 @@
 
 //! `OverlayTrigger` — the shared "this widget opens that overlay" wrapper.
 //!
-//! Used by `Dialog`, `Snackbar` and every other presenter that lets a caller
-//! replace its default `Button` trigger with a widget of their own.
+//! Used by `Dialog`, `Snackbar`, `Wizard` and `PopoverWidget` whenever a
+//! caller replaces the default `Button` trigger with a widget of their own.
+//!
+//! ## One control, on whichever node takes focus
+//!
+//! To a screen reader a trigger is one control, and the node focus lands on is
+//! that control: it carries the role, the name, the popup state, and it
+//! answers Enter, Space and the AT `Click`. Which node that is depends on what
+//! was wrapped, and is decided once, as it mounts:
+//!
+//! * **A widget that takes no focus** (a panel, a glyph, a label): the
+//!   trigger's own node is the button. It is the Tab stop and it carries
+//!   everything above.
+//! * **A control of its own** (a `Button`, an `IconButton`, anything that is or
+//!   holds a focus stop, even one disabled as it mounts): that control is the
+//!   button. Its role and its own text stand, the opening routes and the popup
+//!   state are added to it, and the trigger's node is structure, which the
+//!   tree walk leaves out. The name given to the trigger is not used there:
+//!   the control's own text is what a sighted user reads on it, and a second
+//!   button around the first would be one control heard as two.
 //!
 //! ## Touch and pen
 //!
 //! The trigger has no geometry and no press visual of its own: it forwards the
 //! caller's child, whose target and appearance are the child's, and routes the
-//! opening handlers onto that child's external bucket so they fire beside the
+//! pointer handler onto that child's external bucket so it fires beside the
 //! child's own. The activation is an `on_tap`, so it happens on the release for
 //! every pointer kind.
 
+use std::rc::Rc;
+
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
+use teksilo_core::accesskit::{Action, HasPopup, Role};
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
-use teksilo_core::widget::{LayoutContext, PendingChild, Widget, WidgetPlacement};
+use teksilo_core::widget::{
+    CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
+};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
+
+type Activate = Rc<dyn Fn(&mut EventContext)>;
 
 /// Wraps an arbitrary widget so it can drive a popover.
 ///
 /// `PopoverButton` and `PopoverIconButton` cover the two stock triggers; this
 /// is the third case — a trigger that is *not* a button, such as a table
 /// header's filter glyph or a tag chip. It supplies what those two get from
-/// `Button`/`IconButton`: an activate route (pointer, Enter/Space, and the
-/// AT `Click` action), the `has_popup` / `expanded` disclosure annotations, and
-/// the arena-level `enabled` gate.
+/// `Button`/`IconButton`: a Tab stop, an activate route (pointer, Enter/Space,
+/// and the AT `Click` action), the `has_popup` / `expanded` disclosure
+/// annotations, and the arena-level `enabled` gate. A wrapped widget that is a
+/// control already keeps its own focus, role and name; see the module docs.
 ///
 /// ```ignore
 /// PopoverWidget::new(OverlayTrigger::around(my_glyph))
@@ -39,12 +66,11 @@ use teksilo_core::widget_id::WidgetId;
 pub struct OverlayTrigger {
     child_id: Option<WidgetId>,
     pending_child: Option<PendingChild>,
-    pending_handlers: Option<HandlerSet>,
     name: Option<String>,
-    /// Optional `has_popup` hint surfaced on this trigger's a11y
-    /// node. Same role as Button's equivalent — used by Popover
-    /// for the ARIA disclosure pattern.
-    has_popup: Option<teksilo_core::accesskit::HasPopup>,
+    /// Optional `has_popup` hint surfaced on the trigger's control node.
+    /// Same role as Button's equivalent: used by Popover for the ARIA
+    /// disclosure pattern.
+    has_popup: Option<HasPopup>,
     /// Optional signal reporting whether the owned popup is
     /// currently visible. Published via `set_expanded`.
     expanded_signal: Option<Signal<bool>>,
@@ -54,62 +80,55 @@ pub struct OverlayTrigger {
     /// gated — the same treatment a stock `Button` gets. Default
     /// `Prop::Static(true)`.
     enabled: Prop<bool>,
-    /// Installed by [`crate::popover_widget::PopoverTrigger::with_on_activate`]. Routed onto the child
-    /// in `build` as pointer-tap and Enter/Space, and onto *this* node as the
-    /// AT `Click` action, so a custom trigger is reachable exactly the ways a
-    /// `Button` trigger is.
-    on_activate: Option<std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>,
-    /// The AT `Click` route for a presenter that builds its own
-    /// [`HandlerSet`] (`Dialog`, `Snackbar`) rather than going through
-    /// [`on_activate`](Self::on_activate).
-    ///
-    /// It has to be a *separate* setter, and it has to land on this node
-    /// rather than on the child, because this is the node that carries
-    /// `Role::Button`: an AT action dispatches to the node it was invoked on
-    /// and then bubbles towards the root, so a handler parked on the child —
-    /// a descendant — is never on its path. A presenter that put its AT
-    /// handler in the child's `HandlerSet` therefore published a named,
-    /// correctly-roled button that no screen reader could activate.
-    on_access_activate: Option<std::rc::Rc<dyn Fn(&mut teksilo_core::widget::EventContext)>>,
+    /// What opening the overlay does. Installed by the presenter (`Dialog`,
+    /// `Snackbar`, `Wizard`) or by
+    /// [`crate::popover_widget::PopoverTrigger::with_on_activate`], and routed
+    /// in `build` onto the child as a pointer tap and onto the control node as
+    /// Enter/Space and the AT `Click`, so a custom trigger is reachable exactly
+    /// the ways a `Button` trigger is.
+    on_activate: Option<Activate>,
+    /// Enter and Space open on the key's release rather than its press. The
+    /// modal presenters ask for it; a popover opens on the press.
+    activate_on_key_up: bool,
+    /// The wrapped widget's own focus stop, when it has one. Set as the child
+    /// mounts. `Some` makes that widget the control, and this node structure;
+    /// `None` makes this node the control. See the module docs.
+    wrapped_control: Option<WidgetId>,
 }
 
 impl OverlayTrigger {
-    pub(crate) fn new(child: Box<dyn Widget>, handlers: HandlerSet) -> Self {
-        Self::from_pending(PendingChild::Deferred(child), handlers)
+    pub(crate) fn new(child: Box<dyn Widget>) -> Self {
+        Self::from_pending(PendingChild::Deferred(child))
     }
 
-    pub(crate) fn from_id(id: WidgetId, handlers: HandlerSet) -> Self {
-        Self::from_pending(PendingChild::Id(id), handlers)
-    }
-
-    fn from_pending(pending: PendingChild, handlers: HandlerSet) -> Self {
+    pub(crate) fn from_pending(pending: PendingChild) -> Self {
         Self {
             child_id: None,
             pending_child: Some(pending),
-            pending_handlers: Some(handlers),
             name: None,
             has_popup: None,
             expanded_signal: None,
             enabled: Prop::Static(true),
             on_activate: None,
-            on_access_activate: None,
+            activate_on_key_up: false,
+            wrapped_control: None,
         }
     }
 
     /// Wrap any widget as a popover trigger.
     pub fn around(widget: impl Widget + 'static) -> Self {
-        Self::from_pending(
-            teksilo_core::IntoTeksiChild::into_pending(widget),
-            HandlerSet::new(),
-        )
+        Self::from_pending(teksilo_core::IntoTeksiChild::into_pending(widget))
     }
 
     /// [`around`](Self::around) for a widget already inserted by id.
     pub fn around_id(id: WidgetId) -> Self {
-        Self::from_pending(PendingChild::Id(id), HandlerSet::new())
+        Self::from_pending(PendingChild::Id(id))
     }
 
     /// Set the trigger's accessible name.
+    ///
+    /// Used when the wrapped widget takes no focus of its own. A wrapped
+    /// control keeps its own name.
     pub fn named(self, name: impl Into<String>) -> Self {
         self.name(name)
     }
@@ -119,30 +138,17 @@ impl OverlayTrigger {
         self.on_activate.is_some()
     }
 
-    /// Install the popover's open/close handler. Routed onto the wrapped widget
-    /// as pointer-tap and Enter/Space, and onto this trigger's own node as the
-    /// AT `Click` action.
-    pub fn on_activate(
-        mut self,
-        f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static,
-    ) -> Self {
-        self.on_activate = Some(std::rc::Rc::new(f));
+    /// Install the overlay's open/close handler. Routed onto the wrapped widget
+    /// as a pointer tap, and onto the node that takes focus as Enter/Space and
+    /// the AT `Click` action.
+    pub fn on_activate(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.on_activate = Some(Rc::new(f));
         self
     }
 
-    /// Install *only* the AT `Click` route, on this trigger's own node.
-    ///
-    /// For a presenter that hands the pointer and keyboard routes over in its
-    /// own [`HandlerSet`] (which is applied to the child, so the child's
-    /// gesture arena cannot swallow them first) but still needs the AT action
-    /// on the node that carries `Role::Button`. See
-    /// [`on_access_activate`](Self::on_access_activate)'s field docs for why
-    /// the two cannot share a destination.
-    pub(crate) fn on_access_activate(
-        mut self,
-        f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static,
-    ) -> Self {
-        self.on_access_activate = Some(std::rc::Rc::new(f));
+    /// Open on the release of Enter or Space rather than on the press.
+    pub(crate) fn activate_on_key_up(mut self) -> Self {
+        self.activate_on_key_up = true;
         self
     }
 
@@ -160,7 +166,7 @@ impl OverlayTrigger {
         self
     }
 
-    pub(crate) fn has_popup(mut self, kind: teksilo_core::accesskit::HasPopup) -> Self {
+    pub(crate) fn has_popup(mut self, kind: HasPopup) -> Self {
         self.has_popup = Some(kind);
         self
     }
@@ -168,6 +174,56 @@ impl OverlayTrigger {
     pub(crate) fn expanded_when(mut self, signal: Signal<bool>) -> Self {
         self.expanded_signal = Some(signal);
         self
+    }
+
+    /// Enter/Space and the AT `Click`, for the node that takes focus.
+    fn keyboard_and_at(&self, activate: Activate) -> HandlerSet {
+        let on_key_up = self.activate_on_key_up;
+        let key = activate.clone();
+        HandlerSet::new()
+            .on_key(move |event, ctx| match event {
+                WidgetEvent::KeyDown {
+                    key: Key::Enter | Key::Space,
+                    ..
+                } if !on_key_up => {
+                    key(ctx);
+                    EventResponse::Handled
+                }
+                WidgetEvent::KeyUp {
+                    key: Key::Enter | Key::Space,
+                    ..
+                } if on_key_up => {
+                    key(ctx);
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            })
+            .on_access_action(move |action, ctx| {
+                if action == Action::Click {
+                    activate(ctx);
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            })
+    }
+
+    /// The popup state, written onto a wrapped control's own node after its
+    /// widget has described itself.
+    fn disclosure(&self) -> Option<impl Fn(&mut AccessNodeBuilder) + 'static> {
+        if self.has_popup.is_none() && self.expanded_signal.is_none() {
+            return None;
+        }
+        let has_popup = self.has_popup;
+        let expanded = self.expanded_signal.clone();
+        Some(move |builder: &mut AccessNodeBuilder| {
+            if let Some(kind) = has_popup {
+                builder.set_has_popup(kind);
+            }
+            if let Some(ref signal) = expanded {
+                builder.set_expanded(signal.get());
+            }
+        })
     }
 }
 
@@ -188,68 +244,55 @@ impl Widget for OverlayTrigger {
         let self_id = ctx.self_id();
         ctx.enabled_when(self_id, self.enabled.clone());
         if let Some(pending) = self.pending_child.take() {
-            self.child_id = Some(match pending {
+            let child = match pending {
                 PendingChild::Id(id) => id,
                 PendingChild::Deferred(w) => ctx.add_boxed(w),
-            });
+            };
+            self.child_id = Some(child);
+            // `add` builds the child's whole subtree before it returns, so
+            // whether it is a control of its own is already known. A control
+            // disabled right now is still the control: asking only for what
+            // can take focus now would add a second, enabled stop beside it,
+            // one that opens what the disabled control is there to withhold.
+            self.wrapped_control = ctx.first_focus_capable_descendant(child);
         }
-        // Attach handlers to the CHILD, not to ourselves. The child is
-        // the hit-test target and the first node in the bubble pass —
-        // if it has its own gesture arena (e.g. a real `Button`, which
-        // unconditionally wires `on_tap` for InteractionState
-        // tracking), it consumes the tap before any ancestor can see
-        // it. Routing the overlay-opening handlers onto the child's
-        // *external* bucket means they fire alongside the child's own
-        // handlers when the gesture arena emits `Tap`.
-        //
-        // For non-interactive triggers (test `FixedLeaf`, `Panel`,
-        // etc.) `ensure_gesture_arena` lazily installs a recognizer
-        // for the external `on_tap`, so the same path works.
-        let mut handlers = self.pending_handlers.take();
         if let Some(activate) = self.on_activate.clone() {
-            let set = handlers.take().unwrap_or_default();
+            // The pointer route goes onto the CHILD, not onto ourselves. The
+            // child is the hit-test target and the first node in the bubble
+            // pass. If it has its own gesture arena (a real `Button`, which
+            // unconditionally wires `on_tap` for InteractionState tracking),
+            // it consumes the tap before any ancestor can see it. In the
+            // child's *external* bucket the opener fires alongside the child's
+            // own handlers when the gesture arena emits `Tap`. For a
+            // non-interactive child (a `Panel`, a glyph) `ensure_gesture_arena`
+            // lazily installs a recognizer for it.
             let tap = activate.clone();
-            let key = activate.clone();
-            handlers = Some(
-                set.on_tap(move |_pos, ctx| tap(ctx))
-                    .on_key(move |event, ctx| match event {
-                        teksilo_core::event::WidgetEvent::KeyDown {
-                            key: teksilo_core::event::Key::Enter | teksilo_core::event::Key::Space,
-                            ..
-                        } => {
-                            key(ctx);
-                            teksilo_core::event::EventResponse::Handled
-                        }
-                        _ => teksilo_core::event::EventResponse::Ignored,
-                    }),
-            );
-            // The AT route splits off here and lands on SELF: an
-            // `AccessAction` dispatches to the node it was invoked on — this
-            // one, the node `accessibility` gives `Role::Button` — and then
-            // bubbles rootwards, so the child never sees it. There is no
-            // gesture arena to lose it to either, which is the whole reason
-            // tap and key go the other way.
-            if self.on_access_activate.is_none() {
-                self.on_access_activate = Some(activate);
-            }
-        }
-        if let Some(handlers) = handlers {
-            if let Some(child_id) = self.child_id {
-                ctx.apply_handlers(child_id, handlers);
-            } else {
-                // No child — keep handlers on self so they aren't lost.
-                ctx.apply_self_handlers(handlers);
-            }
-        }
-        if let Some(activate) = self.on_access_activate.clone() {
-            ctx.apply_self_handlers(HandlerSet::new().on_access_action(move |action, ctx| {
-                if action == teksilo_core::accesskit::Action::Click {
-                    activate(ctx);
-                    teksilo_core::event::EventResponse::Handled
-                } else {
-                    teksilo_core::event::EventResponse::Ignored
+            let pointer = HandlerSet::new()
+                .on_tap(move |_event, ctx| tap(ctx))
+                .cursor(CursorIcon::Pointer);
+            // Keys and the AT action go to the node that takes focus: key
+            // events are dispatched there, and an `AccessAction` to the node a
+            // reader is on, bubbling only if that node leaves it unhandled,
+            // which a `Button` never does.
+            let keys = self.keyboard_and_at(activate);
+            match (self.child_id, self.wrapped_control) {
+                (Some(child), Some(control)) => {
+                    ctx.apply_handlers(child, pointer);
+                    let keys = match self.disclosure() {
+                        Some(disclosure) => keys.access_customize(disclosure),
+                        None => keys,
+                    };
+                    ctx.apply_handlers(control, keys);
                 }
-            }));
+                (Some(child), None) => {
+                    ctx.apply_handlers(child, pointer);
+                    ctx.apply_self_handlers(keys.focusable(true));
+                }
+                (None, _) => {
+                    ctx.apply_self_handlers(pointer);
+                    ctx.apply_self_handlers(keys.focusable(true));
+                }
+            }
         }
         // Register the expanded_signal so flips trigger an a11y
         // refresh on this trigger node.
@@ -289,7 +332,13 @@ impl Widget for OverlayTrigger {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::Button);
+        if self.wrapped_control.is_some() {
+            // The wrapped control is the button; this node is structure,
+            // dropped by the walker and by every adapter with its child kept.
+            builder.set_role(Role::GenericContainer);
+            return;
+        }
+        builder.set_role(Role::Button);
         if let Some(name) = &self.name {
             builder.set_name(name.as_str());
         }
@@ -306,12 +355,22 @@ impl Widget for OverlayTrigger {
         // press. Only claimed when there is a route to claim — a bare
         // `OverlayTrigger::around(w)` that no presenter has wired up yet
         // advertises nothing, which is the truth about it.
-        if self.on_access_activate.is_some() {
-            builder.add_action(teksilo_core::accesskit::Action::Click);
+        if self.on_activate.is_some() {
+            builder.add_action(Action::Click);
         }
     }
 
     fn children(&self) -> Vec<WidgetId> {
         self.child_id.into_iter().collect()
     }
+
+    /// A wrapped control stands for the trigger, so what is attached to the
+    /// trigger reaches the node a reader is on: a popover's dialog, named by
+    /// its trigger through `labelled_by`, is named by the control's text.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.wrapped_control
+    }
 }
+
+#[cfg(test)]
+mod reader_tests;

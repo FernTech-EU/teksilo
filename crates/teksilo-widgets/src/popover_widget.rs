@@ -304,7 +304,7 @@ pub struct PopoverWidget<T: PopoverTrigger> {
     /// override the standalone `Popover` used to offer.
     surface_style: Option<SharedPopoverStyle>,
     /// Accessible name for the surface's `Role::Dialog` node. Empty by
-    /// default (the wrapped content usually carries its own role/name).
+    /// default, and then the surface is named by the trigger.
     surface_name: String,
 
     content_id: Option<WidgetId>,
@@ -503,10 +503,10 @@ impl<T: PopoverTrigger> PopoverWidget<T> {
         self
     }
 
-    /// Accessible name for the surface's `Role::Dialog` node. Defaults
-    /// to empty (the wrapped content usually carries its own role and
-    /// name). No effect under [`bare`](Self::bare) or for the Menu
-    /// variant (which is presentational).
+    /// Accessible name for the surface's `Role::Dialog` node. Without one
+    /// the surface is named by the trigger that opens it. No effect under
+    /// [`bare`](Self::bare) or for the Menu variant (which is
+    /// presentational).
     pub fn surface_name(mut self, name: impl Into<String>) -> Self {
         self.surface_name = name.into();
         self
@@ -574,8 +574,9 @@ struct PopoverBody {
     surface_name: String,
     placement: OverlayPlacement,
     body_id: Option<WidgetId>,
-    /// The trigger, once `PopoverWidget::build` has added it: a `MenuList`
-    /// content is named after it.
+    /// The trigger, once `PopoverWidget::build` has added it, which is before
+    /// the body is first built (on the first open). It names the surface when
+    /// the caller gave it no name, and a `MenuList` content is named after it.
     opener: Rc<Cell<Option<WidgetId>>>,
 }
 
@@ -611,6 +612,11 @@ impl Widget for PopoverBody {
         // The surface is resolved per-call > theme slot > built-in
         // `RecipePopoverStyle`, so popovers theme app-wide via
         // `theme.style_slots.popover`.
+        // Whether anything in the content takes focus. Asked now, while the
+        // content is new and before it is parented: `add` has built its whole
+        // subtree.
+        let content_takes_focus = ctx.first_focusable_descendant(inner_content_id).is_some();
+
         let id = match self.surface_variant {
             None => inner_content_id,
             Some(variant) => {
@@ -631,7 +637,27 @@ impl Widget for PopoverBody {
                     show_caret: false,
                     caret_size: 0.0,
                 };
-                style.make_body(&cfg, ctx)
+                let surface = style.make_body(&cfg, ctx);
+                // Every surface but the Menu one is a `Role::Dialog`, and a
+                // dialog needs a name. With none given, it is named by the
+                // control that opened it, as a disclosure's panel is.
+                if variant != PopoverVariant::Menu {
+                    if self.surface_name.is_empty()
+                        && let Some(trigger) = self.opener.get()
+                    {
+                        ctx.access_labelled_by(surface, trigger);
+                    }
+                    // With nothing inside to take focus, the dialog takes it,
+                    // so opening the popover puts the reader on a named node
+                    // that holds the text, and Tab carries on from here, after
+                    // the trigger. Left to the fallback, focus parked on the
+                    // unnamed host above this body: a node no reader could
+                    // name, from which Tab restarted at the top of the window.
+                    if !content_takes_focus {
+                        ctx.apply_handlers(surface, HandlerSet::new().focusable(true));
+                    }
+                }
+                surface
             }
         };
         self.body_id = Some(id);
@@ -695,9 +721,6 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                 opener: opener.clone(),
             },
         );
-        // Focus targets the panel; `request_focus` walks to its first focusable
-        // descendant, so it still lands inside the chrome rather than on it.
-        let focus_id = content_id;
         ctx.set_dormant(content_id);
         // Gate the content's activation on `popover_open` so it is the single
         // source of truth. Without this, when the PopoverWidget itself is woken
@@ -791,7 +814,11 @@ impl<T: PopoverTrigger> Widget for PopoverWidget<T> {
                         req = req.with_fade(d);
                     }
                     ctx_evt.show_overlay(req);
-                    ctx_evt.request_focus(focus_id);
+                    // Into the panel: its first control, or the dialog itself
+                    // when it holds none (see `PopoverBody::build`). A bare
+                    // panel with nothing to focus leaves focus on the trigger
+                    // rather than on an unnamed node.
+                    ctx_evt.request_focus_into(content_id);
                     if let Some(cb) = on_open.as_ref() {
                         cb();
                     }

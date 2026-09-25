@@ -52,6 +52,17 @@ by crate for clarity, not because crates version independently.
   filter keeps, which are the ones a platform adapter walks and can
   announce.
 
+- **`HandlerSet::access_customize`: a widget can finish the accessibility
+  of a node it reaches by id.** The twin of
+  `WidgetWithHandlers::access_customize`, for the nodes a widget writes to
+  through `BuildContext::apply_handlers`, and chained after any customization
+  the node already carries.
+- **`BuildContext::first_focus_capable_descendant`: the control a wrapper
+  stands for, even while it is disabled.** Beside
+  `first_focusable_descendant`, which finds only what can take focus now,
+  this finds the first widget in a subtree that is declared focusable, so a
+  control disabled as it mounts is still recognised as the control.
+
 #### Internationalization
 
 - **A formatted date can name its weekday, or stop at the month.**
@@ -330,6 +341,30 @@ by crate for clarity, not because crates version independently.
   with their date or time. **Behaviour change**: those parts are
   `Role::TextInput`, no longer `Role::DateInput` or `Role::TimeInput`; the
   editor around them keeps its date role.
+- **A custom overlay trigger could not be reached from the keyboard, or was
+  reached as an unnamed panel.** The widget handed to `Dialog::trigger`,
+  `Snackbar::trigger`, `Wizard::trigger` or a `PopoverCustom` carried its
+  button role and name on one node and took focus on another. A popover over
+  a custom trigger was no Tab stop at all, and a screen reader could not
+  focus it either; a dialog's custom trigger took focus as the unnamed panel
+  it wrapped, which Orca 46.1 read as "panel.". The node that takes focus is
+  now the trigger's button: Tab lands on it, the reader hears its name, and
+  Enter, Space and the reader's own activation open the overlay. A trigger
+  that is already a control, such as a `Button`, stays the one Tab stop under
+  its own name, carries the popup state, and now opens the overlay when a
+  screen reader activates it, where before nothing happened; the wrapper
+  around it is no longer a second button, which for a `Snackbar` had been
+  named with the snackbar's message. **Behaviour change**: a custom trigger
+  around a widget that takes no focus is now a Tab stop, including the filter
+  glyph of a filterable `TableView` column.
+- **Opening a popover with nothing to focus in it put the reader on a node
+  with no name and no role.** Orca 46.1 said nothing, and Tab from there went
+  to the first control of the window. Focus now lands on the popover's
+  dialog, so the reader hears its name and the text it holds; Tab goes on to
+  the control after the trigger and Shift+Tab back to the trigger, and either
+  closes the popover. A popover's dialog given no `surface_name` is now named
+  by its trigger, where before it had no name. A `bare()` popover with
+  nothing to focus leaves focus on its trigger.
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

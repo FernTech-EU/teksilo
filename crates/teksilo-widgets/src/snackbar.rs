@@ -49,7 +49,6 @@ use std::time::Duration;
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
 use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
 use teksilo_core::signal::Prop;
 use teksilo_core::styles::{SharedSnackbarStyle, SnackbarStyleConfig};
@@ -423,59 +422,11 @@ impl Widget for Snackbar {
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
             // A custom trigger is an arbitrary widget with no built-in
-            // activation, so we wire pointer / keyboard / AT activation
-            // by hand. (The default-Button branch below delegates all
-            // three to `Button::on_activate_fn`.)
-            let open_on_tap = {
-                let dismiss = dismiss.clone();
-                let shown = shown.clone();
-                move |_event: &teksilo_core::TapEvent,
-                      ctx: &mut teksilo_core::widget::EventContext| {
-                    if !enabled {
-                        return;
-                    }
-                    present_snackbar(
-                        ctx,
-                        self_id,
-                        content_id,
-                        &shown,
-                        dismiss.clone(),
-                        auto_dismiss_after,
-                        fade_duration,
-                    );
-                }
-            };
-            let handlers = teksilo_core::widget_builder::HandlerSet::new()
-                .focusable(true)
-                .cursor(teksilo_core::widget::CursorIcon::Pointer)
-                .on_tap(open_on_tap)
-                .on_key({
-                    let dismiss = dismiss.clone();
-                    let shown = shown.clone();
-                    move |event, ctx| match event {
-                        WidgetEvent::KeyUp {
-                            key: Key::Enter | Key::Space,
-                            ..
-                        } if enabled => {
-                            present_snackbar(
-                                ctx,
-                                self_id,
-                                content_id,
-                                &shown,
-                                dismiss.clone(),
-                                auto_dismiss_after,
-                                fade_duration,
-                            );
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                });
-            // On the trigger's OWN node, not in the set above (which goes to
-            // the child): the trigger node is the one with `Role::Button`,
-            // and an `AccessAction` bubbles from there rootwards, so a
-            // handler on the child was never on its path.
-            let on_access_activate = {
+            // activation. `OverlayTrigger` wires this one opener to the
+            // pointer, to Enter/Space and to the AT `Click`, on the nodes each
+            // belongs on. (The default-Button branch below delegates all three
+            // to `Button::on_activate_fn`.)
+            let open = {
                 let shown = shown.clone();
                 move |ctx: &mut teksilo_core::widget::EventContext| {
                     if !enabled {
@@ -492,13 +443,11 @@ impl Widget for Snackbar {
                     );
                 }
             };
-            let overlay_trigger = match trigger {
-                PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
-                PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
-            }
-            .on_access_activate(on_access_activate)
-            .enabled(self.enabled.clone())
-            .name(label);
+            let overlay_trigger = OverlayTrigger::from_pending(trigger)
+                .on_activate(open)
+                .activate_on_key_up()
+                .enabled(self.enabled.clone())
+                .name(label);
             ctx.add(overlay_trigger)
         } else {
             // `Button::on_activate_fn` already fires on pointer tap,
@@ -569,6 +518,7 @@ impl Widget for Snackbar {
 mod tests {
     use super::*;
     use teksilo_canvas::Size;
+    use teksilo_core::event::{Key, WidgetEvent};
     use teksilo_core::widget_tree::WidgetTree;
     use teksilo_i18n::lit;
 

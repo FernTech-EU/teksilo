@@ -775,91 +775,37 @@ impl Widget for Dialog {
         };
 
         let root_id = if let Some(trigger) = self.pending_trigger.take() {
-            let tap_open = is_open.clone();
-            let tap_dismiss = dismiss_callback.clone();
-            let key_open = is_open.clone();
-            let key_dismiss = dismiss_callback.clone();
-            let action_open = is_open.clone();
-            let action_dismiss = dismiss_callback.clone();
-            let handlers = teksilo_core::widget_builder::HandlerSet::new()
-                .focusable(true)
-                .cursor(teksilo_core::widget::CursorIcon::Pointer)
-                .on_tap({
-                    let label = label.clone();
-                    let content_factory = content_factory.clone();
-                    let enabled = enabled.clone();
-                    move |_pos, ctx| {
-                        if !enabled.get() {
-                            return;
-                        }
-                        tap_open.set(true);
-                        queue_dialog_request(
-                            ctx,
-                            &content_factory,
-                            presentation,
-                            close_behavior,
-                            &label.resolve_now(),
-                            Some(tap_dismiss.clone()),
-                        );
-                    }
-                })
-                .on_key({
-                    let label = label.clone();
-                    let content_factory = content_factory.clone();
-                    let enabled = enabled.clone();
-                    move |event, ctx| match event {
-                        WidgetEvent::KeyUp {
-                            key: Key::Enter | Key::Space,
-                            ..
-                        } if enabled.get() => {
-                            key_open.set(true);
-                            queue_dialog_request(
-                                ctx,
-                                &content_factory,
-                                presentation,
-                                close_behavior,
-                                &label.resolve_now(),
-                                Some(key_dismiss.clone()),
-                            );
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
-                    }
-                });
-            // The AT route goes on the OverlayTrigger's OWN node rather than
-            // into the set above, which is applied to the child. The trigger
-            // node is the one carrying `Role::Button`, and an `AccessAction`
-            // bubbles from the node it was invoked on towards the root — so a
-            // handler on the child sat off that path and this button, named
-            // and correctly roled, could not be activated by a screen reader.
-            let on_access_activate = {
+            // One opener for all three routes. `OverlayTrigger` puts the tap on
+            // the wrapped widget and Enter/Space and the AT `Click` on whichever
+            // node takes focus, which is also the node carrying the name.
+            let open = {
                 let label = label.clone();
                 let content_factory = content_factory.clone();
                 let enabled = enabled.clone();
+                let is_open = is_open.clone();
+                let dismiss = dismiss_callback.clone();
                 move |ctx: &mut teksilo_core::widget::EventContext| {
                     if !enabled.get() {
                         return;
                     }
-                    action_open.set(true);
+                    is_open.set(true);
                     queue_dialog_request(
                         ctx,
                         &content_factory,
                         presentation,
                         close_behavior,
                         &label.resolve_now(),
-                        Some(action_dismiss.clone()),
+                        Some(dismiss.clone()),
                     );
                 }
             };
-            let overlay_trigger = match trigger {
-                PendingChild::Id(id) => OverlayTrigger::from_id(id, handlers),
-                PendingChild::Deferred(widget) => OverlayTrigger::new(widget, handlers),
-            }
-            .on_access_activate(on_access_activate)
-            .enabled(self.enabled.clone())
-            .name(label)
-            .has_popup(teksilo_core::accesskit::HasPopup::Dialog)
-            .expanded_when(is_open.clone());
+            let overlay_trigger = OverlayTrigger::from_pending(trigger)
+                .on_activate(open)
+                .activate_on_key_up()
+                .enabled(self.enabled.clone())
+                .name(label)
+                .has_popup(teksilo_core::accesskit::HasPopup::Dialog)
+                .expanded_when(is_open.clone());
             ctx.add(overlay_trigger)
         } else {
             let tap_open = is_open.clone();

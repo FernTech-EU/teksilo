@@ -377,6 +377,22 @@ impl WidgetTree {
         enter_scope_edge(&scope, false)
     }
 
+    /// The first widget within a subtree, in depth-first order, that is
+    /// declared focusable, whether or not it can take focus right now. See
+    /// [`BuildContext::first_focus_capable_descendant`](crate::build_context::BuildContext::first_focus_capable_descendant).
+    pub(crate) fn first_focus_capable_descendant(&self, root: WidgetId) -> Option<WidgetId> {
+        if !self.arena.is_active(root) {
+            return None;
+        }
+        let node = self.arena.get(root)?;
+        if self.is_node_focusable(node) {
+            return Some(root);
+        }
+        node.children
+            .iter()
+            .find_map(|&child| self.first_focus_capable_descendant(child))
+    }
+
     /// Whether the given widget id currently exists and is active in the
     /// tree (not dormant, not destroyed). Callers that need to validate a
     /// user-supplied `WidgetId` before acting on it — e.g. the modal

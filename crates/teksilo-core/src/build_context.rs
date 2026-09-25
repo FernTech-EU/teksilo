@@ -931,6 +931,19 @@ impl<'a> BuildContext<'a> {
         self.tree.first_focusable_descendant(root)
     }
 
+    /// Find the first widget within the subtree rooted at `root`, in
+    /// depth-first order, that is declared focusable, **whether or not it can
+    /// take focus right now**: a disabled control, or one kept out of the Tab
+    /// order, still counts. Dormant subtrees are skipped, as they are by
+    /// [`first_focusable_descendant`](Self::first_focusable_descendant).
+    ///
+    /// For a wrapper asking which control it stands for. A control disabled
+    /// when it is built is still that control, and taking it for absent would
+    /// have the wrapper add a focus stop of its own beside it.
+    pub fn first_focus_capable_descendant(&self, root: WidgetId) -> Option<WidgetId> {
+        self.tree.first_focus_capable_descendant(root)
+    }
+
     /// Move keyboard focus **into** the subtree rooted at `id`: its first
     /// focusable descendant in tab order, or `id` itself when it is the only
     /// focusable thing there. Returns whether focus ended up inside `id`.
