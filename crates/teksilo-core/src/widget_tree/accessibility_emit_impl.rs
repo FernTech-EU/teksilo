@@ -10,15 +10,38 @@ use super::*;
 use super::accessibility_impl::to_accesskit_rect;
 use crate::accessibility::{AccessNodeBuilder, to_accesskit_affine};
 
+/// The node an adapter tells a reader holds focus: the focused node's
+/// `active_descendant` when that names a node in the update, which is how
+/// `accesskit_consumer` resolves it (`tree.rs:537-543`, `node.rs:966-971`).
+fn focus_as_read(
+    nodes: &[(accesskit::NodeId, accesskit::Node)],
+    focus: accesskit::NodeId,
+) -> accesskit::NodeId {
+    nodes
+        .iter()
+        .find(|(id, _)| *id == focus)
+        .and_then(|(_, node)| node.active_descendant())
+        .filter(|descendant| nodes.iter().any(|(id, _)| id == descendant))
+        .unwrap_or(focus)
+}
+
 impl WidgetTree {
+    /// Walk the arena into a `TreeUpdate`.
+    ///
+    /// `speak` lets a message the framework's announcers hold ready enter the
+    /// update, which it then does unless the update moves focus; the last
+    /// element of the result says whether it did. A snapshot passes `false`
+    /// and describes the tree the adapters have. See [`crate::announcer`].
     #[allow(clippy::type_complexity)]
     pub(super) fn build_accessibility_tree(
         &self,
+        speak: bool,
     ) -> (
         accesskit::TreeUpdate,
         std::collections::HashMap<accesskit::NodeId, WidgetId>,
         std::collections::HashMap<accesskit::NodeId, teksilo_canvas::Rect>,
         super::accessibility_description_impl::DescriptionMemory,
+        bool,
     ) {
         use crate::accessibility::{root_node_id, widget_id_to_node_id};
 
@@ -76,23 +99,7 @@ impl WidgetTree {
                 }
             }
         }
-        // The framework's own live regions, last in the root's child list so
-        // they sit after the application's content in reading order: one node
-        // for each message spoken in the last few seconds, each from an id the
-        // tree has never used. See [`crate::announcer`] for why an
-        // announcement is a node that was never in the tree rather than a
-        // label edited in place or a node shown again.
-        let announcer_nodes: Vec<(accesskit::NodeId, accesskit::Node)> = self
-            .announcer_polite
-            .nodes()
-            .chain(self.announcer_assertive.nodes())
-            .collect();
-        for (id, _) in &announcer_nodes {
-            root.push_child(*id);
-        }
-
         nodes.push((root_node_id(), root));
-        nodes.extend(announcer_nodes);
 
         // One pass, one set: a tooltip is placed once, on the first node that
         // may have it, and the walk order makes that the owner rather than the
@@ -378,11 +385,55 @@ impl WidgetTree {
             }
         }
 
+        // The framework's own live regions, last in the root's child list so
+        // they sit after the application's content in reading order: one node
+        // for each message spoken in the last few seconds, each from an id the
+        // tree has never used. See [`crate::announcer`] for why an
+        // announcement is a node that was never in the tree rather than a
+        // label edited in place or a node shown again.
+        //
+        // A message ready to enter does so only in an update that leaves
+        // focus where the last one put it: the adapters raise an update's
+        // announcements before its focus event, and a reader that stops to
+        // read the new focus cuts the message. Focus is compared as the
+        // consumer resolves it, so a list's new current row is a move.
+        let ready = speak
+            && (self.announcer_polite.entering().is_some()
+                || self.announcer_assertive.entering().is_some());
+        let moves_focus = ready
+            && self.cached_a11y.as_ref().is_some_and(|last| {
+                focus_as_read(&last.nodes, last.focus) != focus_as_read(&nodes, focus)
+            });
+        let admitted = ready && !moves_focus;
+        // What waits is heard after the arrival, by every reader.
+        let held: Vec<&str> = if moves_focus {
+            [
+                self.announcer_polite.entering(),
+                self.announcer_assertive.entering(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        } else {
+            Vec::new()
+        };
+        let announcer_nodes: Vec<(accesskit::NodeId, accesskit::Node)> = self
+            .announcer_polite
+            .nodes(admitted)
+            .chain(self.announcer_assertive.nodes(admitted))
+            .collect();
+        if let Some((_, root)) = nodes.iter_mut().find(|(id, _)| *id == root_node_id()) {
+            for (id, _) in &announcer_nodes {
+                root.push_child(*id);
+            }
+        }
+        nodes.extend(announcer_nodes);
+
         // Last, on the nodes this update carries: a `described_by` relation
         // reaches no screen reader through AccessKit, so its targets' text is
         // written onto the node's `description`, which every adapter exposes.
         // After the relation strip, so every target named is present.
-        let descriptions = self.describe_from_relations(&mut nodes, focus);
+        let descriptions = self.describe_from_relations(&mut nodes, focus, &held);
 
         (
             accesskit::TreeUpdate {
@@ -394,6 +445,7 @@ impl WidgetTree {
             synthetic_parents,
             local_bounds,
             descriptions,
+            admitted,
         )
     }
 

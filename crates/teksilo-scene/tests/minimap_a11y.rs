@@ -175,8 +175,17 @@ impl Fixture {
         got[0]
     }
 
-    fn last_announcement(&mut self, since: u64) -> String {
+    /// The updates a running window delivers after a change: the frame it
+    /// is drawn in, and the next. `press` focuses the minimap as it presses,
+    /// and a message raised in an update that moves focus waits for the next
+    /// one, so a reader hears it after the minimap (`teksilo_core::announcer`).
+    fn next_frames(&mut self) {
         let _ = self.at();
+        let _ = self.at();
+    }
+
+    fn last_announcement(&mut self, since: u64) -> String {
+        self.next_frames();
         let got = self.tree.announcements_since(since);
         assert!(
             !got.is_empty(),
@@ -535,7 +544,7 @@ fn a_tap_moves_the_view_and_says_nothing() {
             1,
             "{kind:?}: a tap must still reach the callback"
         );
-        let _ = f.at();
+        f.next_frames();
         let said = f.tree.announcements_since(since);
         assert!(
             said.is_empty(),

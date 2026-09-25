@@ -354,9 +354,9 @@ fn several_announcements_in_one_update_keep_the_trees_order() {
 }
 
 /// The framework's announcers are the root's last children, after the
-/// application's content in reading order, although the walk emits their nodes
-/// right after the root. A message said through them in the same update as a
-/// change of the application's own live region comes after it.
+/// application's content in reading order. A message said through them in the
+/// same update as a change of the application's own live region comes after
+/// it.
 #[test]
 fn the_frameworks_announcement_comes_after_the_applications_own() {
     let text = Signal::new("Prêt".to_string());

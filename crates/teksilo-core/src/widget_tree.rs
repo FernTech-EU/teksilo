@@ -728,9 +728,9 @@ pub struct WidgetTree {
     /// changed without diffing the whole `TreeUpdate`.
     at_version: crate::signal::Signal<u64>,
     /// The framework's own live regions, one per politeness level. See
-    /// [`crate::announcer`]: each owns a reserved AccessKit node and cycles it
-    /// in and out of the filtered tree, which is the only mechanism all three
-    /// platform adapters agree announces.
+    /// [`crate::announcer`]: each speaks every message from a node the tree
+    /// has never had, which is the only mechanism all three platform adapters
+    /// agree announces, and never in an update that moves focus.
     announcer_polite: crate::announcer::Announcer,
     announcer_assertive: crate::announcer::Announcer,
     /// Where both announcers draw the id of each message's node from, so no

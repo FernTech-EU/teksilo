@@ -1920,6 +1920,54 @@ fn alt_arrow_reorders_item() {
     assert_eq!(model.with_item(2, |v| *v), Some(40));
 }
 
+/// A keyboard move says where the row went once focus is on it. The move
+/// makes the moved row the list's current row, a focus change to every
+/// adapter, and the adapters raise an update's announcements ahead of its
+/// focus event. `tools/reader/` heard Orca cut every move announcement
+/// raised that way for the reading of the row.
+#[test]
+fn a_keyboard_move_is_heard_after_focus_lands_on_the_moved_row() {
+    use crate::common::heard_test::{Heard, Listener};
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    let model = ListModel::from_vec(vec![10, 20, 30, 40, 50]);
+    let selection = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new();
+    let lv_id = tree.add(
+        ListView::new(model.clone(), |_i, _item, _sel| {
+            Box::new(FixedLeaf(100.0, 30.0))
+        })
+        .item_height(30.0)
+        .selection(selection.clone())
+        .reorderable(true),
+    );
+    let lay_out = |tree: &mut WidgetTree| tree.layout(SizeProposal::exact(400.0, 300.0));
+    lay_out(&mut tree);
+    selection.select(2);
+    tree.focus(lv_id);
+    lay_out(&mut tree);
+    let mut listener = Listener::attach(&mut tree);
+
+    tree.press_key(Key::ArrowDown, Modifiers::ALT);
+    lay_out(&mut tree);
+    assert_eq!(model.with_item(3, |v| *v), Some(30));
+    let heard = listener.heard(&mut tree);
+    let focus = heard.iter().position(|h| matches!(h, Heard::Focus(_)));
+    let moved = heard
+        .iter()
+        .position(|h| *h == Heard::Live("Moved to 4 of 5".to_string()));
+    assert!(
+        focus.is_some() && moved.is_some(),
+        "the reader is told of the new current row and of the move: {heard:?}"
+    );
+    assert!(
+        moved > focus,
+        "the move was announced ahead of the focus change to the moved row, \
+         and Orca stops speaking to read the row: {heard:?}"
+    );
+}
+
 // --- Drag-and-drop integration tests ---
 
 /// Build a reorderable ListView at the tree root with the given values.

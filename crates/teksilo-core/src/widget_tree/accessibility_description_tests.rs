@@ -394,9 +394,10 @@ fn a_message_announced_as_focus_arrives_is_said_once() {
 
 /// The same, where the voice is not the line but the application's own
 /// announcement: a line kept silent (`Live::Off`), and `announce_with` saying
-/// the same sentence as focus is sent to the field. The announcer is a live
-/// region like any other, so the arrival leaves its sentence out where the
-/// reader keeps the announcement, and says it where the reader cuts it.
+/// the same sentence as focus is sent to the field. The announcer holds its
+/// message back from the update that moves focus and says it in the next, so
+/// every reader hears it after the arrival, whole, and the arrival leaves the
+/// sentence out.
 #[test]
 fn an_announcement_saying_the_line_as_focus_arrives_is_said_once() {
     for reader in READERS {
@@ -409,7 +410,7 @@ fn an_announcement_saying_the_line_as_focus_arrives_is_said_once() {
         form.tree
             .announce_with("Enter a title", Politeness::Assertive);
         form.tree.focus(form.field);
-        // The message arrives, and a frame later is still there.
+        // Focus arrives, and a frame later the message.
         ears.hear(&mut form.tree);
         ears.hear(&mut form.tree);
         assert_eq!(
@@ -418,9 +419,16 @@ fn an_announcement_saying_the_line_as_focus_arrives_is_said_once() {
             "{reader:?}: heard {:?}",
             ears.heard
         );
+        assert_eq!(
+            ears.cut_times("Enter a title"),
+            0,
+            "{reader:?}: the announcement went out with the focus move, and \
+             the arrival cut it: {:?}",
+            ears.cut
+        );
 
         // The same refusal again, from the button: the line is unchanged, the
-        // announcement is not, and the arrival says it once with it.
+        // announcement is new, and it is heard once, after the arrival.
         form.tree.focus(form.other);
         ears.hear(&mut form.tree);
         form.tree

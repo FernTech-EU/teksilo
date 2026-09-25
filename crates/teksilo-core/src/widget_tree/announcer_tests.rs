@@ -49,6 +49,11 @@ struct Changes {
     /// Live nodes that entered, with their name, in no particular order.
     announced: Vec<(NodeId, String)>,
     removed: Vec<NodeId>,
+    /// Whether the update moved focus. The consumer hands an update's added
+    /// and changed nodes to the adapter first and the focus move after them
+    /// (`accesskit_consumer` `tree.rs:640-673`), so everything in `announced`
+    /// reached the adapter before this focus event.
+    focus_moved: bool,
 }
 
 fn included(node: &NodeRef) -> bool {
@@ -80,7 +85,9 @@ impl TreeChangeHandler for Changes {
         }
     }
 
-    fn focus_moved(&mut self, _old: Option<&NodeRef>, _new: Option<&NodeRef>) {}
+    fn focus_moved(&mut self, _old: Option<&NodeRef>, _new: Option<&NodeRef>) {
+        self.focus_moved = true;
+    }
 
     fn node_removed(&mut self, node: &NodeRef) {
         if included(node) {
@@ -289,4 +296,176 @@ fn a_burst_of_messages_keeps_the_tree_small() {
     }
     let expected: Vec<String> = (0..30).map(|i| format!("Row {i}")).collect();
     assert_eq!(heard, expected, "every message is heard, in order");
+}
+
+/// What a reader makes of `message` over the frames after it is asked for,
+/// one entry each time an adapter raises it: `"heard"`, or `"cut"` when the
+/// same update also moved focus. The adapter raises that update's
+/// announcements before its focus event, and Orca 46.1 stops speaking to read
+/// a new focus (`locusOfFocusChanged` calls `presentationInterrupt`,
+/// `orca/scripts/default.py:698-705`), which `tools/reader/` measured cutting
+/// every such message.
+fn fate(adapter: &mut Adapter, tree: &mut WidgetTree, message: &str) -> Vec<&'static str> {
+    let mut fate = Vec::new();
+    for _ in 0..4 {
+        let changes = adapter.sync(tree);
+        for (_, text) in &changes.announced {
+            if text == message {
+                fate.push(if changes.focus_moved { "cut" } else { "heard" });
+            }
+        }
+        tree.advance_time(Duration::from_millis(16));
+    }
+    fate
+}
+
+/// The defect `tools/reader/` found behind every keyboard move of a row or a
+/// tab: the handler that moves the item announces where it went and puts
+/// focus on it, both reach the adapter in one update, and the announcement
+/// comes first, so Orca cut it for the focus. Here focus moves from one
+/// control to another, as it does to a rebuilt tab header.
+#[test]
+fn a_message_raised_as_focus_moves_is_heard_after_the_move() {
+    let mut tree = WidgetTree::new();
+    let first = tree.add(FillWidget::new().focusable());
+    let second = tree.add(FillWidget::new().focusable());
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(first);
+    let mut adapter = Adapter::attach(&mut tree);
+    tree.advance_time(Duration::ZERO);
+
+    // One handler: the item moves, focus follows it, and the move is said.
+    tree.focus(second);
+    tree.announce("Doc 1 moved to 5 of 6");
+    assert_eq!(
+        fate(&mut adapter, &mut tree, "Doc 1 moved to 5 of 6"),
+        ["heard"],
+        "the message reached the adapter in the update that moved focus, ahead \
+         of the focus event, and Orca stops speaking to read the new focus"
+    );
+}
+
+/// A list that keeps focus itself and points `active_descendant` at its
+/// current row, as `ListView`, `TreeView` and `GridView` do. The consumer
+/// resolves focus through it (`accesskit_consumer` `tree.rs:537-543`), so a
+/// new current row is a focus move to every adapter although the focused
+/// widget is the same.
+#[derive(Debug)]
+struct Roving {
+    rows: Vec<crate::widget_id::WidgetId>,
+    current: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+impl crate::widget::Widget for Roving {
+    fn build(
+        &mut self,
+        ctx: &mut crate::build_context::BuildContext,
+    ) -> Vec<crate::widget_id::WidgetId> {
+        ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().focusable(true));
+        self.rows = (1..=3)
+            .map(|i| ctx.add(FillWidget::new().label(format!("Item {i}"))))
+            .collect();
+        self.rows.clone()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &crate::widget::LayoutContext,
+    ) -> crate::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn children(&self) -> Vec<crate::widget_id::WidgetId> {
+        self.rows.clone()
+    }
+
+    fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
+        builder.set_role(accesskit::Role::ListBox);
+        if let Some(&row) = self.rows.get(self.current.get()) {
+            builder.set_active_descendant(crate::accessibility::widget_id_to_node_id(row));
+        }
+    }
+}
+
+/// The same, where focus stays on the list and its current row changes: the
+/// `ListView` and `TreeView` reorder, whose moved row is a new node.
+#[test]
+fn a_message_raised_as_the_current_row_changes_is_heard_after_the_change() {
+    let current = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut tree = WidgetTree::new();
+    let list = tree.add(Roving {
+        rows: Vec::new(),
+        current: current.clone(),
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(list);
+    let mut adapter = Adapter::attach(&mut tree);
+    tree.advance_time(Duration::ZERO);
+
+    current.set(1);
+    tree.request_accessibility_update();
+    tree.announce("Moved to 2 of 3");
+    assert_eq!(
+        fate(&mut adapter, &mut tree, "Moved to 2 of 3"),
+        ["heard"],
+        "the message reached the adapter in the update that moved the current \
+         row, ahead of the focus event, and Orca stops speaking to read the row"
+    );
+}
+
+/// A message raised while focus stays where it is goes out at once: holding
+/// one back is for an update that moves focus, and costs nothing otherwise.
+#[test]
+fn a_message_raised_while_focus_stays_is_not_held() {
+    let mut tree = WidgetTree::new();
+    let only = tree.add(FillWidget::new().focusable());
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(only);
+    let mut adapter = Adapter::attach(&mut tree);
+    tree.advance_time(Duration::ZERO);
+
+    tree.announce("Saved");
+    let changes = adapter.sync(&mut tree);
+    assert_eq!(
+        changes
+            .announced
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>(),
+        ["Saved"],
+        "nothing moved focus, so the first update speaks the message"
+    );
+}
+
+/// Focus that moves on two frames running, as a rebuild that settles over two
+/// layouts can make it, holds the message until it has stopped: a message
+/// raised with the first move is heard after the second.
+#[test]
+fn a_message_waits_for_focus_to_stop_moving() {
+    let mut tree = WidgetTree::new();
+    let first = tree.add(FillWidget::new().focusable());
+    let second = tree.add(FillWidget::new().focusable());
+    let third = tree.add(FillWidget::new().focusable());
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    tree.focus(first);
+    let mut adapter = Adapter::attach(&mut tree);
+    tree.advance_time(Duration::ZERO);
+
+    tree.focus(second);
+    tree.announce("Moved to 3 of 10");
+    let changes = adapter.sync(&mut tree);
+    assert!(changes.focus_moved, "the first frame moves focus");
+    assert!(
+        changes.announced.is_empty(),
+        "the message went out with the first move, ahead of its focus event: {:?}",
+        changes.announced
+    );
+    tree.advance_time(Duration::from_millis(16));
+    tree.focus(third);
+    assert_eq!(
+        fate(&mut adapter, &mut tree, "Moved to 3 of 10"),
+        ["heard"],
+        "the message went out with the second move, ahead of its focus event"
+    );
 }

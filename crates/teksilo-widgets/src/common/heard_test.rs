@@ -147,17 +147,18 @@ impl Listener {
 
     /// Everything the reader is told between the last call and now.
     ///
-    /// The tree is synced three times, as a running application syncs on
+    /// The tree is synced four times, as a running application syncs on
     /// the frames that follow a change: the framework's announcer puts one
-    /// queued message in the tree an update, so a change that queues two
-    /// needs two syncs to be heard whole, and the third shows that nothing is
-    /// said again.
+    /// queued message in the tree an update, and none in an update that
+    /// moves focus, so a change that moves focus and queues two needs three
+    /// syncs to be heard whole, and the fourth shows that nothing is said
+    /// again.
     pub(crate) fn heard(&mut self, tree: &mut WidgetTree) -> Vec<Heard> {
         let mut handler = Handler {
             heard: Vec::new(),
             defunct: &mut self.defunct,
         };
-        for _ in 0..3 {
+        for _ in 0..4 {
             let update = delivered(tree);
             self.platform
                 .update_and_process_changes(update, &mut handler);

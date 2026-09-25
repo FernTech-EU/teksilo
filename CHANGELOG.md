@@ -138,6 +138,16 @@ by crate for clarity, not because crates version independently.
   it `WidgetTree::deliver_accessibility` and routes the adapter's action
   requests through `WidgetTree::resolve_adapter_action`. Windows and macOS
   keep no defunct state, and nothing changes there that a reader can tell.
+- **An announcement made as focus moved was cut before it was heard.** A
+  keyboard move of a row or a tab ("Moved to 2 of 3", "Doc 1 moved to 5 of 6",
+  "Moved to level 2") puts focus on the moved item and says where it went, and
+  Orca 46.1 stopped the message to read the item: no move in a `ListView`,
+  `TreeView`, `GridView` or tab bar was ever heard whole. A message the
+  announcer is asked for as focus moves, including to a list's new current
+  row, now reaches the screen reader after the focus change, one frame later,
+  so the reader hears the item and then the message. A field focused as the
+  message is announced leaves the message out of its description while focus
+  stays, as it already did where the reader keeps the announcement.
 - **The announcement ring recorded text no platform announces.**
   `WidgetTree::announcements_since`, and the automation bridge's
   `pull_announcements` that reads it, recorded a live node's `value` before

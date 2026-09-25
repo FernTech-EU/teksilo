@@ -322,9 +322,7 @@ impl Heard {
     /// arbitrary; an adapter raises its events in that same arbitrary order.
     /// Several in one update are put in the tree's reading order, so the ring
     /// is reproducible. That is the order of a walk of the replay, not of the
-    /// update's node list: the walk emits the framework's announcers right
-    /// after the root, while they are the root's last children, after the
-    /// application's content.
+    /// update's node list, which the walk fills in no order a reader follows.
     fn in_reading_order(mut self, replay: &Tree) -> Vec<(String, bool)> {
         if self.spoken.len() > 1 {
             let mut position: std::collections::HashMap<NodeId, usize> =

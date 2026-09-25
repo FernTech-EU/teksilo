@@ -74,11 +74,13 @@ impl WidgetTree {
         // cache check, is what makes a queued announcement able to wake a tree
         // that is otherwise clean: `announce` sets `a11y_update_requested`,
         // which the drain above turned into `a11y_dirty`, and the step below
-        // decides what this update will say. One message enters the tree an
-        // update, so an announcer with more queued asks for another sync and
-        // another frame; one whose messages are only lingering asks the event
-        // loop to wake when the next is due to leave.
-        let announcers_busy = self.step_announcers();
+        // readies the message this update may say. The walk decides whether it
+        // does: not in an update that moves focus (see `crate::announcer`).
+        // One message enters the tree an update, so an announcer with more
+        // queued, or one still waiting, asks for another sync and another
+        // frame; one whose messages are only lingering asks the event loop to
+        // wake when the next is due to leave.
+        self.step_announcers();
 
         if !self.a11y_dirty
             && let Some(cached) = &self.cached_a11y
@@ -123,7 +125,9 @@ impl WidgetTree {
                 .clone();
         }
 
-        let (update, parents, local_bounds, descriptions) = self.build_accessibility_tree();
+        let (update, parents, local_bounds, descriptions, admitted) =
+            self.build_accessibility_tree(true);
+        let announcers_busy = self.settle_announcers(admitted);
         // What the adapters will announce from this update. Here, in the
         // `&mut self` half and not in the `&self` walk, because the ring
         // replays exactly the updates this method hands out, in order. A tree
@@ -318,34 +322,53 @@ impl WidgetTree {
     /// It is a full walk every time; `sync_accessibility` is the one with the
     /// cache.
     pub fn accessibility_tree_snapshot(&self) -> accesskit::TreeUpdate {
-        self.build_accessibility_tree().0
+        self.build_accessibility_tree(false).0
     }
 
-    /// Advance both announcers one step and report whether either has more
-    /// messages queued. See [`crate::announcer`].
-    fn step_announcers(&mut self) -> bool {
+    /// Advance both announcers one step: retire what is due, and ready the
+    /// next message to enter. See [`crate::announcer`].
+    fn step_announcers(&mut self) {
         // Both are stepped, not just the busy one: an announcer with nothing
         // queued and nothing in the tree changes nothing, so this costs
         // nothing when nobody is announcing.
         let now = self.animation_clock();
         let polite = self.announcer_polite.step(now, &mut self.announcer_ids);
         let assertive = self.announcer_assertive.step(now, &mut self.announcer_ids);
-        if polite.changed || assertive.changed {
+        if polite || assertive {
             self.a11y_dirty = true;
         }
-        // A message's node leaves the tree at a time, not on a frame: wake the
-        // loop then, rather than drawing frames until it is due. Not on the
-        // simulated clock, whose instants the event loop does not wait on; a
-        // test advances it and syncs.
+        self.wake_for_retirement();
+    }
+
+    /// Put the messages that were ready in the tree when the update just
+    /// built `admitted` them, and report whether a message is still waiting,
+    /// which owes another update. See [`crate::announcer`].
+    fn settle_announcers(&mut self, admitted: bool) -> bool {
+        if admitted {
+            let now = self.animation_clock();
+            self.announcer_polite.admit(now);
+            self.announcer_assertive.admit(now);
+            self.wake_for_retirement();
+        }
+        self.announcer_polite.busy() || self.announcer_assertive.busy()
+    }
+
+    /// A message's node leaves the tree at a time, not on a frame: wake the
+    /// loop then, rather than drawing frames until it is due. Not on the
+    /// simulated clock, whose instants the event loop does not wait on; a
+    /// test advances it and syncs.
+    fn wake_for_retirement(&self) {
         if !self.sim_time_frozen
-            && let Some(at) = [polite.next_retirement, assertive.next_retirement]
-                .into_iter()
-                .flatten()
-                .min()
+            && let Some(at) = [
+                self.announcer_polite.next_retirement(),
+                self.announcer_assertive.next_retirement(),
+            ]
+            .into_iter()
+            .flatten()
+            .min()
         {
             self.request_wake_at(at);
         }
-        polite.busy || assertive.busy
     }
 
     /// Dispatch a synthetic AccessKit action to the node identified by

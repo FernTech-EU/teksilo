@@ -68,6 +68,43 @@
 //! That is a per-platform detail an application should never have to carry, and
 //! it is why this lives in the framework.
 //!
+//! ## Why a message waits for focus to land
+//!
+//! The handler that moves a row or a tab usually says where it went and puts
+//! focus on it, and the move rebuilds what focus was on, so focus lands on a
+//! new node. Both would reach the adapters in one update, and every adapter
+//! hears an update through `accesskit_consumer`, which hands it the added and
+//! changed nodes first and the focus move after them (`tree.rs:640-673`). So
+//! the announcement is raised ahead of the focus event on all three:
+//!
+//! - **Orca 46.1** stops speaking before it reads a new focus
+//!   (`locusOfFocusChanged` calls `presentationInterrupt`,
+//!   `orca/scripts/default.py:698-705`). `tools/reader/` measured every such
+//!   message cut ("Moved to 2 of 3", then a stop and "Documents."). An
+//!   announcement that comes after the focus event is queued behind the
+//!   reading instead: Orca speaks it with `interrupt=True` (`onAnnouncement`
+//!   and `speakMessage`, `scripts/default.py:1424-1428, 3153`), which its
+//!   speech-dispatcher backend no longer turns into a cancel
+//!   (`speechdispatcherfactory.py:453-464`), at the `MESSAGE` priority that
+//!   queues (`speechdispatcherfactory.py:158`).
+//! - **macOS** queues the announcement request, then
+//!   `FocusedUIElementChanged` (`accesskit_macos` `event.rs:236-241`,
+//!   `319-326`), and posts them in that order (`event.rs:126-130`). The
+//!   adapter itself raises another notification last "in order for VoiceOver
+//!   to announce it" (`event.rs:273-276`), which is what a message raised
+//!   first gives up.
+//! - **Windows** raises `LiveRegionChanged` and then the focus change
+//!   (`accesskit_windows` `adapter.rs:256-263`, `341-345`, `643-647`). NVDA
+//!   keeps a live region through a focus change (see
+//!   `widget_tree::accessibility_description_impl`), so it is heard there in
+//!   either order; after the focus event it follows the reading of the new
+//!   focus, as a browser's live region does.
+//!
+//! So a message never enters the tree in an update that moves focus, as the
+//! consumer resolves focus (through `active_descendant`, `tree.rs:537-543`):
+//! it waits, and enters the next update that leaves focus where it is. That
+//! is the frame after the move, since the tree asks for one.
+//!
 //! ## Why the message is a `String` and not a `LocalizedString`
 //!
 //! Two reasons that agree. Structurally, `teksilo-i18n` depends on
@@ -192,20 +229,6 @@ struct Shown {
     until: Instant,
 }
 
-/// What one step changed, for the tree that asked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct Step {
-    /// The update about to be built differs from the last one: a message
-    /// arrived or one left.
-    pub(crate) changed: bool,
-    /// Messages are still queued, so another update is owed at the next
-    /// frame: one message is put in the tree an update, in order.
-    pub(crate) busy: bool,
-    /// When the next spoken message is due to leave, so the tree can ask the
-    /// event loop to wake then.
-    pub(crate) next_retirement: Option<Instant>,
-}
-
 /// One politeness level's queue and the messages it has in the tree.
 ///
 /// Messages are queued rather than coalesced. Two things happening in quick
@@ -215,6 +238,10 @@ pub(crate) struct Step {
 pub(crate) struct Announcer {
     politeness: Politeness,
     pending: VecDeque<String>,
+    /// The message the next update is to speak, taken from `pending` with the
+    /// id of the node it will be spoken from. It waits here through every
+    /// update that moves focus (see the module docs).
+    entering: Option<(NodeId, String)>,
     /// Messages in the tree, oldest first.
     shown: VecDeque<Shown>,
 }
@@ -224,6 +251,7 @@ impl Announcer {
         Self {
             politeness,
             pending: VecDeque::new(),
+            entering: None,
             shown: VecDeque::new(),
         }
     }
@@ -248,29 +276,57 @@ impl Announcer {
     /// at `now` on the tree's clock.
     ///
     /// A message whose [`LINGER`] is over leaves the tree, and the next queued
-    /// one enters it from a fresh id. One message enters an update, so two
-    /// queued together are spoken in the order they were asked for: the
-    /// adapters raise an update's events in no particular order.
-    pub(crate) fn step(&mut self, now: Instant, ids: &mut AnnouncerIds) -> Step {
+    /// one is made ready to enter it from a fresh id; the update decides
+    /// whether it does, and says so with [`admit`](Self::admit). One message
+    /// enters an update, so two queued together are spoken in the order they
+    /// were asked for: the adapters raise an update's events in no particular
+    /// order.
+    ///
+    /// Returns whether the update about to be built may differ from the last
+    /// one: a message left, or one is waiting to enter.
+    pub(crate) fn step(&mut self, now: Instant, ids: &mut AnnouncerIds) -> bool {
         let before = self.shown.len();
         self.shown.retain(|shown| shown.until > now);
-        let mut changed = self.shown.len() != before;
-        if let Some(message) = self.pending.pop_front() {
-            if self.shown.len() >= MAX_SHOWN {
-                self.shown.pop_front();
-            }
-            self.shown.push_back(Shown {
-                id: ids.take(),
-                message,
-                until: now + LINGER,
-            });
-            changed = true;
+        if self.entering.is_none()
+            && let Some(message) = self.pending.pop_front()
+        {
+            self.entering = Some((ids.take(), message));
         }
-        Step {
-            changed,
-            busy: !self.pending.is_empty(),
-            next_retirement: self.shown.iter().map(|shown| shown.until).min(),
+        self.shown.len() != before || self.entering.is_some()
+    }
+
+    /// The message ready to enter the tree, if one is.
+    pub(crate) fn entering(&self) -> Option<&str> {
+        self.entering.as_ref().map(|(_, message)| message.as_str())
+    }
+
+    /// The update carried the message that was ready to enter, so it is in the
+    /// tree from `now` for [`LINGER`]. The oldest leaves early when the tree
+    /// is full, as [`nodes`](Self::nodes) already described it.
+    pub(crate) fn admit(&mut self, now: Instant) {
+        let Some((id, message)) = self.entering.take() else {
+            return;
+        };
+        if self.shown.len() >= MAX_SHOWN {
+            self.shown.pop_front();
         }
+        self.shown.push_back(Shown {
+            id,
+            message,
+            until: now + LINGER,
+        });
+    }
+
+    /// A message is still waiting to be spoken, so another update is owed at
+    /// the next frame.
+    pub(crate) fn busy(&self) -> bool {
+        self.entering.is_some() || !self.pending.is_empty()
+    }
+
+    /// When the next spoken message is due to leave, so the tree can ask the
+    /// event loop to wake then.
+    pub(crate) fn next_retirement(&self) -> Option<Instant> {
+        self.shown.iter().map(|shown| shown.until).min()
     }
 
     /// Shift every retirement by the distance between two clocks, when the
@@ -287,19 +343,31 @@ impl Announcer {
     }
 
     /// The nodes to place in the `TreeUpdate`: one for each message in the
-    /// tree, oldest first.
-    pub(crate) fn nodes(&self) -> impl Iterator<Item = (NodeId, accesskit::Node)> + '_ {
-        self.shown.iter().map(|shown| {
-            let mut node = accesskit::Node::new(self.politeness.role());
-            node.set_live(self.politeness.live());
-            // The label, not the value. `accesskit_consumer`'s
-            // `label_comes_from_value` is true for `Role::Label` and nothing
-            // else (node.rs:744-746), so every adapter reads the announced
-            // text from `label()`, and a live region that sets only `value`
-            // is silent on all three platforms.
-            node.set_label(shown.message.clone());
-            (shown.id, node)
-        })
+    /// tree, oldest first, and last the message ready to enter when the
+    /// update is to `admit` it, which takes the oldest one's place when the
+    /// tree is full.
+    pub(crate) fn nodes(
+        &self,
+        admit: bool,
+    ) -> impl Iterator<Item = (NodeId, accesskit::Node)> + '_ {
+        let entering = self.entering.as_ref().filter(|_| admit);
+        let full = entering.is_some() && self.shown.len() >= MAX_SHOWN;
+        self.shown
+            .iter()
+            .skip(usize::from(full))
+            .map(|shown| (shown.id, shown.message.as_str()))
+            .chain(entering.map(|(id, message)| (*id, message.as_str())))
+            .map(|(id, message)| {
+                let mut node = accesskit::Node::new(self.politeness.role());
+                node.set_live(self.politeness.live());
+                // The label, not the value. `accesskit_consumer`'s
+                // `label_comes_from_value` is true for `Role::Label` and
+                // nothing else (node.rs:744-746), so every adapter reads the
+                // announced text from `label()`, and a live region that sets
+                // only `value` is silent on all three platforms.
+                node.set_label(message);
+                (id, node)
+            })
     }
 }
 
@@ -324,22 +392,30 @@ mod tests {
     }
 
     fn labels(a: &Announcer) -> Vec<String> {
-        a.nodes()
+        a.nodes(false)
             .map(|(_, node)| node.label().unwrap_or_default().to_string())
             .collect()
     }
 
     fn ids(a: &Announcer) -> Vec<NodeId> {
-        a.nodes().map(|(id, _)| id).collect()
+        a.nodes(false).map(|(id, _)| id).collect()
+    }
+
+    /// One update that leaves focus where it is, so the message ready to
+    /// enter does, as the tree drives it. Returns what `step` said.
+    fn update(a: &mut Announcer, now: Instant, ids: &mut AnnouncerIds) -> bool {
+        let changed = a.step(now, ids);
+        a.admit(now);
+        changed
     }
 
     #[test]
     fn an_idle_announcer_puts_nothing_in_the_tree() {
         let mut ids_ = AnnouncerIds::new();
         let mut a = Announcer::new(Politeness::Polite);
-        let step = a.step(Instant::now(), &mut ids_);
-        assert_eq!(step, Step::default());
-        assert_eq!(a.nodes().count(), 0);
+        assert!(!update(&mut a, Instant::now(), &mut ids_));
+        assert_eq!(a.next_retirement(), None);
+        assert_eq!(a.nodes(true).count(), 0);
     }
 
     /// A message enters the tree from a fresh node, stays for [`LINGER`], and
@@ -351,19 +427,19 @@ mod tests {
         let mut a = Announcer::new(Politeness::Polite);
         a.push("Event added".to_string());
 
-        let step = a.step(start, &mut ids_);
-        assert!(step.changed && !step.busy);
-        assert_eq!(step.next_retirement, Some(start + LINGER));
+        assert!(update(&mut a, start, &mut ids_) && !a.busy());
+        assert_eq!(a.next_retirement(), Some(start + LINGER));
         assert_eq!(labels(&a), ["Event added"]);
 
-        let step = a.step(start + LINGER - Duration::from_millis(1), &mut ids_);
-        assert!(!step.changed, "nothing changes while the message lingers");
+        assert!(
+            !update(&mut a, start + LINGER - Duration::from_millis(1), &mut ids_),
+            "nothing changes while the message lingers"
+        );
         assert_eq!(labels(&a), ["Event added"]);
 
-        let step = a.step(start + LINGER, &mut ids_);
-        assert!(step.changed);
-        assert_eq!(step.next_retirement, None);
-        assert_eq!(a.nodes().count(), 0);
+        assert!(update(&mut a, start + LINGER, &mut ids_));
+        assert_eq!(a.next_retirement(), None);
+        assert_eq!(a.nodes(true).count(), 0);
     }
 
     /// The case the whole mechanism exists for. All three platforms announce a
@@ -376,11 +452,11 @@ mod tests {
         let mut ids_ = AnnouncerIds::new();
         let mut a = Announcer::new(Politeness::Polite);
         a.push("Saved".to_string());
-        a.step(start, &mut ids_);
+        update(&mut a, start, &mut ids_);
         let first = ids(&a);
-        a.step(start + LINGER, &mut ids_);
+        update(&mut a, start + LINGER, &mut ids_);
         a.push("Saved".to_string());
-        a.step(at(start + LINGER, 1), &mut ids_);
+        update(&mut a, at(start + LINGER, 1), &mut ids_);
         let second = ids(&a);
         assert_eq!(labels(&a), ["Saved"]);
         assert_eq!(first.len(), 1);
@@ -401,18 +477,53 @@ mod tests {
         a.push("first".to_string());
         a.push("second".to_string());
 
-        let step = a.step(start, &mut ids_);
-        assert!(step.busy, "the second message is owed an update of its own");
+        update(&mut a, start, &mut ids_);
+        assert!(a.busy(), "the second message is owed an update of its own");
         assert_eq!(labels(&a), ["first"]);
 
-        let step = a.step(at(start, 16), &mut ids_);
-        assert!(!step.busy);
+        update(&mut a, at(start, 16), &mut ids_);
+        assert!(!a.busy());
         assert_eq!(labels(&a), ["first", "second"]);
         assert_eq!(
-            step.next_retirement,
+            a.next_retirement(),
             Some(start + LINGER),
             "the earliest leaves first"
         );
+    }
+
+    /// A message that waits through an update (one that moved focus) keeps
+    /// the id it was given and its place in the queue, and lingers from when
+    /// it enters, not from when it was asked for.
+    #[test]
+    fn a_waiting_message_keeps_its_id_and_its_place() {
+        let start = Instant::now();
+        let mut ids_ = AnnouncerIds::new();
+        let mut a = Announcer::new(Politeness::Polite);
+        a.push("first".to_string());
+        a.push("second".to_string());
+
+        assert!(a.step(start, &mut ids_));
+        let ready: Vec<NodeId> = a.nodes(true).map(|(id, _)| id).collect();
+        assert_eq!(a.nodes(false).count(), 0, "held, so nothing in the tree");
+
+        assert!(
+            a.step(at(start, 16), &mut ids_),
+            "a waiting message owes the next update a walk"
+        );
+        assert_eq!(a.entering(), Some("first"), "the second does not jump it");
+        assert_eq!(
+            a.nodes(true).map(|(id, _)| id).collect::<Vec<_>>(),
+            ready,
+            "the id it was given is the one it enters with"
+        );
+        a.admit(at(start, 16));
+        assert_eq!(labels(&a), ["first"]);
+        assert_eq!(a.next_retirement(), Some(at(start, 16) + LINGER));
+        assert!(a.busy(), "the second is still owed an update");
+
+        update(&mut a, at(start, 32), &mut ids_);
+        assert_eq!(labels(&a), ["first", "second"]);
+        assert!(!a.busy());
     }
 
     #[test]
@@ -421,7 +532,7 @@ mod tests {
         let mut a = Announcer::new(Politeness::Polite);
         a.push(String::new());
         a.push("   \n\t ".to_string());
-        assert_eq!(a.step(Instant::now(), &mut ids_), Step::default());
+        assert!(!update(&mut a, Instant::now(), &mut ids_));
     }
 
     #[test]
@@ -431,7 +542,7 @@ mod tests {
         for i in 0..(MAX_QUEUED + 5) {
             a.push(format!("message {i}"));
         }
-        a.step(Instant::now(), &mut ids_);
+        update(&mut a, Instant::now(), &mut ids_);
         assert_eq!(
             labels(&a),
             ["message 5"],
@@ -451,7 +562,12 @@ mod tests {
         }
         for frame in 0..20 {
             a.step(at(start, frame * 16), &mut ids_);
-            assert!(a.nodes().count() <= MAX_SHOWN);
+            assert!(
+                a.nodes(true).count() <= MAX_SHOWN,
+                "the update that admits a message into a full tree carries no more"
+            );
+            a.admit(at(start, frame * 16));
+            assert!(a.nodes(false).count() <= MAX_SHOWN);
         }
         let last: Vec<String> = (12..20).map(|i| format!("row {i}")).collect();
         assert_eq!(labels(&a), last);
@@ -470,8 +586,8 @@ mod tests {
         for i in 0..20 {
             polite.push(format!("p{i}"));
             assertive.push(format!("a{i}"));
-            polite.step(at(start, i * 16), &mut ids_);
-            assertive.step(at(start, i * 16), &mut ids_);
+            update(&mut polite, at(start, i * 16), &mut ids_);
+            update(&mut assertive, at(start, i * 16), &mut ids_);
             for id in ids(&polite).into_iter().chain(ids(&assertive)) {
                 seen.insert(id);
                 assert!(is_announcer_node(id));
@@ -499,14 +615,17 @@ mod tests {
         let mut ids_ = AnnouncerIds::new();
         let mut a = Announcer::new(Politeness::Polite);
         a.push("Saved".to_string());
-        a.step(start, &mut ids_);
+        update(&mut a, start, &mut ids_);
         let later = start + Duration::from_secs(100);
         a.rebase(start, later);
-        let step = a.step(later + LINGER - Duration::from_millis(1), &mut ids_);
-        assert!(!step.changed);
+        assert!(!update(
+            &mut a,
+            later + LINGER - Duration::from_millis(1),
+            &mut ids_
+        ));
         assert_eq!(labels(&a), ["Saved"]);
-        a.step(later + LINGER, &mut ids_);
-        assert_eq!(a.nodes().count(), 0);
+        update(&mut a, later + LINGER, &mut ids_);
+        assert_eq!(a.nodes(true).count(), 0);
     }
 
     #[test]
@@ -514,15 +633,15 @@ mod tests {
         let mut ids_ = AnnouncerIds::new();
         let mut polite = Announcer::new(Politeness::Polite);
         polite.push("p".to_string());
-        polite.step(Instant::now(), &mut ids_);
-        let (_, node) = polite.nodes().next().unwrap();
+        update(&mut polite, Instant::now(), &mut ids_);
+        let (_, node) = polite.nodes(false).next().unwrap();
         assert_eq!(node.role(), Role::Status);
         assert_eq!(node.live(), Some(Live::Polite));
 
         let mut assertive = Announcer::new(Politeness::Assertive);
         assertive.push("a".to_string());
-        assertive.step(Instant::now(), &mut ids_);
-        let (_, node) = assertive.nodes().next().unwrap();
+        update(&mut assertive, Instant::now(), &mut ids_);
+        let (_, node) = assertive.nodes(false).next().unwrap();
         assert_eq!(node.role(), Role::Alert);
         assert_eq!(node.live(), Some(Live::Assertive));
     }

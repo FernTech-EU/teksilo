@@ -707,6 +707,15 @@ fn live_names(update: &teksilo_core::accesskit::TreeUpdate) -> Vec<String> {
     out
 }
 
+/// The updates a running window delivers after a change: the frame it is
+/// drawn in, and the next. A change that moves the grid's current tile moves
+/// focus, and a message raised with it waits for the next update, so a reader
+/// hears it after the tile (`teksilo_core::announcer`).
+fn next_frames(tree: &mut WidgetTree) -> teksilo_core::accesskit::TreeUpdate {
+    let _ = tree.sync_accessibility();
+    tree.sync_accessibility()
+}
+
 /// A French grid of twelve named tiles over `mode`, laid out and focused.
 fn french_grid(mode: SelectionMode) -> (WidgetTree, WidgetId, SelectionModel) {
     let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
@@ -760,7 +769,7 @@ fn a_selection_the_user_changes_is_counted_aloud() {
     // present in an update is not a message said in it.
     let mut seen = tree.announcements_since(0).last().map_or(0, |a| a.seq);
     let mut heard = |tree: &mut teksilo_core::widget_tree::WidgetTree| {
-        let _ = tree.sync_accessibility();
+        let _ = next_frames(tree);
         let got = tree.announcements_since(seen);
         if let Some(last) = got.last() {
             seen = last.seq;
@@ -793,7 +802,7 @@ fn moving_a_single_selection_says_no_count() {
 
     press(&mut tree, Key::ArrowRight, Modifiers::NONE);
     assert_eq!(selection.selected_indices(), vec![1]);
-    let _ = tree.sync_accessibility();
+    let _ = next_frames(&mut tree);
     assert!(
         tree.announcements_since(seen).is_empty(),
         "an arrow that moves a single selection must say no count"
@@ -809,7 +818,7 @@ fn a_click_that_selects_a_tile_is_counted_aloud() {
     tree.click(t[2]);
     tree.layout(SizeProposal::exact(400.0, 300.0));
     assert!(selection.is_selected(2));
-    let update = tree.sync_accessibility();
+    let update = next_frames(&mut tree);
     assert_eq!(live_names(&update), vec!["1 élément sélectionné"]);
     teksilo_i18n::thread_local::clear();
 }
@@ -828,7 +837,7 @@ fn an_assistive_click_that_selects_a_tile_is_counted_aloud() {
     });
     tree.layout(SizeProposal::exact(400.0, 300.0));
     assert!(selection.is_selected(3));
-    let update = tree.sync_accessibility();
+    let update = next_frames(&mut tree);
     assert_eq!(live_names(&update), vec!["1 élément sélectionné"]);
     teksilo_i18n::thread_local::clear();
 }
@@ -868,7 +877,7 @@ fn a_marquee_that_selects_tiles_is_counted_aloud() {
     ));
     tree.layout(SizeProposal::exact(150.0, 150.0));
     assert_eq!(selection.selected_indices(), vec![0, 1, 2]);
-    let update = tree.sync_accessibility();
+    let update = next_frames(&mut tree);
     assert_eq!(live_names(&update), vec!["3 éléments sélectionnés"]);
     teksilo_i18n::thread_local::clear();
 }

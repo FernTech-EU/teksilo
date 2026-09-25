@@ -105,7 +105,11 @@
 //!    it, so the arrival is the one voice left and keeps the text. VoiceOver
 //!    is unverified and is treated as Orca is: a text left out of the arrival
 //!    and cut from the announcement is not heard at all, while one kept is at
-//!    worst heard twice, the second time as a hint after a pause.
+//!    worst heard twice, the second time as a hint after a pause. The
+//!    framework's announcer does not speak in an update that moves focus: it
+//!    holds its message for the next (see [`crate::announcer`]), where every
+//!    reader hears it after the arrival, so its text is left out of the
+//!    arrival on every platform.
 //! 2. **A node focus was on or inside in the last delivered update** gains no
 //!    text in this one: not while focus stays, where Orca speaks the change,
 //!    and not as focus leaves it, where Orca starts to. It may lose one: a
@@ -188,10 +192,14 @@ impl WidgetTree {
     /// Runs last, on the nodes the update will carry: relation targets are
     /// already redirected to proxies and stripped of absent nodes, so every
     /// target named here is in `nodes`.
+    ///
+    /// `held` is what the framework's announcers hold back from this update
+    /// because it moves focus: every reader hears it after the arrival.
     pub(super) fn describe_from_relations(
         &self,
         nodes: &mut [(NodeId, Node)],
         focus: NodeId,
+        held: &[&str],
     ) -> DescriptionMemory {
         let previous = &self.description_memory;
         let index: HashMap<NodeId, usize> = nodes
@@ -316,8 +324,12 @@ impl WidgetTree {
                     continue;
                 }
                 // Rule 1: a live region is saying it right now, to a reader
-                // that goes on saying it as focus lands here.
-                if focused && announcement_kept && announcing.contains(&text) {
+                // that goes on saying it as focus lands here, or the
+                // framework's announcer will say it once focus has landed.
+                if focused
+                    && ((announcement_kept && announcing.contains(&text))
+                        || held.contains(&text.as_str()))
+                {
                     continue;
                 }
                 // Rule 2: focus was here, and the text is new to the node.

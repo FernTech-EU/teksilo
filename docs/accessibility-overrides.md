@@ -451,7 +451,11 @@ So, on the node focus is on and every node it is inside:
   error is announced says the error once, through NVDA's announcement. On
   Linux the arrival keeps it, since Orca cuts the announcement and the arrival
   is the one voice left; macOS does the same, since VoiceOver is unverified and
-  a text left out of both would reach nobody.
+  a text left out of both would reach nobody;
+- the framework's own announcer (`ctx.announce`) never speaks in the update focus
+  moves in: it says its message in the next update, after the new focus, so
+  every reader hears it whole, and the arrival leaves its text out on every
+  platform.
 
 What is held back is read the next time focus arrives. Only Orca speaks a
 change while focus stays: NVDA maps no event to a `FullDescription` change,
