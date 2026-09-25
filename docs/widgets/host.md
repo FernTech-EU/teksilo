@@ -19,7 +19,18 @@ the toast bounds so the user can still interact with content below.
 No overlay system involvement — toasts are regular widgets in the
 arena. The host owns the per-frame timer + hover-pause; expired
 entries are removed from the registry's queue, the version signal
-is bumped, the host rebuilds, the surface widgets are destroyed.
+is bumped, the host rebuilds, and the expired entry's surface is
+destroyed.
+
+The host **reconciles**: a rebuild keeps the surface of every toast
+still live and builds one only for a toast that has just appeared.
+A surface is a live region, and every platform announces a live
+node when it enters the tree, so a host that rebuilt every surface
+on every queue change read every toast still up again each time one
+came or went, and destroyed the control a keyboard user was on. An
+update in place (`Toast::id`) rebuilds only that toast's surface,
+which keeps what did not change (see
+`ToastSurface`).
 
 Routing: each host filters `live_entry_ids()` down to entries whose
 `ToastRoute` matches its own window id / assigned audience, or that

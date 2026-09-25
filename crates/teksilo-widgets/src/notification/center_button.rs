@@ -234,22 +234,11 @@ impl Widget for NotificationCenterButton {
         let show_when_zero = self.show_badge_when_zero;
         let scope = self.route_scope;
 
-        // Bind to the archive's mutation version (not `unread_count`)
-        // at Rebuild — a scoped bell's badge count is a local scan
-        // over `archive.entries()` (see below), so it must rebuild on
-        // ANY archive mutation that could change which of ITS entries
-        // are unread, not just the (global, unscoped) `unread_count`
-        // signal. Matches `NotificationLog`'s own binding.
-        //
-        // One signal for every window's bell: this window's own
-        // `BindingRegistry` remembers the generation it last
-        // reconciled, so a bell in window B cannot miss a mutation
-        // just because window A's tree reconciled first.
-        archive.version_signal().bind_to(
-            ctx.self_id(),
-            ctx.binding_registry(),
-            BindingLevel::Rebuild,
-        );
+        // The bell itself does NOT follow the archive: only its badge does
+        // (`UnreadBadge` below). Every toast pushes to the archive, and a
+        // bell rebuilt on each push replaced the button a keyboard user was
+        // on (focus re-fired on a fresh node, cutting the toast being
+        // announced) and closed an open popover under them.
 
         // Bell trigger: an IconButton(bell) at the requested size.
         let trigger = IconButton::bell().size(self.size);
@@ -274,16 +263,10 @@ impl Widget for NotificationCenterButton {
         // free — no manual `Panel` needed.
 
         // Bell + popover combo. Mark archive entries read when the
-        // popover *closes*, NOT when it opens — mutating the archive
-        // bumps `version_signal`, which fires this widget's `Rebuild`
-        // binding, and a rebuild on OPEN would tear down the
-        // `PopoverIconButton` (and its just-shown overlay) and replace
-        // it with a fresh, closed one, so the popover would flash and
-        // vanish, leaving only the cleared badge. Deferring to close
-        // lets the rebuild happen after the popover is already gone.
-        // Scoped exactly like the toolbar's mark-all-read above: a
-        // scoped bell must only mark ITS entries read, never every
-        // window's/audience's history.
+        // popover *closes*, NOT when it opens: the reader has seen them
+        // once the popover has been open. Scoped exactly like the log's
+        // own mark-all-read: a scoped bell must only mark ITS entries
+        // read, never every window's/audience's history.
         let archive_for_close = archive.clone();
         let pib = PopoverIconButton::new(trigger)
             .content(log)
@@ -295,30 +278,7 @@ impl Widget for NotificationCenterButton {
             });
         let pib_id = ctx.add(pib);
 
-        // Compute the badge label for this build — a local scan over
-        // the (bounded, ≤ DEFAULT_ARCHIVE_LIMIT) archive entries rather
-        // than a dedicated per-audience counter signal: cheap, and it
-        // is the single source of truth `route_visible` already uses
-        // for the popover body, so the two can never disagree.
-        let model = archive.entries();
-        let unread_count = (0..model.len())
-            .filter(|&i| {
-                model
-                    .with_item(i, |e| !e.read && route_visible(e.route, scope))
-                    .unwrap_or(false)
-            })
-            .count();
-        let label = if unread_count == 0 {
-            String::new()
-        } else if unread_count > max_badge as usize {
-            format!("{max_badge}+")
-        } else {
-            unread_count.to_string()
-        };
-
-        // Stack bell + badge. Badge is omitted entirely when there
-        // are no unread (and `show_when_zero` is false) so the bell
-        // renders bare.
+        // Stack bell + badge.
         //
         // The badge is pinned to the top-trailing corner (where count
         // badges belong) via the stack alignment, and its whole subtree
@@ -330,14 +290,22 @@ impl Widget for NotificationCenterButton {
         // notifications (i.e. exactly when you'd press the bell).
         // `hit_transparent` excludes the entire badge subtree from
         // hit-testing, so the click falls through to the bell beneath.
-        let mut stack = ZStack::new()
-            .alignment(Alignment::TOP_TRAILING)
-            .child(pib_id);
-        if unread_count > 0 || show_when_zero {
-            let badge_id = ctx.add(Badge::new(lit!(label)).hit_transparent(true));
-            stack = stack.child(badge_id);
-        }
-        let root = ctx.add(stack);
+        let badge_id = ctx.add(
+            UnreadBadge {
+                archive: archive.clone(),
+                scope,
+                max_badge,
+                show_when_zero,
+                child: None,
+            }
+            .hit_transparent(true),
+        );
+        let root = ctx.add(
+            ZStack::new()
+                .alignment(Alignment::TOP_TRAILING)
+                .child(pib_id)
+                .child(badge_id),
+        );
 
         // Attach tooltip if configured. The three setters
         // (`tooltip`, `rich_tooltip*`, `composite_tooltip`) are
@@ -392,6 +360,90 @@ impl Widget for NotificationCenterButton {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+}
+
+/// The bell's unread-count badge: the one part of the bell that follows the
+/// archive. It rebuilds on every archive change, the bell beside it never does.
+#[derive(Debug)]
+struct UnreadBadge {
+    archive: Rc<NotificationArchiveModel>,
+    scope: Option<ToastRoute>,
+    max_badge: u32,
+    show_when_zero: bool,
+    child: Option<WidgetId>,
+}
+
+impl Widget for UnreadBadge {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // The archive's mutation version, not `unread_count`: a scoped
+        // bell's count is a local scan over `archive.entries()`, so it must
+        // follow ANY mutation that could change which of ITS entries are
+        // unread, not just the (global, unscoped) `unread_count` signal.
+        //
+        // One signal for every window's bell: this window's own
+        // `BindingRegistry` remembers the generation it last reconciled, so
+        // a bell in window B cannot miss a mutation just because window A's
+        // tree reconciled first.
+        self.archive.version_signal().bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Rebuild,
+        );
+
+        // A local scan over the (bounded, ≤ DEFAULT_ARCHIVE_LIMIT) archive
+        // entries rather than a dedicated per-audience counter signal: cheap,
+        // and it is the single source of truth `route_visible` already uses
+        // for the popover body, so the two can never disagree.
+        let model = self.archive.entries();
+        let scope = self.scope;
+        let unread_count = (0..model.len())
+            .filter(|&i| {
+                model
+                    .with_item(i, |e| !e.read && route_visible(e.route, scope))
+                    .unwrap_or(false)
+            })
+            .count();
+        // Omitted entirely when there are no unread (and `show_when_zero`
+        // is false) so the bell renders bare.
+        self.child = (unread_count > 0 || self.show_when_zero).then(|| {
+            let label = if unread_count > self.max_badge as usize {
+                format!("{}+", self.max_badge)
+            } else {
+                unread_count.to_string()
+            };
+            ctx.add(Badge::new(lit!(label)))
+        });
+        self.child.into_iter().collect()
+    }
+
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        // No badge takes no room: the stack keeps the bell's size.
+        self.child
+            .and_then(|id| ctx.child_size(id, proposal))
+            .unwrap_or_default()
+            .into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.child.into_iter().collect()
     }
 }
 
@@ -511,9 +563,11 @@ mod tests {
     }
 
     /// Clicking an in-content action ("mark all read" / "clear") mutates
-    /// the archive, which changes `unread_count` and rebuilds the bell —
-    /// destroying the popover's owner. The overlay must NOT linger as an
-    /// invisible click-blocker; it must be fully dismissed.
+    /// the archive, which changes `unread_count`. The bell used to rebuild
+    /// then, destroying the popover's owner; now only its badge follows
+    /// the archive, so the popover stays open under the reader, and it is
+    /// still the bell's: Escape closes it, it does not linger as an
+    /// invisible click-blocker.
     #[test]
     fn in_content_action_does_not_orphan_overlay() {
         use crate::primitives::{FixedSize, Spacer, VStack};
@@ -536,9 +590,20 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 600.0));
         assert_eq!(
             tree.active_overlays().len(),
+            1,
+            "the in-content action leaves the popover open"
+        );
+
+        tree.press_key(
+            teksilo_core::event::Key::Escape,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        tree.layout(SizeProposal::exact(400.0, 600.0));
+        assert_eq!(
+            tree.active_overlays().len(),
             0,
-            "overlay must be dismissed (not left as an invisible click-blocker) \
-             after the in-content action rebuilds the bell"
+            "and the popover still answers Escape (not left as an invisible \
+             click-blocker)"
         );
     }
 

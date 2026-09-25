@@ -128,6 +128,11 @@ pub struct NotificationLog {
     /// clear actions to entries matching `route` (plus `Broadcast`,
     /// always visible). Set via [`Self::for_window`] / [`Self::for_audience`].
     route_scope: Option<ToastRoute>,
+    /// The toolbar, built once and kept by every later build.
+    toolbar_id: Option<WidgetId>,
+    /// Each row and the entry it shows, as the last build left them: a row
+    /// whose entry has not changed is kept by the next build.
+    rows: Vec<(NotificationEntry, WidgetId)>,
 }
 
 impl NotificationLog {
@@ -144,6 +149,8 @@ impl NotificationLog {
             preferred_width: DEFAULT_PREFERRED_WIDTH,
             preferred_height: DEFAULT_PREFERRED_HEIGHT,
             route_scope: None,
+            toolbar_id: None,
+            rows: Vec::new(),
         }
     }
 
@@ -350,6 +357,12 @@ impl Widget for NotificationLog {
         // disappear, and StandardListItem's read/unread title style
         // needs to flip on mark_all_read.
         //
+        // The rebuild reconciles (`preserves_children_on_rebuild`): the
+        // toolbar and every row whose entry did not change are kept, so
+        // a background job archiving its progress every few hundred
+        // milliseconds does not take focus off the button or the row the
+        // reader is on.
+        //
         // One signal for every window's log — a log embedded in one
         // window shares the signal with a log (or bell) in another
         // without either being able to consume the other's rebuild.
@@ -379,7 +392,9 @@ impl Widget for NotificationLog {
         // reaching for the unscoped `mark_all_read`/`clear` from a
         // scoped log would incorrectly touch every other window's or
         // audience's history too.
-        if self.show_toolbar {
+        if let Some(toolbar) = self.toolbar_id.filter(|_| self.show_toolbar) {
+            column = column.child(toolbar);
+        } else if self.show_toolbar {
             let archive_for_mark = archive.clone();
             let archive_for_clear = archive.clone();
             let toolbar = HStack::new()
@@ -400,19 +415,29 @@ impl Widget for NotificationLog {
                     ctx.add(
                         Button::new(teksilo_i18n::tr_widget!(notifications_clear()))
                             .variant(ButtonVariant::Plain)
-                            .on_activate_fn(move |_| match scope {
-                                Some(s) => archive_for_clear
-                                    .clear_where(|e| route_visible(e.route, Some(s))),
-                                None => archive_for_clear.clear(),
+                            .on_activate_fn(move |ctx| {
+                                match scope {
+                                    Some(s) => archive_for_clear
+                                        .clear_where(|e| route_visible(e.route, Some(s))),
+                                    None => archive_for_clear.clear(),
+                                }
+                                // The rows go and the reader stays on the
+                                // button: say what is left.
+                                ctx.announce(
+                                    teksilo_i18n::tr_widget!(notifications_empty()).resolve_now(),
+                                );
                             }),
                     ),
                 );
-            column = column.child(ctx.add(toolbar));
+            let toolbar = ctx.add(toolbar);
+            self.toolbar_id = Some(toolbar);
+            column = column.child(toolbar);
         }
 
         // Empty state or bucketed sections — against the SCOPED
         // entries snapshot taken above, not the raw archive.
         if entries.is_empty() {
+            self.rows.clear();
             let empty = match &self.empty_state {
                 Some(factory) => ctx.add_boxed(factory()),
                 None => ctx.add(
@@ -447,6 +472,7 @@ impl Widget for NotificationLog {
 
             let mut sections = VStack::new().spacing(8.0);
             let mut current_bucket: Option<DayBucket> = None;
+            let previous_rows = std::mem::take(&mut self.rows);
             for entry in &entries {
                 let bucket = day_bucket_for(entry.timestamp, today, &zone);
                 if Some(bucket) != current_bucket {
@@ -461,11 +487,16 @@ impl Widget for NotificationLog {
                     ));
                     current_bucket = Some(bucket);
                 }
-                sections = sections.child(ctx.add_boxed(Self::build_row(
-                    entry,
-                    on_entry.as_ref(),
-                    on_action.as_ref(),
-                )));
+                let row = match previous_rows.iter().find(|(shown, _)| shown == entry) {
+                    Some((_, row)) => *row,
+                    None => ctx.add_boxed(Self::build_row(
+                        entry,
+                        on_entry.as_ref(),
+                        on_action.as_ref(),
+                    )),
+                };
+                self.rows.push((entry.clone(), row));
+                sections = sections.child(row);
             }
             // Wrap in ScrollArea so the dialog/popover scrolls when
             // the archive grows past the visible height.
@@ -559,6 +590,11 @@ impl Widget for NotificationLog {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+
+    fn preserves_children_on_rebuild(&self) -> bool {
+        // Keeps the toolbar and the unchanged rows; see `build`.
+        true
     }
 }
 

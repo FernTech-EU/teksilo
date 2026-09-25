@@ -1356,6 +1356,106 @@ mod tests {
         );
     }
 
+    /// A reconciling container: it builds its groups once and re-attaches the
+    /// same ones on every later build, the shape of a toast host keeping one
+    /// surface per live toast, or a tab widget keeping its pages.
+    #[derive(Debug)]
+    struct KeepingGroups {
+        epoch: crate::signal::Signal<u64>,
+        group_epochs: Vec<crate::signal::Signal<u64>>,
+        groups: Vec<WidgetId>,
+    }
+
+    impl Widget for KeepingGroups {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let sid = ctx.self_id();
+            let reg = ctx.binding_registry();
+            self.epoch
+                .bind_to(sid, reg, crate::binding::BindingLevel::Rebuild);
+            if self.groups.is_empty() {
+                self.groups = self
+                    .group_epochs
+                    .iter()
+                    .map(|epoch| {
+                        ctx.add(RebuildingRows {
+                            epoch: epoch.clone(),
+                            rows: Vec::new(),
+                        })
+                    })
+                    .collect();
+            }
+            self.groups.clone()
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.groups.clone()
+        }
+
+        fn preserves_children_on_rebuild(&self) -> bool {
+            true
+        }
+    }
+
+    /// When the focused node dies in a rebuild, focus goes back into the
+    /// **innermost** ancestor that survived it, not into the outermost root
+    /// that was rebuilt.
+    ///
+    /// A reconciling container keeps its children across its own rebuild, so
+    /// the group that held focus is still there when one of its rows is
+    /// replaced. Restoring into the container's first focusable descendant
+    /// put a keyboard user in the *first* group whatever group they were in:
+    /// in a toast stack that is the oldest toast, so a reader on the Cancel
+    /// of a progress toast was thrown onto another toast at every step.
+    #[test]
+    fn a_rebuild_restores_focus_into_the_innermost_ancestor_that_survived() {
+        let mut tree = WidgetTree::new();
+        let epoch = crate::signal::Signal::new(0u64);
+        let group_epochs = vec![
+            crate::signal::Signal::new(0u64),
+            crate::signal::Signal::new(0u64),
+        ];
+        let root = tree.add(KeepingGroups {
+            epoch: epoch.clone(),
+            group_epochs: group_epochs.clone(),
+            groups: Vec::new(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        let groups = tree.children(root);
+        let second_group = groups[1];
+        let row = tree
+            .first_focusable_descendant(second_group)
+            .expect("the second group's rows are focusable");
+        tree.focus(row);
+
+        // The container and the second group rebuild in the same pass: the
+        // group survives (the container re-attaches it), the row does not.
+        epoch.set(1);
+        group_epochs[1].set(1);
+        tree.layout(SizeProposal::exact(100.0, 60.0));
+
+        assert_eq!(
+            tree.children(root),
+            groups,
+            "the container kept both groups (the premise of this test)"
+        );
+        let focused = tree.focused().expect("focus must not be dropped");
+        assert_ne!(focused, row, "the old row is dead");
+        assert!(
+            tree.is_descendant_of(focused, second_group),
+            "focus must land back in the group that held it, the innermost \
+             ancestor that survived, not in the first group of the container"
+        );
+    }
+
     #[test]
     fn first_focusable_descendant_prefers_first_focusable_child() {
         let mut tree = WidgetTree::new();

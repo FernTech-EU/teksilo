@@ -140,6 +140,13 @@ by crate for clarity, not because crates version independently.
   node. A screen reader's own request to focus that descendant puts the
   keyboard on the composite, where its caret, input method and focus ring
   live, and a context menu the composite owns is offered on it.
+- **Focus that a rebuild took away came back in the wrong place.** When a
+  widget rebuilt itself and the control that had focus went with it, focus
+  went to the first control of the whole rebuilt widget. For a widget that
+  keeps its parts across a rebuild (a toast stack, a tab widget, a docking
+  layout) that was the first part, whichever one the user was in. Focus now
+  comes back in the innermost part that is still there.
+
 - **Every window was an unnamed "frame" to Orca.** The accessibility tree's
   root, which AT-SPI presents as the window, carried no name, so Orca 46.1
   announced each window as it came up with the bare word "frame". The root now
@@ -421,6 +428,37 @@ by crate for clarity, not because crates version independently.
   `Home` / `End`, the page keys and type-ahead no longer write the bound
   `selected` signal or fire `on_select`; code that read the value after an
   arrow press presses Enter first.
+- **Every change to the toast stack read every toast again and moved
+  keyboard focus.** Showing, updating or dismissing any toast announced each
+  toast still on screen again, in no set order: with an Error toast shown
+  after three others, Orca spoke all four titles. A progress toast updated in
+  place announced its unchanged title at every step, twenty times over for
+  `toast-demo`'s background job. Each change also replaced the control a
+  keyboard user was on and put focus on the oldest toast, so the Cancel of a
+  progress toast could not be pressed from the keyboard. A toast is now
+  announced when it appears and when its title changes, and nothing else is
+  read again. Focus stays where the reader put it, on a toast or on one of its
+  actions, and an action kept across an update runs the update's callback.
+  When an update removes the focused action, focus stays in that toast.
+- **A toast expired under keyboard focus.** A reader who Tabbed to a toast's
+  action had the rest of its ten seconds to decide, then the toast went and
+  Orca said "frame". A toast now stays while keyboard or screen-reader focus
+  is on it or inside it, as it does under a resting pointer.
+- **A toast shown while another was up left with it.** A second toast was
+  charged for the time before it appeared and expired at the first one's
+  deadline: shown 5 s after another it lasted 4.8 s instead of 10, and an
+  Error toast shown last lasted 2 s. Each toast now gets its own time.
+- **The notification bell and log were rebuilt on every notification.**
+  Every toast is archived, and a background job archives each of its steps.
+  Focus on the bell was fired again on a new button, which cut the toast being
+  announced and said "Notifications push button" instead; an open bell
+  popover closed under the reader and marked the new notification read unseen;
+  and the log dialog threw focus back to Mark all read at every step of a job,
+  so Clear all could not be pressed. The bell, its popover and the log's
+  buttons now stay put and keep focus; only the unread badge and the rows whose
+  notification changed follow the archive. Clear all now says "No
+  notifications".
+
 - **A dialog's content was hidden from assistive technology.** The panel
   `RecipeDialogStyle` draws around a `ModalContainer`'s content called
   `set_hidden()` to say it was only chrome, and the consumer every platform

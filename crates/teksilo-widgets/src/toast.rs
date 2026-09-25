@@ -40,6 +40,9 @@ pub mod host;
 pub mod registry;
 pub mod surface;
 
+#[cfg(test)]
+mod reader_tests;
+
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;

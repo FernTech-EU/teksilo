@@ -374,6 +374,24 @@ impl WidgetTree {
                 .min_by_key(|&root| depth(root))
         });
 
+        // The focused node's ancestors up to that root, innermost first. The
+        // restore below goes into the innermost one the rebuild left alive.
+        let focus_ancestors: Vec<WidgetId> = match (self.focused, focus_owner) {
+            (Some(focused), Some(owner)) => {
+                let mut chain = Vec::new();
+                let mut cur = self.arena.parent(focused);
+                while let Some(id) = cur {
+                    chain.push(id);
+                    if id == owner {
+                        break;
+                    }
+                    cur = self.arena.parent(id);
+                }
+                chain
+            }
+            _ => Vec::new(),
+        };
+
         for widget_id in to_rebuild {
             self.rebuild_single_widget(widget_id);
         }
@@ -399,10 +417,21 @@ impl WidgetTree {
         // children have no bounds yet, and the focus-driven scroll-into-view
         // needs them). A rebuild that never held focus, or one whose focused node
         // survived it (the rebuild root itself is not destroyed), records nothing.
+        //
+        // Into the innermost ancestor that survived, not the root: a reconciling
+        // rebuild re-attaches the children it keeps, so the toast, tab or group
+        // the user was in is usually still there, and the root's first focusable
+        // descendant is the first of them, not theirs.
         if self.focused.is_none()
-            && let Some(root) = focus_owner
+            && let Some(owner) = focus_owner
         {
-            self.pending_focus_restore = Some(root);
+            self.pending_focus_restore = focus_ancestors
+                .into_iter()
+                .filter(|&id| {
+                    self.arena.get(id).is_some()
+                        && (id == owner || self.is_descendant_of(id, owner))
+                })
+                .collect();
         }
         // A rebuild's `build()` may arm new animations (looping or
         // one-shot) by calling `signal.animate_to(...)` /
@@ -860,10 +889,14 @@ impl WidgetTree {
         // into hidden content — its own dismiss path restores focus to the
         // trigger), and only if it still has somewhere to put it. Otherwise focus
         // stays `None`, exactly as before.
-        if let Some(root) = self.pending_focus_restore.take()
-            && self.focused.is_none()
-            && self.arena.is_active(root)
-            && let Some(target) = self.first_focusable_descendant(root)
+        let restore = std::mem::take(&mut self.pending_focus_restore);
+        if self.focused.is_none()
+            && let Some(target) = restore.into_iter().find_map(|root| {
+                self.arena
+                    .is_active(root)
+                    .then(|| self.first_focusable_descendant(root))
+                    .flatten()
+            })
         {
             self.focus_ops(target, &mut *ops);
         }

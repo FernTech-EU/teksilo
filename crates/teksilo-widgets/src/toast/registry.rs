@@ -26,7 +26,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{SharedToastStyle, ToastPriority};
@@ -113,6 +113,21 @@ pub(crate) struct LiveEntry {
     /// `None` for persistent toasts. Decremented each frame by the
     /// host's frame-tick effect when the hover-pause refcount is zero.
     pub(crate) time_left: Option<Duration>,
+    /// The instant `time_left` is accounted up to. Each entry is charged from
+    /// its own mark, never from the host's last tick: a toast shown between
+    /// two ticks used to pay for the time before it existed, and left with
+    /// the older toast beside it.
+    pub(crate) timer_mark: Instant,
+    /// How many of this toast's surfaces have keyboard focus on them or
+    /// inside them: one per window at most, since a broadcast toast has a
+    /// surface in every window. Any holder pauses the timers like a resting
+    /// pointer does: a reader who has Tabbed to a toast's action must not
+    /// have it expire under them (WCAG 2.2.1).
+    pub(crate) focus_holders: u32,
+    /// Bumped on every update in place. The entry's surface binds it, so an
+    /// update rebuilds that one surface and nothing else; see
+    /// [`ToastSurface`](super::surface::ToastSurface).
+    pub(crate) revision: Signal<u64>,
     /// Whether a pointer is **holding** this toast down. The touch twin of the
     /// hover refcount: a finger produces no hover, so pressing and holding the
     /// surface is how a touch user says "wait, I am reading this".
@@ -366,6 +381,7 @@ impl ToastRegistry {
             }
             existing.style_override = toast.style_override;
             existing.time_left = toast.auto_dismiss_after;
+            existing.timer_mark = Instant::now();
             // Leading widget: replace when the update sets one. Otherwise
             // *keep* the original (typically a Spinner from `Toast::loading`)
             // for a same-severity text-only update — EXCEPT when the severity
@@ -387,6 +403,7 @@ impl ToastRegistry {
             // leave `archive` at its default `true` across updates.
             existing.archive = toast.archive;
             let entry_id = existing.entry_id;
+            let revision = existing.revision.clone();
             // Snapshot for archive mirror BEFORE dropping the
             // RefCell borrow — the snapshot must be consistent with
             // the mutation, and `archive.push(...)` cannot run while
@@ -400,6 +417,7 @@ impl ToastRegistry {
             if let (Some(archive), Some(entry)) = (self.archive.as_ref(), archive_entry) {
                 archive.push(entry);
             }
+            revision.set(revision.get().wrapping_add(1));
             self.bump_version();
             let handle = ToastHandle::new(ToastHandleInner {
                 entry_id,
@@ -482,6 +500,9 @@ impl ToastRegistry {
             on_dismiss: toast.on_dismiss,
             style_override: toast.style_override,
             time_left: auto_dismiss,
+            timer_mark: Instant::now(),
+            focus_holders: 0,
+            revision: Signal::new(0),
             held: false,
             leading: toast.leading,
             id: toast.id,
@@ -682,6 +703,17 @@ impl ToastRegistry {
     /// release **and** a cancelled contact both clear it without the surface
     /// having to notice either. Silently ignores an entry that has already gone.
     pub(crate) fn set_entry_held(&self, entry_id: u64, held: bool) {
+        let changed = self
+            .inner
+            .borrow()
+            .live_entries
+            .iter()
+            .any(|e| e.entry_id == entry_id && e.held != held);
+        if !changed {
+            return;
+        }
+        // As for focus: the hold starts and ends at this instant.
+        self.settle_timers(Instant::now());
         let mut inner = self.inner.borrow_mut();
         if let Some(entry) = inner
             .live_entries
@@ -692,21 +724,96 @@ impl ToastRegistry {
         }
     }
 
-    /// Whether any live toast is being held down.
+    /// One of the toast's surfaces reports that keyboard focus arrived on it
+    /// or inside it (`true`), or left (`false`). A surface reports each change
+    /// once, and reports focus leaving when it is dropped with focus inside,
+    /// as a closed window's tree is, with no focus change. Silently ignores an
+    /// entry that has already gone.
+    ///
+    /// The timers are brought up to date first, so a pause starts, and ends,
+    /// at the moment focus moved: time spent on a toast is never charged to it
+    /// later, and time spent elsewhere is never forgiven.
+    pub(crate) fn set_entry_focused(&self, entry_id: u64, focused: bool) {
+        if !self.is_entry_alive(entry_id) {
+            return;
+        }
+        self.settle_timers(Instant::now());
+        if let Some(entry) = self
+            .inner
+            .borrow_mut()
+            .live_entries
+            .iter_mut()
+            .find(|e| e.entry_id == entry_id)
+        {
+            entry.focus_holders = if focused {
+                entry.focus_holders.saturating_add(1)
+            } else {
+                entry.focus_holders.saturating_sub(1)
+            };
+        }
+    }
+
+    /// Whether any live toast is being held down, or holds keyboard focus.
     ///
     /// Group-wide, matching the hover refcount: holding one toast of a stack
     /// holds the stack, because dismissing the ones above or below it would
     /// move the thing being read.
     pub(crate) fn any_held(&self) -> bool {
-        self.inner.borrow().live_entries.iter().any(|e| e.held)
+        self.inner
+            .borrow()
+            .live_entries
+            .iter()
+            .any(|e| e.held || e.focus_holders > 0)
+    }
+
+    /// Whether every timer stands still right now: a pointer rests on the
+    /// stack (with the group pause on), or a toast is held or focused.
+    fn timers_paused(&self) -> bool {
+        (self.pause_on_hover_group() && self.hover_count.get() > 0) || self.any_held()
+    }
+
+    /// Bring every timer up to `now` without expiring anything: charge the
+    /// time since each entry's mark unless the timers stand still, then move
+    /// every mark to `now`. Called when a pause starts or ends.
+    fn settle_timers(&self, now: Instant) {
+        let paused = self.timers_paused();
+        let mut inner = self.inner.borrow_mut();
+        for entry in inner.live_entries.iter_mut() {
+            if !paused && let Some(remaining) = entry.time_left.as_mut() {
+                *remaining =
+                    remaining.saturating_sub(now.saturating_duration_since(entry.timer_mark));
+            }
+            entry.timer_mark = now;
+        }
+    }
+
+    /// Tick the per-entry timers up to `now`, each from its own mark. While
+    /// the timers stand still (see [`Self::timers_paused`]) nothing is charged
+    /// and the marks move to `now`. Returns `true` if at least one entry
+    /// expired. Called from the host's frame-tick effect.
+    pub(crate) fn tick_timers_at(&self, now: Instant) -> bool {
+        self.settle_timers(now);
+        let expired: Vec<u64> = self
+            .inner
+            .borrow()
+            .live_entries
+            .iter()
+            .filter(|e| e.time_left.is_some_and(|left| left.is_zero()))
+            .map(|e| e.entry_id)
+            .collect();
+        let any = !expired.is_empty();
+        for entry_id in expired {
+            self.dismiss_entry_deferred(entry_id, ToastDismissCause::Timeout);
+        }
+        any
     }
 
     /// Tick the per-entry timers by `dt`. When `paused` is true (any
-    /// surface is hovered), or any surface is being held down,
-    /// this is a no-op. Returns `true`
+    /// surface is hovered), or any surface is being held down or holds
+    /// keyboard focus, this is a no-op. Returns `true`
     /// if at least one entry expired (host then bumps the version
-    /// signal and rebuilds, dropping the surfaces). Called from the
-    /// host's frame-tick effect.
+    /// signal and rebuilds, dropping the surfaces). The host ticks with
+    /// [`Self::tick_timers_at`]; this charges every entry the same `dt`.
     pub(crate) fn tick_timers(&self, dt: Duration, paused: bool) -> bool {
         if paused || self.any_held() {
             return false;
@@ -746,17 +853,57 @@ impl ToastRegistry {
     }
 
     /// Smallest remaining auto-dismiss duration among live timed
-    /// toasts, or `None` if no toast has a running timer. The host uses
-    /// this to schedule a single `wake_at` deadline at the soonest
+    /// toasts as of `now`, or `None` if no toast has a running timer. The
+    /// host uses this to schedule a single `wake_at` deadline at the soonest
     /// expiry instead of polling every frame — so a visible-but-idle
     /// toast lets the event loop sleep.
-    pub(crate) fn min_running_timer(&self) -> Option<std::time::Duration> {
+    pub(crate) fn min_running_timer_at(&self, now: Instant) -> Option<Duration> {
+        let paused = self.timers_paused();
         self.inner
             .borrow()
             .live_entries
             .iter()
-            .filter_map(|e| e.time_left)
+            .filter_map(|e| {
+                let left = e.time_left?;
+                Some(if paused {
+                    left
+                } else {
+                    left.saturating_sub(now.saturating_duration_since(e.timer_mark))
+                })
+            })
             .min()
+    }
+
+    /// The entry's current data, as its surface renders it.
+    pub(crate) fn surface_data(
+        &self,
+        entry_id: u64,
+    ) -> Option<(super::surface::ToastSurfaceData, bool)> {
+        self.with_entry(entry_id, |e| {
+            (
+                super::surface::ToastSurfaceData {
+                    entry_id: e.entry_id,
+                    severity: e.severity,
+                    priority: e.priority,
+                    title: e.title.clone(),
+                    body: e.body.clone(),
+                    announcement: e.announcement.clone(),
+                    actions: e.actions.clone(),
+                    show_close_button: e.show_close_button,
+                    on_click: e.on_click.clone(),
+                    style_override: e.style_override.clone(),
+                    // Cloned, not re-created: the clone shares the entry's state,
+                    // which is what keeps an unfolded body unfolded.
+                    body_state: e.body_state.clone(),
+                },
+                e.closable_on_escape,
+            )
+        })
+    }
+
+    /// The signal an update in place bumps for `entry_id`.
+    pub(crate) fn entry_revision(&self, entry_id: u64) -> Option<Signal<u64>> {
+        self.with_entry(entry_id, |e| e.revision.clone())
     }
 
     /// Read-only snapshot of live entry ids — the host's `build()`

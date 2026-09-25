@@ -35,6 +35,9 @@ pub mod center_button;
 pub mod log;
 pub mod log_dialog;
 
+#[cfg(test)]
+mod reader_tests;
+
 use serde::{Deserialize, Serialize};
 use teksilo_core::styles::{BannerSeverity, ToastPriority};
 use teksilo_settings::Keyed;

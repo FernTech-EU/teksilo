@@ -175,8 +175,9 @@ pub struct WidgetTree {
     /// degenerating to "the apex is wherever I am, so I am always
     /// inside it").
     previous_pointer_position: Option<teksilo_canvas::Point>,
-    /// A rebuild destroyed the focused widget: the subtree that owned focus,
-    /// remembered so the end of the layout pass can land focus back inside it.
+    /// A rebuild destroyed the focused widget: the ancestors it had inside the
+    /// subtree that owned focus, innermost first, remembered so the end of the
+    /// layout pass can land focus back inside the innermost one still alive.
     ///
     /// A rebuild allocates fresh `WidgetId`s for its children, so the focused
     /// node dies and `revalidate_interaction_state` drops focus to `None`.
@@ -187,7 +188,12 @@ pub struct WidgetTree {
     /// (see the tail of `layout_with_ops`), once the fresh children have real
     /// bounds for the focus-driven scroll-into-view — the same shape as the
     /// post-layout hover refresh next to it.
-    pending_focus_restore: Option<WidgetId>,
+    ///
+    /// The innermost survivor, not the rebuilt root: a reconciling rebuild
+    /// keeps the children it re-attaches, so the group that held focus is often
+    /// still there, and the root's first focusable descendant is the *first*
+    /// group, whichever one the user was in.
+    pending_focus_restore: Vec<WidgetId>,
     /// The interaction anchors as of the last layout walk — the focused node,
     /// each live pointer's captor, and an in-flight drag's source.
     ///
@@ -947,7 +953,7 @@ impl WidgetTree {
             presses: crate::press::PressTable::default(),
             view_focus_stack: Vec::new(),
             previous_pointer_position: None,
-            pending_focus_restore: None,
+            pending_focus_restore: Vec::new(),
             last_interaction_anchors: Vec::new(),
             last_proposal: SizeProposal::exact(800.0, 600.0),
             pending_modal_requests: Vec::new(),

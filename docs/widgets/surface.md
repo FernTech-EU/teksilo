@@ -11,6 +11,15 @@ glyph, title + body column, action row, close button, and the
 chrome (background, padding, layout) is delegated to the active
 `ToastStyle` via `make_body`.
 
+An update in place (`Toast::id`) rebuilds the surface of that one
+entry, and the rebuild **reconciles**: the surface's own node stays
+(so the toast is announced again only if its name changed), and the
+glyph, title, body, each action and the close button are kept when
+the update left them as they were. A progress toast updated every
+160 ms therefore keeps the Cancel a keyboard user is on, and a kept
+action calls the action of the latest update, not of the one that
+built it.
+
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/toast/surface/index.html)
@@ -29,8 +38,9 @@ pub struct ToastSurfaceData { /* fields */ }
 
 One rendered toast — chrome owned by `ToastStyle::make_body`,
 functional pieces (glyph, body, action row, close button) owned
-by this widget. Built fresh for each entry — there is no internal
-`Signal<Option<…>>` slot binding (the host rebuilds on changes).
+by this widget. Built once per entry by the host; an update in
+place rebuilds it and keeps what did not change (see the module
+docs).
 
 ```rust
 pub struct ToastSurface { /* fields */ }

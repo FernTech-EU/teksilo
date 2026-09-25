@@ -17,7 +17,18 @@
 //! No overlay system involvement — toasts are regular widgets in the
 //! arena. The host owns the per-frame timer + hover-pause; expired
 //! entries are removed from the registry's queue, the version signal
-//! is bumped, the host rebuilds, the surface widgets are destroyed.
+//! is bumped, the host rebuilds, and the expired entry's surface is
+//! destroyed.
+//!
+//! The host **reconciles**: a rebuild keeps the surface of every toast
+//! still live and builds one only for a toast that has just appeared.
+//! A surface is a live region, and every platform announces a live
+//! node when it enters the tree, so a host that rebuilt every surface
+//! on every queue change read every toast still up again each time one
+//! came or went, and destroyed the control a keyboard user was on. An
+//! update in place (`Toast::id`) rebuilds only that toast's surface,
+//! which keeps what did not change (see
+//! [`ToastSurface`]).
 //!
 //! Routing: each host filters `live_entry_ids()` down to entries whose
 //! `ToastRoute` matches its own window id / assigned audience, or that
@@ -31,7 +42,7 @@
 //! is cheap and lets one shared queue serve every window without a
 //! per-window registry.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -46,7 +57,7 @@ use teksilo_tokens::Corner;
 
 use crate::notification::NotificationArchive;
 use crate::toast::registry::ToastRegistry;
-use crate::toast::surface::{ToastSurface, ToastSurfaceData};
+use crate::toast::surface::ToastSurface;
 use crate::toast::{ToastAudience, ToastRoute};
 
 /// Configuration for the installed [`ToastHost`]. Passed to
@@ -134,11 +145,9 @@ pub struct ToastHost {
     /// ids THAT ROUTE TO THIS HOST, at the time of the last `build()`.
     /// Used by `place_children` to know the placement order.
     toast_surface_ids: Vec<WidgetId>,
-    /// `Instant` of the last timer tick — used to compute `dt`. The
-    /// auto-dismiss timer is driven by a `wake_at` deadline (see
-    /// `build`), not a per-frame subscription, so a visible toast does
-    /// not pin the event loop at 60 fps.
-    last_tick_at: Rc<RefCell<Option<Instant>>>,
+    /// The entry each surface of `toast_surface_ids` renders, in the same
+    /// order: what the next build reconciles against.
+    toast_entry_ids: Vec<u64>,
     /// Set true once any pointer-event handler has been attached so
     /// subsequent rebuilds don't re-attach. The handler drives the
     /// pending dismiss-callback drain.
@@ -160,7 +169,7 @@ impl ToastHost {
             registry,
             options,
             toast_surface_ids: Vec::new(),
-            last_tick_at: Rc::new(RefCell::new(None)),
+            toast_entry_ids: Vec::new(),
             has_pending_drain_handler: Cell::new(false),
             initial_audience_applied: Cell::new(false),
         }
@@ -215,11 +224,14 @@ fn schedule_toast_wake(
     pause_on_hover_group: bool,
     now: Instant,
 ) {
+    // A hold or keyboard focus needs no poll: the registry settles the
+    // timers at the moment either starts or ends, so the next wake at the
+    // soonest expiry charges exactly the time that ran.
     let paused = pause_on_hover_group && registry.hover_count_signal().get() > 0;
     let delay = if paused {
         HOVER_POLL_INTERVAL
     } else {
-        match registry.min_running_timer() {
+        match registry.min_running_timer_at(now) {
             Some(remaining) => remaining.max(MIN_WAKE_DELAY),
             None => return, // nothing left to wait for
         }
@@ -270,16 +282,18 @@ impl Widget for ToastHost {
         }
         let my_audience: Option<ToastAudience> = my_audience_signal.and_then(|s| s.get());
 
-        // Build one ToastSurface per live entry THAT ROUTES HERE. Each
-        // rebuild creates fresh ToastSurface widget instances — old
-        // surfaces are torn down by the framework (no
-        // preserve_children). The route check must happen before
+        // One ToastSurface per live entry THAT ROUTES HERE. A surface
+        // already built for an entry is re-attached as it is (this host
+        // `preserves_children_on_rebuild`, so the framework keeps it and
+        // reaps the ones left out); only an entry seen for the first time
+        // gets a new one. The route check must happen before
         // `take_leading` (a take-once side effect) runs for an entry —
         // an entry this host skips must be left completely untouched
         // so whichever host it DOES route to still sees its leading
         // widget intact.
         let entry_ids = self.registry.live_entry_ids();
         let mut surface_ids = Vec::with_capacity(entry_ids.len());
+        let mut routed_entry_ids = Vec::with_capacity(entry_ids.len());
         for entry_id in &entry_ids {
             let route_matches = self
                 .registry
@@ -292,31 +306,19 @@ impl Widget for ToastHost {
             if !route_matches {
                 continue;
             }
-            let Some(data) = self.registry.with_entry(*entry_id, |e| ToastSurfaceData {
-                entry_id: e.entry_id,
-                severity: e.severity,
-                priority: e.priority,
-                title: e.title.clone(),
-                body: e.body.clone(),
-                announcement: e.announcement.clone(),
-                actions: e.actions.clone(),
-                show_close_button: e.show_close_button,
-                on_click: e.on_click.clone(),
-                style_override: e.style_override.clone(),
-                // Cloned, not re-created: the clone shares the entry's state, which is
-                // what keeps an unfolded body unfolded across this very rebuild.
-                body_state: e.body_state.clone(),
-            }) else {
+            if let Some(i) = self.toast_entry_ids.iter().position(|e| e == entry_id) {
+                surface_ids.push(self.toast_surface_ids[i]);
+                routed_entry_ids.push(*entry_id);
+                continue;
+            }
+            let Some((data, closable_on_escape)) = self.registry.surface_data(*entry_id) else {
                 continue;
             };
             let leading = self.registry.take_leading(*entry_id);
-            let closable_on_escape = self
-                .registry
-                .with_entry(*entry_id, |e| e.closable_on_escape)
-                .unwrap_or(true);
             let surface =
                 ToastSurface::new(data, leading, self.registry.clone(), closable_on_escape);
             surface_ids.push(ctx.add(surface));
+            routed_entry_ids.push(*entry_id);
         }
 
         // Auto-dismiss timer. Driven by a one-shot `wake_at` deadline,
@@ -330,32 +332,19 @@ impl Widget for ToastHost {
         // AnimatedQuad path and keep ticking regardless of this.)
         if self.registry.has_running_timers() {
             let registry_for_tick = self.registry.clone();
-            let last_tick_at = self.last_tick_at.clone();
             let wake_at = ctx.wake_at_handle();
             let pause_on_hover_group = self.options.pause_on_hover_group;
 
-            // Stamp the dt baseline at arm time so the first deadline wake
-            // measures a real elapsed delta. (The effect consults
-            // wall-clock, not the frame-tick signal — whose delta is
-            // clamped to 0.1 s and would under-count a multi-second sleep.)
-            if last_tick_at.borrow().is_none() {
-                *last_tick_at.borrow_mut() = Some(Instant::now());
-            }
-
+            // Each entry is charged from its own mark (the instant it was
+            // shown, updated or last ticked), on the wall clock: the
+            // frame-tick signal's delta is clamped to 0.1 s and would
+            // under-count a multi-second sleep, and one host-wide "last
+            // tick" charged a toast shown since then for time before it
+            // existed.
             let wake_for_tick = wake_at.clone();
             ctx.effect(&ctx.frame_tick(), move |_delta_from_signal| {
                 let now = Instant::now();
-                let dt = {
-                    let mut last = last_tick_at.borrow_mut();
-                    let result = last
-                        .map(|t| now.saturating_duration_since(t))
-                        .unwrap_or_default();
-                    *last = Some(now);
-                    result
-                };
-                let paused =
-                    pause_on_hover_group && registry_for_tick.hover_count_signal().get() > 0;
-                registry_for_tick.tick_timers(dt, paused);
+                registry_for_tick.tick_timers_at(now);
                 // Re-arm for the next expiry. (An expiry dismisses via a
                 // version bump → rebuild, which re-arms too; rescheduling
                 // here also covers the case where an unrelated frame ran
@@ -378,12 +367,6 @@ impl Widget for ToastHost {
                 pause_on_hover_group,
                 Instant::now(),
             );
-        } else {
-            // No running timer: reset the dt baseline so the next timed
-            // toast measures from its own arrival, not from a stale
-            // timestamp left over from a previous toast session (which
-            // would otherwise instant-expire it on the first tick).
-            *self.last_tick_at.borrow_mut() = None;
         }
 
         // Pending-dismiss-callback drain handler (attached once).
@@ -411,6 +394,7 @@ impl Widget for ToastHost {
         }
 
         self.toast_surface_ids = surface_ids.clone();
+        self.toast_entry_ids = routed_entry_ids;
         surface_ids
     }
 
@@ -498,6 +482,11 @@ impl Widget for ToastHost {
 
     fn children(&self) -> Vec<WidgetId> {
         self.toast_surface_ids.clone()
+    }
+
+    fn preserves_children_on_rebuild(&self) -> bool {
+        // Keeps the surface of every toast still live; see the module docs.
+        true
     }
 }
 
