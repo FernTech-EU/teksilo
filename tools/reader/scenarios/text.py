@@ -46,15 +46,17 @@ session (a Wayland session, `WAYLAND_DISPLAY` set) libatspi gives Orca the
 *legacy* keyboard device, which learns of keys only from applications that
 report them to the registry through
 `org.a11y.atspi.DeviceEventController.NotifyListenersSync`, as the GTK and Qt
-bridges do. `accesskit_unix` 0.23 never calls it, so Orca hears none of the
-keys typed into a Teksilo window, and says nothing about any caret move.
+bridges do. `accesskit_unix` 0.23 never calls it; Teksilo itself does since
+`teksilo_platform::key_report`, for every key that reaches a window while a
+reader is attached. Before that, Orca heard none of the keys typed into a
+Teksilo window, and said nothing about any caret move.
 
-To measure what Orca *would* say about a caret move (on an X11 session, where
-Orca reads the keyboard itself, or beside a toolkit that reports keys),
-`press` first reports the key to the registry exactly as a toolkit bridge
-does, then presses the real key through KWin. Acts that do so say "Orca told
-of the key" in their label. Acts without it measure what Orca does in this
-Wayland session with AccessKit as it ships.
+So `press` presses the real key through KWin and leaves the reporting to the
+application. Acts whose label says "Orca told of the key" date from before
+the application reported keys, when `press` reported each key itself first
+(`tell_orca`); they now mean the application's own report. `tell_orca` stays
+for measuring a build from before that, with `press(..., tell=True)`; on a
+current build it would report every key twice.
 
 The registry's demarshaller reads the event as `(uiiiisb)` (Qt's
 `QSpiDeviceEvent`) although its introspection XML says `(uiuuisb)`, so the
@@ -109,6 +111,17 @@ KEYSYMS = {
 MODIFIER_BITS = {"shift": 1 << 0, "ctrl": 1 << 2, "control": 1 << 2, "alt": 1 << 3}
 
 
+def _a11y_address() -> str:
+    """The private session's accessibility bus address."""
+    done = subprocess.run(
+        ["gdbus", "call", "--session", "--dest", "org.a11y.Bus", "--object-path",
+         "/org/a11y/bus", "--method", "org.a11y.Bus.GetAddress"],
+        capture_output=True, text=True, timeout=10)
+    if done.returncode != 0:
+        raise RunError(f"no accessibility bus address: {done.stderr.strip()}")
+    return done.stdout.strip().strip("(),").strip("'")
+
+
 def _a11y_connection(run: Any) -> Any:
     """A connection to the private session's accessibility bus, kept on `run`."""
     conn = getattr(run, "_text_a11y_conn", None)
@@ -116,13 +129,7 @@ def _a11y_connection(run: Any) -> Any:
         return conn
     from gi.repository import Gio  # noqa: PLC0415 - only a run with Orca needs it
 
-    done = subprocess.run(
-        ["gdbus", "call", "--session", "--dest", "org.a11y.Bus", "--object-path",
-         "/org/a11y/bus", "--method", "org.a11y.Bus.GetAddress"],
-        capture_output=True, text=True, timeout=10)
-    if done.returncode != 0:
-        raise RunError(f"no accessibility bus address: {done.stderr.strip()}")
-    address = done.stdout.strip().strip("(),").strip("'")
+    address = _a11y_address()
     conn = Gio.DBusConnection.new_for_address_sync(
         address, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
         | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
@@ -153,6 +160,10 @@ def tell_orca(run: Any, chord: str) -> None:
     handles. Orca's legacy device receives it synchronously: when this
     returns, Orca has recorded the key as its last input event.
 
+    Only for a build from before the application reported keys itself
+    (`teksilo_platform::key_report`): a current build reports every key it
+    receives, and telling Orca too would report each key twice.
+
     The registry's own demarshaller reads `(uiiiisb)` (Qt's `QSpiDeviceEvent`),
     whatever its introspection XML says, so the call is made with that
     signature through Gio rather than through `gdbus call`, which would type
@@ -179,16 +190,17 @@ def tell_orca(run: Any, chord: str) -> None:
         run.current.steps.append(f"told Orca of {chord}")
 
 
-def press(run: Any, *chords: str, tell: bool = True) -> None:
-    """Press each chord for real, first telling Orca of it when `tell`."""
+def press(run: Any, *chords: str, tell: bool = False) -> None:
+    """Press each chord for real. The application reports it to Orca; `tell`
+    reports it from here first, for a build that does not (`tell_orca`)."""
     for chord in chords:
         if tell:
             tell_orca(run, chord)
         run.key(chord)
 
 
-def type_keys(run: Any, text: str, tell: bool = True) -> None:
-    """Type lowercase ASCII text key by key, telling Orca of each key."""
+def type_keys(run: Any, text: str, tell: bool = False) -> None:
+    """Type lowercase ASCII text key by key (see `press` for `tell`)."""
     for ch in text:
         press(run, "space" if ch == " " else ch, tell=tell)
 
@@ -339,7 +351,8 @@ def heard(run: Any, act: Any, echo: bool = False) -> list:
     """What Orca said from the act's start to where it went quiet after it.
 
     The harness credits Orca's speech to an act from Orca's receipt of the
-    act's first event. A key reported by `tell_orca` is echoed before that
+    act's first event. Orca hears of a key, and echoes it, as the application
+    reports it, before the application acts on it and so before that
     receipt, so this reads from the act's own start instead. Key echo (Orca's
     own `speakKeyEvent`, which the null speech server logs as "key event") is
     left out unless `echo`: it is Orca repeating the key, not the application
@@ -682,14 +695,17 @@ def body_editor_caret(run: Any) -> None:
 
 
 def body_editor_keys_unreported(run: Any) -> None:
-    """AccessKit as it ships, in a Wayland session: no key is ever reported to
-    Orca, as none is by `accesskit_unix`. Focus is put on the editor's text by
-    a screen reader's own request, so the caret events do reach the bus."""
+    """Caret moves with no key reported from the harness: what Orca makes of
+    them rests on the application's own report (`teksilo_platform::key_report`).
+    Before that, no key was ever reported to Orca, as none is by
+    `accesskit_unix`, and it said nothing (finding text-15). Focus is put on
+    the editor's text by a screen reader's own request, so the caret events
+    do reach the bus."""
     focus_by_request(run)
     scene(run, "Ctrl+Home, not reported", lambda: press(run, "Ctrl+Home", tell=False))
     for label, chord in (("Down", "Down"), ("Right", "Right"), ("Ctrl+Right", "Ctrl+Right"),
                          ("End", "End")):
-        with run.act(f"{label}, no key reported to Orca",
+        with run.act(f"{label}, no key reported but by the application",
                      [caret_event(), said_something(run, "Orca reads what the caret moved over")],
                      should="the caret moves and the reader hears what it moved to"):
             press(run, chord, tell=False)

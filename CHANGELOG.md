@@ -17,6 +17,12 @@ by crate for clarity, not because crates version independently.
 
 #### Accessibility
 
+- **`teksilo_platform::key_report`: each key reported to the AT-SPI registry.**
+  `KeyReportGate` reports every key press and release to
+  `org.a11y.atspi.DeviceEventController.NotifyListenersSync` while an
+  assistive technology is attached, and says which keys the screen reader
+  took, so they are not dispatched. `teksilo-app` runs every `KeyboardInput`
+  through it; Linux only, it does nothing on Windows and macOS.
 - **`tools/reader/`: what a screen reader gets from an example, recorded.**
   `tools/reader/reader.py` runs an example in a private, invisible desktop
   session (its own D-Bus, AT-SPI bus, KWin and runtime directory, no
@@ -85,6 +91,24 @@ by crate for clarity, not because crates version independently.
   did the same. Focus now stays where Tab put it. A `Snackbar` that times out
   no longer sends focus back to its trigger after the user has moved on
   either.
+- **Orca heard no key typed into a Teksilo window in a Wayland session.**
+  Orca 46 reads no keyboard there: it learns of a key only when the
+  application reports it to the AT-SPI registry, as GTK and Qt do, and Teksilo
+  did not. So Orca said nothing when an arrow key moved the caret, echoed no
+  typing, and none of its own commands ran (Orca+T, which says the time): the
+  keys went to the application instead. On Linux, while an assistive
+  technology is attached, each key press and release is now reported to the
+  registry before the application sees it, and a key the screen reader takes
+  for one of its commands no longer reaches the application, nor does its
+  release. A key typed into a secure field (a `PasswordField`) is reported
+  without its character: its physical key and modifiers only, which the screen
+  reader's own commands need, so a program listening to the registry can still
+  tell which keys were pressed there. GTK and Qt report the character too. A
+  press waits at most 200 ms for the registry's answer. A registry that stops
+  answering costs one such pause, however many keys follow; one that answers
+  every key more than 200 ms late costs up to 200 ms on each key typed after
+  it has caught up. What a reader hears on an X11 session, where Orca reads
+  the keyboard itself, on Windows and on macOS is unchanged.
 - **Every window was an unnamed "frame" to Orca.** The accessibility tree's
   root, which AT-SPI presents as the window, carried no name, so Orca 46.1
   announced each window as it came up with the bare word "frame". The root now

@@ -126,8 +126,11 @@ Three ways to act, which are not the same thing to a screen reader:
   small client (`fake_key.c`, compiled once into `target/reader/.bin/`), one
   client for the whole run so the seat stays still. They reach the example
   through the compositor and winit, so window-level keys (F10, Alt, Caps Lock)
-  work. Whether Orca hears them is up to the application: see "What it does
-  not show".
+  work. Orca hears them as the application reports them to the AT-SPI
+  registry, which is how its legacy keyboard device learns of keys in a
+  Wayland session (`teksilo_platform::key_report`), so key echo, caret speech
+  that depends on the last key, and Orca's own commands are exercised
+  (`scenarios/fix_key_report.py`).
 - `run.action("click", role=..., name=...)`: an **AT-SPI action**, what a
   screen reader's own activation does. `run.grab_focus(...)` asks for focus
   the same way.
@@ -191,20 +194,17 @@ acts a scenario performs, on the machine it runs on.
 
 It does not show:
 
-- **Orca's answer to keys, unless the application reports them.** In a Wayland
-  session, libatspi 2.52 gives Orca its legacy keyboard device, which learns of
-  a key only when the application reports it to the AT-SPI registry
-  (`DeviceEventController.NotifyListenersSync`), as the GTK and Qt bridges do.
-  What Orca says about a caret move, "selected" after Space, key echo, and
-  Orca's own commands all depend on it. KWin 6.6 offers the newer
-  `org.freedesktop.a11y.KeyboardMonitor`, but this libatspi does not use it.
-  The harness presses keys through the compositor, so Orca hears exactly what
-  the application reports, as it would on the user's own Wayland desktop.
 - **Windows and macOS.** The UIA and macOS adapters are different code; a
   finding here is a Linux finding until their source says otherwise, and a
   claim about NVDA, JAWS or VoiceOver rests on reading their source.
-- **Orca's key-press speech**, and anything Orca does in answer to a key it
-  sees itself (its own navigation commands, flat review, key echo).
+- **Orca reading the keyboard itself**, as it does on an X11 session. In a
+  Wayland session libatspi 2.52 gives Orca its legacy keyboard device, which
+  learns of a key only when the application reports it to the AT-SPI registry
+  (`DeviceEventController.NotifyListenersSync`), as the GTK and Qt bridges and
+  `teksilo_platform::key_report` do. KWin 6.6 offers the newer
+  `org.freedesktop.a11y.KeyboardMonitor`, which this libatspi does not use.
+  The harness presses keys through the compositor, so Orca hears exactly what
+  the application reports, as it would on the user's own Wayland desktop.
 - **Timing on another machine.** A cut is estimated from Orca's log; a race
   that loses here may win on a faster machine, and the other way round. Run a
   scenario more than once before trusting a result that depends on timing.

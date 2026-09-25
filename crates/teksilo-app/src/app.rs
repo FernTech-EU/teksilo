@@ -639,6 +639,11 @@ struct TeksiloAppHandler {
     /// When the on-screen keyboard's rectangle was last read. See
     /// [`TeksiloAppHandler::refresh_occluded_band`].
     osk_polled_at: Option<Instant>,
+    /// Tells an attached screen reader of each key before the application
+    /// acts on it, where the reader cannot see the keyboard itself (Orca
+    /// under Wayland), and holds back the keys the reader took. One per
+    /// application: a key pressed in one window can come up in another.
+    key_report: teksilo_platform::key_report::KeyReportGate,
 }
 
 impl TeksiloAppHandler {
@@ -689,6 +694,7 @@ impl TeksiloAppHandler {
             woken_externally: true,
             pen_recheck_at: None,
             osk_polled_at: None,
+            key_report: teksilo_platform::key_report::KeyReportGate::for_platform(),
         }
     }
 
@@ -2100,6 +2106,73 @@ impl TeksiloAppHandler {
         self.wm.reinsert_managed(window_id, current);
     }
 
+    /// Report a key to an attached screen reader and say whether the
+    /// application still gets it. See [`teksilo_platform::key_report`].
+    fn report_key(
+        &mut self,
+        window_id: WindowId,
+        key_event: &winit::event::KeyEvent,
+        is_synthetic: bool,
+    ) -> teksilo_platform::key_report::KeyDisposition {
+        use teksilo_platform::key_report::{KeyDisposition, KeyInput, KeyTarget, KeyboardState};
+        let Some(managed) = self.wm.get_by_winit_mut(window_id) else {
+            return KeyDisposition::Deliver;
+        };
+        let target = KeyTarget {
+            reader_attached: managed.platform_window.accessibility_active(),
+            // A secure field declares a password IME purpose while focused
+            // (`TextInputField::secure`, so every `PasswordField`).
+            secure_field: managed
+                .tree
+                .ime_context_for_focused()
+                .is_some_and(|ime| ime.purpose == teksilo_core::ime::ImePurpose::Password),
+        };
+        let keyboard = KeyboardState {
+            modifiers: managed.current_modifiers,
+            caps_lock: managed.caps_lock_active,
+        };
+        self.key_report.filter(
+            &KeyInput::from_winit(key_event, is_synthetic),
+            keyboard,
+            target,
+        )
+    }
+
+    /// What a key press says about the keyboard itself, kept whether or not
+    /// the key reaches a widget: the OS toggles Caps Lock, and a chord made
+    /// while Alt is held is not an Alt tap, even when a screen reader took
+    /// the key.
+    fn note_physical_key(&mut self, window_id: WindowId, key_event: &winit::event::KeyEvent) {
+        if key_event.state != winit::event::ElementState::Pressed {
+            return;
+        }
+        let key = event_translation::translate_key(&key_event.logical_key);
+        let Some(managed) = self.wm.get_by_winit_mut(window_id) else {
+            return;
+        };
+        // Track Caps Lock from the discrete key press (winit's
+        // `ModifiersState` carries no lock state), toggling on each key-down
+        // edge and pushing the result to `WindowState::caps_lock` for the
+        // password-field warning.
+        if matches!(key, Some(teksilo_core::event::Key::CapsLock)) {
+            managed.caps_lock_active = !managed.caps_lock_active;
+            managed
+                .state
+                .set_caps_lock_from_os(managed.caps_lock_active);
+        }
+        // Bare-Alt-tap detection: every other KeyDown while Alt is held
+        // flips the sticky flag, so the falling edge of `alt_down` only
+        // counts as a tap when no chord was composed. winit 0.30 reports the
+        // modifier keys as `KeyboardInput` too, on Wayland and X11 alike, but
+        // `translate_key` has no Teksilo key for Shift, Control, Alt or Super,
+        // so they never count: Alt's own press, and Shift added to it, leave
+        // the tap intact. Every key that does translate counts, Caps Lock
+        // included.
+        if key.is_some() {
+            managed.state.note_non_alt_keydown_during_alt();
+        }
+    }
+
     fn handle_accessibility_actions(
         &mut self,
         window_id: WindowId,
@@ -2219,9 +2292,12 @@ impl TeksiloAppHandler {
         // proves nothing about screen readers (a magnifier or an automation
         // harness activates the adapter too) — detaching does, and
         // `set_at_client_attached` is where that asymmetry lives.
-        current
-            .tree
-            .set_at_client_attached(current.platform_window.accessibility_active());
+        let at_attached = current.platform_window.accessibility_active();
+        current.tree.set_at_client_attached(at_attached);
+        if at_attached {
+            // Connect to the registry now rather than on the first key.
+            self.key_report.warm_up();
+        }
 
         // Kept unconditional: `sync_accessibility` is not a pure builder —
         // it steps the framework's live-region announcers, fills the
@@ -2446,6 +2522,23 @@ impl TeksiloAppHandler {
     ) {
         let teksilo_id = self.wm.teksilo_id_for_winit(window_id);
 
+        // An attached screen reader hears of the key before anything acts on
+        // it, and may take it for itself (Orca's own commands): a key taken
+        // there goes no further. First of all, so that the reader's commands
+        // work in a window a modal child blocks too.
+        if let WindowEvent::KeyboardInput {
+            event: key_event,
+            is_synthetic,
+            ..
+        } = &event
+            && self.report_key(window_id, key_event, *is_synthetic)
+                == teksilo_platform::key_report::KeyDisposition::Drop
+        {
+            self.note_physical_key(window_id, key_event);
+            self.update_control_flow(event_loop);
+            return;
+        }
+
         // A window blocked by a modal child swallows the user's *input* and
         // bounces it to the child, while still hearing everything the OS says
         // about the window itself. Which is which — and which of the swallowed
@@ -2602,36 +2695,7 @@ impl TeksiloAppHandler {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
-                // Track Caps Lock from the discrete key press — winit's
-                // `ModifiersState` carries no lock state — toggling on
-                // each key-down edge and pushing the result to
-                // `WindowState::caps_lock` for the password-field warning.
-                if key_event.state == winit::event::ElementState::Pressed
-                    && matches!(
-                        event_translation::translate_key(&key_event.logical_key),
-                        Some(teksilo_core::event::Key::CapsLock)
-                    )
-                    && let Some(managed) = self.wm.get_by_winit_mut(window_id)
-                {
-                    managed.caps_lock_active = !managed.caps_lock_active;
-                    managed
-                        .state
-                        .set_caps_lock_from_os(managed.caps_lock_active);
-                }
-
-                // Bare-Alt-tap detection: every non-Alt KeyDown while
-                // Alt is held flips the sticky flag, so the falling
-                // edge of `alt_down` only counts as a tap when no
-                // chord was composed. winit fires modifier keys
-                // through `ModifiersChanged`, not `KeyboardInput`, so
-                // every KeyDown we see here is a non-modifier and
-                // qualifies as an "other key" press.
-                if key_event.state == winit::event::ElementState::Pressed
-                    && event_translation::translate_key(&key_event.logical_key).is_some()
-                    && let Some(managed) = self.wm.get_by_winit_mut(window_id)
-                {
-                    managed.state.note_non_alt_keydown_during_alt();
-                }
+                self.note_physical_key(window_id, &key_event);
                 let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
                     event_translation::translate_key(&key_event.logical_key).map(|key| {
                         let modifiers =

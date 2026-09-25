@@ -11807,6 +11807,8 @@ dependencies = [
  "windows-core 0.62.2",
  "winit",
  "x11rb",
+ "xkeysym",
+ "zbus",
 ]
 
 [[package]]

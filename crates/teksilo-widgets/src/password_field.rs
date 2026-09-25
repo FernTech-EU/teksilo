@@ -12,6 +12,15 @@
 //! plaintext never reaches the shaper or glyph atlas while masked, and
 //! caret / selection / hit-test stay correct.
 //!
+//! On Linux, while a screen reader is attached, Teksilo reports each key
+//! to the AT-SPI registry, which is how Orca hears keys in a Wayland
+//! session (`teksilo_platform::key_report`). A key typed into this field,
+//! revealed or not, goes there without its character: no text, and the
+//! keysym `VoidSymbol`. Its physical keycode and modifiers still go,
+//! because Orca matches its own commands on them, so a process listening
+//! to the registry can tell which physical keys were pressed. GTK 3 and
+//! Qt report the character too.
+//!
 //! Feature parity target: Qt `QLineEdit` echo modes, SwiftUI
 //! `SecureField`, WinUI `PasswordBox` / `PasswordRevealMode`, and the
 //! Android `password_toggle`.

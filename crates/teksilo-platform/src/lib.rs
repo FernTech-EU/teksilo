@@ -9,6 +9,7 @@ pub mod event_translation;
 pub mod external_dnd;
 #[cfg(feature = "file-dialog")]
 pub mod file_dialog;
+pub mod key_report;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux_helpers;
 #[cfg(feature = "native-menu")]

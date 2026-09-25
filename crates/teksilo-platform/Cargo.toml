@@ -181,6 +181,15 @@ libc = "0.2"
 # unified and cargo does not build two copies. `just check-x11rb-unified` (and
 # the CI job of the same name) fails the build if it ever forks.
 x11rb = "0.13"
+# Reporting each key to the AT-SPI registry (`key_report/atspi.rs`), which is
+# how Orca's legacy keyboard device hears keys. The same zbus, with the same
+# features, that `accesskit_unix` already links, so it adds no crate.
+zbus = { version = "5.5", default-features = false, features = ["async-io"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
+# The X keysym constants, to check `key_report`'s hand-written keysym table
+# against. Already in the tree through winit's xkbcommon.
+xkeysym = "0.2"
 
 [package.metadata.docs.rs]
 all-features = true
