@@ -969,12 +969,12 @@ fn the_count_is_said_in_words_with_no_translations_installed() {
         listener.heard(&mut tree),
         vec![Heard::Live("1 item selected".to_string())]
     );
-    press(&mut tree, Key::A, Modifiers::CTRL);
+    press(&mut tree, Key::A, Modifiers::COMMAND);
     assert_eq!(
         listener.heard(&mut tree),
         vec![Heard::Live("12 items selected".to_string())]
     );
-    press(&mut tree, Key::A, Modifiers::CTRL | Modifiers::SHIFT);
+    press(&mut tree, Key::A, Modifiers::COMMAND | Modifiers::SHIFT);
     assert_eq!(
         listener.heard(&mut tree),
         vec![Heard::Live("No item selected".to_string())]
@@ -1015,7 +1015,7 @@ fn a_selection_change_keeps_the_readers_tile_and_changes_its_state() {
         "the reader's tile is the same node, now selected"
     );
 
-    press(&mut tree, Key::A, Modifiers::CTRL);
+    press(&mut tree, Key::A, Modifiers::COMMAND);
     assert_eq!(
         listener.heard(&mut tree),
         vec![Heard::Live("12 éléments sélectionnés".to_string())]
