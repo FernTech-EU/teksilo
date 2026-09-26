@@ -34,3 +34,9 @@ level = 1
 [output.html.search]
 enable = true
 limit-results = 30
+
+# The screen-reader findings run to about 1.6 MB of quoted evidence; searched,
+# they would push the search index past the 25 MiB a file may weigh on
+# Cloudflare Pages. Their overview (a11y/reader-findings.md) stays searchable.
+[output.html.search.chapter]
+"a11y/reader-findings/" = { enable = false }

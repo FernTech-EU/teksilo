@@ -26,6 +26,9 @@ extend-exclude = [
   "examples/rich_text_editor/src/highlighters.rs",
   "examples/rich_text_editor/src/highlight_controls.rs",
   "examples/rich_text_editor/src/main.rs",
+  # The screen-reader findings quote what applications and Orca said, verbatim,
+  # the rich-text demo's deliberate misspellings included.
+  "docs/a11y/reader-findings/",
   # Reader-harness scenarios that type and find the rich-text editor demo's
   # deliberate misspellings.
   "tools/reader/scenarios/verify_text.py",
