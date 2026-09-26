@@ -448,8 +448,11 @@ jobs:
           status=0
           for example in "$examples_dir"/example_*.py; do
             echo "::group::$(basename "$example")"
-            timeout 300 python3 "$example"
-            rc=$?
+            # `|| rc=$?`, not a bare command then `rc=$?`: the step runs
+            # under `bash -e`, which would end it at the first failing probe
+            # and leave the ones after it unrun and unreported.
+            rc=0
+            timeout 300 python3 "$example" || rc=$?
             if [ "$rc" -ne 0 ]; then
               echo "::error::$example failed (exit $rc)"
               status=1
