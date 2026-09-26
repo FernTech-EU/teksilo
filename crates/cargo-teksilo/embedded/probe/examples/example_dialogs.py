@@ -20,7 +20,8 @@ overlays that a probe has to know before it can assert anything about one:
    records `escape=true`, so the escape button really fired rather than the
    window merely vanishing.
 5. **An in-tree `Popover` is the other shape**: `get_overlays` counts it, focus
-   moves into its content, Escape dismisses it and focus comes back. And the
+   moves into its content, Escape dismisses it and focus comes back to the
+   trigger (or where it was, if the press gave the trigger none). And the
    two-press rule — an outside press dismisses the overlay *without* reaching
    the control beneath — holds for a **direct** pointer (touch / pen) and not
    for a mouse. See `two_press_leg`.
@@ -376,10 +377,16 @@ def popover_leg(session, report: Report) -> None:
     report.check(
         session.call("get_overlays").get("count") == 0, "Escape dismissed the popover",
     )
+    # Where focus comes back to depends on the press that opened it. A trigger
+    # that is a focusable button takes focus from the press, as a button does,
+    # so it holds focus when the popover opens and gets it back; one a press
+    # gives no focus leaves focus where it was. Anywhere else is a loss.
+    back = focused_ids(session)
     report.check(
-        focused_ids(session) == focus_before,
-        f"…and focus returned to where it was before it opened "
-        f"({focus_before} → {focused_ids(session)})",
+        back in ([trigger["id"]], focus_before),
+        f"…and focus returned to the trigger that opened it, or, where the "
+        f"press gave the trigger no focus, to where it was before "
+        f"(before {focus_before}, trigger {trigger['id']}, now {back})",
     )
 
 

@@ -13,6 +13,18 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Automation
+
+- **The curated dialogs probe reported a popover's focus as lost.**
+  `example_dialogs.py`, which `cargo teksilo probe` writes into a project,
+  expected focus back where it was before a popover opened. Since 0.14.0 a
+  custom popover trigger can take focus, so a mouse press on it does, and
+  closing the popover rightly hands focus back to the trigger. The probe now
+  expects the trigger, or, where the press gave the trigger no focus, the
+  control that had it before.
+
 ## [0.14.0] - 2026-09-26
 
 ### Added
