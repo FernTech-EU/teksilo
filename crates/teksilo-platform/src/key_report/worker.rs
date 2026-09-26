@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn a_press_waits_for_the_registrys_answer() {
+    fn a_press_waits_for_the_registry_to_answer() {
         let taking = Registry {
             consume: true,
             ..Registry::default()
