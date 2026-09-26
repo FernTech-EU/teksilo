@@ -1621,6 +1621,11 @@ is preserved). Call this at the top of a custom
 — and any caret-relative action — operates where the user clicked, exactly
 as the built-in menu and the single-line field do.
 
+Only when a pointer opened the menu
+(`EventContext::context_menu_trigger`):
+a menu opened from the keyboard is handed an anchor in the middle of the
+editor, and moving the caret there sends Paste away from where the user is.
+
 #### `pub fn reveal_range( &self, ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize, ) -> bool`
 
 Scroll the character range `[start, end)` into view, reporting whether this editor

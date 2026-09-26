@@ -21,11 +21,21 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
   Typing and stepping update it; external writes re-format the
   editable text.
 - **Commit model**: the user can type freely (subject to the
-  per-character input filter). The value is *committed* on
+  per-character input filter, which only the default parser has:
+  a custom `value_from_text` is handed
+  every character). The value is *committed* on
   `Enter` or on focus loss —
   at commit time the text is parsed, clamped into `[min, max]`
   (or wrapped, per `WrapMode`), and reformatted. Invalid input
   reverts to the last known good value.
+- **Stepping over typed text**: every step (key, wheel, button,
+  assistive `Increment` / `Decrement`) starts from what the field
+  shows. Text typed and not yet committed is read first, exactly as
+  `Enter` would read it, and the step moves on from there: type 35,
+  press `Up` with a step of 5, and the value is 40, reported once.
+  Text that cannot be read steps nothing; the value goes back into
+  the field, and the next press steps from it. This is
+  `QAbstractSpinBox::stepBy`.
 - **Keyboard**:
   - `Up` / `Down` → ±`single_step`
   - `PageUp` / `PageDown` → ±`page_step`
@@ -49,7 +59,9 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
 - **Special value text**: when the current value equals `min`
   and `special_value_text` is
   set, the field shows that string instead of the formatted
-  number — Qt's "Auto" / "None" / "Unlimited" affordance.
+  number (Qt's "Auto" / "None" / "Unlimited" affordance). It
+  stays while the field has focus, as in Qt: keyboard focus
+  selects it, so a number typed replaces it.
 - **Adaptive step**: with
   `StepType::Adaptive`, the effective step
   tracks the decimal magnitude of the current value (Qt's
@@ -60,11 +72,12 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
   (`localized`, on by default); thousands
   separators are opt-in
   (`use_grouping`, off by default, as in
-  Qt). Display, commit parse and the per-character input filter
-  all resolve from one `NumberPresentation`, so they cannot
-  disagree about which separator the field is using — a French
-  user sees `12,5`, types `12,5`, and the numeric keypad's `.`
-  still works. Rendering is a string transform over the value's
+  Qt). Display, commit parse, stepping and the per-character
+  input filter all read one `NumberPresentation`, which a live
+  language switch replaces, so they cannot disagree about which
+  separator the field is using: a French user sees `12,5`,
+  types `12,5`, and the numeric keypad's `.` still works.
+  Rendering is a string transform over the value's
   own `Display`, never an `f64` round-trip, so a `SpinBox<i64>`
   stays exact past 2^53. Turn it off for a number that is an
   *identifier* rather than a quantity (port, version component,
@@ -79,14 +92,24 @@ are a synthesis of Qt's `QSpinBox` / `QDoubleSpinBox`, WinUI 3's
 
 # Accessibility
 
-The composite exposes itself as
-`Role::SpinButton`
-with numeric value, min, max, step, and jump properties set on
-the AccessKit node; the AT receives
+The editing field is the spin button: one AccessKit node with
+`Role::SpinButton`,
+the `label` as its name, the numeric value, min,
+max, step and jump, the field's text as its value and its text
+runs, and the
 `Increment`,
 `Decrement`,
 `SetValue`, and
-`Focus` actions.
+`Focus` actions. It is
+the node that holds focus, so a focus change reports the field's
+name and value once, and a step moves the number a screen reader
+is following. The composite's own node is structure and collapses;
+it names the field as its
+`accessibility_proxy`,
+so an `access_label`, a `FormLayout` label, an
+`access_described_by` or a tooltip given to the spin box lands on
+the field. The `suffix` is painted and not part
+of the text, so it is not announced.
 
 `SetValue` accepts either payload shape, because both are sent in
 the field: a number (macOS `setAccessibilityValue:` with an
@@ -99,7 +122,7 @@ display and is reported unhandled. A
 `read_only` spin box advertises and services
 none of the three mutating actions. The step buttons are
 structurally part of the SpinBox and publish no separate a11y
-nodes.
+nodes; stepping is the spin button's `Increment` and `Decrement`.
 
 # Example
 
@@ -371,8 +394,9 @@ the caret cannot enter it.
 Text shown in place of the formatted value when the current
 value equals `min`. Use for "Auto", "None", "Off",
 "Unlimited" affordances where the minimum has special
-semantics. When the field is focused the real number is
-shown instead so the user can type.
+semantics. The text stays while the field has focus, as
+Qt's `specialValueText` does: keyboard focus selects it, so a
+number typed replaces it, and a step moves off it.
 
 #### `pub fn wrap_mode(mut self, mode: WrapMode) -> Self`
 
@@ -451,7 +475,9 @@ surrounding layout.
 Set the accessible name announced by screen readers as the
 control's label. ARIA requires spin buttons to have a label;
 when none is set here the caller is responsible for labelling
-via a wrapping element or `access_label`.
+via a `FormLayout` line, `access_labelled_by` or `access_label`
+on the spin box, which all reach the editing field that holds
+focus and publishes the spin button.
 
 #### `pub fn placeholder(mut self, text: impl Into<LocalizedString>) -> Self`
 
@@ -485,6 +511,12 @@ Override the parse step. Receives the field's raw text
 content); returns `Some(value)` to accept or `None` to
 reject. Invalid input reverts to the last good value on
 commit.
+
+Installing a parser also lifts the per-character input filter,
+which admits only what the default numeric parse can read. The
+parser owns the text convention, so a month field reading
+`"march"` as 3 can be typed by name: every character reaches the
+field, and whatever the parser refuses is reverted at commit.
 
 #### `pub fn on_value_changed(mut self, f: impl Fn(T, &mut EventContext) + 'static) -> Self`
 

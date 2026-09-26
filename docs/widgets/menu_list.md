@@ -30,9 +30,14 @@ hover-switch while the cursor travels diagonally toward the submenu.
 
 ## Accessibility
 
-`Role::Menu`; each row is `Role::MenuItem` / `Role::MenuItemCheckBox` /
-`Role::MenuItemRadio` as declared by the item. Radio items in the same
-list auto-group via `push_to_radio_group` so AT announces "2 of 3".
+`Role::Menu`, named after what opened it (a `MenuBar` trigger, the
+`MenuItem::submenu` row, a `PopoverButton`'s button), with the keyboard
+highlight as its active descendant: the menu keeps keyboard focus, and a
+screen reader is told of each move of the highlight as a focus change to
+the row. Each row is `Role::MenuItem` / `Role::MenuItemCheckBox` /
+`Role::MenuItemRadio` as declared by the item, and carries its position
+among the menu's shown rows, whose count the menu carries. Radio items in
+the same list also auto-group via `push_to_radio_group`.
 
 ```rust
 # use teksilo_widgets::{MenuList, MenuItem};

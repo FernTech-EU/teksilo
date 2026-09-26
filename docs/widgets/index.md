@@ -69,6 +69,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [Button](button.md) — Button — a labelled, activatable action trigger
 - [CommandLinkButton](command_link_button.md) — CommandLinkButton — large two-line button with icon, title, and
 - [IconButton](icon_button.md) — IconButton — a square, icon-only, flat-surface button
+- [OverlayTrigger](overlay_trigger.md) — `OverlayTrigger` — the shared "this widget opens that overlay" wrapper
 - [SplitButton](split_button.md) — SplitButton — a button split into two regions sharing a single frame
 
 ## Inputs and indicators
@@ -113,6 +114,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 
 - [ColorEdit](color_edit.md) — `ColorEdit` — compact field-style color picker trigger that opens
 - [ColorPicker](color_picker.md) — `ColorPicker` — embeddable composite color selector
+- [ColorSwatch](swatch.md) — `ColorSwatch` — single clickable color cell with `Role::ColorWell`
 - [HexColorInput](hex_color_input.md) — `HexColorInput` — single-line `#RRGGBB[AA]` color editor
 
 ## Menus
@@ -124,10 +126,12 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 ## Overlays and dialogs
 
 - [AttachedSide](shadow.md) — Layered drop-shadow helper for elevated surfaces
+- [CommandPalette](command_palette.md) — CommandPalette — type-to-run access to every command an app has registered
 - [Dialog](dialog.md) — Modal dialogs — a trigger button that presents a centered modal panel
 - [MessageBox](message_box.md) — MessageBox — QMessageBox-style alert dialog
 - [NotificationCenterButton](center_button.md) — `NotificationCenterButton` — bell icon with an unread-count badge that
 - [NotificationLog](log.md) — `NotificationLog` — a scrollable, day-bucketed list of archived notifications
+- [PopoverWidget](popover_widget.md) — `PopoverWidget<T>` — a generic trigger that opens a popover when
 - [Snackbar](snackbar.md) — Snackbar — a transient, button-triggered floating notification surface
 - [Toast](toast.md) — Toast notification — stackable, action-rich, severity-aware floating
 - [ToastHost](host.md) — `ToastHost` — invisible sibling widget that owns the toast queue
@@ -166,19 +170,12 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [TextScaleControl](text_scale_control.md) — `TextScaleControl` — the settings control that grows all text in the app
 - [ThemeSwitcher](theme_switcher.md) — ThemeSwitcher — a drop-in app-theme picker for settings screens & toolbars
 
-## ColorPicker (submodule)
-
-- [ColorSwatch](swatch.md) — `ColorSwatch` — single clickable color cell with `Role::ColorWell`
-
 ## Other
 
 - [ActivateOn](data_views.md) — Shared substrate for the data views' source-owned drag-and-drop + lazy
 - [CodeEditorHandle](code_editor.md) — Multi-line plain-text and code editing surfaces
-- [CommandPalette](command_palette.md) — CommandPalette — type-to-run access to every command an app has registered
 - [NotificationEntry](notification.md) — Persistent notification archive — the storage and data-model layer
-- [OverlayTrigger](overlay_trigger.md) — `OverlayTrigger` — the shared "this widget opens that overlay" wrapper
 - [PopoverSurface](popover_surface.md) — `PopoverSurface` — the themed panel a popover's content sits in
-- [PopoverWidget](popover_widget.md) — `PopoverWidget<T>` — a generic trigger that opens a popover when
 - [TreeRowMeta](tree_source.md) — Type-erased data source adapter for `TreeView`
 
 ## TabWidget (submodule)

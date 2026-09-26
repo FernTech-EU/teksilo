@@ -35,7 +35,7 @@ surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 ## Builder methods at a glance
 
-`read_only`, `context_menu`, `default_context_menu`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
+`read_only`, `label`, `context_menu`, `default_context_menu`, `wrap_mode`, `v_scroll_policy`, `h_scroll_policy`, `overscroll_behavior`, `window_to_clip`, `min_lines`, `max_lines`, `font_family`, `font_size_scale`, `follow_text_scale`, `on_change`, `background`, `text_color`, `caret_color`, `selection_color`, `gutter`, `current_line_highlight`, `indent_style`, `tab_width`, `use_soft_tabs`, `auto_indent`, `bracket_pairs`, `auto_close_brackets`, `bracket_matching`, `line_comment`, `completion_provider`, `auto_complete`, `handle`
 
 ## API reference
 
@@ -68,6 +68,19 @@ guesses a language.
 A read-only code viewer bound to `document`: no caret, navigation and
 copy only, `Role::Document`. Still gets the gutter and syntax colours.
 
+#### `pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self`
+
+Accessible name for the editor.
+
+Applied to the body that holds the text, which is the node focus is
+published on and the one a screen reader announces ("Code, entry"). The
+editor's own node is structure that no adapter shows. An
+`.access_label(..)`, `.access_labelled_by(..)` or tooltip attached to
+the editor reaches the same node.
+
+Stays locale-reactive: a `tr!(...)` name is re-resolved when the
+locale changes, without a rebuild.
+
 #### `pub fn context_menu( mut self, factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static, ) -> Self`
 
 Replace the built-in right-click menu with `factory`, called on each
@@ -76,7 +89,9 @@ shows no menu.
 
 A replacement is responsible for repositioning the caret if it wants the
 platform convention — the built-in menu does it through
-`context_menu::factory`.
+`context_menu::factory`, and only when a pointer opened the menu
+(`EventContext::context_menu_trigger`).
+Shift+F10 hands the factory an anchor, not a place the user chose.
 
 #### `pub fn default_context_menu(mut self, enabled: bool) -> Self`
 
@@ -301,6 +316,10 @@ Replace the built-in right-click menu — see
 
 Whether to install the built-in right-click menu — see
 `CodeEditor::default_context_menu`.
+
+#### `pub fn label(mut self, label: impl Into<teksilo_i18n::LocalizedString>) -> Self`
+
+Accessible name for the editor: see `CodeEditor::label`.
 
 #### `pub fn handle(&self) -> CodeEditorHandle`
 

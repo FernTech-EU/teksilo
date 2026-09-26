@@ -461,9 +461,12 @@ Updated when the user drags a column across a pane boundary.
 Currently keyboard-focused cell, as `(row_index, display_col)`,
 or `None` when no cell is focused. Mutated by the keyboard
 handler (Arrow keys / Tab / Home / End / PgUp / PgDn /
-Ctrl-Home / Ctrl-End / Escape) and by direct
+Ctrl-Home / Ctrl-End / Escape), by direct
 `set_focused_cell` /
-`clear_focused_cell` calls.
+`clear_focused_cell` calls, and — in a
+table whose selection holds one row or cell — by any selection change
+that leaves an existing cursor off the selection, which moves the
+cursor onto it.
 
 #### `pub fn set_focused_cell(&self, row: usize, col: usize)`
 
@@ -551,8 +554,8 @@ Replace the full width-override map (typically used to restore
 a persisted layout).
 
 A no-op when the map is unchanged, so the documented
-settings-round-trip wiring (see docs/table-view.md, "Persistence")
-terminates instead of recursing: `Signal::set` has no equality check of
+signal round trip (see docs/table-view.md, "Persistence", which shows
+it for the column order) terminates instead of recursing: `Signal::set` has no equality check of
 its own, and a live resize writes a width on every pointer move.
 
 #### `pub fn set_column_order(&self, order: Vec<String>)`

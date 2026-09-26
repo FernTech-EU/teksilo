@@ -528,6 +528,10 @@ Current column display order as a list of column ids.
 
 Keyboard-focused cell as `(row, display_column_index)`, or `None`.
 
+In a tree table whose selection holds one row or cell, a selection
+change that leaves an existing cursor off the selection moves the
+cursor onto it.
+
 #### `pub fn editing_cell_signal(&self) -> &Signal<Option<(usize, usize)>>`
 
 Cell currently being edited as `(row, display_column_index)`, or `None`.

@@ -39,7 +39,10 @@ belongs to the row.
 
 Arrows move the cursor; `Home` / `End` reach the first and last **visible**
 row and `PageUp` / `PageDown` a viewport of them, each moving the selection
-unless the accelerator is held, which moves the cursor alone. `Shift`
+unless the accelerator is held, which moves the cursor alone — in a
+multiple selection only: a single selection always moves with the cursor,
+a selection the application sets moves the cursor onto it, and a
+structural change carries the selection along with its row. `Shift`
 extends a range from the anchor and `Ctrl+Shift` extends it additively.
 
 `→` opens a closed node and, on one already open, moves into its first

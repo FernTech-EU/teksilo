@@ -52,16 +52,20 @@ says "row 147 of 200" rather than counting the realized window. The count
 sits on the container because AccessKit resolves an item's set size by
 walking up from it, unlike ARIA's per-item `aria-setsize`.
 
-The container is the focusable node and rows deliberately are not, so
-`set_selected` is the only signal telling assistive technology which row is
-current — and the row subtree is kept out of the Tab order, so a control the
-delegate puts in a row (the checkbox `StandardListItem` embeds, most often)
-never becomes a Tab stop of its own. Such a control publishes a keyboard
-toggle instead, which `Space` runs. Full keyboard navigation: arrows, Home,
-End, PageUp, PageDown (each moving the selection, or only the cursor when
-the accelerator is held), Shift for a range and Ctrl+Shift for an additive
-one, Space (checks the row when it carries a checkbox, else select/toggle),
-Enter (activate), Ctrl+A / Ctrl+Shift+A (select all /
+The container is the focusable node and rows deliberately are not. The
+container names the cursor's row as its active descendant, which is the row
+assistive technology calls current, and each row says through
+`set_selected` whether it is selected. In a single selection the two are one
+row: the keys move them together, and a selection the application sets
+moves the cursor onto it. The row subtree is kept out of the Tab order, so a
+control the delegate puts in a row (the checkbox `StandardListItem` embeds,
+most often) never becomes a Tab stop of its own. Such a control publishes a
+keyboard toggle instead, which `Space` runs. Full
+keyboard navigation: arrows, Home, End, PageUp, PageDown (each moving the
+selection; in a multiple selection, Ctrl on an arrow or the accelerator on
+the others moves only the cursor), Shift for a range and Ctrl+Shift for an
+additive one, Space (checks the row when it carries a checkbox, else
+select/toggle), Enter (activate), Ctrl+A / Ctrl+Shift+A (select all /
 deselect), Ctrl+Arrow and Ctrl+Space (the disjoint-selection pair),
 type-ahead (opt-in via `type_ahead_label`), and Shift+F10 or the Menu key
 for the selected row's context menu. On macOS, Cmd+Down opens the focused
