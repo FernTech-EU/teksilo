@@ -28,7 +28,7 @@ wgpu = { workspace = true }
 # in the tree via `teksilo-render` and `rfd`.
 pollster = { workspace = true }
 accesskit = { workspace = true }
-accesskit_winit = "0.34.0"
+accesskit_winit = "0.34.1"
 arboard = { workspace = true, optional = true }
 raw-window-handle = "0.6"
 # rfd 0.17 dropped the `async-std` / `tokio` runtime-selection features: it no
@@ -184,7 +184,7 @@ x11rb = "0.13"
 # Reporting each key to the AT-SPI registry (`key_report/atspi.rs`), which is
 # how Orca's legacy keyboard device hears keys. The same zbus, with the same
 # features, that `accesskit_unix` already links, so it adds no crate.
-zbus = { version = "5.5", default-features = false, features = ["async-io"] }
+zbus = { version = "5.19", default-features = false, features = ["async-io"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dev-dependencies]
 # The X keysym constants, to check `key_report`'s hand-written keysym table

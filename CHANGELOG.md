@@ -13,6 +13,20 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed
+
+#### Accessibility
+
+- **AccessKit 0.25.1.** `accesskit` 0.25.1 and `accesskit_consumer` 0.39.1,
+  and through `accesskit_winit` 0.34.1 the platform adapters
+  `accesskit_windows` 0.35.1, `accesskit_macos` 0.27.1 and, on Linux,
+  `accesskit_unix` 0.24.0 with `accesskit_atspi_common` 0.21.0. On Linux a
+  disabled control is no longer reported enabled and sensitive, so Orca
+  announces it as unavailable rather than as a control that should respond,
+  and an image (`Role::Image`, and `Canvas`, `GraphicsSymbol`, `SvgRoot`)
+  answers AT-SPI's Image interface. The re-exported `teksilo::accesskit` stays
+  on 0.25, so nothing changes for code that uses it.
+
 ### Fixed
 
 #### Automation

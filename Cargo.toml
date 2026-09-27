@@ -35,8 +35,8 @@ repository = "https://github.com/FernTech-EU/teksilo.git"
 
 [workspace.dependencies]
 # Shared dependency versions
-accesskit = "0.25.0"
-accesskit_consumer = "0.39.0"
+accesskit = "0.25.1"
+accesskit_consumer = "0.39.1"
 tiny-skia = "0.12.0"
 wgpu = "30.0.0"
 # Minimal blocking executor, used only to drive `wgpu`'s adapter/device
