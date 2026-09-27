@@ -51,12 +51,12 @@ announcer fix (`7545b207`).
 | severity | framework | example | upstream | harness | all | fixed | partly fixed |
 |---|---|---|---|---|---|---|---|
 | critical | 28 | 1 | 5 | 0 | 34 | 27 | 2 |
-| high | 146 | 15 | 26 | 0 | 187 | 64 | 9 |
-| medium | 115 | 21 | 18 | 0 | 154 | 13 | 2 |
+| high | 146 | 15 | 26 | 0 | 187 | 66 | 10 |
+| medium | 115 | 21 | 18 | 0 | 154 | 14 | 4 |
 | low | 75 | 26 | 17 | 1 | 119 | 3 | 0 |
-| all | 364 | 63 | 66 | 1 | 494 | 107 | 13 |
+| all | 364 | 63 | 66 | 1 | 494 | 110 | 16 |
 
-494 findings: 107 fixed, 13 partly fixed, 253 open in Teksilo, 63 open in the examples' own code, and 57 upstream. Every sweep finding was reproduced by the verifier; 85 of them were corrected on the way, and the verifiers added 80 the sweep had missed. The last page, the examples swept last, was swept on the build with the fixes and has no second agent's pass.
+494 findings: 110 fixed, 16 partly fixed, 253 open in Teksilo, 63 open in the examples' own code, and 51 upstream. Every sweep finding was reproduced by the verifier; 85 of them were corrected on the way, and the verifiers added 80 the sweep had missed. The last page, the examples swept last, was swept on the build with the fixes and has no second agent's pass.
 
 ## What was fixed
 
@@ -90,6 +90,7 @@ found a gap, its correction is part of the same commit.
 | `e7764b0f` | A screen reader can no longer click or focus the page behind an in-tree modal. | [dialogs-08](reader-findings/dialogs.md#dialogs-08), [radioclose-M1](reader-findings/radio-close.md#radioclose-m1) | `an_at_click_behind_a_modal_does_nothing`, `an_at_focus_request_behind_a_modal_leaves_focus_in_it`, `what_opens_over_the_modal_takes_requests` and 3 more |
 | `27022d39` | A context menu opened with Shift+F10 or the Menu key acts where the caret is; closing a field's own menu does not select the whole field. | [text-v01](reader-findings/text.md#text-v01), [text-v02](reader-findings/text.md#text-v02) | `shift_f10_leaves_the_caret_where_the_reader_put_it`, `shift_f10_keeps_the_selection_the_menu_acts_on`, `shift_f10_leaves_the_caret_where_the_reader_put_it` and 5 more |
 | `70183c50` | The chosen segment of a segmented control is read as checked. | [catalog-a-10](reader-findings/catalog-a.md#catalog-a-10), [charts-08](reader-findings/charts.md#charts-08), [sceneetc-12](reader-findings/scene-and-more.md#sceneetc-12) | `the_reader_hears_the_selected_segment_checked`, `a_segmented_control_raises_no_selection_changed` |
+| `d217ee62` | Taking AccessKit 0.25.1 (accesskit_atspi_common 0.21.0 on Linux): a disabled control is reported disabled, so Orca says it is unavailable. | [menus-12](reader-findings/menus.md#menus-12), [catalog-a-05](reader-findings/catalog-a.md#catalog-a-05), [catalog-b-19](reader-findings/catalog-b.md#catalog-b-19), [password-09](reader-findings/password-field.md#password-09), [tabs-11](reader-findings/tabs.md#tabs-11), [chrome-09](reader-findings/chrome.md#chrome-09) | none: the change is AccessKit's; measured with the harness |
 
 ## What stays open
 
@@ -171,7 +172,7 @@ says so; the node-id fix above is such a work-round.
 |---|---|---|
 | `accesskit_atspi_common` 0.20, `adapter.rs:90-111` | A node that leaves the tree is announced defunct, and the same id added again is never announced alive, so libatspi and Orca drop it for good. Teksilo now hands a returning node a new id. | catalog-a-01, catalog-a-M1, catalog-a-M2, spinbox-01, winintl-01, sceneetc-03, tabs-13 |
 | `accesskit_unix` 0.23, `atspi/bus.rs:434-473` | The `Cache` `AddAccessible` / `RemoveAccessible` signals go out with a flattened body, which libatspi 2.52 refuses ("unknown signature"), so a client never learns of a removal. | catalog-b-M3, password-v03, winintl-v-03 |
-| `accesskit_atspi_common` 0.20, `node.rs:300-386` (`state`) | No `EXPANDABLE`/`EXPANDED`, no `HAS_POPUP`, no `INVALID_ENTRY`; a disabled node is still `ENABLED` and `SENSITIVE` (`node.rs:376-380`). | menus-12, menus-17, catalog-a-05, catalog-a-06, collections-06, catalog-c-20, chrome-08, chrome-09, docking-07, dialogs-11, password-07, password-09, tabs-11, spinbox-08, tables-04, misc-19 |
+| `accesskit_atspi_common` 0.20, `node.rs:300-386` (`state`) | No `EXPANDABLE`/`EXPANDED`, no `HAS_POPUP`, no `INVALID_ENTRY`; a read-only node is `READ_ONLY` without `SENSITIVE`, which Orca reads as "grayed". It also exported a disabled node as `ENABLED` and `SENSITIVE`; 0.21.0 no longer does (AccessKit #788), and Teksilo takes it from `d217ee62`. | menus-17, catalog-a-06, collections-06, catalog-c-20, chrome-08, docking-07, dialogs-11, password-07, spinbox-08, tables-04, misc-19 |
 | `accesskit_atspi_common` 0.20, `node.rs:650-658` | AT-SPI's `Value` interface carries a number only; a combo box's current text value reaches no AT-SPI client. Teksilo could publish it as the combo box's text. | menus-06, catalog-a-07, winintl-03, misc-06, text-14 |
 | `accesskit_atspi_common` 0.20, `node.rs:959-977` | Relations: no `NODE_CHILD_OF` (tree level), `FLOWS_TO` or `MEMBER_OF` (radio group). | collections-m2, radioclose-05, sceneetc-08 |
 | `accesskit_atspi_common` 0.20, `node.rs:415-436`, `494-521` | No `Table`/`TableCell` interfaces and no table attributes, so no header, row, column or size is spoken, and Orca treats a grid as a layout table. | tables-02, tables-04, gridview-09, datetime-10 |

@@ -21,7 +21,7 @@ How to read an entry, and what the words mean, is in
 | [tabs-08](#tabs-08) | tab-widget | The tab's context menu is silent while the reader moves through it (MenuList exposes no current item) | high | all | fixed |
 | [tabs-09](#tabs-09) | tab-migration | tab-migration: a tab can be moved to the other group only by dragging; there is no keyboard or AT route | high | all | open |
 | [tabs-10](#tabs-10) | tab-migration | A tab list cannot be named, so tab-migration's two groups sound identical | medium | all | open |
-| [tabs-11](#tabs-11) | tab-widget | A disabled tab is exported as enabled and sensitive on AT-SPI, so Orca never says it is unavailable | medium | Linux | upstream |
+| [tabs-11](#tabs-11) | tab-widget | A disabled tab is exported as enabled and sensitive on AT-SPI, so Orca never says it is unavailable | medium | Linux | fixed |
 | [tabs-12](#tabs-12) | tab-widget | The tab list's AT structure: non-tab children, the unpinned tabs nested in an unnamed panel, and setsize on every descendant | low | Linux, Windows | open |
 | [tabs-13](#tabs-13) | tab-widget | Tabs scrolled out of an overflowing strip leave the AT tree, and come back under defunct ids | low | Linux | fixed |
 | [tabs-14](#tabs-14) | tab-widget | A pinned tab's declared tooltip is replaced by its title, for AT and for hover | low | all | open |
@@ -301,7 +301,7 @@ A disabled tab is exported as enabled and sensitive on AT-SPI, so Orca never say
 - **The reader gets:** Locked carries enabled and sensitive. 'selectable' is absent, which shows the adapter saw is\_disabled, so the flag reached AccessKit. Orca says 'Locked page tab.' plus the example's own tooltip 'Disabled tabs cannot be activated.', which is all that tells this reader it is unavailable; a disabled tab without such a tooltip reads as available. The tab also accepts AT focus.
 - **Platform:** Linux only. By source, Windows publishes IsEnabled = !is\_disabled (accesskit\_windows node.rs:535) and macOS isAccessibilityEnabled = !is\_disabled (accesskit\_macos node.rs:658-660).
 - **Severity:** medium; **layer:** upstream
-- **Status:** Upstream, outside Teksilo: not fixed here.
+- **Status:** Fixed by `d217ee62` (accesskit-update). Fixed part: measured on d217ee62: tabs-launch-tree's check on 'Locked' passes, and in tabs-at-activation Orca tells the reader Locked is unavailable.
 - **Where:** crates/teksilo-widgets/src/tab\_widget/header.rs:1216-1222
 - **Evidence:**
   - `tabs-launch-tree-20260925-135331: [page tab] 'Locked' desc='Disabled tabs cannot be activated' states=['enabled', 'focusable', 'sensitive', 'showing', 'visible'] attrs={'setsize': '6', 'posinset': '3'} actions=[]`

@@ -15,7 +15,7 @@ How to read an entry, and what the words mean, is in
 | [catalog-a-02](#catalog-a-02) | widget-catalog | Checkbox, Toggle, RadioButton and Slider changes reach AT only with the next unrelated update | high | all | fixed |
 | [catalog-a-03](#catalog-a-03) | widget-catalog | Tab away from the Theme switcher once its tooltip has shown and focus is thrown back to Theme | high | all | fixed |
 | [catalog-a-04](#catalog-a-04) | widget-catalog | The Theme switcher's composite tooltip reaches the reader as the single word 'Tooltip' | high | Linux | open |
-| [catalog-a-05](#catalog-a-05) | widget-catalog | Disabled buttons read as enabled on Linux | high | Linux | upstream |
+| [catalog-a-05](#catalog-a-05) | widget-catalog | Disabled buttons read as enabled on Linux | high | Linux | fixed |
 | [catalog-a-06](#catalog-a-06) | widget-catalog | Expanded/collapsed state and has-popup never reach AT-SPI (Accordion, ToolBox, SplitButton, ComboBox) | high | Linux | upstream |
 | [catalog-a-07](#catalog-a-07) | widget-catalog | A ComboBox's current value is invisible on Linux (Theme switcher, fruit combo) | high | Linux | upstream |
 | [catalog-a-08](#catalog-a-08) | widget-catalog | The Inputs page's fruit ComboBox has no name | high | Linux | open (example) |
@@ -168,7 +168,7 @@ Disabled buttons read as enabled on Linux
 - **The reader gets:** Exactly the states of the enabled buttons: enabled, focusable, sensitive, plus a 'click' action. Orca's flat review or object navigation presents 'Default push button' as usable. The same holds for the Stepper's gated 'Next' (tree: \[push button\] 'Next' {focusable}) although Tab skips it. Disabled check boxes and toggles are fine: they read as read-only.
 - **Platform:** Linux AT-SPI (measured). Windows is correct from source (accesskit\_windows-0.35.0 node.rs:534-536 IsEnabled = !is\_disabled).
 - **Severity:** high; **layer:** upstream
-- **Status:** Upstream, outside Teksilo: not fixed here.
+- **Status:** Fixed by `d217ee62` (accesskit-update). Fixed part: measured on d217ee62: catalog-a-disabled's checks on the disabled buttons, which failed in the sweep, pass.
 - **Where:** accesskit\_atspi\_common-0.20.0 node.rs:376-380; crates/teksilo-widgets/src/button.rs:1301-1302
 - **Evidence:**
   - `disabled 13:28:15: FAIL [push button] 'Default' #1 has no ['sensitive', 'enabled'], [push button] 'Default' #1 states=['enabled', 'focusable', 'sensitive', 'showing', 'visible']`

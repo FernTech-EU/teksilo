@@ -19,7 +19,7 @@ How to read an entry, and what the words mean, is in
 | [chrome-06](#chrome-06) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | A collapsed Accordion's body stays in the tree and is read (rich tooltip 'More') | medium | all | open |
 | [chrome-07](#chrome-07) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Anything that leaves the tree and comes back keeps its node ids and stays defunct to libatspi: a re-shown tooltip, a re-opened ToolBox section, a restored Splitter pane, a reopened menu | high | Linux | fixed |
 | [chrome-08](#chrome-08) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Expanded/collapsed is never exposed on Linux: opening a ToolBox section, collapsing a Splitter pane or opening a disclosure is silent | high | Linux | upstream |
-| [chrome-09](#chrome-09) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | A disabled push button reads as enabled, sensitive and focusable (ToolBox 'Build tasks', ShortcutSettings 'Reset') | medium | Linux | upstream |
+| [chrome-09](#chrome-09) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | A disabled push button reads as enabled, sensitive and focusable (ToolBox 'Build tasks', ShortcutSettings 'Reset') | medium | Linux | partly fixed |
 | [chrome-10](#chrome-10) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | A Splitter divider's position is never spoken, on focus or while resizing with the arrows | high | Linux | upstream |
 | [chrome-11](#chrome-11) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Splitter collapse/restore animation sends a value change every frame; Orca says 'vertical splitter' about ten times per Enter | medium | Linux | open |
 | [chrome-12](#chrome-12) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Every Splitter divider is named 'Splitter divider'; a reader cannot tell which panes it separates | medium | all | open |
@@ -238,7 +238,7 @@ A disabled push button reads as enabled, sensitive and focusable (ToolBox 'Build
 - **The reader gets:** states=\['enabled', 'focusable', 'sensitive', 'showing', 'visible'\], no actions. A reader browsing the palette hears an ordinary button. Tab correctly skips it.
 - **Platform:** Linux AT-SPI (measured); Windows (accesskit\_windows node.rs:535 is\_enabled = !is\_disabled) and macOS (node.rs:659-660) expose disabled correctly
 - **Severity:** medium; **layer:** upstream
-- **Status:** Upstream, outside Teksilo: not fixed here.
+- **Status:** Fixed by `d217ee62` (accesskit-update). Fixed part: the state part only, measured on d217ee62: 'Build tasks' is neither enabled nor sensitive (chrome-toolbox, 3 runs); it is still focusable, which is Teksilo's to fix.
 - **Where:** upstream accesskit\_atspi\_common-0.20.0/src/node.rs:376; crates/teksilo-widgets/src/tool\_box.rs:1033; crates/teksilo-widgets/src/menu\_item/widget\_impl.rs:984
 - **Evidence:**
   - `chrome-toolbox FAIL: "[push button] 'Build tasks' desc=None states=['enabled', 'focusable', 'sensitive', 'showing', 'visible'] attributes={} relations={} value=None"`

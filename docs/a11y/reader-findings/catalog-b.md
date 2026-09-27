@@ -29,7 +29,7 @@ How to read an entry, and what the words mean, is in
 | [catalog-b-16](#catalog-b-16) | widget-catalog | Wrapped text fields announce twice: HexColorInput and SearchField nest a named entry inside a second entry | medium | Linux | open |
 | [catalog-b-17](#catalog-b-17) | widget-catalog | Content below the fold is missing from the accessibility tree until it is scrolled into view | medium | Linux | open |
 | [catalog-b-18](#catalog-b-18) | widget-catalog | Unnamed controls and indistinguishable duplicates on the catalog pages (the example labels nothing) | high | Linux | open (example) |
-| [catalog-b-19](#catalog-b-19) | widget-catalog | A disabled menu item is exposed as enabled, and a menu item's shortcut never reaches AT-SPI | high | Linux | upstream |
+| [catalog-b-19](#catalog-b-19) | widget-catalog | A disabled menu item is exposed as enabled, and a menu item's shortcut never reaches AT-SPI | high | Linux | partly fixed |
 | [catalog-b-20](#catalog-b-20) | widget-catalog | The colour of the ColorEdit trigger and of the picker's 'Selected color' well never reaches the reader | medium | Linux | open |
 | [catalog-b-21](#catalog-b-21) | widget-catalog | Decorative chrome reaches AT: an unnamed separator after every SpinBox, and an empty status bar after every text field | low | Linux | open |
 | [catalog-b-M1](#catalog-b-m1) | widget-catalog | ColorEdit's popover is an unnamed dialog, and opening it replays the ColorPicker's live flood each time | high | Linux | open |
@@ -504,7 +504,7 @@ A disabled menu item is exposed as enabled, and a menu item's shortcut never rea
 - **The reader gets:** 'Disabled item' has states \['enabled', 'sensitive', 'showing', 'visible'\]. Teksilo sets disabled (the walker calls set\_disabled from the arena), but accesskit\_atspi\_common inserts Enabled\|Sensitive for every role outside its read-only list, so a disabled Button, MenuItem, Link or Tab is reported enabled. 'With shortcut' has actions=\[{'name': 'click', 'description': '', 'key\_binding': ''}\]: Teksilo sets keyboard\_shortcut, and atspi\_common always exports an empty key binding.
 - **Platform:** Linux AT-SPI (measured). On Windows and macOS, by source, the adapters do carry the disabled state.
 - **Severity:** high; **layer:** upstream
-- **Status:** Upstream, outside Teksilo: not fixed here.
+- **Status:** Fixed by `d217ee62` (accesskit-update). Fixed part: the disabled part only, measured on d217ee62: 'Disabled item' is exposed as disabled (catalog-b-menus-open); a menu item's shortcut still reaches no AT-SPI client.
 - **Where:** accesskit\_atspi\_common-0.20.0/src/node.rs:376-380, 1097
 - **Evidence:**
   - `menus-open 'look at the standalone items': 'FAIL  'Disabled item' is exposed as disabled / [menu item] 'Disabled item': states=['enabled', 'sensitive', 'showing', 'visible']'`

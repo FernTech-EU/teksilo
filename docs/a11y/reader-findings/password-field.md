@@ -19,7 +19,7 @@ How to read an entry, and what the words mean, is in
 | [password-06](#password-06) | password-field | An empty, untouched password field is flagged invalid as soon as focus leaves it, even for its own reveal toggle | medium | Linux | open |
 | [password-07](#password-07) | password-field | The invalid state Teksilo sets on the field reaches no platform (no invalid-entry state) | low | Linux | upstream |
 | [password-08](#password-08) | password-field | RevealMode::Hold exposes a 'button' no reader can operate: no action, not focusable, skipped by Tab | medium | Linux | open |
-| [password-09](#password-09) | password-field | The disabled Sign in button reads as enabled and sensitive on AT-SPI, and a reader's focus request lands on it | medium | Linux | upstream |
+| [password-09](#password-09) | password-field | The disabled Sign in button reads as enabled and sensitive on AT-SPI, and a reader's focus request lands on it | medium | Linux | partly fixed |
 | [password-10](#password-10) | password-field | The first character typed or pasted into an empty text field is never reported: an empty field has no text run and no Text interface | medium | Linux | fixed |
 | [password-11](#password-11) | password-field | The Username field has no name: Orca reads its placeholder as if it were the field's content | high | Linux | open (example) |
 | [password-12](#password-12) | password-field | The showcase captions duplicate the fields' names and are read as one run-on sentence on entering the panel | low | Linux | open (example) |
@@ -252,7 +252,7 @@ The disabled Sign in button reads as enabled and sensitive on AT-SPI, and a read
 - **The reader gets:** States are \['enabled', 'focusable', 'sensitive', 'showing', 'visible'\] although enabled\_when(can\_submit) is false and Tab skips the button. accesskit\_atspi\_common adds Enabled\|Sensitive to every role outside its read-only list, whatever the node's disabled flag. Teksilo's Button advertises Action::Focus even while disabled, so AT-SPI grab\_focus focuses it, and Orca says 'Sign in push button.' with no hint it does nothing. Because the state set is the same either way, no event tells the reader when Sign in becomes enabled.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows/macOS, from source only: UIA IsEnabled and AXEnabled follow is\_disabled, so the wrong state is Linux-only.
 - **Severity:** medium; **layer:** upstream
-- **Status:** Upstream, outside Teksilo: not fixed here.
+- **Status:** Fixed by `d217ee62` (accesskit-update). Fixed part: the state part only, measured on d217ee62: 'Sign in' is neither enabled nor sensitive (password-sign-in); a reader's focus request still lands on it, which is Teksilo's to fix.
 - **Where:** root cause accesskit\_atspi\_common-0.20.0/src/node.rs:376-380; Teksilo's share crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1163-1201 (an AT Focus is serviced with no enabled check) and crates/teksilo-widgets/src/button.rs:1301-1302 (Focus advertised unconditionally)
 - **Evidence:**
   - `password-sign-in-20260925-141101-98166: FAIL [push button] 'Sign in' has no state enabled / [push button] 'Sign in' interfaces=['Accessible', 'Action', 'Component'] states=['enabled', 'focusable', 'sensitive', 'showing', 'visible'] ... actions=[{'name': 'click', ...}]`

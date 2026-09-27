@@ -22,7 +22,7 @@ How to read an entry, and what the words mean, is in
 | [menus-09](#menus-09) | menus-and-dropdowns | Escape does not leave the menu bar, and after a command focus stays on the menu bar | medium | all | open |
 | [menus-10](#menus-10) | menus-and-dropdowns | Escape after moving between menus with Left or Right drops focus on the window | medium | all | open |
 | [menus-11](#menus-11) | menus-and-dropdowns | Both context menus are unreachable by keyboard and by screen reader | critical | Linux | open (example) |
-| [menus-12](#menus-12) | menus-and-dropdowns | Disabled menu items are exported as enabled and sensitive on AT-SPI | high | Linux | upstream |
+| [menus-12](#menus-12) | menus-and-dropdowns | Disabled menu items are exported as enabled and sensitive on AT-SPI | high | Linux | fixed |
 | [menus-13](#menus-13) | menus-and-dropdowns | Radio (and other) menu items export no position and no group: 'Dark Theme, 2 of 3' is impossible | medium | Linux | open |
 | [menus-14](#menus-14) | menus-and-dropdowns | The first item is skipped: Down from an empty combo box picks the second fruit, and menu type-ahead from no highlight lands on the second match | medium | all | fixed |
 | [menus-15](#menus-15) | menus-and-dropdowns | The Opacity slider inside the View options menu ignores the arrow keys, and is read as '0.6499999761581421' | high | Linux | fixed |
@@ -308,7 +308,7 @@ Disabled menu items are exported as enabled and sensitive on AT-SPI
 - **The reader gets:** Both carry 'enabled' and 'sensitive'. Teksilo marks the nodes disabled, but accesskit\_atspi\_common gives Enabled\|Sensitive to any disabled node whose role has no read-only support (MenuItem, Button, ...).
 - **Platform:** Linux only. accesskit\_windows node.rs:535 (IsEnabled = !is\_disabled) and accesskit\_macos node.rs:658-660 map it correctly.
 - **Severity:** high; **layer:** upstream
-- **Status:** Upstream, outside Teksilo: not fixed here.
+- **Status:** Fixed by `d217ee62` (accesskit-update). Fixed part: measured on d217ee62: menus-context-mouse's check that 'Export as PDF' is not enabled, which failed 2 of 2 in the sweep, passes.
 - **Where:** accesskit\_atspi\_common-0.20.0/src/node.rs:374-378
 - **Evidence:**
   - `menus-scroll-back '== look at the tree at launch': 'FAIL  [menu item] 'Disabled item' is not enabled' / '[menu item] 'Disabled item' states=['enabled', 'sensitive', 'showing', 'visible'] attributes={} relations={}' (4 of 4)`
