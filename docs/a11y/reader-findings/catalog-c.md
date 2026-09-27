@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Widget catalog, last six tabs
 
 Examples: widget-catalog (overlays, data, dragdrop, animations, touch, settings).
 37 findings: 1 critical, 14 high, 17 medium, 5 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -26,8 +28,8 @@ How to read an entry, and what the words mean, is in
 | [catalog-c-13](#catalog-c-13) | widget-catalog | Showing a toast re-announces every toast already on screen | medium | Linux | fixed |
 | [catalog-c-14](#catalog-c-14) | widget-catalog | The notification bell is destroyed and rebuilt on every toast: focus is re-fired, the toast's announcement is cut, and an open log closes under the reader | high | Linux | fixed |
 | [catalog-c-15](#catalog-c-15) | widget-catalog | The bell never tells a reader how many notifications are unread | high | all | open |
-| [catalog-c-16](#catalog-c-16) | widget-catalog | Notification log: an unnamed dialog whose 'list' holds its toolbar buttons and role-less entries that the keyboard cannot reach; Tab leaves and closes it | high | all | open |
-| [catalog-c-17](#catalog-c-17) | widget-catalog | Escape on a focused toast drops focus to the window itself ('frame.') | medium | all | open |
+| [catalog-c-16](#catalog-c-16) | widget-catalog | Notification log: an unnamed dialog whose 'list' holds its toolbar buttons and role-less entries that the keyboard cannot reach; Tab leaves and closes it | high | all | partly fixed |
+| [catalog-c-17](#catalog-c-17) | widget-catalog | Escape on a focused toast drops focus to the window itself ('frame.') | medium | all | partly fixed |
 | [catalog-c-18](#catalog-c-18) | widget-catalog | Accordion content sits inside the Accordion's own button node, so a MessageBox's 'Show details' text is inside a push button | high | all | open |
 | [catalog-c-19](#catalog-c-19) | widget-catalog | The catalog's message boxes put their message behind 'Show details', so a reader hears only the title | medium | all | open (example) |
 | [catalog-c-20](#catalog-c-20) | widget-catalog | Expanded/collapsed state, tree level and has-popup never reach AT-SPI (or macOS): a reader cannot tell a tree item or disclosure is expandable, or that it opened | high | Linux | upstream |
@@ -46,7 +48,7 @@ How to read an entry, and what the words mean, is in
 | [catalog-c-33](#catalog-c-33) | widget-catalog | Cycle swaps its child in and out of the tree every 1.5 s while nothing happens | low | all | open |
 | [catalog-c-34](#catalog-c-34) | widget-catalog | Overlays tab: 'Warning' and 'Error' each name two different buttons (message box and toast rows) | low | all | open (example) |
 | [catalog-c-M1](#catalog-c-m1) | widget-catalog | A re-shown tooltip or popover reuses its accessibility node, which AT-SPI already declared defunct: Tab into a sticky tooltip on its second showing is silent | high | Linux | fixed |
-| [catalog-c-M2](#catalog-c-m2) | widget-catalog | TableView, TreeTableView and GridView replace every visible row and cell node, and the TableView's column headers, on each keyboard move | low | Linux | open |
+| [catalog-c-M2](#catalog-c-m2) | widget-catalog | TableView, TreeTableView and GridView replace every visible row and cell node, and the TableView's column headers, on each keyboard move | low | Linux | partly fixed |
 | [catalog-c-M3](#catalog-c-m3) | widget-catalog | Tabbing away from a rich-tooltip button with a warm (no-fade) tooltip makes Orca start reading that tooltip's text, markup and all, then cut it | low | Linux | open |
 
 ### catalog-c-01 {#catalog-c-01}
@@ -57,12 +59,21 @@ The Settings tab crashes the app in every debug build: a PrivacySettings Toggle 
 - **Scenario:** catalog-c-settings-launch, catalog-c-settings-open
 - **Act:** Launch with --tab settings, or Down arrow from the Touch page tab onto the Settings page tab
 - **The reader should get:** The Settings tab opens; ThemeSwitcher, TextScaleControl, LanguageSwitcher, ShortcutSettings and the PrivacySettings consent toggles are in the tree, named, with their states spoken
-- **The reader gets:** The process panics while building the accessibility tree and exits with status 101. The window leaves the bus and the reader is left with nothing. In release builds the assertion is compiled out and the toggle would be named through labelled\_by, but every debug build crashes, and debug is what app developers and this harness run
+- **The reader got (`261a218f`):** The process panics while building the accessibility tree and exits with status 101. The window leaves the bus and the reader is left with nothing. In release builds the assertion is compiled out and the toggle would be named through labelled\_by, but every debug build crashes, and debug is what app developers and this harness run
 - **Platform:** all platforms (the panic is in teksilo-widgets, before any adapter)
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `c1a553ac` (settings-crash). Fixed part: The Settings tab crashes the app in every debug build: a PrivacySettings Toggle trips its own label assertion.
-- **Where:** crates/teksilo-widgets/src/privacy\_settings.rs:436-437; crates/teksilo-widgets/src/toggle.rs:448-453
-- **Evidence:**
+- **Status:** Fixed by `c1a553ac` (settings-crash).
+- **Now (`c198e4d1`):** The Settings tab opens, from launch and from the Down arrow on the Touch tab, and the app keeps running. The PrivacySettings consent switches are in the tree, each named by its row. On Tab to the first one, Orca says 'Anonymous usage metrics toggle button not pressed.'
+- **Measured again:** catalog-c-settings-launch, catalog-c-settings-open and fix-settings-crash-consent, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-settings-launch 'after launch on the Settings tab': pass the application is still running; pass the tree holds [spin button] 'Text size'`
+  - `pass2 catalog-c-settings-launch 'after launch on the Settings tab': pass the application is still running; pass the tree holds [spin button] 'Text size'`
+  - `pass1 catalog-c-settings-open 'Down arrow from Touch to Settings': +238.2 ms object:state-changed:focused 1 [page tab] 'Settings' / +340.3 ms ORCA SAYS: 'Settings page tab.' / pass the application is still running`
+  - `pass2 catalog-c-settings-open 'Down arrow from Touch to Settings': +182.4 ms object:state-changed:focused 1 [page tab] 'Settings' / +234.3 ms ORCA SAYS: 'Settings page tab.' / pass the application is still running`
+  - `pass1 fix-settings-crash-consent 'Tab to the first consent switch': +72.7 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics' / +276.0 ms ORCA SAYS: 'Anonymous usage metrics toggle button not pressed.' / pass the tree holds [toggle button] 'Crash reports' / pass the tree holds [toggle button] 'Feature flags'`
+  - `pass2 fix-settings-crash-consent 'Tab to the first consent switch': +100.7 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics' / +466.6 ms ORCA SAYS: 'Anonymous usage metrics toggle button not pressed.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/privacy\_settings.rs:438-439; crates/teksilo-widgets/src/toggle.rs:445-450
+- **Evidence (`261a218f`):**
   - `app.log: thread 'main' (2545233) panicked at crates/teksilo-widgets/src/toggle.rs:449:9:`
   - `app.log: Toggle is missing an accessible label, screen readers will announce "switch" with no context. Call .label(...) when constructing the widget.`
   - `launch: +2990.3 ms object:children-changed:remove [application] 'widget-catalog' -> [frame] ''`
@@ -85,12 +96,20 @@ Tabbing away from a control whose focus-opened tooltip is showing sends focus ba
 - **Scenario:** catalog-c-tooltip-tab-away, catalog-c-overlays-tooltips, catalog-c-\*-tabwalk
 - **Act:** Focus 'Hover or hold — level 1' (rich tooltip), 'Province info' (composite tooltip) or the title-bar Theme combo box (composite tooltip), wait until the tooltip is up but not yet sticky (about 0.5 to 2 s), then press Tab
 - **The reader should get:** Focus moves to the next control and stays there; the tooltip closes behind it
-- **The reader gets:** Focus reaches the next control, then about 120 ms later returns to the control just left. Orca's reading of the new control is cut and it reads the old control again, with its tooltip text. The reader has to press Tab a second time. If the reader waits until the tooltip turns sticky, Tab instead lands inside the tooltip (a \[tool tip\] or \[dialog\] node takes focus), so the Tab order passes through tooltips. The likely cause: a tooltip shown by focus records the focused control as its focus\_restore (overlay\_impl.rs:530-532). tooltip\_focus\_leave\_outside dismisses only tooltips already promoted by focus (the promoted\_by\_focus filter, overlay\_impl.rs:1344-1360). The dismissal that does happen, whether the pointer-leave timer or the end of the fade, calls focus\_ops(restore\_id) without checking that focus has moved on (widget\_tree.rs:1660-1667 and 1714-1722)
+- **The reader got (`261a218f`):** Focus reaches the next control, then about 120 ms later returns to the control just left. Orca's reading of the new control is cut and it reads the old control again, with its tooltip text. The reader has to press Tab a second time. If the reader waits until the tooltip turns sticky, Tab instead lands inside the tooltip (a \[tool tip\] or \[dialog\] node takes focus), so the Tab order passes through tooltips. The likely cause: a tooltip shown by focus records the focused control as its focus\_restore (overlay\_impl.rs:530-532). tooltip\_focus\_leave\_outside dismisses only tooltips already promoted by focus (the promoted\_by\_focus filter, overlay\_impl.rs:1344-1360). The dismissal that does happen, whether the pointer-leave timer or the end of the fade, calls focus\_ops(restore\_id) without checking that focus has moved on (widget\_tree.rs:1660-1667 and 1714-1722)
 - **Platform:** all platforms (focus is moved inside teksilo-core); measured on Linux AT-SPI/Orca
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `b30770d5` (tooltip-snapback). Fixed part: focus returns ~120 ms after Tab from a focus-opened tooltip's anchor.
-- **Where:** crates/teksilo-core/src/widget\_tree/overlay\_impl.rs:493-497, 530-531, 541; crates/teksilo-core/src/widget\_tree.rs:1655-1667 (process\_overlay\_fade\_dismissals\_real); crates/teksilo-core/src/overlay.rs dismiss\_because fade deferral
-- **Evidence:**
+- **Status:** Fixed by `b30770d5` (tooltip-snapback).
+- **Now (`c198e4d1`):** Tab from a control whose focus-opened tooltip is showing moves focus to the next control, and it stays there. The tooltip closes behind it and nothing sends focus back. This holds for the rich tooltip, the composite 'Province info' tooltip and the title bar's Theme combo box.
+- **Measured again:** verify-catalog-c-bounce-cold 2 of 2 runs (6 of 6 cold acts), catalog-c-tooltip-tab-away 2 of 2, tab walks of overlays, data, dragdrop, animations, touch and settings 2 of 2 each
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-catalog-c-bounce-cold 'cold: focus Province info, wait 1.5 s (tooltip up), Tab': +1588.7 ms object:state-changed:focused 1 [push button] 'Tabbed details' / +1715.2 ms object:children-changed:remove [frame] 'Teksilo — Widget Catalog' -> [tool tip] 'Tooltip' / pass focus lands on [push button] 'Tabbed details' and stays there`
+  - `pass1 verify-catalog-c-bounce-cold 'cold: focus the Theme combo box, wait 1.5 s (tooltip up), Tab': +1558.2 ms object:state-changed:focused 1 [push button] 'Scroll tabs up' / +1667.5 ms object:children-changed:remove [frame] 'Teksilo — Widget Catalog' -> [tool tip] 'Tooltip' / +1671.0 ms ORCA SAYS: 'Scroll tabs up push button.'`
+  - `pass2 verify-catalog-c-bounce-cold 'cold: focus Hover or hold — level 3, wait 1 s (rich tooltip up), Tab': +1075.4 ms object:state-changed:focused 1 [push button] 'Plain among rich' / +1142.5 ms ORCA SAYS: 'Plain among rich push button.' / pass focus lands on [push button] 'Plain among rich' and stays there`
+  - `pass1 catalog-c-tooltip-tab-away 'wait 1 s on Hover or hold — level 1 (tooltip up, not sticky), Tab': +1031.9 ms object:state-changed:focused 1 [push button] 'Hover or hold — level 2' / +1107.9 ms ORCA SAYS: 'Hover or hold — level 2 push button.' / pass focus lands on [push button] 'Hover or hold — level 2' and stays there`
+  - `pass1 tabwalk-widget-catalog-overlays Tab 7: +28.7 ms object:state-changed:focused 1 [push button] 'Scroll tabs up' / +92.8 ms ORCA SAYS: 'Scroll tabs up push button.' (one focus event; no Tab of any catalog-c walk, either pass, shows a second focus event)`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree.rs:1695-1705, 1730-1741, 1768-1774 (restore\_focus\_left\_behind); crates/teksilo-core/src/widget\_tree/overlay\_impl.rs:491-497, 531, 541; crates/teksilo-core/src/overlay.rs dismiss\_because fade deferral
+- **Evidence (`261a218f`):**
   - `tab-away run 1, act 'wait 1 s on Hover or hold — level 1 (tooltip up, not sticky), Tab':`
   - `  +1031.3 ms object:state-changed:focused 1 [push button] 'Hover or hold — level 2'`
   - `  +1153.3 ms object:state-changed:focused 1 [push button] 'Hover or hold — level 1'`
@@ -117,12 +136,19 @@ A rich tooltip opened by keyboard focus is never spoken while it shows; its text
 - **Scenario:** catalog-c-overlays-tooltips
 - **Act:** Focus 'Hover or hold — level 1' and stay 4 s, then press Escape
 - **The reader should get:** While the reader rests on the button, its rich tooltip's text is spoken, through the description or an announcement, as docs/tooltips.md 'Keyboard / a11y promotion' promises
-- **The reader gets:** The tooltip node is added at about 0.55 s and turns into a dialog at about 2.5 s. The button's description does not change while focus stays, and Orca says only 'Hover or hold — level 1 push button.' On the first focus the button has no description at all: a rich tooltip's content does not exist until it is shown. The text arrives as a description change only when Escape dismisses the tooltip, and Orca then reads it, markup included. On Windows, NVDA never speaks a FullDescription change (per the platform facts), so an NVDA user would not hear it at all
+- **The reader got (`261a218f`):** The tooltip node is added at about 0.55 s and turns into a dialog at about 2.5 s. The button's description does not change while focus stays, and Orca says only 'Hover or hold — level 1 push button.' On the first focus the button has no description at all: a rich tooltip's content does not exist until it is shown. The text arrives as a description change only when Escape dismisses the tooltip, and Orca then reads it, markup included. On Windows, NVDA never speaks a FullDescription change (per the platform facts), so an NVDA user would not hear it at all
 - **Platform:** Linux AT-SPI/Orca measured; Windows inferred from the NVDA description behaviour in the platform facts
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/tooltip/rich.rs:184-196, 255-262, 559-561; crates/teksilo-core/src/widget\_tree/accessibility\_description\_impl.rs (hold-back); docs/tooltips.md:563-572
-- **Evidence:**
+- **Now (`c198e4d1`):** On the first visit, resting on 'Hover or hold — level 1' opens its rich tooltip and turns it into a dialog, but the button gains no description and Orca says only 'Hover or hold — level 1 push button.' The text reaches the reader only when Escape closes the tooltip, markup included. Tabbing on from level 2 in the tab walk, the held description is published in the same update that moves focus, so Orca starts reading it for the control just left and is cut.
+- **Measured again:** catalog-c-overlays-tooltips, 2 of 2 runs; tabwalk-widget-catalog-overlays pass1
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-tooltips 'focus Hover or hold — level 1 and stay (rich tooltip)': +99.6 ms ORCA SAYS: 'Hover or hold — level 1 push button.' / +553.9 ms object:children-changed:add [frame] 'Teksilo — Widget Catalog' -> [tool tip] 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.' / +2560.3 ms object:property-change:accessible-role [dialog] / FAIL no description change on 'Hover or hold — level 1' in the act`
+  - `pass1 catalog-c-overlays-tooltips 'Escape closes the rich tooltip': +143.6 ms object:property-change:accessible-description [push button] 'Hover or hold — level 1' text='Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.' / +152.9 ms ORCA SAYS: 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.'`
+  - `pass2 catalog-c-overlays-tooltips 'focus Hover or hold — level 1 and stay (rich tooltip)': +123.6 ms ORCA SAYS: 'Hover or hold — level 1 push button.' / +567.9 ms add [tool tip] / +2575.0 ms accessible-role [dialog] / no description change`
+  - `pass1 tabwalk-widget-catalog-overlays Tab 17: +71.6 ms object:property-change:accessible-description [push button] 'Hover or hold — level 2' text='Level 2 of the cascade. Hover the [final link](:tip-c) for one more.' / +72.7 ms object:state-changed:focused 1 [push button] 'Hover or hold — level 3' / +119.1 ms ORCA SAYS (CUT): 'Level 2 of the cascade. Hover the [final link](:tip-c) for one more.' / +413.1 ms ORCA SAYS: 'Hover or hold — level 3 push button.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/tooltip/rich.rs:186-196, 255-262, 559-561; crates/teksilo-core/src/widget\_tree/accessibility\_description\_impl.rs:335-339 (rule 2 hold-back); docs/tooltips.md:563-572
+- **Evidence (`261a218f`):**
   - `act 'focus Hover or hold — level 1 and stay': +558.7 ms object:children-changed:add [frame] '' -> [tool tip] 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.'`
   - `  +2565.9 ms object:property-change:accessible-role [dialog] 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.'`
   - `  +134.0 ms ORCA SAYS: 'Hover or hold — level 1 push button.' (nothing else in the 4 s act)`
@@ -146,12 +172,19 @@ Rich tooltip text reaches the reader with its raw link markup ('\[next link\](:t
 - **Scenario:** catalog-c-overlays-tooltips
 - **Act:** Focus a rich-tooltip button, let the tooltip open, then Escape or Tab away
 - **The reader should get:** The tooltip's link reads as its label ('next link'), never as markdown with a registry key
-- **The reader gets:** The tooltip node is named with the unparsed markup, and the description copied onto the button carries it too. Orca reads 'Hover the \[next link\](:tip-b) to open level 2.' The cause: RichTooltipWidget::accessibility sets its name to content.text, the source string, not the rendered text
+- **The reader got (`261a218f`):** The tooltip node is named with the unparsed markup, and the description copied onto the button carries it too. Orca reads 'Hover the \[next link\](:tip-b) to open level 2.' The cause: RichTooltipWidget::accessibility sets its name to content.text, the source string, not the rendered text
 - **Platform:** all platforms (the node name is wrong); spoken on Linux/Orca
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/tooltip/rich.rs:559-561
-- **Evidence:**
+- **Now (`c198e4d1`):** Every rich tooltip node is still named with its source markup, and the anchor's description copies it. Orca reads 'Level 1 of the cascade. Hover the \[next link\](:tip-b) to open level 2.' aloud.
+- **Measured again:** catalog-c-overlays-tooltips 2 of 2, catalog-c-tooltip-tab-away 2 of 2, overlays tab walk 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-tooltips 'Escape closes the rich tooltip': +152.9 ms ORCA SAYS: 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.' / FAIL Orca does not say '[next link]'`
+  - `pass2 catalog-c-overlays-tooltips 'Escape closes the rich tooltip': +171.6 ms ORCA SAYS: 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.'`
+  - `pass1 catalog-c-tooltip-tab-away 'wait 1 s on Hover or hold — level 2 (tooltip up, not sticky), Tab': +1061.7 ms ORCA SAYS: 'Level 2 of the cascade. Hover the [final link](:tip-c) for one more. dialog Each nested tooltip parents its overlay to the previous one (OverlayLayer::InTree).'`
+  - `pass1 tabwalk-widget-catalog-overlays Tab 17: +119.1 ms ORCA SAYS (CUT): 'Level 2 of the cascade. Hover the [final link](:tip-c) for one more.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/tooltip/rich.rs:559-561
+- **Evidence (`261a218f`):**
   - `+558.7 ms object:children-changed:add [frame] '' -> [tool tip] 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.'`
   - `+144.1 ms ORCA SAYS: 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.'`
   - `overlays-tabwalk Tab 17: ORCA SAYS 'Level 2 of the cascade. Hover the [final link](:tip-c) for one more.'`
@@ -170,12 +203,19 @@ Composite tooltips are named 'Tooltip', so every composite trigger's description
 - **Scenario:** catalog-c-overlays-tooltips, catalog-c-overlays-tabwalk
 - **Act:** Focus 'Province info', 'Tabbed details' or 'With internal Button' (and the title bar's Theme combo box); Tab into the sticky tooltip
 - **The reader should get:** The trigger describes what its tooltip holds (e.g. 'Iberia …'), or says nothing; the tooltip is named for its content
-- **The reader gets:** Orca says 'Province info push button.' then 'Tooltip.' at every composite trigger, the Theme combo box included. The content ('Iberia', 'Treasury report') is never spoken while the reader rests on the trigger. Tabbing into the sticky surface gives 'Tooltip dialog Treasury report This quarter: +423 coins.' The cause: CompositeTooltipWidget falls back to the generic a11y\_tooltip\_name, and the not-shown description path copies the content's name onto the anchor. docs/tooltips.md claims all three tiers publish their body as the name, which is not true for composites
+- **The reader got (`261a218f`):** Orca says 'Province info push button.' then 'Tooltip.' at every composite trigger, the Theme combo box included. The content ('Iberia', 'Treasury report') is never spoken while the reader rests on the trigger. Tabbing into the sticky surface gives 'Tooltip dialog Treasury report This quarter: +423 coins.' The cause: CompositeTooltipWidget falls back to the generic a11y\_tooltip\_name, and the not-shown description path copies the content's name onto the anchor. docs/tooltips.md claims all three tiers publish their body as the name, which is not true for composites
 - **Platform:** all platforms (names and descriptions); spoken on Linux/Orca
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/tooltip/composite.rs:431-438; docs/tooltips.md:625
-- **Evidence:**
+- **Now (`c198e4d1`):** Every composite trigger, the title bar's Theme combo box included, still carries the description 'Tooltip', and Orca says 'Tooltip.' after it. The content ('Iberia', 'Treasury report') is not spoken while the reader rests on the trigger. Tabbing into the sticky surface gives 'Tooltip dialog Treasury report This quarter: +423 coins.'
+- **Measured again:** catalog-c-overlays-tooltips 2 of 2, overlays tab walk 2 of 2, every launch tree
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-tooltips 'focus Province info and stay (composite tooltip)': +106.8 ms ORCA SAYS: 'Province info push button.' / +106.9 ms ORCA SAYS: 'Tooltip.' / +757.0 ms object:children-changed:add [frame] 'Teksilo — Widget Catalog' -> [tool tip] 'Tooltip' / FAIL Orca says 'Iberia'`
+  - `pass2 catalog-c-overlays-tooltips 'Tab into the sticky composite tooltip': +124.8 ms ORCA SAYS: 'Tooltip dialog Treasury report This quarter: +423 coins.'`
+  - `pass1 tabwalk-widget-catalog-overlays Tab 6: +140.4 ms ORCA SAYS: 'Theme combo box.' / +140.4 ms ORCA SAYS: 'Tooltip.'`
+  - `pass1 catalog-c-settings-launch tree-launch.txt: [combo box] 'Theme' desc='Tooltip' {focusable}`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/tooltip/composite.rs:431-438; docs/tooltips.md:625
+- **Evidence (`261a218f`):**
   - `launch tree: [push button] 'Province info' desc='Tooltip' {focusable} / [push button] 'Tabbed details' desc='Tooltip' / [push button] 'With internal Button' desc='Tooltip' / [combo box] 'Theme' desc='Tooltip'`
   - `act 'focus Province info and stay': +789.3 ms ORCA SAYS: 'Province info push button.' / +789.3 ms ORCA SAYS: 'Tooltip.' / +1046.9 ms object:children-changed:add [frame] '' -> [tool tip] 'Tooltip'`
   - `act 'Tab into the sticky composite tooltip': +87.1 ms ORCA SAYS: 'Tooltip dialog Treasury report This quarter: +423 coins.'`
@@ -194,12 +234,19 @@ Opening the 'Tabbed details' composite tooltip moves Orca's locus of focus to a 
 - **Scenario:** catalog-c-overlays-tooltips
 - **Act:** Focus 'Tabbed details' and stay; the tooltip opens after its delay while focus stays on the button
 - **The reader should get:** Nothing spoken about controls the reader is not on; Orca's locus stays on the focused button
-- **The reader gets:** The tooltip's TabWidget is added with a selected tab. The AT-SPI adapter emits object:selection-changed on its page tab list, and Orca's onSelectionChanged makes the selected tab its locus of focus and says 'Stats page tab.' Orca now thinks the reader is on 'Stats' while keyboard focus is on 'Tabbed details'. The same mechanism makes Orca read the catalog's own selected page tab at every launch
+- **The reader got (`261a218f`):** The tooltip's TabWidget is added with a selected tab. The AT-SPI adapter emits object:selection-changed on its page tab list, and Orca's onSelectionChanged makes the selected tab its locus of focus and says 'Stats page tab.' Orca now thinks the reader is on 'Stats' while keyboard focus is on 'Tabbed details'. The same mechanism makes Orca read the catalog's own selected page tab at every launch
 - **Platform:** Linux AT-SPI/Orca
 - **Severity:** medium; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** accesskit\_atspi\_common-0.20.0/src/adapter.rs:79-81; crates/teksilo-widgets/src/tab\_widget (selected tab published inside an unfocused transient overlay)
-- **Evidence:**
+- **Now (`c198e4d1`):** When the 'Tabbed details' tooltip opens while focus stays on the button, its page tab list emits selection-changed and Orca says 'Stats page tab.', cutting its reading of the focused button. The adapter behaviour is unchanged in accesskit\_atspi\_common 0.21.0.
+- **Measured again:** catalog-c-overlays-tooltips 2 of 2, catalog-c-tooltip-tab-away 2 of 2, verify-catalog-c-bounce-cold 2 of 2, overlays tab walk 2 of 2; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-tooltips 'focus Tabbed details and stay (composite tooltip with tabs)': +152.2 ms ORCA SAYS (CUT): 'Tabbed details push button.' / +782.5 ms object:selection-changed [page tab list] '' / +837.8 ms ORCA SAYS: 'Stats page tab.'`
+  - `pass2 catalog-c-overlays-tooltips same act: +779.1 ms object:selection-changed [page tab list] '' / +973.9 ms ORCA SAYS: 'Stats page tab.'`
+  - `pass1 verify-catalog-c-bounce-cold 'cold: focus Province info, wait 1.5 s (tooltip up), Tab': +1761.4 ms object:selection-changed [page tab list] '' / +1809.5 ms ORCA SAYS: 'Stats page tab.'`
+  - `accesskit_atspi_common-0.21.0/src/adapter.rs:79-81: if let Some(true) = node.is_selected() { self.enqueue_selection_changed_if_needed(node); }`
+- **Where (`c198e4d1`):** accesskit\_atspi\_common-0.21.0/src/adapter.rs:79-81; /usr/lib/python3/dist-packages/orca/scripts/default.py:1540-1602; crates/teksilo-widgets/src/tab\_widget (selected tab published inside an unfocused transient overlay)
+- **Evidence (`261a218f`):**
   - `+1394.9 ms object:selection-changed [page tab list] ''`
   - `+1451.0 ms ORCA SAYS: 'Stats page tab.'`
   - `orca-debug.out 13:12:49.937326 - FOCUS MANAGER: Changing locus of focus from [push button: 'Tabbed details'] to [page tab: 'Stats']. Notify: True`
@@ -218,12 +265,18 @@ A popover with no focusable content takes focus on an unnamed, role-less wrapper
 - **Scenario:** catalog-c-overlays-dialogs
 - **Act:** Space on 'Anchor' (PopoverButton whose content is two labels)
 - **The reader should get:** The popover opens as a named dialog; focus lands on it (or its content) and the reader hears 'Popover content …'
-- **The reader gets:** Focus moves to an \[unknown\] node with no name that wraps an unnamed \[dialog\]. Orca's generator finds nothing to say ('Results for \[unknown\] are pauses only'), stops speech and is silent. The cause: PopoverWidget sends focus to the PopoverBody content node (focus\_id = content\_id). PopoverBody has no accessibility(), so its role stays Unknown. The surface's dialog name defaults to empty
+- **The reader got (`261a218f`):** Focus moves to an \[unknown\] node with no name that wraps an unnamed \[dialog\]. Orca's generator finds nothing to say ('Results for \[unknown\] are pauses only'), stops speech and is silent. The cause: PopoverWidget sends focus to the PopoverBody content node (focus\_id = content\_id). PopoverBody has no accessibility(), so its role stays Unknown. The surface's dialog name defaults to empty
 - **Platform:** all platforms (focus target and tree); UIA would expose a Custom control, macOS AXUnknown (per adapter role maps); measured on Linux/Orca
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `de3bb295` (popover-trigger). Fixed part: 'Anchor dialog Popover content Click outside to dismiss.' (2 of 2.
-- **Where:** crates/teksilo-widgets/src/popover\_widget.rs:361, 569-651, 685
-- **Evidence:**
+- **Status:** Fixed by `de3bb295` (popover-trigger).
+- **Now (`c198e4d1`):** Space on 'Anchor' opens the popover and focus lands on a dialog named after its trigger. Orca says 'Anchor dialog Popover content Click outside to dismiss.'
+- **Measured again:** catalog-c-overlays-dialogs 2 of 2, verify-catalog-c-popover 2 of 2 (first and second opening)
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-dialogs 'Space on Anchor (popover)': +58.7 ms object:children-changed:add [panel] '' -> [dialog] 'Anchor' / +60.0 ms object:state-changed:focused 1 [dialog] 'Anchor' / +107.0 ms ORCA SAYS: 'Anchor dialog Popover content Click outside to dismiss.'`
+  - `pass2 catalog-c-overlays-dialogs 'Space on Anchor (popover)': +59.2 ms object:state-changed:focused 1 [dialog] 'Anchor' / +115.8 ms ORCA SAYS: 'Anchor dialog Popover content Click outside to dismiss.'`
+  - `pass1 verify-catalog-c-popover 'Space on Anchor again': +50.1 ms object:state-changed:focused 1 [dialog] 'Anchor' / +94.5 ms ORCA SAYS: 'Anchor dialog Popover content Click outside to dismiss.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/popover\_widget.rs:641-657
+- **Evidence (`261a218f`):**
   - `+64.5 ms object:children-changed:add [panel] '' -> [unknown] ''`
   - `+65.7 ms object:state-changed:focused 1 [unknown] ''`
   - `orca-debug.out 13:13:13.664324 - FOCUS MANAGER: Changing locus of focus from [push button: 'Anchor'] to [unknown]. Notify: True`
@@ -245,12 +298,25 @@ Tab inside an open popover with no focusable content closes it and throws focus 
 - **Scenario:** catalog-c-overlays-dialogs
 - **Act:** Space on 'Anchor', then Tab
 - **The reader should get:** Focus stays in the popover, or the popover closes and focus goes back to Anchor or on to the next control ('Open Dialog')
-- **The reader gets:** The popover goes and focus jumps to the title bar's 'Menu' button, the window's first control. Orca: 'landmark Window title bar', 'Menu push button.' The reader loses their place on the page
+- **The reader got (`261a218f`):** The popover goes and focus jumps to the title bar's 'Menu' button, the window's first control. Orca: 'landmark Window title bar', 'Menu push button.' The reader loses their place on the page
 - **Platform:** all platforms (focus is moved inside teksilo-core); measured on Linux/Orca
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `de3bb295` (popover-trigger). Fixed part: Tab from the open popover goes to 'Open Dialog', not to the title bar's 'Menu' (2 of 2.
-- **Where:** crates/teksilo-widgets/src/popover\_widget.rs:685; crates/teksilo-core/src/widget\_tree/focus\_impl.rs:943-958
-- **Evidence:**
+- **Status:** Fixed by `de3bb295` (popover-trigger).
+- **Now (`c198e4d1`):** Tab inside the open popover closes it and moves focus on to 'Open Dialog'; Shift+Tab and Escape close it and return focus to 'Anchor'. Orca names each landing, after the window's name.
+- **Measured again:** catalog-c-overlays-dialogs 2 of 2 runs plus a re-run, verify-catalog-c-popover 2 of 2 runs plus a re-run (focus moves as described in all 6; Orca names every landing in 7 of 8 spoken acts after the window's name, and missed one landing, all misses in pass2 under load)
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-dialogs 'Tab inside the open popover': +130.1 ms object:children-changed:remove [panel] '' -> [dialog] 'Anchor' / +130.3 ms object:state-changed:focused 1 [push button] 'Open Dialog' / +191.7 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +191.7 ms ORCA SAYS: 'Open Dialog push button.'`
+  - `pass2 catalog-c-overlays-dialogs 'Tab inside the open popover': (Orca received this act's first event 608 ms after the bus carried it) / +284.1 ms object:state-changed:focused 1 [push button] 'Open Dialog' / no ORCA SAYS line`
+  - `pass2 catalog-c-overlays-dialogs orca-debug.out: 16:00:31.394515 - AXObject: find_descendant: found [push button: 'Open Dialog'] in 0.8050s / 16:00:31.409246 - FOCUS MANAGER: Changing locus of focus from [dialog: 'Anchor'] to [push button: 'Open Dialog']. Notify: False / 16:00:31.626558 - FOCUS MANAGER: Setting locus of focus to existing locus of focus`
+  - `tiebreak catalog-c-overlays-dialogs 'Tab inside the open popover': +136.4 ms object:children-changed:remove [panel] '' -> [dialog] 'Anchor' / +136.8 ms object:state-changed:focused 1 [push button] 'Open Dialog' / +227.4 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +227.4 ms ORCA SAYS: 'Open Dialog push button.'`
+  - `pass1 verify-catalog-c-popover 'Shift+Tab inside the open popover': +123.6 ms object:state-changed:focused 1 [push button] 'Anchor' / +190.2 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +190.2 ms ORCA SAYS: 'Anchor push button.'`
+  - `pass2 verify-catalog-c-popover 'Shift+Tab inside the open popover': +386.0 ms object:state-changed:focused 1 [push button] 'Anchor' / +963.0 ms ORCA SAYS: 'Anchor push button.'`
+  - `tiebreak verify-catalog-c-popover 'Shift+Tab inside the open popover': +144.9 ms object:state-changed:focused 1 [push button] 'Anchor' / +237.2 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +237.3 ms ORCA SAYS: 'Anchor push button.'`
+  - `pass1 verify-catalog-c-popover 'Escape at once': +193.7 ms object:state-changed:focused 1 [push button] 'Anchor' / +287.9 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +287.9 ms ORCA SAYS: 'Anchor push button.'`
+  - `pass2 verify-catalog-c-popover 'Escape at once': +217.2 ms object:state-changed:focused 1 [push button] 'Anchor' / +315.4 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +315.4 ms ORCA SAYS: 'Anchor push button.'`
+  - `tiebreak verify-catalog-c-popover 'Escape at once': +130.7 ms object:state-changed:focused 1 [push button] 'Anchor' / +250.1 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +250.2 ms ORCA SAYS: 'Anchor push button.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/popover\_widget.rs:650-658; crates/teksilo-core/src/widget\_tree/focus\_impl.rs:967-975 (the edge fallback, no longer reached from an open popover)
+- **Evidence (`261a218f`):**
   - `+30.7 ms object:children-changed:remove [panel] '' -> [unknown] ''`
   - `+31.2 ms object:state-changed:focused 1 [push button] 'Menu'`
   - `+107.5 ms ORCA SAYS: 'landmark Window title bar'`
@@ -271,12 +337,17 @@ The snackbar announces the generic word 'Snackbar', never its message
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** Space on 'Show snackbar'
 - **The reader should get:** The reader hears 'File saved successfully'
-- **The reader gets:** The alert node is named 'Snackbar' and that is all that is announced and spoken. The message text is a child label nobody reads. The example gives no .announcement(...), which the Snackbar docs ask for, and SnackbarSurface falls back to the generic a11y\_snackbar\_name rather than deriving the name from its content
+- **The reader got (`261a218f`):** The alert node is named 'Snackbar' and that is all that is announced and spoken. The message text is a child label nobody reads. The example gives no .announcement(...), which the Snackbar docs ask for, and SnackbarSurface falls back to the generic a11y\_snackbar\_name rather than deriving the name from its content
 - **Platform:** all platforms (announced string = node name); measured on Linux/Orca
 - **Severity:** high; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/widget\_catalog/src/tabs/overlays.rs:384-397; crates/teksilo-widgets/src/snackbar.rs:236-241
-- **Evidence:**
+- **Now (`c198e4d1`):** The snackbar is still announced as the generic word 'Snackbar', and Orca says only 'Snackbar'. The message 'File saved successfully' is never heard.
+- **Measured again:** catalog-c-overlays-notices 2 of 2, verify-catalog-c-notices 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-notices 'Space on Show snackbar (first time)': +55.1 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +66.8 ms ORCA SAYS: 'Snackbar' / FAIL the bus carries an announcement of 'File saved successfully'`
+  - `pass2 catalog-c-overlays-notices same act: +65.4 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +71.5 ms ORCA SAYS: 'Snackbar'`
+- **Where (`c198e4d1`):** examples/widget\_catalog/src/tabs/overlays.rs:384-397; crates/teksilo-widgets/src/snackbar.rs:236-241
+- **Evidence (`261a218f`):**
   - `+325.8 ms object:announcement [notification] 'Snackbar' text='Snackbar'`
   - `+375.5 ms ORCA SAYS: 'Snackbar'`
   - `FAIL the bus carries an announcement of 'File saved successfully'`
@@ -295,12 +366,18 @@ Every snackbar after the first is announced from a defunct node and dropped by O
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** Space on 'Show snackbar', wait for it to auto-dismiss, Space again
 - **The reader should get:** The second snackbar is heard like the first
-- **The reader gets:** The snackbar surface is one detached node, reused each time it is shown (same AT-SPI path). The adapter marked it defunct when it left the tree after the first show. The second announcement comes from that defunct path and Orca logs 'Ignoring defunct object'. The harness's observation flags it. This is the K2 mechanism on a different node: the K2 fix to the announcer does not cover it
+- **The reader got (`261a218f`):** The snackbar surface is one detached node, reused each time it is shown (same AT-SPI path). The adapter marked it defunct when it left the tree after the first show. The second announcement comes from that defunct path and Orca logs 'Ignoring defunct object'. The harness's observation flags it. This is the K2 mechanism on a different node: the K2 fix to the announcer does not cover it
 - **Platform:** Linux AT-SPI/Orca (defunct handling is AT-SPI's)
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `85624a1a` (node-ids). Fixed part: same Snackbar mechanism, verified through dialogs-snackbar rather than the catalog-c scenario.
-- **Where:** crates/teksilo-widgets/src/snackbar.rs:65-92, 409; accesskit\_atspi\_common-0.20.0/src/adapter.rs:91-106
-- **Evidence:**
+- **Status:** Fixed by `85624a1a` (node-ids).
+- **Now (`c198e4d1`):** The second and third snackbars are announced and spoken like the first. No announcement comes from a defunct node and Orca drops none.
+- **Measured again:** catalog-c-overlays-notices, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-notices 'Space on Show snackbar (second time)': +86.5 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +100.9 ms ORCA SAYS: 'Snackbar' (no defunct observation)`
+  - `pass2 catalog-c-overlays-notices 'Space on Show snackbar (second time)': +78.2 ms object:announcement [notification] 'Snackbar' / +89.9 ms ORCA SAYS: 'Snackbar'`
+  - `pass1 and pass2 catalog-c-overlays-notices orca-debug.out: 0 lines 'Ignoring defunct object: [notification', 3 lines SPEECH OUTPUT: 'Snackbar'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/snackbar.rs:64-92, 408-418; crates/teksilo-core/src/accessibility/adapter\_ids.rs (a node that comes back gets a new platform id)
+- **Evidence (`261a218f`):**
   - `act 'Space on Show snackbar (second time)': +75.5 ms object:announcement [notification] 'Snackbar' text='Snackbar'`
   - `observed 'Snackbar' came from a node the bus had already been told was defunct, which Orca drops; path /org/a11y/atspi/accessible/0/79228451076681882632059879424`
   - `orca-debug.out 13:14:38.198462 EVENT MANAGER: Ignoring defunct object: [notification: 'Snackbar']`
@@ -320,12 +397,19 @@ Snackbar with a custom Button trigger: a screen reader's activation of the focus
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** AT-SPI 'click' on the focused 'Show snackbar' button (what VoiceOver's VO-Space / AXPress and NVDA's default action do)
 - **The reader should get:** The snackbar opens
-- **The reader gets:** Nothing happens: no announcement, no overlay. The trigger is a push button nested in another push button. The outer one is not focusable, is named 'File saved successfully' (the snackbar's label, i.e. its message) and holds the working Click. The inner focusable 'Show snackbar' Button handles Click itself (Button::on\_access\_action returns Handled with no callback), so the action never reaches OverlayTrigger's on\_access\_activate. Keyboard Space works only because the key handlers go on the child
+- **The reader got (`261a218f`):** Nothing happens: no announcement, no overlay. The trigger is a push button nested in another push button. The outer one is not focusable, is named 'File saved successfully' (the snackbar's label, i.e. its message) and holds the working Click. The inner focusable 'Show snackbar' Button handles Click itself (Button::on\_access\_action returns Handled with no callback), so the action never reaches OverlayTrigger's on\_access\_activate. Keyboard Space works only because the key handlers go on the child
 - **Platform:** all platforms (action routing in teksilo); measured through AT-SPI Action
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `de3bb295` (popover-trigger). Fixed part: the reader's click on the focused custom Button trigger of a Snackbar announces 'Snackbar' (3 of 3); the outer push button named 'File saved successfully' is gone from the tree.
-- **Where:** crates/teksilo-widgets/src/button.rs:454-465; crates/teksilo-widgets/src/overlay\_trigger.rs:243-252, 291-312; crates/teksilo-widgets/src/snackbar.rs:475-494; example: examples/widget\_catalog/src/tabs/overlays.rs:387
-- **Evidence:**
+- **Status:** Fixed by `de3bb295` (popover-trigger).
+- **Now (`c198e4d1`):** The trigger is now one focusable push button 'Show snackbar'; the outer push button named with the message is gone. A reader's click on it opens the snackbar and 'Snackbar' is announced.
+- **Measured again:** catalog-c-overlays-notices 2 of 2, verify-catalog-c-notices 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-catalog-c-notices 'AT-SPI click on the focused inner Show snackbar button': +58.2 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +64.9 ms ORCA SAYS: 'Snackbar'`
+  - `pass2 catalog-c-overlays-notices 'AT-SPI click on the focused Show snackbar': +70.9 ms object:announcement [notification] 'Snackbar' / +79.7 ms ORCA SAYS: 'Snackbar'`
+  - `pass1 verify-catalog-c-notices 'AT-SPI click on the outer trigger node File saved successfully': COULD NOT RUN: RunError: no node matches {'cmd': 'action', 'action': 'click', 'role': 'push button', 'name': 'File saved successfully'}`
+  - `pass1 catalog-c-overlays-notices tree-launch.txt: [push button] 'Show snackbar' {focusable} (no parent push button)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/overlay\_trigger.rs:257, 277-285, 334-340; crates/teksilo-widgets/src/snackbar.rs:446-451
+- **Evidence (`261a218f`):**
   - `act 'AT-SPI click on the focused Show snackbar': == harness:action click [push button] 'Show snackbar' / FAIL some announcement reaches the bus: no object:announcement in the act`
   - `launch tree: [push button] 'File saved successfully' (states enabled, sensitive, no focusable; actions click) > [push button] 'Show snackbar' {focusable}`
   - `earlier run: AT-SPI click on [push button] 'File saved successfully' -> +67.5 ms object:announcement [notification] 'Snackbar'`
@@ -344,12 +428,17 @@ A toast's body is never announced, only its title
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** Space on the 'Warning' or 'Error' toast trigger
 - **The reader should get:** 'Warning. Take a look when you have a moment.' / 'Build failed. Three errors, two warnings.'
-- **The reader gets:** The announcement carries the node name, which is the title only. The body goes to the description, which no adapter announces. live\_atomic is set but AT-SPI's announcement is the name. The reader hears 'Warning' and 'Build failed' and nothing else
+- **The reader got (`261a218f`):** The announcement carries the node name, which is the title only. The body goes to the description, which no adapter announces. live\_atomic is set but AT-SPI's announcement is the name. The reader hears 'Warning' and 'Build failed' and nothing else
 - **Platform:** Linux AT-SPI/Orca measured; Windows LiveRegionChanged makes NVDA read the node, likely name only too (not measured)
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/toast/surface.rs:426-446
-- **Evidence:**
+- **Now (`c198e4d1`):** A toast is still announced by its title only. Orca says 'Warning' and 'Build failed'; the bodies 'Take a look when you have a moment.' and 'Three errors, two warnings.' are not heard.
+- **Measured again:** catalog-c-overlays-notices, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-notices 'Space on toast trigger Warning': +93.2 ms object:announcement [status bar] 'Warning' text='Warning' / +102.7 ms ORCA SAYS: 'Warning' / FAIL Orca says 'Take a look when you have a moment.'`
+  - `pass2 catalog-c-overlays-notices 'Space on toast trigger Error': +91.8 ms object:announcement [notification] 'Build failed' text='Build failed' / +116.0 ms ORCA SAYS: 'Build failed' / FAIL Orca says 'Three errors, two warnings.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/toast/surface.rs:648-667
+- **Evidence (`261a218f`):**
   - `+185.1 ms object:announcement [status bar] 'Warning' text='Warning' / +325.6 ms ORCA SAYS: 'Warning' / FAIL Orca says 'Take a look when you have a moment.'`
   - `+449.0 ms object:announcement [notification] 'Build failed' text='Build failed' / FAIL Orca says 'Three errors, two warnings.'`
   - `crates/teksilo-widgets/src/toast/surface.rs:426-446 (set_name(title); set_description(body))`
@@ -366,12 +455,17 @@ Showing a toast re-announces every toast already on screen
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** Space on 'Info', then on 'Success'
 - **The reader should get:** The reader hears 'Saved' once
-- **The reader gets:** The ToastHost rebuilds on every registry change, re-adding each visible toast as a new node (new AT-SPI path), and every live node added with a name is announced again. The reader hears 'Info notice', 'Saved'. Later toasts re-announce 'Warning', 'Build failed' or 'Working…' the same way
+- **The reader got (`261a218f`):** The ToastHost rebuilds on every registry change, re-adding each visible toast as a new node (new AT-SPI path), and every live node added with a name is announced again. The reader hears 'Info notice', 'Saved'. Later toasts re-announce 'Warning', 'Build failed' or 'Working…' the same way
 - **Platform:** Linux AT-SPI/Orca measured (add-with-name announcement is atspi\_common adapter.rs:71-77; Windows raises LiveRegionChanged on new live nodes similarly)
 - **Severity:** medium; **layer:** framework
-- **Status:** Fixed by `0e2b6377` (toast). Fixed part: in widget-catalog, showing a toast no longer re-announces the toasts already shown (3 of 3 on every toast act)..
-- **Where:** crates/teksilo-widgets/src/toast/host.rs:236-270
-- **Evidence:**
+- **Status:** Fixed by `0e2b6377` (toast).
+- **Now (`c198e4d1`):** Showing a toast announces that toast only. The toasts already on screen are not announced again, and an expiring toast does not re-announce the others.
+- **Measured again:** catalog-c-overlays-notices, 2 of 2 runs (5 toast acts each)
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-notices 'Space on toast trigger Success': +67.5 ms object:announcement [status bar] 'Saved' text='Saved' / +83.4 ms ORCA SAYS: 'Saved' / pass no toast already on screen is announced again`
+  - `pass2 catalog-c-overlays-notices 'Space on toast trigger Error': +91.8 ms object:announcement [notification] 'Build failed' / +3094.1 ms object:children-changed:remove [frame] 'Teksilo — Widget Catalog' -> [status bar] 'Warning' (expiry, no new announcement) / pass no toast already on screen is announced again`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/toast/host.rs:283-310, 487
+- **Evidence (`261a218f`):**
   - `act 'Space on toast trigger Success': +244.2 ms object:announcement [status bar] 'Info notice' text='Info notice' / +262.8 ms object:announcement [status bar] 'Saved' text='Saved' / +370.3 ms ORCA SAYS: 'Info notice' / +393.1 ms ORCA SAYS: 'Saved'`
   - `announcement source paths: first 'Info notice' from .../79228451224255835221736292352, re-announcement from .../237684776252784510408824193024 (a new node)`
   - `act 'Error' (run 131038): ann=['Warning', 'Build failed'] said=['Warning', 'Build failed']`
@@ -390,12 +484,22 @@ The notification bell is destroyed and rebuilt on every toast: focus is re-fired
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** With focus on the Notifications bell (or inside its open log), a new toast arrives
 - **The reader should get:** Focus and the reader's place stay; the toast is heard; the unread count updates
-- **The reader gets:** NotificationCenterButton rebinds on the archive version at Rebuild. Every toast replaces the bell (and its popover) with new nodes: the focused bell goes defunct and a focus event fires on the new one. Orca stops the toast announcement to re-read 'Notifications push button.' With the log open and focus on 'Clear all', the log's dialog goes defunct and focus is pulled to the new bell
+- **The reader got (`261a218f`):** NotificationCenterButton rebinds on the archive version at Rebuild. Every toast replaces the bell (and its popover) with new nodes: the focused bell goes defunct and a focus event fires on the new one. Orca stops the toast announcement to re-read 'Notifications push button.' With the log open and focus on 'Clear all', the log's dialog goes defunct and focus is pulled to the new bell
 - **Platform:** Linux AT-SPI/Orca measured; the node replacement happens on all platforms
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `0e2b6377` (toast). Fixed part: the focused bell is no longer replaced on each toast, so the toast announcement is not cut. Only the unread badge follows the archive..
-- **Where:** crates/teksilo-widgets/src/notification/center\_button.rs:230-252
-- **Evidence:**
+- **Status:** Fixed by `0e2b6377` (toast).
+- **Now (`c198e4d1`):** A toast arriving while focus rests on the bell no longer replaces the bell: focus stays and Orca speaks the toast without cutting it. With the log open and focus on 'Clear all', a new toast leaves focus and the log in place; the log gains the new entry and the unread badge changes.
+- **Measured again:** verify-catalog-c-notices and catalog-c-overlays-notices, 2 of 2 runs each (bell focused); remeasure-catalog-c-1-log-toast, 2 of 2 runs (log open)
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-catalog-c-notices 'a toast arrives (AT-SPI click on Info) while focus rests on the bell': +105.5 ms object:announcement [status bar] 'Info notice' text='Info notice' / +123.6 ms ORCA SAYS: 'Info notice' / pass the focused bell is not destroyed`
+  - `pass2 verify-catalog-c-notices 'a toast arrives (AT-SPI click on Info) while focus rests on the bell': +68.6 ms object:announcement [status bar] 'Info notice' text='Info notice' / +80.8 ms ORCA SAYS: 'Info notice' / pass the focused bell is not destroyed`
+  - `pass1 catalog-c-overlays-notices 'a toast arrives while focus rests on the bell': +61.0 ms object:announcement [status bar] 'Info notice' text='Info notice' / +72.0 ms ORCA SAYS: 'Info notice' / pass the focused bell is not destroyed under the reader`
+  - `pass2 catalog-c-overlays-notices 'a toast arrives while focus rests on the bell': +84.3 ms object:announcement [status bar] 'Info notice' text='Info notice' / +104.9 ms ORCA SAYS: 'Info notice' / pass the focused bell is not destroyed under the reader`
+  - `judge remeasure-catalog-c-1-log-toast 'a toast arrives (AT-SPI click on Success) while the log is open and focus is on 'Clear all'': +281.2 ms object:announcement [status bar] 'Saved' text='Saved' / +291.9 ms object:children-changed:add [panel] '' -> [label] '2' / +294.0 ms object:children-changed:add [list] 'Notifications' -> [panel] '' / +315.3 ms ORCA SAYS: 'Saved' / pass focus does not move / pass none of ['Notifications', 'Clear all'] goes defunct`
+  - `tiebreak remeasure-catalog-c-1-log-toast 'a toast arrives (AT-SPI click on Success) while the log is open and focus is on 'Clear all'': +68.8 ms object:announcement [status bar] 'Saved' text='Saved' / +70.6 ms object:children-changed:add [list] 'Notifications' -> [panel] '' / +72.7 ms object:children-changed:add [panel] '' -> [label] '2' / +73.3 ms object:property-change:accessible-parent [unknown] 'Info notice' -> [panel] '' / +83.1 ms ORCA SAYS: 'Saved' / pass focus does not move / pass none of ['Notifications', 'Clear all'] goes defunct`
+  - `tiebreak remeasure-catalog-c-1-log-toast tree after the toast: [dialog] 'Notifications' {active} > [list] 'Notifications' > [push button] 'Clear all' {focusable,focused}, [panel] '' > [label] 'Today', [unknown] 'Saved' desc='Saved', [unknown] 'Info notice' desc='Info notice'; [label] '2' beside the bell`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/notification/center\_button.rs:230-241, 369-392
+- **Evidence (`261a218f`):**
   - `run 125949: +86.5 ms object:announcement [status bar] 'Working…' / +89.0 ms object:announcement [status bar] 'Info notice' / +90.8 ms object:state-changed:focused 1 [push button] 'Notifications' / +91.1 ms object:state-changed:defunct 1 [push button] 'Notifications' / +104.6 ms ORCA SAYS (CUT): 'Working…' / +109.4 ms ORCA SAYS (CUT): 'Info notice' / +208.6 ms ORCA SAYS: 'Notifications push button.'`
   - `run 132036 (log open, focus on 'Clear all'): +91.7 ms object:state-changed:focused 1 [push button] 'Notifications' / +92.0 ms object:state-changed:defunct 1 [dialog] '' / +92.1 ms object:state-changed:defunct 1 [push button] 'Notifications' / +104.4 ms ORCA SAYS (CUT): 'Info notice' / +183.0 ms ORCA SAYS: 'Notifications push button.'`
   - `every toast act: object:state-changed:defunct 1 [push button] 'Notifications'`
@@ -414,12 +518,18 @@ The bell never tells a reader how many notifications are unread
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** Focus the Notifications bell after five toasts
 - **The reader should get:** 'Notifications, 5 unread' (in the name, value or description)
-- **The reader gets:** The count is a separate sibling label ('5') outside the button. The button is named 'Notifications' with description 'Notifications' (a duplicate that Orca drops). Orca says 'Notifications push button.' The widget docs say outright that the count is not announced
+- **The reader got (`261a218f`):** The count is a separate sibling label ('5') outside the button. The button is named 'Notifications' with description 'Notifications' (a duplicate that Orca drops). Orca says 'Notifications push button.' The widget docs say outright that the count is not announced
 - **Platform:** all platforms
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/notification/center\_button.rs:14-21, 316-330
-- **Evidence:**
+- **Now (`c198e4d1`):** The bell is still named 'Notifications' with the description 'Notifications', and the count is a separate sibling label. Orca says 'Notifications push button.' and never the unread count.
+- **Measured again:** catalog-c-overlays-notices, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-notices 'focus the Notifications bell': +97.9 ms ORCA SAYS: 'Notifications push button.' / FAIL Orca says '5'`
+  - `pass2 catalog-c-overlays-notices same act: +119.0 ms ORCA SAYS: 'Notifications push button.'`
+  - `pass1 catalog-c-overlays-notices tree-Space-on-toast-trigger--Loading-.txt: [push button] 'Notifications' desc='Notifications' {focusable} / [label] '5'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/notification/center\_button.rs:14-21, 286-304, 369-420
+- **Evidence (`261a218f`):**
   - `+99.5 ms ORCA SAYS: 'Notifications push button.' / FAIL Orca says '5'`
   - `tree: [push button] 'Notifications' desc='Notifications' {focusable} ... [label] '5' (sibling, not a child)`
   - `crates/teksilo-widgets/src/notification/center_button.rs:14-21 ('The badge count is not separately announced')`
@@ -436,12 +546,18 @@ Notification log: an unnamed dialog whose 'list' holds its toolbar buttons and r
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** Space on the bell, then Tab past 'Clear all'
 - **The reader should get:** A dialog named 'Notifications' whose entries are list items the keyboard can reach (and whose actions it can use), with focus kept inside while it is open
-- **The reader gets:** Orca: 'dialog Today Show errors (no longer available)', 'Notifications.', 'list.', 'Mark all read push button.' The dialog has no name, so Orca makes one from its text. The \[list\] contains the two toolbar buttons, and its entries are \[unknown\] nodes (StandardListItem) that are not focusable, so no keyboard route reaches them. Tab from 'Clear all' goes out to a toast ('Working… statusbar') and the log closes behind it
+- **The reader got (`261a218f`):** Orca: 'dialog Today Show errors (no longer available)', 'Notifications.', 'list.', 'Mark all read push button.' The dialog has no name, so Orca makes one from its text. The \[list\] contains the two toolbar buttons, and its entries are \[unknown\] nodes (StandardListItem) that are not focusable, so no keyboard route reaches them. Tab from 'Clear all' goes out to a toast ('Working… statusbar') and the log closes behind it
 - **Platform:** all platforms (tree and focus); spoken on Linux/Orca
 - **Severity:** high; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/notification/log.rs:260-300, 556-557; crates/teksilo-widgets/src/notification/center\_button.rs:280-288
-- **Evidence:**
+- **Status:** Partly fixed by `de3bb295`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** The log's dialog is now named 'Notifications' after its bell. The rest remains: Orca says 'Notifications dialog Today Show errors (no longer available)', 'Notifications.', 'list.', 'Mark all read push button.'; the \[list\] holds the two toolbar buttons, its entries are \[unknown\] nodes the keyboard cannot reach, and Tab from 'Clear all' leaves for a toast while the log closes behind it.
+- **Measured again:** catalog-c-overlays-notices, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-notices 'Space on the Notifications bell': +61.5 ms object:children-changed:add [panel] '' -> [dialog] 'Notifications' / +170.4 ms ORCA SAYS: 'Notifications dialog Today Show errors (no longer available)' / 'Notifications.' / 'list.' / 'Mark all read push button.' / FAIL no node with the role 'unknown' under 'Notifications' in the tree: [unknown] 'Working…' desc='Working…', [unknown] 'Build failed' desc='Three errors, two warnings.'`
+  - `pass1 catalog-c-overlays-notices tree-Space-on-the-Notifications-bell.txt: [dialog] 'Notifications' {active} > [list] 'Notifications' > [push button] 'Mark all read' / [push button] 'Clear all' / [panel] '' > [label] 'Today' / [unknown] 'Working…' …`
+  - `pass2 catalog-c-overlays-notices 'Tab from the log's last control': +30.6 ms object:children-changed:remove [panel] '' -> [dialog] 'Notifications' / +31.2 ms object:state-changed:focused 1 [status bar] 'Working…' / +104.8 ms ORCA SAYS: 'Working… statusbar.' / FAIL focus stays inside the log`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/notification/log.rs:586-589, 268-300; crates/teksilo-widgets/src/popover\_widget.rs:641-649 (the surface named by its trigger)
+- **Evidence (`261a218f`):**
   - `+189.0 ms ORCA SAYS: 'dialog Today Show errors (no longer available)' / 'Notifications.' / 'list.' / 'Mark all read push button.'`
   - `tree: [dialog] '' {active} > [list] 'Notifications' > [push button] 'Mark all read' {focusable,focused} / [push button] 'Clear all' / [panel] '' > [label] 'Today' / [unknown] 'Build failed' desc='Three errors, two warnings.' / [unknown] 'Warning' desc='Take a look when you have a moment.'`
   - `act 'Tab from the log's last control': +46.1 ms object:state-changed:focused 1 [status bar] 'Working…' / +47.9 ms object:state-changed:defunct 1 [dialog] '' / +119.6 ms ORCA SAYS: 'Working… statusbar.'`
@@ -460,12 +576,18 @@ Escape on a focused toast drops focus to the window itself ('frame.')
 - **Scenario:** catalog-c-overlays-notices
 - **Act:** Focus in a toast (reached by Tab from the notification log), press Escape
 - **The reader should get:** The toast is dismissed and focus returns to where the reader was (the log or the bell)
-- **The reader gets:** The toast goes defunct and focus moves to the \[frame\]. Orca says 'frame.' and the reader's place is lost
+- **The reader got (`261a218f`):** The toast goes defunct and focus moves to the \[frame\]. Orca says 'frame.' and the reader's place is lost
 - **Platform:** all platforms (focus moved inside teksilo); measured on Linux/Orca
 - **Severity:** medium; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/toast/surface.rs:373-392; crates/teksilo-widgets/src/toast/host.rs (rebuild)
-- **Evidence:**
+- **Status:** Partly fixed by `0e2b6377`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** Escape on a focused toast while another toast is up now moves focus to that other toast ('Info notice statusbar. progress bar. Clear push button.'), not to the window, but not back to where the reader was either. When the focused toast is the only one on screen, focus still drops to the window and Orca says 'Teksilo — Widget Catalog frame.'
+- **Measured again:** verify-catalog-c-notices 2 of 2 and catalog-c-overlays-notices 2 of 2 (another toast up); remeasure-catalog-c-1-last-toast 1 of 1 (only toast)
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-catalog-c-notices 'Escape on the focused toast': +60.5 ms object:children-changed:remove [frame] 'Teksilo — Widget Catalog' -> [status bar] 'Working…' / +60.6 ms object:state-changed:focused 1 [status bar] 'Info notice' / +123.7 ms ORCA SAYS: 'Info notice statusbar.'`
+  - `pass2 catalog-c-overlays-notices 'Escape on the toast that took focus': +37.3 ms object:state-changed:focused 1 [status bar] 'Info notice' / +72.1 ms ORCA SAYS: 'Info notice statusbar.'`
+  - `judge remeasure-catalog-c-1-last-toast 'Escape on the focused toast, the only one on screen': +119.8 ms object:state-changed:focused 1 [frame] 'Teksilo — Widget Catalog' / +120.2 ms object:state-changed:defunct 1 [status bar] 'Working…' / +342.7 ms ORCA SAYS: 'Teksilo — Widget Catalog frame.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/toast/surface.rs:592-608; crates/teksilo-core/src/widget\_tree/layout\_impl.rs:421-433
+- **Evidence (`261a218f`):**
   - `run 131038: +27.1 ms object:state-changed:focused 1 [frame] '' / +27.1 ms object:state-changed:focused 0 [push button] 'Clear' / +76.7 ms ORCA SAYS: 'frame.'`
   - `run 131420: +30.6 ms object:state-changed:focused 1 [frame] '' / +30.7 ms object:state-changed:defunct 1 [push button] 'Clear' / +30.8 ms object:state-changed:defunct 1 [status bar] 'Working…' / +72.0 ms ORCA SAYS: 'frame.'`
   - `verify-catalog-c-notices-20260925-133807-3691376 'Escape on the focused toast': +37.7 ms remove [frame] '' -> [status bar] 'Working…' / +37.8 ms focused 1 [frame] '' / +92.9 ms ORCA SAYS: 'frame.'`
@@ -481,12 +603,18 @@ Accordion content sits inside the Accordion's own button node, so a MessageBox's
 - **Scenario:** catalog-c-overlays-dialogs
 - **Act:** Open any message box, Shift+Tab to 'Show details', Space
 - **The reader should get:** A disclosure button, and the revealed details as a sibling region the reader can move to
-- **The reader gets:** The Accordion root is itself Role::Button, and the details region is its child: \[push button\] 'Show details' &gt; \[landmark\] 'Show details' &gt; \[panel\] &gt; \[label\] text. Readers treat a button as a leaf (ARIA's children-presentational; VoiceOver does not navigate into AXButton children), so the text is effectively unreachable. The reveal is not spoken either: Orca said nothing on Space
+- **The reader got (`261a218f`):** The Accordion root is itself Role::Button, and the details region is its child: \[push button\] 'Show details' &gt; \[landmark\] 'Show details' &gt; \[panel\] &gt; \[label\] text. Readers treat a button as a leaf (ARIA's children-presentational; VoiceOver does not navigate into AXButton children), so the text is effectively unreachable. The reveal is not spoken either: Orca said nothing on Space
 - **Platform:** all platforms (tree shape); measured on Linux
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/accordion.rs:667-682
-- **Evidence:**
+- **Now (`c198e4d1`):** The message box's details are still a child of the Accordion's own push button: \[push button\] 'Show details' &gt; \[landmark\] 'Show details' &gt; \[panel\] '' &gt; \[label\]. Orca says 'Show details push button.' without 'collapsed', and says nothing when Space reveals the details.
+- **Measured again:** catalog-c-overlays-dialogs, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-dialogs 'Shift+Tab to Show details': +86.7 ms ORCA SAYS: 'Show details push button.' / FAIL Orca says 'collapsed'`
+  - `pass1 catalog-c-overlays-dialogs 'Space on Show details': +139.1 ms object:children-changed:add [panel] '' -> [label] 'This is a Dialog (presented via MessageBox::information).' (no ORCA SAYS) / FAIL the details are not inside the button: [alert] 'Dialog example' > [push button] 'Show details' > [landmark] 'Show details' > [panel] '' > [label] 'This is a Dialog (presented via MessageBox::information).'`
+  - `pass2 catalog-c-overlays-dialogs 'Space on Show details': +90.8 ms object:children-changed:add [panel] '' -> [label] 'This is a Dialog (presented via MessageBox::information).' / FAIL Orca says 'expanded'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/accordion.rs:667-682
+- **Evidence (`261a218f`):**
   - `FAIL the details are not inside the button: [alert] 'Dialog example' > [push button] 'Show details' > [landmark] 'Show details' > [panel] '' > [label] 'This is a Dialog (presented via MessageBox::information).'`
   - `act 'Space on Show details': +82.0 ms object:children-changed:add [panel] '' -> [label] 'This is a Dialog (presented via MessageBox::information).' (no Orca speech in the act)`
   - `crates/teksilo-widgets/src/accordion.rs:668-682 (Role::Button + set_expanded + push_controlled on the root; children() returns header and body); crates/teksilo-widgets/src/message_box.rs:937-952 (detailed text in an Accordion)`
@@ -503,12 +631,18 @@ The catalog's message boxes put their message behind 'Show details', so a reader
 - **Scenario:** catalog-c-overlays-dialogs
 - **Act:** Space on 'Information', 'Warning', 'Error', 'Confirm' or 'Open Dialog'
 - **The reader should get:** 'alert Warning. Disk is almost full. OK push button.'
-- **The reader gets:** 'alert Warning.' / 'OK push button.' The message ('Disk is almost full.', 'This action cannot be undone.') was passed as detailed\_text, which is hidden behind the disclosure. The example should use .text(...) or .informative\_text(...), which MessageBox writes into the dialog's description
+- **The reader got (`261a218f`):** 'alert Warning.' / 'OK push button.' The message ('Disk is almost full.', 'This action cannot be undone.') was passed as detailed\_text, which is hidden behind the disclosure. The example should use .text(...) or .informative\_text(...), which MessageBox writes into the dialog's description
 - **Platform:** all platforms
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/widget\_catalog/src/tabs/overlays.rs:327-378
-- **Evidence:**
+- **Now (`c198e4d1`):** Each catalog message box still hides its message behind 'Show details'. Orca says, for instance, 'alert Warning.' then 'OK push button.' and never 'Disk is almost full.'
+- **Measured again:** catalog-c-overlays-dialogs, 2 of 2 runs, 5 boxes each
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-dialogs 'Space on Warning (message box)': +69.3 ms ORCA SAYS (CUT): 'Warning' / +122.7 ms ORCA SAYS: 'alert Warning.' / +122.8 ms ORCA SAYS: 'OK push button.' / FAIL Orca says 'Disk is almost full.'`
+  - `pass1 catalog-c-overlays-dialogs 'Space on Confirm (message box)': +132.9 ms ORCA SAYS: 'alert Are you sure?' / 'OK push button.' / FAIL Orca says 'This action cannot be undone.'`
+  - `pass2 catalog-c-overlays-dialogs: the same for 'Open Dialog', 'Information', 'Warning', 'Error' and 'Confirm'`
+- **Where (`c198e4d1`):** examples/widget\_catalog/src/tabs/overlays.rs:327-378
+- **Evidence (`261a218f`):**
   - `+200.2 ms ORCA SAYS (CUT): 'Warning' / +635.4 ms ORCA SAYS: 'alert Warning.' / +635.5 ms ORCA SAYS: 'OK push button.' / FAIL Orca says 'Disk is almost full.'`
   - `examples/widget_catalog/src/tabs/overlays.rs:330, 345, 356, 367, 378 (.detailed_text(...) as the only message)`
   - `catalog-c-overlays-dialogs-20260925-133059-3247045 'Space on Warning': +64.7 ms ORCA SAYS (CUT): 'Warning' / +101.0 ms ORCA SAYS: 'alert Warning.' 'OK push button.'`
@@ -524,12 +658,22 @@ Expanded/collapsed state, tree level and has-popup never reach AT-SPI (or macOS)
 - **Scenario:** catalog-c-data-views
 - **Act:** TreeView: Down to 'Documents', Right to expand, Left to collapse; TreeTableView: expand 'docs'; 'Show details'
 - **The reader should get:** 'Documents, collapsed' / 'expanded' / 'collapsed', and 'level 2' on children
-- **The reader gets:** Orca says only 'Documents.' before and after. The tree items carry no expandable, expanded or collapsed state and no level attribute. accesskit\_atspi\_common 0.20's state() maps no Expanded/Expandable/Collapsed and exports no level or has-popup. accesskit\_macos 0.27 has no expanded mapping either. accesskit\_windows does expose ExpandCollapsePattern (node.rs:718-723), so Windows is fine
+- **The reader got (`261a218f`):** Orca says only 'Documents.' before and after. The tree items carry no expandable, expanded or collapsed state and no level attribute. accesskit\_atspi\_common 0.20's state() maps no Expanded/Expandable/Collapsed and exports no level or has-popup. accesskit\_macos 0.27 has no expanded mapping either. accesskit\_windows does expose ExpandCollapsePattern (node.rs:718-723), so Windows is fine
 - **Platform:** Linux AT-SPI (measured) and macOS (source); Windows has it
 - **Severity:** high; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** accesskit\_atspi\_common-0.20.0/src/node.rs:300-384, 415-437
-- **Evidence:**
+- **Now (`c198e4d1`):** Orca still says only 'Documents.' when a tree item is reached, expanded or collapsed, and 'docs.' on a TreeTableView folder row. Tree items carry no expandable, expanded or collapsed state and no level attribute, and 'Show details' in the message box is read as a plain push button before and after Space.
+- **Measured again:** catalog-c-data-views, 2 of 2 runs; catalog-c-overlays-dialogs, 2 of 2 runs; remeasure-catalog-c-2-treetable-grid, 1 of 1 run; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-data-views 'Down in the TreeView': +168.3 ms ORCA SAYS: 'Documents.' / FAIL Orca says 'collapsed'`
+  - `pass1 catalog-c-data-views 'Right (expand Documents)': +173.6 ms ORCA SAYS: 'Documents.' / FAIL Orca says 'expanded' (the tree holds [tree item] 'Projects')`
+  - `pass2 catalog-c-data-views 'Left then Left (to the parent, then collapse)': +368.1 ms ORCA SAYS: 'Documents.' / FAIL Orca says 'collapsed'`
+  - `pass1 catalog-c-data-views tree-Right--expand-Documents-.txt: [tree item] 'Documents' {focused,selectable,selected} attrs={'posinset': '1'} (no expandable state, no level)`
+  - `judge remeasure-catalog-c-2-treetable-grid 'Right on the row': +221.1 ms ORCA SAYS: 'docs.' / FAIL Orca says 'expanded' (tree-Right-on-the-row.txt holds [label] 'README.md')`
+  - `pass1 and pass2 catalog-c-overlays-dialogs 'Shift+Tab to 'Show details'': ORCA SAYS: 'Show details push button.' / FAIL Orca says 'collapsed'; 'Space on 'Show details'': FAIL Orca says 'expanded'`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:301-389 state() maps no Expanded, Expandable or Collapsed; node.rs:417-442 attributes() exports only placeholder-text, posinset, setsize, id, braillelabel, brailleroledescription`
+- **Where (`c198e4d1`):** accesskit\_atspi\_common-0.21.0/src/node.rs:301-389, 417-442 (Windows has it: accesskit\_windows-0.35.1/src/node.rs:714-724, 695-699)
+- **Evidence (`261a218f`):**
   - `act 'Down in the TreeView': +165.8 ms ORCA SAYS: 'Documents.' / FAIL Orca says 'collapsed'`
   - `act 'Right (expand Documents)': +212.3 ms ORCA SAYS: 'Documents.' / FAIL Orca says 'expanded' (tree now holds 'Projects')`
   - `TreeTableView: +556.7 ms ORCA SAYS: 'docs.' / FAIL Orca says 'expanded' (tree holds 'README.md')`
@@ -549,12 +693,22 @@ Expanding or collapsing a tree row destroys the focused row and re-creates it
 - **Scenario:** catalog-c-data-views
 - **Act:** Right or Left on a TreeView or TreeTableView row
 - **The reader should get:** The same row node stays focused; only its state and its children change
-- **The reader gets:** The focused row goes defunct and a new node with the same name takes focus. Orca logs 'Ignoring defunct object: \[tree item: 'Documents'\]' and re-reads the row ('Documents.' twice on Left, Left, the first cut). Any reader context on the row (review position, pending events) is lost
+- **The reader got (`261a218f`):** The focused row goes defunct and a new node with the same name takes focus. Orca logs 'Ignoring defunct object: \[tree item: 'Documents'\]' and re-reads the row ('Documents.' twice on Left, Left, the first cut). Any reader context on the row (review position, pending events) is lost
 - **Platform:** Linux AT-SPI/Orca measured; node replacement happens on all platforms
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/tree\_view (row realization on reflatten); crates/teksilo-widgets/src/tree\_table\_view.rs
-- **Evidence:**
+- **Now (`c198e4d1`):** Right or Left on a TreeView row still replaces the focused row: focus moves to a new 'Documents' node, the old one goes defunct, and Orca logs 'Ignoring defunct object'. Left, Left makes Orca read 'Documents.' twice, the first cut. The TreeTableView does the same on Right and Left, and in the TreeView a plain Down now also replaces every visible row.
+- **Measured again:** catalog-c-data-views, 2 of 2 runs; remeasure-catalog-c-2-treetable-grid, 1 of 1 run
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-data-views 'Right (expand Documents)': +62.0 ms object:state-changed:focused 1 [tree item] 'Documents' / +62.0 ms object:state-changed:focused 0 [tree item] 'Documents' / +64.4 ms object:state-changed:defunct 1 [tree item] 'Documents'`
+  - `pass2 catalog-c-data-views 'Right (expand Documents)': +68.8 ms object:state-changed:focused 1 [tree item] 'Documents' / +68.8 ms object:state-changed:focused 0 [tree item] 'Documents' / +69.8 ms object:state-changed:defunct 1 [tree item] 'Documents'`
+  - `pass1 catalog-c-data-views orca-debug.out 15:55:10.568693 EVENT MANAGER: Ignoring defunct object: [tree item: 'Documents']`
+  - `pass1 catalog-c-data-views 'Left then Left (to the parent, then collapse)': +194.5 ms ORCA SAYS (CUT): 'Documents.' / +374.3 ms ORCA SAYS: 'Documents.'`
+  - `pass2 catalog-c-data-views 'Left then Left (to the parent, then collapse)': +215.2 ms ORCA SAYS (CUT): 'Documents.' / +368.1 ms ORCA SAYS: 'Documents.'`
+  - `pass1 catalog-c-data-views 'Down in the TreeView': +74.7 ms object:state-changed:defunct 1 [tree item] 'Documents' (6 nodes defunct on a plain Down)`
+  - `judge remeasure-catalog-c-2-treetable-grid 'Right on the row': +81.1 ms object:state-changed:focused 1 [table cell] '' / +84.1 ms object:state-changed:focused 0 [table cell] '' / +93.1 ms object:state-changed:defunct 1 [table cell] '' (30 nodes defunct)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/tree\_view/body\_pane.rs:143-149 (the pane rebuilds on its version signal); crates/teksilo-widgets/src/tree\_table\_view/body\_pane.rs:202; crates/teksilo-widgets/src/tree\_table\_view.rs
+- **Evidence (`261a218f`):**
   - `+74.1 ms object:state-changed:focused 1 [tree item] 'Documents' / +74.2 ms object:state-changed:focused 0 [tree item] 'Documents'`
   - `FAIL no object:state-changed:defunct event from [tree item] '*' / orca-debug.out 13:09:09.618033 EVENT MANAGER: Ignoring defunct object: [tree item: 'Documents']`
   - `act 'Left then Left': ORCA SAYS (CUT): 'Documents.' then 'Documents.'`
@@ -571,12 +725,20 @@ StandardListItem and StandardTreeItem have no role: 'unknown' nodes everywhere t
 - **Scenario:** catalog-c-data-views, catalog-c-overlays-notices
 - **Act:** Launch on the Data tab; open the notification log
 - **The reader should get:** Standalone items expose a list item or tree item role (or none at all); inside a ListView or TreeView the row is not duplicated
-- **The reader gets:** Every StandardListItem/StandardTreeItem publishes a name and no role, so AccessKit's default Role::Unknown reaches AT-SPI as 'unknown' (UIA: Custom, macOS: AXUnknown per the adapters' role maps). In ListView and TreeView each \[list item\]/\[tree item\] has an \[unknown\] child repeating its name. Standalone items and the notification-log entries are bare \[unknown\] nodes
+- **The reader got (`261a218f`):** Every StandardListItem/StandardTreeItem publishes a name and no role, so AccessKit's default Role::Unknown reaches AT-SPI as 'unknown' (UIA: Custom, macOS: AXUnknown per the adapters' role maps). In ListView and TreeView each \[list item\]/\[tree item\] has an \[unknown\] child repeating its name. Standalone items and the notification-log entries are bare \[unknown\] nodes
 - **Platform:** all platforms
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/standard\_item.rs:916-935
-- **Evidence:**
+- **Now (`c198e4d1`):** Every StandardListItem and StandardTreeItem still publishes a name and no role. Each ListView and TreeView row holds an \[unknown\] child repeating its name, the standalone items are bare \[unknown\] nodes, and so are the notification log's entries.
+- **Measured again:** catalog-c-data-views, 2 of 2 runs; catalog-c-overlays-notices, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-data-views 'focus the ListView': FAIL no node with the role 'unknown' in the tree: [unknown] 'Row 1' desc=None`
+  - `pass1 catalog-c-data-views tree-Right--expand-Documents-.txt: [list item] 'Row 1' {selectable} attrs={'posinset': '1', 'setsize': '10'} > [unknown] 'Row 1' attrs={'setsize': '10'}; [unknown] 'First item'; [unknown] 'Root'; [tree item] 'Documents' > [unknown] 'Documents'`
+  - `pass1 catalog-c-data-views launch tree audit: unknown-role: [unknown] 'Row 1': a node whose role the adapter could not map`
+  - `pass1 and pass2 catalog-c-overlays-notices tree-Space-on-the-Notifications-bell.txt: [unknown] 'Build failed' desc='Three errors, two warnings.' / [unknown] 'Saved' desc='Saved'`
+  - `crates/teksilo-widgets/src/standard_item.rs:916-935 (set_name / set_description, no set_role)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/standard\_item.rs:916-935
+- **Evidence (`261a218f`):**
   - `[list item] 'Row 1' {selectable} attrs={'posinset': '1', 'setsize': '10'} > [unknown] 'Row 1' attrs={'setsize': '10'}`
   - `[unknown] 'First item' / [unknown] 'Second item' / [unknown] 'Root' / [unknown] 'Child A' (standalone section)`
   - `[tree item] 'Documents' > [unknown] 'Documents'`
@@ -595,12 +757,20 @@ The Data tab's ListView, TreeView, TableView and TreeTableView are unnamed; focu
 - **Scenario:** catalog-c-data-views, catalog-c-data-tabwalk
 - **Act:** Tab walk and data-views on the Data tab
 - **The reader should get:** 'People, table' / 'Files, tree table' etc.; at least something spoken when the table takes focus
-- **The reader gets:** 'list box.', 'tree.', 'tree table.'. The TableView says nothing at all: Orca's table generator needs the AT-SPI Table interface, which AccessKit does not implement, and with no name there is nothing else. Only the GridView is named ('Tiles')
+- **The reader got (`261a218f`):** 'list box.', 'tree.', 'tree table.'. The TableView says nothing at all: Orca's table generator needs the AT-SPI Table interface, which AccessKit does not implement, and with no name there is nothing else. Only the GridView is named ('Tiles')
 - **Platform:** Linux/Orca measured (table silence is AT-SPI-specific)
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/widget\_catalog/src/tabs/data.rs:66, 88, 135, 171-210
-- **Evidence:**
+- **Now (`c198e4d1`):** The ListView, TreeView, TableView and TreeTableView are still unnamed: Orca says 'list box.' and 'tree.', and on the People table it says nothing at all. Only the GridView is named ('Tiles').
+- **Measured again:** catalog-c-data-views, 2 of 2 runs; catalog-c-data-tabwalk and tabwalk-widget-catalog-data, 4 of 4 runs; remeasure-catalog-c-2 scenarios, 1 of 1 run each
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-data-views 'focus the ListView': +74.0 ms object:state-changed:focused 1 [list box] '' / +151.3 ms ORCA SAYS: 'list box.'`
+  - `pass1 catalog-c-data-views 'Tab to the TableView': +109.5 ms object:state-changed:focused 1 [table] '' (no ORCA SAYS in the act) / FAIL focus lands on a node with a name`
+  - `pass2 tabwalk-widget-catalog-data 'Tab 14': +133.9 ms object:state-changed:focused 1 [table] '' (no ORCA SAYS); orca-debug.out 17:46:22.984414 - SPEECH GENERATOR: Results for [table] are pauses only`
+  - `judge remeasure-catalog-c-2-table-exit 'Ctrl+Tab again': +198.5 ms object:state-changed:focused 1 [tree table] '' / +332.6 ms ORCA SAYS: 'tree table.'`
+  - `judge remeasure-catalog-c-2-treetable-grid 'set the scene: Ctrl+Tab towards the tile grid (2)': +143.6 ms object:state-changed:focused 1 [table] 'Tiles' / +337.1 ms ORCA SAYS: 'Tiles.'`
+- **Where (`c198e4d1`):** examples/widget\_catalog/src/tabs/data.rs:66, 88, 135, 171-210
+- **Evidence (`261a218f`):**
   - `+52.0 ms object:state-changed:focused 1 [list box] '' / +100.6 ms ORCA SAYS: 'list box.'`
   - `+705.9 ms object:state-changed:focused 1 [table] '' (no ORCA SAYS in the act)`
   - `data-tabwalk orca-debug.out 13:18:01.670976 - SPEECH GENERATOR: Results for [table] are pauses only`
@@ -618,12 +788,22 @@ Tab never leaves the TableView (it walks cells); nothing tells a reader that Ctr
 - **Scenario:** catalog-c-data-views, catalog-c-data-tabwalk
 - **Act:** Tab into the People table, then keep pressing Tab
 - **The reader should get:** Tab moves to the next control, or the reader is told how to leave (WCAG 2.1.2)
-- **The reader gets:** Each Tab moves to the next cell ('Admin.', '$45000.', 'Blake.' ...). The 30-stop tab walk never left the table. Ctrl+Tab does leave (documented in docs/table-view.md:498-501 as the default tab\_traversal), but no description or hint says so
+- **The reader got (`261a218f`):** Each Tab moves to the next cell ('Admin.', '$45000.', 'Blake.' ...). The 30-stop tab walk never left the table. Ctrl+Tab does leave (documented in docs/table-view.md:498-501 as the default tab\_traversal), but no description or hint says so
 - **Platform:** all platforms
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/keyboard.rs:431-460; crates/teksilo-widgets/src/table\_view/column.rs:188-192
-- **Evidence:**
+- **Now (`c198e4d1`):** Tab still walks the People table cell by cell and never leaves it; the 40-stop walks end still inside it. Ctrl+Tab from a cell now stops first on the Filter button in the table's Name column header ('Name column header.' 'Filter push button.'), and only a second Ctrl+Tab leaves for the tree table; Tab from that Filter button goes back into the cells. Nothing in the tree tells a reader about either key.
+- **Measured again:** catalog-c-data-views, 2 of 2 runs; data tab walks, 4 of 4 runs; remeasure-catalog-c-2-table-exit, 1 of 1 run (Ctrl+Tab lands on Filter in 3 of 3 runs)
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-data-views 'Tab five more times': five focus moves, each to a [table cell] ''; +1092.2 ms ORCA SAYS: 'Casey.' / FAIL focus leaves the table`
+  - `pass2 tabwalk-widget-catalog-data: Tab 15 to Tab 40 all [table cell] '' ('Admin.' ... '$70096.')`
+  - `pass1 catalog-c-data-views 'Ctrl+Tab leaves the table': +77.6 ms object:state-changed:focused 1 [push button] 'Filter' / +227.5 ms ORCA SAYS: 'Name column header.' / +227.5 ms ORCA SAYS: 'Filter push button.'`
+  - `pass2 catalog-c-data-views 'Ctrl+Tab leaves the table': +89.7 ms object:state-changed:focused 1 [push button] 'Filter' / +412.5 ms ORCA SAYS: 'Name column header.'`
+  - `judge remeasure-catalog-c-2-table-exit 'Ctrl+Tab from a cell': +57.1 ms object:state-changed:focused 1 [push button] 'Filter'`
+  - `judge remeasure-catalog-c-2-table-exit 'Tab from where Ctrl+Tab landed': +134.2 ms object:state-changed:focused 1 [table cell] '' / +299.5 ms ORCA SAYS: 'Admin.'`
+  - `judge remeasure-catalog-c-2-table-exit 'Ctrl+Tab again' (from the Filter button): +198.5 ms object:state-changed:focused 1 [tree table] '' / +332.6 ms ORCA SAYS: 'tree table.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/keyboard.rs:429-460; crates/teksilo-widgets/src/table\_view/column.rs:185-192
+- **Evidence (`261a218f`):**
   - `data-tabwalk: Tab 16 [table cell] '' :: Admin. / Tab 17 :: $45000. / ... / Tab 30 [table cell] '' :: Finn.`
   - `act 'Ctrl+Tab leaves the table': +1643.0 ms object:state-changed:focused 1 [tree table] '' / ORCA SAYS: 'tree table.'`
   - `catalog-c-data-views-20260925-133507-3516143 'Tab five more times': five focus moves, each to a [table cell]; 'Ctrl+Tab leaves the table': ORCA SAYS 'tree table.'`
@@ -639,12 +819,17 @@ Slider value changes from the keyboard are not published until some other event 
 - **Scenario:** catalog-c-touch
 - **Act:** Focus the Touch tab's slider ('Value', 40) and press Right
 - **The reader should get:** The reader hears '41' at once
-- **The reader gets:** No accessible-value change arrives during the 2.5 s after Right, and Orca is silent. The new value is only emitted when the next event (Tab) forces an accessibility sync, in the same update as the focus move, so Orca's '41' is cut at once. The likely cause: Slider never binds its value for accessibility (no BindingLevel::AccessibilityOnly in slider.rs, unlike SpinBox or ProgressBar). accessibility() reads self.value only when the node is re-walked for another reason
+- **The reader got (`261a218f`):** No accessible-value change arrives during the 2.5 s after Right, and Orca is silent. The new value is only emitted when the next event (Tab) forces an accessibility sync, in the same update as the focus move, so Orca's '41' is cut at once. The likely cause: Slider never binds its value for accessibility (no BindingLevel::AccessibilityOnly in slider.rs, unlike SpinBox or ProgressBar). accessibility() reads self.value only when the node is re-walked for another reason
 - **Platform:** all platforms (the tree update is never produced); measured on Linux/Orca
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `5c8ff299` (state-publish).
-- **Where:** crates/teksilo-widgets/src/slider.rs:340-420, 786-799
-- **Evidence:**
+- **Now (`c198e4d1`):** Right on the Touch tab's slider publishes the new value at once and Orca says '41' in the same act.
+- **Measured again:** catalog-c-touch, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-touch 'Right on the slider': +45.0 ms object:property-change:accessible-value [slider] 'Value' / +65.1 ms ORCA SAYS: '41'`
+  - `pass2 catalog-c-touch 'Right on the slider': +39.5 ms object:property-change:accessible-value [slider] 'Value' / +48.1 ms ORCA SAYS: '41'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/slider.rs:342-360 (the value bound at BindingLevel::AccessibilityOnly), 794
+- **Evidence (`261a218f`):**
   - `act 'Right on the slider': FAIL the slider's new value reaches the bus: no accessible-value change on a slider in the act / FAIL Orca says '41'`
   - `act 'Tab to the splitter handle': +50.5 ms object:property-change:accessible-value [slider] 'Value' / +60.6 ms object:state-changed:focused 1 [separator] 'Splitter divider' / +72.8 ms ORCA SAYS (CUT): '41'`
   - `crates/teksilo-widgets/src/slider.rs:786-799 (accessibility reads self.value.get()); grep 'AccessibilityOnly' finds no binding in slider.rs`
@@ -661,12 +846,19 @@ A ListView with no selection model does not expose its keyboard row: arrow keys 
 - **Scenario:** catalog-c-touch
 - **Act:** Touch tab: focus the reorderable list, press Down, Down
 - **The reader should get:** Each Down moves a focus (or active-descendant) to the next row and the reader hears 'row 1', 'row 2'
-- **The reader gets:** No focus event of any kind and no speech, though the list is tracking a current row internally: the next Alt+Down moves 'row 2' and only then does focus appear on it. A reader cannot hear which row they are about to reorder
+- **The reader got (`261a218f`):** No focus event of any kind and no speech, though the list is tracking a current row internally: the next Alt+Down moves 'row 2' and only then does focus appear on it. A reader cannot hear which row they are about to reorder
 - **Platform:** all platforms (no tree focus is produced); measured on Linux/Orca
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/list\_view/widget\_impl.rs:436-470, 993-1055
-- **Evidence:**
+- **Now (`c198e4d1`):** Down and Down again in the Touch tab's reorderable list still produce no focus change and no speech. Only Alt+Down puts focus on 'row 2', so a reader cannot hear which row they are about to move.
+- **Measured again:** catalog-c-touch, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-touch 'Down in the reorderable list': FAIL focus lands on [list item] 'row 1': no focus change on the bus in this act / FAIL Orca says 'row 1': Orca unheard: 'row 1'`
+  - `pass1 catalog-c-touch 'Down again': no focus change on the bus in this act`
+  - `pass2 catalog-c-touch 'Down in the reorderable list' and 'Down again': no focus change on the bus in this act`
+  - `pass1 catalog-c-touch 'Alt+Down: move the current row down (1st move)': +166.4 ms object:state-changed:focused 1 [list item] 'row 2' / +392.3 ms ORCA SAYS: 'row 2.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/list\_view/widget\_impl.rs:438-472, 996-1063; examples/widget\_catalog/src/tabs/touch.rs:112-124
+- **Evidence (`261a218f`):**
   - `act 'Down in the reorderable list': FAIL focus lands on [list item] 'row 1': no focus change on the bus in this act / FAIL Orca says 'row 1': Orca unheard`
   - `act 'Down again': no focus change on the bus in this act`
   - `act 'Alt+Down': +149.4 ms object:state-changed:focused 1 [list item] 'row 2' / +362.3 ms ORCA SAYS: 'row 2.'`
@@ -684,12 +876,19 @@ ListView keyboard reorder: 'Moved to N of M' is emitted in the same update as th
 - **Scenario:** catalog-c-touch
 - **Act:** Alt+Down on a row of the reorderable list
 - **The reader should get:** 'Moved to 3 of 30' heard in full
-- **The reader gets:** The announcement reaches the bus before the focus event of the same update, and Orca's stop for the new focus cuts it: 'Moved to 3 of 30 (CUT)', 'row 2.' In 2 of 3 runs it was not spoken at all. This message goes through ctx.announce (list\_view/widget\_impl.rs:262), and its source is the announcer node NodeId(1) (path .../18446744073709551616), so its defunct drop on the 2nd move is K2 and the K2 fix covers that part. The ordering cut is separate, and remains after the fix
+- **The reader got (`261a218f`):** The announcement reaches the bus before the focus event of the same update, and Orca's stop for the new focus cuts it: 'Moved to 3 of 30 (CUT)', 'row 2.' In 2 of 3 runs it was not spoken at all. This message goes through ctx.announce (list\_view/widget\_impl.rs:262), and its source is the announcer node NodeId(1) (path .../18446744073709551616), so its defunct drop on the 2nd move is K2 and the K2 fix covers that part. The ordering cut is separate, and remains after the fix
 - **Platform:** Linux AT-SPI/Orca
 - **Severity:** medium; **layer:** framework
-- **Status:** Fixed by `b518253f` (announce-focus). Fixed part: ListView keyboard reorder cut; same ListView path, verified via the data-collections and drag-and-drop runs.
-- **Where:** crates/teksilo-widgets/src/list\_view/widget\_impl.rs:235-262; crates/teksilo-core/src/announcer.rs
-- **Evidence:**
+- **Status:** Fixed by `b518253f` (announce-focus).
+- **Now (`c198e4d1`):** Each keyboard move is now heard whole: focus lands on the moved row first, the announcement follows in a later update, and Orca says 'row 2.' then 'Moved to 3 of 30', and on the second move 'Moved to 4 of 30'. No announcement came from a defunct node.
+- **Measured again:** catalog-c-touch, 2 of 2 runs (4 of 4 moves heard whole)
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-touch 'Alt+Down: move the current row down (1st move)': +166.4 ms object:state-changed:focused 1 [list item] 'row 2' / +195.2 ms object:announcement [status bar] 'Moved to 3 of 30' text='Moved to 3 of 30' / +392.3 ms ORCA SAYS: 'row 2.' / +410.6 ms ORCA SAYS: 'Moved to 3 of 30'`
+  - `pass1 catalog-c-touch 'Alt+Down: move it again (2nd move)': +106.9 ms object:state-changed:focused 1 [list item] 'row 2' / +116.1 ms object:announcement [status bar] 'Moved to 4 of 30' / +254.4 ms ORCA SAYS: 'row 2.' / +262.5 ms ORCA SAYS: 'Moved to 4 of 30'`
+  - `pass2 catalog-c-touch 'Alt+Down: move the current row down (1st move)': +151.0 ms object:state-changed:focused 1 [list item] 'row 2' / +164.2 ms object:announcement [status bar] 'Moved to 3 of 30' / +476.2 ms ORCA SAYS: 'Moved to 3 of 30'`
+  - `pass2 catalog-c-touch 'Alt+Down: move it again (2nd move)': +139.0 ms object:announcement [status bar] 'Moved to 4 of 30' / +292.5 ms ORCA SAYS: 'Moved to 4 of 30'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/list\_view/widget\_impl.rs:237-264; crates/teksilo-core/src/announcer.rs:71-105 (a message waits for an update that leaves focus where it is); crates/teksilo-core/src/widget\_tree/accessibility\_impl.rs:346
+- **Evidence (`261a218f`):**
   - `+148.8 ms object:announcement [status bar] 'Moved to 3 of 30' text='Moved to 3 of 30' / +149.4 ms object:state-changed:focused 1 [list item] 'row 2' / observed 'Moved to 3 of 30' reached the bus 0.5 ms before the act's focus change`
   - `run 131516: ORCA SAYS (CUT): 'Moved to 3 of 30' then 'row 2.'`
   - `2nd move: observed 'Moved to 4 of 30' came from a node the bus had already been told was defunct; path /org/a11y/atspi/accessible/0/18446744073709551616 (K2)`
@@ -708,12 +907,19 @@ Touch tab controls lack useful names: unnamed text field, unnamed list, a slider
 - **Scenario:** catalog-c-touch, catalog-c-touch-tabwalk
 - **Act:** Tab walk of the Touch tab
 - **The reader should get:** Each control named for what it does
-- **The reader gets:** 'list box.' / 'Value horizontal slider 40.' / 'entry Tap, hold, drag a handle.': the TextInput has only a placeholder (no label), the reorderable ListView has no name, and the slider's label is the generic 'Value'
+- **The reader got (`261a218f`):** 'list box.' / 'Value horizontal slider 40.' / 'entry Tap, hold, drag a handle.': the TextInput has only a placeholder (no label), the reorderable ListView has no name, and the slider's label is the generic 'Value'
 - **Platform:** all platforms
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/widget\_catalog/src/tabs/touch.rs:118-124, 135, 244
-- **Evidence:**
+- **Now (`c198e4d1`):** The Touch tab walk still reads 'list box.', 'Value horizontal slider 40.' and 'entry Tap, hold, drag a handle.': the reorderable list has no name, the slider's label is the generic 'Value', and the text field has only a placeholder.
+- **Measured again:** catalog-c-touch-tabwalk, 2 of 2 runs; catalog-c-touch, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-touch-tabwalk 'Tab 12': +45.9 ms object:state-changed:focused 1 [list box] '' / +146.2 ms ORCA SAYS: 'list box.'`
+  - `pass1 catalog-c-touch-tabwalk 'Tab 13': +34.9 ms object:state-changed:focused 1 [slider] 'Value' / +145.8 ms ORCA SAYS: 'Value horizontal slider 40.'`
+  - `pass1 catalog-c-touch-tabwalk 'Tab 15': +76.5 ms object:state-changed:focused 1 [entry] '' / +193.1 ms ORCA SAYS: 'entry Tap, hold, drag a handle.'`
+  - `pass2 catalog-c-touch-tabwalk: Tab 12 'list box.' / Tab 13 'Value horizontal slider 40.' / Tab 15 'entry Tap, hold, drag a handle.'`
+- **Where (`c198e4d1`):** examples/widget\_catalog/src/tabs/touch.rs:118-124, 135, 244
+- **Evidence (`261a218f`):**
   - `touch-tabwalk: Tab 13 [list box] '' :: list box. / Tab 14 [slider] 'Value' :: Value horizontal slider 40. / Tab 16 [entry] '' :: entry Tap, hold, drag a handle.`
   - `examples/widget_catalog/src/tabs/touch.rs:117-124, 135, 244 (TextInput::new(field).placeholder(...), no label)`
   - `catalog-c-touch-tabwalk-20260925-133855-3726010: Tab 13 [list box] '' / Tab 14 [slider] 'Value' / Tab 16 [entry] ''`
@@ -729,12 +935,19 @@ The DropTarget offers a reader no way to drop without dragging, and is an unname
 - **Scenario:** catalog-c-dragdrop, catalog-c-dragdrop-tabwalk
 - **Act:** Tab past the two DropZones; inspect the DropTarget
 - **The reader should get:** A drop target with a keyboard or AT route to the same action (a Browse button, or a named group with an action); WCAG 2.5.7
-- **The reader gets:** Tab goes from the second 'Browse…' straight to the title bar. The DropTarget is \[panel\] '' &gt; \[panel\] '' &gt; \[label\], not focusable, no action, no name, and the drop hint only exists during a drag. The DropZones do pass: each has a Browse… button whose zone Orca speaks as context
+- **The reader got (`261a218f`):** Tab goes from the second 'Browse…' straight to the title bar. The DropTarget is \[panel\] '' &gt; \[panel\] '' &gt; \[label\], not focusable, no action, no name, and the drop hint only exists during a drag. The DropZones do pass: each has a Browse… button whose zone Orca speaks as context
 - **Platform:** all platforms
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/widget\_catalog/src/tabs/dragdrop.rs:69-86; crates/teksilo-widgets/src/drop\_target.rs
-- **Evidence:**
+- **Now (`c198e4d1`):** Tab still goes from the second 'Browse…' straight to the title bar's 'Menu'. The DropTarget is still an unnamed, unfocusable panel with no action, so a reader has no route to it without dragging. The two DropZones still pass, each read with its zone.
+- **Measured again:** catalog-c-dragdrop, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-dragdrop 'Tab on past the zones': +36.2 ms object:state-changed:focused 1 [push button] 'Menu' / +125.9 ms ORCA SAYS: 'landmark Window title bar'`
+  - `pass1 catalog-c-dragdrop 'look for a non-drag route to the DropTarget': FAIL the DropTarget is focusable or offers an action: found [label] 'DropTarget — wraps a Panel; drop a file to see the border highlight' / ancestor [panel] '' states=['enabled', 'sensitive', 'showing', 'visible'] actions=[]`
+  - `pass2 catalog-c-dragdrop 'Tab on past the zones': +34.0 ms object:state-changed:focused 1 [push button] 'Menu'`
+  - `pass1 catalog-c-dragdrop 'Tab to the second Browse… button': +128.2 ms ORCA SAYS: 'Drop images here panel.' / 'Browse… push button.'`
+- **Where (`c198e4d1`):** examples/widget\_catalog/src/tabs/dragdrop.rs:69-86; crates/teksilo-widgets/src/drop\_target.rs
+- **Evidence (`261a218f`):**
   - `act 'Tab on past the zones': +50.8 ms object:state-changed:focused 1 [push button] 'Menu' / +313.9 ms ORCA SAYS: 'landmark Window title bar'`
   - `FAIL the DropTarget is focusable or offers an action: found [label] 'DropTarget — wraps a Panel; drop a file to see the border highlight' / ancestor [panel] '' states=['enabled', 'sensitive', 'showing', 'visible'] actions=[]`
   - `examples/widget_catalog/src/tabs/dragdrop.rs:69-86`
@@ -752,12 +965,18 @@ Each DropZone's empty live status label emits an empty announcement at launch
 - **Scenario:** catalog-c-dragdrop
 - **Act:** Launch on the Drag & Drop tab
 - **The reader should get:** No announcement until the status line has text
-- **The reader gets:** Two object:announcement events with empty text. The status TextWidget is a live label whose name (from its empty value) is Some(""), and atspi\_common announces any named live node on add. Orca ignores them, but they are noise, and a wasted announcement on other readers
+- **The reader got (`261a218f`):** Two object:announcement events with empty text. The status TextWidget is a live label whose name (from its empty value) is Some(""), and atspi\_common announces any named live node on add. Orca ignores them, but they are noise, and a wasted announcement on other readers
 - **Platform:** Linux AT-SPI (adapter.rs:71-77)
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/drop\_zone.rs:385-392
-- **Evidence:**
+- **Now (`c198e4d1`):** At launch on the Drag & Drop tab, the two DropZones' empty live status labels still put two announcements with empty text on the bus. Orca says nothing for them.
+- **Measured again:** catalog-c-dragdrop, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-dragdrop 'the launch's announcements': FAIL no empty announcement reached the bus: 15:54:51.048311 object:announcement [label] '' text='' path /org/a11y/atspi/accessible/0/79228404111271470967541465088 / 15:54:51.059776 object:announcement [label] '' text=''`
+  - `pass2 catalog-c-dragdrop 'the launch's announcements': 15:59:46.201603 object:announcement [label] '' text='' / 15:59:46.208840 object:announcement [label] '' text=''`
+  - `accesskit_atspi_common-0.21.0/src/adapter.rs:72-78 still announces any live node added with a name`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/drop\_zone.rs:385-392; accesskit\_atspi\_common-0.21.0/src/adapter.rs:72-78
+- **Evidence (`261a218f`):**
   - `13:10:41.920283 object:announcement [label] '' text='' path /org/a11y/atspi/accessible/0/79228404074377982820122361856`
   - `13:10:41.932532 object:announcement [label] '' text='' path /org/a11y/atspi/accessible/0/79228403742336589493350432768`
   - `crates/teksilo-widgets/src/drop_zone.rs:385-392 (TextWidget::new(lit!(String::new())).access_live(Live::Polite))`
@@ -774,12 +993,19 @@ Animations tab: three toggles are all named 'Visible'
 - **Scenario:** catalog-c-animations, catalog-c-animations-tabwalk
 - **Act:** Tab walk of the Animations tab
 - **The reader should get:** 'Fade visible', 'Slide visible', 'Scale visible' (or the section title as group label)
-- **The reader gets:** 'Visible toggle button pressed.' three times, at Tab 13, 16 and 18, and nothing tells them apart. Orca does not speak the section headings as context
+- **The reader got (`261a218f`):** 'Visible toggle button pressed.' three times, at Tab 13, 16 and 18, and nothing tells them apart. Orca does not speak the section headings as context
 - **Platform:** all platforms
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/widget\_catalog/src/tabs/animations.rs:26-28, 38, 106, 133
-- **Evidence:**
+- **Now (`c198e4d1`):** The Animations tab walk still reads 'Visible toggle button pressed.' three times, and nothing tells the Fade, Slide and Scale toggles apart.
+- **Measured again:** catalog-c-animations-tabwalk, 2 of 2 runs; tabwalk-widget-catalog-animations, 2 of 2 runs; catalog-c-animations, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-animations-tabwalk 'Tab 12': object:state-changed:focused 1 [toggle button] 'Visible' / +90.6 ms ORCA SAYS: 'Visible toggle button pressed.'`
+  - `pass1 catalog-c-animations-tabwalk 'Tab 15' and 'Tab 17': [toggle button] 'Visible' / ORCA SAYS: 'Visible toggle button pressed.'`
+  - `pass2 catalog-c-animations-tabwalk: Tabs 12, 15 and 17 [toggle button] 'Visible'`
+  - `pass1 catalog-c-animations 'focus the Fade toggle': FAIL each toggle is named for what it drives`
+- **Where (`c198e4d1`):** examples/widget\_catalog/src/tabs/animations.rs:26-28, 38, 106, 133
+- **Evidence (`261a218f`):**
   - `FAIL each toggle is named for what it drives: toggle buttons: ['teksu! DSL', 'Visible', 'Expanded', 'Visible', 'Visible'] / 'Visible' names 3 toggles`
   - `animations-tabwalk: Tab 13 [toggle button] 'Visible' / Tab 16 [toggle button] 'Visible' / Tab 18 [toggle button] 'Visible'`
   - `examples/widget_catalog/src/tabs/animations.rs:38, 106, 133`
@@ -796,12 +1022,19 @@ Content a demo hides stays in the tree: collapsed (Collapse), faded out (Fade), 
 - **Scenario:** catalog-c-animations
 - **Act:** Space on Expanded (collapse), on Visible (fade out), on Visible (slide out)
 - **The reader should get:** Hidden content leaves the tree a reader walks
-- **The reader gets:** 'Collapsing content', 'fading' and 'snackbar' are still in the tree after the toggle. Fade and Slide document that they are AT-transparent and that callers must pair them with visible\_when, which the example does not (example layer). Collapse's docs say its content 'is announced by its own subtree when expanded', yet it is still exposed when collapsed (framework)
+- **The reader got (`261a218f`):** 'Collapsing content', 'fading' and 'snackbar' are still in the tree after the toggle. Fade and Slide document that they are AT-transparent and that callers must pair them with visible\_when, which the example does not (example layer). Collapse's docs say its content 'is announced by its own subtree when expanded', yet it is still exposed when collapsed (framework)
 - **Platform:** all platforms
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/animations/collapse.rs:197-203; crates/teksilo-widgets/src/animations/slide.rs:227-229; (example for Fade: examples/widget\_catalog/src/tabs/animations.rs:38-39)
-- **Evidence:**
+- **Now (`c198e4d1`):** After the toggles hide them, 'Collapsing content', 'fading' and 'snackbar' are all still in the tree a reader walks.
+- **Measured again:** catalog-c-animations, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-animations 'Space: fade the cell out': +79.3 ms ORCA SAYS: 'not pressed' / FAIL the tree holds no [*] 'fading': found [label] 'fading'`
+  - `pass1 catalog-c-animations 'Space on Expanded: collapse the Collapse demo': FAIL the tree holds no [label] 'Collapsing content': found [label] 'Collapsing content'`
+  - `pass1 catalog-c-animations 'Space: slide the cell out': FAIL the tree holds no [*] 'snackbar': found [label] 'snackbar'`
+  - `pass2 catalog-c-animations: the same three FAILs`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/animations/collapse.rs:197-203; crates/teksilo-widgets/src/animations/slide.rs:227-229; crates/teksilo-widgets/src/animations/fade.rs:164-171; examples/widget\_catalog/src/tabs/animations.rs:38-39
+- **Evidence (`261a218f`):**
   - `act 'Space on Expanded: collapse': ORCA SAYS 'not pressed' / FAIL the tree holds no [label] 'Collapsing content': found [label] 'Collapsing content'`
   - `act 'Space: fade the cell out': FAIL the tree holds no [*] 'fading': found [label] 'fading'`
   - `act 'Space: slide the cell out': FAIL the tree holds no [*] 'snackbar': found [label] 'snackbar'`
@@ -819,12 +1052,18 @@ Cycle swaps its child in and out of the tree every 1.5 s while nothing happens
 - **Scenario:** catalog-c-animations
 - **Act:** Leave the Animations tab idle for 6 s
 - **The reader should get:** Decorative motion changes nothing in the accessibility tree
-- **The reader gets:** Every 1.5 s a children-changed:add, a children-changed:remove and a defunct. Orca stayed quiet (it passes), but a reader reviewing that area has its object destroyed under it, and every AT client wakes up
+- **The reader got (`261a218f`):** Every 1.5 s a children-changed:add, a children-changed:remove and a defunct. Orca stayed quiet (it passes), but a reader reviewing that area has its object destroyed under it, and every AT client wakes up
 - **Platform:** all platforms (tree churn); measured on Linux
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/animations/cycle.rs (Switcher-based)
-- **Evidence:**
+- **Now (`c198e4d1`):** With the Animations tab idle, Cycle still adds one tip, removes another and makes it defunct about every 1.5 s. Orca stays quiet.
+- **Measured again:** catalog-c-animations, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-animations 'idle 6 s on the tab (Cycle and Pulse running)': +152.3 ms object:children-changed:add [panel] '' -> [label] 'Tip 2 — try Ctrl+P' / +153.6 ms object:children-changed:remove [panel] '' -> [label] 'Tip 1 — drag the divider' / +153.8 ms object:state-changed:defunct 1 [label] 'Tip 1 — drag the divider'; repeats at +1661.2, +3174.6, +4683.0 ms`
+  - `pass2 catalog-c-animations idle act: +98.7 ms add 'Tip 3 — F12 opens the inspector' / +101.0 ms remove 'Tip 2 — try Ctrl+P' / +101.3 ms defunct 'Tip 2 — try Ctrl+P'; repeats at +1600.5, +3124.3, +4631.5 ms`
+  - `pass1 and pass2 catalog-c-animations: pass Orca stays quiet / FAIL the tree holds still`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/animations/cycle.rs:116-140
+- **Evidence (`261a218f`):**
   - `+418.3 ms object:children-changed:add [panel] '' -> [label] 'Tip 1 — drag the divider'`
   - `+418.6 ms object:children-changed:remove [panel] '' -> [label] 'Tip 3 — F12 opens the inspector'`
   - `+418.7 ms object:state-changed:defunct 1 [label] 'Tip 3 — F12 opens the inspector'`
@@ -842,12 +1081,18 @@ Overlays tab: 'Warning' and 'Error' each name two different buttons (message box
 - **Scenario:** catalog-c-overlays-tabwalk
 - **Act:** Tab walk of the Overlays tab
 - **The reader should get:** Distinct names ('Warning message box', 'Warning toast') or a grouped context
-- **The reader gets:** 'Warning push button.' at Tab 28 and Tab 34, 'Error push button.' at Tab 29 and 35. The same words open a modal dialog in one place and a toast in the other
+- **The reader got (`261a218f`):** 'Warning push button.' at Tab 28 and Tab 34, 'Error push button.' at Tab 29 and 35. The same words open a modal dialog in one place and a toast in the other
 - **Platform:** all platforms
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/widget\_catalog/src/tabs/overlays.rs:18-58, 340-380
-- **Evidence:**
+- **Now (`c198e4d1`):** The Overlays tab walk still reads 'Warning push button.' and 'Error push button.' twice each: once for the message box triggers and once for the toast triggers.
+- **Measured again:** catalog-c-overlays-tabwalk, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-tabwalk 'Tab 25': [push button] 'Warning' / ORCA SAYS: 'Warning push button.'; 'Tab 31': [push button] 'Warning' / ORCA SAYS: 'Warning push button.'`
+  - `pass1 catalog-c-overlays-tabwalk 'Tab 26' and 'Tab 32': [push button] 'Error' / ORCA SAYS: 'Error push button.'`
+  - `pass2 catalog-c-overlays-tabwalk: Tabs 25 and 31 'Warning push button.', Tabs 26 and 32 'Error push button.'`
+- **Where (`c198e4d1`):** examples/widget\_catalog/src/tabs/overlays.rs:18-58, 340-380
+- **Evidence (`261a218f`):**
   - `overlays-tabwalk: Tab 28 [push button] 'Warning' :: Warning push button. / Tab 34 [push button] 'Warning' :: Warning push button.`
   - `examples/widget_catalog/src/tabs/overlays.rs:18-58 (toast row) and 340-380 (message box row)`
   - `catalog-c-overlays-tabwalk-20260925-133734-3659642: Tab 28 'Warning' … Tab 34 'Warning'; Tab 29 'Error' … Tab 35 'Error'`
@@ -863,12 +1108,21 @@ A re-shown tooltip or popover reuses its accessibility node, which AT-SPI alread
 - **Scenario:** verify-catalog-c-tooltip-reshow, verify-catalog-c-popover, catalog-c-tooltip-tab-away
 - **Act:** Focus 'With internal Button' and wait 3.2 s, Tab into the sticky tooltip, then Escape. Focus elsewhere, come back, wait 3.2 s and Tab into it again. Also: open the popover, Escape, then open it again.
 - **The reader should get:** The second showing is read as the first: 'Tooltip dialog Treasury report This quarter: +423 coins.'
-- **The reader gets:** The first showing is read. On the second, focus moves into the tooltip dialog, which has the same AT-SPI path as the first. Orca logs 'Ignoring defunct object: \[dialog: 'Tooltip'\]' and says nothing, so the reader's focus sits in a silent object. The same happens after a focus bounce (catalog-c-02): the rich 'Level 1' tooltip re-shows on its old path, and Tab into it is silent. A reopened popover also focuses its old, defunct host. The cause is the one behind catalog-c-10 and K2. Overlay content keeps its WidgetId across shows: the tooltip content\_id is registered once at attach, the popover content\_id comes from add\_deferred. When dismissed it goes dormant and leaves the tree, and atspi\_common's remove\_node marks it defunct. The K2 fix, which covers only the announcer, does not reach it. The re-shown composite also briefly returns as \[dialog\], its sticky state kept from the last show, then flips to \[tool tip\] 35 ms later.
+- **The reader got (`261a218f`):** The first showing is read. On the second, focus moves into the tooltip dialog, which has the same AT-SPI path as the first. Orca logs 'Ignoring defunct object: \[dialog: 'Tooltip'\]' and says nothing, so the reader's focus sits in a silent object. The same happens after a focus bounce (catalog-c-02): the rich 'Level 1' tooltip re-shows on its old path, and Tab into it is silent. A reopened popover also focuses its old, defunct host. The cause is the one behind catalog-c-10 and K2. Overlay content keeps its WidgetId across shows: the tooltip content\_id is registered once at attach, the popover content\_id comes from add\_deferred. When dismissed it goes dormant and leaves the tree, and atspi\_common's remove\_node marks it defunct. The K2 fix, which covers only the announcer, does not reach it. The re-shown composite also briefly returns as \[dialog\], its sticky state kept from the last show, then flips to \[tool tip\] 35 ms later.
 - **Platform:** Linux AT-SPI (defunct is atspi\_common's state). The macOS and Windows adapters re-announce and re-expose a re-added node per their source, so they are likely unaffected (not measured).
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `85624a1a` (node-ids). Fixed part: measured on the combined build, 1 run: verify-catalog-c-tooltip-reshow had 2 failed checks in the sweep, none now.
-- **Where:** crates/teksilo-core/src/build\_context.rs:763-872 (attach\_tooltip\*: one content\_id per anchor); crates/teksilo-core/src/widget\_tree/overlay\_impl.rs:498-545 (show re-activates the same content\_id), 2107 (dormant\_dismissed\_content); crates/teksilo-widgets/src/popover\_widget.rs:670-690
-- **Evidence:**
+- **Status:** Fixed by `85624a1a` (node-ids).
+- **Now (`c198e4d1`):** A re-shown sticky tooltip now comes back under a new AT-SPI path, and Tab into it on its second showing is read as the first: 'Tooltip dialog Treasury report This quarter: +423 coins.' A reopened popover is read ('Anchor dialog Popover content Click outside to dismiss.'), and Tab into a re-shown rich tooltip after a focus bounce is read too. The re-shown composite still arrives as \[dialog\] and turns into \[tool tip\] about 40 ms later.
+- **Measured again:** verify-catalog-c-tooltip-reshow, 2 of 2 runs; verify-catalog-c-popover, 2 of 2 runs; catalog-c-tooltip-tab-away, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-catalog-c-tooltip-reshow 'second show: focus 'With internal Button', wait 3.2 s, Tab into the tooltip': +3266.7 ms object:state-changed:focused 1 [dialog] 'Tooltip' / +3343.0 ms ORCA SAYS: 'Tooltip dialog Treasury report This quarter: +423 coins.' / pass Orca handles the focus event (no defunct drop)`
+  - `pass2 verify-catalog-c-tooltip-reshow 'second show': +3510.4 ms object:state-changed:focused 1 [dialog] 'Tooltip' / +3756.4 ms ORCA SAYS: 'Tooltip dialog Treasury report This quarter: +423 coins.'`
+  - `pass1 verify-catalog-c-tooltip-reshow events: first show path /org/a11y/atspi/accessible/0/79228451113575370779478982656 (defunct at 16:38:14.109672); second show path /org/a11y/atspi/accessible/0/158456325028528675187087900672`
+  - `pass1 verify-catalog-c-tooltip-reshow 'second show': +764.4 ms object:children-changed:add [frame] 'Teksilo — Widget Catalog' -> [dialog] 'Tooltip' / +807.0 ms object:property-change:accessible-role [tool tip] 'Tooltip'`
+  - `pass1 verify-catalog-c-popover 'Space on Anchor again': +50.1 ms object:state-changed:focused 1 [dialog] 'Anchor' / +94.5 ms ORCA SAYS: 'Anchor dialog Popover content Click outside to dismiss.'`
+  - `pass2 catalog-c-tooltip-tab-away 'wait 3 s on 'Hover or hold — level 1' (tooltip sticky), Tab': +3037.6 ms object:state-changed:focused 1 [tool tip] 'Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.' / +3064.7 ms ORCA SAYS: 'tool tip Level 1 of the cascade. Hover the [next link](:tip-b) to open level 2.'`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/accessibility/adapter\_ids.rs:1-38, 128 (AdapterIds::deliver hands a returning node a new id); crates/teksilo-core/src/build\_context.rs:763-872; crates/teksilo-core/src/widget\_tree/overlay\_impl.rs:498-545, 2150; crates/teksilo-widgets/src/popover\_widget.rs:712
+- **Evidence (`261a218f`):**
   - `verify-catalog-c-tooltip-reshow (3 runs): first show 13:37:37.342407 children-changed:add -> [tool tip] path …/79228451076681882632059879424; 13:37:43.341874 state-changed:defunct [dialog] same path; second show 13:37:51.390212 add -> [dialog] same path; 13:37:53.895115 focused 1 [dialog] same path; orca 13:37:53.897356 EVENT MANAGER: Ignoring defunct object: [dialog: 'Tooltip']; Orca says only 'With internal Button push button.' 'Tooltip.'`
   - `first show in the same runs: ORCA SAYS 'Tooltip dialog Treasury report This quarter: +423 coins.' (3 of 3)`
   - `catalog-c-tooltip-tab-away (3 runs) 'wait 3 s on Hover or hold — level 1 (tooltip sticky), Tab': focused 1 [tool tip] 'Level 1 …' path …/79228451076681882632059879424 (defunct since 13:31:04.934629); orca 13:31:18.586605 Ignoring defunct object; no speech (3 of 3)`
@@ -886,12 +1140,25 @@ TableView, TreeTableView and GridView replace every visible row and cell node, a
 - **Scenario:** catalog-c-data-views
 - **Act:** Data tab: Down or Tab inside the People table, Down/Right in the TreeTableView, Right in the GridView
 - **The reader should get:** A move changes focus between existing cell nodes; the headers and the other rows stay put
-- **The reader gets:** A single Down in the TableView makes 90 nodes defunct: 36 cells, 36 labels, 13 rows, 3 column headers and the Filter button. Every Tab makes about 83 nodes defunct, and five Tabs put 445 events on the bus. A GridView Right makes 33 nodes defunct. The focused cell is a new node each time, and Orca logs 'Ignoring defunct object: \[table cell\]' for the old one. Orca's speech itself was intact in these runs. Any AT state tied to an object (review position, NVDA's review cursor) is lost on every keystroke, and about 90 events a keystroke comes close to Orca's 100-event deluge threshold, above which it drops name and description changes. It belongs to the same class as catalog-c-21, but happens on every move rather than only on expand.
+- **The reader got (`261a218f`):** A single Down in the TableView makes 90 nodes defunct: 36 cells, 36 labels, 13 rows, 3 column headers and the Filter button. Every Tab makes about 83 nodes defunct, and five Tabs put 445 events on the bus. A GridView Right makes 33 nodes defunct. The focused cell is a new node each time, and Orca logs 'Ignoring defunct object: \[table cell\]' for the old one. Orca's speech itself was intact in these runs. Any AT state tied to an object (review position, NVDA's review cursor) is lost on every keystroke, and about 90 events a keystroke comes close to Orca's 100-event deluge threshold, above which it drops name and description changes. It belongs to the same class as catalog-c-21, but happens on every move rather than only on expand.
 - **Platform:** Linux AT-SPI measured; the node replacement happens in teksilo on all platforms
 - **Severity:** low; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/body.rs, crates/teksilo-widgets/src/tree\_table\_view.rs, crates/teksilo-widgets/src/grid\_view (body pane rebuilt on focus/selection change; exact trigger not isolated)
-- **Evidence:**
+- **Status:** Partly fixed by `8448bb9a`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** The GridView is cured: a move keeps the tile nodes and replaces only the label in the tiles it changes (1 or 2 nodes defunct). The TableView still replaces every row, cell, column header and its Filter button on each move (90 nodes defunct on one Down, 415 over five Tabs), and the TreeTableView still replaces its rows on every move (21 to 41 nodes defunct per key, its column headers too on Left). When keys come fast, a cell is gone before Orca reads it, so Orca loses its place and reads the window's name before the next cell.
+- **Measured again:** catalog-c-data-views, 2 of 2 runs plus 1 tiebreak run agree (TableView, and the window's name on fast keys once per run); remeasure-catalog-c-2-treetable-grid, 1 of 1 complete run (TreeTableView and GridView)
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-data-views 'Down in the TableView': 90 object:state-changed:defunct in 96 events, including +110.5 ms object:state-changed:defunct 1 [column header] 'Salary' and +112.9 ms object:state-changed:defunct 1 [push button] 'Filter'`
+  - `pass2 catalog-c-data-views: 'Down in the TableView' 90 defunct, 'Tab from a cell' 83 defunct, 'Tab five more times' 415 defunct in 445 events`
+  - `pass1 catalog-c-data-views orca-debug.out 15:55:30.059769 EVENT MANAGER: Ignoring defunct object: [table cell]`
+  - `pass1 catalog-c-data-views 'Tab five more times': +840.1 ms ORCA SAYS (CUT): 'Teksilo — Widget Catalog' / +840.2 ms ORCA SAYS (CUT): '$48137.' (orca-debug.out 15:55:30.522013 FOCUS MANAGER: Changing locus of focus from [table cell] to [DEAD], then newAncestors=[Teksilo, Widget Catalog])`
+  - `pass2 catalog-c-data-views 'Down, Down, Right in the TreeTableView' (acting on the People table): +725.9 ms ORCA SAYS: 'Teksilo — Widget Catalog' / +725.9 ms ORCA SAYS: 'Editor.' (orca-debug.out 16:00:25.280937 FOCUS MANAGER: Changing locus of focus from [table cell] to [DEAD])`
+  - `tiebreak catalog-c-data-views-20260927-185654 (load about 7) 'Tab five more times': +704.4 ms ORCA SAYS (CUT): 'Teksilo — Widget Catalog' / +704.4 ms ORCA SAYS (CUT): 'Editor.'; same counts as both passes (90, 83, 415 defunct)`
+  - `judge remeasure-catalog-c-2-treetable-grid 'Down in the TreeTableView': 21 defunct / +61.3 ms object:state-changed:focused 1 [table cell] ''; 'Right on the row': 30 defunct including +89.8 ms object:state-changed:defunct 1 [table row] ''; 'Left on the row': 41 defunct including +68.7 ms object:state-changed:defunct 1 [column header] 'Name' and +69.0 ms object:state-changed:defunct 1 [push button] 'Filter'`
+  - `judge remeasure-catalog-c-2-treetable-grid 'Down in the TreeTableView' +210.9 ms ORCA SAYS: 'Cargo.toml.' / 'Down again' +215.0 ms ORCA SAYS: 'docs.' (single spaced moves read cleanly)`
+  - `judge remeasure-catalog-c-2-treetable-grid 'Right again in the GridView': +85.9 ms object:state-changed:focused 1 [table cell] '' / +86.6 ms object:state-changed:defunct 1 [label] 'Sunset' (2 defunct, no tile cell) / +443.4 ms ORCA SAYS: 'Harbor.'`
+  - `judge remeasure-catalog-c-2-treetable-grid 'Down in the GridView': 2 defunct ([label] 'Harbor' and one gone node) / pass no object:state-changed:defunct event from [table cell] '*'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:19 and :205 (a selection change bumps the Rebuild version of the whole table, headers included); crates/teksilo-widgets/src/table\_view/body\_pane.rs:213; crates/teksilo-widgets/src/tree\_table\_view/widget\_impl.rs:19; crates/teksilo-widgets/src/tree\_table\_view/body\_pane.rs:202
+- **Evidence (`261a218f`):**
   - `catalog-c-data-views-20260925-133029-3216175 'Down in the TableView': 90 object:state-changed:defunct (label 36, table cell 36, table row 13, column header 3, push button 1, panel 1)`
   - `same run 'Tab from a cell': 83 defunct; orca 13:31:18.207587 EVENT MANAGER: Ignoring defunct object: [table cell]`
   - `catalog-c-data-views-20260925-133507-3516143 'Tab five more times': 445 events (415 defunct), 5 x 'Ignoring defunct object: [table cell]'`
@@ -908,12 +1175,20 @@ Tabbing away from a rich-tooltip button with a warm (no-fade) tooltip makes Orca
 - **Scenario:** catalog-c-overlays-tabwalk
 - **Act:** Tab walk through the rich column: Tab from 'Hover or hold — level 3' to 'Plain among rich' while level 3's tooltip is up
 - **The reader should get:** Nothing about the control just left; the new control is read
-- **The reader gets:** In the update that moves focus, the old button gains the tooltip's text as its description, and the change reaches the bus before the focus event. Orca still holds the old button as its focus, so it starts reading 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.', then cuts it for the new focus. The hold-back in accessibility\_description\_impl.rs is documented to prevent exactly this: a node focus is on, or was on in the last update, gains nothing in the update focus leaves it. It evidently does not cover the static description written when a tooltip stops showing. With a cold (faded) tooltip the change lands about 50 ms later, in a separate update, and is not spoken.
+- **The reader got (`261a218f`):** In the update that moves focus, the old button gains the tooltip's text as its description, and the change reaches the bus before the focus event. Orca still holds the old button as its focus, so it starts reading 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.', then cuts it for the new focus. The hold-back in accessibility\_description\_impl.rs is documented to prevent exactly this: a node focus is on, or was on in the last update, gains nothing in the update focus leaves it. It evidently does not cover the static description written when a tooltip stops showing. With a cold (faded) tooltip the change lands about 50 ms later, in a separate update, and is not spoken.
 - **Platform:** Linux AT-SPI/Orca measured. NVDA does not speak description changes (accessibility\_description\_impl.rs header).
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:761-793 (tooltip\_description\_target); crates/teksilo-core/src/widget\_tree/accessibility\_description\_impl.rs (hold-back scope)
-- **Evidence:**
+- **Now (`c198e4d1`):** Tabbing from 'Hover or hold — level 3' to 'Plain among rich' with level 3's tooltip up still writes the tooltip's text onto the old button's description in the same update as the focus move. Orca starts reading 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.' and cuts it for the new focus.
+- **Measured again:** catalog-c-overlays-tabwalk, 2 of 2 runs; tabwalk-widget-catalog-overlays, 2 of 2 runs; verify-catalog-c-bounce-cold, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 catalog-c-overlays-tabwalk 'Tab 18': +33.2 ms object:property-change:accessible-description [push button] 'Hover or hold — level 3' text='Level 3 — end of the cascade. Press Esc or click outside to dismiss.' / +33.4 ms object:state-changed:focused 1 [push button] 'Plain among rich' / +58.5 ms ORCA SAYS (CUT): 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.'`
+  - `pass2 catalog-c-overlays-tabwalk 'Tab 18': +35.8 ms object:property-change:accessible-description [push button] 'Hover or hold — level 3' / +35.9 ms object:state-changed:focused 1 [push button] 'Plain among rich' / +51.7 ms ORCA SAYS (CUT): 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.'`
+  - `pass1 tabwalk-widget-catalog-overlays 'Tab 18': +115.5 ms ORCA SAYS (CUT): 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.'`
+  - `pass2 tabwalk-widget-catalog-overlays 'Tab 18': +44.2 ms ORCA SAYS (CUT): 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.'`
+  - `pass1 and pass2 verify-catalog-c-bounce-cold 'cold: focus 'Hover or hold — level 3', wait 1 s (rich tooltip up), Tab': ORCA SAYS: 'Plain among rich push button.' (the cold case is not spoken)`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:841-873 (tooltip\_description\_target); crates/teksilo-core/src/widget\_tree/accessibility\_description\_impl.rs:198-345 (the hold-back applies to described\_by text only)
+- **Evidence (`261a218f`):**
   - `catalog-c-overlays-tabwalk-20260925-133734-3659642 Tab 20: +31.8 ms remove [tool tip] 'Level 3 …' / +32.2 ms object:property-change:accessible-description [push button] 'Hover or hold — level 3' text='Level 3 — end of the cascade…' / +32.3 ms focused 1 [push button] 'Plain among rich' / +50.2 ms ORCA SAYS (CUT): 'Level 3 — end of the cascade. Press Esc or click outside to dismiss.'`
   - `the sweep's own walk target/reader-sweep/catalog-c/v2/catalog-c-overlays-tabwalk-20260925-131441-2679904 Tab 20: same sequence, ORCA SAYS (CUT) at +42.4 ms`
   - `cold case, verify-catalog-c-bounce-cold-20260925-133654-3621579: focus at +1063.4 ms, description change at +1113.3 ms (separate update), not spoken`

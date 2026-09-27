@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Dialogs and popovers
 
 Examples: `dialogs-and-popovers`.
 15 findings: 1 critical, 10 high, 2 medium, 2 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -14,7 +16,7 @@ How to read an entry, and what the words mean, is in
 | [dialogs-01](#dialogs-01) | dialogs-and-popovers | The custom-trigger popover ('Show popover') is not a Tab stop and cannot take focus, so no keyboard user can open it | critical | all | fixed |
 | [dialogs-02](#dialogs-02) | dialogs-and-popovers | The custom-trigger Dialog ('Open dialog') puts focus on an unnamed panel: Orca says just 'panel.' when Tab reaches it and again when the dialog closes | high | all | fixed |
 | [dialogs-03](#dialogs-03) | dialogs-and-popovers | Opening the popover moves focus to an unnamed role-less node outside an unnamed dialog, and Orca says nothing | high | all | fixed |
-| [dialogs-04](#dialogs-04) | dialogs-and-popovers | Snackbar and popover reuse the same accessibility nodes on every showing, so after the first showing Orca drops them as defunct: the 2nd and later snackbars are silent, and focus into a reopened popover is ignored | high | Linux | partly fixed |
+| [dialogs-04](#dialogs-04) | dialogs-and-popovers | Snackbar and popover reuse the same accessibility nodes on every showing, so after the first showing Orca drops them as defunct: the 2nd and later snackbars are silent, and focus into a reopened popover is ignored | high | Linux | fixed |
 | [dialogs-05](#dialogs-05) | dialogs-and-popovers | The snackbar announces only the generic word 'Snackbar', and its message 'Autosave complete' is never announced | high | all | open |
 | [dialogs-06](#dialogs-06) | dialogs-and-popovers | When the snackbar times out, it pulls focus back to the control that was focused when it appeared, even though the reader has moved on | high | all | fixed |
 | [dialogs-07](#dialogs-07) | dialogs-and-popovers | The snackbar times out while the reader's focus is on its Dismiss button, and removes the button from under them | high | all | open |
@@ -35,12 +37,20 @@ The custom-trigger popover ('Show popover') is not a Tab stop and cannot take fo
 - **Scenario:** dialogs-popover
 - **Act:** Tab through the page (tabwalk, and dialogs-popover 'Tab twice from the window'); AT-SPI grab\_focus on \[push button\] 'Show popover'
 - **The reader should get:** 'Show popover' is a Tab stop between the Theme box and the other triggers. Tab lands on it, Orca says 'Show popover push button', and Enter or Space opens the popover.
-- **The reader gets:** Tab goes Theme -&gt; \[panel\] '' (the 'Open dialog' trigger's child) -&gt; 'Show snackbar', and 'Show popover' is never visited. The node has no focusable state, and AT-SPI grab\_focus on it changes nothing. The only way to open the popover is an AT-SPI click from object navigation (for example Orca flat review). A keyboard user, sighted or not, cannot open it.
+- **The reader got (`261a218f`):** Tab goes Theme -&gt; \[panel\] '' (the 'Open dialog' trigger's child) -&gt; 'Show snackbar', and 'Show popover' is never visited. The node has no focusable state, and AT-SPI grab\_focus on it changes nothing. The only way to open the popover is an AT-SPI click from object navigation (for example Orca flat review). A keyboard user, sighted or not, cannot open it.
 - **Platform:** all (framework; the tree is the same in-tree popover on every platform). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `de3bb295` (popover-trigger). Fixed part: critical): 'Show popover' is now a Tab stop and an AT-SPI grab\_focus target (3 of 3 for both, Orca says 'Show popover push button.'), and Enter opens it.
-- **Where:** crates/teksilo-widgets/src/overlay\_trigger.rs:208-243,291-311; crates/teksilo-widgets/src/popover\_widget.rs:879-882
-- **Evidence:**
+- **Status:** Fixed by `de3bb295` (popover-trigger).
+- **Now (`c198e4d1`):** 'Show popover' is a Tab stop right after the Theme box. Tab lands on it and Orca says 'Show popover push button.', AT-SPI grab\_focus moves focus to it, and Enter opens the popover.
+- **Measured again:** dialogs-popover, fix-popover-trigger-grab-focus, fix-popover-trigger-escape, fix-popover-trigger-tab-out, tabwalk-dialogs-and-popovers: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-popover 'Tab twice from the window': +197.9 ms object:state-changed:focused 1 [push button] 'Show popover' / +247.1 ms ORCA SAYS: 'Show popover push button.'`
+  - `pass2 dialogs-popover 'Tab twice from the window': +196.7 ms object:state-changed:focused 1 [push button] 'Show popover' / +281.2 ms ORCA SAYS: 'Show popover push button.'`
+  - `pass1 fix-popover-trigger-grab-focus 'AT-SPI grab_focus on the popover's trigger': +11.4 ms object:state-changed:focused 1 [push button] 'Show popover' / +61.1 ms ORCA SAYS: 'Show popover push button.' (pass2: +14.5 ms / +80.8 ms)`
+  - `pass1 fix-popover-trigger-escape 'Enter opens the popover': +33.9 ms object:state-changed:focused 1 [dialog] 'Show popover' / +123.6 ms ORCA SAYS: 'Show popover dialog Popover Use popovers for compact contextual actions without leaving the current surface. Quick actions Inline help Inspector.' (pass2 the same at +37.3 ms / +181.9 ms)`
+  - `pass1 tabwalk-dialogs-and-popovers tree-launch.txt: "[push button] 'Show popover' {focusable}"`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/overlay\_trigger.rs:239-294 (keys and the AT Click go on the focusable trigger node, :289, :293), :334-362 (Role::Button, name and Click on that node); crates/teksilo-widgets/src/popover\_widget.rs:146-175,921-925
+- **Evidence (`261a218f`):**
   - `tree-launch.txt: "[push button] 'Show popover'" has no {focusable} (compare "[push button] 'Show snackbar' {focusable}")`
   - `tabwalk Tab 2: "+12.7 ms object:state-changed:focused 1 [panel] ''" / ORCA SAYS 'panel.'; Tab 3: "object:state-changed:focused 1 [push button] 'Show snackbar'"`
   - `dialogs-popover 'AT-SPI grab_focus on the popover trigger': FAIL focus lands on [push button] 'Show popover' - "no focus change on the bus in this act" (2 of 2 runs)`
@@ -62,12 +72,19 @@ The custom-trigger Dialog ('Open dialog') puts focus on an unnamed panel: Orca s
 - **Scenario:** dialogs-review-dialog
 - **Act:** dialogs-review-dialog: Tab from Theme to the trigger; Escape or Enter on Cancel closes the dialog
 - **The reader should get:** Focus lands on a node that says 'Open dialog, push button' (with has-popup dialog). When the dialog closes, focus returns there and the reader hears the name again.
-- **The reader gets:** Focus lands on the trigger's child \[panel\] '' and Orca says 'panel.'. The name, Button role, Click action, has\_popup and expanded all sit on the parent OverlayTrigger node, which is not focusable. On close, focus goes back to the same unnamed panel ('panel.'). Enter still opens the dialog, but the reader was never told what the control is.
+- **The reader got (`261a218f`):** Focus lands on the trigger's child \[panel\] '' and Orca says 'panel.'. The name, Button role, Click action, has\_popup and expanded all sit on the parent OverlayTrigger node, which is not focusable. On close, focus goes back to the same unnamed panel ('panel.'). Enter still opens the dialog, but the reader was never told what the control is.
 - **Platform:** all (framework). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `de3bb295` (popover-trigger). Fixed part: the Dialog's custom trigger now takes focus as \[push button\] 'Open dialog', on Tab and when the dialog closes (fix-popover-trigger-dialog 3 of 3.
-- **Where:** crates/teksilo-widgets/src/dialog.rs:783-855; crates/teksilo-widgets/src/overlay\_trigger.rs:236-243,291-298
-- **Evidence:**
+- **Status:** Fixed by `de3bb295` (popover-trigger).
+- **Now (`c198e4d1`):** Tab from 'Show popover' lands on \[push button\] 'Open dialog' and Orca says 'Open dialog push button.'. Escape closes the dialog and returns focus to the same named button, which Orca reads again.
+- **Measured again:** fix-popover-trigger-dialog, fix-popover-trigger-grab-focus, tabwalk-dialogs-and-popovers: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 fix-popover-trigger-dialog 'Tab to the dialog's trigger': +12.3 ms object:state-changed:focused 1 [push button] 'Open dialog' / +89.6 ms ORCA SAYS: 'Open dialog push button.' (pass2: +16.7 ms / +92.9 ms)`
+  - `pass1 fix-popover-trigger-dialog 'Escape closes it': +13.2 ms object:state-changed:focused 1 [push button] 'Open dialog' / +89.8 ms ORCA SAYS: 'Open dialog push button.' (pass2: +16.2 ms / +114.5 ms)`
+  - `pass1 fix-popover-trigger-grab-focus 'AT-SPI grab_focus on the dialog's trigger': +13.8 ms object:state-changed:focused 1 [push button] 'Open dialog' / +67.8 ms ORCA SAYS: 'Open dialog push button.'`
+  - `pass1 tabwalk-dialogs-and-popovers: +11.2 ms object:state-changed:focused 1 [push button] 'Open dialog' / +59.8 ms ORCA SAYS: 'Open dialog push button.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/dialog.rs:777-808; crates/teksilo-widgets/src/overlay\_trigger.rs:263-294,334-362
+- **Evidence (`261a218f`):**
   - `tree-launch.txt: "[push button] 'Open dialog'" (not focusable) > "[panel] '' {focusable}"`
   - `'Tab reaches the Open dialog trigger': "+6.6 ms object:state-changed:focused 1 [panel] ''" / "+61.8 ms ORCA SAYS: 'panel.'" (2 of 2 runs)`
   - `'Escape closes it': "+26.4 ms object:state-changed:focused 1 [panel] ''" / "+213.7 ms ORCA SAYS: 'panel.'"; 'Enter on Cancel closes it': "+29.5 ms object:state-changed:focused 1 [panel] ''" / "ORCA SAYS: 'panel.'"`
@@ -88,12 +105,18 @@ Opening the popover moves focus to an unnamed role-less node outside an unnamed 
 - **Scenario:** dialogs-popover
 - **Act:** dialogs-popover: AT-SPI click on \[push button\] 'Show popover'
 - **The reader should get:** Focus moves into a named dialog, or stays on the trigger with the popover announced. The reader hears the popover's name and content ('Popover. Use popovers for compact contextual actions…').
-- **The reader gets:** Focus goes to \[unknown\] '' (PopoverBody, which has no accessibility()), the parent of an unnamed \[dialog\] ''. Orca's speech generator produces 'pauses only', so the reader hears silence and does not know a popover opened. The dialog is unnamed because surface\_name defaults to empty, and the example sets none.
+- **The reader got (`261a218f`):** Focus goes to \[unknown\] '' (PopoverBody, which has no accessibility()), the parent of an unnamed \[dialog\] ''. Orca's speech generator produces 'pauses only', so the reader hears silence and does not know a popover opened. The dialog is unnamed because surface\_name defaults to empty, and the example sets none.
 - **Platform:** all (framework: request\_focus targets a non-focusable node whose role is Unknown). Measured on Linux. On Windows (by source) UIA gets WindowOpened for the unnamed dialog node and a focus on a Role::Unknown element.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `de3bb295` (popover-trigger). Fixed part: opening the popover puts focus on \[dialog\] 'Show popover' and Orca says 'Show popover dialog Popover Use popovers ...' (3 of 3 in each of 3 scenarios, plus verify-dialogs-popover-more 3 of 3.
-- **Where:** crates/teksilo-widgets/src/popover\_widget.rs:361,569-658,685,779; crates/teksilo-core/src/widget\_tree/pointer\_router.rs:3040; crates/teksilo-widgets/src/popover\_surface.rs:262-268
-- **Evidence:**
+- **Status:** Fixed by `de3bb295` (popover-trigger).
+- **Now (`c198e4d1`):** Opening the popover puts focus on \[dialog\] 'Show popover', and Orca reads the dialog's name and everything in it: 'Show popover dialog Popover Use popovers for compact contextual actions without leaving the current surface. Quick actions Inline help Inspector.'
+- **Measured again:** dialogs-popover, verify-dialogs-popover-more, fix-popover-trigger-escape, fix-popover-trigger-tab-out, fix-popover-trigger-shift-tab-out: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-popover 'AT-SPI click on the trigger opens the popover': +31.1 ms object:children-changed:add [panel] '' -> [dialog] 'Show popover' / +32.1 ms object:state-changed:focused 1 [dialog] 'Show popover' / +119.3 ms ORCA SAYS: 'Show popover dialog Popover Use popovers for compact contextual actions without leaving the current surface. Quick actions Inline help Inspector.'`
+  - `pass2 dialogs-popover same act: +24.9 ms object:state-changed:focused 1 [dialog] 'Show popover' / +94.9 ms ORCA SAYS: 'Show popover dialog Popover Use popovers ...'`
+  - `pass1 verify-dialogs-popover-more 'AT-SPI click opens the popover while focus is on 'Show snackbar'': +28.8 ms object:state-changed:focused 1 [dialog] 'Show popover' / +93.4 ms ORCA SAYS: 'Show popover dialog Popover Use popovers ...' (pass2 +34.2 ms / +139.5 ms)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/popover\_widget.rs:589-665 (the surface is named by its trigger through labelled\_by, :645-649, and made focusable when its content has no control, :650-661), :821 (request\_focus\_into, no fallback to the host); crates/teksilo-widgets/src/popover\_surface.rs:250-274
+- **Evidence (`261a218f`):**
   - `events: "+31.1 ms object:state-changed:focused 1 [unknown] ''"; tree after the act: "[panel] '' > [unknown] '' ['enabled','focusable','focused',...] > [dialog] '' > [label] 'Popover' ..."`
   - `checks: FAIL the popover's dialog has a name - "[dialog] ''"; FAIL focus lands inside the popover's dialog - "path: [application] 'dialogs-and-popovers' > [frame] '' > [panel] '' > [panel] '' > [unknown] ''"; FAIL Orca says 'Use popovers' (2 of 2 runs)`
   - `orca-debug.out (run 130342): "13:03:58.955848 - FOCUS MANAGER: Changing locus of focus from [panel] to [unknown]. Notify: True" then "13:03:59.005916 - SPEECH GENERATOR: Results for [unknown] are pauses only"; run 131000: "13:10:19.705231 - SPEECH GENERATOR: Results for [unknown] are pauses only"`
@@ -114,12 +137,20 @@ Snackbar and popover reuse the same accessibility nodes on every showing, so aft
 - **Scenario:** dialogs-snackbar, dialogs-popover
 - **Act:** dialogs-snackbar: Space on 'Show snackbar' three times, each left to time out; dialogs-popover: open, Escape, open again
 - **The reader should get:** Every showing is heard ('Snackbar' or better the message), and every popover opening moves Orca's focus.
-- **The reader gets:** The snackbar surface and the popover body are persistent deferred subtrees, built once and re-activated with the same WidgetIds and so the same AT-SPI paths. accesskit\_atspi\_common marks them defunct when they leave the tree, and libatspi keeps them defunct when they return. Snackbar: showing 1 is spoken; showings 2 and 3 come from the same path the bus was told was defunct, and Orca logs 'Ignoring defunct object'. Popover: on the second opening the focus event on \[unknown\] is ignored as defunct, and Orca's locus of focus stays on the old panel. None of these go through ctx.announce, so the K2 announcer fix does not cover them.
+- **The reader got (`261a218f`):** The snackbar surface and the popover body are persistent deferred subtrees, built once and re-activated with the same WidgetIds and so the same AT-SPI paths. accesskit\_atspi\_common marks them defunct when they leave the tree, and libatspi keeps them defunct when they return. Snackbar: showing 1 is spoken; showings 2 and 3 come from the same path the bus was told was defunct, and Orca logs 'Ignoring defunct object'. Popover: on the second opening the focus event on \[unknown\] is ignored as defunct, and Orca's locus of focus stays on the old panel. None of these go through ctx.announce, so the K2 announcer fix does not cover them.
 - **Platform:** Linux AT-SPI/Orca (the defunct cache is libatspi's). On Windows/macOS by source, a reused NodeId is not held defunct, so this part is Linux-only.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `85624a1a` (node-ids). Fixed part: snackbar part (dialogs-snackbar showings 2 and 3 heard 1/1); the popover's reopening no longer drops events as defunct, but its focus-into-popover defect is a separate topic.
-- **Where:** crates/teksilo-widgets/src/snackbar.rs:408-418; crates/teksilo-widgets/src/popover\_widget.rs:586-588,655-657,672-682
-- **Evidence:**
+- **Status:** Fixed by `85624a1a` (node-ids).
+- **Now (`c198e4d1`):** Every snackbar showing is announced ('Snackbar'), the second and third included, and focus into a re-shown snackbar's Dismiss is read ('notification Snackbar.' 'Autosave complete' 'Dismiss push button.'). Every reopening of the popover moves Orca's focus and is read in full, and each Escape that closes it is read too. Orca no longer ignores any of these as defunct.
+- **Measured again:** dialogs-snackbar, dialogs-popover, verify-dialogs-popover-more: 2 of 2 runs each; the re-shown Dismiss: 1 run of remeasure-dialogs-snackbar-reshown-dismiss
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-snackbar 'Space shows the snackbar, showing 2': +27.7 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +36.6 ms ORCA SAYS: 'Snackbar'; showing 3: +29.2 ms / +45.0 ms ORCA SAYS: 'Snackbar'`
+  - `pass2 dialogs-snackbar showings 2 and 3: +27.0 ms / +39.6 ms ORCA SAYS: 'Snackbar' and +28.3 ms / +36.7 ms ORCA SAYS: 'Snackbar'; orca-debug.out of both passes has no 'Ignoring defunct object' line`
+  - `pass1 dialogs-popover 'AT-SPI click opens it a second time': +18.9 ms object:state-changed:focused 1 [dialog] 'Show popover' / +78.1 ms ORCA SAYS: 'Show popover dialog Popover Use popovers ...'; 'Escape closes it again': +190.9 ms ORCA SAYS: 'Show popover push button.'`
+  - `pass1 verify-dialogs-popover-more 'Escape closes opening 2': +24.1 ms object:state-changed:focused 1 [push button] 'Show snackbar' / +116.1 ms ORCA SAYS: 'Show snackbar push button.'; 'opening 3': +98.4 ms ORCA SAYS: 'Show popover dialog ...' (pass2 the same)`
+  - `judge remeasure-dialogs-snackbar-reshown-dismiss 'Space shows it again, then Shift+Tab four times to Dismiss': +771.7 ms object:state-changed:focused 1 [push button] 'Dismiss' / +828.5 ms ORCA SAYS (CUT): 'notification Snackbar.' 'Autosave complete' 'Dismiss push button.' (the only 'Ignoring defunct object' line is the focus loss of the removed Dismiss, after the time-out)`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/accessibility/adapter\_ids.rs:101-430 (a node that comes back is handed a new id), called from crates/teksilo-core/src/widget\_tree/accessibility\_impl.rs:196; the reused subtrees themselves are unchanged in shape: crates/teksilo-widgets/src/snackbar.rs:400-419; crates/teksilo-widgets/src/popover\_widget.rs:589-592,694-696,712-722
+- **Evidence (`261a218f`):**
   - `snackbar: 3 of 3 runs, showing 1 spoken ('SPEECH OUTPUT: 'Snackbar''); showings 2 and 3 dropped in 6 of 6 (for example run 130812: "13:08:37.969043 - EVENT MANAGER: Ignoring defunct object: [notification: 'Snackbar']", "13:08:44.147574 - EVENT MANAGER: Ignoring defunct object: [notification: 'Snackbar']")`
   - `events.jsonl run 130424: all three announcements come from one path: "object:announcement" source "/org/a11y/atspi/accessible/0/79228166185166408261744721920" at 13:04:33.499620, 13:04:40.206104, 13:04:46.478610; after each time-out: "object:state-changed:defunct 1 [notification] 'Snackbar'"`
   - `observation: "'Snackbar' came from a node the bus had already been told was defunct, which Orca drops"`
@@ -141,12 +172,18 @@ The snackbar announces only the generic word 'Snackbar', and its message 'Autosa
 - **Scenario:** dialogs-snackbar
 - **Act:** dialogs-snackbar / dialogs-snackbar-focus / dialogs-snackbar-reach: show the snackbar (Space, or AT-SPI click)
 - **The reader should get:** The reader hears the notification's message, 'Autosave complete', politely, while focus stays where it was.
-- **The reader gets:** The only object:announcement is the alert's name, 'Snackbar' (the en-US fallback a11y-snackbar-name), which is jargon and carries no information. The content is Live::Off, so the message is not announced. A reader hears the message only by Tabbing into the snackbar ('notification Snackbar.' / 'Autosave complete' / 'Dismiss push button.') before it times out.
+- **The reader got (`261a218f`):** The only object:announcement is the alert's name, 'Snackbar' (the en-US fallback a11y-snackbar-name), which is jargon and carries no information. The content is Live::Off, so the message is not announced. A reader hears the message only by Tabbing into the snackbar ('notification Snackbar.' / 'Autosave complete' / 'Dismiss push button.') before it times out.
 - **Platform:** all: on Windows, UIA LiveRegionChanged makes NVDA read the node's name ('Snackbar'); on macOS the announcement carries the name (by source, atspi/windows/macos all announce the name). Measured on Linux.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/snackbar.rs:227-243; crates/teksilo-widgets/src/styles/recipe\_snackbar\_style.rs:171-188
-- **Evidence:**
+- **Now (`c198e4d1`):** Showing the snackbar still announces only the generic word 'Snackbar'. 'Autosave complete' is never announced; a reader hears it only by Tabbing into the snackbar before it times out.
+- **Measured again:** dialogs-snackbar (3 showings per run), dialogs-snackbar-focus, dialogs-snackbar-reach, verify-dialogs-snackbar-distance: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-snackbar 'Space shows the snackbar, showing 1': +26.7 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +35.0 ms ORCA SAYS: 'Snackbar'; FAIL the bus carries an announcement of 'Autosave complete'; FAIL Orca says 'Autosave complete' (showings 2 and 3 the same)`
+  - `pass2 dialogs-snackbar 'Space shows the snackbar, showing 1': +33.4 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +39.9 ms ORCA SAYS: 'Snackbar'; FAIL Orca says 'Autosave complete' (all 3 showings)`
+  - `pass1 dialogs-snackbar-reach 'AT-SPI click on 'Show snackbar' while focus is on 'Custom buttons'': +20.4 ms object:announcement [notification] 'Snackbar' text='Snackbar' / +32.0 ms ORCA SAYS: 'Snackbar'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/snackbar.rs:226-241; crates/teksilo-widgets/src/styles/recipe\_snackbar\_style.rs:171-188; examples/dialogs\_and\_popovers/src/main.rs:363-365
+- **Evidence (`261a218f`):**
   - `every showing: "+36.7 ms object:announcement [notification] 'Snackbar' text='Snackbar'" and "ORCA SAYS: 'Snackbar'"; FAIL the bus carries an announcement of 'Autosave complete'; FAIL Orca says 'Autosave complete' (all 9 showings in 3 runs, plus snackbar-focus and snackbar-reach runs)`
   - `orca-debug.out run 130424: "13:04:33.524141 - SPEECH OUTPUT: 'Snackbar'"`
   - `crates/teksilo-widgets/src/snackbar.rs:235-242: name = announcement or tr_widget!(a11y_snackbar_name) ('Snackbar', locales/en-US.ftl:33); crates/teksilo-widgets/src/styles/recipe_snackbar_style.rs:172-188 sets the content root Live::Off unconditionally, even when no announcement was given`
@@ -164,12 +201,17 @@ When the snackbar times out, it pulls focus back to the control that was focused
 - **Scenario:** dialogs-snackbar-focus
 - **Act:** dialogs-snackbar-focus: Space on 'Show snackbar', Tab to 'Adaptive modal window', wait for the 2.5 s time-out
 - **The reader should get:** The snackbar goes away, and focus stays on 'Adaptive modal window', where the user put it (the snackbar never took focus).
-- **The reader gets:** On time-out focus jumps back to 'Show snackbar' and Orca says 'Show snackbar push button.' unprompted. The user loses their place, and a keyboard user typing into a field would be moved out of it.
+- **The reader got (`261a218f`):** On time-out focus jumps back to 'Show snackbar' and Orca says 'Show snackbar push button.' unprompted. The user loses their place, and a keyboard user typing into a field would be moved out of it.
 - **Platform:** all (framework overlay manager). Measured on Linux.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `b30770d5` (tooltip-snapback). Fixed part: measured on the combined build, 1 run: dialogs-snackbar-focus had 3 failed checks in the sweep, none now.
-- **Where:** crates/teksilo-core/src/widget\_tree.rs:1713-1721; crates/teksilo-core/src/widget\_tree/pointer\_router.rs:2882-2900
-- **Evidence:**
+- **Status:** Fixed by `b30770d5` (tooltip-snapback).
+- **Now (`c198e4d1`):** When the snackbar times out, focus stays on 'Adaptive modal window', where the user put it, and Orca says nothing.
+- **Measured again:** dialogs-snackbar-focus, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-snackbar-focus 'it times out while focus is on the next control': +946.5 ms object:children-changed:remove [frame] 'Dialogs and Popovers' -> [notification] 'Snackbar', no focus event; pass no object:state-changed:focused event from [*] '*'; pass Orca does not say 'Show snackbar'`
+  - `pass2 dialogs-snackbar-focus same act: every check passed, nothing observed`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree.rs:1730-1741 (restore only when focus is no longer on an active node), :1743-1775; crates/teksilo-core/src/widget\_tree/pointer\_router.rs:2888-2898
+- **Evidence (`261a218f`):**
   - `'it times out while focus is on the next control': "+887.2 ms object:state-changed:focused 1 [push button] 'Show snackbar'" / "+887.4 ms object:state-changed:focused 0 [push button] 'Adaptive modal window'" / "+983.0 ms ORCA SAYS: 'Show snackbar push button.'" (3 of 3 runs)`
   - `orca-debug.out run 130629: "13:07:24.588068 - SPEECH OUTPUT: 'Adaptive modal window push button.'" then, with no key pressed, "13:07:26.309228 - SPEECH OUTPUT: 'Show snackbar push button.'"`
   - `crates/teksilo-core/src/widget_tree/pointer_router.rs:2882-2900: a timed overlay records focus_restore = the focus at show time (set_top_focus_restore); crates/teksilo-core/src/widget_tree.rs:1714-1722 (process_auto_dismiss_overlays_impl) restores it on time-out whenever the node is active, without checking whether focus is still where it was or inside the overlay`
@@ -187,12 +229,18 @@ The snackbar times out while the reader's focus is on its Dismiss button, and re
 - **Scenario:** dialogs-snackbar-reach
 - **Act:** dialogs-snackbar-reach: with focus on 'Custom buttons', AT-SPI click 'Show snackbar', Tab to Dismiss, wait
 - **The reader should get:** The time-out pauses while focus (or the reader) is inside the snackbar, as it would for a hovered pointer, so the user can act on it (WCAG 2.2.1).
-- **The reader gets:** The 2.5 s time-out runs regardless. Focus is thrown back to 'Custom buttons' and Orca says 'Custom buttons push button.'. In one run the time-out fired 150 ms after focus reached Dismiss, so Orca never said 'Dismiss' at all.
+- **The reader got (`261a218f`):** The 2.5 s time-out runs regardless. Focus is thrown back to 'Custom buttons' and Orca says 'Custom buttons push button.'. In one run the time-out fired 150 ms after focus reached Dismiss, so Orca never said 'Dismiss' at all.
 - **Platform:** all (framework). Measured on Linux.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/snackbar.rs:65-96
-- **Evidence:**
+- **Now (`c198e4d1`):** The 2.5 s time-out still runs while focus is on the snackbar's Dismiss. The reading 'notification Snackbar.' 'Autosave complete' 'Dismiss push button.' is stopped about 1.7 s in, focus is thrown back, and Orca says 'Custom buttons push button.' (or 'Show snackbar push button.').
+- **Measured again:** dialogs-snackbar-reach, verify-dialogs-snackbar-distance: 2 of 2 runs each; also remeasure-dialogs-snackbar-reshown-dismiss, 1 run
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-snackbar-reach 'focus stays on Dismiss while the time-out passes': +881.8 ms object:state-changed:focused 1 [push button] 'Custom buttons' / +938.9 ms ORCA SAYS: 'Custom buttons push button.'; FAIL the tree holds [push button] 'Dismiss'; orca-debug.out: 'notification Snackbar.' 'Autosave complete' 'Dismiss push button.' spoken at 16:09:25.291, 'NULL SPEECH: stop' at 16:09:26.920949`
+  - `pass2 dialogs-snackbar-reach same act: +1039.0 ms object:state-changed:focused 1 [push button] 'Custom buttons' / +1084.5 ms ORCA SAYS: 'Custom buttons push button.'; orca-debug.out spoken at 16:18:02.092, 'NULL SPEECH: stop' at 16:18:03.809616`
+  - `pass1 verify-dialogs-snackbar-distance 'Space shows it, then Tab seven times at once': +1129.5 ms object:state-changed:focused 1 [push button] 'Dismiss', +1193.7 ms ORCA SAYS (CUT): 'notification Snackbar.' / (CUT): 'Autosave complete' / (CUT): 'Dismiss push button.', +2526.4 ms object:state-changed:focused 1 [push button] 'Show snackbar' / +2589.0 ms ORCA SAYS: 'Show snackbar push button.' (pass2: Dismiss at +1133.8 ms, back at +2531.1 ms)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/snackbar.rs:64-95 (show\_overlay\_for with no pause); crates/teksilo-core/src/overlay.rs:745,761 (pause\_auto\_dismiss, resume\_auto\_dismiss, unused by the snackbar); crates/teksilo-core/src/widget/event\_context.rs:1632; crates/teksilo-core/src/widget\_tree.rs:1743-1775
+- **Evidence (`261a218f`):**
   - `runs 130526 and 131245: Tab -> "object:state-changed:focused 1 [push button] 'Dismiss'" / "ORCA SAYS: 'notification Snackbar.'" "'Autosave complete'" "'Dismiss push button.'", then about 1 s into the next act "object:state-changed:focused 1 [push button] 'Custom buttons'" / "ORCA SAYS: 'Custom buttons push button.'"`
   - `run 130925: "+26.0 ms object:state-changed:focused 1 [push button] 'Dismiss'" then "+173.7 ms object:state-changed:focused 1 [push button] 'Custom buttons'" and "13:09:44.311220 EVENT MANAGER: Ignoring defunct object: [push button: 'Dismiss']"; Orca said only 'Custom buttons push button.'`
   - `crates/teksilo-widgets/src/snackbar.rs:65-96: present_snackbar uses show_overlay_for(request, duration) with no pause on focus; crates/teksilo-core/src/overlay.rs:731 has pause_auto_dismiss, but the snackbar never calls it; widget_tree.rs:1696-1712 dismisses on elapsed time alone`
@@ -212,12 +260,19 @@ An in-tree modal MessageBox is not modal to assistive technology: AT-SPI click a
 - **Scenario:** dialogs-modal-inert
 - **Act:** dialogs-modal-inert: open 'Save changes?'; AT-SPI click on \[push button\] 'Welcome' behind it; AT-SPI grab\_focus on 'Delete file?' behind it; real Space
 - **The reader should get:** While a modal box is up, an activation or focus request aimed at the page behind it does nothing (the scrim blocks the pointer and Tab is trapped; the AT path should be gated the same way).
-- **The reader gets:** The AT-SPI click on 'Welcome' opens a second modal box on top. grab\_focus moves focus to 'Delete file?' behind both boxes (Orca: 'Delete file? push button.'), and a real Space there opens a third modal box. After Escape closes the top box, focus is restored to a control behind the two remaining modals. A reader who activates by object navigation (Orca flat review, NVDA object navigator, VoiceOver cursor) can trigger actions behind a 'Save changes?' question.
+- **The reader got (`261a218f`):** The AT-SPI click on 'Welcome' opens a second modal box on top. grab\_focus moves focus to 'Delete file?' behind both boxes (Orca: 'Delete file? push button.'), and a real Space there opens a third modal box. After Escape closes the top box, focus is restored to a control behind the two remaining modals. A reader who activates by object navigation (Orca flat review, NVDA object navigator, VoiceOver cursor) can trigger actions behind a 'Save changes?' question.
 - **Platform:** Linux measured (in-tree modals). The dispatch is platform-independent, so any in-tree modal on Windows/macOS behaves the same by source; native-window modals there were not measured.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `e7764b0f` (modal-at). Fixed part: an AT-SPI click behind an in-tree MessageBox no longer opens a second or third box, and grab\_focus behind it no longer moves focus. The next real Space presses the box's own button..
-- **Where:** crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1152-1230; crates/teksilo-app/src/app.rs:2103-2141,2448-2471
-- **Evidence:**
+- **Status:** Fixed by `e7764b0f` (modal-at).
+- **Now (`c198e4d1`):** With 'Save changes?' up, an AT-SPI click on 'Welcome' behind it does nothing, and grab\_focus on 'Delete file?' behind it does not move focus. The next real Space presses the box's own Save, and focus returns to 'Save changes?'.
+- **Measured again:** dialogs-modal-inert, 2 of 2 runs (fix-modal-at-dialogs also ran twice)
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-modal-inert 'AT-SPI click on Welcome behind the modal box': pass the tree holds no [alert] 'Welcome to Teksilo'; pass the tree holds [alert] 'Save changes?'; pass no object:state-changed:focused event`
+  - `pass1 dialogs-modal-inert 'AT-SPI grab_focus on Delete file? behind the boxes': pass no object:state-changed:focused event`
+  - `pass1 dialogs-modal-inert 'Real Space on the control behind the boxes': +31.4 ms object:text-changed:insert [label] '—' text='Save changes? → Save (dismissal=Button)' / +31.6 ms object:state-changed:focused 1 [push button] 'Save changes?' / +122.9 ms ORCA SAYS: 'Save changes? push button.'`
+  - `pass2 dialogs-modal-inert same acts: +30.8 ms object:state-changed:focused 1 [push button] 'Save changes?' / +92.6 ms ORCA SAYS: 'Save changes? push button.'`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1157-1180 (the AccessAction arm drops a target behind the modal); crates/teksilo-core/src/widget\_tree/overlay\_impl.rs:714-731 (is\_behind\_modal); crates/teksilo-app/src/app.rs:2176-2221,2554-2577
+- **Evidence (`261a218f`):**
   - `'AT-SPI click on Welcome behind the modal box': "+47.5 ms object:announcement [alert] 'Welcome to Teksilo'" / "+49.2 ms object:state-changed:focused 1 [push button] 'OK'"; FAIL the tree holds no [alert] 'Welcome to Teksilo' - "found [alert] 'Welcome to Teksilo'" (2 of 2 runs)`
   - `'AT-SPI grab_focus on Delete file? behind the boxes': "+17.9 ms object:state-changed:focused 1 [push button] 'Delete file?'" / "ORCA SAYS: 'Delete file? push button.'"`
   - `'Real Space on the control behind the boxes': "+46.1 ms object:announcement [alert] 'Delete file?'" / "+47.5 ms object:state-changed:focused 1 [push button] 'No'", so three modal alerts are up`
@@ -237,12 +292,19 @@ The 'Don't show this again' check box in the Welcome MessageBox publishes its ne
 - **Scenario:** dialogs-welcome
 - **Act:** dialogs-welcome: Tab to the check box, Space (and later an AT-SPI click)
 - **The reader should get:** object:state-changed:checked is emitted as the box toggles, and Orca says 'checked' / 'not checked' at once.
-- **The reader gets:** Nothing reaches the bus for Space or for the AT-SPI click, even with a 4 s record window. The checked event is emitted only with the next Tab, in the same update as the focus change, so Orca's 'checked' is cut by 'OK push button.'. The AT-SPI click's uncheck is never announced at all.
+- **The reader got (`261a218f`):** Nothing reaches the bus for Space or for the AT-SPI click, even with a 4 s record window. The checked event is emitted only with the next Tab, in the same update as the focus change, so Orca's 'checked' is cut by 'OK push button.'. The AT-SPI click's uncheck is never announced at all.
 - **Platform:** all (framework: the AT tree is not re-walked). Measured on Linux.
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `5c8ff299` (state-publish).
-- **Where:** crates/teksilo-widgets/src/styles/recipe\_checkbox\_style.rs:147; crates/teksilo-widgets/src/checkbox.rs (build binds nothing)
-- **Evidence:**
+- **Now (`c198e4d1`):** Space on the 'Don't show this again' check box emits object:state-changed:checked at once and Orca says 'checked'. The AT-SPI click that unchecks it is also published at once, and Orca says 'not checked'.
+- **Measured again:** dialogs-welcome, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-welcome 'Space checks it': +24.7 ms object:state-changed:checked 1 [check box] "Don't show this again" / +33.5 ms ORCA SAYS: 'checked'`
+  - `pass1 dialogs-welcome 'AT-SPI click unchecks it': +34.5 ms object:state-changed:checked 0 [check box] "Don't show this again" / +42.1 ms ORCA SAYS: 'not checked'`
+  - `pass1 dialogs-welcome 'Tab to OK': pass no object:state-changed:checked event; +61.0 ms ORCA SAYS: 'OK push button.'`
+  - `pass2 dialogs-welcome: +25.5 ms object:state-changed:checked 1 / +31.0 ms ORCA SAYS: 'checked'; +30.3 ms object:state-changed:checked 0 / +36.8 ms ORCA SAYS: 'not checked'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/checkbox.rs:389-396 (the check state bound at AccessibilityOnly); crates/teksilo-widgets/src/styles/recipe\_checkbox\_style.rs:147
+- **Evidence (`261a218f`):**
   - `'Space checks it': FAIL a object:state-changed:checked event from [check box] - "no object:state-changed:checked event from [check box] '*'"; FAIL Orca says 'checked' (2 of 2 runs)`
   - `'Tab to OK' (run 130728): "+6.8 ms object:state-changed:checked 1 [check box] \"Don't show this again\"" / "+7.0 ms object:state-changed:focused 1 [push button] 'OK'"; orca-debug.out "13:07:51.774699 - SPEECH OUTPUT: 'checked'" then "13:07:51.808672 - NULL SPEECH: stop" and "13:07:51.808750 - SPEECH OUTPUT: 'OK push button.'"`
   - `'AT-SPI click unchecks it': FAIL no object:state-changed:checked; FAIL Orca says 'not checked' (2 of 2 runs)`
@@ -262,12 +324,19 @@ Every MessageBox title is spoken twice on opening: the live announcement is cut 
 - **Scenario:** dialogs-save-changes (and every MessageBox scenario)
 - **Act:** Space (or AT-SPI click) on any MessageBox trigger: 'Save changes?', 'Delete file?', 'Could not open file', 'Welcome', 'Custom buttons'
 - **The reader should get:** The title is heard once, then the text, then the focused default button.
-- **The reader gets:** The AlertDialog is an assertive live region. Its object:announcement reaches the bus 1-14 ms before the focus change in the same update. Orca starts the title, stops it to present the new focus, then reads 'alert &lt;title&gt;' + description + '&lt;button&gt; push button'. The reader hears a clipped fragment of the title and then the whole title again. Nothing is lost, but the live channel is wasted, and the stutter repeats on every box.
+- **The reader got (`261a218f`):** The AlertDialog is an assertive live region. Its object:announcement reaches the bus 1-14 ms before the focus change in the same update. Orca starts the title, stops it to present the new focus, then reads 'alert &lt;title&gt;' + description + '&lt;button&gt; push button'. The reader hears a clipped fragment of the title and then the whole title again. Nothing is lost, but the live channel is wasted, and the stutter repeats on every box.
 - **Platform:** Linux AT-SPI/Orca (in-tree presentation). On Windows/macOS a MessageBox opens as a native window (supports\_native\_modal\_windows() is true), and the adapters emit no announcement for a new window's initial tree, so by source this is Linux-only unless an app forces ModalPresentation::InTree.
 - **Severity:** low; **layer:** framework
-- **Status:** Open. In the announce-focus fix topic, not fixed there: Different cause. The live region is the MessageBox AlertDialog itself (message\_box.rs:1115-1124, Live::Assertive). Focus moves into it through initial\_focus\_hint, and it is not an announcer message. A held-back dialog node is impossible, because focus cannot land inside a node that is not in the tree. The fix belongs in the widget: do not make the in-tree box live when presenting it moves focus into it, since the focus reading already says 'alert &lt;title&gt;' plus the description.
-- **Where:** crates/teksilo-widgets/src/message\_box.rs:1115-1124
-- **Evidence:**
+- **Status:** Open.
+- **Now (`c198e4d1`):** Every MessageBox still starts its title as a live announcement that the focus reading stops a few tens of milliseconds later, then reads 'alert &lt;title&gt;', the text and the focused button. Under load the first utterance can finish, and the title is then heard twice in full.
+- **Measured again:** dialogs-save-changes, dialogs-delete-file, dialogs-could-not-open, dialogs-welcome, dialogs-custom-buttons, dialogs-modal-inert, verify-dialogs-messagebox-more: 2 of 2 runs each; 31 of 32 openings were flagged, the other one (under load) spoke the title in full before 'alert How do I…?'
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-save-changes 'Space on 'Save changes?' opens the box': +44.2 ms ORCA SAYS (CUT): 'Save changes?' / +102.3 ms ORCA SAYS: 'alert Save changes?'; FAIL Orca says 'Save changes?' once; observed 'Save changes?' reached the bus 1.3 ms before the act's focus change`
+  - `pass1 dialogs-modal-inert 'Space opens 'Save changes?'': +36.5 ms object:announcement [alert] 'Save changes?' text='Save changes?' / +37.9 ms object:state-changed:focused 1 [push button] 'Save' / +46.7 ms ORCA SAYS (CUT): 'Save changes?' / +105.5 ms ORCA SAYS: 'alert Save changes?'`
+  - `pass2 dialogs-welcome 'Space opens the information box': +51.5 ms ORCA SAYS (CUT): 'Welcome to Teksilo' / +104.0 ms ORCA SAYS: 'alert Welcome to Teksilo.'`
+  - `pass2 verify-dialogs-messagebox-more 'Space opens 'How do I…?', opening 3': +269.6 ms object:announcement [alert] 'How do I…?' / +323.9 ms object:state-changed:focused 1 [push button] 'OK' / +486.2 ms ORCA SAYS: 'How do I…?' / +1654.7 ms ORCA SAYS: 'alert How do I…?'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/message\_box.rs:1115-1124
+- **Evidence (`261a218f`):**
   - `24 of 24 MessageBox openings in 11 runs: the title announcement is cut and the focus reading 'alert <title>' follows (dialogs-save-changes 3 runs x 3 openings, delete-file, could-not-open x2, welcome x2, custom-buttons, modal-inert x2)`
   - `run 130212, first opening: "+37.7 ms object:announcement [alert] 'Save changes?' text='Save changes?'" / "+39.7 ms object:state-changed:focused 1 [push button] 'Save'" / "+47.9 ms ORCA SAYS (CUT): 'Save changes?'" / "+102.8 ms ORCA SAYS: 'alert Save changes?'"`
   - `orca-debug.out: "13:02:21.893882 - NULL SPEECH: speak 'Save changes?' interrupt=True" -> "13:02:21.948418 - NULL SPEECH: stop" -> "13:02:21.948789 - SPEECH OUTPUT: 'alert Save changes?'" -> "13:02:21.948825 - SPEECH OUTPUT: 'You have unsaved changes in report.skrib. Your changes will be lost if you don't save them.'" -> "13:02:21.948870 - SPEECH OUTPUT: 'Save push button.'"`
@@ -286,12 +355,19 @@ No disclosure state reaches Orca: 'Show details' never says collapsed or expande
 - **Scenario:** dialogs-could-not-open, dialogs-adaptive-dialog
 - **Act:** dialogs-could-not-open: Tab to 'Show details', Space; dialogs-adaptive-dialog: open the dialog and read the opener's states
 - **The reader should get:** 'Show details, push button, collapsed'. Space says 'expanded' (and the details become readable). The Dialog trigger reads 'expanded' while its dialog is open.
-- **The reader gets:** Orca says 'Show details push button.' with no state. Space emits only children-changed:add for the details label, and Orca says nothing, so the reader gets no feedback that anything happened. The trigger's AT-SPI states never include expandable or expanded. Teksilo sets both (Accordion set\_expanded, OverlayTrigger/Button has\_popup + set\_expanded), but accesskit\_atspi\_common 0.20 maps neither.
+- **The reader got (`261a218f`):** Orca says 'Show details push button.' with no state. Space emits only children-changed:add for the details label, and Orca says nothing, so the reader gets no feedback that anything happened. The trigger's AT-SPI states never include expandable or expanded. Teksilo sets both (Accordion set\_expanded, OverlayTrigger/Button has\_popup + set\_expanded), but accesskit\_atspi\_common 0.20 maps neither.
 - **Platform:** Linux AT-SPI only. Windows maps both (accesskit\_windows node.rs:485-494 aria haspopup, :714-721 ExpandCollapse). macOS publishes neither (no 'expand' in accesskit\_macos-0.27.0 by grep).
 - **Severity:** high; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/accordion.rs:668-678 (sets expanded correctly; the loss is in accesskit\_atspi\_common-0.20.0/src/node.rs:301-386)
-- **Evidence:**
+- **Now (`c198e4d1`):** 'Show details' is still read as 'Show details push button.' with no collapsed state, and Space on it is silent. The Dialog trigger never reads expanded. The current AT-SPI adapter still maps neither expanded nor has-popup.
+- **Measured again:** dialogs-could-not-open, dialogs-adaptive-dialog: 2 of 2 runs each; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-could-not-open 'Tab from Retry wraps to the Show details toggle': +46.7 ms ORCA SAYS: 'Show details push button.'; FAIL [push button] 'Show details' has expandable - states=['enabled', 'focusable', 'focused', 'sensitive', 'showing', 'visible']`
+  - `pass1 dialogs-could-not-open 'Space expands the details': +58.0 ms object:children-changed:add [panel] '' -> [label] 'Underlying OS error: EACCES (permission denied)\nopen("report.skrib", O_RDWR) → errno 13'; no ORCA SAYS; FAIL Orca says 'expanded'`
+  - `pass1 and pass2 dialogs-adaptive-dialog 'Space opens the dialog': FAIL [push button] 'Adaptive modal window' has expanded - states=['enabled', 'focusable', 'sensitive', 'showing', 'visible']`
+  - `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/accesskit_atspi_common-0.21.0/src/node.rs:301-389: state() inserts no Expandable or Expanded, and the crate has no has_popup mapping`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/accordion.rs:668-678 (sets expanded correctly); the loss is in accesskit\_atspi\_common-0.21.0/src/node.rs:301-389
+- **Evidence (`261a218f`):**
   - `'Tab from Retry wraps to the Show details toggle': "ORCA SAYS: 'Show details push button.'"; FAIL [push button] 'Show details' has expandable - "states=['enabled', 'focusable', 'focused', 'sensitive', 'showing', 'visible']" (2 of 2 runs)`
   - `'Space expands the details': only "+54.7 ms object:children-changed:add [panel] '' -> [label] 'Underlying OS error: EACCES (permission denied)\nopen(\"report.skrib\", O_RDWR) → errno 13'"; FAIL Orca says 'expanded'; no ORCA SAYS line in the act`
   - `dialogs-adaptive-dialog 'Space opens the dialog': FAIL [push button] 'Adaptive modal window' has expanded - "states=['enabled', 'focusable', 'sensitive', 'showing', 'visible']" (2 of 2 runs)`
@@ -311,12 +387,19 @@ Native-window modals (Windows/macOS) drop ModalRequest::on\_dismiss: the Dialog 
 - **Scenario:** none (source reading)
 - **Act:** Source reading only: MessageBox::present / Dialog on a platform where supports\_native\_modal\_windows() is true
 - **The reader should get:** Closing the modal window by any route runs the request's on\_dismiss: Dialog resets is\_open so the trigger reads collapsed, and MessageBox reports its escape answer (as it does in-tree on Escape or click-outside).
-- **The reader gets:** process\_modal\_requests destructures the request with '..', so on\_dismiss is discarded for the native window. Dialog's is\_open (which drives set\_expanded on the trigger) is reset only by that callback (dialog.rs:766-768 says so). On Windows, where UIA exposes ExpandCollapse, NVDA would read the trigger as 'expanded' after the dialog has closed. A MessageBox window closed from its title bar or Alt+F4 never calls on\_result: 'Save changes?' closed that way tells the caller nothing. Escape still answers, through MessageBox's own shortcut.
+- **The reader got (`261a218f`):** process\_modal\_requests destructures the request with '..', so on\_dismiss is discarded for the native window. Dialog's is\_open (which drives set\_expanded on the trigger) is reset only by that callback (dialog.rs:766-768 says so). On Windows, where UIA exposes ExpandCollapse, NVDA would read the trigger as 'expanded' after the dialog has closed. A MessageBox window closed from its title bar or Alt+F4 never calls on\_result: 'Save changes?' closed that way tells the caller nothing. Escape still answers, through MessageBox's own shortcut.
 - **Platform:** Windows, macOS (by source; not measured). The Linux in-tree path is correct (measured: the trigger's state follows and every close route reports a result).
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-app/src/app.rs:699-790
-- **Evidence:**
+- **Now (`c198e4d1`):** By source, a native-window modal (Windows, macOS) still drops the request's on\_dismiss. A Dialog trigger stays 'expanded' after its dialog closes, and a MessageBox closed from its title bar or Alt+F4 reports no answer.
+- **Measured again:** read from source
+- **Evidence (`c198e4d1`):**
+  - `crates/teksilo-app/src/app.rs:729-736: 'let ModalRequest { content, title, size, focus_target, close_behavior, .. } = queued.request;' (on_dismiss still falls into '..'; close_behavior is now read, on_dismiss is not)`
+  - `crates/teksilo-core/src/modal.rs:69-73: 'Only fired for in-tree presentations — native-window modals do not have a reliable dismiss callback yet.'`
+  - `crates/teksilo-widgets/src/dialog.rs:765-775: is_open is reset only by the dismiss callback, 'Only in-tree presentations fire this callback.'`
+  - `crates/teksilo-platform/src/window_system.rs:106-116: supports_native_modal_windows() is true outside the Linux/BSD family`
+- **Where (`c198e4d1`):** crates/teksilo-app/src/app.rs:704-795 (NativeWindow arm :727-790); crates/teksilo-core/src/modal.rs:69-73; crates/teksilo-widgets/src/dialog.rs:765-775; crates/teksilo-widgets/src/message\_box.rs:799-803,819-850; crates/teksilo-platform/src/window\_system.rs:106-116
+- **Evidence (`261a218f`):**
   - `crates/teksilo-app/src/app.rs:723-730: 'let ModalRequest { content, title, size, focus_target, close_behavior, .. } = queued.request;' (on_dismiss not read); crates/teksilo-platform/src/window_system.rs:106-118 supports_native_modal_windows() is true outside the Linux/BSD family`
   - `crates/teksilo-widgets/src/dialog.rs:764-775: 'The dismiss callback resets it to false ... Only in-tree presentations fire this callback.'`
   - `crates/teksilo-widgets/src/message_box.rs:810-850: the result on non-button dismissal comes only from on_dismiss (present)`
@@ -336,12 +419,17 @@ The example's trigger names do not match their visible text ('Show popover' show
 - **Scenario:** tabwalk
 - **Act:** tree at launch; Tab to the Open dialog trigger
 - **The reader should get:** An accessible name that contains the visible label (WCAG 2.5.3), so a reader and a voice-control user find the control by the words on screen.
-- **The reader gets:** The Button-role nodes are named 'Show popover' and 'Open dialog', while the painted text is 'Context / Popover actions' and 'Modal / Review changes'. A sighted helper saying 'press Review changes' and a reader hearing 'Open dialog' are talking about different words.
+- **The reader got (`261a218f`):** The Button-role nodes are named 'Show popover' and 'Open dialog', while the painted text is 'Context / Popover actions' and 'Modal / Review changes'. A sighted helper saying 'press Review changes' and a reader hearing 'Open dialog' are talking about different words.
 - **Platform:** all
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/dialogs\_and\_popovers/src/main.rs:263-283,327-328,333,360
-- **Evidence:**
+- **Now (`c198e4d1`):** The triggers are still named 'Show popover' and 'Open dialog', while their visible text is 'Context / Popover actions' and 'Modal / Review changes'. The popover's dialog is now named after its trigger, so it is 'Show popover' too.
+- **Measured again:** tabwalk-dialogs-and-popovers, 2 of 2 runs (static)
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-dialogs-and-popovers tree-launch.txt: "[push button] 'Show popover' {focusable}" > "[panel] ''" > "[label] 'Context'" "[label] 'Popover actions'"; "[push button] 'Open dialog' {focusable}" > "[panel] ''" > "[label] 'Modal'" "[label] 'Review changes'"`
+  - `pass1 fix-popover-trigger-dialog 'Tab to the dialog's trigger': +89.6 ms ORCA SAYS: 'Open dialog push button.'`
+- **Where (`c198e4d1`):** examples/dialogs\_and\_popovers/src/main.rs:263-283,327-328,333,360
+- **Evidence (`261a218f`):**
   - `tree-launch.txt: "[push button] 'Show popover'" > "[label] 'Context'" "[label] 'Popover actions'"; "[push button] 'Open dialog'" > "[panel] '' {focusable}" > "[label] 'Modal'" "[label] 'Review changes'"`
   - `examples/dialogs_and_popovers/src/main.rs:273-275 (OverlayTrigger::around(popover_trigger).named("Show popover")), :281 (Dialog::new(lit!("Open dialog")) with .trigger(dialog_trigger) showing 'Review changes')`
   - `tree-launch.txt (r1): "[push button] 'Show popover'" > "[panel] ''" > "[label] 'Context'" "[label] 'Popover actions'"; "[push button] 'Open dialog'" > "[panel] '' {focusable}" > "[label] 'Modal'" "[label] 'Review changes'"`
@@ -357,12 +445,18 @@ The MessageBox's 'Show details' disclosure (every Accordion) publishes its conte
 - **Scenario:** dialogs-could-not-open
 - **Act:** dialogs-could-not-open: Tab from Retry to 'Show details', Space to expand, read the tree
 - **The reader should get:** The disclosure button is a leaf, and the details region is its sibling (controlled by it). Every route a reader uses to read a dialog then reaches 'Underlying OS error: EACCES ...'.
-- **The reader gets:** The tree is \[push button\] 'Show details' &gt; \[landmark\] 'Show details' &gt; \[panel\] '' &gt; \[label\] 'Underlying OS error: EACCES (permission denied)...'. Orca's flat review, the route for reading a non-document window, treats a push button as a single leaf and does not descend (script\_utilities.py:1505-1506 returns \[root\] for any button in getOnScreenObjects, used by flat\_review.py:750). The details are neither in the alert's description nor focusable, and expanding them is silent (dialogs-11). So an Orca user is not told they exist, and only Orca 46's object navigator (object\_navigator.py:190-203), which descends into any child, can reach them. The Accordion doc says 'The header is announced as Role::Button', but the code gives Role::Button to the Accordion node itself, whose children() is its whole root, region included. The sweep's 'passed' line about the details being reachable comes from the harness's raw walk, which ignores Orca's rule.
+- **The reader got (`261a218f`):** The tree is \[push button\] 'Show details' &gt; \[landmark\] 'Show details' &gt; \[panel\] '' &gt; \[label\] 'Underlying OS error: EACCES (permission denied)...'. Orca's flat review, the route for reading a non-document window, treats a push button as a single leaf and does not descend (script\_utilities.py:1505-1506 returns \[root\] for any button in getOnScreenObjects, used by flat\_review.py:750). The details are neither in the alert's description nor focusable, and expanding them is silent (dialogs-11). So an Orca user is not told they exist, and only Orca 46's object navigator (object\_navigator.py:190-203), which descends into any child, can reach them. The Accordion doc says 'The header is announced as Role::Button', but the code gives Role::Button to the Accordion node itself, whose children() is its whole root, region included. The sweep's 'passed' line about the details being reachable comes from the harness's raw walk, which ignores Orca's rule.
 - **Platform:** Linux: the tree is measured, the Orca consequence is from Orca 46.1's source. Windows and macOS were not measured: the same button-with-children structure is exported, and whether NVDA/VoiceOver descend into a button's children was not verified.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/accordion.rs:668-697
-- **Evidence:**
+- **Now (`c198e4d1`):** The 'Show details' disclosure still publishes its details inside the push button: \[push button\] 'Show details' &gt; \[landmark\] 'Show details' &gt; \[panel\] '' &gt; \[label\] 'Underlying OS error: EACCES ...'. Orca's flat review treats a button as a leaf, and expanding is silent (dialogs-11).
+- **Measured again:** dialogs-could-not-open, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 dialogs-could-not-open tree-Space-expands-the-details.txt:36-39: "[push button] 'Show details' {focusable,focused} rel=['controller-for']" / "[landmark] 'Show details'" / "[panel] ''" / "[label] 'Underlying OS error: EACCES (permission denied)\nopen(\"report.skrib\", O_RDWR) → errno 13'"`
+  - `pass1 dialogs-could-not-open tree-Space-opens-the-error-box.txt:36-38: collapsed, "[landmark] 'Show details'" > "[panel] ''" still hang under the button`
+  - `pass1 dialogs-could-not-open 'Space opens the error box': pass [alert] 'Could not open file' is described by ['report.skrib could not be opened.', 'You may not have permission.'] (the details are not in the description)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/accordion.rs:668-697
+- **Evidence (`261a218f`):**
   - `r2 dialogs-could-not-open tree-Space-expands-the-details.txt lines 36-39: "[push button] 'Show details' {focusable,focused} rel=['controller-for']" / "  [landmark] 'Show details'" / "    [panel] ''" / "      [label] 'Underlying OS error: EACCES (permission denied)\nopen(\"report.skrib\", O_RDWR) → errno 13'" (r1 identical); collapsed, the [landmark] > [panel] still hang under the button (tree-Tab-from-Retry...txt:36-38)`
   - `[alert] 'Could not open file' desc='report.skrib could not be opened.\nYou may not have permission.' (the details are not in the description)`
   - `crates/teksilo-widgets/src/accordion.rs:668-678 (Role::Button, name, expanded, Click on the Accordion node; push_controlled(region)), :680-682 + :688-697 (children() = the root holding header AND region); module doc :13-19 says the HEADER is the button`
@@ -379,12 +473,18 @@ Tab out of an open popover throws focus to the first control of the window (the 
 - **Scenario:** verify-dialogs-popover-more
 - **Act:** verify-dialogs-popover-more: with focus on 'Show snackbar', AT-SPI click 'Show popover' (focus goes to the PopoverBody host), then Tab
 - **The reader should get:** The popover closes (disclosure pattern), and focus moves to the next control after the trigger ('Open dialog') or back to where it was. The reader hears that control.
-- **The reader gets:** The popover closes, and focus lands on \[combo box\] 'Theme' at the top of the window, so Orca says 'Toolbar tool bar' / 'Theme combo box.'. The reader has lost their place in the page. The cause is the focus parked on the non-focusable PopoverBody host (dialogs-03). That node is not a Tab-cycle entry, so navigate\_scope starts the cycle from the beginning.
+- **The reader got (`261a218f`):** The popover closes, and focus lands on \[combo box\] 'Theme' at the top of the window, so Orca says 'Toolbar tool bar' / 'Theme combo box.'. The reader has lost their place in the page. The cause is the focus parked on the non-focusable PopoverBody host (dialogs-03). That node is not a Tab-cycle entry, so navigate\_scope starts the cycle from the beginning.
 - **Platform:** all (framework focus traversal). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** medium; **layer:** framework
-- **Status:** Fixed by `de3bb295` (popover-trigger). Fixed part: Tab from the open popover goes to 'Open dialog', not to the Theme box (fix-popover-trigger-tab-out 3 of 3, verify-dialogs-popover-more 3 of 3.
-- **Where:** crates/teksilo-widgets/src/popover\_widget.rs:685,779; crates/teksilo-core/src/widget\_tree/pointer\_router.rs:3040
-- **Evidence:**
+- **Status:** Fixed by `de3bb295` (popover-trigger).
+- **Now (`c198e4d1`):** Tab from inside the open popover closes it and moves focus to 'Open dialog', the control after the trigger, and Orca says 'Open dialog push button.'. Shift+Tab goes back to the trigger.
+- **Measured again:** verify-dialogs-popover-more, fix-popover-trigger-tab-out, fix-popover-trigger-shift-tab-out: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-dialogs-popover-more 'Tab from inside the popover': +27.2 ms object:children-changed:remove [panel] '' -> [dialog] 'Show popover' / +27.5 ms object:state-changed:focused 1 [push button] 'Open dialog' / +121.4 ms ORCA SAYS: 'Open dialog push button.' (pass2: +53.3 ms / +198.4 ms)`
+  - `pass1 fix-popover-trigger-tab-out 'Tab from inside the popover': +29.3 ms object:state-changed:focused 1 [push button] 'Open dialog' / +132.5 ms ORCA SAYS: 'Open dialog push button.' (pass2: +23.4 ms / +118.9 ms)`
+  - `pass1 fix-popover-trigger-shift-tab-out 'Shift+Tab from inside the popover': +33.7 ms object:state-changed:focused 1 [push button] 'Show popover' / +138.0 ms ORCA SAYS: 'Show popover push button.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/popover\_widget.rs:650-661 (the dialog takes focus itself), :821 (request\_focus\_into)
+- **Evidence (`261a218f`):**
   - `r2 'Tab from inside the popover': "+10.0 ms object:children-changed:remove [panel] '' -> [unknown] ''" / "+10.2 ms object:state-changed:focused 1 [combo box] 'Theme'" / "+86.2 ms ORCA SAYS: 'Toolbar tool bar'" / "+86.2 ms ORCA SAYS: 'Theme combo box.'"`
   - `r3 same act: "+10.5 ms object:state-changed:focused 1 [combo box] 'Theme'" / "+78.5 ms ORCA SAYS: 'Toolbar tool bar'" / "'Theme combo box.'"`
   - `crates/teksilo-core/src/widget_tree/pointer_router.rs:3040 (request_focus falls back to the non-focusable host); crates/teksilo-core/src/widget_tree/focus_impl.rs:474 (navigate_scope from a self.focused that is not an entry); popover_widget.rs's own test doc says the content's natural Tab slot follows the trigger`

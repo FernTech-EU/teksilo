@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Radio tiles and close confirmation
 
 Examples: `radio-tile`, `close-confirmation`.
-7 findings: 3 high, 1 medium, 3 low.
+7 findings: 2 high, 2 medium, 3 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -17,7 +19,7 @@ How to read an entry, and what the words mean, is in
 | [radioclose-04](#radioclose-04) | close-confirmation | The message box title is spoken twice as the dialog opens, the first time cut after a syllable | low | Linux | open |
 | [radioclose-05](#radioclose-05) | radio-tile | Radio group membership is not exported on AT-SPI: Orca repeats the group name on every arrow, and its where-am-I has no 'N of M' | low | Linux | upstream |
 | [radioclose-06](#radioclose-06) | radio-tile | Each group's name is also a separate visible label just before it, so object navigation reads it twice | low | Linux | open (example) |
-| [radioclose-M1](#radioclose-m1) | close-confirmation | The in-tree message box is modal only to the pointer and Tab: AT-SPI click and grab\_focus reach the window's controls behind it, which stay in the tree, focusable and enabled | high | Linux | partly fixed |
+| [radioclose-M1](#radioclose-m1) | close-confirmation | The in-tree message box is modal only to the pointer and Tab: AT-SPI click and grab\_focus reach the window's controls behind it, which stay in the tree, focusable and enabled | medium | Linux | partly fixed |
 
 ### radioclose-01 {#radioclose-01}
 
@@ -27,12 +29,24 @@ A close requested by the compositor (close button, window menu) shows no confirm
 - **Scenario:** radioclose-close-escape, radioclose-close-discard, radioclose-close-save, radioclose-close-space, radioclose-close-twice, radioclose-sugar-blocked
 - **Act:** With the document dirty and focus on the checkbox, close the window through KWin (run.close\_window(), as the close button does); for the sugar window, close only that window through KWin
 - **The reader should get:** The guard vetoes the close and the Save/Discard/Cancel (or Yes/No) message box appears at once: focus on Save (No), and Orca says 'alert Close window?', the text, 'Save push button.'
-- **The reader gets:** Nothing happens for as long as nothing else happens: no event on the bus and no speech for the whole 6 s act (3-4 s in the twice/space variants). The dialog appears only on the next input event of any kind (pressing Shift here). A reader who closed the window hears silence and has no sign the close was refused. A second close request in the meantime stacks a second dialog (see radioclose-03). The in-app route (Space on 'Close window (ctx.close\_window)') is not affected: its dialog appears within ~45 ms.
+- **The reader got (`261a218f`):** Nothing happens for as long as nothing else happens: no event on the bus and no speech for the whole 6 s act (3-4 s in the twice/space variants). The dialog appears only on the next input event of any kind (pressing Shift here). A reader who closed the window hears silence and has no sign the close was refused. A second close request in the meantime stacks a second dialog (see radioclose-03). The in-app route (Space on 'Close window (ctx.close\_window)') is not affected: its dialog appears within ~45 ms.
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. The cause is in platform-independent teksilo-app code, so the Windows/macOS OS close routes run the same code by source; there the dialog appears only if some other event follows (a key-up after Alt+F4/Cmd+W, the pointer re-entering the client area). Not measured there.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-app/src/app.rs:959-972 (post\_event order), app.rs:2486-2493 (CloseRequested), app.rs:3169-3185 (about\_to\_wait); crates/teksilo-app/src/window\_manager.rs:1390-1401, 1422-1480 (process\_pending / evaluate\_close\_guard)
-- **Evidence:**
+- **Now (`c198e4d1`):** A close asked for through the compositor still shows nothing: no event reaches the bus and Orca says nothing, even after 15 s. The Save/Discard/Cancel box appears only on the next input event of any kind, and then Orca reads it. The in-app Close button still opens the box at once.
+- **Measured again:** radioclose-close-escape, -discard, -save, radioclose-sugar-blocked (2 closes each), verify-radioclose-hold: 2 of 2 runs each, 3 hold runs in all
+- **Evidence (`c198e4d1`):**
+  - `pass1 radioclose-close-escape 'close the window as its close button does': 'FAIL  focus lands on [push button] 'Save'' / 'no focus change on the bus in this act'; note: 'no dialog reached the bus in 6 s; pressed Shift to wake the app'`
+  - `pass1 radioclose-close-escape 'press Shift, which does nothing, to wake the app': '+1622.7 ms object:announcement [alert] 'Close window?' text='Close window?'' / '+1635.6 ms object:state-changed:focused 1 [push button] 'Save''`
+  - `pass1 verify-radioclose-hold 'close through KWin, then nothing for 15 s': 'pass  no object:announcement event from [*] '*'' / 'pass  the tree holds no [alert] '*''; note: 'hold: an [alert] was added during the 15 s wait: False'`
+  - `pass1 verify-radioclose-hold 'press Shift, which does nothing': '+32.6 ms object:announcement [alert] 'Close window?' text='Close window?'' / '+34.2 ms object:state-changed:focused 1 [push button] 'Save'' / '+111.2 ms ORCA SAYS: 'alert Close window?''`
+  - `pass2 verify-radioclose-hold (both pass2 runs): note: 'hold: an [alert] was added during the 15 s wait: False'`
+  - `pass1 and pass2 radioclose-close-escape, radioclose-close-discard, radioclose-close-save: note: 'close the window as its close button does': no dialog reached the bus in 6 s; pressed Shift to wake the app'`
+  - `pass1 and pass2 radioclose-sugar-blocked: notes 'close the sugar window as its close button does': no dialog reached the bus in 6 s' and 'close it again': no dialog reached the bus in 6 s'`
+  - `contrast, pass2 radioclose-close-title 'Space on Close window (ctx.close_window)': '+34.6 ms object:announcement [alert] 'Close window?' text='Close window?'' / '+36.4 ms object:state-changed:focused 1 [push button] 'Save''`
+  - `` source: crates/teksilo-app/src/app.rs:976 `let had_modal_requests = self.process_modal_requests(event_loop);` still runs before app.rs:978 `self.process_pending(event_loop);` ``
+- **Where (`c198e4d1`):** crates/teksilo-app/src/app.rs:965-978 (post\_event order: process\_modal\_requests at 976, process\_pending at 978), app.rs:2591-2598 (CloseRequested), app.rs:3245-3264 (about\_to\_wait), app.rs:3162 (custom title bar close request); crates/teksilo-app/src/window\_manager.rs:1390-1401, 1422-1480 (process\_pending / evaluate\_close\_guard)
+- **Evidence (`261a218f`):**
   - `radioclose-close-escape-20260925-141941-250141 report.txt: "== close the window as its close button does" / "steps: close the window through KWin" / "FAIL  focus lands on [push button] 'Save'" / "no focus change on the bus in this act"`
   - `same run, notes: "note: 'close the window as its close button does': no dialog reached the bus in 6 s; pressed Shift to wake the app"`
   - `same run, next act "== press Shift, which does nothing, to wake the app": "+14.3 ms object:announcement [alert] 'Close window?' text='Close window?'"`
@@ -59,12 +73,21 @@ Checkbox check-state changes never reach the accessibility tree until something 
 - **Scenario:** radioclose-checkbox, radioclose-close-clean
 - **Act:** Tab to 'Document has unsaved changes' (checked), press Space; press Space again; do an AT-SPI 'click' on it; then Tab away and Shift+Tab back
 - **The reader should get:** Each toggle emits object:state-changed:checked, Orca says 'not checked' / 'checked', and the bus reports the new state
-- **The reader gets:** Space and AT-SPI click both really toggle the flag: in close-clean the next close quits with no dialog, so `dirty` was false. But no object:state-changed:checked event is emitted, Orca says nothing, and the checkbox keeps reading its old state ('checked') on the bus. The change surfaces only when focus leaves: the stale 'checked 0' event arrives together with the focus move, and Orca's 'not checked' is cut by the new focus. In this example that checkbox decides whether closing loses work, and the reader is told the opposite of the truth.
+- **The reader got (`261a218f`):** Space and AT-SPI click both really toggle the flag: in close-clean the next close quits with no dialog, so `dirty` was false. But no object:state-changed:checked event is emitted, Orca says nothing, and the checkbox keeps reading its old state ('checked') on the bus. The change surfaces only when focus leaves: the stale 'checked 0' event arrives together with the focus move, and Orca's 'not checked' is cut by the new focus. In this example that checkbox decides whether closing loses work, and the reader is told the opposite of the truth.
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. The stale value is in the AccessKit tree Teksilo publishes (no TreeUpdate carries the new `toggled`), so by Teksilo's source UIA and macOS get the same stale state. Not measured there.
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `5c8ff299` (state-publish).
-- **Where:** crates/teksilo-widgets/src/checkbox.rs:362-420, 535-548, 644-670; crates/teksilo-core/src/widget\_tree/layout\_impl.rs:92-106
-- **Evidence:**
+- **Now (`c198e4d1`):** Each toggle of the checkbox now reaches the bus at once. Space and an AT-SPI click both emit object:state-changed:checked, Orca says 'not checked' or 'checked', and the bus reads the new state. The second window's 'Locked against closing' checkbox behaves the same way.
+- **Measured again:** radioclose-checkbox, radioclose-close-clean, verify-radioclose-sugar-toggle: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 radioclose-checkbox 'Space: uncheck': '+22.1 ms object:state-changed:checked 0 [check box] 'Document has unsaved changes'' / '+28.1 ms ORCA SAYS: 'not checked'' / 'pass  the checkbox reads not checked on the bus'`
+  - `pass2 radioclose-checkbox 'Space: check again': '+22.8 ms object:state-changed:checked 1 [check box] 'Document has unsaved changes'' / '+35.5 ms ORCA SAYS: 'checked''`
+  - `pass2 radioclose-checkbox 'AT-SPI click: uncheck': '+7.6 ms object:state-changed:checked 0 [check box] 'Document has unsaved changes'' / '+15.0 ms ORCA SAYS: 'not checked''`
+  - `pass1 radioclose-checkbox: the same three acts pass, with Orca lagging ('Orca received this act's first event 816 ms after the bus carried it')`
+  - `pass1 radioclose-close-clean 'Space: clear the checkbox': '+230.5 ms object:state-changed:checked 0 [check box] 'Document has unsaved changes'' / '+1546.3 ms ORCA SAYS: 'not checked''`
+  - `pass2 verify-radioclose-sugar-toggle 'Space: unlock': '+22.3 ms object:state-changed:checked 0 [check box] 'Locked against closing'' / '+32.8 ms ORCA SAYS: 'not checked''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/checkbox.rs:389-396 (check state bound at BindingLevel::AccessibilityOnly), checkbox.rs:653 (accessibility)
+- **Evidence (`261a218f`):**
   - `radioclose-checkbox-20260925-141232-134730 report.txt, "== Space: uncheck": "FAIL  a object:state-changed:checked event from [check box] '*'" / "no object:state-changed:checked event from [check box] '*'" / "FAIL  Orca says 'not checked'" / "FAIL  the checkbox reads not checked on the bus" / "states=['checkable', 'checked', 'enabled', 'focusable', 'focused', 'sensitive', 'showing', 'visible']"`
   - `same run, "== AT-SPI click: uncheck": "+7.0 ms == harness:action click [check box] 'Document has unsaved changes'" then the same three FAILs, "states=['checkable', 'checked', ...]"`
   - `same run, "== Tab away and Shift+Tab back": "+4.4 ms object:state-changed:checked 0 [check box] 'Document has unsaved changes'" / "+4.6 ms object:state-changed:focused 1 [push button] 'Close window (ctx.close_window)'" / "+15.8 ms ORCA SAYS (CUT): 'not checked'"`
@@ -89,12 +112,20 @@ Each further close request stacks another identical confirmation dialog
 - **Scenario:** radioclose-close-twice, radioclose-close-again
 - **Act:** (a) Close through KWin twice before the held dialog shows, as a user who heard nothing would; (b) open the dialog with the in-app button, then close through KWin again while it is up
 - **The reader should get:** One dialog, however many times the close is asked for. One Cancel/Escape ends it and returns focus to the checkbox.
-- **The reader gets:** Two 'Close window?' alerts are in the tree. Escape removes the top one, and focus lands on the Save button of the second. Orca reads 'alert Close window? … Save push button.' again, so the reader believes Cancel did nothing and has to answer twice. In (b) the second dialog arrives with focus moving Save-&gt;Save, and Orca only says 'Close window?', so the reader does not know they are now in a second dialog.
+- **The reader got (`261a218f`):** Two 'Close window?' alerts are in the tree. Escape removes the top one, and focus lands on the Save button of the second. Orca reads 'alert Close window? … Save push button.' again, so the reader believes Cancel did nothing and has to answer twice. In (b) the second dialog arrives with focus moving Save-&gt;Save, and Orca only says 'Close window?', so the reader does not know they are now in a second dialog.
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. The guard re-run is platform-independent teksilo-app code.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-app/src/window\_manager.rs:1390-1401, 1422-1480; examples/close\_confirmation/src/main.rs:62-95
-- **Evidence:**
+- **Now (`c198e4d1`):** Two close requests still stack two identical 'Close window?' boxes. Escape removes the top one, focus lands on Save in the second, and Orca reads 'alert Close window?' again, so Cancel seems to have done nothing. A compositor close while the button-opened box is up adds a second box, and Orca says only 'Close window?'.
+- **Measured again:** radioclose-close-twice, radioclose-close-again, verify-radioclose-twice-both: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 radioclose-close-twice 'close through KWin again, as a user who heard nothing would': '+26.4 ms object:children-changed:add [frame] 'Close confirmation' -> [alert] 'Close window?'' / '+32.6 ms object:children-changed:add [frame] 'Close confirmation' -> [alert] 'Close window?'' / 'FAIL  the tree holds exactly 1 [alert]'`
+  - `pass2 radioclose-close-twice 'Escape: Cancel': '+11.7 ms object:children-changed:remove [frame] 'Close confirmation' -> [alert] 'Close window?'' / '+14.3 ms object:state-changed:focused 1 [push button] 'Save'' / '+251.4 ms ORCA SAYS: 'alert Close window?'' / 'FAIL  the tree holds no [alert] '*''`
+  - `pass2 verify-radioclose-twice-both 'Escape: first Cancel': '+12.6 ms object:state-changed:focused 1 [push button] 'Save'' / '+92.7 ms ORCA SAYS: 'alert Close window?''; 'Escape: second Cancel': '+14.3 ms object:state-changed:focused 1 [check box] 'Document has unsaved changes''`
+  - `pass2 radioclose-close-again 'press Shift, which does nothing': '+12.5 ms object:children-changed:add [frame] 'Close confirmation' -> [alert] 'Close window?'' / '+12.6 ms object:state-changed:focused 1 [push button] 'Save'' / '+19.8 ms ORCA SAYS: 'Close window?'' / 'FAIL  the tree holds exactly 1 [alert]'`
+  - `pass1 radioclose-close-again 'press Shift, which does nothing': '+1333.1 ms object:children-changed:add [frame] 'Close confirmation' -> [alert] 'Close window?'' / '+1363.3 ms ORCA SAYS: 'Close window?''`
+- **Where (`c198e4d1`):** crates/teksilo-app/src/window\_manager.rs:1390-1401, 1422-1480; examples/close\_confirmation/src/main.rs:62-95
+- **Evidence (`261a218f`):**
   - `radioclose-close-twice-20260925-141153-134730, "== close through KWin again, as a user who heard nothing would": "+24.8 ms object:announcement [alert] 'Close window?' text='Close window?'" / "+27.1 ms object:children-changed:add [frame] '' -> [alert] 'Close window?'" / "+30.1 ms object:announcement [alert] 'Close window?' text='Close window?'" / "+31.5 ms object:children-changed:add [frame] '' -> [alert] 'Close window?'" / "FAIL  the tree holds exactly 1 [alert]" / "[alert] 'Close window?'" / "[alert] 'Close window?'"`
   - `same run, "== Escape: Cancel": "+5.4 ms object:children-changed:remove [frame] '' -> [alert] 'Close window?'" / "+5.8 ms object:state-changed:focused 1 [push button] 'Save'" / "+79.2 ms ORCA SAYS: 'alert Close window?'" / "+79.3 ms ORCA SAYS: 'Save push button.'" / "FAIL  the tree holds no [alert] '*'" / "found [alert] 'Close window?'"`
   - `radioclose-close-again-20260925-141420-215583, after a KWin close while the button-opened dialog is up, then Shift: "+7.3 ms object:announcement [alert] 'Close window?' text='Close window?'" / "+8.2 ms object:children-changed:add [frame] '' -> [alert] 'Close window?'" / "+8.4 ms object:state-changed:focused 1 [push button] 'Save'" / "+19.7 ms ORCA SAYS: 'Close window?'" / "FAIL  the tree holds exactly 1 [alert]"`
@@ -115,12 +146,19 @@ The message box title is spoken twice as the dialog opens, the first time cut af
 - **Scenario:** radioclose-close-title (and every dialog opening in the close/sugar scenarios)
 - **Act:** Space on 'Close window (ctx.close\_window)' (or any route that opens the MessageBox)
 - **The reader should get:** The reader hears the dialog once: 'alert Close window?', its text, 'Save push button.' (the MessageBox doc says 'the title is the one thing announced, once')
-- **The reader gets:** The AlertDialog is an assertive live region. atspi\_common emits object:announcement for its name as it is added, 1-2 ms before focus moves to Save in the same update. Orca starts 'Close window?' (interrupt=True), then stops it to present the new focus, and says 'alert Close window?' again. The reader hears a clipped 'Clo-' before the full reading. Nothing is lost, but the live region adds only this stutter, because focus always enters the box.
+- **The reader got (`261a218f`):** The AlertDialog is an assertive live region. atspi\_common emits object:announcement for its name as it is added, 1-2 ms before focus moves to Save in the same update. Orca starts 'Close window?' (interrupt=True), then stops it to present the new focus, and says 'alert Close window?' again. The reader hears a clipped 'Clo-' before the full reading. Nothing is lost, but the live region adds only this stutter, because focus always enters the box.
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. Windows by source: accesskit\_windows adapter.rs:248-262 raises both UIA WindowOpened and LiveRegionChanged for the dialog node as it is added, ahead of the focus event, so NVDA gets the same double presentation (not measured).
 - **Severity:** low; **layer:** framework
-- **Status:** Open. In the announce-focus fix topic, which did not report it fixed.
-- **Where:** crates/teksilo-widgets/src/message\_box.rs:1115-1124, 1130
-- **Evidence:**
+- **Status:** Open.
+- **Now (`c198e4d1`):** As the box opens, Orca starts the title 'Close window?', stops it to read the new focus, then says 'alert Close window?', the text and 'Save push button.'. The title is presented twice, the first time cut. The same happens for 'Close this window?' in the second window.
+- **Measured again:** radioclose-close-title, radioclose-sugar-button: 2 of 2 runs each, and every box opening in the group's other runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 radioclose-close-title 'Space on Close window (ctx.close_window)': '+39.8 ms object:announcement [alert] 'Close window?' text='Close window?'' / '+41.0 ms object:state-changed:focused 1 [push button] 'Save'' / '+52.4 ms ORCA SAYS (CUT): 'Close window?'' / '+111.9 ms ORCA SAYS: 'alert Close window?'' / 'FAIL  Orca says 'Close window?' exactly 1 time(s)'`
+  - `pass2 radioclose-close-title same act: '+34.6 ms object:announcement [alert] 'Close window?' text='Close window?'' / '+36.4 ms object:state-changed:focused 1 [push button] 'Save'' / '+46.6 ms ORCA SAYS (CUT): 'Close window?'' / '+97.9 ms ORCA SAYS: 'alert Close window?''; observed: 'Orca's 'Close window?' was cut by a stop 51 ms in (estimated)'`
+  - `pass2 radioclose-sugar-button 'Space on Close window (can_close)': '+34.9 ms object:announcement [alert] 'Close this window?' text='Close this window?'' / '+36.0 ms object:state-changed:focused 1 [push button] 'No''`
+  - `every box opening in this group's runs (close-escape, close-twice, close-again, behind-modal-*, space-leak) carries the same observation: 'Close window?' reached the bus 1.2 to 18.7 ms before the act's focus change`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/message\_box.rs:1115-1124 (set\_live at 1122), 1129-1131 (initial\_focus\_hint)
+- **Evidence (`261a218f`):**
   - `radioclose-close-title-20260925-140258-4176546: "+45.0 ms object:announcement [alert] 'Close window?' text='Close window?'" / "+47.0 ms object:state-changed:focused 1 [push button] 'Save'" / "+59.2 ms ORCA SAYS (CUT): 'Close window?'" / "+121.4 ms ORCA SAYS: 'alert Close window?'" / "FAIL  Orca says 'Close window?' exactly 1 time(s)"`
   - `same run, observed: "'Close window?' reached the bus 2.0 ms before the act's focus change, which Orca interrupts to read the new focus"`
   - `orca-debug.out: "14:03:25.148893 - NULL SPEECH: speak 'Close window?' interrupt=True" / "14:03:25.210987 - NULL SPEECH: stop" / "14:03:25.211179 - NULL SPEECH: speak 'alert Close window?' interrupt=False"`
@@ -140,12 +178,21 @@ Radio group membership is not exported on AT-SPI: Orca repeats the group name on
 - **Scenario:** radioclose-tile-row, radioclose-tile-list, radioclose-tile-grid, radioclose-tile-tree
 - **Act:** Tab into a RadioTileGroup, then Right/Left/Home/End/Up/Down
 - **The reader should get:** On entry the group name, then '&lt;tile&gt; selected radio button &lt;description&gt;'. On each arrow within the group, only the new tile and its state, not the group again.
-- **The reader gets:** Every arrow is spoken as '&lt;Group&gt;. &lt;tile&gt;. selected radio button &lt;desc&gt;', e.g. 'Template.' 'None.' 'selected radio button' 'empty binder.'. On entry the name comes twice: 'Project format panel.' (the ancestor) and 'Project format.' (the radio group label). The tiles do declare their group (`push_to_radio_group`), but accesskit\_atspi\_common 0.20 exports no MEMBER\_OF relation. Orca's `_generateNewRadioButtonGroup` suppresses the group name only when the previous focus is among the MEMBER\_OF targets. Orca's where-am-I `_generatePositionInGroup` also counts MEMBER\_OF targets only, so it gives no position even though posinset/setsize are correct on the bus. The where-am-I part is by source reading; that key is Orca's own and was not exercised.
+- **The reader got (`261a218f`):** Every arrow is spoken as '&lt;Group&gt;. &lt;tile&gt;. selected radio button &lt;desc&gt;', e.g. 'Template.' 'None.' 'selected radio button' 'empty binder.'. On entry the name comes twice: 'Project format panel.' (the ancestor) and 'Project format.' (the radio group label). The tiles do declare their group (`push_to_radio_group`), but accesskit\_atspi\_common 0.20 exports no MEMBER\_OF relation. Orca's `_generateNewRadioButtonGroup` suppresses the group name only when the previous focus is among the MEMBER\_OF targets. Orca's where-am-I `_generatePositionInGroup` also counts MEMBER\_OF targets only, so it gives no position even though posinset/setsize are correct on the bus. The where-am-I part is by source reading; that key is Orca's own and was not exercised.
 - **Platform:** Linux AT-SPI/Orca 46.1, measured for the repetition. Windows by source: accesskit\_windows exports UIA PositionInSet (+1) and SizeOfSet (node.rs:682-693, 1326-1327), and radio grouping is not a UIA relation, so NVDA is not affected this way. macOS publishes neither.
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** upstream: accesskit\_atspi\_common-0.20.0/src/node.rs:959-976 (Teksilo side correct at crates/teksilo-widgets/src/radio\_tile.rs:778-784)
-- **Evidence:**
+- **Now (`c198e4d1`):** Orca still repeats the group name on every arrow, for example 'Template.' 'None.' 'selected radio button' 'empty binder.'. The tiles still export no member-of relation on AT-SPI, although posinset and setsize are right on the bus. The adapter now in use still exports only the controller-for relation.
+- **Measured again:** radioclose-tile-row, radioclose-tile-list, radioclose-tile-tree: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 radioclose-tile-row 'Right: Bundle': '+449.0 ms ORCA SAYS: 'Project format.'' / '+449.0 ms ORCA SAYS: 'Bundle.'' / 'FAIL  Orca does not say 'Project format''`
+  - `pass1 radioclose-tile-row 'Left: back to Bundle': '+60.9 ms ORCA SAYS: 'Project format.'' / '+60.9 ms ORCA SAYS: 'Bundle.''`
+  - `pass2 radioclose-tile-list 'Home: None': '+320.2 ms ORCA SAYS: 'Template.'' / '+320.2 ms ORCA SAYS: 'None.'' / '+320.2 ms ORCA SAYS: 'selected radio button'' / '+320.3 ms ORCA SAYS: 'empty binder.''`
+  - `pass2 radioclose-tile-row 'Tab into Project format': '+889.0 ms ORCA SAYS: 'Project format panel.'' / '+889.0 ms ORCA SAYS: 'Project format.''`
+  - `pass1 and pass2 radioclose-tile-tree: 'FAIL  [radio button] 'Single file' has a member-of relation' / '[radio button] 'Single file' relations={}'; 'pass  each tile says its position'`
+  - `source: accesskit_atspi_common-0.21.0/src/node.rs:972-989 relation_set inserts only RelationType::ControllerFor; node.rs:228 Role::RadioGroup => AtspiRole::Panel`
+- **Where (`c198e4d1`):** upstream: accesskit\_atspi\_common-0.21.0/src/node.rs:972-989 (Teksilo side correct at crates/teksilo-widgets/src/radio\_tile.rs:778-784)
+- **Evidence (`261a218f`):**
   - `radioclose-tile-row-20260925-135127-4005518, "== Right: Bundle": "+6.6 ms object:state-changed:focused 1 [radio button] 'Bundle'" / "+101.9 ms ORCA SAYS: 'Project format.'" / "+101.9 ms ORCA SAYS: 'Bundle.'" / "FAIL  Orca does not say 'Project format'" / "Orca said: 'Project format.'"`
   - `radioclose-tile-list-20260925-141702-250141 orca-debug.out: "14:17:18.531965 - EVENT MANAGER: object:state-changed:focused for [radio button: 'None'] in [application: 'radio-tile'] (1, 0, 0)" then "14:17:18.576387 - SPEECH OUTPUT: 'Template.'" / "14:17:18.576421 - SPEECH OUTPUT: 'None.'"; report: Home, End, Up and Down each "FAIL  Orca does not say 'Template'"`
   - `entry, tabwalk-radio-tile-20260925-134956-3988920: "+54.9 ms ORCA SAYS: 'Project format panel.'" / "+54.9 ms ORCA SAYS: 'Project format.'" / "+54.9 ms ORCA SAYS: 'Single file.'" / "+54.9 ms ORCA SAYS: 'selected radio button'"`
@@ -168,12 +215,17 @@ Each group's name is also a separate visible label just before it, so object nav
 - **Scenario:** radioclose-tile-tree (tree-radio-tile)
 - **Act:** Walk the tree a reader walks (flat review / object navigation)
 - **The reader should get:** The group is named once, from its visible heading
-- **The reader gets:** Each section is a \[label\] 'Project format' followed by a \[panel\] 'Project format', and the same for 'Template' and 'Publication stage'. The example gives the group a copy of the heading's string instead of relating the two.
+- **The reader got (`261a218f`):** Each section is a \[label\] 'Project format' followed by a \[panel\] 'Project format', and the same for 'Template' and 'Publication stage'. The example gives the group a copy of the heading's string instead of relating the two.
 - **Platform:** Linux AT-SPI, measured in the tree. The same nodes reach every adapter.
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/radio\_tile/src/main.rs:49-59, 64, 83, 119
-- **Evidence:**
+- **Now (`c198e4d1`):** Each section is still a label followed by a panel of the same name: 'Project format', 'Template' and 'Publication stage' each come twice in object navigation.
+- **Measured again:** radioclose-tile-tree, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass2 radioclose-tile-tree tree-read-the-tree-at-rest.txt: "    [label] 'Project format'" / "    [panel] 'Project format' {focusable}" / "    [label] 'Template'" / "    [panel] 'Template' {focusable}" / "    [label] 'Publication stage'" / "    [panel] 'Publication stage' {focusable}"`
+  - `pass1 radioclose-tile-tree: the same tree`
+- **Where (`c198e4d1`):** examples/radio\_tile/src/main.rs:47-56 (section heading), 62, 83, 122 (group labels)
+- **Evidence (`261a218f`):**
   - `tree-radio-tile-20260925-134921-3980323/tree-launch.txt: "    [label] 'Project format'" / "    [panel] 'Project format' {focusable}" / "    [label] 'Template'" / "    [panel] 'Template' {focusable}" / "    [label] 'Publication stage'" / "    [panel] 'Publication stage' {focusable}"`
   - ``examples/radio_tile/src/main.rs:49-59 `section()` adds a visible TextWidget title; :64, :83, :119 `.label(lit!("Project format"))` etc. name the group with the same string``
   - `radioclose-tile-tree-20260925-143159-508149 tree: "    [label] 'Project format'" / "    [panel] 'Project format' {focusable}" / "    [label] 'Template'" / "    [panel] 'Template' {focusable}"`
@@ -189,12 +241,21 @@ The in-tree message box is modal only to the pointer and Tab: AT-SPI click and g
 - **Scenario:** verify-radioclose-behind-modal-box, verify-radioclose-behind-modal-focus, verify-radioclose-behind-modal (tools/reader/scenarios/verify\_radio\_close.py)
 - **Act:** close-confirmation: open the Save/Discard/Cancel box (Space on 'Close window (ctx.close\_window)'), then act on the window's own controls behind it, as a screen reader's own activation or focus request does: (a) AT-SPI click on the checkbox, then Cancel, then close through KWin; (b) AT-SPI grab\_focus on 'Open can\_close-sugar window…', then a real Space; (c) AT-SPI click on 'Close window (ctx.close\_window)'
 - **The reader should get:** While the modal box is up, the content beneath it is inert to assistive technology, as it is to the pointer and Tab: not in the tree a reader walks (or at least not actionable), focus requests outside the box refused, and actions on it ignored.
-- **The reader gets:** The background controls stay in the tree beside the \[alert\] {modal}, marked {focusable}. (a) The AT-SPI click toggles the checkbox behind the box, silently because of radioclose-02. After Cancel the reader hears 'not checked', and the next close quits the app with no confirmation: in a real app the unsaved work is gone. (b) grab\_focus moves focus out of the box onto the background button (Orca reads it), and the next real Space activates it: the second window opens while the box is still up. (c) The click on the background Close button runs the guard again and stacks a second box. After an AT-SPI Cancel on the lower box, focus goes back to its opener behind the box still showing.
+- **The reader got (`261a218f`):** The background controls stay in the tree beside the \[alert\] {modal}, marked {focusable}. (a) The AT-SPI click toggles the checkbox behind the box, silently because of radioclose-02. After Cancel the reader hears 'not checked', and the next close quits the app with no confirmation: in a real app the unsaved work is gone. (b) grab\_focus moves focus out of the box onto the background button (Orca reads it), and the next real Space activates it: the second window opens while the box is still up. (c) The click on the background Close button runs the guard again and stacks a second box. After an AT-SPI Cancel on the lower box, focus goes back to its opener behind the box still showing.
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. The box is presented in the window's own tree only on non-macOS Unix (teksilo-platform window\_system.rs:106-116; message\_box.rs:843-849 Deferred + ModalPresentation::Auto). On Windows and macOS it becomes a native modal window. Teksilo's AT action dispatch has no modality check on any platform, so an action on the blocked parent's nodes is probably dispatched there too, but that is not verified. Every in-tree modal (ModalContent::ExistingWidget, in-tree Dialogs) shares the dispatch path on all platforms. Not measured.
-- **Severity:** high; **layer:** framework
-- **Status:** Fixed by `e7764b0f` (modal-at). Fixed part: the actionable part (its 'or at least not actionable' clause): a click behind 'Close window?' no longer toggles the checkbox or re-runs the close guard, grab\_focus no longer leaves the box, and no second window opens behind it..
-- **Where:** crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1152-1200 (AccessAction dispatch); crates/teksilo-core/src/widget\_tree/focus\_impl.rs:441-449 (only Tab is confined); crates/teksilo-core/src/widget\_tree/accessibility\_impl.rs (the walker exports the background); crates/teksilo-app/src/app.rs:155-200 (present\_in\_tree\_modal\_request)
-- **Evidence:**
+- **Severity:** medium; **layer:** framework
+- **Severity in the sweep:** high. The part that lost data is gone: nothing behind the box can be clicked or focused by a screen reader. What is left is a page that stays in the tree, focusable, while it ignores every request. A reader who walks into it gets no answer, but can go back to the box.
+- **Status:** Partly fixed by `e7764b0f` (modal-at). What remains is under **Now**.
+- **Now (`c198e4d1`):** A screen reader can no longer act behind the box. An AT-SPI click on the checkbox or on the Close button behind it does nothing, and grab\_focus on a control behind it moves no focus. A real Space then presses the box's own Save. What remains: the page's controls stay in the tree beside the modal alert, marked focusable, so flat review or object navigation still reaches controls that no longer respond.
+- **Measured again:** verify-radioclose-behind-modal, verify-radioclose-behind-modal-box, verify-radioclose-behind-modal-focus: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 verify-radioclose-behind-modal 'AT-SPI click on 'Close window (ctx.close_window)' behind the dialog': '+7.4 ms == harness:action click [push button] 'Close window (ctx.close_window)'' / 'pass  the tree holds exactly 1 [alert]' / 'pass  no object:children-changed:add event from [frame] '*''`
+  - `pass2 verify-radioclose-behind-modal 'AT-SPI grab_focus on the checkbox behind the dialog': 'pass  no object:state-changed:focused event from [check box] '*''; after Cancel, 'Shift+Tab / Tab round to the checkbox': '+98.2 ms ORCA SAYS: 'Document has unsaved changes check box checked.''`
+  - `pass1 verify-radioclose-behind-modal-box 'AT-SPI click on the checkbox behind the dialog': '+5.1 ms == harness:action click [check box] 'Document has unsaved changes'' / 'pass  the checkbox reads checked on the bus'; 'close through KWin': 'pass  the application is still running'`
+  - `pass1 verify-radioclose-behind-modal-focus 'AT-SPI grab_focus on 'Open can_close-sugar window…' behind the dialog': 'pass  no object:state-changed:focused event from [push button] 'Open can_close''; 'Space, where focus now is': '+23.4 ms object:children-changed:remove [application] 'close-confirmation' -> [frame] 'Close confirmation'' (Space pressed the box's Save, which saves and quits); note: 'behind-modal-focus: frames on the bus: 0'`
+  - `pass1 verify-radioclose-behind-modal-focus tree-AT-SPI-grab-focus-on--Open-can-close-sugar-window---behind-t.txt: "[check box] 'Document has unsaved changes' {checkable,checked,focusable}" / "[push button] 'Close window (ctx.close_window)' {focusable}" beside "[alert] 'Close window?' ... {active,focusable,modal}"`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1168-1176 (AccessAction dropped behind a modal), crates/teksilo-core/src/widget\_tree/overlay\_impl.rs:714-732 (is\_behind\_modal), crates/teksilo-core/src/widget\_tree/focus\_impl.rs:462-464 (Tab confined to the modal), crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:48 (the walk still takes every root, the page included), crates/teksilo-app/src/app.rs:155-289 (present\_in\_tree\_modal\_request)
+- **Evidence (`261a218f`):**
   - `verify-radioclose-behind-modal-box-20260925-143234-607761, 'AT-SPI click on the checkbox behind the dialog': '+4.7 ms == harness:action click [check box] 'Document has unsaved changes'' (no event); 'Escape: Cancel': '+4.5 ms object:state-changed:checked 0 [check box] 'Document has unsaved changes''; 'Shift+Tab to the checkbox': '+63.4 ms ORCA SAYS: 'Document has unsaved changes check box not checked.''; 'close through KWin': 'COULD NOT RUN:  the application exited (0)' / '+13.5 ms object:children-changed:remove [application] 'close-confirmation' -> [frame] '''`
   - `verify-radioclose-behind-modal-focus-20260925-143605-607761, 'AT-SPI grab_focus on 'Open can_close-sugar window…' behind the dialog': '+5.2 ms object:state-changed:focused 1 [push button] 'Open can_close-sugar window…'' / '+41.0 ms ORCA SAYS: 'Open can_close-sugar window… push button.''; 'Space, where focus now is': '+55.8 ms object:children-changed:add [application] 'close-confirmation' -> [frame] ''' / '+93.5 ms window:activate [frame] '''; tree-Space--where-focus-now-is.txt holds the first frame's [alert] 'Close window?' {active,focusable,modal} AND a second [frame] '' {active,focusable,focused} with 'Locked against closing'`
   - `verify-radioclose-behind-modal-20260925-143042-564379, 'AT-SPI click on 'Close window (ctx.close_window)' behind the dialog': '+21.0 ms object:announcement [alert] 'Close window?'' / '+22.6 ms object:children-changed:add [frame] '' -> [alert] 'Close window?'' / 'FAIL  the tree holds exactly 1 [alert]'; 'AT-SPI grab_focus on the checkbox behind the dialog': '+7.4 ms object:state-changed:focused 1 [check box] 'Document has unsaved changes'' / '+41.1 ms ORCA SAYS: 'Document has unsaved changes check box not checked.''; 'AT-SPI click on Cancel (1)': '+13.7 ms object:state-changed:focused 1 [push button] 'Close window (ctx.close_window)'' while the second alert is still in the tree`

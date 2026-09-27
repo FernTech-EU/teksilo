@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Rich text and input methods
 
 Examples: `rich-text-editor`, `ime-playground`, `rich-text-viewer`.
-22 findings: 2 critical, 12 high, 4 medium, 4 low.
+22 findings: 2 critical, 11 high, 5 medium, 4 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -26,11 +28,11 @@ How to read an entry, and what the words mean, is in
 | [text-13](#text-13) | rich-text-editor | Headings in rich text are unnamed and carry no level on AT-SPI | medium | Linux | open |
 | [text-14](#text-14) | rich-text-editor | The Heading level, Font family and Theme combo boxes never tell the reader their current value | medium | Linux | upstream |
 | [text-15](#text-15) | rich-text-editor | Orca in a Wayland session never learns of a key typed into a Teksilo window, so it says nothing about any caret move | high | Linux | fixed |
-| [text-16](#text-16) | rich-text-editor | After a screen reader moves focus into the editor, Ctrl+Tab jumps to the window's first control instead of the next one | low | Linux | open |
+| [text-16](#text-16) | rich-text-editor | After a screen reader moves focus into the editor, Ctrl+Tab jumps to the window's first control instead of the next one | low | Linux | fixed |
 | [text-17](#text-17) | rich-text-editor, ime-playground, rich-text-viewer | Every TextInput/SearchField carries an always-present, empty, unnamed status bar node | low | Linux | open |
 | [text-v01](#text-v01) | rich-text-editor | Shift+F10 moves the caret to the middle of the editor or field and drops the selection, so the menu's Paste writes somewhere else | critical | Linux | fixed |
 | [text-v02](#text-v02) | ime-playground | Closing a TextInput's context menu with Escape selects the whole field, so the next key replaces its content | high | Linux | fixed |
-| [text-v03](#text-v03) | rich-text-editor | The editor's context menu cannot be operated by a reader: focus lands on an unnamed menu, Down is silent, and the disabled Cut and Copy report enabled | high | Linux | partly fixed |
+| [text-v03](#text-v03) | rich-text-editor | The editor's context menu cannot be operated by a reader: focus lands on an unnamed menu, Down is silent, and the disabled Cut and Copy report enabled | medium | Linux | partly fixed |
 | [text-v04](#text-v04) | rich-text-editor | The Highlighter search tells a reader nothing: no match count, and the matches are not in the text attributes | medium | Linux | open (example) |
 | [text-v05](#text-v05) | rich-text-editor, ime-playground, rich-text-viewer | SearchField publishes a second, non-focusable entry holding the same text around the focused one | low | Linux | open |
 
@@ -42,12 +44,22 @@ Keyboard focus into a RichTextEditor (editor or read-only viewer) lands on an un
 - **Scenario:** text-editor-tab-in, text-viewer, text-ime, text-editor-shift-tab
 - **Act:** text-editor-tab-in 'Tab from the search field into the editor' then 'Down in the editor (Orca told of the key)'; text-viewer 'Tab into the viewer' then 'Down in the viewer'; text-ime 'Tab to the rich editor'; text-editor-shift-tab stops 6 and 8
 - **The reader should get:** Focus lands on the multi-line entry (editor) or document frame (viewer) that carries the Text interface; the reader hears a name and 'entry'/'document'; every arrow key then moves a caret the reader hears.
-- **The reader gets:** AT-SPI focus goes to the wrapper RichTextEditor node, a Role::GenericContainer that AT-SPI maps to 'section'. Orca says only 'section.'. The entry is not the focused node, so accesskit\_atspi\_common emits no text-caret-moved and no text-selection-changed for it: Down, Right, End and all other caret keys are silent. Typing still emits text-changed on the unfocused entry, and Orca only moves its locus there as a heuristic. The only route that puts focus on the text node is an AT-SPI grab\_focus on the entry itself, which a user does not do. Every keyboard or pointer entry into every RichTextEditor in the three examples is affected.
+- **The reader got (`261a218f`):** AT-SPI focus goes to the wrapper RichTextEditor node, a Role::GenericContainer that AT-SPI maps to 'section'. Orca says only 'section.'. The entry is not the focused node, so accesskit\_atspi\_common emits no text-caret-moved and no text-selection-changed for it: Down, Right, End and all other caret keys are silent. Typing still emits text-changed on the unfocused entry, and Orca only moves its locus there as a heuristic. The only route that puts focus on the text node is an AT-SPI grab\_focus on the entry itself, which a user does not do. Every keyboard or pointer entry into every RichTextEditor in the three examples is affected.
 - **Platform:** Linux AT-SPI/Orca 46.1 measured. Windows/macOS by adapter source only: the same TreeUpdate.focus is the GenericContainer, which is a UIA Group (accesskit\_windows node.rs:76) or NSAccessibilityUnknownRole (accesskit\_macos node.rs:55). Those adapters do raise text-selection events for the unfocused entry (windows node.rs:761-768, macos event.rs:291-297), but a screen reader tracks its focus object, which has no text pattern. NVDA and VoiceOver were not verified.
 - **Severity:** critical; **layer:** framework
 - **Status:** Fixed by `731cc2e1` (editor-focus).
-- **Where:** crates/teksilo-widgets/src/rich\_text.rs:3853, :4281-4291; crates/teksilo-widgets/src/rich\_text/body.rs:760-772; crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:126-139
-- **Evidence:**
+- **Now (`c198e4d1`):** Tab into the editor puts focus on the text itself, a multi-line entry named 'Editor', and Orca says 'Editor entry RichTextEditor — Capability '. Down then moves a caret the reader hears ('Showcase'). The viewer's document gets focus the same way ('Sample document document frame Teksilo Rich Text Viewer.'), and the ime-playground rich editor is focused as an entry.
+- **Measured again:** text-editor-tab-in, text-viewer, text-ime, text-editor-shift-tab, fix-editor-focus-rich, fix-editor-focus-viewer: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-tab-in 'Tab from the search field into the editor': +39.6 ms object:state-changed:focused 1 [entry] 'Editor' / +124.1 ms ORCA SAYS: 'Editor entry RichTextEditor — Capability '`
+  - `pass1 text-editor-tab-in 'Down in the editor (Orca told of the key)': +50.3 ms object:text-caret-moved [entry] 'Editor' / +70.8 ms ORCA SAYS: 'Showcase'`
+  - `pass2 text-editor-tab-in 'Tab from the search field into the editor': +40.5 ms object:state-changed:focused 1 [entry] 'Editor' / +93.0 ms ORCA SAYS: 'Editor entry RichTextEditor — Capability '`
+  - `pass1 text-viewer 'Tab into the viewer': +13.4 ms object:state-changed:focused 1 [document frame] 'Sample document' / +55.5 ms ORCA SAYS: 'Sample document document frame Teksilo Rich Text Viewer.'; 'Down in the viewer': +23.0 ms ORCA SAYS: 'This window holds a single RichTextEditor::read_only bound to a TextDocument loaded from an embedded '`
+  - `pass2 text-viewer 'Tab into the viewer': +13.9 ms object:state-changed:focused 1 [document frame] 'Sample document'`
+  - `pass1 text-ime 'Tab to the rich editor': +29.2 ms object:state-changed:focused 1 [entry] '' (focus is on the entry; its missing name is text-08)`
+  - `pass1 text-editor-shift-tab stops: [document frame] 'Preview'; [separator] 'Splitter divider'; [entry] 'Editor'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text.rs:4321-4336 (wrapper stays a GenericContainer, accessibility\_proxy returns the body); crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:160-169 (focus published on the proxy)
+- **Evidence (`261a218f`):**
   - `text-editor-tab-in-20260925-142522-443443 act 'Tab from the search field into the editor': 14:25:31.543160 object:state-changed:focused 1 [section] ''`
   - `same act: 14:25:31.544409 object:state-changed:focused 0 [entry] ''`
   - `orca-debug.out: 14:25:31.586022 - SPEECH OUTPUT: 'section.'`
@@ -76,12 +88,20 @@ Coming back to an editor or viewer is silent: the wrapper node is removed when f
 - **Scenario:** text-editor-tab-in, text-viewer
 - **Act:** text-editor-tab-in 'Ctrl+Tab out of the editor' then 'Ctrl+Shift+Tab back into the editor'; text-viewer 'Tab out to the Theme combo box' then 'Tab into the viewer a second time'
 - **The reader should get:** Returning focus to the editor is announced like the first arrival.
-- **The reader gets:** The GenericContainer exists in the AT tree only while it is focused, because it is otherwise pruned as a content-free container. When focus leaves, the adapter removes it and marks it defunct. When focus comes back, the node reappears with the same NodeId (path), which libatspi still holds as defunct, and Orca logs 'Ignoring defunct object: \[section\]' and says nothing. This is the mechanism of K2 (a reused id after removal), here on the editor's wrapper rather than the announcer's nodes, so the K2 fix does not cover it.
+- **The reader got (`261a218f`):** The GenericContainer exists in the AT tree only while it is focused, because it is otherwise pruned as a content-free container. When focus leaves, the adapter removes it and marks it defunct. When focus comes back, the node reappears with the same NodeId (path), which libatspi still holds as defunct, and Orca logs 'Ignoring defunct object: \[section\]' and says nothing. This is the mechanism of K2 (a reused id after removal), here on the editor's wrapper rather than the announcer's nodes, so the K2 fix does not cover it.
 - **Platform:** Linux AT-SPI/Orca 46.1 measured. The defunct-on-reuse behaviour is AT-SPI-specific (accesskit\_atspi\_common remove\_node). On Windows/macOS the node still appears and disappears with focus, not verified.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `85624a1a` (node-ids). Fixed part: text-editor-tab-in: returning to the editor is heard as 'section.' 1/1; the separate text-01 defect of focusing a GenericContainer remains.
-- **Where:** crates/teksilo-widgets/src/rich\_text.rs:3853, :4290 (a focusable GenericContainer); crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:229-235 contributes but is not sufficient
-- **Evidence:**
+- **Status:** Fixed by `85624a1a` (node-ids).
+- **Now (`c198e4d1`):** Coming back to the editor with Ctrl+Shift+Tab is announced: 'Editor entry Showcase.'. Coming back to the viewer is announced too. The node focus lands on is the entry, which never leaves the tree, so nothing is defunct when focus returns.
+- **Measured again:** text-editor-tab-in, text-viewer, verify-text-ctxmenu: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-tab-in 'Ctrl+Tab out of the editor': +76.1 ms object:state-changed:focused 1 [separator] 'Splitter divider' (no defunct event)`
+  - `pass1 text-editor-tab-in 'Ctrl+Shift+Tab back into the editor': +93.5 ms object:state-changed:focused 1 [entry] 'Editor' / +135.6 ms ORCA SAYS: 'Editor entry Showcase.'`
+  - `pass2 text-editor-tab-in 'Ctrl+Shift+Tab back into the editor': +85.9 ms object:state-changed:focused 1 [entry] 'Editor' / +133.7 ms ORCA SAYS: 'Editor entry Showcase.'`
+  - `pass1 text-viewer 'Tab into the viewer a second time': +12.8 ms object:state-changed:focused 1 [document frame] 'Sample document' / +52.4 ms ORCA SAYS: 'Sample document document frame This window holds a single RichTextEditor::read_only bound to a TextDocument loaded from an embedded '`
+  - `pass1 verify-text-ctxmenu 'Escape closes the menu': +63.6 ms object:state-changed:focused 1 [entry] 'Editor' / +264.7 ms ORCA SAYS: 'Editor entry RichTextEditor — Capability '`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text.rs:4321-4336; crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:160-169; crates/teksilo-core/src/accessibility/adapter\_ids.rs (a node that comes back gets a new id)
+- **Evidence (`261a218f`):**
   - `text-editor-tab-in-20260925-142522-443443 'Ctrl+Tab out of the editor': 14:25:47.250823 object:state-changed:defunct 1 [section] '' ; 14:25:47.251042 object:state-changed:focused 1 [separator] 'Splitter divider' ; 14:25:47.297698 - SPEECH OUTPUT: 'vertical splitter Splitter divider.'`
   - `'Ctrl+Shift+Tab back into the editor': 14:25:51.193556 object:state-changed:focused 1 [section] '' ; orca-debug.out 14:25:51.195193 - EVENT MANAGER: Ignoring defunct object: [section] ; no SPEECH OUTPUT but the key echo 'tab' (14:25:51.136250)`
   - `text-viewer-20260925-142451-427749 'Tab out to the Theme combo box': 14:25:13.133749 object:state-changed:defunct 1 [section] '' ; 'Tab into the viewer a second time': 14:25:17.033059 object:state-changed:focused 1 [section] '' ; 14:25:17.034178 - EVENT MANAGER: Ignoring defunct object: [section] ; Orca said nothing`
@@ -103,12 +123,23 @@ No character separates paragraphs in the text a reader gets: the end of one para
 - **Scenario:** text-editor-caret, text-editor-typing
 - **Act:** text-editor-caret: 'Down onto the heading's short last line', 'End: end of the first paragraph', 'Right across the paragraph break', 'the word at the paragraph break'; text-editor-typing 'Enter: a new paragraph'
 - **The reader should get:** The Text interface holds a line break at the end of each paragraph, as AccessKit expects: a run whose value ends in a newline marks a paragraph end. The caret at the end of 'Showcase' is on the heading's line, End there says nothing of the next paragraph, Right moves to a new offset and speaks 'T', Enter inserts a line break, and paragraph granularity stops at the heading.
-- **The reader gets:** get\_text(28,40) is 'ShowcaseThis'. The caret at the end of the H1 (document position 36) and at the start of 'This window…' (document position 37) both report offset 36. (1) Down from offset 14 puts the caret on the heading's second line, at the end of 'Showcase'. Orca reads the next paragraph's line, 'This window hosts two RichTextEditor widgets bound to the same TextDocument. The ', and Up then returns to column 14 of the heading, which proves the caret was on 'Showcase'. (2) End at the end of the heading: Orca says 'T'. (3) Right across the break: the caret offset stays 36 (text-caret-moved 36 again), Orca logs 'Event is for last saved cursor position' and says nothing. (4) Enter at the end of the document: the character count stays 7596, no text-changed event, silence. (5) PARAGRAPH granularity at offset 35 returns 0..2981, twenty or so paragraphs up to the first code block, whose text holds a newline. The reader is told the caret is somewhere it is not, and text typed there lands in the other paragraph.
+- **The reader got (`261a218f`):** get\_text(28,40) is 'ShowcaseThis'. The caret at the end of the H1 (document position 36) and at the start of 'This window…' (document position 37) both report offset 36. (1) Down from offset 14 puts the caret on the heading's second line, at the end of 'Showcase'. Orca reads the next paragraph's line, 'This window hosts two RichTextEditor widgets bound to the same TextDocument. The ', and Up then returns to column 14 of the heading, which proves the caret was on 'Showcase'. (2) End at the end of the heading: Orca says 'T'. (3) Right across the break: the caret offset stays 36 (text-caret-moved 36 again), Orca logs 'Event is for last saved cursor position' and says nothing. (4) Enter at the end of the document: the character count stays 7596, no text-changed event, silence. (5) PARAGRAPH granularity at offset 35 returns 0..2981, twenty or so paragraphs up to the first code block, whose text holds a newline. The reader is told the caret is somewhere it is not, and text typed there lands in the other paragraph.
 - **Platform:** Linux AT-SPI/Orca 46.1 measured. The text model and paragraph logic are in accesskit\_consumer (text.rs:71-72), which all three adapters share, so by source UIA text ranges (NVDA paragraph navigation) and macOS text ranges see the same run-together text. Not verified on Windows or macOS.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:348-364, :436-446
-- **Evidence:**
+- **Now (`c198e4d1`):** The text still has no character between paragraphs. Down onto the heading's last line reads the next paragraph's first line, End at the end of the heading says 'T', Right across the break leaves the caret at 36 and Orca says nothing, and Enter adds no character and no text-changed event. The paragraph at the heading runs on into the following paragraphs, and the viewer reads 'architecture.What works todayCrisp glyph…' as one run.
+- **Measured again:** text-editor-caret 2 of 2, text-editor-typing 2 of 2, text-viewer 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-caret 'Down onto the heading's short last line (Orca told of the key)': +43.4 ms object:text-caret-moved [entry] 'Editor' / +64.2 ms ORCA SAYS: 'This window hosts two RichTextEditor widgets bound to the same TextDocument. The '`
+  - `pass1 text-editor-caret 'End: end of the first paragraph': +54.1 ms ORCA SAYS: 'T'; FAIL the character at the caret is a line break: char at caret: {'text': 'T', 'start': 36, 'end': 37}`
+  - `pass1 text-editor-caret 'Right across the paragraph break': FAIL the caret offset moves on: caret before 36, after 36; Orca said nothing in this act`
+  - `pass1 text-editor-caret 'the word at the paragraph break': FAIL text 28..40: 'ShowcaseThis'`
+  - `pass2 text-editor-caret: the same failures (16:56:59.098236 Orca said: 'This window hosts two RichTextEditor widgets bound to the same TextDocument. The '; 16:57:12.457152 Orca said: 'T'; caret before 36, after 36)`
+  - `pass1 text-editor-typing 'Enter: a new paragraph': +376.9 ms object:text-caret-moved [entry] 'Editor' only; FAIL characters before 7596, after 7596`
+  - `pass2 text-editor-typing 'Enter: a new paragraph': FAIL characters before 7596, after 7596`
+  - `pass1 text-viewer 'scene: set the caret to 587': +66.7 ms ORCA SAYS: "string. It is the live target of Milestone 8a of §27.10 of the Teksilo architecture.What works todayCrisp glyph rendering at any display DPI …"`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:348-364, :436-446; crates/teksilo-core/src/accessibility/text\_runs.rs:22-25 (the emitter's hard-break contract)
+- **Evidence (`261a218f`):**
   - `text-editor-caret-20260925-142559-454805 'Down onto the heading's short last line': 14:26:24.439739 object:text-caret-moved 36 [entry] '' ; orca 14:26:24.448607 - SPEECH OUTPUT: 'This window hosts two RichTextEditor widgets bound to the same TextDocument. The ' ; next act 'Up': 14:26:28.428806 object:text-caret-moved 14 [entry] ''`
   - `'End: end of the first paragraph': 14:26:37.598712 object:text-caret-moved 36 [entry] '' ; 14:26:37.604748 - DEFAULT: Presenting result of line boundary nav ; 14:26:37.610556 - SPEECH OUTPUT: 'T' ; probe: char at caret {'text': 'T', 'start': 36, 'end': 37}, text 28..44 'ShowcaseThis win'`
   - `'Right across the paragraph break': 14:26:41.549424 object:text-caret-moved 36 [entry] '' ; 14:26:41.554005 - DEFAULT: Event is for last saved cursor position ; FAIL 'the caret offset moves on': caret before 36, after 36`
@@ -132,12 +163,22 @@ Lists reach the reader as plain paragraphs: no bullet, no number, no depth, no l
 - **Scenario:** text-editor-structure, text-viewer
 - **Act:** text-editor-structure 'Down onto the first bullet item', 'Down onto the first numbered item', 'Down onto a nested numbered item', 'the document's structure in the tree'; text-viewer 'Down onto a bullet item'
 - **The reader should get:** A reader hears that a line is a list item, with its marker ('•', '1.') and its nesting, the way the bullets and numbers are drawn. The marker can be in the text, as browsers expose list markers, or come from list and list item nodes.
-- **The reader gets:** Orca reads 'First item at indent 0', 'First numbered item' and 'Nested decimal at indent 1' with no marker. The tree holds no list or list item node, and the text has no marker. The nested numbered list's own '1.' and its depth are lost, so a numbered procedure cannot be followed by number.
+- **The reader got (`261a218f`):** Orca reads 'First item at indent 0', 'First numbered item' and 'Nested decimal at indent 1' with no marker. The tree holds no list or list item node, and the text has no marker. The nested numbered list's own '1.' and its depth are lost, so a numbered procedure cannot be followed by number.
 - **Platform:** Linux AT-SPI/Orca 46.1 measured. The missing tree content applies to every platform (the AccessKit tree has no list nodes and no marker text).
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:371-395
-- **Evidence:**
+- **Now (`c198e4d1`):** List items are still read as plain lines: 'First item at indent 0', 'First numbered item', 'Nested decimal at indent 1', with no marker and no depth. The tree has no list or list item node, in the editor or the viewer, and changing an item's depth with Tab puts nothing on the bus.
+- **Measured again:** text-editor-structure 2 of 2, text-viewer 2 of 2, verify-text-list-indent 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-structure 'Down onto the first bullet item': 16:34:06.581690 Orca said: 'First item at indent 0'`
+  - `pass1 text-editor-structure 'Down onto the first numbered item': 16:34:13.181226 Orca said: 'First numbered item'`
+  - `pass1 text-editor-structure 'Down onto a nested numbered item': 16:34:19.737407 Orca said: 'Nested decimal at indent 1'`
+  - `pass1 text-editor-structure 'the document's structure in the tree': FAIL the lists are lists (a list or list item node): no such node in the tree after the act`
+  - `pass2 text-editor-structure: 16:57:39.888615 Orca said: 'First item at indent 0'; 16:57:53.192471 Orca said: 'Nested decimal at indent 1'`
+  - `pass1 text-viewer 'Down onto a bullet item': +43.7 ms ORCA SAYS: 'Mouse wheel scrolling.'; pass2 16:59:05.246968 Orca said: 'Mouse wheel scrolling.'`
+  - `pass1 and pass2 verify-text-list-indent 'Tab on a list item: indent it': FAIL something on the bus changes for the new depth: no event; Orca said nothing in this act`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:371-395
+- **Evidence (`261a218f`):**
   - `text-editor-structure-20260925-142333-394383 'Down onto the first bullet item': 14:23:48.811838 object:text-caret-moved 1855 [entry] '' ; 14:23:48.828225 - SPEECH OUTPUT: 'First item at indent 0' ; FAIL Orca says '•' or 'bullet' or 'list item'`
   - `'Down onto the first numbered item': 14:23:55.343473 object:text-caret-moved 2092 [entry] '' ; 14:23:55.358705 - SPEECH OUTPUT: 'First numbered item' ; FAIL`
   - `'Down onto a nested numbered item': SPEECH OUTPUT 'Nested decimal at indent 1' ; FAIL Orca says '1.' or 'nesting level' or 'level 2'`
@@ -159,12 +200,19 @@ Links in rich text are not exposed: no link node, no Hypertext, read as plain te
 - **Scenario:** text-editor-format, text-editor-structure
 - **Act:** text-editor-format 'the link 'the text-document repo', as the Text interface answers'; text-editor-structure 'Down onto a line with a link' and the tree check
 - **The reader should get:** A reader can hear that 'the text-document repo' is a link, find it, and follow it (a Role::Link node or Hypertext).
-- **The reader gets:** The editor exposes no Hypertext interface (hypertext links: None), the tree holds no link node, and the attribute run at the link is empty. Orca reads the line 'switches to the monospace family. Links like the text-document repo carry an ' with nothing to mark a link. The editor supports link activation by pointer (.on\_link\_activated), but no AT user can find the link or activate it.
+- **The reader got (`261a218f`):** The editor exposes no Hypertext interface (hypertext links: None), the tree holds no link node, and the attribute run at the link is empty. Orca reads the line 'switches to the monospace family. Links like the text-document repo carry an ' with nothing to mark a link. The editor supports link activation by pointer (.on\_link\_activated), but no AT user can find the link or activate it.
 - **Platform:** Linux AT-SPI/Orca measured. The AccessKit tree content applies to all platforms.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:348-397 (add a push\_link\_child per anchor\_href fragment); crates/teksilo-widgets/src/rich\_text/mouse.rs:459-490 (pointer-only activation)
-- **Evidence:**
+- **Now (`c198e4d1`):** Links in the editor are still plain text. The editor offers no Hypertext interface, the tree has no link node, and Orca reads the line with the link as ordinary words.
+- **Measured again:** text-editor-format 2 of 2, text-editor-structure 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-format 'the link 'the text-document repo', as the Text interface answers': FAIL hypertext links: None, attrs at the link: {'attrs': {}, 'start': 0, 'end': 7596}`
+  - `pass2 text-editor-format: the same FAIL`
+  - `pass1 and pass2 text-editor-structure 'the document's structure in the tree': FAIL the links are links: no such node in the tree after the act`
+  - `pass1 text-editor-structure note: Down onto a line with a link: line 'switches to the monospace family. Links like the text-document repo carry an '`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:348-397; crates/teksilo-widgets/src/rich\_text/mouse.rs:459-490; precedent crates/teksilo-widgets/src/primitives/text\_widget.rs:1036-1046
+- **Evidence (`261a218f`):**
   - `text-editor-format-20260925-142932-527100: FAIL 'the editor offers its links (Hypertext)': hypertext links: None, attrs at the link: {'attrs': {}, 'start': 0, 'end': 7596}`
   - `text-editor-structure-20260925-142333-394383 'Down onto a line with a link': 14:24:08.411046 object:text-caret-moved 1056 [entry] '' ; 14:24:08.423619 - SPEECH OUTPUT: 'switches to the monospace family. Links like the text-document repo carry an '`
   - `text-editor-structure-20260925-141819-270614 tree check FAIL 'the links are links': no such node`
@@ -184,12 +232,18 @@ Character formatting (bold, italic, underline, spelling marks) is not exposed as
 - **Scenario:** text-editor-format
 - **Act:** text-editor-format 'the attributes of the bold word 'two'', 'Ctrl+B on the selected word', 'activate Italic through AT-SPI'
 - **The reader should get:** The Text interface's attribute run at a bold or italic word reports its weight or style (WCAG 1.3.1). Orca's read-attributes command and its misspelling indicator depend on these attributes.
-- **The reader gets:** get\_attribute\_run anywhere in the document returns {} over 0..7596, a single attribute-less run covering the whole document. This holds for the markdown bold 'two', and for 'window' after Ctrl+B and after Italic. The Spell highlighter's misspellings are painted only, never exposed.
+- **The reader got (`261a218f`):** get\_attribute\_run anywhere in the document returns {} over 0..7596, a single attribute-less run covering the whole document. This holds for the markdown bold 'two', and for 'window' after Ctrl+B and after Italic. The Spell highlighter's misspellings are painted only, never exposed.
 - **Platform:** Linux AT-SPI measured. The runs carry default TextRunAttributes on every platform (by source).
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:348-364; crates/teksilo-core/src/accessibility/text\_runs.rs:228-296
-- **Evidence:**
+- **Now (`c198e4d1`):** The Text interface still reports one attribute-free run over the whole document. The bold word 'two' carries no weight, and a word made bold with Ctrl+B still reports no attributes.
+- **Measured again:** text-editor-format 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-format 'the attributes of the bold word 'two'': FAIL {'attrs': {}, 'start': 0, 'end': 7596}`
+  - `pass1 text-editor-format 'Ctrl+B on the selected word': FAIL the Text interface now says the word is bold: {'attrs': {}, 'start': 0, 'end': 7596}`
+  - `pass2 text-editor-format: the same two FAILs`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:348-364; crates/teksilo-core/src/accessibility/text\_runs.rs:228-302 (from\_geometry sets attrs: TextRunAttributes::default() at :298)
+- **Evidence (`261a218f`):**
   - `text-editor-format-20260925-142932-527100: FAIL 'the attribute run at 'two' says it is bold': {'attrs': {}, 'start': 0, 'end': 7596}`
   - `'Ctrl+B on the selected word': 14:29:48.402520 object:state-changed:pressed 1 [toggle button] 'Bold (Ctrl+B)' ; FAIL 'the Text interface now says the word is bold': {'attrs': {}, 'start': 0, 'end': 7596}`
   - `run note: attributes at 'window' after Italic: {'attrs': {}, 'start': 0, 'end': 7596}`
@@ -208,12 +262,20 @@ Both rich text panes are unnamed, and RichTextEditor offers no way to name its t
 - **Scenario:** text-editor-structure, text-viewer, tree
 - **Act:** launch tree audit (rich-text-editor, rich-text-viewer); text-editor-structure tree check; grab\_focus scenes
 - **The reader should get:** The editor and the preview (or the viewer's document) carry a name ('Editor', 'Preview'), spoken on focus.
-- **The reader gets:** The audit reports an unnamed focusable entry. Orca says 'entry This window hosts two RichTextEditor…' and 'document frame This window holds a single…', with no name. RichTextEditor has no label builder (tools/extract\_widget\_api.py RichTextEditor lists none). An .access\_label on it would land on the wrapper, a GenericContainer, which Teksilo keeps once it has a property but which accesskit\_consumer's common\_filter still excludes (filters.rs:30-33), so the name reaches no reader. The examples cannot name the panes.
+- **The reader got (`261a218f`):** The audit reports an unnamed focusable entry. Orca says 'entry This window hosts two RichTextEditor…' and 'document frame This window holds a single…', with no name. RichTextEditor has no label builder (tools/extract\_widget\_api.py RichTextEditor lists none). An .access\_label on it would land on the wrapper, a GenericContainer, which Teksilo keeps once it has a property but which accesskit\_consumer's common\_filter still excludes (filters.rs:30-33), so the name reaches no reader. The examples cannot name the panes.
 - **Platform:** Linux AT-SPI/Orca measured. The AccessKit tree has no name on every platform.
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `731cc2e1` (editor-focus).
-- **Where:** crates/teksilo-widgets/src/rich\_text.rs:4281-4291 (no accessibility\_proxy, no label); crates/teksilo-widgets/src/rich\_text/body.rs:760-846
-- **Evidence:**
+- **Now (`c198e4d1`):** The rich-text-editor panes are named: Orca says 'Editor entry …' and 'Preview document frame …', and the viewer's document is 'Sample document'. RichTextEditor now has a .label() that names the text node. The ime-playground rich editor is still unnamed, because that example does not use the new label (text-08).
+- **Measured again:** text-editor-shift-tab, text-editor-tab-in, text-viewer, tabwalk-rich-text-editor, tabwalk-rich-text-viewer: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-shift-tab stops: [document frame] 'Preview'; [separator] 'Splitter divider'; [entry] 'Editor'`
+  - `pass1 text-editor-shift-tab 'Shift+Tab 6': +116.1 ms ORCA SAYS: 'Preview document frame RichTextEditor — Capability '`
+  - `pass1 text-editor-tab-in launch: object:children-changed:add [frame] 'Teksilo — Rich Text Editor' -> [entry] 'Editor' and -> [document frame] 'Preview'`
+  - `pass1 text-viewer 'the viewer in the tree': pass the document is named`
+  - `pass2 text-viewer 'Tab into the viewer': +13.9 ms object:state-changed:focused 1 [document frame] 'Sample document'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text.rs:325-336 (label), :4331-4336 (accessibility\_proxy)
+- **Evidence (`261a218f`):**
   - `tree-rich-text-editor-20260925-135811-4106847 audit: "unnamed-control: [entry] '': a focusable entry with no name (its text is 'RichTextEditor — Capability ShowcaseThis window hosts…')"`
   - `text-editor-structure-20260925-141819-270614: FAIL 'the editor and the preview are named': 2 of 2 fail, e.g. [entry] '' … [document frame] ''`
   - `text-editor-caret-20260925-142559-454805 grab_focus scene: SPEECH OUTPUT 'entry RichTextEditor — Capability '`
@@ -234,12 +296,20 @@ Unnamed text fields in the examples: the rich-text-editor search field (focused 
 - **Scenario:** launch of every rich-text-editor and ime-playground scenario; text-ime
 - **Act:** launch of rich-text-editor and ime-playground; text-ime 'the fields in the tree'
 - **The reader should get:** The search field is named (for example 'Find in document'), and each ime-playground field carries the caption drawn above it ('Single-line TextInput', 'Multi-line RichTextEditor').
-- **The reader gets:** rich-text-editor: SearchField::new(query).placeholder("Find in document…") without .label(). It holds focus at launch and Orca says 'entry heading selected.' ('heading' is the pre-filled query). ime-playground: labeled() stacks a TextWidget caption above each control without any association, so the TextInput reads 'entry compose here.' (its placeholder) and the rich editor has no name. The PasswordField is named only because it has its own .label("Password"). The SearchField is also exposed as an unnamed \[entry\] wrapping a second \[entry\] plus an empty \[status bar\].
+- **The reader got (`261a218f`):** rich-text-editor: SearchField::new(query).placeholder("Find in document…") without .label(). It holds focus at launch and Orca says 'entry heading selected.' ('heading' is the pre-filled query). ime-playground: labeled() stacks a TextWidget caption above each control without any association, so the TextInput reads 'entry compose here.' (its placeholder) and the rich editor has no name. The PasswordField is named only because it has its own .label("Password"). The SearchField is also exposed as an unnamed \[entry\] wrapping a second \[entry\] plus an empty \[status bar\].
 - **Platform:** Linux AT-SPI/Orca measured. The missing names apply to every platform.
 - **Severity:** high; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/rich\_text\_editor/src/highlight\_controls.rs:216-217; examples/ime\_playground/src/main.rs:140-176
-- **Evidence:**
+- **Now (`c198e4d1`):** The rich-text-editor search field, which has focus at launch, is still unnamed: Orca says 'entry heading selected.'. In ime-playground the TextInput reads only its placeholder ('entry compose here.') and the rich editor is read as 'entry.' with no name.
+- **Measured again:** every rich-text-editor and ime-playground launch in both passes; text-ime 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-tab-in launch: +1274.3 ms object:state-changed:focused 1 [entry] '' / +1368.8 ms ORCA SAYS: 'entry heading selected.'; tree audit: unnamed-control: [entry] '': a focusable entry with no name (its text is 'heading')`
+  - `pass2 text-editor-tab-in launch: +1914.5 ms ORCA SAYS: 'entry heading selected.'`
+  - `pass1 text-ime launch: +490.4 ms ORCA SAYS: 'entry compose here.'; 'the fields in the tree': FAIL every text field is named: 2 of 3 fail, e.g. [entry] '' attrs={'placeholder-text': 'compose here'} children=[]`
+  - `pass1 text-ime 'Tab to the rich editor': +92.4 ms ORCA SAYS: 'entry.'; FAIL the control focus lands on has a name: focus on [entry] ''`
+  - `pass2 text-ime 'Tab to the rich editor': +300.6 ms ORCA SAYS: 'entry.'`
+- **Where (`c198e4d1`):** examples/rich\_text\_editor/src/highlight\_controls.rs:216-217; examples/ime\_playground/src/main.rs:140-176
+- **Evidence (`261a218f`):**
   - `tabwalk-rich-text-editor-20260925-140442-18361 launch: +1167.2 ms object:state-changed:focused 1 [entry] '' ; ORCA SAYS: 'entry heading selected.' ; audit: "unnamed-control: [entry] '': a focusable entry with no name (its text is 'heading')"`
   - `tree-launch.txt: [entry] '' {editable,selectable-text,single-line} text='heading' / [entry] '' {editable,focusable,focused,selectable-text,single-line} text='heading' / [status bar] ''`
   - `text-ime-20260925-142728-476941 orca-debug.out 14:27:30.484878 - SPEECH OUTPUT: 'entry compose here.' ; FAIL 'every text field is named': 2 of 3 fail, e.g. [entry] '' attrs={'placeholder-text': 'compose here'}`
@@ -258,12 +328,20 @@ TextInput caret moves never reach the reader: arrows and Home are silent and the
 - **Scenario:** text-ime
 - **Act:** text-ime 'Left in the TextInput', 'Home in the TextInput', 'type c at the start'
 - **The reader should get:** Left over 'ab' reports the caret at 1 and Orca says 'b'; Home reports 0 and Orca says 'a'.
-- **The reader gets:** No text-caret-moved event for Left or Home. The Text interface still reports caret 2 after both. Orca knows the keys but says nothing. The next typed 'c' goes in at offset 0 ('cab', text-changed:insert at 0), which proves the real caret was at 0 while AT-SPI said 2. A reader reviewing a single-line field (ime-playground's TextInput, and every TextInput/SearchField built on TextInputField) hears nothing and is told a wrong position.
+- **The reader got (`261a218f`):** No text-caret-moved event for Left or Home. The Text interface still reports caret 2 after both. Orca knows the keys but says nothing. The next typed 'c' goes in at offset 0 ('cab', text-changed:insert at 0), which proves the real caret was at 0 while AT-SPI said 2. A reader reviewing a single-line field (ime-playground's TextInput, and every TextInput/SearchField built on TextInputField) hears nothing and is told a wrong position.
 - **Platform:** Linux AT-SPI/Orca measured. The missing AT update means no platform receives the move (by source).
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:193-256, 452-481
-- **Evidence:**
+- **Now (`c198e4d1`):** Caret moves in a TextInput now reach the reader. Left over 'ab' gives a caret event and Orca says 'b', Home gives one and Orca says 'a', and the Text interface's caret is at 0. The 'c' typed next goes in at the caret the reader was told.
+- **Measured again:** text-ime 2 of 2, verify-text-ctxmenu-field 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-ime 'Left in the TextInput (Orca told of the key)': +8.9 ms object:text-caret-moved [entry] '' / +14.4 ms ORCA SAYS: 'b'`
+  - `pass1 text-ime 'Home in the TextInput (Orca told of the key)': +9.7 ms object:text-caret-moved [entry] '' / +16.0 ms ORCA SAYS: 'a'; pass the Text interface's caret is at 0`
+  - `pass1 text-ime 'type c at the start': +20.0 ms object:text-changed:insert [entry] '' text='c'; pass the Text interface's caret follows the insertion (1)`
+  - `pass2 text-ime 'Left in the TextInput': +18.6 ms object:text-caret-moved [entry] '' / +42.0 ms ORCA SAYS: 'b'; 'Home in the TextInput': +13.1 ms object:text-caret-moved [entry] '' / +21.9 ms ORCA SAYS: 'a'`
+  - `pass1 text-ime 'scene: Ctrl+A BackSpace': +28.8 ms object:text-selection-changed [entry] ''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:491-510 (caret and anchor bound at AccessibilityOnly)
+- **Evidence (`261a218f`):**
   - `text-ime-20260925-142728-476941 'Left in the TextInput (Orca told of the key)': no event on the bus; FAIL 'a object:text-caret-moved event from [entry]'; FAIL "Orca says exactly 'b'"; note 'the TextInput after Left: caret 2'`
   - `'Home in the TextInput': no event; FAIL "the Text interface's caret is at 0": caret 2`
   - `'type c at the start': 14:28:07.447250 object:text-changed:insert 0 [entry] '' text='c' ; 14:28:07.447626 object:text-caret-moved 1 [entry] '' ; probe text 'cab', caret 1`
@@ -285,12 +363,20 @@ An empty TextInput exposes no Text interface, so the first text entered (a typed
 - **Scenario:** text-ime
 - **Act:** text-ime 'F1: Pinyin … commit 你好 in the entry' (empty field); 'type a into the empty TextInput'
 - **The reader should get:** Committing 你好 into the empty field, or typing 'a' into it, emits object:text-changed:insert like every later insertion.
-- **The reader gets:** The empty field's interfaces are \['Accessible', 'Component'\], with no Text and no EditableText. The first insertion emits only text-caret-moved and no text-changed:insert. After the first character, Text and EditableText appear and 'b' is reported normally. Orca's key echo hides this for typed letters, but an IME commit into an empty field is never presented, and a client that checked the interfaces while the field was empty sees no Text.
+- **The reader got (`261a218f`):** The empty field's interfaces are \['Accessible', 'Component'\], with no Text and no EditableText. The first insertion emits only text-caret-moved and no text-changed:insert. After the first character, Text and EditableText appear and 'b' is reported normally. Orca's key echo hides this for typed letters, but an IME commit into an empty field is never presented, and a client that checked the interfaces while the field was empty sees no Text.
 - **Platform:** Linux AT-SPI measured. By source, accesskit\_consumer's supports\_text\_ranges (text.rs:1402-1406) also gates text events on the other adapters.
 - **Severity:** medium; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-core/src/accessibility/text\_runs.rs:228-296 (from\_geometry with an empty geometry)
-- **Evidence:**
+- **Now (`c198e4d1`):** An empty TextInput now exposes Text and EditableText. The IME commit of 你好 into the empty field and a letter typed into it each emit text-changed:insert, and emptying the field emits text-changed:delete.
+- **Measured again:** text-ime 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-ime note: the empty TextInput at launch: interfaces ['Accessible', 'Component', 'EditableText', 'Text']`
+  - `pass1 text-ime 'F1: Pinyin ni → nihao → commit 你好 in the entry': +20.5 ms object:text-changed:insert [entry] '' text='你好'`
+  - `pass1 text-ime 'scene: Ctrl+A BackSpace': +230.3 ms object:text-changed:delete [entry] '' text='你好ê'`
+  - `pass1 text-ime 'type a into the empty TextInput (Orca told of the key)': +13.0 ms object:text-changed:insert [entry] '' text='a'`
+  - `pass2 text-ime 'type a into the empty TextInput': +15.7 ms object:text-changed:insert [entry] '' text='a'; 'scene: Ctrl+A BackSpace': +227.9 ms object:text-changed:delete [entry] '' text='你好ê'`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/accessibility/text\_runs.rs:262-288 (a geometry with no lines still gets its one line)
+- **Evidence (`261a218f`):**
   - `text-ime-20260925-142728-476941 note: the empty TextInput at launch: interfaces ['Accessible', 'Component']`
   - `'F1: Pinyin ni → nihao → commit 你好 in the entry': 14:27:38.246915 object:text-caret-moved 2 [entry] '' only; FAIL 'a object:text-changed:insert event from [entry]'; probe after: '你好'`
   - `'type a into the empty TextInput': 14:27:51.694520 object:text-caret-moved 1 [entry] '' only; FAIL text-changed:insert ; 'type b after it': 14:27:55.590138 object:text-changed:insert 1 [entry] '' text='b'`
@@ -310,12 +396,19 @@ The formatting toolbar cannot be reached by keyboard, yet AT-SPI reports every b
 - **Scenario:** text-editor-shift-tab, text-editor-format
 - **Act:** text-editor-shift-tab (Shift+Tab walk from the search field); rich-text-editor tabwalk; text-editor-format 'Tab from the editor to the toolbar'
 - **The reader should get:** Keyboard and screen reader users can reach and operate alignment, lists, indent, blockquote, insert table, the table operations, undo and redo, either through the Tab order or a roving toolbar.
-- **The reader gets:** Every IconButton is .focusable(false). Shift+Tab from the search field stops at Spell, Syntax, Font family, Heading level, Theme, then the preview's and the editor's sections, never on a formatting button. Only B/I/U, undo/redo and indent have keyboard shortcuts. Alignment, bullets, numbering, blockquote, insert table and all seven table operations have no keyboard route; a screen reader user can reach them only through an AT-SPI action from flat review. Each button still advertises Action::Focus, so AT-SPI marks them 'focusable', which misleads object navigation.
+- **The reader got (`261a218f`):** Every IconButton is .focusable(false). Shift+Tab from the search field stops at Spell, Syntax, Font family, Heading level, Theme, then the preview's and the editor's sections, never on a formatting button. Only B/I/U, undo/redo and indent have keyboard shortcuts. Alignment, bullets, numbering, blockquote, insert table and all seven table operations have no keyboard route; a screen reader user can reach them only through an AT-SPI action from flat review. Each button still advertises Action::Focus, so AT-SPI marks them 'focusable', which misleads object navigation.
 - **Platform:** Linux AT-SPI/Orca measured. The Tab order is platform-independent.
 - **Severity:** high; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/rich\_text\_editor/src/format\_toolbar.rs:586-609; crates/teksilo-widgets/src/icon\_button.rs:895
-- **Evidence:**
+- **Now (`c198e4d1`):** No formatting button is in the Tab order. Shift+Tab from the search field stops at Spell, Syntax, Font family, Heading level, Theme, Preview, the Splitter divider and Editor. Alignment, lists, blockquote, insert table and the table operations still have no keyboard route, and every button is still reported focusable.
+- **Measured again:** text-editor-shift-tab 2 of 2, text-editor-format 2 of 2, tabwalk-rich-text-editor 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-shift-tab 'the formatting buttons in the Tab order': FAIL stops: [check box] 'Spell'; [check box] 'Syntax'; [combo box] 'Font family'; [combo box] 'Heading level'; [combo box] 'Theme'; [document frame] 'Preview'; [separator] 'Splitter divider'; [entry] 'Editor'`
+  - `pass2 text-editor-shift-tab: the same stops`
+  - `pass1 and pass2 text-editor-format 'Tab from the editor to the toolbar': FAIL focus lands on [toggle button] '*': +66.4 ms object:state-changed:focused 1 [separator] 'Splitter divider'`
+  - `pass1 tabwalk-rich-text-editor tree-launch.txt: [toggle button] 'Bold (Ctrl+B)' desc='Bold (Ctrl+B)' {focusable}`
+- **Where (`c198e4d1`):** examples/rich\_text\_editor/src/format\_toolbar.rs:586-609; crates/teksilo-widgets/src/icon\_button.rs:895
+- **Evidence (`261a218f`):**
   - `text-editor-shift-tab-20260925-142442-423219 focus sequence: 14:24:50.454661 focused 1 [check box] 'Spell'; 14:24:52.369099 [check box] 'Syntax'; 14:24:54.285472 [combo box] 'Font family'; 14:24:56.234522 [combo box] 'Heading level'; 14:24:58.137966 [combo box] 'Theme'; 14:25:00.053856 [section] ''; 14:25:01.965348 [separator] 'Splitter divider'; 14:25:03.882786 [section] ''`
   - `FAIL 'a formatting toggle (Bold) is among the Shift+Tab stops'`
   - `tree-rich-text-editor-20260925-135811-4106847 tree-launch.txt: [toggle button] 'Bold (Ctrl+B)' desc='Bold (Ctrl+B)' {focusable}`
@@ -333,12 +426,17 @@ Ctrl+B / Italic change formatting with no feedback a reader can get
 - **Scenario:** text-editor-format
 - **Act:** text-editor-format 'Ctrl+B on the selected word', 'activate Italic through AT-SPI'
 - **The reader should get:** After Ctrl+B the reader hears that bold is now on (or can query it, see text-06).
-- **The reader gets:** The Bold toggle's pressed state flips (state-changed:pressed 1 on an unfocused button, which Orca ignores). Orca says only its key echo 'B', and the text attributes stay empty. With text-06, a reader has no way to learn the word is now bold, or to tell a toggle-on from a toggle-off.
+- **The reader got (`261a218f`):** The Bold toggle's pressed state flips (state-changed:pressed 1 on an unfocused button, which Orca ignores). Orca says only its key echo 'B', and the text attributes stay empty. With text-06, a reader has no way to learn the word is now bold, or to tell a toggle-on from a toggle-off.
 - **Platform:** Linux AT-SPI/Orca measured
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/rich\_text/keyboard.rs:502-514
-- **Evidence:**
+- **Now (`c198e4d1`):** Ctrl+B on a selected word gives the reader nothing: Orca says nothing in the act, and the text attributes stay empty.
+- **Measured again:** text-editor-format 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-format 'Ctrl+B on the selected word (Orca told of the key)': FAIL the reader hears that bold is now on: Orca said nothing in this act`
+  - `pass2 text-editor-format 'Ctrl+B on the selected word': FAIL the reader hears that bold is now on: Orca said nothing in this act; FAIL {'attrs': {}, 'start': 0, 'end': 7596}`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text/keyboard.rs:502-514
+- **Evidence (`261a218f`):**
   - `text-editor-format-20260925-142932-527100 'Ctrl+B on the selected word': 14:29:48.402520 object:state-changed:pressed 1 [toggle button] 'Bold (Ctrl+B)' ; orca 14:29:48.071943 - SPEECH OUTPUT: 'B' (key echo) ; FAIL 'the reader hears that bold is now on': Orca said nothing`
   - `'activate Italic through AT-SPI': object:state-changed:pressed 1 [toggle button] 'Italic (Ctrl+I)' (pass), nothing spoken`
   - `source: crates/teksilo-widgets/src/rich_text/keyboard.rs handles Ctrl+B/I/U with no announcement; no ctx.announce anywhere in rich_text`
@@ -355,12 +453,18 @@ Headings in rich text are unnamed and carry no level on AT-SPI
 - **Scenario:** text-editor-structure
 - **Act:** text-editor-structure 'the document's structure in the tree'; viewer tree
 - **The reader should get:** Each heading node is named by its text and carries its level (Orca and object navigation say 'heading level 2, Heading scale').
-- **The reader gets:** All 38 heading nodes (19 per pane) are '\[heading\] ''', each holding a \[label\] with the text. There is no 'level' attribute. Object navigation or flat review meets a nameless 'heading'. (Orca's default script never announces headings on caret moves in any toolkit, so line reading itself is unaffected.)
+- **The reader got (`261a218f`):** All 38 heading nodes (19 per pane) are '\[heading\] ''', each holding a \[label\] with the text. There is no 'level' attribute. Object navigation or flat review meets a nameless 'heading'. (Orca's default script never announces headings on caret moves in any toolkit, so line reading itself is unaffected.)
 - **Platform:** Linux AT-SPI measured. By source, Windows exports the level (accesskit\_windows node.rs:500, 690-699); the empty name applies to every platform.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:383-389
-- **Evidence:**
+- **Now (`c198e4d1`):** All 38 heading nodes are still unnamed and carry no level on AT-SPI. Object navigation meets a nameless 'heading' holding a label with the text.
+- **Measured again:** text-editor-structure 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-structure 'the document's structure in the tree': FAIL every heading has a name: 38 of 38 fail, e.g. [heading] '' attrs=None children=[('label', 'Heading scale')]`
+  - `pass1 text-editor-structure: FAIL every heading has a level: 38 of 38 fail`
+  - `pass2 text-editor-structure: the same two FAILs, 38 of 38`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/rich\_text/body/flow\_walk.rs:383-389; accesskit\_consumer-0.39.1 src/node.rs:720-733 (name from descendants excludes Heading); accesskit\_atspi\_common-0.21.0 src/node.rs:417-439 (attributes() exports no 'level')
+- **Evidence (`261a218f`):**
   - `text-editor-structure-20260925-142333-394383: FAIL 'every heading has a name': 38 of 38 fail, e.g. [heading] '' attrs=None children=[('label', 'Heading scale')]`
   - `FAIL 'every heading has a level': 38 of 38 fail`
   - `source: crates/teksilo-widgets/src/rich_text/body/flow_walk.rs:384-385 push_paragraph_child + set_paragraph_as_heading, no label or labelled_by; accesskit_consumer node.rs:720-733 name-from-descendants only for Button/CheckBox/Link/MenuItem…/RadioButton, not Heading; accesskit_atspi_common node.rs:415-437 attributes() exports no 'level' (upstream)`
@@ -377,12 +481,20 @@ The Heading level, Font family and Theme combo boxes never tell the reader their
 - **Scenario:** text-editor-shift-tab
 - **Act:** text-editor-shift-tab stops 3-5
 - **The reader should get:** 'Heading level combo box, Normal', 'Font family combo box, &lt;family&gt;', 'Theme combo box, Light'.
-- **The reader gets:** Orca says 'Font family combo box.', 'Heading level combo box.' and 'Theme combo box.', with no value. The ComboBox sets its selected label as the AccessKit value, but accesskit\_atspi\_common exports a string value only as the name of a Role::Label, and a closed combo has no selected child (Selection reports 0). A reader cannot tell which heading level the caret's paragraph has, although the picker tracks it.
+- **The reader got (`261a218f`):** Orca says 'Font family combo box.', 'Heading level combo box.' and 'Theme combo box.', with no value. The ComboBox sets its selected label as the AccessKit value, but accesskit\_atspi\_common exports a string value only as the name of a Role::Label, and a closed combo has no selected child (Selection reports 0). A reader cannot tell which heading level the caret's paragraph has, although the picker tracks it.
 - **Platform:** Linux AT-SPI/Orca measured. On Windows the ValuePattern likely carries it (not verified).
 - **Severity:** medium; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/combo\_box.rs:1247-1265 (a Teksilo-side workaround is possible)
-- **Evidence:**
+- **Now (`c198e4d1`):** The Font family, Heading level and Theme combo boxes are still read with no value: 'Font family combo box.', 'Heading level combo box.', 'Theme combo box.'.
+- **Measured again:** text-editor-shift-tab 2 of 2, text-viewer 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-shift-tab 'Shift+Tab 3': +105.8 ms ORCA SAYS: 'Font family combo box.'`
+  - `pass1 text-editor-shift-tab 'Shift+Tab 4': +124.3 ms ORCA SAYS: 'Heading level combo box.'`
+  - `pass1 text-editor-shift-tab 'Shift+Tab 5': +145.6 ms ORCA SAYS: 'Theme combo box.'`
+  - `pass2 text-editor-shift-tab: +112.1 ms ORCA SAYS: 'Font family combo box.'; +112.7 ms ORCA SAYS: 'Heading level combo box.'; +418.0 ms ORCA SAYS: 'Theme combo box.'`
+  - `pass1 text-viewer 'Tab to the Theme combo box': +91.8 ms ORCA SAYS: 'Theme combo box.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/combo\_box.rs:1338-1344 (set\_value(label)); accesskit\_atspi\_common-0.21.0 src/node.rs:38-44 (name from value only for a label), :480-482 and :589-591 (Value interface only for a numeric value)
+- **Evidence (`261a218f`):**
   - `text-editor-shift-tab-20260925-142442-423219 orca-debug.out: 14:24:54.342404 - SPEECH OUTPUT: 'Font family combo box.' ; 14:24:56.273016 - SPEECH OUTPUT: 'Heading level combo box.' ; 14:24:58.214976 - SPEECH OUTPUT: 'Theme combo box.'`
   - `tree-launch.txt: [combo box] 'Heading level' {focusable} (no value, no text; selected_children 0)`
   - `source: crates/teksilo-widgets/src/combo_box.rs:1249-1263 set_value(label); accesskit_atspi_common-0.20.0 node.rs:38-44 name from value only when label_comes_from_value (Role::Label); no string-value export for other roles`
@@ -399,12 +511,20 @@ Orca in a Wayland session never learns of a key typed into a Teksilo window, so 
 - **Scenario:** text-editor-keys-unreported, text-editor-caret
 - **Act:** text-editor-keys-unreported (Down, Right, Ctrl+Right, End with focus on the entry, no key reported)
 - **The reader should get:** Down reads the new line, Right the character, and Ctrl+Right the word, as they are once Orca knows the key (text-editor-caret).
-- **The reader gets:** text-caret-moved reaches Orca, which logs 'DEFAULT: Presenting text at new caret position' and then says nothing: \_presentTextAtNewCaretPosition chooses line, word or character from the last key it saw, and it saw none. Orca's log has 0 KEYBOARD\_EVENT lines for the whole run. Under WAYLAND\_DISPLAY, libatspi gives Orca its legacy device, which gets keys only from applications that report them to the registry's DeviceEventController, as the GTK and Qt bridges do. accesskit\_unix 0.23 never does. A run that reports each key to the registry the way those bridges do (my module's tell\_orca) gets full caret speech (text-editor-caret), which confirms the path. By source, Orca's key echo and Orca 46's own command keys depend on the same reports; this was not tested.
+- **The reader got (`261a218f`):** text-caret-moved reaches Orca, which logs 'DEFAULT: Presenting text at new caret position' and then says nothing: \_presentTextAtNewCaretPosition chooses line, word or character from the last key it saw, and it saw none. Orca's log has 0 KEYBOARD\_EVENT lines for the whole run. Under WAYLAND\_DISPLAY, libatspi gives Orca its legacy device, which gets keys only from applications that report them to the registry's DeviceEventController, as the GTK and Qt bridges do. accesskit\_unix 0.23 never does. A run that reports each key to the registry the way those bridges do (my module's tell\_orca) gets full caret speech (text-editor-caret), which confirms the path. By source, Orca's key echo and Orca 46's own command keys depend on the same reports; this was not tested.
 - **Platform:** Linux, Wayland session with Orca 46 (legacy device) measured. X11 sessions (Orca reads the X keyboard) and newer Orcas using a compositor keyboard monitor are not affected. Windows and macOS are not affected.
 - **Severity:** high; **layer:** upstream
 - **Status:** Fixed by `276ff85b` (key-report).
-- **Where:** accesskit\_unix (no DeviceEventController reports); a Teksilo-side workaround is possible in teksilo-platform's key path
-- **Evidence:**
+- **Now (`c198e4d1`):** Orca now hears the keys typed into a Teksilo window and speaks caret moves: Down reads 'Showcase', Right reads 'h', Ctrl+Right reads 'Showcase'. The application reports each key to the AT-SPI registry itself.
+- **Measured again:** text-editor-keys-unreported 2 of 2, fix-key-report-editor 2 of 2, fix-key-report-text-input 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-editor-keys-unreported 'Down, no key reported but by the application': +33.1 ms object:text-caret-moved [entry] 'Editor' / +51.3 ms ORCA SAYS: 'Showcase'`
+  - `pass1 text-editor-keys-unreported 'Right, no key reported but by the application': +32.7 ms object:text-caret-moved [entry] 'Editor' / +45.0 ms ORCA SAYS: 'h'`
+  - `pass1 text-editor-keys-unreported 'Ctrl+Right, no key reported but by the application': +63.6 ms object:text-caret-moved [entry] 'Editor' / +77.9 ms ORCA SAYS: 'Showcase'`
+  - `pass2 text-editor-keys-unreported: 'Right' +49.7 ms ORCA SAYS: 'h'; 'Ctrl+Right' +127.7 ms ORCA SAYS: 'Showcase'`
+  - `orca-debug.out: 14 'KEYBOARD_EVENT:' lines in each pass (0 in the sweep)`
+- **Where (`c198e4d1`):** crates/teksilo-platform/src/key\_report.rs (Teksilo's report to DeviceEventController.NotifyListenersSync), key\_report/atspi.rs:83; accesskit\_unix-0.24.0 still sends no such report (no DeviceEventController in its src)
+- **Evidence (`261a218f`):**
   - `text-editor-keys-unreported-20260925-142817-494623 'Down, no key reported to Orca': 14:28:28.927401 object:text-caret-moved 28 [entry] '' ; orca 14:28:28.932693 - DEFAULT: Presenting text at new caret position ; no SPEECH OUTPUT`
   - `'Right, no key reported to Orca': 14:28:32.811535 object:text-caret-moved 29 [entry] '' ; 14:28:32.818518 - DEFAULT: Presenting text at new caret position ; no SPEECH OUTPUT`
   - `orca-debug.out: 0 'KEYBOARD_EVENT:' lines (a run with keys reported: 24)`
@@ -423,12 +543,20 @@ After a screen reader moves focus into the editor, Ctrl+Tab jumps to the window'
 - **Scenario:** text-editor-format
 - **Act:** text-editor-format 'Tab from the editor to the toolbar' (focus previously put on the entry by AT-SPI grab\_focus)
 - **The reader should get:** Ctrl+Tab from the editor moves to the next control in order (the Splitter divider), as it does after keyboard entry (text-editor-tab-in).
-- **The reader gets:** Focus goes to the Theme combo box, the first control of the window. The AT Focus action parks the widget tree's focus on the non-focusable body widget, so traversal restarts from the top.
+- **The reader got (`261a218f`):** Focus goes to the Theme combo box, the first control of the window. The AT Focus action parks the widget tree's focus on the non-focusable body widget, so traversal restarts from the top.
 - **Platform:** Linux measured (keyboard behaviour, platform-independent)
 - **Severity:** low; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/rich\_text/body.rs:839 (the body advertises Focus); crates/teksilo-core AT Focus dispatch (walks down only)
-- **Evidence:**
+- **Status:** Fixed by `731cc2e1`, found by the re-measure: that commit did not report it.
+- **Now (`c198e4d1`):** After a screen reader's focus request on the editor's text, Ctrl+Tab moves on to the Splitter divider and Ctrl+Shift+Tab back to the search field, as after a Tab arrival. The focus request now puts the keyboard on the editor itself.
+- **Measured again:** verify-text-traversal 2 of 2, text-editor-format 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-text-traversal 'Ctrl+Tab after a focus request on the text': +379.1 ms object:state-changed:focused 1 [separator] 'Splitter divider' / +696.0 ms ORCA SAYS: 'vertical splitter Splitter divider.'`
+  - `pass2 verify-text-traversal 'Ctrl+Tab after a focus request on the text': +64.8 ms object:state-changed:focused 1 [separator] 'Splitter divider'`
+  - `pass2 verify-text-traversal 'Ctrl+Shift+Tab after a focus request on the text': +86.0 ms object:state-changed:focused 1 [entry] '' / +160.7 ms ORCA SAYS: 'entry heading selected.'`
+  - `pass1 text-editor-format 'Tab from the editor to the toolbar' (after a grab_focus on the entry): +66.4 ms object:state-changed:focused 1 [separator] 'Splitter divider'`
+  - `pass2 text-editor-format 'Tab from the editor to the toolbar' (after a grab_focus on the entry): +75.3 ms object:state-changed:focused 1 [separator] 'Splitter divider'`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1207-1221 and crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:1087-1103 (focusable\_composite\_behind); crates/teksilo-widgets/src/rich\_text/body.rs:839
+- **Evidence (`261a218f`):**
   - `text-editor-format-20260925-142932-527100: 14:29:55.985205 object:state-changed:focused 1 [combo box] 'Theme' ; 14:29:55.985587 object:state-changed:focused 0 [entry] '' ; 14:29:56.049042 - SPEECH OUTPUT: 'Theme combo box.'`
   - `contrast text-editor-tab-in-20260925-142522-443443 'Ctrl+Tab out of the editor': 14:25:47.251042 object:state-changed:focused 1 [separator] 'Splitter divider'`
   - `source: rich_text.rs:3511 the body is non-focusable; the AT Focus action targets the body node (body.rs:840)`
@@ -447,12 +575,17 @@ Every TextInput/SearchField carries an always-present, empty, unnamed status bar
 - **Scenario:** launch
 - **Act:** launch trees of rich-text-editor and ime-playground
 - **The reader should get:** A validation status node exists only while it has a message, or at least is not a 'status bar' in the window when empty.
-- **The reader gets:** An empty \[status bar\] '' follows the ime-playground TextInput and PasswordField, and sits inside the search field. Orca's object navigation and its 'read status bar' command can land on an empty status bar in these windows.
+- **The reader got (`261a218f`):** An empty \[status bar\] '' follows the ime-playground TextInput and PasswordField, and sits inside the search field. Orca's object navigation and its 'read status bar' command can land on an empty status bar in these windows.
 - **Platform:** Linux AT-SPI measured
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/validation\_strip.rs:148-165
-- **Evidence:**
+- **Now (`c198e4d1`):** An empty, unnamed status bar still follows the ime-playground TextInput and PasswordField, and another sits inside the rich-text-editor search field.
+- **Measured again:** every ime-playground and rich-text-editor launch in both passes
+- **Evidence (`c198e4d1`):**
+  - `pass1 text-ime launch: +387.4 ms object:children-changed:add [frame] 'Teksilo — IME Playground' -> [status bar] ''; +391.9 ms object:children-changed:add [frame] 'Teksilo — IME Playground' -> [status bar] ''`
+  - `pass1 tabwalk-rich-text-editor tree-launch.txt: [entry] '' {editable,selectable-text,single-line} text='heading' / [entry] '' {editable,focusable,focused,selectable-text,single-line} text='heading' / [status bar] ''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/validation\_strip.rs:148-165
+- **Evidence (`261a218f`):**
   - `tabwalk-ime-playground-20260925-141044-142257 launch: +408.5 ms object:children-changed:add [frame] '' -> [status bar] '' ; +411.3 ms object:children-changed:add [frame] '' -> [status bar] ''`
   - `tree-rich-text-editor-20260925-135811-4106847 tree-launch.txt: [entry] '' … / [entry] '' {…focused…} / [status bar] ''`
   - `source: crates/teksilo-widgets/src/primitives/validation_strip.rs:149 builder.set_role(Role::Status) whether or not a message is shown`
@@ -470,12 +603,21 @@ Shift+F10 moves the caret to the middle of the editor or field and drops the sel
 - **Scenario:** verify-text-ctxmenu-caret, verify-text-ctxmenu-field
 - **Act:** verify-text-ctxmenu-caret: Ctrl+Home, Shift+F10, Escape; Ctrl+Home, Shift+F10, 'p' + Return (Paste); select the first word, Shift+F10. verify-text-ctxmenu-field (ime-playground TextInput): Home, Shift+F10.
 - **The reader should get:** A menu opened from the keyboard acts where the caret and selection are. Escape leaves the caret at 0, Paste inserts at 0, and Copy or Cut act on the selected word.
-- **The reader gets:** Opening the menu moves the caret from 0 to 645, the character under the centre of the editor pane. Paste inserts 'RichTextEditor' at 645, in the middle of a word ('recievRichTextEditore'). With a word selected, the selection collapses: Orca says 'Text unselected.' and then 'menu.'. After Escape the selection is gone and the caret is at 645. In a TextInput the caret jumps from 0 to 51. A reader who arrived by Tab (text-01) gets no caret event at all, so the paste lands where they never were, without their knowing.
+- **The reader got (`261a218f`):** Opening the menu moves the caret from 0 to 645, the character under the centre of the editor pane. Paste inserts 'RichTextEditor' at 645, in the middle of a word ('recievRichTextEditore'). With a word selected, the selection collapses: Orca says 'Text unselected.' and then 'menu.'. After Escape the selection is gone and the caret is at 645. In a TextInput the caret jumps from 0 to 51. A reader who arrived by Tab (text-01) gets no caret event at all, so the paste lands where they never were, without their knowing.
 - **Platform:** Linux measured. The behaviour itself is platform-independent keyboard handling.
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `27022d39` (context-menu-caret). Fixed part: Shift+F10 / Menu key in RichTextEditor, CodeEditor or a TextInputField-based field no longer moves the caret or drops the selection. The menu's Paste inserts at the caret, and Cut/Copy act on the selection. A right-click still moves the caret to the click..
-- **Where:** crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1264-1284; crates/teksilo-widgets/src/rich\_text/context\_menu.rs:105-123; crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:806-817
-- **Evidence:**
+- **Status:** Fixed by `27022d39` (context-menu-caret).
+- **Now (`c198e4d1`):** Shift+F10 no longer moves the caret or drops the selection. With the caret at 0 the menu opens with no caret event, Escape leaves the caret at 0, and the menu's Paste inserts at 0. A selection survives the menu, and Orca does not say 'Text unselected.'. In a TextInput the caret stays at 0 and a later 'x' goes in at 0.
+- **Measured again:** fix-context-menu-caret-editor 2 of 2, fix-context-menu-caret-field 2 of 2, verify-text-ctxmenu-caret 2 of 2, verify-text-ctxmenu-field 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 fix-context-menu-caret-editor 'Shift+F10 with the caret at 0': pass no object:text-caret-moved event from [entry] '*'; pass the caret is still at 0 with the menu open`
+  - `pass1 fix-context-menu-caret-editor 'p, Return: the menu's Paste': pass the document now begins with the pasted word (note: after Paste: caret 8, text 'squiggleRichTextEditor — Capability ShowcaseThis window host')`
+  - `pass1 fix-context-menu-caret-editor 'Shift+F10 over a selection': pass no object:text-selection-changed event from [entry] '*'; pass Orca does not say 'unselected'`
+  - `pass1 verify-text-ctxmenu-caret notes: caret after Shift+F10, Escape: 0; selection before Shift+F10: [[0, 28]]; selection after Shift+F10, Escape: [[0, 28]] caret 28`
+  - `pass1 verify-text-ctxmenu-field 'type x after closing the menu': +34.4 ms object:text-changed:insert [entry] '' text='x'; note: field text after x: 'xabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij'`
+  - `pass2 fix-context-menu-caret-editor and verify-text-ctxmenu-field: the same passes`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1292-1316 (the keyboard trigger); crates/teksilo-widgets/src/rich\_text/context\_menu.rs:114-127; crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:866-875
+- **Evidence (`261a218f`):**
   - `verify-text-ctxmenu-caret-20260925-144603-905511: 14:46:14.264312 caret-moved 0; Shift+F10 14:46:16.639943 object:text-caret-moved 645; 14:46:31.177793 object:text-changed:insert 645 'RichTextEditor'; orca 14:46:31.222699 AXText: Text of [entry] (598-684): 'squiggle is visible: you will definately recievRichTextEditore teh sepe…'`
   - `verify-text-ctxmenu-caret-20260925-144841-989699: selection [[0, 14]] before; Shift+F10 14:49:16.204173 object:text-selection-changed + caret-moved 645; orca 14:49:16.221092 SPEECH OUTPUT: 'Text unselected.'; after Escape selections [] caret 645`
   - `verify-text-ctxmenu-caret-20260925-145227-1091797: the same (645, paste at 645, 14:52:59.754902 'Text unselected.')`
@@ -493,12 +635,18 @@ Closing a TextInput's context menu with Escape selects the whole field, so the n
 - **Scenario:** verify-text-ctxmenu-field
 - **Act:** verify-text-ctxmenu-field (ime-playground): type 60 letters, Home, Shift+F10, Escape, type x
 - **The reader should get:** Escape returns focus to the field with its caret or selection as before the menu, and 'x' goes in as one character.
-- **The reader gets:** When focus comes back from the menu the whole field is selected. Orca says 'entry abcdefghij… selected.'. The next 'x' deletes all 60 characters and leaves 'x'.
+- **The reader got (`261a218f`):** When focus comes back from the menu the whole field is selected. Orca says 'entry abcdefghij… selected.'. The next 'x' deletes all 60 characters and leaves 'x'.
 - **Platform:** Linux measured. The behaviour itself is platform-independent.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `27022d39` (context-menu-caret). Fixed part: closing a TextInputField's own context menu (Escape, a menu command such as Paste, or a click outside) no longer selects the whole field. Focus comes back to the caret and selection the menu found..
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:700-709
-- **Evidence:**
+- **Status:** Fixed by `27022d39` (context-menu-caret).
+- **Now (`c198e4d1`):** Closing a TextInput's context menu with Escape no longer selects the whole field. Orca says 'entry abcdefghij….' with no 'selected', and the next 'x' goes in at the caret as one character.
+- **Measured again:** verify-text-ctxmenu-field 2 of 2, fix-context-menu-caret-field 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-text-ctxmenu-field 'scene: Escape': +32.5 ms object:state-changed:focused 1 [entry] '' / +195.0 ms ORCA SAYS: 'entry abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij.'`
+  - `pass1 verify-text-ctxmenu-field 'type x after closing the menu': +34.4 ms object:text-changed:insert [entry] '' text='x'; pass x goes in at the start of the field (offset 0), where the caret was`
+  - `pass2 verify-text-ctxmenu-field 'scene: Escape': +59.5 ms ORCA SAYS: 'entry abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij.'; 'type x': +15.8 ms object:text-changed:insert [entry] '' text='x'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:753-762 (select-all only when focus does not come back from the field's own menu)
+- **Evidence (`261a218f`):**
   - `verify-text-ctxmenu-field-20260925-145430-1150948 'scene: Escape': object:text-selection-changed + caret-moved 60 on [entry]; ORCA SAYS 'entry abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij selected.'; 'type x': 14:54:48.304558 object:text-changed:delete 0 60 'abcdefghij…', 14:54:48.304815 insert 0 'x'; Orca 'Selection deleted.'; field text after: 'x'`
   - `verify-text-ctxmenu-field-20260925-145502-1162551: identical (14:55:20.202479 delete 0 60, insert 'x')`
   - `source: crates/teksilo-widgets/src/primitives/text_input_field/widget_impl.rs:700-709: every focus gain without a hovering pointer counts as a keyboard arrival and calls cursor.select(SelectionType::Document), including focus coming back from the field's own menu. The focus-loss branch at :711-722 preserves the selection precisely for that menu.`
@@ -514,12 +662,20 @@ The editor's context menu cannot be operated by a reader: focus lands on an unna
 - **Scenario:** verify-text-ctxmenu, verify-text-ctxmenu-caret
 - **Act:** verify-text-ctxmenu: Shift+F10 in the editor, then Down, then Escape. verify-text-ctxmenu-caret: the menu opened over a collapsed selection.
 - **The reader should get:** 'Cut, dimmed' (or the first item) is read on opening, each arrow reads the next item, and disabled items are exposed as disabled.
-- **The reader gets:** Orca says 'menu.' (\[menu\] '' takes focus). Down puts no event on the bus and Orca says nothing. Cut and Copy were built .enabled(has\_selection) with has\_selection false, yet report 'enabled','sensitive'. This is the MenuList/MenuItem defect the menus package reports (the menu\_list.rs arrow handler moves a private focused\_index; a disabled item is not exposed), reached here through RichTextEditor's own menu. It is listed so this report can cite it, not as a new root cause.
+- **The reader got (`261a218f`):** Orca says 'menu.' (\[menu\] '' takes focus). Down puts no event on the bus and Orca says nothing. Cut and Copy were built .enabled(has\_selection) with has\_selection false, yet report 'enabled','sensitive'. This is the MenuList/MenuItem defect the menus package reports (the menu\_list.rs arrow handler moves a private focused\_index; a disabled item is not exposed), reached here through RichTextEditor's own menu. It is listed so this report can cite it, not as a new root cause.
 - **Platform:** Linux measured
-- **Severity:** high; **layer:** framework
-- **Status:** Fixed by `9636094c` (menus). Fixed part: the arrow part only.
-- **Where:** crates/teksilo-widgets/src/menu\_list.rs (arrow handling); crates/teksilo-widgets/src/menu\_item/widget\_impl.rs (disabled exposure)
-- **Evidence:**
+- **Severity:** medium; **layer:** framework
+- **Severity in the sweep:** high. The menu can now be operated by arrow keys and disabled items are reported, so the reader has a way round; what is left is an unnamed 'menu.' on opening with no item read.
+- **Status:** Partly fixed by `9636094c` (menus). What remains is under **Now**.
+- **Now (`c198e4d1`):** The arrows now work: Down in the editor's context menu moves focus to 'Cut' and Orca says 'Cut grayed.', so a disabled item is reported as disabled. On opening, focus still lands on an unnamed menu and Orca says only 'menu.', with no first item.
+- **Measured again:** verify-text-ctxmenu 2 of 2, verify-text-ctxmenu-caret 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-text-ctxmenu 'Shift+F10 in the editor (focus arrived by Tab)': +299.0 ms object:state-changed:focused 1 [menu] '' / +643.2 ms ORCA SAYS: 'menu.'`
+  - `pass1 verify-text-ctxmenu 'Down in the context menu': +124.9 ms object:state-changed:focused 1 [menu item] 'Cut' / +446.6 ms ORCA SAYS: 'Cut grayed.'`
+  - `pass2 verify-text-ctxmenu 'Shift+F10 in the editor': +549.0 ms ORCA SAYS: 'menu.'; 'Down in the context menu': +65.5 ms object:state-changed:focused 1 [menu item] 'Cut' / +225.0 ms ORCA SAYS: 'Cut grayed.'`
+  - `pass1 and pass2 verify-text-ctxmenu-caret tree audit: unnamed-control menu a focusable menu with no name`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/menu\_list.rs:1121-1156 (a menu is named only after an opener, and names no row until one is highlighted); crates/teksilo-widgets/src/rich\_text/context\_menu.rs:136-166
+- **Evidence (`261a218f`):**
   - `verify-text-ctxmenu-20260925-144245-823122: 14:42:58.514007 object:state-changed:focused 1 [menu] ''; orca 14:42:58.605091 SPEECH OUTPUT: 'menu.'; act 'Down in the context menu': no event on the bus, only the key echo`
   - `verify-text-ctxmenu-20260925-144936-1017457: the same (14:49:51.754848 'menu.', Down silent)`
   - `verify-text-ctxmenu-caret-20260925-144841-989699 tree-Shift-F10-with-the-first-word-selected.txt: [menu item] 'Cut' and 'Copy' states ['enabled','sensitive','showing','visible'], although the selection had just collapsed ('Text unselected.' 14:49:16.221092)`
@@ -536,12 +692,18 @@ The Highlighter search tells a reader nothing: no match count, and the matches a
 - **Scenario:** verify-text-search
 - **Act:** verify-text-search: select the query in the search field and type 'teh'
 - **The reader should get:** The reader learns how many matches there are (a status or an announcement) and can find them, for example as a highlight attribute on the text.
-- **The reader gets:** Only the field's own text changes reach the bus. There is no announcement, no status and no name change. The attribute run at the 'teh' match is {} over 0..7596. The matches are painted in yellow and orange only.
+- **The reader got (`261a218f`):** Only the field's own text changes reach the bus. There is no announcement, no status and no name change. The attribute run at the 'teh' match is {} over 0..7596. The matches are painted in yellow and orange only.
 - **Platform:** Linux measured. The missing count is platform-independent.
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/rich\_text\_editor/src/highlight\_controls.rs:180-217
-- **Evidence:**
+- **Now (`c198e4d1`):** Typing a search in the Highlighter still tells the reader nothing. There is no announcement, no status and no name change, and the Text interface reports no attribute at a match.
+- **Measured again:** verify-text-search 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-text-search 'select the query and type 'teh'': FAIL an announcement or a status tells how many matches: no announcement and no name change`
+  - `pass1 verify-text-search 'the match, as the Text interface answers': FAIL {'attrs': {}, 'start': 0, 'end': 7596}`
+  - `pass2 verify-text-search: the same two FAILs`
+- **Where (`c198e4d1`):** examples/rich\_text\_editor/src/highlight\_controls.rs:180-217; crates/teksilo-widgets/src/rich\_text/body.rs:786-796
+- **Evidence (`261a218f`):**
   - `verify-text-search-20260925-144407-857015: 'an announcement or a status tells how many matches' FAIL: no announcement and no name change; the only events are text-changed:delete 'heading', insert 't','e','h' on the search [entry]`
   - `same run: attributes at the 'teh' match: {'attrs': {}, 'start': 0, 'end': 7596}`
   - `source: examples/rich_text_editor/src/highlight_controls.rs:180-212 builds a FindSession (which has match_count()) and exposes nothing; crates/teksilo-widgets/src/rich_text/body.rs:786-796 leaves highlight overlays out of the AT walk by design`
@@ -557,12 +719,16 @@ SearchField publishes a second, non-focusable entry holding the same text around
 - **Scenario:** launch
 - **Act:** launch tree of rich-text-editor
 - **The reader should get:** One search entry: the focused field, carrying the search role and the popup semantics.
-- **The reader gets:** '\[entry\] '' {editable,selectable-text,single-line} text='heading'' wraps the focused '\[entry\] '' … text='heading''. Object navigation and flat review meet two entries for one field. The outer node, Role::SearchInput, also holds has\_popup, expanded and controls, on a node that never takes focus.
+- **The reader got (`261a218f`):** '\[entry\] '' {editable,selectable-text,single-line} text='heading'' wraps the focused '\[entry\] '' … text='heading''. Object navigation and flat review meet two entries for one field. The outer node, Role::SearchInput, also holds has\_popup, expanded and controls, on a node that never takes focus.
 - **Platform:** Linux measured (tree). The duplicate node is in the AccessKit tree on every platform.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/search\_field.rs:772-803
-- **Evidence:**
+- **Now (`c198e4d1`):** The search field is still published as an unnamed, non-focusable entry wrapping the focused entry, both holding 'heading'.
+- **Measured again:** every rich-text-editor launch in both passes (tree-launch.txt)
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-rich-text-editor tree-launch.txt: [entry] '' {editable,selectable-text,single-line} text='heading' / [entry] '' {editable,focusable,focused,selectable-text,single-line} text='heading' / [status bar] ''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/search\_field.rs:772-803
+- **Evidence (`261a218f`):**
   - `text-editor-tab-in-20260925-143636-700740 tree-launch.txt: [entry] '' {editable,selectable-text,single-line} text='heading' / [entry] '' {editable,focusable,focused,selectable-text,single-line} text='heading' / [status bar] ''`
   - `source: crates/teksilo-widgets/src/search_field.rs:772-803 (Role::SearchInput on the non-focusable outer node; its text comes from the inner field's runs, found at any depth)`
 - **Reproduced:** every rich-text-editor launch (25 of 25)

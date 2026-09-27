@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Grid view
 
 Examples: `grid-view`.
-17 findings: 1 critical, 5 high, 5 medium, 6 low.
+17 findings: 4 high, 5 medium, 8 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -13,18 +15,18 @@ How to read an entry, and what the words mean, is in
 |---|---|---|---|---|---|
 | [gridview-01](#gridview-01) | grid-view | The selection-count announcement (and the grid's value) is the Fluent message id 'grid-view-selection-count', not '1 item selected' | high | Linux | fixed |
 | [gridview-02](#gridview-02) | grid-view | Every selection change rebuilds all realized tiles, so the focused tile comes back as a new node: a spurious focus event follows each count announcement and cuts it, and no 'selected' state change ever reaches the bus | high | Linux | fixed |
-| [gridview-03](#gridview-03) | grid-view | A screen reader putting focus on a tile splits AT focus from the grid's cursor: Enter opens a different tile, and the next arrow drops keyboard focus out of the grid onto the window | critical | Linux | fixed |
-| [gridview-04](#gridview-04) | grid-view | The tile's context menu (the keyboard reorder menu) is silent to a reader: 'menu.', then nothing on arrows, and Enter runs a row the reader never heard | high | Linux | fixed |
+| [gridview-03](#gridview-03) | grid-view | A screen reader putting focus on a tile splits AT focus from the grid's cursor: Enter opens a different tile, and the next arrow drops keyboard focus out of the grid onto the window | medium | Linux | partly fixed |
+| [gridview-04](#gridview-04) | grid-view | The tile's context menu (the keyboard reorder menu) is silent to a reader: 'menu.', then nothing on arrows, and Enter runs a row the reader never heard | low | Linux | partly fixed |
 | [gridview-05](#gridview-05) | grid-view | After a reorder the move announcement names the wrong tile, and type-ahead lands on the wrong tile, because the tile names come from a stale by-index caption snapshot | high | Linux | open (example) |
 | [gridview-06](#gridview-06) | grid-view | Type-ahead with a growing prefix skips the tile it is already on, so typing a word lands past the first match | medium | Linux | open |
 | [gridview-07](#gridview-07) | grid-view | The album (section) a tile belongs to is never spoken, and in the tree its row header comes after all the tiles; sections whose tiles are realized have no header node | medium | Linux | open |
-| [gridview-08](#gridview-08) | grid-view | A tile's selected / not-selected state is never spoken on Linux, and the grid's AT-SPI Selection always reports 0 selected children | high | Linux | upstream |
+| [gridview-08](#gridview-08) | grid-view | A tile's selected / not-selected state is never spoken on Linux, and the grid's AT-SPI Selection always reports 0 selected children | high | Linux | partly fixed |
 | [gridview-09](#gridview-09) | grid-view | The grid is a layout table to Orca: no role, no size, no row/column or 'N of 60' for a tile | medium | Linux | upstream |
-| [gridview-10](#gridview-10) | grid-view | Alt+arrow reorder makes two announcements (the move and a count), and the move is emitted before the focus change to the moved tile, which cuts it | medium | Linux | partly fixed |
+| [gridview-10](#gridview-10) | grid-view | Alt+arrow reorder makes two announcements (the move and a count), and the move is emitted before the focus change to the moved tile, which cuts it | low | Linux | partly fixed |
 | [gridview-11](#gridview-11) | grid-view | The tiles' Move custom actions (a documented non-drag reorder route) reach no screen reader: AT-SPI offers only 'click' | low | Linux | upstream |
 | [gridview-12](#gridview-12) | grid-view | Tiles are unnamed cells: the launch audit flags 55 focusable table cells with no name | low | Linux | open |
 | [gridview-13](#gridview-13) | grid-view | The reorder announcement is English-only (lit!, not translatable) | low | all | open |
-| [gridview-v1](#gridview-v1) | grid-view | Alt+arrow reorder collapses a multi-selection to the moved tile, and the reader is not told | medium | Linux | open |
+| [gridview-v1](#gridview-v1) | grid-view | Alt+arrow reorder collapses a multi-selection to the moved tile, and the reader is not told | medium | Linux | partly fixed |
 | [gridview-v2](#gridview-v2) | grid-view | Type-ahead with no cursor yet skips the first tile | low | Linux | open |
 | [gridview-v3](#gridview-v3) | grid-view | Alt+arrow with no cursor moves the first tile, which the reader never heard | low | Linux | open |
 | [gridview-v4](#gridview-v4) | grid-view | setsize=60 is published on every descendant of the grid (labels, the body pane, row headers, the pinned label) | low | Linux | upstream |
@@ -36,12 +38,20 @@ The selection-count announcement (and the grid's value) is the Fluent message id
 - **Example:** grid-view
 - **Act:** Any key that changes how many tiles are selected: Right from no cursor, Space, Ctrl+Space, Shift+Right, Ctrl+A, Ctrl+Shift+A, type-ahead, Alt+Right on an unselected tile
 - **The reader should get:** The reader hears the new count in words: '1 item selected', 'No item selected', '60 items selected' (en-US.ftl:439-444)
-- **The reader gets:** The announcement text on the bus is the message id 'grid-view-selection-count' for every count; the grid's AccessKit value (grid\_view.rs:1970) carries the same id. On main K2 also drops it, so Orca says nothing; with K2 fixed Orca would read out 'grid-view-selection-count'.
+- **The reader got (`261a218f`):** The announcement text on the bus is the message id 'grid-view-selection-count' for every count; the grid's AccessKit value (grid\_view.rs:1970) carries the same id. On main K2 also drops it, so Orca says nothing; with K2 fixed Orca would read out 'grid-view-selection-count'.
 - **Platform:** Linux AT-SPI/Orca measured. Windows by source: the grid has a value and is not a Label, so accesskit\_windows exposes the UIA Value pattern (node.rs:592-597) and a UIA client reading the grid's value gets the raw id.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `8448bb9a` (gridview). Fixed part: the selection count (and the grid's value) is now said in English words with no I18nManager installed ('1 item selected', 'No item selected', '60 items selected'), not the message id. Root cause fixed in the tr!/tr\_widget!/tr\_signal! macro fallback, so every message with a selector, plural, function call or reference is covered (command-palette-result-count too)..
-- **Where:** crates/teksilo-i18n-macros/src/lib.rs:479-519 and 824-866 (no fallback for selector messages); crates/teksilo-i18n/src/resolve.rs:22-24; crates/teksilo-widgets/src/grid\_view/selection\_count.rs:31-36
-- **Evidence:**
+- **Status:** Fixed by `8448bb9a` (gridview).
+- **Now (`c198e4d1`):** The count is said in words with no translations installed: '1 item selected', 'No item selected', '2 items selected', '60 items selected'. Orca speaks it in full, and no message id reaches the bus. The grid's value is the same words.
+- **Measured again:** fix-gridview-count, gridview-selection, gridview-repeat-count, gridview-at-actions, verify-gridview-first-count: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 fix-gridview-count 'Space: select it': +31.0 ms object:announcement [status bar] '1 item selected' text='1 item selected' / +49.9 ms ORCA SAYS: '1 item selected' / pass  no announcement of 'grid-view-'`
+  - `pass2 fix-gridview-count 'Space: unselect it': +25.0 ms object:announcement [status bar] 'No item selected' text='No item selected' / +38.3 ms ORCA SAYS: 'No item selected'`
+  - `pass1 gridview-selection 'Ctrl+A: select all': +50.6 ms object:announcement [status bar] '60 items selected' text='60 items selected' / +325.1 ms ORCA SAYS: '60 items selected'`
+  - `pass1 gridview-selection 'Ctrl+Space: add it': +47.2 ms ORCA SAYS: '2 items selected'`
+  - `crates/teksilo-widgets/src/grid_view.rs:1968-1970 sets the grid's value from selection_count_words(count), which now formats through the source fallback`
+- **Where (`c198e4d1`):** crates/teksilo-i18n-macros/src/lib.rs:1012-1036 (the source fallback a selector message now gets); crates/teksilo-i18n/src/resolve.rs:56-85 (format\_source\_fallback); crates/teksilo-widgets/src/grid\_view/selection\_count.rs:31-36
+- **Evidence (`261a218f`):**
   - `gridview-arrows-20260925-135433-4064709/report.txt: "+83.6 ms object:announcement [<Error>] '' text='grid-view-selection-count'"`
   - `gridview-reorder-20260925-135823-4109511/orca-debug.out: "13:58:39.670287 - EVENT MANAGER: object:announcement for [status bar: 'grid-view-selection-count'] in [application: 'grid-view'] (1, 0, grid-view-selection-count)"`
   - `Every one of the 59 count announcements in 31 runs carried text='grid-view-selection-count' (e.g. gridview-selection-20260925-141416-213061, all 7 selection-changing acts)`
@@ -64,12 +74,19 @@ Every selection change rebuilds all realized tiles, so the focused tile comes ba
 - **Example:** grid-view
 - **Act:** Space / Ctrl+Space on the current tile, Ctrl+A, Ctrl+Shift+A (cursor does not move); also every arrow that replaces the selection
 - **The reader should get:** Focus stays put. The tile's selected state changes in place (object:state-changed:selected) and the count announcement is heard in full
-- **The reader gets:** Each selection-changing key removes and re-adds every realized tile and row header: 237 events per key (57 add, 57 remove, 115 defunct), against 2 for a cursor-only Ctrl+Right. The adapter then reports focus on a new table-cell node, and Orca stops speech and reads the tile's name again ('Sunset 1.' after Space). In 59 of 63 announcements across 31 runs, the announcement reached the bus 0.0-100.5 ms before that focus change in the same act (the other 4 are the second message of an Alt+Right, gridview-10). Where K2 did not drop the message, Orca spoke it and then cut it for the refocus. So the K2 fix alone will not make the count audible. There were no object:state-changed:selected or object:selection-changed events in any run, so a toggle is never heard as a state change.
+- **The reader got (`261a218f`):** Each selection-changing key removes and re-adds every realized tile and row header: 237 events per key (57 add, 57 remove, 115 defunct), against 2 for a cursor-only Ctrl+Right. The adapter then reports focus on a new table-cell node, and Orca stops speech and reads the tile's name again ('Sunset 1.' after Space). In 59 of 63 announcements across 31 runs, the announcement reached the bus 0.0-100.5 ms before that focus change in the same act (the other 4 are the second message of an Alt+Right, gridview-10). Where K2 did not drop the message, Orca spoke it and then cut it for the refocus. So the K2 fix alone will not make the count audible. There were no object:state-changed:selected or object:selection-changed events in any run, so a toggle is never heard as a state change.
 - **Platform:** Linux AT-SPI/Orca measured. The same rebuild gives every adapter a new focused node (the consumer hands node changes before the focus event, tree.rs:640-673). NVDA's handling was not verified.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `8448bb9a` (gridview). Fixed part: a change of selection no longer rebuilds every realized tile. The tile under the cursor keeps its node, so there is no spurious focus event after the count and Orca speaks the count in full. object:state-changed:selected now reaches the bus. A Space is 11-13 AT-SPI events, down from 237..
-- **Where:** crates/teksilo-widgets/src/grid\_view/body\_pane.rs:252-259 (selection effect -&gt; Rebuild)
-- **Evidence:**
+- **Status:** Fixed by `8448bb9a` (gridview).
+- **Now (`c198e4d1`):** A change of selection no longer replaces the tiles. Focus stays on the tile, the cell raises object:state-changed:selected in place, and Orca speaks the count in full, then 'selected' or 'unselected'. No focus event follows the count.
+- **Measured again:** fix-gridview-count, gridview-selection, gridview-repeat-count: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 fix-gridview-count 'Space: select it': +31.0 ms object:announcement [status bar] '1 item selected' text='1 item selected' / +33.1 ms object:state-changed:selected 1 [table cell] '' / +49.9 ms ORCA SAYS: '1 item selected' / +92.7 ms ORCA SAYS: 'selected' / pass  no object:state-changed:focused event from [*] '*'`
+  - `pass2 fix-gridview-count 'Space: unselect it': +38.3 ms ORCA SAYS: 'No item selected' / +75.7 ms ORCA SAYS: 'unselected' / pass  no object:state-changed:focused event from [*] '*'`
+  - `pass1 gridview-selection 'Ctrl+Shift+A: select none': +78.0 ms object:announcement [status bar] 'No item selected' text='No item selected' / +258.4 ms ORCA SAYS: 'No item selected' / pass  no object:state-changed:focused event from [*] '*'`
+  - `pass1 fix-gridview-count 'Ctrl+A: select all': the realized tiles' caption labels are replaced below their cells (defunct [label] events), but no table cell and no focus event`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view/a11y.rs:118-141 (each tile watches its own selectedness); crates/teksilo-widgets/src/grid\_view/body\_pane.rs:251-255 (the pane no longer observes the selection)
+- **Evidence (`261a218f`):**
   - `gridview-selection-20260925-135520-4074007/report.txt, 'Space: unselect it': "+89.0 ms object:announcement [<Error>] '' text='grid-view-selection-count'" / "+89.8 ms object:state-changed:focused 1 [table cell] ''" / "+234.5 ms ORCA SAYS: 'Sunset 1.'" / "FAIL  no object:state-changed:focused event from [*] '*'"`
   - `same act, orca-debug.out: "13:55:36.628408 EVENT MANAGER: Ignoring defunct object: [DEAD]" then "13:55:36.707590 NULL SPEECH: stop" then "13:55:36.707667 SPEECH OUTPUT: 'Sunset 1.'"`
   - `gridview-reorder-20260925-141204-172548/orca-debug.out (a message K2 did not drop): "14:12:20.483247 - NULL SPEECH: speak 'Sunset 1 moved to 2 of 60' interrupt=True" / "14:12:20.634221 - NULL SPEECH: stop" / "14:12:20.634292 - SPEECH OUTPUT: 'Sunset 1.'"`
@@ -92,12 +109,22 @@ A screen reader putting focus on a tile splits AT focus from the grid's cursor: 
 - **Example:** grid-view
 - **Act:** Right (cursor on 'Sunset 1'), then AT-SPI grab\_focus on the 'Trail 3' cell (the tile advertises Action::Focus), then Enter, Right, Right
 - **The reader should get:** Focus and the grid's cursor move to 'Trail 3'. Enter opens 'Trail 3', Right goes to 'Picnic 4', then 'Summit 5'
-- **The reader gets:** Orca says 'Trail 3.', but Teksilo's focus lands on the TileA11y node itself and the grid's focused\_index stays 0. Enter activates tile 0: the example printed 'activate tile 0'. The next Right moves the grid's hidden cursor and changes the selection. The pane rebuild then destroys the focused tile node, and focus falls to the window: Orca says 'frame.'. The following Right produces nothing, because keyboard focus is no longer in the grid.
+- **The reader got (`261a218f`):** Orca says 'Trail 3.', but Teksilo's focus lands on the TileA11y node itself and the grid's focused\_index stays 0. Enter activates tile 0: the example printed 'activate tile 0'. The next Right moves the grid's hidden cursor and changes the selection. The pane rebuild then destroys the focused tile node, and focus falls to the window: Orca says 'frame.'. The following Right produces nothing, because keyboard focus is no longer in the grid.
 - **Platform:** Linux AT-SPI measured (grab\_focus). By source the same path is reached from macOS: setAccessibilityFocused -&gt; Action::Focus (accesskit\_macos node.rs:663-675), which VoiceOver sends when 'keyboard focus follows the VoiceOver cursor' is on (the default). Also from Windows: UIA SetFocus -&gt; Action::Focus (accesskit\_windows node.rs:1129-1131), which NVDA's move-focus-to-navigator-object command calls.
-- **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `8448bb9a` (gridview). Fixed part: a screen reader's focus request on a tile no longer splits AT focus from the grid's cursor. Enter and Space no longer act on a tile the reader did not choose, and focus no longer falls to the window. Done the house way (the tile does not offer Focus, like ListItemWrapper and calendar days), not by moving the cursor; see not\_fixed..
-- **Where:** crates/teksilo-widgets/src/grid\_view/a11y.rs:94; crates/teksilo-widgets/src/grid\_view/body\_pane.rs:513-545; crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1187-1201
-- **Evidence:**
+- **Severity:** medium; **layer:** framework
+- **Severity in the sweep:** critical. The critical part is gone: no key acts on a tile while focus is elsewhere, and the grid keeps focus. What is left is a focus request that does nothing and says nothing, with the tile's click action as a way round.
+- **Status:** Partly fixed by `8448bb9a` (gridview). What remains is under **Now**.
+- **Now (`c198e4d1`):** A screen reader's focus request on a tile no longer splits focus from the cursor, and focus no longer falls to the window. But the request is now refused without a word: after grab\_focus on 'Trail 3' nothing happens, and Enter opens 'Sunset 1', the tile the grid and Orca both still hold. Choosing a tile works through the tile's click action, which moves the cursor and focus there.
+- **Measured again:** gridview-at-focus, verify-gridview-at-focus-keys, fix-gridview-at-focus: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 gridview-at-focus 'AT-SPI grab_focus on Trail 3': FAIL  focus lands on [table cell] '*' / no focus change on the bus in this act / Orca unheard: 'Trail 3'`
+  - `pass1 gridview-at-focus 'Enter on the focused tile': the example printed ['activate tile 0']`
+  - `pass1 gridview-at-focus 'Right from Trail 3': +22.3 ms object:state-changed:focused 1 [table cell] '' / +206.7 ms ORCA SAYS: 'Harbor 2.'`
+  - `pass2 verify-gridview-at-focus-keys 'Space on the focused tile': Orca 'No item selected', 'unselected' (Sunset 1 toggled, Trail 3 not); no focus event to [frame]`
+  - `pass1 fix-gridview-at-focus: every check passed (AT-SPI click on 'Picnic 4' selects it and moves focus there; Enter prints 'activate tile 3')`
+  - `tree-launch.txt: [table cell] '' {selectable}, no longer focusable`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view/a11y.rs:180-191 (a tile no longer offers Focus); crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1207-1226 (an unoffered Focus is reported unhandled); crates/teksilo-widgets/src/grid\_view/body\_pane.rs:527-560 (Click moves the cursor)
+- **Evidence (`261a218f`):**
   - `gridview-at-focus-20260925-141557-241986/report.txt, 'AT-SPI grab_focus on Trail 3': "+12.0 ms object:state-changed:focused 1 [table cell] ''" then ORCA SAYS: 'Trail 3.' (quoted from run 140542-34278)`
   - `'Enter on the focused tile': "FAIL  the example activated tile 2 ('Trail 3')" / "the example printed ['activate tile 0']" (app.log 'activate tile 0' in 3/3 runs)`
   - `'Right from Trail 3': "+88.1 ms object:state-changed:focused 1 [frame] ''" / "ORCA SAYS: 'frame.'" / "14:16:23.118571 EVENT MANAGER: Ignoring defunct object: [table cell]"`
@@ -120,12 +147,21 @@ The tile's context menu (the keyboard reorder menu) is silent to a reader: 'menu
 - **Example:** grid-view
 - **Act:** Ctrl+Right twice (cursor on 'Harbor 2'), Menu key, Down, Enter
 - **The reader should get:** The menu is announced with its current row ('Move Left'). Down moves to and speaks 'Move Right'. Enter runs the row the reader heard
-- **The reader gets:** Focus goes to an unnamed \[menu\] and Orca says 'menu.'. No row is ever focused and the menu sets no active descendant, so Down makes no event and Orca says nothing. Enter runs 'Move Left' (the first Down highlighted it visually): 'Harbor 2 moved to 1 of 60'. The rows exist on the bus but none carries focused/selected state. This menu is one of the grid's documented non-drag reorder routes (grid\_view.rs:1313-1318).
+- **The reader got (`261a218f`):** Focus goes to an unnamed \[menu\] and Orca says 'menu.'. No row is ever focused and the menu sets no active descendant, so Down makes no event and Orca says nothing. Enter runs 'Move Left' (the first Down highlighted it visually): 'Harbor 2 moved to 1 of 60'. The rows exist on the bus but none carries focused/selected state. This menu is one of the grid's documented non-drag reorder routes (grid\_view.rs:1313-1318).
 - **Platform:** Linux AT-SPI/Orca measured. By source MenuList publishes only Role::Menu on every platform, with no active\_descendant, so no adapter can name the current row.
-- **Severity:** high; **layer:** framework
-- **Status:** Fixed by `9636094c` (menus).
-- **Where:** crates/teksilo-widgets/src/menu\_list.rs:228-231, 991-993
-- **Evidence:**
+- **Severity:** low; **layer:** framework
+- **Severity in the sweep:** high. Every row is heard and Enter runs what was heard; only the menu's missing name is left.
+- **Status:** Partly fixed by `9636094c` (menus). What remains is under **Now**.
+- **Now (`c198e4d1`):** The rows are now heard: the first Down focuses 'Move Left' and Orca says 'Move Left.', and Enter runs that row, which the reader heard. The menu itself is still unnamed, so opening it says only 'menu.', and the audit flags a focusable menu with no name.
+- **Measured again:** gridview-context-menu, verify-gridview-menu-escape: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 gridview-context-menu 'Menu key': +22.6 ms object:state-changed:focused 1 [menu] '' / +110.5 ms ORCA SAYS: 'menu.'`
+  - `pass1 gridview-context-menu 'Down: the next row': +23.3 ms object:state-changed:focused 1 [menu item] 'Move Left' / +91.9 ms ORCA SAYS: 'Move Left.'`
+  - `pass2 gridview-context-menu 'Enter': +133.1 ms object:announcement [status bar] 'Harbor 2 moved to 1 of 60' text='Harbor 2 moved to 1 of 60' / +560.1 ms ORCA SAYS: 'Harbor 2.' / +579.2 ms ORCA SAYS: 'Harbor 2 moved to 1 of 60'`
+  - `pass1 and pass2 gridview-context-menu audit: unnamed-control [menu] '': a focusable menu with no name`
+  - `pass1 verify-gridview-menu-escape: every check passed`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/menu\_list.rs:1121-1156 (active descendant now set; the name comes only from an opener, which a context menu does not have, lines 1127-1129)
+- **Evidence (`261a218f`):**
   - `gridview-context-menu-20260925-141641-250092/report.txt: "+18.0 ms object:state-changed:focused 1 [menu] ''" / "+107.6 ms ORCA SAYS: 'menu.'"`
   - `tree after Down: "menu rows: [('Move Left', ['enabled', 'sensitive', 'showing', 'visible']), ('Move Right', ['enabled', 'sensitive', 'showing', 'visible']), ('Move to Start', ['enabled', 'sensitive', 'showing', 'visible']), ('Move to End', ['enabled', 'sensitive', 'showing', 'visible'])]" / "menus: [('', ['enabled', 'focusable', 'focused', 'sensitive', 'showing', 'visible'])]"`
   - `Down act: no events, Orca said nothing`
@@ -146,12 +182,19 @@ After a reorder the move announcement names the wrong tile, and type-ahead lands
 - **Example:** grid-view
 - **Act:** Ctrl+Right, Alt+Right (Sunset 1 to position 2), Alt+Down (Sunset 1 to position 7); later Home, type 's'
 - **The reader should get:** 'Sunset 1 moved to 7 of 60'. Typing 's' from 'Harbor 2' (now first) reaches 'Summit 5' (now fourth)
-- **The reader gets:** The bus carries 'Harbor 2 moved to 7 of 60' although Sunset 1 moved. Typing 's' lands on 'Garden 6': the stale label for index 4 is 'Summit 5', but the tile now at index 4 is Garden 6. On main K2 hides the wrong announcement; with K2 fixed the reader would hear the wrong name.
+- **The reader got (`261a218f`):** The bus carries 'Harbor 2 moved to 7 of 60' although Sunset 1 moved. Typing 's' lands on 'Garden 6': the stale label for index 4 is 'Summit 5', but the tile now at index 4 is Garden 6. On main K2 hides the wrong announcement; with K2 fixed the reader would hear the wrong name.
 - **Platform:** Linux AT-SPI/Orca measured; the announced string is the same on all platforms
 - **Severity:** high; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/grid\_view/src/main.rs:77,105; contributing crates/teksilo-widgets/src/grid\_view.rs:1345-1352
-- **Evidence:**
+- **Now (`c198e4d1`):** After Sunset 1 is moved, Alt+Down names the wrong tile, and the reader now hears it: Orca says 'Harbor 2 moved to 7 of 60' although Sunset 1 moved. Typing 's' from 'Harbor 2' lands on 'Garden 6', not 'Summit 5'.
+- **Measured again:** gridview-reorder, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 gridview-reorder 'Alt+Down': +165.1 ms object:announcement [status bar] 'Harbor 2 moved to 7 of 60' text='Harbor 2 moved to 7 of 60' / +343.8 ms ORCA SAYS: 'Harbor 2 moved to 7 of 60'`
+  - `pass2 gridview-reorder 'Alt+Down': +232.9 ms object:announcement [status bar] 'Harbor 2 moved to 7 of 60' text='Harbor 2 moved to 7 of 60' / +486.9 ms ORCA SAYS: 'Harbor 2 moved to 7 of 60'`
+  - `pass1 gridview-reorder 'type s': +179.4 ms ORCA SAYS: 'Garden 6.'`
+  - `pass2 gridview-reorder 'type s': +373.0 ms ORCA SAYS: 'Garden 6.'`
+- **Where (`c198e4d1`):** examples/grid\_view/src/main.rs:77,105; contributing crates/teksilo-widgets/src/grid\_view.rs:1345-1352
+- **Evidence (`261a218f`):**
   - `gridview-reorder-20260925-141511-230793/report.txt, Alt+Down: "object:announcement [status bar] 'grid-view-selection-count' text='Harbor 2 moved to 7 of 60'" and "FAIL  the bus carries an announcement of 'Sunset 1 moved to 7 of 60'"`
   - `type 's' act: "ORCA SAYS: 'Garden 6.'" / "FAIL  Orca says 'Summit 5'"`
   - ``examples/grid_view/src/main.rs:77,105: `.type_ahead_label(move |i| cap_for_type.get(i)...)` over `captions`, a Vec snapshotted at startup and never reordered``
@@ -170,12 +213,18 @@ Type-ahead with a growing prefix skips the tile it is already on, so typing a wo
 - **Example:** grid-view
 - **Act:** From 'Canyon 11' type 'cab' quickly; from 'Sunset 1' (Home) type 'can' quickly
 - **The reader should get:** 'cab' reaches 'Cabin 5' (the next caption starting 'cab'). 'can' from Sunset 1 reaches 'Canyon 11'
-- **The reader gets:** Each keystroke searches again from the tile after the current one, so a tile that still matches the longer prefix is skipped. 'cab' goes c-&gt;Cabin 5, ca-&gt;Canyon 7, cab-&gt;Cabin 1, and Orca says 'Cabin 1.'. 'can' goes c-&gt;Cabin 9, ca-&gt;Canyon 11, can-&gt;Canyon 7, and Orca says 'Canyon 7.'. The reader hears a tile other than the one they typed toward.
+- **The reader got (`261a218f`):** Each keystroke searches again from the tile after the current one, so a tile that still matches the longer prefix is skipped. 'cab' goes c-&gt;Cabin 5, ca-&gt;Canyon 7, cab-&gt;Cabin 1, and Orca says 'Cabin 1.'. 'can' goes c-&gt;Cabin 9, ca-&gt;Canyon 11, can-&gt;Canyon 7, and Orca says 'Canyon 7.'. The reader hears a tile other than the one they typed toward.
 - **Platform:** Linux measured; the logic is platform-independent
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/common/type\_ahead.rs:95-101
-- **Evidence:**
+- **Now (`c198e4d1`):** Typing a word still skips a tile that matches the longer prefix. 'cab' from 'Canyon 11' ends on 'Cabin 1', not 'Cabin 5'; 'can' from 'Sunset 1' ends on 'Canyon 7', not 'Canyon 11'. Orca now also echoes each typed letter.
+- **Measured again:** gridview-type-ahead and verify-gridview-type-ahead-start, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 gridview-type-ahead 'type cab quickly': Orca said (cut): 'a' / Orca said: 'b' / Orca said: 'Cabin 1.' / FAIL  the focused cell holds 'Cabin 5' / focused cell holds 'Cabin 1'`
+  - `pass2 gridview-type-ahead 'type can quickly': Orca said: 'Canyon 7.' / focused cell holds 'Canyon 7'`
+  - `pass1 verify-gridview-type-ahead-start 'type su quickly from Sunset 1': +315.2 ms ORCA SAYS: 'Summit 1.' / focused cell holds 'Summit 1'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/common/type\_ahead.rs:95-101
+- **Evidence (`261a218f`):**
   - `gridview-type-ahead-20260925-141801-267545/report.txt: "== type 'cab' quickly" ... "+1218.4 ms ORCA SAYS: 'Cabin 1.'" / "FAIL  the focused cell holds 'Cabin 5'" / "focused cell holds 'Cabin 1'"`
   - `same run: "== type 'can' quickly" ... "+716.0 ms ORCA SAYS: 'Canyon 7.'"`
   - `the intermediate targets show as focus events on already-destroyed nodes: "+264.6 ms object:state-changed:focused 1 [<Error>] ''"`
@@ -194,12 +243,20 @@ The album (section) a tile belongs to is never spoken, and in the tree its row h
 - **Example:** grid-view
 - **Act:** Down from 'Canyon 11' (last row of Travel) into 'Summit 1' (first row of Family); Up back
 - **The reader should get:** The reader hears that they are now in the Family album (and Travel on the way back)
-- **The reader gets:** Orca says only 'Summit 1.' / 'Canyon 11.'. In the tree, the Role::RowHeader nodes ('Travel', 'Family') are the last children of the body pane, after all 55 realized tiles (index\_in\_parent 55, 56). There is no header node for Work or Nature, although their tiles are realized (only headers inside the visible rect are built). No relation links a tile to its header. A stray plain \[label\] copy of the pinned header ('Travel', later 'Work' while the only row header is 'Nature') sits as the grid's last child.
+- **The reader got (`261a218f`):** Orca says only 'Summit 1.' / 'Canyon 11.'. In the tree, the Role::RowHeader nodes ('Travel', 'Family') are the last children of the body pane, after all 55 realized tiles (index\_in\_parent 55, 56). There is no header node for Work or Nature, although their tiles are realized (only headers inside the visible rect are built). No relation links a tile to its header. A stray plain \[label\] copy of the pinned header ('Travel', later 'Work' while the only row header is 'Nature') sits as the grid's last child.
 - **Platform:** Linux AT-SPI/Orca measured. Orca reads row headers only through the AT-SPI Table interface, which AccessKit does not implement. accesskit\_windows implements no GridItem/TableItem patterns either (node.rs:648-667, 'TODO: tables (#29)').
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/grid\_view/body\_pane.rs:609-632
-- **Evidence:**
+- **Now (`c198e4d1`):** Crossing from Travel into Family, Orca says only 'Summit 1.', and only 'Canyon 11.' on the way back. The row headers still come after all the tiles, only headers inside the visible rect exist, and a stray copy of the pinned header sits as the grid's last child.
+- **Measured again:** gridview-sections, 2 of 2 runs; trees from gridview-far-jumps and the tab walk, 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 gridview-sections 'Down: into the Family album': +173.3 ms ORCA SAYS: 'Summit 1.' / Orca unheard: 'Family'`
+  - `pass2 gridview-sections 'Up: back into Travel': Orca said: 'Canyon 11.' / Orca unheard: 'Travel'`
+  - `pass1 tabwalk-grid-view tree-launch.txt: [row header] 'Travel' and [row header] 'Family' after [table cell] posinset 1..55, then [label] 'Travel' under the table`
+  - `pass1 gridview-far-jumps tree-End--the-last-tile.txt: cells from posinset 11, [row header] 'Nature' only, grid-child [label] 'Work'`
+  - `pass1 tabwalk-grid-view orca-debug.out: AXTable: [table: 'Photo library'] is layout only: True (Doesn't support table interface.)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view/body\_pane.rs:623-646
+- **Evidence (`261a218f`):**
   - `gridview-sections-20260925-141843-278097/report.txt: "== Down: into the Family album" ... "+293.7 ms ORCA SAYS: 'Summit 1.'" / "Orca unheard: 'Family'"`
   - `tree-grid-view-20260925-134800-3956180 launch tree: row header 'Travel' index_in_parent 55, 'Family' index_in_parent 56, after [table cell] posinset 1..55; then "[label] 'Travel'" directly under the table`
   - `gridview-far-jumps-20260925-135615-4081386/tree-End--the-last-tile.txt: "[row header] 'Nature'" ... "[label] 'Work'"`
@@ -218,12 +275,21 @@ A tile's selected / not-selected state is never spoken on Linux, and the grid's 
 - **Example:** grid-view
 - **Act:** Ctrl+Right onto an unselected tile; any move onto a selected tile; Escape back to the grid with 'Market 7' selected
 - **The reader should get:** In a multi-selection grid the reader hears whether the tile they land on is selected, and the grid can tell how many are selected
-- **The reader gets:** Orca says only the caption ('Harbor 2.'), with no 'selected'/'not selected', although the cell carries (or lacks) STATE\_SELECTED correctly on the bus. The grid's Selection interface reports 0 selected children while 'Market 7' is selected, so Orca's AXSelection also reads 0.
+- **The reader got (`261a218f`):** Orca says only the caption ('Harbor 2.'), with no 'selected'/'not selected', although the cell carries (or lacks) STATE\_SELECTED correctly on the bus. The grid's Selection interface reports 0 selected children while 'Market 7' is selected, so Orca's AXSelection also reads 0.
 - **Platform:** Linux AT-SPI/Orca 46.1 measured
 - **Severity:** high; **layer:** upstream
-- **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/grid\_view/body\_pane.rs:808-811 (Group between grid and cells); crates/teksilo-widgets/src/grid\_view/a11y.rs:82-99
-- **Evidence:**
+- **Status:** Partly fixed by `8448bb9a`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** A toggle is now heard: after the count Orca says 'selected' or 'unselected'. But landing on a tile still says only its caption, with nothing about whether it is selected, and the grid's AT-SPI Selection still reports 0 selected children while a tile is selected.
+- **Measured again:** gridview-selection, fix-gridview-count, gridview-at-actions: 2 of 2 runs each; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 gridview-selection 'Ctrl+Right: move the cursor only': +97.1 ms ORCA SAYS: 'Harbor 2.' / FAIL  Orca says the tile is 'not selected'`
+  - `pass2 gridview-selection 'Ctrl+Right: move the cursor only': Orca said ['Harbor 2.']`
+  - `pass1 gridview-selection 'Space: select it again': +39.2 ms ORCA SAYS: '1 item selected' / +75.2 ms ORCA SAYS: 'selected'`
+  - `pass1 gridview-at-actions orca-debug.out: 16:17:12.248467 - AXSelection: [table: 'Photo library'] reports 0 selected children (Escape, Market 7 selected)`
+  - `pass2 gridview-at-actions orca-debug.out: 16:30:13.659546 - AXSelection: [table: 'Photo library'] reports 0 selected children`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:1302-1310 n_selected_children counts only items(filter); accesskit_consumer-0.39.1/src/node.rs:920-936 is_item_like does not include GridCell`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view/body\_pane.rs:822-826 (Group between grid and cells); crates/teksilo-widgets/src/grid\_view/a11y.rs:169-199; upstream accesskit\_atspi\_common-0.21.0/src/node.rs:1302-1310, accesskit\_consumer-0.39.1/src/node.rs:920-936
+- **Evidence (`261a218f`):**
   - `gridview-selection-20260925-141416-213061/report.txt, Ctrl+Right: ORCA SAYS: 'Harbor 2.' / "FAIL  Orca says the tile is 'not selected'" while "pass  the cell of 'Harbor 2' lacks state 'selected'"`
   - `gridview-at-actions-20260925-140503-22076 tree after AT click: table node 'selected_children': 0 while "the cell of 'Market 7' has state 'selected'"`
   - `gridview-at-actions-20260925-142149-357596/orca-debug.out: "14:22:10.630949 - AXSelection: [table: 'Photo library'] reports 0 selected children" (Escape, Market 7 selected)`
@@ -243,12 +309,20 @@ The grid is a layout table to Orca: no role, no size, no row/column or 'N of 60'
 - **Example:** grid-view
 - **Act:** Tab onto the grid; arrow between tiles
 - **The reader should get:** The reader learns this is a grid of 60 photos in 5 columns, and where the current tile is (row/column or position)
-- **The reader gets:** Orca says 'Photo library.' only, with no role and no count. Per tile it says only the caption. Cells publish posinset/setsize attributes (1-based), which Orca's default script never reads. Row/column indices and the grid's row\_count/column\_count reach no AT-SPI interface.
+- **The reader got (`261a218f`):** Orca says 'Photo library.' only, with no role and no count. Per tile it says only the caption. Cells publish posinset/setsize attributes (1-based), which Orca's default script never reads. Row/column indices and the grid's row\_count/column\_count reach no AT-SPI interface.
 - **Platform:** Linux AT-SPI/Orca measured. Windows by source: no GridItem/TableItem patterns in accesskit\_windows 0.35.
 - **Severity:** medium; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/grid\_view.rs:1939-1955
-- **Evidence:**
+- **Now (`c198e4d1`):** Tab onto the grid still gives 'Photo library.' only, with no role and no count, and each tile is read by its caption alone. Orca treats the grid as a layout table.
+- **Measured again:** tabwalk-grid-view and gridview-arrows, 2 of 2 runs; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-grid-view 'Tab 1': +211.1 ms object:state-changed:focused 1 [table] 'Photo library' / +305.4 ms ORCA SAYS: 'Photo library.'`
+  - `pass1 tabwalk-grid-view orca-debug.out: 16:58:34.374253 - AXTable: [table: 'Photo library'] is layout only: True (Doesn't support table interface.)`
+  - `pass2 gridview-arrows: every check passed; Tab gives 'Photo library.'`
+  - `tree-launch.txt: [table cell] '' {selectable} attrs={'posinset': '1', 'setsize': '60'}`
+  - `accesskit_atspi_common-0.21.0/src has no table interface or row/column index code; accesskit_windows-0.35.1/src/node.rs:650 still carries 'TODO: tables (#29)'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view.rs:1939-1955
+- **Evidence (`261a218f`):**
   - `tabwalk-grid-view-20260925-134840-3966959/report.txt: "+17.7 ms object:state-changed:focused 1 [table] 'Photo library'" / "+86.5 ms ORCA SAYS: 'Photo library.'"`
   - `orca-debug.out: "13:48:48.382407 - AXTable: [table: 'Photo library'] is layout only: True (Doesn't support table interface.)"`
   - `tree: "[table cell] '' {focusable,selectable} attrs={'setsize': '60', 'posinset': '1'}"`
@@ -266,12 +340,19 @@ Alt+arrow reorder makes two announcements (the move and a count), and the move i
 - **Example:** grid-view
 - **Act:** Ctrl+Right (cursor only, nothing selected), Alt+Right
 - **The reader should get:** One message: 'Sunset 1 moved to 2 of 60', heard in full
-- **The reader gets:** Two announcements: 'Sunset 1 moved to 2 of 60', then 'grid-view-selection-count' (the reorder selects the destination inside the key handler's count voice). The move message precedes the focus event on the moved tile by 0.1-10.6 ms. In 1 of 4 runs Orca spoke it and cut it after about 150 ms to read 'Sunset 1.'. In the other 3, K2 dropped it as defunct. The whole grid body is also replaced ('children-changed:remove \[table\] Photo library -&gt; \[panel\]') on every reorder.
+- **The reader got (`261a218f`):** Two announcements: 'Sunset 1 moved to 2 of 60', then 'grid-view-selection-count' (the reorder selects the destination inside the key handler's count voice). The move message precedes the focus event on the moved tile by 0.1-10.6 ms. In 1 of 4 runs Orca spoke it and cut it after about 150 ms to read 'Sunset 1.'. In the other 3, K2 dropped it as defunct. The whole grid body is also replaced ('children-changed:remove \[table\] Photo library -&gt; \[panel\]') on every reorder.
 - **Platform:** Linux AT-SPI/Orca measured
-- **Severity:** medium; **layer:** framework
-- **Status:** Fixed by `b518253f` (announce-focus). Fixed part: ordering part only: the move message now reaches the bus after the focus change to the moved tile.
-- **Where:** crates/teksilo-widgets/src/grid\_view.rs:1371-1385 (select then announce before the rebuild), 1429 (voice around on\_key)
-- **Evidence:**
+- **Severity:** low; **layer:** framework
+- **Severity in the sweep:** medium. The move is now heard whole; what remains is an extra count message after it, and the body churn, which no longer cuts speech.
+- **Status:** Partly fixed by `b518253f` (announce-focus). What remains is under **Now**.
+- **Now (`c198e4d1`):** The move message now reaches the bus after the focus change and Orca speaks it in full after the tile: 'Sunset 1.', 'Sunset 1 moved to 2 of 60'. When the move changes the selection count, a second message follows ('1 item selected'). Every reorder still replaces the whole grid body.
+- **Measured again:** gridview-reorder, verify-gridview-reorder-multi, verify-gridview-alt-no-cursor, gridview-context-menu: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 gridview-reorder 'Alt+Right': +77.4 ms object:state-changed:focused 1 [table cell] '' / +87.7 ms object:announcement [status bar] 'Sunset 1 moved to 2 of 60' text='Sunset 1 moved to 2 of 60' / +89.2 ms object:announcement [status bar] '1 item selected' text='1 item selected' / +274.7 ms ORCA SAYS: 'Sunset 1.' / +284.3 ms ORCA SAYS: 'Sunset 1 moved to 2 of 60' / +289.4 ms ORCA SAYS: '1 item selected'`
+  - `pass2 gridview-reorder 'Alt+Right': +104.6 ms object:state-changed:focused 1 [table cell] '' / +112.4 ms object:announcement [status bar] 'Sunset 1 moved to 2 of 60' / +113.5 ms object:announcement [status bar] '1 item selected' / +344.3 ms ORCA SAYS: 'Sunset 1 moved to 2 of 60' / +349.6 ms ORCA SAYS: '1 item selected'`
+  - `pass1 gridview-context-menu 'Enter': state-changed:defunct 1 on every [table cell] and both [row header] nodes, then the move announcement`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view.rs:1371-1385, 1429
+- **Evidence (`261a218f`):**
   - `gridview-reorder-20260925-141204-172548/report.txt: "+56.5 ms object:announcement [status bar] 'grid-view-selection-count' text='Sunset 1 moved to 2 of 60'" ... "+67.0 ms object:state-changed:focused 1 [table cell] ''"`
   - `same run orca-debug.out: "14:12:20.483247 - NULL SPEECH: speak 'Sunset 1 moved to 2 of 60' interrupt=True" / "14:12:20.634221 - NULL SPEECH: stop" / "14:12:20.634292 - SPEECH OUTPUT: 'Sunset 1.'" then "Ignoring defunct object: [status bar: 'grid-view-selection-count']" for the count`
   - `gridview-reorder-20260925-135823-4109511: "+63.2 ms object:announcement ... text='Sunset 1 moved to 2 of 60'" and "+78.1 ms object:announcement ... text='grid-view-selection-count'"`
@@ -291,12 +372,18 @@ The tiles' Move custom actions (a documented non-drag reorder route) reach no sc
 - **Example:** grid-view
 - **Act:** Read a tile's actions on AT-SPI
 - **The reader should get:** Move Left / Move Right / Move to Start / Move to End offered as actions
-- **The reader gets:** Each table cell lists actions \[{'name': 'click'}\] only. No AccessKit adapter exposes custom actions. The route grid\_view.rs describes as one of four ('the tile's AccessKit custom actions') does not exist for a reader; the Alt+arrow chord works but is announced as in gridview-02/10, and the context menu is silent (gridview-04).
+- **The reader got (`261a218f`):** Each table cell lists actions \[{'name': 'click'}\] only. No AccessKit adapter exposes custom actions. The route grid\_view.rs describes as one of four ('the tile's AccessKit custom actions') does not exist for a reader; the Alt+arrow chord works but is announced as in gridview-02/10, and the context menu is silent (gridview-04).
 - **Platform:** Linux measured. Windows and macOS by source: accesskit\_windows-0.35.0 and accesskit\_macos-0.27.0 contain no custom-action code.
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/common/ordered\_move.rs:477
-- **Evidence:**
+- **Now (`c198e4d1`):** Each tile still offers only 'click' on AT-SPI. The Move custom actions reach no screen reader. The context menu and Alt+arrows are now both heard, so a reader has a way to reorder.
+- **Measured again:** tabwalk-grid-view tree, 2 of 2 runs; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-grid-view run.json: table cell actions [{'name': 'click', 'description': '', 'key_binding': ''}]`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:525-538: n_actions is 1 or 0 and the only name is 'click'`
+  - `no custom-action code in accesskit_windows-0.35.1/src or accesskit_macos-0.27.1/src (grep)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/common/ordered\_move.rs:477
+- **Evidence (`261a218f`):**
   - `tree-grid-view-20260925-134800-3956180 run.json: table cell "'actions': [{'name': 'click', 'description': '', 'key_binding': ''}]"`
   - `accesskit_atspi_common-0.20.0 node.rs:532-545: n_actions is 1 or 0 and the only name is 'click'`
   - `crates/teksilo-widgets/src/common/ordered_move.rs:468-480 installs access_custom_action per move; grid_view.rs:1313-1318 counts it as a route`
@@ -312,12 +399,19 @@ Tiles are unnamed cells: the launch audit flags 55 focusable table cells with no
 - **Example:** grid-view
 - **Act:** launch (tree audit)
 - **The reader should get:** Each focusable cell carries its caption as its name
-- **The reader gets:** 'unnamed-control: \[table cell\] '': a focusable table cell with no name' for every realized tile. The caption lives in a \[label\] child. Orca 46 still reads it (from the cell's displayed text), but any client asking the cell its name gets ''. accesskit\_consumer derives names from descendants only for button-like roles, so a GridCell stays unnamed unless the app supplies tile\_a11y\_label, which this example does not.
+- **The reader got (`261a218f`):** 'unnamed-control: \[table cell\] '': a focusable table cell with no name' for every realized tile. The caption lives in a \[label\] child. Orca 46 still reads it (from the cell's displayed text), but any client asking the cell its name gets ''. accesskit\_consumer derives names from descendants only for button-like roles, so a GridCell stays unnamed unless the app supplies tile\_a11y\_label, which this example does not.
 - **Platform:** Linux measured (audit); name '' on every adapter by source
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/grid\_view/a11y.rs:82-99
-- **Evidence:**
+- **Now (`c198e4d1`):** Tiles are still unnamed cells; the caption lives in a label child. Orca still reads it. The launch audit no longer lists them, only because the cells are no longer focusable (the tile stopped offering Focus); the cell that takes focus still has the name ''.
+- **Measured again:** every grid-view run, 2 of 2 passes
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-grid-view tree-launch.txt: [table cell] '' {selectable} attrs={'posinset': '1', 'setsize': '60'} / [label] 'Sunset 1'`
+  - `pass1 fix-gridview-count 'Ctrl+Right': +34.8 ms object:state-changed:focused 1 [table cell] ''`
+  - `audit: [] in every grid-view run of both passes (the audit counts only focusable nodes)`
+  - `accesskit_consumer-0.39.1/src/node.rs:718-740: names come from descendants only for button-like roles`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view/a11y.rs:169-173; examples/grid\_view/src/main.rs (no tile\_a11y\_label)
+- **Evidence (`261a218f`):**
   - `tree-grid-view-20260925-134800-3956180/report.txt: "unnamed-control: [table cell] '': a focusable table cell with no name" (x55)`
   - `accesskit_consumer-0.39.0 node.rs:719-735: FromDescendants only for Button/CheckBox/Link/MenuItem/RadioButton...`
   - `crates/teksilo-widgets/src/grid_view/a11y.rs:33-36, 84-86: name only when tile_a11y_label is given; examples/grid_view/src/main.rs uses no tile_a11y_label`
@@ -333,12 +427,18 @@ The reorder announcement is English-only (lit!, not translatable)
 - **Example:** grid-view
 - **Act:** Alt+arrow or context-menu Move
 - **The reader should get:** '&lt;name&gt; moved to N of M' in the user's language
-- **The reader gets:** Built with lit!(format!("{name} moved to {position} of {count}")) and 'Moved to {position} of {count}', so it is English in every locale
+- **The reader got (`261a218f`):** Built with lit!(format!("{name} moved to {position} of {count}")) and 'Moved to {position} of {count}', so it is English in every locale
 - **Platform:** all (source only; not run in another locale)
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/common/ordered\_move.rs:102-103, 260-267, 316-323
-- **Evidence:**
+- **Now (`c198e4d1`):** The move message and the Move menu rows are still English literals in every locale.
+- **Measured again:** read from source
+- **Evidence (`c198e4d1`):**
+  - `crates/teksilo-widgets/src/common/ordered_move.rs:316-323: lit!(format!("{name} moved to {position} of {count}"))`
+  - `crates/teksilo-widgets/src/common/ordered_move.rs:258-268 and 100-104: menu and custom-action labels are lit!`
+  - `pass1 gridview-reorder: text='Sunset 1 moved to 2 of 60'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/common/ordered\_move.rs:102-103, 260-267, 316-323
+- **Evidence (`261a218f`):**
   - `crates/teksilo-widgets/src/common/ordered_move.rs:316-323`
   - `bus text seen: "text='Sunset 1 moved to 2 of 60'" (gridview-reorder-20260925-141204-172548)`
   - `gridview-context-menu-20260925-142913-464380 tree: menu rows 'Move Left', 'Move Right', 'Move to Start', 'Move to End'`
@@ -354,12 +454,22 @@ Alt+arrow reorder collapses a multi-selection to the moved tile, and the reader 
 - **Scenario:** verify-gridview-reorder-multi (tools/reader/scenarios/verify\_gridview.py)
 - **Act:** Ctrl+Right, then Ctrl+Space three times on Sunset 1, Harbor 2 and Trail 3 (status '3 selected'), then Alt+Right on Trail 3
 - **The reader should get:** The tile moves and the three tiles stay selected (or the selection change is said in words)
-- **The reader gets:** The selection drops to the moved tile alone: the status line goes to '1 selected'. The only hint is the count message, which is the raw id (gridview-01) and is dropped by K2 on main. Orca says 'Trail 3 moved to 4 of 60' in 1 of 2 runs, cut by the refocus, then 'Trail 3.'. The context-menu route does the same (select(dest)) and says no count at all.
+- **The reader got (`261a218f`):** The selection drops to the moved tile alone: the status line goes to '1 selected'. The only hint is the count message, which is the raw id (gridview-01) and is dropped by K2 on main. Orca says 'Trail 3 moved to 4 of 60' in 1 of 2 runs, cut by the refocus, then 'Trail 3.'. The context-menu route does the same (select(dest)) and says no count at all.
 - **Platform:** Linux AT-SPI/Orca measured; the selection loss is platform-independent (model logic)
 - **Severity:** medium; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/grid\_view.rs:1373
-- **Evidence:**
+- **Status:** Partly fixed by `8448bb9a`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** Alt+Right on one of three selected tiles still drops the selection to the moved tile, but the reader is now told: Orca says 'Trail 3.', 'Trail 3 moved to 4 of 60', then '1 item selected'. A Move from the tile's context menu goes through the same code and changes the selection with no count said.
+- **Measured again:** verify-gridview-reorder-multi, 2 of 2 runs; gridview-context-menu, 2 of 2 runs (starting from no selection); the context-menu route with three selected read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-gridview-reorder-multi 'Alt+Right': +88.6 ms object:property-change:accessible-name [label] '1 selected' text='1 selected' / +112.2 ms object:announcement [status bar] 'Trail 3 moved to 4 of 60' text='Trail 3 moved to 4 of 60' / +113.4 ms object:announcement [status bar] '1 item selected' text='1 item selected' / +409.4 ms ORCA SAYS: 'Trail 3.' / +420.8 ms ORCA SAYS: 'Trail 3 moved to 4 of 60' / +427.2 ms ORCA SAYS: '1 item selected'`
+  - `pass2 verify-gridview-reorder-multi 'Alt+Right': +98.2 ms object:property-change:accessible-name [label] '1 selected' text='1 selected' / +112.3 ms object:announcement [status bar] 'Trail 3 moved to 4 of 60' text='Trail 3 moved to 4 of 60' / +113.9 ms object:announcement [status bar] '1 item selected' text='1 item selected' / +547.4 ms ORCA SAYS: 'Trail 3.' / +556.7 ms ORCA SAYS: 'Trail 3 moved to 4 of 60' / +564.9 ms ORCA SAYS: '1 item selected'`
+  - `pass1 gridview-context-menu 'Enter': +86.0 ms object:property-change:accessible-name [label] '1 selected' text='1 selected' / +92.9 ms object:announcement [status bar] 'Harbor 2 moved to 1 of 60' text='Harbor 2 moved to 1 of 60' / +374.6 ms ORCA SAYS: 'Harbor 2.' / +385.4 ms ORCA SAYS: 'Harbor 2 moved to 1 of 60' (no count announcement)`
+  - `pass2 gridview-context-menu 'Enter': +118.6 ms object:property-change:accessible-name [label] '1 selected' text='1 selected' / +133.1 ms object:announcement [status bar] 'Harbor 2 moved to 1 of 60' text='Harbor 2 moved to 1 of 60' / +560.1 ms ORCA SAYS: 'Harbor 2.' / +579.2 ms ORCA SAYS: 'Harbor 2 moved to 1 of 60' (no count announcement)`
+  - `crates/teksilo-widgets/src/grid_view.rs:1371-1373: the one commit closure behind the chord, the context menu and the custom actions sets the cursor and calls sel.select(dest)`
+  - `crates/teksilo-widgets/src/grid_view.rs:1393, 1428-1432: the count voice wraps only the key handler`
+  - `crates/teksilo-widgets/src/grid_view/body_pane.rs:572-587 and crates/teksilo-widgets/src/common/ordered_move.rs:544-565: the context menu rows call the closure with no count voice around them`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view.rs:1371-1373; crates/teksilo-widgets/src/grid\_view/body\_pane.rs:572-587
+- **Evidence (`261a218f`):**
   - `verify-gridview-reorder-multi-20260925-143435-623194: 'check: three selected' pass [label] '3 selected'; 'Alt+Right': 14:35:13.284011 object:announcement text='Trail 3 moved to 4 of 60'; 14:35:13.284650 object:property-change:accessible-name [label] '1 selected'; 14:35:13.293114 object:announcement text='grid-view-selection-count'`
   - `verify-gridview-reorder-multi-20260925-143848-724775: same, plus orca-debug.out 14:39:26.799500 NULL SPEECH: speak 'Trail 3 moved to 4 of 60' interrupt=True / 14:39:26.976787 NULL SPEECH: stop`
   - `crates/teksilo-widgets/src/grid_view.rs:1371-1373: focused.set(Some(dest)); sel.select(dest)`
@@ -376,12 +486,17 @@ Type-ahead with no cursor yet skips the first tile
 - **Scenario:** verify-gridview-type-ahead-start
 - **Act:** Tab onto the grid, type 's'
 - **The reader should get:** 'Sunset 1', the first caption starting with s
-- **The reader gets:** Orca says 'Summit 5.' and the focused cell holds Summit 5. With no cursor, the key handler passes current = 0, and the search starts at current + 1, so tile 0 cannot be reached on the first keystroke.
+- **The reader got (`261a218f`):** Orca says 'Summit 5.' and the focused cell holds Summit 5. With no cursor, the key handler passes current = 0, and the search starts at current + 1, so tile 0 cannot be reached on the first keystroke.
 - **Platform:** Linux measured; the logic is platform-independent
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/grid\_view/keyboard.rs:126, 210-216
-- **Evidence:**
+- **Now (`c198e4d1`):** With no cursor yet, typing 's' still skips the first tile: Orca says 'Summit 5.', then '1 item selected', not 'Sunset 1'.
+- **Measured again:** verify-gridview-type-ahead-start, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-gridview-type-ahead-start 'type s with no cursor yet': +210.2 ms ORCA SAYS: 'Summit 5.' / +222.8 ms ORCA SAYS: '1 item selected' / focused cell holds 'Summit 5'`
+  - `pass2 verify-gridview-type-ahead-start 'type s with no cursor yet': +429.4 ms ORCA SAYS: 'Summit 5.' / focused cell holds 'Summit 5'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view/keyboard.rs:126, 210-216; crates/teksilo-widgets/src/common/type\_ahead.rs:95-96
+- **Evidence (`261a218f`):**
   - `verify-gridview-type-ahead-start-20260925-143401-623194 'type s with no cursor yet': ORCA SPEECH OUTPUT 'Summit 5.'; FAIL "the focused cell holds 'Sunset 1'" / "focused cell holds 'Summit 5'"`
   - `verify-gridview-type-ahead-start-20260925-143940-724775: same`
   - `` crates/teksilo-widgets/src/grid_view/keyboard.rs:126 `let current = cursor.unwrap_or(0);` then type_ahead.rs:95-96 `for offset in 1..=count { let i = (current + offset) % count` ``
@@ -397,12 +512,18 @@ Alt+arrow with no cursor moves the first tile, which the reader never heard
 - **Scenario:** verify-gridview-alt-no-cursor
 - **Act:** Tab onto the grid (no cursor), Alt+Right
 - **The reader should get:** Nothing moves until the reader has a tile under the cursor (the arrows treat 'no cursor' as distinct from 'tile 0')
-- **The reader gets:** Sunset 1 is moved to position 2 and selected ('Sunset 1 moved to 2 of 60', then the count id). The reader hears only 'Sunset 1.' when focus lands on it.
+- **The reader got (`261a218f`):** Sunset 1 is moved to position 2 and selected ('Sunset 1 moved to 2 of 60', then the count id). The reader hears only 'Sunset 1.' when focus lands on it.
 - **Platform:** Linux measured
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/grid\_view/keyboard.rs:158-178
-- **Evidence:**
+- **Now (`c198e4d1`):** Alt+Right with no cursor still moves the first tile to position 2 and selects it. The reader now hears it: Orca says 'Sunset 1.', 'Sunset 1 moved to 2 of 60', '1 item selected'. The move itself should not happen before the reader has a tile.
+- **Measured again:** verify-gridview-alt-no-cursor, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-gridview-alt-no-cursor 'Alt+Right with no cursor yet': +847.7 ms object:announcement [status bar] 'Sunset 1 moved to 2 of 60' text='Sunset 1 moved to 2 of 60' / +850.1 ms object:announcement [status bar] '1 item selected' text='1 item selected' / +1922.5 ms ORCA SAYS: 'Sunset 1.' / +2067.1 ms ORCA SAYS: 'Sunset 1 moved to 2 of 60' / +2100.3 ms ORCA SAYS: '1 item selected' / FAIL  nothing moves before the reader has a tile`
+  - `pass2 verify-gridview-alt-no-cursor 'Alt+Right with no cursor yet': +116.7 ms object:announcement [status bar] 'Sunset 1 moved to 2 of 60' text='Sunset 1 moved to 2 of 60' / +462.5 ms ORCA SAYS: 'Sunset 1.' / +478.6 ms ORCA SAYS: 'Sunset 1 moved to 2 of 60' / +485.7 ms ORCA SAYS: '1 item selected' / FAIL  nothing moves before the reader has a tile`
+  - ``crates/teksilo-widgets/src/grid_view/keyboard.rs:126 `let current = cursor.unwrap_or(0);` and 158-178 reorder `current` with no check that a cursor exists; the file is unchanged since 261a218f``
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view/keyboard.rs:126, 158-178
+- **Evidence (`261a218f`):**
   - `verify-gridview-alt-no-cursor-20260925-143656-623194: announcements ['Sunset 1 moved to 2 of 60', 'grid-view-selection-count']; 14:37:08.482741 accessible-name [label] '1 selected'; ORCA SPEECH OUTPUT 'Sunset 1.'`
   - ``crates/teksilo-widgets/src/grid_view/keyboard.rs:126 current = cursor.unwrap_or(0); 158-175 reorders `current` with no check that a cursor exists``
 - **Reproduced:** 1 of 1 run; deterministic by source
@@ -415,12 +536,17 @@ setsize=60 is published on every descendant of the grid (labels, the body pane, 
 - **Example:** grid-view
 - **Act:** launch (tree)
 - **The reader should get:** Only the tiles carry a set size
-- **The reader gets:** Every node under the grid has attrs {'setsize': '60'}: the body-pane panel, each caption label, the row headers, the stray pinned label. accesskit\_atspi\_common derives setsize for any node from its nearest filtered ancestor with size\_of\_set, and Teksilo puts that on the Grid, as AccessKit's model requires. Orca's default script ignores it; another AT reading attributes would see set members that are not items.
+- **The reader got (`261a218f`):** Every node under the grid has attrs {'setsize': '60'}: the body-pane panel, each caption label, the row headers, the stray pinned label. accesskit\_atspi\_common derives setsize for any node from its nearest filtered ancestor with size\_of\_set, and Teksilo puts that on the Grid, as AccessKit's model requires. Orca's default script ignores it; another AT reading attributes would see set members that are not items.
 - **Platform:** Linux measured (tree); cosmetic
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/grid\_view.rs:1952-1954
-- **Evidence:**
+- **Now (`c198e4d1`):** Every node under the grid still carries setsize 60: the body panel, each caption label, the row headers and the stray pinned label.
+- **Measured again:** tabwalk-grid-view tree, 2 of 2 runs; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-grid-view tree-launch.txt: [panel] '' attrs={'setsize': '60'} / [label] 'Sunset 1' attrs={'setsize': '60'} / [row header] 'Travel' attrs={'setsize': '60'} / grid-child [label] 'Travel' attrs={'setsize': '60'}`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:399-403 size_of_set() uses size_of_set_from_container for every node; accesskit_consumer-0.39.1/src/node.rs:629-641`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/grid\_view.rs:1952-1954
+- **Evidence (`261a218f`):**
   - `gridview-sections-20260925-142828-464934 launch tree: panel '' attrs {'setsize': '60'}; label 'Sunset 1' attrs {'setsize': '60'}; row header 'Travel' attrs {'setsize': '60'}; grid-child label 'Travel' attrs {'setsize': '60'}`
   - `accesskit_atspi_common-0.20.0/src/node.rs:397-401 size_of_set() = size_of_set_from_container(&filter) for every node; accesskit_consumer-0.39.0/src/node.rs:629-641`
 - **Reproduced:** every tree

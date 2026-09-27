@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # New widgets kit
 
 Examples: `new-widgets-kit`.
 14 findings: 5 high, 4 medium, 5 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -34,12 +36,21 @@ A banner dismissed through its Collapse stays in the reader's tree and Tab order
 - **Scenario:** newkit-banner-dismiss-keys, newkit-banner-dismiss-at
 - **Act:** Shift+Tab x3 to the 'Unsaved changes' dismiss button, Space; then Shift+Tab; then AT-SPI click on 'Restore banners'. Separately: AT-SPI click on the 'Disk almost full' dismiss button, then Shift+Tab twice from the search field.
 - **The reader should get:** The dismissed banner leaves the tree (as it leaves the screen); focus moves to a control that is still visible and the reader hears it; Shift+Tab never lands inside the dismissed banner; when 'Restore banners' brings a banner back, the reader hears it (it is a polite live region).
-- **The reader gets:** Space on the dismiss button puts nothing on the bus except the height tween's object:bounds-changed events (100 of them): no children-changed, no focus change, and Orca says nothing. The \[status bar\] 'Unsaved changes' stays in the tree at zero width, and focus stays on its invisible 'Clear'. Shift+Tab lands on the invisible 'Save now' and Orca says 'Save now push button.'. After the 'Disk almost full' banner is dismissed, Shift+Tab from 'Restore banners' lands on its invisible Clear, and Orca says 'Disk almost full statusbar' 'Clear push button.'. 'Restore banners' emits no announcement, because the banner never left the tree. A sighted keyboard user also tabs onto these invisible buttons.
+- **The reader got (`261a218f`):** Space on the dismiss button puts nothing on the bus except the height tween's object:bounds-changed events (100 of them): no children-changed, no focus change, and Orca says nothing. The \[status bar\] 'Unsaved changes' stays in the tree at zero width, and focus stays on its invisible 'Clear'. Shift+Tab lands on the invisible 'Save now' and Orca says 'Save now push button.'. After the 'Disk almost full' banner is dismissed, Shift+Tab from 'Restore banners' lands on its invisible Clear, and Orca says 'Disk almost full statusbar' 'Clear push button.'. 'Restore banners' emits no announcement, because the banner never left the tree. A sighted keyboard user also tabs onto these invisible buttons.
 - **Platform:** Linux AT-SPI/Orca 46.1 (measured). Windows and macOS read the same tree: the nodes are never hidden, and common\_filter drops only hidden nodes (filters.rs:17-34), so the dismissed banner stays on all three platforms (from the source).
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/animations/collapse.rs:100-133 (build: nothing makes the child dormant/hidden or moves focus out), 135-166 (layout only), 197-203 (accessibility empty); same wrapper used by the vertical Accordion, accordion.rs:526-536
-- **Evidence:**
+- **Now (`c198e4d1`):** Dismissing a banner still only shrinks it on screen: it stays in the tree at zero width, focus stays on its invisible 'Clear', and Orca now says only the key name 'space'. Shift+Tab lands on the dismissed banner's invisible 'Save now' ('Save now push button.'), which still acts, and 'Restore banners' brings the banner back without any announcement.
+- **Measured again:** newkit-banner-dismiss-keys, newkit-banner-dismiss-at and verify-newkit-banner-invisible, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-banner-dismiss-keys 'Space on the dismiss button': '+8.0 ms ORCA SAYS: 'space'' and 'FAIL  the tree holds no [status bar] 'Unsaved changes' / found [status bar] 'Unsaved changes''; focus path ... > [status bar] 'Unsaved changes' ext=[24, 137, 0, 53] > [push button] 'Clear' ext=[144, 151, 24, 24]`
+  - `pass2 newkit-banner-dismiss-keys 'Space on the dismiss button': events for the whole run are 566 object:bounds-changed and nothing else in that act; tree after it still holds [status bar] 'Unsaved changes' with 'Save now' and 'Clear' {focusable,focused}`
+  - `pass2 newkit-banner-dismiss-keys 'Shift+Tab after the dismiss': '+29.7 ms object:state-changed:focused 1 [push button] 'Save now'', '+115.0 ms ORCA SAYS: 'Save now push button.''`
+  - `pass2 newkit-banner-dismiss-keys 'Activate Restore banners through AT-SPI': 'FAIL  the bus carries an announcement of 'Unsaved changes' / no object:announcement in the act'`
+  - `pass1 newkit-banner-dismiss-at 'Shift+Tab again': focus path ... > [status bar] 'Disk almost full' ext=[24, 198, 0, 53] > [push button] 'Clear' ext=[47, 213, 24, 24]; '+85.6 ms ORCA SAYS: 'Disk almost full statusbar'', '+85.6 ms ORCA SAYS: 'Clear push button.''`
+  - `pass2 verify-newkit-banner-invisible 'Shift+Tab twice, back into the dismissed banner': '+249.4 ms object:state-changed:focused 1 [push button] 'Save now'', '+292.5 ms ORCA SAYS: 'Save now push button.''; then 'Space on the invisible Save now': app.log 'Save now clicked'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/animations/collapse.rs:100-133 (build: nothing makes the child dormant/hidden or moves focus out), 135-166 (layout only), 197-203 (accessibility empty); same wrapper used by the vertical Accordion, accordion.rs:526-536
+- **Evidence (`261a218f`):**
   - `Space act (banner-dismiss-keys, round 2): 'events: 100 Counter({object:bounds-changed: 100})'. The report shows no other event, then 'FAIL  Orca says something / Orca said nothing'`
   - `FAIL  the tree holds no [status bar] 'Unsaved changes' / found [status bar] 'Unsaved changes'`
   - `focus path: [application] 'new-widgets-kit' ext=None > [frame] '' ext=[0, 0, 720, 720] > [panel] '' ext=[0, 28, 720, 692] > [status bar] 'Unsaved changes' ext=[24, 137, 0, 53] > [push button] 'Clear' ext=[144, 151, 24, 24]`
@@ -65,12 +76,21 @@ SearchField suggestions are silent: the popup's combobox semantics sit on a non-
 - **Scenario:** newkit-search-suggestions, newkit-search-escape
 - **Act:** With focus in the search field, type 'ap' (the list opens with Apple, Apricot), then press Down, Down (or type 'b' and press Up).
 - **The reader should get:** The focused field says it expanded and controls a list, and each arrow moves the active descendant, so the reader hears 'Apple', then 'Apricot' (or 'Blueberry').
-- **The reader gets:** Opening the list is silent: the focused entry has no expanded state, no controller-for relation and no active descendant. Every Down or Up puts zero events on the bus, and Orca says nothing. The field has two nested nodes: an outer, unfocusable, unnamed \[entry\] (Role::SearchInput) that holds controller-for and contains the list box, and the focused inner \[entry\]. Both emit text-changed for every character (duplicate events).
+- **The reader got (`261a218f`):** Opening the list is silent: the focused entry has no expanded state, no controller-for relation and no active descendant. Every Down or Up puts zero events on the bus, and Orca says nothing. The field has two nested nodes: an outer, unfocusable, unnamed \[entry\] (Role::SearchInput) that holds controller-for and contains the list box, and the focused inner \[entry\]. Both emit text-changed for every character (duplicate events).
 - **Platform:** Linux AT-SPI/Orca (measured). The source says Windows and macOS are the same: every adapter follows accesskit\_consumer's focus, which takes the active descendant of the focused node only (tree.rs:538-542). Upstream on Linux: accesskit\_atspi\_common 0.20 maps no expanded/expandable state at all (no Expanded state anywhere in the crate), so even after a fix Orca will not hear 'expanded'. Windows has an ExpandCollapse pattern (accesskit\_windows node.rs).
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/search\_field.rs:772-805 (combobox semantics on the unfocused outer Role::SearchInput node), 842-874 (highlight drives only a repaint-level RectWidget background; the only bind\_to in the file is suggestions at Rebuild, line 848), 1112-1117 (row set\_selected read only when a walk happens)
-- **Evidence:**
+- **Now (`c198e4d1`):** Opening the suggestion list is still silent: the focused inner entry has no expanded state, no relation and no active descendant. Down and Up put no event on the bus and Orca says nothing, so 'Apple', 'Apricot' and 'Blueberry' are never heard. Each typed character still arrives twice as text-changed:insert, once from the outer entry.
+- **Measured again:** newkit-search-suggestions, newkit-search-escape and verify-newkit-search-space, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-search-suggestions 'type 'ap' in the search field': 'FAIL  the focused node has state 'expanded' / [entry] '' ext=[54, 336, 618, 18] states=['editable', 'enabled', 'focusable', 'focused', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] attrs=None rel=None'; Orca said only 'p'`
+  - `pass1 newkit-search-suggestions 'type 'ap'': '+85.5 ms object:text-changed:insert [entry] '' text='p'' then '+85.8 ms object:text-changed:insert [entry] '' text='p''`
+  - `pass1 newkit-search-suggestions 'Down into the suggestions': no event; 'FAIL  Orca says 'Apple' / Orca unheard: 'Apple''; list item 'Apple' states=['enabled', 'selectable', 'sensitive', 'showing', 'visible']`
+  - `pass2 newkit-search-suggestions 'Down again': 'FAIL  a object:active-descendant-changed event from [*] '*'', 'FAIL  Orca says 'Apricot''`
+  - `pass1 and pass2 newkit-search-escape 'Up wraps to the last suggestion': 'FAIL  Orca says 'Blueberry' / Orca unheard: 'Blueberry''`
+  - `pass1 and pass2 verify-newkit-search-space 'Down': 'no object:active-descendant-changed event from [*] '*'', 'Orca unheard: 'Apple''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/search\_field.rs:772-805 (combobox semantics on the unfocused outer Role::SearchInput node), 842-874 (highlight drives only a repaint-level RectWidget background; the only bind\_to in the file is suggestions at Rebuild, line 848), 1112-1117 (row set\_selected read only when a walk happens). Upstream: accesskit\_consumer-0.39.1/src/tree.rs:538-542 (focus follows the focused node's active descendant only); accesskit\_atspi\_common-0.21.0/src/node.rs:301-386 still maps no expanded state
+- **Evidence (`261a218f`):**
   - `type 'ap': 'FAIL  the focused node has state 'expanded' / [entry] '' ext=[54, 336, 618, 18] states=['editable', 'enabled', 'focusable', 'focused', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] attrs=None rel=None'`
   - `probe: outer node '[entry] '' ext=[24, 331, 672, 32] states=['editable', 'enabled', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] ... rel={'controller-for': ['/org/a11y/atspi/accessible/0/396140821481099075569433182208']}'. Under it: the focused inner [entry], [status bar] '', [list box] '', [list item] 'Apple' {posinset 1, setsize 2}, [list item] 'Apricot'`
   - `'+0.9 object:children-changed:add [entry] -> [list box]' comes from the outer entry. '+49.5 object:text-changed:insert [entry] 'p'' is followed by '+50.4 object:text-changed:insert [entry] 'p'' from the outer entry (the same character twice)`
@@ -94,12 +114,19 @@ InputDialog's field has no name: the prompt is a separate label, so returning to
 - **Scenario:** newkit-dialog-accept, newkit-dialog-escape
 - **Act:** Tab x3 to 'Rename…', Space (or AT-SPI click) opens the InputDialog; then Tab, Tab, Tab (Cancel, OK, back to the field).
 - **The reader should get:** The field is named by the prompt 'Enter the new file name:', so the reader hears it both when the dialog opens and whenever focus comes back to the field.
-- **The reader gets:** On open, Orca reads the prompt only as dialog text: 'Rename document dialog Enter the new file name:', then 'entry untitled.txt selected.'. The field itself is \[entry\] '' with no name, no description and no relation. When Tab wraps back to it, the reader hears only 'entry untitled.txt selected.'. The launch audit already flags unnamed entries.
+- **The reader got (`261a218f`):** On open, Orca reads the prompt only as dialog text: 'Rename document dialog Enter the new file name:', then 'entry untitled.txt selected.'. The field itself is \[entry\] '' with no name, no description and no relation. When Tab wraps back to it, the reader hears only 'entry untitled.txt selected.'. The launch audit already flags unnamed entries.
 - **Platform:** Linux AT-SPI/Orca (measured). The name is empty in the AccessKit tree itself, so from the source the UIA and macOS adapters also publish an unnamed edit.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/input\_dialog.rs:340-342 (prompt is a plain TextWidget), 383-396 (TextInput built with no .label()/labelled\_by)
-- **Evidence:**
+- **Now (`c198e4d1`):** The dialog's field is still unnamed. On open Orca says 'Rename document dialog Enter the new file name:' then 'entry untitled.txt selected.'; when Tab wraps back to the field it says only 'entry untitled.txt selected.'.
+- **Measured again:** newkit-dialog-accept and newkit-dialog-escape, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 newkit-dialog-accept 'Space on Rename… opens the InputDialog': '+164.5 ms ORCA SAYS: 'Rename document dialog Enter the new file name:'', '+164.5 ms ORCA SAYS: 'entry untitled.txt selected.''; 'FAIL  the focused [entry] has a name / [entry] '' ext=[248, 357, 224, 18] desc=None attrs={} rel=None'`
+  - `pass2 newkit-dialog-accept 'Tab wraps to the field': '+106.4 ms ORCA SAYS: 'entry untitled.txt selected.''; 'FAIL  Orca says 'Enter the new file name''`
+  - `pass1 newkit-dialog-accept 'Tab wraps to the field': same FAILs`
+  - `pass1 and pass2 newkit-dialog-escape 'Space on Rename… opens the InputDialog': 'FAIL  the focused [entry] has a name'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/input\_dialog.rs:340-342 (prompt is a plain TextWidget), 383-396 (TextInput built with no .label()/labelled\_by)
+- **Evidence (`261a218f`):**
   - `tree while open: [dialog] 'Rename document' {active,modal} / [label] 'Rename document' / [label] 'Enter the new file name:' / [entry] '' {editable,focusable,focused,selectable-text,single-line} text='untitled.txt' / [status bar] '' / [push button] 'Cancel' / [push button] 'OK'`
   - `FAIL  the focused [entry] has a name / [entry] '' ext=[248, 357, 224, 18] desc=None attrs={} rel=None text={'characters': 12, 'text': 'untitled.txt', 'caret': 12}`
   - `Orca (run 132525-2943801): '13:25:37.617959 - SPEECH OUTPUT: 'Rename document dialog Enter the new file name:'' then '13:25:37.617975 - SPEECH OUTPUT: 'entry untitled.txt selected.''`
@@ -118,12 +145,19 @@ At launch all three banners are announced at once, in random order, each cutting
 - **Scenario:** every newkit scenario's launch act, and the tabwalk
 - **Act:** Launch the example; initial focus goes to the search field.
 - **The reader should get:** Live regions that are present when the window opens are not announced as new content (the web/ARIA convention), or they are heard whole after the focus reading. The reader hears the window and the focused field cleanly.
-- **The reader gets:** The bus carries three object:announcement events (the banner titles, in a different order every run) about 5-110 ms before the window's activation and focus. Orca speaks each with interrupt=True, so each cuts the one before, and then stops for 'frame.' (K1) and the focused entry. No banner title is ever heard whole. The info banner 'Welcome to Teksilo' has no focusable content, so for a Tab user this launch announcement is the only time it would ever be spoken.
+- **The reader got (`261a218f`):** The bus carries three object:announcement events (the banner titles, in a different order every run) about 5-110 ms before the window's activation and focus. Orca speaks each with interrupt=True, so each cuts the one before, and then stops for 'frame.' (K1) and the focused entry. No banner title is ever heard whole. The info banner 'Welcome to Teksilo' has no focusable content, so for a Tab user this launch announcement is the only time it would ever be spoken.
 - **Platform:** Linux AT-SPI/Orca (measured). By source, Windows (accesskit\_windows adapter.rs:256-263, UIA LiveRegionChanged) and macOS (accesskit\_macos event.rs:236-241) also announce every named live node that is added. Whether their first client request also meets the placeholder tree was not measured.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-platform/src/window.rs:157-165 (on\_activate answers the placeholder), 738 (window shown before the first frame), 1119-1128 (empty\_initial\_tree)
-- **Evidence:**
+- **Now (`c198e4d1`):** At launch the three banner titles are still announced together, in a different order each run, each cut by the next and the last cut by the window's reading. The window is now named, so the reading that follows is 'New widgets kit frame.' and then the focused field. No banner title is heard whole.
+- **Measured again:** every new-widgets-kit job, 24 of 24 launches
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-banner-dismiss-keys launch: '+334.7 ms object:announcement [status bar] 'Unsaved changes'', '+338.1 ms object:announcement [status bar] 'Welcome to Teksilo'', '+338.8 ms object:announcement [status bar] 'Disk almost full'', then '+339.5 ms object:children-changed:add [frame] 'New widgets kit' -> [tool bar] 'Toolbar'' and '+349.2 ms object:state-changed:active 1 [frame] 'New widgets kit''`
+  - `pass1 newkit-banner-dismiss-keys launch: '+361.1 ms ORCA SAYS (CUT): 'Unsaved changes'', '+372.4 ms ORCA SAYS (CUT): 'Welcome to Teksilo'', '+379.6 ms ORCA SAYS (CUT): 'Disk almost full'', '+415.9 ms ORCA SAYS: 'New widgets kit frame.''`
+  - `pass2 tabwalk-new-widgets-kit launch: 'Orca's 'Disk almost full' was cut by a stop 83 ms in (estimated)', then 'Unsaved changes' and 'Welcome to Teksilo' each cut 0 ms in`
+  - `all 24 launches (12 jobs, 2 passes): all three titles spoken and all three cut; the order varies between runs`
+- **Where (`c198e4d1`):** crates/teksilo-platform/src/window.rs:157-165 (on\_activate answers the placeholder), 738 (window shown before the first frame), 1130-1139 (empty\_initial\_tree)
+- **Evidence (`261a218f`):**
   - `tabwalk launch: '+448.7 ms object:announcement [status bar] 'Unsaved changes'', '+454.2 ms object:announcement [status bar] 'Disk almost full'', '+455.7 ms object:announcement [status bar] 'Welcome to Teksilo'', then '+468.5 ms window:activate [frame] ''' and '+469.1 ms object:state-changed:focused 1 [entry] '''`
   - `the first update only adds the empty frame: '+282.4 ms object:children-changed:add [application] 'new-widgets-kit' -> [frame] '''. The content arrives later: '+457.1 ms object:children-changed:add [frame] '' -> [tool bar] 'Toolbar'', '+458.9 ms ... -> [panel] '''`
   - `Orca: '12:57:06.702668 - NULL SPEECH: speak 'Unsaved changes' interrupt=True', '12:57:06.716883 - NULL SPEECH: speak 'Disk almost full' interrupt=True', '12:57:06.726664 - NULL SPEECH: speak 'Welcome to Teksilo' interrupt=True', '12:57:06.784490 - NULL SPEECH: stop', '12:57:06.784620 - NULL SPEECH: speak 'frame.' interrupt=False'`
@@ -143,12 +177,17 @@ A banner's dismiss button is announced as 'Clear' (IconButton::clear), not as di
 - **Scenario:** newkit-banner-dismiss-keys, tabwalk
 - **Act:** Tab or Shift+Tab onto the X button of 'Unsaved changes' or 'Disk almost full'.
 - **The reader should get:** A name that says what it does: 'Dismiss' or 'Close' (ideally 'Dismiss Unsaved changes').
-- **The reader gets:** \[push button\] 'Clear' desc='Clear'. Orca says 'Unsaved changes statusbar' 'Clear push button.'. 'Clear' reads as clearing a field or a value, the window now has two buttons both named 'Clear', and the description repeats the name.
+- **The reader got (`261a218f`):** \[push button\] 'Clear' desc='Clear'. Orca says 'Unsaved changes statusbar' 'Clear push button.'. 'Clear' reads as clearing a field or a value, the window now has two buttons both named 'Clear', and the description repeats the name.
 - **Platform:** Linux measured. The name comes from the widget, so the same text reaches every platform (from the source).
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/banner.rs:172-182
-- **Evidence:**
+- **Now (`c198e4d1`):** The banners' dismiss buttons are still named 'Clear' with the description 'Clear'. Orca says 'Unsaved changes statusbar' 'Clear push button.' and 'Disk almost full statusbar' 'Clear push button.'.
+- **Measured again:** newkit-banner-dismiss-keys and tabwalk new-widgets-kit, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-banner-dismiss-keys 'Shift+Tab three times to the Unsaved changes dismiss button': 'FAIL  the focused control's name says one of ['dismiss', 'close'] / [push button] 'Clear' ext=[660, 151, 24, 24] desc='Clear''; '+522.9 ms ORCA SAYS: 'Unsaved changes statusbar'', '+522.9 ms ORCA SAYS: 'Clear push button.''`
+  - `pass2 tabwalk-new-widgets-kit 'Tab 8': '+69.2 ms ORCA SAYS: 'Clear push button.''; 'Tab 9': '+104.2 ms ORCA SAYS: 'Disk almost full statusbar'', '+104.2 ms ORCA SAYS: 'Clear push button.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/banner.rs:172-182
+- **Evidence (`261a218f`):**
   - `FAIL  the focused control's name says one of ['dismiss', 'close'] / [push button] 'Clear' ext=[660, 151, 24, 24] desc='Clear'`
   - `Orca (run 132256-2943801): '13:23:04.827559 - SPEECH OUTPUT: 'Unsaved changes statusbar'' and '13:23:04.827591 - SPEECH OUTPUT: 'Clear push button.''`
   - `crates/teksilo-widgets/src/banner.rs:173-181 uses IconButton::clear().embedded(), explaining it as 'adequate for a banner dismiss button without inventing a new i18n key'. icon_button.rs:505-508: clear() gets its tooltip from tr_widget!(a11y_builtin_clear())`
@@ -165,12 +204,20 @@ An empty text field publishes no Text or EditableText interface: typing its firs
 - **Scenario:** newkit-search-escape (and every TextInputField: search, file entry, dialog field)
 - **Act:** In the search field: Ctrl+A, BackSpace (the field goes from 'b' to empty), then type 'c', then 'h'.
 - **The reader should get:** object:text-changed:delete for the 'b' and object:text-changed:insert for the 'c', as for any other edit, and an entry that always offers Text/EditableText.
-- **The reader gets:** Emptying the field gives only text-selection-changed. The first character gives only text-caret-moved. Only the second character ('h') produces text-changed:insert. Orca's own log shows the empty focused entry with interfaces='Component', and the same entry with 'Component, EditableText, Text' once it holds text. Orca speaks deletion (BackSpace) and pasted or inserted text from these events, and it cannot read the text or caret of an interface-less entry. The harness cannot show Orca's key-driven echo (it never sees the keys), so the audible effect is inferred from the missing events.
+- **The reader got (`261a218f`):** Emptying the field gives only text-selection-changed. The first character gives only text-caret-moved. Only the second character ('h') produces text-changed:insert. Orca's own log shows the empty focused entry with interfaces='Component', and the same entry with 'Component, EditableText, Text' once it holds text. Orca speaks deletion (BackSpace) and pasted or inserted text from these events, and it cannot read the text or caret of an interface-less entry. The harness cannot show Orca's key-driven echo (it never sees the keys), so the audible effect is inferred from the missing events.
 - **Platform:** Linux AT-SPI (measured). accesskit\_consumer gates text ranges on having a TextRun child on every platform, but I did not verify the Windows/macOS text-change paths.
 - **Severity:** medium; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-core/src/accessibility/text\_runs.rs:228-290 (TextRunSource::from\_geometry builds zero lines from a geometry with no lines, and adds the residual line only when covered &lt; text.len()), with the empty-text geometry coming from text-typeset 1.12.0 document\_flow.rs:1260-1262 and teksilo-text typesetter\_bridge.rs:697; the field retains it at crates/teksilo-widgets/src/primitives/text\_input\_field.rs:740-746 and uses it at primitives/text\_input\_field/widget\_impl.rs:1112-1136
-- **Evidence:**
+- **Now (`c198e4d1`):** An empty field now publishes its text. Emptying the search field gives text-changed:delete and Orca says 'Selection deleted.'; the first character typed into an empty field gives text-changed:insert, in the search field, the file entry and the dialog field.
+- **Measured again:** newkit-search-escape and verify-newkit-empty-edits, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-search-escape 'Ctrl+A, BackSpace empties the field': '+235.3 ms object:text-changed:delete [entry] '' text='b'', '+265.8 ms ORCA SAYS: 'Selection deleted.''`
+  - `pass1 newkit-search-escape 'type 'c' into the empty field': '+26.4 ms object:text-changed:insert [entry] '' text='c''`
+  - `pass1 verify-newkit-empty-edits 'type 'a' into the empty file entry': '+53.5 ms object:text-changed:insert [entry] '' text='a''; 'BackSpace deletes 'a' and empties the field': '+17.2 ms object:text-changed:delete [entry] '' text='a'', '+27.5 ms ORCA SAYS: 'a''`
+  - `pass1 verify-newkit-empty-edits 'Ctrl+A, BackSpace empties the dialog field': '+238.9 ms object:text-changed:delete [entry] '' text='untitled.txt'', '+247.8 ms ORCA SAYS: 'Selection deleted.''; 'type 'x' into the emptied dialog field': '+19.3 ms object:text-changed:insert [entry] '' text='x''`
+  - `pass2 newkit-search-escape and pass2 verify-newkit-empty-edits: the same checks pass`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/accessibility/text\_runs.rs:269-287 (a geometry with no lines now gets one unmeasured line, so an empty field keeps a text run); crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1213-1220 (the retained geometry goes through from\_geometry)
+- **Evidence (`261a218f`):**
   - `Ctrl+A, BackSpace: '+30.6 ms object:text-selection-changed [entry] ''', then only label changes and list box churn. 'FAIL  a object:text-changed:delete event from [entry] '*''`
   - `type 'c' into the empty field: '+23.0 ms object:text-caret-moved [entry] '''. 'FAIL  a object:text-changed:insert event from [entry] '*''`
   - `type 'h' after it: '+19.3 ms object:text-changed:insert [entry] '' text='h''. The check passes`
@@ -192,12 +239,18 @@ The SearchField and the FilePickerField entry have no accessible name: once fill
 - **Scenario:** newkit-search-suggestions, tabwalk, launch audit
 - **Act:** Tab onto the search field and the file entry, empty and after the search field holds 'Apricot'.
 - **The reader should get:** Each field is named ('Search fruits', 'File').
-- **The reader gets:** Both entries are unnamed; the launch audit reports 'unnamed-control' twice. While empty, Orca reads the placeholder ('entry Type a fruit — Apple, Banana, …', 'entry No file selected.'). Once filled, only 'entry Apricot.' is heard. The only visible text nearby is the group header 'SearchField & FilePickerField', which is not associated with either field.
+- **The reader got (`261a218f`):** Both entries are unnamed; the launch audit reports 'unnamed-control' twice. While empty, Orca reads the placeholder ('entry Type a fruit — Apple, Banana, …', 'entry No file selected.'). Once filled, only 'entry Apricot.' is heard. The only visible text nearby is the group header 'SearchField & FilePickerField', which is not associated with either field.
 - **Platform:** Linux measured. The name is empty in the tree, so it is empty on every platform (from the source).
 - **Severity:** high; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/new\_widgets\_kit/src/main.rs:190-208 and 221-226 (no .label()); APIs exist at crates/teksilo-widgets/src/search\_field.rs:206-210 and file\_picker\_field.rs:172 (forwarded at 322-324)
-- **Evidence:**
+- **Now (`c198e4d1`):** The search field and the file entry are still unnamed; the launch audit reports two unnamed entries. Orca reads the placeholder while they are empty ('entry No file selected.'), and once the search field holds text only its value: 'entry Apricot' 'entry Apricot selected.'.
+- **Measured again:** newkit-search-suggestions and tabwalk new-widgets-kit, 2 of 2 runs each, and the audit of all 24 launches
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-search-suggestions launch audit: 'unnamed-control: [entry] '': a focusable entry with no name' twice`
+  - `pass2 newkit-search-suggestions 'Shift+Tab away and Tab back to the field': 'FAIL  the focused [entry] has a name / [entry] '' ext=[54, 336, 618, 18] desc=None attrs={} rel=None text={'characters': 7, 'text': 'Apricot', 'caret': 7}'; '+1338.7 ms ORCA SAYS: 'entry Apricot'', '+1338.8 ms ORCA SAYS: 'entry Apricot selected.''`
+  - `pass2 tabwalk-new-widgets-kit 'Tab 1': '+66.3 ms ORCA SAYS: 'entry No file selected.''`
+- **Where (`c198e4d1`):** examples/new\_widgets\_kit/src/main.rs:190-208 and 221-226 (no .label()); APIs exist at crates/teksilo-widgets/src/search\_field.rs:206-210 and file\_picker\_field.rs:172 (forwarded at 322-324)
+- **Evidence (`261a218f`):**
   - `tree audit: 'unnamed-control: [entry] '': a focusable entry with no name' (x2)`
   - `FAIL  the focused [entry] has a name / [entry] '' ext=[54, 336, 618, 18] desc=None attrs={} rel=None`
   - `Orca (run 132400-2943801): '13:24:30.405242 - SPEECH OUTPUT: 'entry Apricot.''. Tabwalk: 'ORCA SAYS: 'entry No file selected.''`
@@ -215,12 +268,17 @@ The text field's visible clear (X) button has no accessibility node and cannot b
 - **Scenario:** newkit-search-escape
 - **Act:** Type 'b' in the search field (the X appears), Escape to close the list, then look for the clear control.
 - **The reader should get:** The X is a named button a reader can find and activate (or it is advertised as an action on the field).
-- **The reader gets:** The field's subtree holds only the two entries and an empty status bar, with no button. The X is pointer-only. Clearing still works from the keyboard (Ctrl+A, BackSpace), and Escape does not clear.
+- **The reader got (`261a218f`):** The field's subtree holds only the two entries and an empty status bar, with no button. The X is pointer-only. Clearing still works from the keyboard (Ctrl+A, BackSpace), and Escape does not clear.
 - **Platform:** Linux measured; the node is absent from the tree on every platform (from the source).
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/text\_input/widget\_impl.rs:205-243 (HitTarget clear affordance); crates/teksilo-widgets/src/button.rs HitTarget has no accessibility() and no focusable
-- **Evidence:**
+- **Now (`c198e4d1`):** The search field's visible clear (X) button is still not in the tree: the field holds only the two entries and an empty status bar. It is pointer-only; Ctrl+A, BackSpace still clears the field from the keyboard.
+- **Measured again:** newkit-search-escape, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-search-escape 'Escape closes the list': 'FAIL  the SearchField's clear button is in the tree, inside the field / [entry] '' ext=[24, 331, 672, 32] / [entry] '' ext=[54, 336, 618, 18] / [status bar] '' ext=[24, 363, 0, 0]'`
+  - `pass2 newkit-search-escape 'Escape closes the list': the same FAIL`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/text\_input/widget\_impl.rs:205-243 (HitTarget clear affordance); crates/teksilo-widgets/src/button.rs:128-230 HitTarget has no accessibility() and no focusable
+- **Evidence (`261a218f`):**
   - `FAIL  the SearchField's clear button is in the tree, inside the field / [entry] '' ext=[24, 331, 672, 32] / [entry] '' ext=[54, 336, 618, 18] / [status bar] '' ext=[24, 363, 0, 0]`
   - `crates/teksilo-widgets/src/text_input/widget_impl.rs:205-243: the clear affordance is a HitTarget with only .on_tap(...). HitTarget (crates/teksilo-widgets/src/button.rs:128-230) implements no accessibility() and is not focusable`
 - **Reproduced:** 3 of 3 runs; deterministic
@@ -235,12 +293,17 @@ Every TextInput carries an empty, unnamed 'status bar' (its ValidationStrip), in
 - **Scenario:** tree at launch, newkit-dialog-accept
 - **Act:** Walk the tree (Orca flat review / object navigation).
 - **The reader should get:** No node while there is no validation message (or a node without a status role).
-- **The reader gets:** The tree has an unnamed \[status bar\] '' under the search field, after the file entry, and inside the Rename dialog between the entry and Cancel. A reader who explores meets empty status bars.
+- **The reader got (`261a218f`):** The tree has an unnamed \[status bar\] '' under the search field, after the file entry, and inside the Rename dialog between the entry and Cancel. A reader who explores meets empty status bars.
 - **Platform:** Linux measured.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/validation\_strip.rs:147-163
-- **Evidence:**
+- **Now (`c198e4d1`):** Each text field still carries an empty, unnamed \[status bar\] '': under the search field, after the file picker's Browse, and in the Rename dialog between the field and Cancel. A reader exploring the window meets them.
+- **Measured again:** tabwalk new-widgets-kit and newkit-dialog-accept, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-new-widgets-kit tree-launch.txt: '[entry] '' ... / [status bar] ''' under the search field and '[push button] 'Browse' desc='Browse' {focusable}' followed by '[status bar] '''`
+  - `pass2 newkit-dialog-accept 'Enter accepts': '+31.3 ms object:state-changed:defunct 1 [status bar] ''' among the dialog's nodes`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/validation\_strip.rs:147-163
+- **Evidence (`261a218f`):**
   - `tree: '[entry] '' ... / [status bar] ''' (search), '[push button] 'Browse' ... / [status bar] ''' (file picker), '[entry] '' ... text='untitled.txt' / [status bar] '' / [push button] 'Cancel'' (dialog)`
   - `crates/teksilo-widgets/src/primitives/validation_strip.rs:148-163 always sets Role::Status, even when the feedback is Pristine`
 - **Reproduced:** every run; deterministic
@@ -255,12 +318,19 @@ The example's status lines ('Submitted 1 time(s).', 'Last result: …', 'Filteri
 - **Scenario:** newkit-search-suggestions, newkit-dialog-accept/escape
 - **Act:** Press Enter in the search field to submit, or accept or cancel the InputDialog.
 - **The reader should get:** A status message is announced (WCAG 4.1.3). The submit confirmation and the dialog result should be heard.
-- **The reader gets:** The labels change (object:property-change:accessible-name) but they are not live regions, and Orca says nothing. Before anything happens, two empty \[label\] '' nodes sit in the tree.
+- **The reader got (`261a218f`):** The labels change (object:property-change:accessible-name) but they are not live regions, and Orca says nothing. Before anything happens, two empty \[label\] '' nodes sit in the tree.
 - **Platform:** Linux measured.
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/new\_widgets\_kit/src/main.rs:136-145 and 250-256
-- **Evidence:**
+- **Now (`c198e4d1`):** The example's status lines still change silently: 'Submitted 1 time(s).' and 'Last result: …' only change a label's name and Orca says nothing. Two empty \[label\] '' nodes are still in the tree at launch.
+- **Measured again:** newkit-search-suggestions and newkit-dialog-accept, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 newkit-search-suggestions 'Enter again submits the query': '+17.4 ms object:property-change:accessible-name [label] 'Submitted 1 time(s).' text='Submitted 1 time(s).''; 'FAIL  Orca says 'Submitted' / Orca unheard: 'Submitted''`
+  - `pass2 newkit-dialog-accept 'Enter accepts': '+30.2 ms object:property-change:accessible-name [label] 'Last result: accepted — name updated above.'' and Orca says only 'Rename… push button.'`
+  - `pass1 verify-newkit-empty-edits 'Escape closes the dialog': '+20.2 ms object:property-change:accessible-name [label] 'Last result: cancelled — name unchanged.'', then '+85.2 ms ORCA SAYS: 'Rename… push button.''`
+  - `pass2 tabwalk-new-widgets-kit tree-launch.txt: '[label] ''' after the search readout and after 'Current name: untitled.txt'`
+- **Where (`c198e4d1`):** examples/new\_widgets\_kit/src/main.rs:136-145 and 250-256
+- **Evidence (`261a218f`):**
   - `Enter again submits the query: '+12.6 ms object:property-change:accessible-name [label] 'Submitted 1 time(s).' text='Submitted 1 time(s).''. 'FAIL  Orca says 'Submitted' / Orca unheard: 'Submitted''`
   - `Escape cancels: '+13.4 ms object:property-change:accessible-name [label] 'Last result: cancelled — name unchanged.'' is followed only by 'ORCA SAYS: 'Rename… push button.''`
   - `tree at launch: '[label] ''' after the search readout and after 'Current name: untitled.txt'`
@@ -277,12 +347,17 @@ A banner's body text is never spoken when a reader tabs into the banner's contro
 - **Scenario:** tabwalk
 - **Act:** Tab onto 'Save now' (Unsaved changes) and onto the 'Disk almost full' X.
 - **The reader should get:** The reader learns what the banner says: 'Closing the document now will discard your edits.' and 'Less than 200 MB remaining on /Users/you.'
-- **The reader gets:** Orca gives only the banner's name as context: 'Unsaved changes statusbar' 'Save now push button.' and 'Disk almost full statusbar' 'Clear push button.'. The launch announcement carries only the title, and it is cut (newkit-04). The description is reachable only by exploring (flat review).
+- **The reader got (`261a218f`):** Orca gives only the banner's name as context: 'Unsaved changes statusbar' 'Save now push button.' and 'Disk almost full statusbar' 'Clear push button.'. The launch announcement carries only the title, and it is cut (newkit-04). The description is reachable only by exploring (flat review).
 - **Platform:** Linux measured.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/banner.rs:256-265
-- **Evidence:**
+- **Now (`c198e4d1`):** Tabbing into a banner still gives only its title as context: 'Unsaved changes statusbar' 'Save now push button.' and 'Disk almost full statusbar' 'Clear push button.'. The body text is never spoken on the way in.
+- **Measured again:** tabwalk new-widgets-kit, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-new-widgets-kit 'Tab 7': '+68.9 ms ORCA SAYS: 'Unsaved changes statusbar'', '+68.9 ms ORCA SAYS: 'Save now push button.''`
+  - `pass2 tabwalk-new-widgets-kit 'Tab 9': '+104.2 ms ORCA SAYS: 'Disk almost full statusbar'', '+104.2 ms ORCA SAYS: 'Clear push button.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/banner.rs:256-265
+- **Evidence (`261a218f`):**
   - `tabwalk Tab 7: 'ORCA SAYS: 'Unsaved changes statusbar'', 'ORCA SAYS: 'Save now push button.''. Tab 9: 'ORCA SAYS: 'Disk almost full statusbar'', 'ORCA SAYS: 'Clear push button.''`
   - `crates/teksilo-widgets/src/banner.rs:262-264: 'Use the title alone as the AT name; the description is read by descending into the body text widget'`
 - **Reproduced:** 1 tabwalk plus 3 runs of newkit-banner-dismiss-keys (same context speech); deterministic
@@ -297,12 +372,17 @@ CommandLinkButton folds its description into its name, frozen at build
 - **Scenario:** tabwalk
 - **Act:** Tab onto the two command links.
 - **The reader should get:** Name 'Create new project', description 'Start with a blank workspace.' (locale-reactive).
-- **The reader gets:** The name is 'Create new project — Start with a blank workspace.' and Orca reads the whole string as the name. The string is built with resolve\_now(), so it does not follow a locale change, and a voice-control user must say the whole sentence.
+- **The reader got (`261a218f`):** The name is 'Create new project — Start with a blank workspace.' and Orca reads the whole string as the name. The string is built with resolve\_now(), so it does not follow a locale change, and a voice-control user must say the whole sentence.
 - **Platform:** Linux measured; the name is the same on every platform (from the source).
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/command\_link\_button.rs:427-436
-- **Evidence:**
+- **Now (`c198e4d1`):** Each command link still folds its description into its name: Orca says 'Create new project — Start with a blank workspace. push button.'. The name is resolved on every accessibility walk, so it does follow a locale change; the defect is the folding.
+- **Measured again:** tabwalk new-widgets-kit, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-new-widgets-kit 'Tab 4': '+111.3 ms ORCA SAYS: 'Create new project — Start with a blank workspace. push button.''`
+  - `pass2 tabwalk-new-widgets-kit 'Tab 5': '+71.5 ms ORCA SAYS: 'Open existing project — Browse to a folder on disk. push button.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/command\_link\_button.rs:427-436
+- **Evidence (`261a218f`):**
   - `tabwalk Tab 4: 'ORCA SAYS: 'Create new project — Start with a blank workspace. push button.''`
   - `crates/teksilo-widgets/src/command_link_button.rs:427-436: format!("{} — {}", self.title.resolve_now(), desc.resolve_now()) in set_name`
   - `tabwalk 134545-3921245 Tab 4: 'ORCA SAYS: 'Create new project — Start with a blank workspace. push button.''`
@@ -317,12 +397,20 @@ Caret moves and selection changes in any TextInputField are never published: arr
 - **Example:** new-widgets-kit
 - **Act:** verify-newkit-caret: Tab to the file entry, type 'abc', then Left, Left, Home, Shift+End, Right, Ctrl+A. verify-newkit-caret-dialog: in the search field type 'xy', Left, Shift+Home, then Tab away; open the InputDialog, End, Left, Shift+Home.
 - **The reader should get:** Each caret move emits object:text-caret-moved and each selection change emits object:text-selection-changed, so Orca echoes the character, word or selection, and its caret-offset queries are current.
-- **The reader gets:** No event of any kind for any of these acts, in all three fields (FilePickerField entry, SearchField, InputDialog field). The AT tree keeps the old caret and selection, so Orca speaks nothing ('selected', 'Text unselected' and character echo are all missing), and its own caret-offset reads are stale. The pending selection is only published when something else dirties the tree. When Tab left the search field, the bus carried text-selection-changed plus caret-moved for the field being left, and Orca said 'x' 'selected' at that moment, cut at once by the new focus.
+- **The reader got (`261a218f`):** No event of any kind for any of these acts, in all three fields (FilePickerField entry, SearchField, InputDialog field). The AT tree keeps the old caret and selection, so Orca speaks nothing ('selected', 'Text unselected' and character echo are all missing), and its own caret-offset reads are stale. The pending selection is only published when something else dirties the tree. When Tab left the search field, the bus carried text-selection-changed plus caret-moved for the field being left, and Orca said 'x' 'selected' at that moment, cut at once by the new focus.
 - **Platform:** Linux AT-SPI/Orca measured. The AccessKit tree itself is not updated, so no adapter has anything to report: no UIA TextSelectionChanged on Windows and no AXSelectedTextChanged on macOS (from the source; not measured).
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:209-255 and 452-481: the only AccessibilityOnly bindings are text, feedback, active\_descendant/controls and revealed. The cursor\_position signal (primitives/text\_input\_field/state.rs:67, set at state.rs:606-607) is not bound. crates/teksilo-core/src/widget\_tree/accessibility\_impl.rs:20-30 and 74: sync\_accessibility re-walks only on focus, overlay, rebuild, activation, an AccessibilityOnly flip, a shortcut rebind, a locale switch, an announcement or an explicit request, so a caret-only change is never sent. keyboard.rs:130-132 (Ctrl+A) only changes the cursor.
-- **Evidence:**
+- **Now (`c198e4d1`):** Caret moves and selection changes are now published in all three fields. Orca echoes the character on Left and Home, says 'abc' 'selected' on Shift+End, 'Text unselected.' when the selection collapses, and 'entire document selected' on Ctrl+A. Tabbing out of a field no longer publishes a stale selection.
+- **Measured again:** verify-newkit-caret and verify-newkit-caret-dialog, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-newkit-caret 'Left': '+28.4 ms object:text-caret-moved [entry] ''', '+75.5 ms ORCA SAYS: 'c''; 'Home': '+54.9 ms ORCA SAYS: 'a''`
+  - `pass1 verify-newkit-caret 'Shift+End selects the whole text': '+60.4 ms object:text-selection-changed [entry] ''', '+87.1 ms ORCA SAYS: 'abc'', '+87.3 ms ORCA SAYS: 'selected''; 'Right': '+58.2 ms ORCA SAYS: 'Text unselected.''; 'Ctrl+A': '+90.8 ms ORCA SAYS: 'entire document selected''`
+  - `pass2 verify-newkit-caret-dialog 'Shift+Home in the search field': '+32.7 ms object:text-selection-changed [entry] ''', '+44.5 ms ORCA SAYS: 'x'', '+44.5 ms ORCA SAYS: 'selected''`
+  - `pass2 verify-newkit-caret-dialog 'Tab three times to Rename…': only focus and caret events, no text-selection-changed for the field left, and no 'selected' spoken`
+  - `pass2 verify-newkit-caret-dialog 'End collapses the selection to the end': '+28.1 ms ORCA SAYS: 'Text unselected.''; 'Shift+Home in the dialog field': '+41.3 ms ORCA SAYS: 'untitled.tx'', '+41.4 ms ORCA SAYS: 'selected''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:491-510 (cursor\_position and cursor\_anchor bound at AccessibilityOnly)
+- **Evidence (`261a218f`):**
   - `verify-newkit-caret 134332-3872224 and 135009-3927144: 'Left', 'Left again', 'Home' → 'FAIL a object:text-caret-moved event from [entry]'; 'Shift+End', 'Right', 'Ctrl+A' → 'FAIL a object:text-selection-changed event from [entry]' (no event of any type in these acts)`
   - `verify-newkit-caret-dialog 134448-3905984 and 135057-3927144: search field 'Left' and 'Shift+Home' → no event; dialog 'End' (collapse the all-selected text), 'Left', 'Shift+Home' → no event, 'FAIL Orca says 'selected''`
   - `same runs, 'Tab three times to Rename…': '+7.4 ms object:text-selection-changed [entry] ''', '+7.6 ms object:text-caret-moved [entry] ''', '+7.6 ms object:state-changed:focused 1 [entry] ''' (the file entry) then Orca '13:45:08.372163 SPEECH OUTPUT: 'x'', '13:45:08.372242 SPEECH OUTPUT: 'selected'' both marked CUT: the Shift+Home selection from the previous act, published only on the focus change`
@@ -338,12 +426,18 @@ The SearchField's outer Role::SearchInput node is spoken as an extra unnamed 'en
 - **Example:** new-widgets-kit
 - **Act:** Launch (initial focus on the search field), or Tab/Shift+Tab back onto the search field.
 - **The reader should get:** One entry is read: 'Search fruits entry …' (or at least a single 'entry …').
-- **The reader gets:** Orca says 'entry' and then 'entry Type a fruit — Apple, Banana, …' (or 'entry' 'entry Apricot.'). Orca presents the outer, unfocused, unnamed \[entry\] as a new ancestor of the focused inner \[entry\]. The reader hears two text fields where there is one.
+- **The reader got (`261a218f`):** Orca says 'entry' and then 'entry Type a fruit — Apple, Banana, …' (or 'entry' 'entry Apricot.'). Orca presents the outer, unfocused, unnamed \[entry\] as a new ancestor of the focused inner \[entry\]. The reader hears two text fields where there is one.
 - **Platform:** Linux AT-SPI/Orca measured. On Windows the outer node is an Edit control in the UIA tree too (from the source; not measured whether NVDA voices it).
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/search\_field.rs:774 (builder.set\_role(Role::SearchInput) on the composite's own node, while the focused node is the inner TextInputField; the TextInput composite uses GenericContainer for exactly this reason, text\_input/widget\_impl.rs:103-110)
-- **Evidence:**
+- **Now (`c198e4d1`):** Every time focus enters the search field Orca still reads the outer unnamed entry first: 'entry' then 'entry Type a fruit — Apple, Banana, …'. Once the field holds text the extra reading now carries the value too: 'entry Apricot' then 'entry Apricot selected.'.
+- **Measured again:** tabwalk new-widgets-kit and newkit-search-suggestions, 2 of 2 runs each, and 24 of 24 launches
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-new-widgets-kit 'Tab 11': '+92.7 ms ORCA SAYS: 'entry'', '+92.7 ms ORCA SAYS: 'entry Type a fruit — Apple, Banana, …''`
+  - `pass2 newkit-search-suggestions 'Shift+Tab away and Tab back to the field': '+1338.7 ms ORCA SAYS: 'entry Apricot'', '+1338.8 ms ORCA SAYS: 'entry Apricot selected.''; Orca log 'GENERATION TIME: 0.0193 ----> newAncestors=[entry Apricot]'`
+  - `every one of the 24 launches: 'entry' then 'entry Type a fruit — Apple, Banana, …'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/search\_field.rs:774 (builder.set\_role(Role::SearchInput) on the composite's own node, while the focused node is the inner TextInputField; the TextInput composite uses GenericContainer for exactly this reason, text\_input/widget\_impl.rs:103-110)
+- **Evidence (`261a218f`):**
   - `run 133336-3321571 'Shift+Tab away and Tab back to the field': Orca log 'GENERATION TIME: 0.0123 ----> newAncestors=[entry]', then '13:34:06.404205 - SPEECH OUTPUT: 'entry'' and '13:34:06.404229 - SPEECH OUTPUT: 'entry Apricot.''`
   - `every launch act: '+610.6 ms ORCA SAYS: 'entry'', '+610.6 ms ORCA SAYS: 'entry Type a fruit — Apple, Banana, …'' (run 133231-3321571); tabwalk 134545-3921245 Tab 11: 'entry' then 'entry Type a fruit — Apple, Banana, …'`
   - `tree: '[entry] '' {editable,selectable-text,single-line}' (outer, not focusable) > '[entry] '' {editable,focusable,…}' (inner) > '[status bar] ''', plus the list box when open`

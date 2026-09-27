@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Spin boxes
 
 Examples: `spin-box`.
-13 findings: 2 critical, 3 high, 3 medium, 5 low.
+13 findings: 2 critical, 2 high, 3 medium, 6 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -14,7 +16,7 @@ How to read an entry, and what the words mean, is in
 | [spinbox-01](#spinbox-01) | spin-box | After scrolling down and back, every spin box that scrolled out is defunct to libatspi and Orca goes silent on it | critical | Linux | fixed |
 | [spinbox-02](#spinbox-02) | spin-box | A live locale switch leaves SpinBox parsing, stepping, focusing and filtering in the build-time locale: typing 12,5 in French writes 125 | critical | all | fixed |
 | [spinbox-03](#spinbox-03) | spin-box | Caret moves and selections inside a SpinBox field never reach the accessibility tree | high | all | fixed |
-| [spinbox-04](#spinbox-04) | spin-box | Special value text 'Auto' is lost to a reader: Tab-in says 'Timeout 0' | high | all | fixed |
+| [spinbox-04](#spinbox-04) | spin-box | Special value text 'Auto' is lost to a reader: Tab-in says 'Timeout 0' | low | all | partly fixed |
 | [spinbox-05](#spinbox-05) | spin-box | Leaving Timeout makes Orca start 'Text unselected.' and cut it: the blur rewrites the text before the focus moves | low | Linux | fixed |
 | [spinbox-06](#spinbox-06) | spin-box | A spin box's unit (pt, dB, %, s, Hz) never reaches a reader | high | all | open |
 | [spinbox-07](#spinbox-07) | spin-box | Invalid input is reverted silently: the reader is never told the entry was refused | medium | Linux | open |
@@ -33,12 +35,23 @@ After scrolling down and back, every spin box that scrolled out is defunct to li
 - **Scenario:** spinbox-scroll-back
 - **Act:** Tab from Font size down to Port (the page scrolls; the top boxes leave the AT-SPI tree), then Shift+Tab back up to Timeout, Opacity, Gain, Font size, and press Up on Timeout and Font size
 - **The reader should get:** Each box is heard again on the way back ('Timeout 0 spin button.', 'Opacity 50 spin button.', ...), and Up on Timeout says '1', as on the way down.
-- **The reader gets:** Nothing. Focus lands on each box (object:state-changed:focused 1 is on the bus), but Orca drops every event from them as defunct. Six Shift+Tabs are silent (Frequency, Font size no buttons, Timeout, Opacity, Gain, Font size), and so is Up on Timeout. Orca's locus of focus stays on the last live box, 'Font size mirror'. So the '13' Orca says after Up on Font size is the mirror's value change, spoken as if the mirror had focus. libatspi reports the returned node as defunct and focused at the same time. Why: AccessKit's common\_filter drops a clipping parent's off-screen children, and Teksilo's ScrollArea marks its node clips\_children. accesskit\_atspi\_common's remove\_node then emits state-changed:defunct 1. When the node comes back under the same path it gets only a children-changed:add, and nothing clears the DEFUNCT state libatspi cached. libatspi 2.52 also cannot parse AccessKit's cache AddAccessible signal, as the dbind warning shows. The same filter keeps everything below the fold (Population, Population ungrouped, Port, Reset all) off the bus until Tab scrolls it into view.
+- **The reader got (`261a218f`):** Nothing. Focus lands on each box (object:state-changed:focused 1 is on the bus), but Orca drops every event from them as defunct. Six Shift+Tabs are silent (Frequency, Font size no buttons, Timeout, Opacity, Gain, Font size), and so is Up on Timeout. Orca's locus of focus stays on the last live box, 'Font size mirror'. So the '13' Orca says after Up on Font size is the mirror's value change, spoken as if the mirror had focus. libatspi reports the returned node as defunct and focused at the same time. Why: AccessKit's common\_filter drops a clipping parent's off-screen children, and Teksilo's ScrollArea marks its node clips\_children. accesskit\_atspi\_common's remove\_node then emits state-changed:defunct 1. When the node comes back under the same path it gets only a children-changed:add, and nothing clears the DEFUNCT state libatspi cached. libatspi 2.52 also cannot parse AccessKit's cache AddAccessible signal, as the dbind warning shows. The same filter keeps everything below the fold (Population, Population ungrouped, Port, Reset all) off the bus until Tab scrolls it into view.
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. The defunct half is AT-SPI-specific. The off-screen filtering is the consumer's common\_filter, which all three adapters use to list children (from the source, not measured).
 - **Severity:** critical; **layer:** upstream
-- **Status:** Fixed by `85624a1a` (node-ids). Fixed part: measured on the combined build, 1 run: spinbox-scroll-back had 6 failed checks and 36 defunct drops in the sweep, none now.
-- **Where:** Trigger: crates/teksilo-widgets/src/scroll\_area.rs:1304-1305 (Role::ScrollView + clips\_children; also crates/teksilo-scene/src/scroll\_view.rs:550). Root cause is upstream: accesskit\_atspi\_common-0.20.0/src/adapter.rs:91-105 plus add\_node 49-81, and accesskit\_unix-0.23.0/src/atspi/bus.rs:434-438.
-- **Evidence:**
+- **Status:** Fixed by `85624a1a` (node-ids).
+- **Now (`c198e4d1`):** A box that scrolled out of view and came back is heard again. Shift+Tab back up says 'Timeout Auto spin button.', 'Opacity 50 spin button.', 'Gain 0.0 spin button.' and 'Font size 12 spin button.', and Up on Timeout says '1' and Up on Font size says '13' from Font size itself. Content below the fold (Population, Port, Reset all) is still off the bus until Tab scrolls it into view.
+- **Measured again:** spinbox-scroll-back, 2 of 2 runs; verify-spinbox-return-state 1 of 2 (pass1 was derailed by load before the act)
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-scroll-back 'Shift+Tab to Timeout (it left the tree and came back)': +51.0 ms object:children-changed:add [panel] '' -> [spin button] 'Timeout' / +53.5 ms object:state-changed:focused 1 [spin button] 'Timeout' / +183.9 ms ORCA SAYS: 'Timeout Auto spin button.'`
+  - `pass1 spinbox-scroll-back 'Up on Timeout': +99.9 ms ORCA SAYS: '1'`
+  - `pass1 spinbox-scroll-back 'Shift+Tab to Font size': +126.3 ms object:children-changed:add [panel] '' -> [spin button] 'Font size' / +136.7 ms object:state-changed:focused 1 [spin button] 'Font size' / +266.4 ms ORCA SAYS: 'Font size 12 spin button.' / pass [spin button] 'Font size' lacks state 'defunct'`
+  - `pass1 spinbox-scroll-back 'Up on Font size': orca-debug.out 16:30:11.176966 - FOCUS MANAGER: Locus of focus is [spin button: 'Font size'] / 16:30:11.182637 - SPEECH OUTPUT: '13'; no 'Ignoring defunct' line in the run`
+  - `pass2 spinbox-scroll-back: the same acts all pass: +735.7 ms ORCA SAYS: 'Timeout Auto spin button.', +358.1 ms ORCA SAYS: '1', +1039.8 ms ORCA SAYS: 'Font size 12 spin button.', +715.0 ms ORCA SAYS: '13'`
+  - `pass2 verify-spinbox-return-state 'a fresh AT-SPI client reads the returned Font size's states': the listener's cached view is ['editable', 'enabled', 'focusable', 'focused', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] (no defunct); 'Up on the returned Font size': +82.0 ms ORCA SAYS: '13'; 'Down': +77.9 ms ORCA SAYS: '12'`
+  - `pass1 and pass2 spinbox-tree: FAIL the tree holds [spin button] 'Population' / 'Port' / [push button] 'Reset all' (below the fold, off the bus at launch)`
+  - `every run: libatspi refused the application's cache signals: AddAccessible refused 93x, RemoveAccessible refused 42x (pass1 spinbox-scroll-back)`
+- **Where (`c198e4d1`):** Trigger unchanged: crates/teksilo-widgets/src/scroll\_area.rs:1304-1305, crates/teksilo-scene/src/scroll\_view.rs:550. Teksilo's workaround: crates/teksilo-core/src/accessibility/adapter\_ids.rs and crates/teksilo-core/src/widget\_tree/accessibility\_impl.rs:196 (deliver\_accessibility), 215 (resolve\_adapter\_action). Upstream, still as before: accesskit\_atspi\_common-0.21.0/src/adapter.rs:91-106 (remove\_node emits Defunct true) and 49-82 (add\_node never clears it); accesskit\_unix-0.24.0/src/atspi/bus.rs:441-446 (AddAccessible cache signal libatspi still refuses).
+- **Evidence (`261a218f`):**
   - `events.jsonl (scroll-back-20260925-131252): 13:13:11.525188 object:children-changed:remove [panel] '' -> [spin button] 'Font size' (path .../79228163325921076836764221440)`
   - `13:13:11.527585 object:state-changed:defunct 1 [spin button] 'Font size' (same path)`
   - `13:13:48.134264 object:children-changed:add [panel] '' -> [spin button] 'Font size' (same path); 13:13:48.137086 object:state-changed:focused 1 [spin button] 'Font size'`
@@ -68,12 +81,21 @@ A live locale switch leaves SpinBox parsing, stepping, focusing and filtering in
 - **Scenario:** spinbox-locale
 - **Act:** Language combo: Down, Enter picks français (every unfocused box re-renders: Gain '0,0', Frequency '440,00', Population '1 234 567'). Then focus Gain and press Down; focus Frequency, select all, type '12,5', Enter; Tab to Population
 - **The reader should get:** Focused and stepped boxes keep the French form ('-0,5'). Typing 12,5 commits 12.5 and the reader hears '12,50'. Population reads '1 234 567'.
-- **The reader gets:** Focusing a box switches its text back to the English form (',' -&gt; '.'). Down on Gain says '-0.5'. In Frequency the comma is filtered out as it is typed, so '125' commits and the reader hears '125.00': the value is wrongly written (125 Hz instead of 12.5). Population is announced 'Population 1,234,567 spin button.', which a French reader takes as a decimal. This is not specific to readers: the comment at spin\_box.rs:892-894 expects 'the closures below re-resolve on the next build', but a locale switch does not rebuild. Only the locale effect (line 993) re-resolves NumberPresentation. The focus effect, set\_committed, the parse, step\_silent and the char filter all keep the one resolved at build (line 895).
+- **The reader got (`261a218f`):** Focusing a box switches its text back to the English form (',' -&gt; '.'). Down on Gain says '-0.5'. In Frequency the comma is filtered out as it is typed, so '125' commits and the reader hears '125.00': the value is wrongly written (125 Hz instead of 12.5). Population is announced 'Population 1,234,567 spin button.', which a French reader takes as a decimal. This is not specific to readers: the comment at spin\_box.rs:892-894 expects 'the closures below re-resolve on the next build', but a locale switch does not rebuild. Only the locale effect (line 993) re-resolves NumberPresentation. The focus effect, set\_committed, the parse, step\_silent and the char filter all keep the one resolved at build (line 895).
 - **Platform:** All platforms and all users (widget logic). Measured on Linux/Orca.
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `a9f25fd0` (spinbox). Fixed part: after a live locale switch a SpinBox now shows, reads, steps, filters and commits in the language switched to (typing 12,5 in French writes 12.5, shown and spoken '12,50'; Down on Gain says '-0,5'; Population reads '1 234 567' with U+202F.
-- **Where:** crates/teksilo-widgets/src/spin\_box.rs:895 (resolved once), captured by the value effect 951, set\_committed 1023, parse 1057, step\_silent 1188, char\_filter 1298, focus effect 1400; only the locale effect 983-1003 re-resolves
-- **Evidence:**
+- **Status:** Fixed by `a9f25fd0` (spinbox).
+- **Now (`c198e4d1`):** After a live switch to French every box reads and writes the French form. Focusing Gain keeps '0,0' and Down says '-0,5'. Typing 12,5 in Frequency commits 12.5 and the reader hears '12,50'. Population is announced 'Population 1 234 567 spin button.'
+- **Measured again:** spinbox-locale, 2 of 2 runs; verify-spinbox-locale-blur, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-locale 'setup: focus Gain': +172.5 ms ORCA SAYS: 'Gain 0,0 spin button.' (no text change on focus)`
+  - `pass1 spinbox-locale 'Gain: Down in French': +26.2 ms object:text-changed:insert [spin button] 'Gain' text='-0,5' / +70.2 ms ORCA SAYS: '-0,5'`
+  - `pass1 spinbox-locale 'Frequency: select all, type 12,5 then Enter': +320.5 ms object:text-changed:insert [spin button] 'Frequency' text=',' / +441.9 ms ORCA SAYS: '12,50' / pass [spin button] 'Frequency' has value 12.5 and text '12,50'`
+  - `pass1 spinbox-locale 'Tab to Population (grouped) in French': +253.1 ms ORCA SAYS: 'Population 1 234 567 spin button.'`
+  - `pass2 spinbox-locale: the same: +86.3 ms ORCA SAYS: '-0,5', +450.4 ms ORCA SAYS: '12,50', +259.3 ms ORCA SAYS: 'Population 1 234 567 spin button.'`
+  - `pass1 and pass2 verify-spinbox-locale-blur 'Gain: Down in French, then Tab away': pass [spin button] 'Gain' has value -0.5 and text '-0,5'; 'Frequency: select all, type 12.5 (keypad-style point), Enter': ORCA SAYS: '12,50'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/spin\_box.rs:895-906 (one LivePresentation cell, created once), 987-1012 (the locale effect replaces it), read at call time by the value effect 947-984, set\_committed 1025-1050, parse 1062-1073, step\_silent 1187-1210 and the char filter 1302-1306; the focus effect is gone (1364-1372); LivePresentation 1969-1989. crates/teksilo-core/src/widget\_tree.rs:1456 (set\_locale, still no rebuild).
+- **Evidence (`261a218f`):**
   - `report.txt (locale-20260925-131609), act 'Language: Down, Enter picks français': pass  [spin button] 'Gain' has value 0 and text '0,0'; pass  [spin button] 'Frequency' has value 440 and text '440,00'`
   - `act 'setup: focus Gain': +41.4 ms object:text-changed:delete [spin button] 'Gain' text=',' / +41.7 ms object:text-changed:insert [spin button] 'Gain' text='.'`
   - `act 'Gain: Down in French': +22.2 ms object:text-changed:insert [spin button] 'Gain' text='-0.5'; orca-debug.out 13:16:30.075621 - SPEECH OUTPUT: '-0.5'`
@@ -99,12 +121,20 @@ Caret moves and selections inside a SpinBox field never reach the accessibility 
 - **Scenario:** spinbox-caret
 - **Act:** Focus Font size ('12', all selected), then Home, Right, End, Left, Shift+Home, then type '3'
 - **The reader should get:** Each move publishes the new caret (object:text-caret-moved), and Shift+Home a text-selection-changed, so a reader reviewing the number hears what the caret crosses and braille follows.
-- **The reader gets:** No event on the bus for Home, Right, End, Left or Shift+Home. Text.caretOffset stays at 2 throughout. The caret really moves: typing 3 after Shift+Home gives '32' with the caret at 1. The tree catches up only when the text changes, and then Orca says 'Text unselected.' for the stale whole-text selection it still held. The cause is in TextInputField, the stack TextInput, PasswordField and SearchField share: the key handler calls sync\_cursor\_signals and request\_frame, and nothing binds cursor\_position, cursor\_anchor or has\_selection for AT. Only text\_signal is bound at AccessibilityOnly. So the same probably holds for every text field, but only SpinBox was measured here. For the same reason the selection a field clears on blur is never published, which feeds spinbox-05.
+- **The reader got (`261a218f`):** No event on the bus for Home, Right, End, Left or Shift+Home. Text.caretOffset stays at 2 throughout. The caret really moves: typing 3 after Shift+Home gives '32' with the caret at 1. The tree catches up only when the text changes, and then Orca says 'Text unselected.' for the stale whole-text selection it still held. The cause is in TextInputField, the stack TextInput, PasswordField and SearchField share: the key handler calls sync\_cursor\_signals and request\_frame, and nothing binds cursor\_position, cursor\_anchor or has\_selection for AT. Only text\_signal is bound at AccessibilityOnly. So the same probably holds for every text field, but only SpinBox was measured here. For the same reason the selection a field clears on blur is never published, which feeds spinbox-05.
 - **Platform:** All platforms by source: the AccessKit tree is not updated, so no adapter can raise AT-SPI caret events, UIA TextSelectionChanged or macOS AXSelectedTextChanged. Measured on Linux.
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:452-481 (only text\_signal is bound at AccessibilityOnly among the text state) and 193-207 (caret\_position mirror, no AT binding); keyboard.rs:294-297
-- **Evidence:**
+- **Now (`c198e4d1`):** Every caret move and selection inside the field reaches the bus. Home, Right, End and Left each raise object:text-caret-moved and Orca reads the character ('1', '2', 'blank', '2'); Shift+Home raises object:text-selection-changed and Orca says '1' 'selected'.
+- **Measured again:** spinbox-caret, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-caret 'Home': +25.0 ms object:text-selection-changed [spin button] 'Font size' / +25.2 ms object:text-caret-moved [spin button] 'Font size' / +41.4 ms ORCA SAYS: 'Text unselected.' / +58.1 ms ORCA SAYS: '1' / pass [spin button] 'Font size' caret at 0`
+  - `pass1 spinbox-caret 'Right': +19.3 ms object:text-caret-moved [spin button] 'Font size' / +35.8 ms ORCA SAYS: '2'`
+  - `pass1 spinbox-caret 'End': +18.0 ms object:text-caret-moved / +30.2 ms ORCA SAYS: 'blank'; 'Left': +21.1 ms object:text-caret-moved / +30.7 ms ORCA SAYS: '2'`
+  - `pass1 spinbox-caret 'Shift+Home (select the 1)': +35.2 ms object:text-selection-changed [spin button] 'Font size' / +49.4 ms ORCA SAYS: '1' / +49.5 ms ORCA SAYS: 'selected'`
+  - `pass2 spinbox-caret: every check passed, nothing observed (the same events and speech)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:491-510 (cursor\_position and cursor\_anchor now bound at AccessibilityOnly), 459-489 (text\_signal), 193-207 (caret\_position mirror); keyboard.rs:294-297 unchanged
+- **Evidence (`261a218f`):**
   - `report.txt (caret-20260925-131838), act 'Home': FAIL  [spin button] 'Font size' caret at 0 / [spin button] 'Font size' text={'characters': 2, 'text': '12', 'caret': 2}; FAIL  a object:text-caret-moved event from [spin button] '*' / no object:text-caret-moved event from [spin button] '*'`
   - `acts 'Right' and 'Left': the same, text={'characters': 2, 'text': '12', 'caret': 2}`
   - `act 'Shift+Home (select the 1)': FAIL  a object:text-selection-changed event from [spin button] '*' / no object:text-selection-changed event from [spin button] '*'`
@@ -125,12 +155,22 @@ Special value text 'Auto' is lost to a reader: Tab-in says 'Timeout 0'
 - **Scenario:** spinbox-special
 - **Act:** Tab from Opacity to Timeout (value 0 = minimum, shown 'Auto' while unfocused); also Shift+Tab back to it
 - **The reader should get:** The reader hears 'Timeout Auto spin button.', the meaning the box has at its minimum and what a sighted user saw a moment before.
-- **The reader gets:** 'Timeout 0 spin button.' The field swaps 'Auto' for '0' in the same update as the focus change, before the focus event, so no reader ever hears Auto on arrival. A reader who hears 'Timeout 0' has no way to know that 0 means automatic. The widget is also inconsistent while focused: Down back to the minimum and Enter at the minimum both put 'Auto' back into the focused field. Stepping is announced 'Auto', but Enter with 0 typed changes the text to 'Auto' silently (Orca says only 'Text unselected.'). The focus-in swap exists so the number can be edited, but Qt's QSpinBox keeps specialValueText while focused.
+- **The reader got (`261a218f`):** 'Timeout 0 spin button.' The field swaps 'Auto' for '0' in the same update as the focus change, before the focus event, so no reader ever hears Auto on arrival. A reader who hears 'Timeout 0' has no way to know that 0 means automatic. The widget is also inconsistent while focused: Down back to the minimum and Enter at the minimum both put 'Auto' back into the focused field. Stepping is announced 'Auto', but Enter with 0 typed changes the text to 'Auto' silently (Orca says only 'Text unselected.'). The focus-in swap exists so the number can be edited, but Qt's QSpinBox keeps specialValueText while focused.
 - **Platform:** All platforms (the value published is the field's text). Measured on Linux/Orca.
-- **Severity:** high; **layer:** framework
-- **Status:** Fixed by `a9f25fd0` (spinbox). Fixed part: at its minimum a special-value SpinBox keeps 'Auto' while focused, so arrival says 'Timeout Auto spin button.', and Down back to the minimum says 'Auto' again (matches Qt QSpinBox specialValueText.
-- **Where:** crates/teksilo-widgets/src/spin\_box.rs:1378-1406 (focus effect: format\_for\_display(..., special=None, force\_plain=true)); set\_committed 1017-1044 and step\_silent's display 1193-1203 pass force\_plain=false
-- **Evidence:**
+- **Severity:** low; **layer:** framework
+- **Severity in the sweep:** high. The loss that made this high, hearing 'Timeout 0' on arrival, is gone. What remains is a commit that ends on the value already held giving no speech, a small case of spinbox-07.
+- **Status:** Partly fixed by `a9f25fd0` (spinbox). What remains is under **Now**.
+- **Now (`c198e4d1`):** Arrival is fixed: Tab or Shift+Tab onto Timeout at its minimum says 'Timeout Auto spin button.', and Down back to the minimum says 'Auto'. One part remains: typing 0 into Timeout and pressing Enter changes the text from '0' to 'Auto' with no speech; Orca says only 'Text unselected.' from the typing.
+- **Measured again:** spinbox-special, 2 of 2 runs; tabwalk-spin-box 2 of 2 (in pass1 the first lap went silent under load; the second lap's Tab 24 says 'Timeout Auto spin button.')
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-special 'Tab to Timeout (value 0 = Auto)': +20.1 ms object:state-changed:focused 1 [spin button] 'Timeout' / +64.2 ms ORCA SAYS: 'Timeout Auto spin button.' (no text change on focus)`
+  - `pass1 spinbox-special 'Down back to the minimum': +28.5 ms object:text-changed:insert [spin button] 'Timeout' text='Auto' / +76.6 ms ORCA SAYS: 'Auto'`
+  - `pass1 spinbox-special 'Shift+Tab back to Timeout, select all, type 0, Enter': +1492.7 ms ORCA SAYS: 'return' / +1504.0 ms ORCA SAYS: 'Text unselected.' / +1507.4 ms object:text-changed:delete [spin button] 'Timeout' text='0' / +1507.8 ms object:text-changed:insert [spin button] 'Timeout' text='Auto' / FAIL Orca says 'Auto'`
+  - `pass2 spinbox-special: the same: +527.6 ms ORCA SAYS: 'Timeout Auto spin button.', +300.4 ms ORCA SAYS: 'Auto', and in the type-0 act +1722.5 ms ORCA SAYS: 'Text unselected.' / +1732.4 ms object:text-changed:insert [spin button] 'Timeout' text='Auto' / FAIL Orca says 'Auto'`
+  - `pass1 tabwalk-spin-box Tab 24: +56.1 ms object:state-changed:focused 1 [spin button] 'Timeout' / +212.9 ms ORCA SAYS: 'Timeout Auto spin button.'`
+  - `pass2 tabwalk-spin-box Tab 6: +19.4 ms object:state-changed:focused 1 [spin button] 'Timeout' / +51.3 ms ORCA SAYS: 'Timeout Auto spin button.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/spin\_box.rs:1364-1372 (focus no longer swaps the special text); the silent Enter goes through commit\_text 1075-1092 and set\_committed 1025-1050, which raise no value change when the value is unchanged
+- **Evidence (`261a218f`):**
   - `tabwalk report, Tab 6: +32.6 ms object:text-changed:delete [spin button] 'Timeout' text='Auto' / +33.0 ms object:text-changed:insert [spin button] 'Timeout' text='0' / +33.1 ms object:state-changed:focused 1 [spin button] 'Timeout' / +292.0 ms ORCA SAYS: 'Timeout 0 spin button.'`
   - `report.txt (special-20260925-131130), act 'Tab to Timeout (value 0 = Auto)': FAIL  Orca says 'Auto' / Orca unheard: 'Auto' / Orca said: 'Timeout 0 spin button.'; orca-debug.out 13:11:43.123012 - SPEECH OUTPUT: 'Timeout 0 spin button.'`
   - `the same run, act 'Down back to the minimum': +17.1 ms object:text-changed:insert [spin button] 'Timeout' text='Auto'; orca-debug.out 13:11:50.922555 - SPEECH OUTPUT: 'Auto'`
@@ -152,12 +192,18 @@ Leaving Timeout makes Orca start 'Text unselected.' and cut it: the blur rewrite
 - **Scenario:** spinbox-leave-timeout
 - **Act:** Tab away from Timeout while it holds '0' (it flips back to 'Auto' on blur)
 - **The reader should get:** The reader hears only the next control, 'Frequency 440.00 spin button.'
-- **The reader gets:** A cut fragment 'Text unselected.' first, then Frequency. The blur commit rewrites the field text ('0' -&gt; 'Auto') and clears its selection in the same tree update as the focus move. The consumer hands node changes to the adapter before the focus event. The old node was still focused in the previous tree, so accesskit\_atspi\_common emits text-selection-changed for it (adapter.rs:216-229). Orca handles that first, finds its cached selection '0' gone and says SELECTION\_REMOVED (script\_utilities.py:4001-4003), then stops speech to present the new focus. Boxes whose text does not change on blur produce no such event, only because their cleared selection never reaches the tree (spinbox-03).
+- **The reader got (`261a218f`):** A cut fragment 'Text unselected.' first, then Frequency. The blur commit rewrites the field text ('0' -&gt; 'Auto') and clears its selection in the same tree update as the focus move. The consumer hands node changes to the adapter before the focus event. The old node was still focused in the previous tree, so accesskit\_atspi\_common emits text-selection-changed for it (adapter.rs:216-229). Orca handles that first, finds its cached selection '0' gone and says SELECTION\_REMOVED (script\_utilities.py:4001-4003), then stops speech to present the new focus. Boxes whose text does not change on blur produce no such event, only because their cleared selection never reaches the tree (spinbox-03).
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. Windows and macOS not measured.
 - **Severity:** low; **layer:** framework
-- **Status:** Fixed by `a9f25fd0` (spinbox). Fixed part: a side effect, not in this topic's JSON): leaving Timeout at its minimum no longer rewrites the text, so Orca no longer says 'Text unselected.' (3 of 3 spinbox-special runs, 3 of 3 leave-timeout cycles.
-- **Where:** crates/teksilo-widgets/src/spin\_box.rs:1372-1376 (on\_blur\_fn -&gt; commit -&gt; set\_committed shows the special text) with the focus swap at 1378-1406
-- **Evidence:**
+- **Status:** Fixed by `a9f25fd0` (spinbox).
+- **Now (`c198e4d1`):** Leaving Timeout says only the next control, 'Frequency 440.00 spin button.' The field keeps 'Auto' while focused, so the blur no longer rewrites the text and no text-selection-changed comes from Timeout as focus leaves.
+- **Measured again:** spinbox-leave-timeout, 2 of 2 runs (6 of 6 Tab-aways); spinbox-special 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-leave-timeout 'Tab away from Timeout (1)': +21.3 ms object:state-changed:focused 1 [spin button] 'Frequency' / +108.4 ms ORCA SAYS: 'Frequency 440.00 spin button.' / pass Orca does not say 'unselected' / pass no object:text-selection-changed event from [spin button] 'Timeout'`
+  - `pass1 and pass2 spinbox-leave-timeout: the same in all 3 Tab-aways of each run (pass2 +210.7, +162.8, +91.6 ms ORCA SAYS: 'Frequency 440.00 spin button.')`
+  - `pass1 and pass2 spinbox-special 'Tab away from Timeout again (text flips 0 -> Auto)': ORCA SAYS: 'Frequency 440.00 spin button.' / pass Orca does not say 'unselected'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/spin\_box.rs:1357-1362 (commit on blur) and 1364-1372 (focus leaves the special text in place, so there is nothing for the blur to flip)
+- **Evidence (`261a218f`):**
   - `report.txt (leave-timeout-20260925-130924), act 'Tab away from Timeout (1)': +160.5 ms object:text-changed:delete [spin button] 'Timeout' text='0' / +161.0 ms object:text-changed:insert [spin button] 'Timeout' text='Auto' / +163.8 ms object:text-selection-changed [spin button] 'Timeout' / +166.7 ms object:state-changed:focused 1 [spin button] 'Frequency' / +402.7 ms ORCA SAYS (CUT): 'Text unselected.' / +997.3 ms ORCA SAYS: 'Frequency 440.00 spin button.'`
   - `observed  Orca's 'Text unselected.' was cut by a stop 594 ms in (estimated)`
   - `orca-debug.out: 13:09:44.656846 - SPEECH OUTPUT: 'Text unselected.' ... then 13:09:45.251212 - NULL SPEECH: stop / 13:09:45.251429 - SPEECH OUTPUT: 'Frequency 440.00 spin button.'`
@@ -178,12 +224,18 @@ A spin box's unit (pt, dB, %, s, Hz) never reaches a reader
 - **Scenario:** spinbox-steps
 - **Act:** Focus Font size (or any box with a suffix); step it
 - **The reader should get:** 'Font size 12 pt spin button.' (or the unit in the description), so 'Timeout 30' is known to be seconds and 'Frequency 440' hertz.
-- **The reader gets:** 'Font size 12 spin button.' No spin button carries its unit anywhere: not in its name, description, text or value. The suffix is painted beside the text and published nowhere. The widget documents this as a known gap (spin\_box.rs:1422-1429, docs/accessibility-internal-audit.md:742-746), and it is reported here because a reader still loses the unit.
+- **The reader got (`261a218f`):** 'Font size 12 spin button.' No spin button carries its unit anywhere: not in its name, description, text or value. The suffix is painted beside the text and published nowhere. The widget documents this as a known gap (spin\_box.rs:1422-1429, docs/accessibility-internal-audit.md:742-746), and it is reported here because a reader still loses the unit.
 - **Platform:** All platforms (the value is the field text; UIA Value and macOS AXValue carry the same string or number). Measured on Linux/Orca.
 - **Severity:** high; **layer:** framework
-- **Status:** Open. In the spinbox fix topic, not fixed there: The unit (suffix) never reaching a reader cannot be fixed in a small, safe change. The suffix is painted beside the field's text and published nowhere. The right fix, which is what docs/accessibility-internal-audit.md already names and what Qt does (its line edit holds '1 s' as text, measured), is for TextInputField to emit its suffix as a trailing run on the same line as the editable runs, with value = text + suffix. That touches the shared TextInputField primitive (TextInput, SearchField, ColorPicker fields, TextScaleControl and SpinBox all set a suffix). It needs suffix geometry from the suffix engine in the one TextRunSource, because two push\_text\_runs calls would put the unit on a separate 'line' (the next\_on\_line / previous\_on\_line links). It also needs handle\_access\_action's SetTextSelection to map a (run node, index) position to a document offset: today it reads character\_index and ignores the run, a bug that already exists for fields over 255 characters. Tests that pin value == typed text would change. Option B is to put the unit in the spin button's description: a SpinBox-only change, but Orca 46.1 speaks it only on arrival, after the role ('Font size 12 spin button. pt'), never on a step (the SPIN\_BUTTON 'focused' format is only displayedText or value), and the description is also where a tooltip's text, access\_description and described\_by targets are written, so the unit would be mixed with or replaced by the application's own description. I recommend option A as its own change.
-- **Where:** crates/teksilo-widgets/src/spin\_box.rs:1419-1453 (the comment at 1428 records the gap; access\_customize sets name/value/range/actions only)
-- **Evidence:**
+- **Status:** Open.
+- **Now (`c198e4d1`):** Focusing Font size still says 'Font size 12 spin button.' with no unit. No spin button carries its unit in its name, description, text or value.
+- **Measured again:** spinbox-steps, 2 of 2 runs; spinbox-tree, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-steps 'focus Font size (AT-SPI grab_focus)': +175.5 ms ORCA SAYS: 'Font size 12 spin button.' / FAIL Orca says 'pt'`
+  - `pass2 spinbox-steps same act: +751.6 ms ORCA SAYS: 'Font size 12 spin button.' / FAIL Orca says 'pt'`
+  - `pass1 and pass2 spinbox-tree: FAIL every spin button with a suffix exposes its unit / 'Font size' (unit 'pt'): description=None text='12' Value.text=None attributes=None / 'Gain' (unit 'dB'): description=None text='0.0' ... / 'Opacity' (unit '%'): description=None text='50' ...`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/spin\_box.rs:1392-1397 (the comment recording the gap) and 1398-1421 (access\_customize sets name, value, range and actions only)
+- **Evidence (`261a218f`):**
   - `report.txt (steps-20260925-131130), act 'focus Font size': +125.6 ms ORCA SAYS: 'Font size 12 spin button.' / FAIL  Orca says 'pt'`
   - `spinbox-tree report: FAIL  every spin button with a suffix exposes its unit / 'Font size' (unit 'pt'): description=None text='12' Value.text=None ... / 'Timeout' (unit 's'): description=None text='Auto' Value.text=None ... / 'Frequency' (unit 'Hz'): description=None text='440.00' Value.text=None`
   - `source: crates/teksilo-widgets/src/spin_box.rs:1422-1429 ('The unit reaches a reader once the field emits it as text'); 1430-1453 (access_customize sets name/value/range only)`
@@ -201,12 +253,18 @@ Invalid input is reverted silently: the reader is never told the entry was refus
 - **Scenario:** spinbox-typing
 - **Act:** Gain (custom parser, no character filter): select all, type 'abc', Enter
 - **The reader should get:** The reader learns the entry was refused and what the value is, for example 'invalid' or '0.0'.
-- **The reader gets:** The text goes back from 'abc' to '0.0' and Orca says nothing about it. The only speech is 'Text unselected.', from typing over the selection. The revert re-publishes the unchanged value, so no value-change event fires. No invalid state is set and nothing is announced. A sighted user sees the text snap back; a reader is left believing 'abc' went in or that nothing happened.
+- **The reader got (`261a218f`):** The text goes back from 'abc' to '0.0' and Orca says nothing about it. The only speech is 'Text unselected.', from typing over the selection. The revert re-publishes the unchanged value, so no value-change event fires. No invalid state is set and nothing is announced. A sighted user sees the text snap back; a reader is left believing 'abc' went in or that nothing happened.
 - **Platform:** Linux/Orca measured. Nothing in the tree marks the refusal on any platform (by source).
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/spin\_box.rs:1066-1083 (commit\_text: on a failed parse set\_committed(value\_signal.get())) and 1017-1044 (set\_committed notifies only when the value changes)
-- **Evidence:**
+- **Now (`c198e4d1`):** Typing 'abc' into Gain and pressing Enter reverts the text to '0.0' with no word to the reader. The only speech is the typed letters and 'Text unselected.' from typing over the selection.
+- **Measured again:** spinbox-typing, 2 of 2 runs; verify-spinbox-silent-clamp, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-typing 'Gain: select all, type abc then Enter': +385.1 ms ORCA SAYS: 'return' / +401.5 ms object:text-changed:delete [spin button] 'Gain' text='abc' / +401.8 ms object:text-changed:insert [spin button] 'Gain' text='0.0' / FAIL the reader is told the entry was refused (invalid state, a message, or at least the value it went back to)`
+  - `pass2 spinbox-typing same act: +703.7 ms ORCA SAYS: 'return' / +748.1 ms object:text-changed:delete [spin button] 'Gain' text='ab' / +748.5 ms object:text-changed:insert [spin button] 'Gain' text='0.0' / FAIL (Orca said: 'c', 'Text unselected.', 'return')`
+  - `pass1 and pass2 verify-spinbox-silent-clamp 'Gain: select all, type abc, Enter (reverts to 0.0)': FAIL Orca says '0.0' / Orca unheard: '0.0'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/spin\_box.rs:1075-1092 (commit\_text: on a failed parse set\_committed(value\_signal.get())) and 1025-1050 (set\_committed raises no value change when the value is unchanged)
+- **Evidence (`261a218f`):**
   - `report.txt (typing-20260925-131130), act 'Gain: select all, type abc then Enter': +340.7 ms object:text-changed:delete [spin button] 'Gain' text='abc' / +341.0 ms object:text-changed:insert [spin button] 'Gain' text='0.0' / FAIL  the reader is told the entry was refused (invalid state, a message, or at least the value it went back to) / Orca said: 'Text unselected.'`
   - `orca-debug.out: 13:12:04.308030 - SPEECH OUTPUT: 'Text unselected.' (the only speech in the act)`
   - `source: crates/teksilo-widgets/src/spin_box.rs:1068-1085 (commit_text: on a failed parse set_committed(value_signal.get()), no feedback); 1017-1044 (set_committed notifies only when the value changes)`
@@ -225,12 +283,19 @@ Read-only spin box is announced 'grayed' (as disabled)
 - **Scenario:** spinbox-readonly
 - **Act:** Focus 'Font size mirror' (read\_only(true), enabled)
 - **The reader should get:** 'Font size mirror 12 spin button, read only', an available control whose value cannot be edited.
-- **The reader gets:** 'Font size mirror 12 spin button.' then 'grayed.'. The node has read-only but neither enabled nor sensitive. accesskit\_atspi\_common maps a read-only node to ReadOnly in place of Enabled\|Sensitive (node.rs:376-380), and Orca speaks 'grayed' for anything not sensitive (generator.py:565). Read-only and enabled are independent in AT-SPI.
+- **The reader got (`261a218f`):** 'Font size mirror 12 spin button.' then 'grayed.'. The node has read-only but neither enabled nor sensitive. accesskit\_atspi\_common maps a read-only node to ReadOnly in place of Enabled\|Sensitive (node.rs:376-380), and Orca speaks 'grayed' for anything not sensitive (generator.py:565). Read-only and enabled are independent in AT-SPI.
 - **Platform:** Linux AT-SPI only. By source, UIA keeps IsEnabled and reports Value/RangeValue IsReadOnly (accesskit\_windows node.rs:1316, 1347, 1358), and macOS keeps AXEnabled.
 - **Severity:** medium; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** none in Teksilo; accesskit\_atspi\_common-0.20.0/src/node.rs:376-380
-- **Evidence:**
+- **Now (`c198e4d1`):** Focusing the read-only 'Font size mirror' still says 'Font size mirror 12 spin button.' then 'grayed.' The node has read-only but neither enabled nor sensitive.
+- **Measured again:** spinbox-readonly, 2 of 2 runs; spinbox-tree 2 of 2; tabwalk-spin-box 1 of 2 (pass1 walk broken by load)
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-readonly 'focus the read-only mirror (AT-SPI grab_focus)': +144.5 ms ORCA SAYS: 'Font size mirror 12 spin button.' / +144.5 ms ORCA SAYS: 'grayed.' / FAIL [spin button] 'Font size mirror' has state 'sensitive' / states=['focusable', 'focused', 'read-only', 'selectable-text', 'showing', 'single-line', 'visible']`
+  - `pass2 spinbox-readonly same act: +196.2 ms ORCA SAYS: 'grayed.'`
+  - `pass2 tabwalk-spin-box Tab 9: +57.4 ms ORCA SAYS: 'Font size mirror 12 spin button.' / +57.4 ms ORCA SAYS: 'grayed.'`
+  - `pass1 and pass2 spinbox-tree: FAIL [spin button] 'Font size mirror' has state 'enabled'`
+- **Where (`c198e4d1`):** none in Teksilo; accesskit\_atspi\_common-0.21.0/src/node.rs:376-382 (a read-only node that is not disabled still gets ReadOnly in place of Enabled\|Sensitive)
+- **Evidence (`261a218f`):**
   - `tabwalk report, Tab 9: +352.3 ms ORCA SAYS: 'Font size mirror 12 spin button.' / +352.4 ms ORCA SAYS: 'grayed.'`
   - `report.txt (readonly-20260925-130925): FAIL  Orca does not say 'grayed' / Orca said: 'grayed.'; FAIL  [spin button] 'Font size mirror' has state 'sensitive' / states=['focusable', 'focused', 'read-only', 'selectable-text', 'showing', 'single-line', 'visible']`
   - `orca-debug.out: GENERATION TIME: 0.0005 ----> availability=[grayed] / 13:09:39.821564 - SPEECH OUTPUT: 'grayed.'`
@@ -249,12 +314,18 @@ Each SpinBox's decorative divider is published as an unnamed separator (splitter
 - **Scenario:** spinbox-tree
 - **Act:** Launch; walk the tree
 - **The reader should get:** Only the spin button. The 1 dp line between the field and the step buttons is decoration.
-- **The reader gets:** After every box with buttons there is an unnamed \[separator\] ('' extents \[345,161,1,24\] ...), 7 on the first screen. A reader stepping through objects meets 'separator' after each box. On macOS the role is AXSplitter, which suggests a draggable divider. The cause: the chrome adds Divider::vertical(), and Divider::accessibility claims Role::Splitter.
+- **The reader got (`261a218f`):** After every box with buttons there is an unnamed \[separator\] ('' extents \[345,161,1,24\] ...), 7 on the first screen. A reader stepping through objects meets 'separator' after each box. On macOS the role is AXSplitter, which suggests a draggable divider. The cause: the chrome adds Divider::vertical(), and Divider::accessibility claims Role::Splitter.
 - **Platform:** Linux measured (AT-SPI Separator). By source, Windows gets UIA Separator and macOS NSAccessibilitySplitterRole (accesskit\_windows node.rs:193, accesskit\_macos node.rs:160).
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/divider.rs:137-139 (Role::Splitter); crates/teksilo-widgets/src/styles/recipe\_spin\_box\_style.rs:76
-- **Evidence:**
+- **Now (`c198e4d1`):** After every box with step buttons there is still an unnamed separator in the tree, 7 on the first screen, which a reader meets in object review.
+- **Measured again:** spinbox-tree, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-tree 'the tree after launch': FAIL the tree holds no [separator] / [separator] '' extents=[345, 161, 1, 24] index_in_parent=4 / [separator] '' extents=[385, 203, 1, 24] index_in_parent=8 / [separator] '' extents=[385, 245, 1, 24] index_in_parent=12`
+  - `pass2 spinbox-tree: the same separators with the same extents`
+  - `pass1 spinbox-scroll-back: object:children-changed:add [panel] '' -> [separator] '' after each spin button scrolled into view`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/divider.rs:137-139 (Role::Splitter); crates/teksilo-widgets/src/styles/recipe\_spin\_box\_style.rs:76
+- **Evidence (`261a218f`):**
   - `spinbox-tree report: FAIL  the tree holds no [separator] / [separator] '' extents=[345, 161, 1, 24] index_in_parent=4 / [separator] '' extents=[385, 203, 1, 24] index_in_parent=8 / ... (7 in all)`
   - `tree-launch.txt: [spin button] 'Font size' ... / [separator] '' / [label] '12 pt'`
   - `source: crates/teksilo-widgets/src/styles/recipe_spin_box_style.rs:76 (Divider::vertical()); crates/teksilo-widgets/src/primitives/divider.rs:137-139 (Role::Splitter)`
@@ -271,12 +342,17 @@ The published step disagrees with the adaptive step a key press takes
 - **Scenario:** spinbox-adaptive
 - **Act:** Focus Frequency (440, StepType::Adaptive), press Up
 - **The reader should get:** The Value interface's minimum increment (UIA SmallChange) is the step a press takes at the current value.
-- **The reader gets:** The press moves 440 -&gt; 540 (step 100, and the reader hears '540.00', which is right), but the published increment stays 1.0. spin\_box.rs:1442 publishes single\_step, not resolve\_effective\_step(current).
+- **The reader got (`261a218f`):** The press moves 440 -&gt; 540 (step 100, and the reader hears '540.00', which is right), but the published increment stays 1.0. spin\_box.rs:1442 publishes single\_step, not resolve\_effective\_step(current).
 - **Platform:** Linux measured. By source, Windows RangeValue SmallChange comes from numeric\_value\_step (accesskit\_windows node.rs:1361). macOS publishes no step.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/spin\_box.rs:1442
-- **Evidence:**
+- **Now (`c198e4d1`):** Up on Frequency still moves 440 to 540 and the reader hears '540.00', but the Value interface still publishes an increment of 1.0.
+- **Measured again:** spinbox-adaptive, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-adaptive 'Frequency: Up (adaptive step)': +100.1 ms ORCA SAYS: '540.00' / FAIL [spin button] 'Frequency' value={'current': 540.0, 'minimum': 0.1, 'maximum': 20000.0, 'increment': 1.0, 'text': None}; one Up moved it by 100`
+  - `pass2 spinbox-adaptive same act: +246.8 ms ORCA SAYS: '540.00' / the same FAIL, increment 1.0`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/spin\_box.rs:1410 (set\_numeric\_value\_step(single\_step)); resolve\_effective\_step 2022-2041
+- **Evidence (`261a218f`):**
   - `report.txt (adaptive-20260925-131838), act 'Frequency: Up (adaptive step)': +47.7 ms ORCA SAYS: '540.00' / FAIL  the Value interface's minimum increment is the step a press just took / [spin button] 'Frequency' value={'current': 540.0, 'minimum': 0.1, 'maximum': 20000.0, 'increment': 1.0, 'text': None} ...; one Up moved it by 100`
   - `source: crates/teksilo-widgets/src/spin_box.rs:1442 (set_numeric_value_step(single_step)); 2038-2057 (resolve_effective_step)`
   - `spinbox-adaptive-20260925-133434-3240601, act 'Frequency: Up (adaptive step)': ORCA SAYS '540.00' (13:34:46.249222) / FAIL value={'current': 540.0, 'minimum': 0.1, 'maximum': 20000.0, 'increment': 1.0, 'text': None}; one Up moved it by 100`
@@ -292,12 +368,18 @@ AccessKit emits text-changed events for off-screen (filtered) nodes; Orca drains
 - **Scenario:** spinbox-readonly
 - **Act:** Opacity: PageUp x2 (the four other Opacity boxes, bound to the same signal, are below the fold and off the bus)
 - **The reader should get:** Events only from nodes on the bus.
-- **The reader gets:** Pairs of object:text-changed from sources that do not exist on the bus (\[&lt;Error&gt;\] '' in the listener; 'Ignoring defunct object: \[DEAD\]' in Orca). Orca's queue reached 57 events and its speech for the act came 2.5 s after the keys. node\_updated calls emit\_text\_change\_if\_needed before any filter check.
+- **The reader got (`261a218f`):** Pairs of object:text-changed from sources that do not exist on the bus (\[&lt;Error&gt;\] '' in the listener; 'Ignoring defunct object: \[DEAD\]' in Orca). Orca's queue reached 57 events and its speech for the act came 2.5 s after the keys. node\_updated calls emit\_text\_change\_if\_needed before any filter check.
 - **Platform:** Linux AT-SPI (accesskit\_atspi\_common)
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** none in Teksilo (upstream accesskit\_atspi\_common-0.20.0/src/adapter.rs:287-288)
-- **Evidence:**
+- **Now (`c198e4d1`):** Each Opacity step still raises text-changed events from the four off-screen Opacity boxes and their readouts, which are not on the bus; Orca drops them as dead objects. Orca kept up in both runs: it said '75' about 150 to 200 ms after the key.
+- **Measured again:** spinbox-readonly, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass2 spinbox-readonly 'Opacity: PageUp x2 to 100': +28.8 ms object:text-changed:delete [gone] '' text='50' / +30.7 ms object:text-changed:insert [gone] '' text='75' (8 such pairs per step) / +195.4 ms ORCA SAYS (CUT): '75' / +575.6 ms ORCA SAYS: '100'`
+  - `pass2 spinbox-readonly orca-debug.out: 16:49:17.369139 EVENT MANAGER: object:text-changed:delete for [DEAD] in [application: 'spin-box'] (0, 2, 50) is not obsoleted / 16:49:17.370340 EVENT MANAGER: Ignoring defunct object: [DEAD] (48 such lines in the run)`
+  - `pass1 spinbox-readonly same act: the same dropped events (16:29:29.499795 EVENT MANAGER: Ignoring defunct object: [DEAD]) / +156.8 ms ORCA SAYS (CUT): '75' / +638.5 ms ORCA SAYS: '100'; Orca's queue peaked at 28`
+- **Where (`c198e4d1`):** none in Teksilo; accesskit\_atspi\_common-0.21.0/src/adapter.rs:287-290 (node\_updated calls emit\_text\_change\_if\_needed before comparing filter(old) and filter(new)), 184-194
+- **Evidence (`261a218f`):**
   - `report.txt (readonly-20260925-130925), act 'Opacity: PageUp x2 to 100': +97.8 ms object:text-changed:delete [<Error>] '' text='50' / +115.0 ms object:text-changed:insert [<Error>] '' text='75' (and 14 more such pairs) / +2480.4 ms ORCA SAYS: 'Text unselected.' / +2597.7 ms ORCA SAYS: '100'`
   - `orca-debug.out: vvvvv PROCESS OBJECT EVENT object:text-changed:delete (queue size: 57) vvvvv / 13:10:01.469826 - EVENT MANAGER: Ignoring defunct object: [DEAD]`
   - `source: accesskit_atspi_common-0.20.0/src/adapter.rs node_updated (calls emit_text_change_if_needed before filter(old)/filter(new)); 120-196`
@@ -314,12 +396,19 @@ A value clamped as focus leaves is cut at once: type 500 and Tab, and the reader
 - **Scenario:** verify-spinbox-blur-clamp
 - **Act:** Font size (max 96): Ctrl+A, type 500, Tab. Commit on blur clamps it to 96 and focus moves to Gain.
 - **The reader should get:** The reader hears that Font size became 96 (the entry was clamped), then Gain.
-- **The reader gets:** Orca starts '96' and a stop cuts it 0-153 ms in, then 'Gain 0.0 spin button.' follows. The clamp's value change reaches the bus 0.1-1 ms before the focus change, in the same tree update. Orca's locus is still Font size, so it speaks the value and then stops to present the new focus. A reader who typed 500 and moved on believes 500 went in. The same applies to any typed value that blur changes (clamp, or the revert of spinbox-07).
+- **The reader got (`261a218f`):** Orca starts '96' and a stop cuts it 0-153 ms in, then 'Gain 0.0 spin button.' follows. The clamp's value change reaches the bus 0.1-1 ms before the focus change, in the same tree update. Orca's locus is still Font size, so it speaks the value and then stops to present the new focus. A reader who typed 500 and moved on believes 500 went in. The same applies to any typed value that blur changes (clamp, or the revert of spinbox-07).
 - **Platform:** Linux AT-SPI/Orca 46.1, measured. The value-before-focus order comes from accesskit\_consumer, which every adapter shares; Windows and macOS were not measured.
 - **Severity:** medium; **layer:** framework
-- **Status:** Open. In the announce-focus fix topic, not fixed there: Not a live region: a value change on the node focus is leaving, which Orca speaks and then cuts. It is now a small widget follow-up: a ctx.announce of the kept value in the blur commit (spin\_box.rs:1372-1376) would be held past the focus move by this fix.
-- **Where:** crates/teksilo-widgets/src/spin\_box.rs:1372-1376
-- **Evidence:**
+- **Status:** Open.
+- **Now (`c198e4d1`):** Typing 500 into Font size and pressing Tab clamps it to 96, and Orca starts '96' and cuts it at once to say 'Gain 0.0 spin button.' The value change still reaches the bus a fraction of a millisecond before the focus change, in the same update.
+- **Measured again:** verify-spinbox-blur-clamp, 2 of 3 runs (pass2 and one re-run: cut in 6 of 6 acts; pass1 ran under heavy load, Orca lagged and '96' was not cut)
+- **Evidence (`c198e4d1`):**
+  - `pass2 verify-spinbox-blur-clamp 'select all, type 500, Tab away (clamps to 96 on blur) (1)': +387.2 ms object:property-change:accessible-value [spin button] 'Font size' / +388.3 ms object:state-changed:focused 1 [spin button] 'Gain' / +467.1 ms ORCA SAYS (CUT): '96' / +681.2 ms ORCA SAYS: 'Gain 0.0 spin button.' / FAIL Orca says '96'`
+  - `pass2 orca-debug.out: 17:19:41.006730 - NULL SPEECH: speak '96' interrupt=True / 17:19:41.220709 - NULL SPEECH: stop (acts 2 and 3: stops 104 and 112 ms in)`
+  - `judge run verify-spinbox-blur-clamp-20260927-175541: 17:55:52.077866 - NULL SPEECH: speak '96' interrupt=True / 17:55:52.127466 - NULL SPEECH: stop / 17:55:52.127563 - SPEECH OUTPUT: 'Gain 0.0 spin button.' (acts 2 and 3: stops 68 and 20 ms in)`
+  - `pass1 verify-spinbox-blur-clamp (Orca lagging under load): +1356.1 ms ORCA SAYS: '96' / +2403.6 ms ORCA SAYS: 'Gain 0.0 spin button.'; the stop came 1.0 to 4.6 s after '96' because Orca was slow to build the focus speech`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/spin\_box.rs:1357-1362 (commit on blur) and 1025-1050 (set\_committed changes the value inside the blur, which lands in the focus update)
+- **Evidence (`261a218f`):**
   - `verify-spinbox-blur-clamp-20260925-133445-3487452, act 'select all, type 500, Tab away (clamps to 96 on blur) (1)': +340.0 ms object:property-change:accessible-value [spin button] 'Font size' / +340.1 ms object:state-changed:focused 1 [spin button] 'Gain' / +458.6 ms ORCA SAYS (CUT): '96' / +508.5 ms ORCA SAYS: 'Gain 0.0 spin button.' / FAIL Orca says '96'`
   - `orca-debug.out: 13:34:57.780758 - NULL SPEECH: speak '96' interrupt=True / 13:34:57.830496 - NULL SPEECH: stop / 13:34:57.830555 - SPEECH OUTPUT: 'Gain 0.0 spin button.' (also 13:35:07.071871 speak '96' / 13:35:07.217266 stop)`
   - `cut offsets over the 9 acts: 0, 145, 72 / 0, 153, 109 / 0, 66, 152 ms`
@@ -336,12 +425,19 @@ Orca says 'Text unselected.' on the first character typed into any spin box
 - **Scenario:** spinbox-typing / spinbox-locale / verify-spinbox-blur-clamp
 - **Act:** Focus a spin box (the field selects all), then type a digit
 - **The reader should get:** Nothing but the typed character's echo (and the value once committed)
-- **The reader gets:** 'Text unselected.' before the committed value, for example before '20'. Focus publishes the whole-text selection. Orca 46 never presents text-changed events in a spin button (script\_utilities.py:3696-3702), so it never refreshes that cached selection. When typing replaces it, text-selection-changed makes it say SELECTION\_REMOVED (script\_utilities.py:4001-4003). This is Orca behaviour for any spin button. Teksilo publishes the selection correctly here.
+- **The reader got (`261a218f`):** 'Text unselected.' before the committed value, for example before '20'. Focus publishes the whole-text selection. Orca 46 never presents text-changed events in a spin button (script\_utilities.py:3696-3702), so it never refreshes that cached selection. When typing replaces it, text-selection-changed makes it say SELECTION\_REMOVED (script\_utilities.py:4001-4003). This is Orca behaviour for any spin button. Teksilo publishes the selection correctly here.
 - **Platform:** Linux Orca 46.1, measured
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** none (Orca)
-- **Evidence:**
+- **Now (`c198e4d1`):** The first character typed over a spin box's selected text still makes Orca say 'Text unselected.' before the committed value.
+- **Measured again:** spinbox-typing, 2 of 2 runs; spinbox-locale 2 of 2; verify-spinbox-blur-clamp 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 spinbox-typing 'type 20 then Enter': +46.7 ms ORCA SAYS (CUT): 'Text unselected.' / +94.4 ms ORCA SAYS: 'return' / +166.3 ms ORCA SAYS: '20'`
+  - `pass2 spinbox-typing same act: +90.1 ms ORCA SAYS (CUT): 'Text unselected.' / +764.9 ms ORCA SAYS: '20'`
+  - `pass1 spinbox-locale 'Frequency: select all, type 12,5 then Enter': +276.1 ms ORCA SAYS (CUT): 'Text unselected.'`
+  - `pass2 verify-spinbox-blur-clamp act (1): +284.0 ms ORCA SAYS (CUT): 'Text unselected.'`
+- **Where (`c198e4d1`):** none (Orca 46.1: /usr/lib/python3/dist-packages/orca/script\_utilities.py:3696-3702 and 4001-4003)
+- **Evidence (`261a218f`):**
   - `spinbox-typing-20260925-133305-3367096, act 'type 20 then Enter': +15.2 ms object:text-selection-changed [spin button] 'Font size' / +46.2 ms ORCA SAYS: 'Text unselected.' / +245.5 ms ORCA SAYS: '20' (same in -133404: +28.1 ms 'Text unselected.')`
   - `spinbox-locale-20260925-133053-3240601, act 'Frequency: select all, type 12,5': +251.5 ms ORCA SAYS: 'Text unselected.'`
   - `orca script_utilities.py:3696-3702 (is_spin_button -> 'Event is not being presented due to role'), 4001-4003`

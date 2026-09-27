@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Date and time pickers
 
 Examples: `datetime-pickers`.
-20 findings: 3 critical, 5 high, 7 medium, 5 low.
+20 findings: 3 critical, 4 high, 8 medium, 5 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -16,8 +18,8 @@ How to read an entry, and what the words mean, is in
 | [datetime-03](#datetime-03) | datetime-pickers | The calendar's months/years view cannot be operated from the keyboard or by a screen reader, and Enter there writes the hidden day cursor as the selected date | critical | all | fixed |
 | [datetime-04](#datetime-04) | datetime-pickers | Caret and selection moves inside date/time fields are never reported to the platform | high | all | fixed |
 | [datetime-05](#datetime-05) | datetime-pickers | Stepping a date or time segment with Up/Down is silent: only a one-character diff reaches the bus | high | Linux | open |
-| [datetime-06](#datetime-06) | datetime-pickers | DateTimeEdit's date/time parts and DateRangeEdit's start/end are read without their value on Orca | high | Linux | partly fixed |
-| [datetime-07](#datetime-07) | datetime-pickers | The DateEdit and TimeEdit fields where focus lands have no name, and the example labels none of its editors | high | Linux | partly fixed |
+| [datetime-06](#datetime-06) | datetime-pickers | DateTimeEdit's date/time parts and DateRangeEdit's start/end are read without their value on Orca | high | Linux | fixed |
+| [datetime-07](#datetime-07) | datetime-pickers | The DateEdit and TimeEdit fields where focus lands have no name, and the example labels none of its editors | medium | Linux | partly fixed |
 | [datetime-08](#datetime-08) | datetime-pickers | Orca never says which day is selected, which is today, or where a range starts; committing a day is silent | high | Linux | upstream |
 | [datetime-09](#datetime-09) | datetime-pickers | Committing a range in DateRangeEdit's calendar tells the reader nothing about the range | medium | Linux | open |
 | [datetime-10](#datetime-10) | datetime-pickers | Orca treats the calendar grid as a layout table: the calendar and its month are never said on entering it | medium | Linux | upstream |
@@ -40,12 +42,21 @@ DateEdit and DateTimeEdit calendars reopen on a stale cursor, and Enter writes t
 - **Scenario:** datetime-dateedit-stale, datetime-datetimeedit-stale, datetime-dateedit-popover
 - **Act:** DateEdit: Up in the field (year 2026 -&gt; 2027), Alt+Down, Enter. DateTimeEdit: Tab to the date part, Up, Tab, Tab, Space on Open calendar, Enter. Also: open the DateEdit calendar, Right, Escape, Alt+Down again.
 - **The reader should get:** The calendar opens on the date the field holds (Sunday, May 2, 2027) and Enter keeps it; after a close/reopen the calendar opens on the field's value again.
-- **The reader gets:** The calendar opens on Saturday, May 2, 2026 (the value at build time) and the reader hears that date; Enter commits it, silently reverting the field to 2026-05-02. After Right+Escape, the reopened calendar lands on May 3 (where the last session's cursor was), not on the field's date. The reader is never told the calendar disagrees with the field.
+- **The reader got (`261a218f`):** The calendar opens on Saturday, May 2, 2026 (the value at build time) and the reader hears that date; Enter commits it, silently reverting the field to 2026-05-02. After Right+Escape, the reopened calendar lands on May 3 (where the last session's cursor was), not on the field's date. The reader is never told the calendar disagrees with the field.
 - **Platform:** All platforms (widget logic, measured on Linux AT-SPI/Orca 46.1)
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `2d0446fc` (dateedit). Fixed part: DateEdit/DateTimeEdit/DateRangeEdit calendars open on the field's date (and on the day view) at every opening; Enter keeps the field's value.
-- **Where:** crates/teksilo-widgets/src/calendar.rs:295-313 (cursor captured once); crates/teksilo-widgets/src/date\_edit.rs:652-676, 734-764; crates/teksilo-widgets/src/date\_time\_edit.rs:600-649; crates/teksilo-widgets/src/date\_range\_edit.rs:469-532
-- **Evidence:**
+- **Status:** Fixed by `2d0446fc` (dateedit).
+- **Now (`c198e4d1`):** Every date field's calendar opens on the date the field holds, and Enter keeps it. After Up in the DateEdit field (2027-05-02), Alt+Down lands on 'Sunday, May 2, 2027' and Orca says it; Enter leaves 'Edit: 2027-05-02'. DateTimeEdit and DateRangeEdit behave the same, and a reopening after a moved cursor lands on the field's date again, not where the last cursor was left.
+- **Measured again:** datetime-dateedit-stale, datetime-datetimeedit-stale, datetime-dateedit-popover, verify-datetime-reopen-others, verify-datetime-rangeedit-stale, fix-dateedit-stale: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-dateedit-stale 'Alt+Down opens the calendar': '+79.4 ms object:state-changed:focused 1 [table cell] 'Sunday, May 2, 2027'' then '+215.1 ms ORCA SAYS: 'Sunday, May 2, 2027.''`
+  - `pass1 datetime-dateedit-stale 'Enter in the calendar': '+110.8 ms ORCA SAYS: 'Date entry 05/02/2027 selected.'' and 'pass  the tree holds [label] 'Edit: 2027-05-02''`
+  - `pass2 datetime-datetimeedit-stale 'Space on Open calendar': '+55.8 ms object:state-changed:focused 1 [table cell] 'Sunday, May 2, 2027''; 'Enter in the calendar': '+112.7 ms ORCA SAYS: 'Date entry 05/02/2027 selected.'' and 'pass  the tree holds [label] 'DateTime: 2027-05-02 14:35''`
+  - `pass1 datetime-dateedit-popover 'Alt+Down reopens it' (after Right to 3 May and Escape): '+61.9 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'' and '+194.1 ms ORCA SAYS: 'Saturday, May 2, 2026.''`
+  - `pass2 verify-datetime-reopen-others 'Space reopens the DateRangeEdit calendar': '+69.4 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'' (the previous opening's cursor was on 3 May)`
+  - `pass1 verify-datetime-rangeedit-stale 'Space opens the range calendar': '+63.5 ms object:state-changed:focused 1 [table cell] 'Saturday, May 16, 2026'', the range's start as the field now holds it`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar.rs:475-530 (Calendar::opening, CalendarOpening::open\_on); crates/teksilo-widgets/src/date\_edit.rs:764-773; crates/teksilo-widgets/src/date\_time\_edit.rs:678-683; crates/teksilo-widgets/src/date\_range\_edit.rs:521-525
+- **Evidence (`261a218f`):**
   - `datetime-dateedit-stale-20260925-131141-2478059 report.txt, Up: '+29.1 ms object:property-change:accessible-name [label] 'Edit: 2027-05-02' text='Edit: 2027-05-02''`
   - `same run, Alt+Down: '+51.0 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'' then '+181.4 ms ORCA SAYS: 'Saturday, May 2, 2026.''; orca-debug.out '13:11:54.456223 - SPEECH OUTPUT: 'Saturday, May 2, 2026.''`
   - `same run, Enter: '+27.3 ms object:property-change:accessible-name [label] 'Edit: 2026-05-02' text='Edit: 2026-05-02'' / check 'FAIL the tree holds [label] 'Edit: 2027-05-02''`
@@ -67,12 +78,21 @@ A date field's calendar is silent on Orca from its second opening on: its retain
 - **Scenario:** datetime-dateedit-popover
 - **Act:** DateEdit: Alt+Down, Right, Escape, Alt+Down (reopen), Left, Left, Home.
 - **The reader should get:** The reopened calendar speaks like the first time: the day under the cursor on opening and every day the cursor moves to.
-- **The reader gets:** Opening again says nothing; moving onto any day met in an earlier opening says nothing (Orca: 'Ignoring defunct object'); only a day never visited before (May 1) or cells rebuilt by a change of month are spoken. The grid node itself is dropped too (its name-change events), and after Enter/Escape from a silent reopen Orca does not even re-announce the field because its locus never left it. Reopening from the months view focuses the grid node, also dropped.
+- **The reader got (`261a218f`):** Opening again says nothing; moving onto any day met in an earlier opening says nothing (Orca: 'Ignoring defunct object'); only a day never visited before (May 1) or cells rebuilt by a change of month are spoken. The grid node itself is dropped too (its name-change events), and after Enter/Escape from a silent reopen Orca does not even re-announce the field because its locus never left it. Reopening from the months view focuses the grid node, also dropped.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). macOS: accesskit\_macos drops the platform object on removal and creates a new one on return (context.rs:70-83), so no defunct carry-over is expected there (source only). Windows: UIA has no defunct mark by id (source only, not verified by run).
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `85624a1a` (node-ids). Fixed part: reopened calendar and a day met before heard 3/3.
-- **Where:** crates/teksilo-core/src/deferred\_subtree.rs (built once, retained) + dormancy that removes the subtree from the AT tree; node ids from teksilo\_core::accessibility::widget\_id\_to\_node\_id; callers date\_edit.rs:704, date\_time\_edit.rs:648, date\_range\_edit.rs:493
-- **Evidence:**
+- **Status:** Fixed by `85624a1a` (node-ids).
+- **Now (`c198e4d1`):** A reopened calendar speaks as it did the first time. The day under the cursor is heard on every opening, a day met in an earlier opening is heard again, and a months view shown a second time is heard. This holds for DateEdit, DateTimeEdit and DateRangeEdit.
+- **Measured again:** datetime-dateedit-popover, verify-datetime-reopen-others, verify-datetime-months-dataloss, fix-dateedit-zoom: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-dateedit-popover 'Alt+Down reopens it': '+61.9 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'' then '+194.1 ms ORCA SAYS: 'Saturday, May 2, 2026.''`
+  - `pass1 datetime-dateedit-popover 'Alt+Down reopens the calendar' (third opening): '+169.6 ms ORCA SAYS: 'Saturday, May 2, 2026.''`
+  - `pass2 verify-datetime-reopen-others 'Space reopens the DateTimeEdit calendar': '+204.5 ms ORCA SAYS: 'Saturday, May 2, 2026.''; 'Space reopens the DateRangeEdit calendar': '+169.7 ms ORCA SAYS: 'Saturday, May 2, 2026.''`
+  - `pass1 verify-datetime-months-dataloss 'Alt+Down reopens it (in the months view)': '+179.9 ms ORCA SAYS: 'Saturday, May 2, 2026.''`
+  - `pass1 fix-dateedit-zoom 'Space on the title again' (the months come back): '+241.5 ms ORCA SAYS: 'August 2026.''`
+  - `pass1 datetime-dateedit-popover orca-debug.out: the only drops are focus losses of cells removed at a close, e.g. '16:06:35.718412 - EVENT MANAGER: Ignoring defunct object: [table cell: 'Sunday, May 3, 2026']' during 'Escape closes it'`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/accessibility/adapter\_ids.rs:74-401 (AdapterIds::deliver hands a returning node a new id); crates/teksilo-core/src/deferred\_subtree.rs (unchanged, still retained); callers date\_edit.rs:719, date\_time\_edit.rs:655, date\_range\_edit.rs:498
+- **Evidence (`261a218f`):**
   - `datetime-dateedit-popover-20260925-131250-2552592 events.jsonl: the day keeps one path across the close: '13:13:03.834982 FOCUS Sunday, May 3, 2026 /org/a11y/atspi/accessible/0/79228194298004376595101384704', '13:13:07.724833 DEFUNCT Sunday, May 3, 2026 .../79228194298004376595101384704', '13:13:11.645912 FOCUS Sunday, May 3, 2026 .../79228194298004376595101384704'`
   - `same run, Alt+Down reopens it: '+55.8 ms object:state-changed:focused 1 [table cell] 'Sunday, May 3, 2026'' and no speech; orca-debug.out '13:13:11.660009 - EVENT MANAGER: Ignoring defunct object: [table cell: 'Sunday, May 3, 2026']'`
   - `same run, Left, a day back: '+32.6 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'', no speech; '13:13:15.543229 - EVENT MANAGER: Ignoring defunct object: [table cell: 'Saturday, May 2, 2026']'`
@@ -97,12 +117,21 @@ The calendar's months/years view cannot be operated from the keyboard or by a sc
 - **Scenario:** datetime-zoom, datetime-dateedit-popover
 - **Act:** Single calendar: Space on the title button (months view), Tab x3 into the months, Down, Enter, Tab, Escape, AT-SPI click on 'March', Space on the title again.
 - **The reader should get:** Arrows move among the months and are spoken, Enter/Space (or a screen reader's click) opens that month in the days view, Escape returns to the days, and the selected date is untouched.
-- **The reader gets:** Down moves nothing a reader can see (no focus change, silence) but moves the invisible day cursor; Enter on 'January' commits that cursor day (Selected: 2026-05-02 becomes 2026-05-09) and stays in the months view; the months offer no AT-SPI action, so a screen reader cannot activate one; Escape does nothing; the title only goes on to the years view ('2020 to 2029'). There is no keyboard or AT path back to picking a day in a standalone calendar. In a DateEdit popover the months view persists across close/reopen, so the reopened calendar focuses the grid with nothing to pick.
+- **The reader got (`261a218f`):** Down moves nothing a reader can see (no focus change, silence) but moves the invisible day cursor; Enter on 'January' commits that cursor day (Selected: 2026-05-02 becomes 2026-05-09) and stays in the months view; the months offer no AT-SPI action, so a screen reader cannot activate one; Escape does nothing; the title only goes on to the years view ('2020 to 2029'). There is no keyboard or AT path back to picking a day in a standalone calendar. In a DateEdit popover the months view persists across close/reopen, so the reopened calendar focuses the grid with nothing to pick.
 - **Platform:** All platforms for the key handling and missing click action (widget logic); measured on Linux AT-SPI/Orca
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `2d0446fc` (dateedit). Fixed part: months/years view is keyboard- and AT-operable (arrows heard, Enter/Space zoom in, Escape back to days, Click advertised), never commits the hidden day; a date field's calendar never reopens on the months view.
-- **Where:** crates/teksilo-widgets/src/calendar/zoom\_grid.rs:355-381, 418-424; crates/teksilo-widgets/src/calendar.rs:1305-1427; crates/teksilo-widgets/src/calendar/header.rs:199-216
-- **Evidence:**
+- **Status:** Fixed by `2d0446fc` (dateedit).
+- **Now (`c198e4d1`):** The months view works from the keyboard and by a screen reader's click. Zooming out puts focus on the shown month ('May 2026.'), arrows move among months and are heard ('August 2026.'), Enter opens that month's days on a day that is heard, Escape returns to the days, a month offers 'click', and the selected date never changes. A date field's calendar always reopens on its days.
+- **Measured again:** fix-dateedit-zoom, verify-datetime-months-dataloss, datetime-dateedit-popover: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 fix-dateedit-zoom 'Down in the months view': '+28.1 ms object:state-changed:focused 1 [table cell] 'August 2026'' and '+150.9 ms ORCA SAYS: 'August 2026.''; 'pass  the tree holds [label] 'Selected: 2026-05-02''`
+  - `pass1 fix-dateedit-zoom 'Enter on August': '+99.1 ms object:state-changed:focused 1 [table cell] 'Sunday, August 2, 2026'' and '+306.3 ms ORCA SAYS: 'Sunday, August 2, 2026.''`
+  - `pass1 fix-dateedit-zoom 'Escape in the months view': '+212.8 ms ORCA SAYS: 'Wednesday, September 2, 2026.'' and 'pass  the tree holds [label] 'Selected: 2026-05-02''`
+  - `pass1 fix-dateedit-zoom 'Space on the title once more': 'pass  [table cell] 'March 2026' offers a 'click' action'; 'AT-SPI click on the month March': '+72.5 ms object:property-change:accessible-name [table] 'Calendar, March 2026' text='Calendar, March 2026''`
+  - `pass1 verify-datetime-months-dataloss 'Alt+Down reopens it (in the months view)': '+77.7 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026''; 'Enter in the reopened calendar': 'pass  the tree holds [label] 'Edit: 2026-05-02''`
+  - `pass1 datetime-zoom 'Down in the months view' (focus on the title button '2026'): '+20.9 ms object:property-change:accessible-name [table] 'Calendar, August 2026' text='Calendar, August 2026'', no focus change and no speech`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar/zoom\_grid.rs:88-160 (Zoom keys), 526-541 (not a Tab stop, Click routed), 586-596 (Click advertised); crates/teksilo-widgets/src/calendar.rs:1431-1443 (view branch of the key handler); crates/teksilo-widgets/src/calendar/header.rs:207-225 (title hands focus to the grid)
+- **Evidence (`261a218f`):**
   - `datetime-zoom-20260925-131710-2787163, Down in the months view: 'FAIL focus lands on [table cell] 'April'' - 'no focus change on the bus in this act'`
   - `same run, Enter on the focused month: '+31.8 ms object:property-change:accessible-name [label] 'Selected: 2026-05-09' text='Selected: 2026-05-09'' and 'pass the tree holds [push button] '2026'' (still the months view)`
   - `same run, Escape: '[table cell] 'March' interfaces=['Accessible', 'Component'] actions=[]'; AT-SPI click: 'RunError: {... 'name': 'March', 'role': 'table cell'} offers no action on AT-SPI'`
@@ -123,12 +152,19 @@ Caret and selection moves inside date/time fields are never reported to the plat
 - **Scenario:** datetime-caret
 - **Act:** In the DateEdit field (text selected at launch): Home, Right, Right, End, Shift+Left, then type 7.
 - **The reader should get:** Each move emits object:text-caret-moved (and text-selection-changed for Home and Shift+Left), so the reader hears the character or selection and knows which segment Up/Down will step.
-- **The reader gets:** No caret or selection event at all for Home, Right, End or Shift+Left, though the keys work (Shift+Left selected the last digit and typing 7 replaced it: Edit: 2027-05-02). A reader cannot review the field by character nor tell which segment is under the caret.
+- **The reader got (`261a218f`):** No caret or selection event at all for Home, Right, End or Shift+Left, though the keys work (Shift+Left selected the last digit and typing 7 replaced it: Edit: 2027-05-02). A reader cannot review the field by character nor tell which segment is under the caret.
 - **Platform:** All platforms (the AccessKit node is not re-walked, so no adapter sees the move); measured on Linux AT-SPI
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:199-230, 440-481
-- **Evidence:**
+- **Now (`c198e4d1`):** Every caret and selection move in the DateEdit field reaches the bus and Orca speaks it: Home says 'Text unselected.' and '0', Right says '5' then '/', End says 'blank', Shift+Left says '6' and 'selected'.
+- **Measured again:** datetime-caret, 2 of 2 runs; datetime-timeedit, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-caret 'Home in the DateEdit field': '+24.7 ms object:text-selection-changed [entry] 'Date'', '+25.0 ms object:text-caret-moved [entry] 'Date'', '+32.2 ms ORCA SAYS: 'Text unselected.'', '+40.0 ms ORCA SAYS: '0''`
+  - `pass1 datetime-caret 'Right': '+22.2 ms object:text-caret-moved [entry] 'Date'' and '+32.6 ms ORCA SAYS: '5''`
+  - `pass2 datetime-caret 'Shift+Left': '+43.5 ms object:text-selection-changed [entry] 'Date'', '+60.7 ms ORCA SAYS: '6'', '+60.8 ms ORCA SAYS: 'selected''`
+  - `pass1 datetime-timeedit 'Home then Up (hour)': '+24.8 ms object:text-caret-moved [entry] 'Time'' and '+38.3 ms ORCA SAYS: '1'', before the step's text change`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:491-510 (caret and anchor bound at AccessibilityOnly)
+- **Evidence (`261a218f`):**
   - `datetime-caret-20260925-131030-2422452 and datetime-caret-20260925-131710-2786962, every navigation act: 'FAIL a object:text-caret-moved event from [entry] '*'' - 'no object:text-caret-moved event from [entry] '*''; Home and Shift+Left also 'no object:text-selection-changed event from [entry] '*''`
   - `same runs, Type 7 over the selection: '+33.4 ms object:text-changed:delete [entry] '' text='6'', '+33.7 ms object:text-changed:insert [entry] '' text='7'' and 'pass the tree holds [label] 'Edit: 2027-05-02''`
   - `Cause: TextInputField binds only text_signal (and feedback) at AccessibilityOnly (crates/teksilo-widgets/src/primitives/text_input_field/widget_impl.rs:452-481, 209-230); a caret key updates cursor_position/cursor_anchor via sync_cursor_signals (text_input_field/state.rs:575-614, called from keyboard.rs:294-298) but nothing binds those signals to an accessibility re-walk; the selection is written only when the node is walked (widget_impl.rs:1146-1159).`
@@ -147,12 +183,22 @@ Stepping a date or time segment with Up/Down is silent: only a one-character dif
 - **Scenario:** datetime-timeedit, datetime-dateedit-stale, datetime-datetimeedit-stale
 - **Act:** DateEdit field: Up (year). TimeEdit 24 h: Up, Down, Shift+Up, Home then Up. TimeEdit 12 h: End then Up (AM/PM). DateTimeEdit date part: Up.
 - **The reader should get:** The reader hears the new value (e.g. '14:36', '05/02/2027', 'AM').
-- **The reader gets:** Nothing is spoken. The entry emits text-changed:delete '5' / insert '6' (or '6'-&gt;'7', 'P'-&gt;'A') and nothing else; Orca logs 'Not speaking inserted string due to lack of cause'. The wrapper's value (the date in words) is carried by no AT-SPI interface.
+- **The reader got (`261a218f`):** Nothing is spoken. The entry emits text-changed:delete '5' / insert '6' (or '6'-&gt;'7', 'P'-&gt;'A') and nothing else; Orca logs 'Not speaking inserted string due to lack of cause'. The wrapper's value (the date in words) is carried by no AT-SPI interface.
 - **Platform:** Linux AT-SPI / Orca 46.1 measured. With a real key Orca would see lastKey=Up: isAutoTextEvent is true only for an editable descendant of a combo box (script\_utilities.py:2442-2443) and a one-character insertion is echoed only with echo-by-character on (script\_utilities.py:3804-3805, off by default), so at best the reader hears a lone '7'. Windows/macOS: the wrapper's value changes (UIA/macOS carry it) but the focus is on the inner edit; not measured.
 - **Severity:** high; **layer:** framework
-- **Status:** Open. In the dateedit fix topic, not fixed there: Segment stepping is still heard only as a one-character text diff. There are two fixes: an announcement per step, or spin-button semantics per segment, and they need a design decision. The house Listener model (heard\_test.rs) already counts the focused field's value change as heard on UIA and macOS, so an announcement would say the step twice there. Neither option can be measured here for NVDA or VoiceOver. Orca 46.1 would speak a real key's inserted text only as a lone character (default.py onTextInserted: no cause; isSelectedTextInsertionEvent speaks only the inserted diff).
-- **Where:** crates/teksilo-widgets/src/date\_edit.rs:914-960; time\_edit.rs:700-720; date\_time\_edit.rs:1295-1310; date\_range\_edit.rs:1020-1035
-- **Evidence:**
+- **Status:** Open.
+- **Now (`c198e4d1`):** Stepping a segment with Up, Down or Shift+Up is still silent in TimeEdit (24 h and 12 h), DateEdit and DateTimeEdit. The bus carries only a one-character text change, on the field and on the date editor around it, and Orca does not present it. Only a caret or selection move made before the step is heard now: Home as a lone character ('1'), End as 'Text unselected.'.
+- **Measured again:** datetime-timeedit, datetime-dateedit-stale, datetime-datetimeedit-stale: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-timeedit 'Up (caret at the end, on the minutes)': '+26.2 ms object:text-changed:delete [entry] 'Time' text='5'', '+26.3 ms object:text-changed:insert [entry] 'Time' text='6'', then 'FAIL  Orca says '14:36''`
+  - `pass1 datetime-timeedit orca-debug.out: '16:07:35.980748 - DEFAULT: Event is not being presented due to lack of cause' (20 such lines in each pass)`
+  - `pass1 datetime-timeedit 'Home then Up (hour)': '+38.3 ms ORCA SAYS: '1'' then 'FAIL  Orca says '15''`
+  - `pass1 datetime-timeedit 'End then Up (AM/PM)': '+33.6 ms ORCA SAYS (CUT): 'Text unselected.'' then 'FAIL  Orca says 'AM''`
+  - `pass2 datetime-timeedit 'End then Up (AM/PM)': only '+41.4 ms ORCA SAYS (CUT): 'Text unselected.'' then 'FAIL  Orca says 'AM''`
+  - `pass1 datetime-dateedit-stale 'Up in the DateEdit field (caret on the year)': '+42.5 ms object:text-changed:insert [entry] 'Date' text='7'' then 'FAIL  Orca says '2027''`
+  - `pass2 datetime-datetimeedit-stale 'Up in the DateTimeEdit date part': '+42.1 ms object:text-changed:insert [entry] 'Date' text='7'' then 'FAIL  Orca says '2027''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/date\_edit.rs:950-996; crates/teksilo-widgets/src/time\_edit.rs:716-736; crates/teksilo-widgets/src/date\_time\_edit.rs:1304-1319; crates/teksilo-widgets/src/date\_range\_edit.rs:1030-1045
+- **Evidence (`261a218f`):**
   - `datetime-timeedit-20260925-130723-2298159, Up: '+42.7 ms object:text-changed:delete [entry] '' text='5'', '+43.1 ms object:text-changed:insert [entry] '' text='6'', '+43.3 ms object:text-selection-changed [entry] ''' and 'FAIL Orca says '14:36'' - 'Orca unheard: '14:36''`
   - `same run orca-debug.out: '13:07:38.608167 - DEFAULT: Not speaking inserted string due to lack of cause'`
   - `same run, End then Up (AM/PM): '+657.8 ms object:text-changed:delete [entry] '' text='P'', '+658.1 ms object:text-changed:insert [entry] '' text='A'', 'FAIL Orca says 'AM''`
@@ -172,12 +218,19 @@ DateTimeEdit's date/time parts and DateRangeEdit's start/end are read without th
 - **Scenario:** (tabwalk), datetime-datetimeedit-stale, datetime-range-edit
 - **Act:** Tab onto the DateTimeEdit date part, its time part, the DateRangeEdit start and end dates; return to the DateTimeEdit date part after a calendar commit; Shift+Tab to the DateRangeEdit end date.
 - **The reader should get:** The reader hears the name and the value: 'Date, 05/02/2026', 'End date, 05/05/2026'.
-- **The reader gets:** 'Date date editor.', 'Time date editor.', 'Start date date editor.', 'End date date editor.' with no value. The value is in the node's Text interface but Orca's default speech format for DATE\_EDITOR is labelOrName + roleName.
+- **The reader got (`261a218f`):** 'Date date editor.', 'Time date editor.', 'Start date date editor.', 'End date date editor.' with no value. The value is in the node's Text interface but Orca's default speech format for DATE\_EDITOR is labelOrName + roleName.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows: DateInput/TimeInput map to UIA Edit (accesskit\_windows node.rs:79-91), so the value pattern should be read; macOS maps them to AXDateField/AXTimeField (accesskit\_macos node.rs:85-88); neither measured.
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `2d0446fc` (dateedit). Fixed part: DateTimeEdit parts and DateRangeEdit halves are entries read with their date/time.
-- **Where:** crates/teksilo-widgets/src/date\_time\_edit.rs:1204-1206; crates/teksilo-widgets/src/date\_range\_edit.rs:957-959
-- **Evidence:**
+- **Status:** Fixed by `2d0446fc` (dateedit).
+- **Now (`c198e4d1`):** The DateTimeEdit parts and the DateRangeEdit halves are entries now, and Orca reads their name and value: 'Date entry 05/02/2026 selected.', 'Time entry 02:35 PM selected.', 'Start date entry 05/02/2026 selected.', 'End date entry 05/16/2026 selected.'. Returning to the end date after a commit reads 'End date entry 05/05/2026 selected.'.
+- **Measured again:** tabwalk-datetime-pickers, datetime-range-edit, datetime-datetimeedit-stale: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-datetime-pickers Tab 4: '+27.3 ms object:state-changed:focused 1 [entry] 'Date'' and '+67.1 ms ORCA SAYS: 'Date entry 05/02/2026 selected.''`
+  - `pass1 tabwalk-datetime-pickers Tab 8: '+72.8 ms ORCA SAYS: 'End date entry 05/16/2026 selected.''`
+  - `pass1 datetime-range-edit 'Shift+Tab to the end date': '+48.3 ms object:state-changed:focused 1 [entry] 'End date'' and '+107.7 ms ORCA SAYS: 'End date entry 05/05/2026 selected.''`
+  - `pass2 datetime-datetimeedit-stale 'Enter in the calendar': '+112.7 ms ORCA SAYS: 'Date entry 05/02/2027 selected.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/date\_time\_edit.rs:1211-1215; crates/teksilo-widgets/src/date\_range\_edit.rs:961-970
+- **Evidence (`261a218f`):**
   - `tabwalk-datetime-pickers-20260925-132032-2912751: '+22.3 ms object:state-changed:focused 1 [date editor] 'Date'' / '+127.5 ms ORCA SAYS: 'Date date editor.''; Tab 7: 'ORCA SAYS: 'Start date date editor.''; Tab 8: 'ORCA SAYS: 'End date date editor.''`
   - `tree-datetime-pickers-20260925-125905-2013173 tree-launch.txt: "[date editor] 'Date' {editable,focusable,selectable-text,single-line} text='05/02/2026'"`
   - `datetime-range-edit-20260925-131250-2552648, Shift+Tab to the end date: 'object:state-changed:focused 1 [date editor] 'End date'' / 'ORCA SAYS: 'End date date editor.'' / 'FAIL Orca says '05/05/2026''`
@@ -197,12 +250,20 @@ The DateEdit and TimeEdit fields where focus lands have no name, and the example
 - **Scenario:** (tree), (tabwalk), datetime-timeedit
 - **Act:** Launch (focus in the DateEdit field); Tab to the 24 h and 12 h TimeEdit fields.
 - **The reader should get:** The reader hears which field this is: 'Date', or better the example's own label ('24 h time', '12 h time'), then the value.
-- **The reader gets:** 'entry 05/02/2026 selected.', 'entry 14:35 selected.', 'entry 02:35:00 PM selected.': no name. The wrapper named 'Date'/'Time' is not spoken: Orca's ancestor format for a date editor is empty. The two TimeEdits' wrappers (and the DateTimeEdit time part) are all named 'Time', so even their names would not tell them apart.
+- **The reader got (`261a218f`):** 'entry 05/02/2026 selected.', 'entry 14:35 selected.', 'entry 02:35:00 PM selected.': no name. The wrapper named 'Date'/'Time' is not spoken: Orca's ancestor format for a date editor is empty. The two TimeEdits' wrappers (and the DateTimeEdit time part) are all named 'Time', so even their names would not tell them apart.
 - **Platform:** Linux AT-SPI / Orca 46.1 measured. The focused node is unnamed on every adapter (accesskit\_consumer takes the name from the label, node.rs:744-746); whether a Windows/macOS reader recovers the wrapper's name is not measured.
-- **Severity:** high; **layer:** framework
-- **Status:** Fixed by `2d0446fc` (dateedit). Fixed part: framework part): DateEdit/TimeEdit inner field carries the editor's label or 'Date'/'Time'; access\_label/access\_described\_by on the editor reach it via accessibility\_proxy.
-- **Where:** crates/teksilo-widgets/src/date\_edit.rs:841-849; crates/teksilo-widgets/src/time\_edit.rs:604-606, 764-770
-- **Evidence:**
+- **Severity:** medium; **layer:** framework
+- **Severity in the sweep:** high. The focused field now carries a name. Only the example's three identical 'Time' names remain, and the values' formats tell them apart.
+- **Status:** Partly fixed by `2d0446fc` (dateedit). What remains is under **Now**.
+- **Now (`c198e4d1`):** The field focus lands on is named now: 'Date entry 05/02/2026 selected.', 'Time entry 14:35 selected.'. What remains is the example's part: it labels no editor, so the 24 h field, the 12 h field and the DateTimeEdit's time part are all read as 'Time', and a reader can tell them apart only by the format of the value.
+- **Measured again:** datetime-timeedit, datetime-dateedit-stale, tabwalk-datetime-pickers: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-dateedit-stale launch: '+518.8 ms object:state-changed:focused 1 [entry] 'Date'' and '+619.6 ms ORCA SAYS: 'Date entry 05/02/2026 selected.''`
+  - `pass1 datetime-timeedit 'Tab twice, to the 24 h field': '+762.5 ms ORCA SAYS: 'Time entry 14:35 selected.''; 'Tab to the 12 h field': '+123.5 ms ORCA SAYS: 'Time entry 02:35:00 PM selected.''`
+  - `pass1 tabwalk-datetime-pickers tree-launch.txt: "[entry] 'Time' {editable,focusable,selectable-text,single-line} text='14:35'", "[entry] 'Time' ... text='02:35:00 PM'" and "[entry] 'Time' ... text='02:35 PM'"`
+  - `pass1 tabwalk-datetime-pickers Tab 5: '+108.2 ms ORCA SAYS: 'Time entry 02:35 PM selected.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/date\_edit.rs:870-880; crates/teksilo-widgets/src/time\_edit.rs:612-621; examples/datetime\_pickers/src/main.rs:130-162
+- **Evidence (`261a218f`):**
   - `tree-datetime-pickers-20260925-125905-2013173 report.txt tree audit: "unnamed-control: [entry] '': a focusable entry with no name (its text is '05/02/2026')", '... (its text is '14:35')', '... (its text is '02:35:00 PM')'`
   - `tree-launch.txt: "[date editor] 'Date' ... [entry] '' {editable,focusable,focused,selectable-text,single-line} text='05/02/2026'" and two "[date editor] 'Time'" wrappers`
   - `same run orca-debug.out: '12:59:09.861887 - SPEECH GENERATOR: Starting ancestor generation for [date editor: 'Date'] (using role: date-editor)' followed by 'GENERATION TIME: 0.0485 ----> newAncestors=[]' and 'GENERATION TIME: 0.0017 ----> labelOrName=[]'`
@@ -222,12 +283,21 @@ Orca never says which day is selected, which is today, or where a range starts; 
 - **Scenario:** datetime-grid-keys, datetime-range-calendar
 - **Act:** Tab into the single calendar (on the selected day), arrows back onto the selected day, Enter on May 30, Left/Right back onto it; range calendar: Tab in (today), Enter (start), Right x3, Enter (end), Left onto a day inside the range.
 - **The reader should get:** The reader hears 'selected' on the selected day(s), 'today' on today, and a confirmation when Enter selects a day or sets a range start.
-- **The reader gets:** Only the date name is ever spoken ('Saturday, May 2, 2026.'), selected or not, today or not. Enter updates the selected state on the bus but nothing is spoken. The range's first Enter changes nothing on the bus at all (the anchor is not exposed). The grid's AT-SPI Selection reports 0 selected children while a day is selected.
+- **The reader got (`261a218f`):** Only the date name is ever spoken ('Saturday, May 2, 2026.'), selected or not, today or not. Enter updates the selected state on the bus but nothing is spoken. The range's first Enter changes nothing on the bus at all (the anchor is not exposed). The grid's AT-SPI Selection reports 0 selected children while a day is selected.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). aria-current=date reaches Windows as UIA AriaProperties 'current=date' (accesskit\_windows node.rs:466-478) but neither accesskit\_atspi\_common nor accesskit\_macos maps it (source).
 - **Severity:** high; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/calendar/cell.rs:276-303 (anchor not exposed); crates/teksilo-widgets/src/calendar.rs:1366-1373, 1429-1470 (silent anchor set and cancel, silent commit)
-- **Evidence:**
+- **Now (`c198e4d1`):** Orca still says only the day's name. It never says 'selected' on the selected day or 'today' on today. Enter on a day changes the selected state on the bus and nothing is spoken except Orca's echo of the key. The range's first Enter still changes nothing on the bus, and Escape on a pending start is silent.
+- **Measured again:** datetime-grid-keys, datetime-range-calendar, verify-datetime-range-escape: 2 of 2 runs each; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-grid-keys 'Tab into the single calendar': '+116.6 ms ORCA SAYS: 'Saturday, May 2, 2026.'' and 'FAIL  Orca says 'selected''`
+  - `pass1 datetime-grid-keys 'Enter commits the day under the cursor (May 30)': '+39.6 ms object:state-changed:selected 1 [table cell] 'Saturday, May 30, 2026'', no ORCA SAYS, 'FAIL  Orca says 'selected''`
+  - `pass1 datetime-range-calendar 'Tab into the range calendar' (today): '+89.8 ms ORCA SAYS: 'Sunday, September 27, 2026.''; 'Enter sets the range's start': only '+6.5 ms ORCA SAYS: 'return'' and no bus event`
+  - `pass1 datetime-range-calendar 'Enter ends the range': '+38.5 ms object:state-changed:selected 1 [table cell] 'Tuesday, September 29, 2026'' ... no speech`
+  - `pass1 verify-datetime-range-escape 'Escape cancels the pending start': only '+6.4 ms ORCA SAYS: 'escape''`
+  - `read from source: accesskit_atspi_common-0.21.0/src/node.rs:300-390 maps no aria-current and no expanded state; node.rs:1302-1310 counts only item-like children (accesskit_consumer-0.39.1/src/node.rs:920-936 excludes GridCell and Row)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar/cell.rs:276-303; crates/teksilo-widgets/src/calendar.rs:1497-1504 (Escape drops the anchor silently), 1597-1650 (commit\_date, silent); accesskit\_atspi\_common-0.21.0/src/node.rs:300-390, 1302-1310; accesskit\_consumer-0.39.1/src/node.rs:920-936; accesskit\_windows-0.35.1/src/node.rs:466-478
+- **Evidence (`261a218f`):**
   - `datetime-grid-keys-20260925-131909-2876039, Tab into the single calendar: 'object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'' / 'ORCA SAYS: 'Saturday, May 2, 2026.'' / 'FAIL Orca says 'selected''; the tree holds "[table cell] 'Saturday, May 2, 2026' {selectable,selected}"`
   - `datetime-grid-keys-20260925-130330-2129926, Enter: '+36.9 ms object:state-changed:selected 1 [table cell] 'Saturday, May 30, 2026'', '+37.0 ms object:state-changed:selected 0 [table cell] 'Saturday, May 2, 2026'', no speech; orca-debug.out '13:04:30.658044 - AXUtilitiesState: [table cell: 'Saturday, May 30, 2026'] is focused but lacks state focusable'`
   - `tree run run.json: table 'Calendar, May 2026' interfaces ['Accessible', 'Component', 'Selection'], 'selected_children': 0`
@@ -248,12 +318,18 @@ Committing a range in DateRangeEdit's calendar tells the reader nothing about th
 - **Scenario:** datetime-range-edit
 - **Act:** Space on Open range calendar, Enter on 2 May, Right x3, Enter.
 - **The reader should get:** The calendar closes, focus goes back to the field and the reader hears the committed range (e.g. 'Saturday, May 2, 2026 to Tuesday, May 5, 2026').
-- **The reader gets:** Enter on the start is silent; the final Enter closes the calendar, focus lands on the trigger button and Orca says only 'Open range calendar push button.'
+- **The reader got (`261a218f`):** Enter on the start is silent; the final Enter closes the calendar, focus lands on the trigger button and Orca says only 'Open range calendar push button.'
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured); the missing announcement and focus choice are the widget's on every platform
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/date\_range\_edit.rs:471-478
-- **Evidence:**
+- **Now (`c198e4d1`):** Enter on the start day is heard only as Orca's echo 'return'. The final Enter commits the range, closes the calendar and puts focus on the trigger, and Orca says only 'Open range calendar push button.'. Going back to the fields now reads the new end date with its value.
+- **Measured again:** datetime-range-edit, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-range-edit 'Enter on 2 May starts a range': only '+6.2 ms ORCA SAYS: 'return''`
+  - `pass1 datetime-range-edit 'Enter ends the range': '+36.6 ms object:property-change:accessible-name [label] 'Range edit: 2026-05-02 – 2026-05-05' text='Range edit: 2026-05-02 – 2026-05-05'', '+37.0 ms object:state-changed:focused 1 [push button] 'Open range calendar'', '+115.0 ms ORCA SAYS: 'Open range calendar push button.''`
+  - `pass2 datetime-range-edit 'Enter ends the range': '+110.6 ms ORCA SAYS: 'Open range calendar push button.'' and 'FAIL  Orca says 'May 5, 2026''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/date\_range\_edit.rs:476-483
+- **Evidence (`261a218f`):**
   - `datetime-range-edit-20260925-131250-2552648, Enter ends the range: '+34.5 ms object:property-change:accessible-name [label] 'Range edit: 2026-05-02 – 2026-05-05' ...', '+34.7 ms object:state-changed:focused 1 [push button] 'Open range calendar'', '+187.1 ms ORCA SAYS: 'Open range calendar push button.'' / 'FAIL Orca says 'May 5, 2026''`
   - `same run, Enter on 2 May starts a range: said=[] and no event`
   - `Cause: on_range_changed only dismisses the overlay (crates/teksilo-widgets/src/date_range_edit.rs:473-478); unlike DateEdit (date_edit.rs:685) it requests no focus back to the field and announces nothing.`
@@ -270,12 +346,19 @@ Orca treats the calendar grid as a layout table: the calendar and its month are 
 - **Scenario:** datetime-grid-keys
 - **Act:** Tab from Theme into the single calendar; every arrow press after.
 - **The reader should get:** Entering the grid, the reader hears it is a calendar of May 2026 (a table, with the day's column).
-- **The reader gets:** Only the day's name. Orca judges the table layout-only because it has no Table interface, skips it as an ancestor and finds no table for any cell.
+- **The reader got (`261a218f`):** Only the day's name. Orca judges the table layout-only because it has no Table interface, skips it as an ancestor and finds no table for any cell.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured)
 - **Severity:** medium; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/calendar.rs:776-790
-- **Evidence:**
+- **Now (`c198e4d1`):** Entering the calendar grid still says only the day. Orca judges the grid a layout table because it has no Table interface, so the calendar and its month are never said as context.
+- **Measured again:** datetime-grid-keys, 2 of 2 runs; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-grid-keys orca-debug.out: '16:06:58.427241 - AXTable: [table: 'Calendar, May 2026'] is layout only: True (Doesn't support table interface.)'`
+  - `pass2 datetime-grid-keys orca-debug.out: '16:15:20.101770 - AXTable: [table: 'Calendar, May 2026'] is layout only: True (Doesn't support table interface.)'; 19 layout-only judgements and 56 'Couldn't find table-implementing ancestor' lines in each pass, as at 261a218f`
+  - `pass1 datetime-grid-keys 'Tab into the single calendar': '+116.6 ms ORCA SAYS: 'Saturday, May 2, 2026.'' and 'FAIL  Orca says 'Calendar''`
+  - `read from source: accesskit_atspi_common-0.21.0/src/node.rs:484-514 builds the interface set with no Table or TableCell`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar.rs:877-888; accesskit\_atspi\_common-0.21.0/src/node.rs:484-514
+- **Evidence (`261a218f`):**
   - `datetime-grid-keys-20260925-130330-2129926 orca-debug.out: '13:03:43.867221 - AXTable: [table: 'Calendar, May 2026'] is layout only: True (Doesn't support table interface.)', '13:03:43.867258 - SCRIPT UTILITIES: [table: 'Calendar, May 2026'] is deemed to be layout only', 'GENERATION TIME: 0.0084 ----> newAncestors=[]', '13:03:43.872526 - AXTable: Couldn't find table-implementing ancestor for [table cell: 'Saturday, May 2, 2026']'`
   - `Quantified: in each grid-keys run (130330, 131909) Orca judged the calendar table layout-only 19 times and never otherwise, and logged 'Couldn't find table-implementing ancestor' 56 times; tabwalk 132032: 8 and 8`
   - `report.txt, Tab into the single calendar: 'FAIL Orca says 'Calendar'' - 'Orca said: 'Saturday, May 2, 2026.''`
@@ -293,12 +376,19 @@ Header arrows keep the names 'Next month'/'Previous year' in the months and year
 - **Scenario:** datetime-zoom
 - **Act:** In the months view, Space on the arrow named 'Next month'.
 - **The reader should get:** The button's name says what it does in this view ('Next year'), or the button steps a month.
-- **The reader gets:** Focus is on 'Next month push button.'; pressing it moves the calendar a year: the announcer says '2027' and the grid becomes 'Calendar, May 2027'.
+- **The reader got (`261a218f`):** Focus is on 'Next month push button.'; pressing it moves the calendar a year: the announcer says '2027' and the grid becomes 'Calendar, May 2027'.
 - **Platform:** All platforms (names are the widget's)
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/calendar/header.rs:83-160
-- **Evidence:**
+- **Now (`c198e4d1`):** In the months view the arrow still named 'Next month' moves the calendar a year: the reader hears '2027' and the grid becomes 'Calendar, May 2027'. The arrow named 'Next year' moves it ten years ('2037').
+- **Measured again:** remeasure-datetime-arrows-in-months, 1 of 1 run (deterministic, and the source agrees)
+- **Evidence (`c198e4d1`):**
+  - `judge remeasure-datetime-arrows-in-months 'Space on the arrow named Next month, in the months view': '+37.9 ms object:announcement [status bar] '2027' text='2027'', '+39.1 ms object:property-change:accessible-name [table] 'Calendar, May 2027' text='Calendar, May 2027'', '+55.8 ms ORCA SAYS: '2027''`
+  - `judge remeasure-datetime-arrows-in-months 'Tab four times, to the arrow named Next month': '+767.8 ms ORCA SAYS: 'Next month push button.''`
+  - `judge remeasure-datetime-arrows-in-months 'Space on the arrow named Next year, in the months view': '+27.0 ms object:announcement [status bar] '2037' text='2037'', '+39.0 ms ORCA SAYS: '2037''`
+  - `source: crates/teksilo-widgets/src/calendar/header.rs:87-90 resolve the four labels once in build; header.rs:124-126 and 155-158 step 12/120 and 120/1200 months by mode`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar/header.rs:86-165
+- **Evidence (`261a218f`):**
   - `datetime-zoom-20260925-131710-2787163, positioning: 'ORCA SAYS: 'Next month push button.''; Space: '+18.6 ms object:announcement [status bar] '2027' text='2027'', '+19.8 ms object:property-change:accessible-name [table] 'Calendar, May 2027' text='Calendar, May 2027'', '+26.0 ms ORCA SAYS: '2027''`
   - `Cause: arrow names resolved once in build (crates/teksilo-widgets/src/calendar/header.rs:84-87) while step_single/step_double step 12 or 120 months in the months/years views (header.rs:112-121, 146-150).`
   - `datetime-zoom-20260925-132725-3056683 'Space on the arrow named Next month, in the months view': '+27.0 ms object:property-change:accessible-name [table] 'Calendar, May 2027'', '+27.5 ms object:announcement [status bar] '2027'', 'ORCA SAYS: '2027''`
@@ -314,12 +404,18 @@ The documented T key (jump to today) never fires from a real keyboard
 - **Scenario:** datetime-grid-keys
 - **Act:** In the single calendar's grid, press T.
 - **The reader should get:** The cursor moves to today and the reader hears 'Friday, September 25, 2026'.
-- **The reader gets:** Nothing happens: no focus change on the bus, nothing spoken.
+- **The reader got (`261a218f`):** Nothing happens: no focus change on the bus, nothing spoken.
 - **Platform:** All platforms (key matching); measured on Linux
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/calendar.rs:1377
-- **Evidence:**
+- **Now (`c198e4d1`):** Pressing T in the calendar grid still does nothing: no focus change on the bus, and Orca says only its echo of the key, 't'.
+- **Measured again:** datetime-grid-keys, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-grid-keys 'T jumps to today': '+7.5 ms ORCA SAYS: 't'' and 'no focus change on the bus in this act'`
+  - `pass2 datetime-grid-keys 'T jumps to today': '+6.5 ms ORCA SAYS: 't'' and 'no focus change on the bus in this act'`
+  - `source: crates/teksilo-widgets/src/calendar.rs:1506 still matches Key::Character('t' | 'T'); crates/teksilo-platform/src/event_translation.rs:1446 still translates the letter to Key::T`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar.rs:1436, 1506; crates/teksilo-platform/src/event\_translation.rs:1446
+- **Evidence (`261a218f`):**
   - `datetime-grid-keys-20260925-131909-2876039, T jumps to today: 'steps: key t' / 'FAIL focus lands on [table cell] 'Friday, September 25, 2026'' - 'no focus change on the bus in this act'`
   - `Cause: crates/teksilo-widgets/src/calendar.rs:1378 matches Key::Character('t' | 'T'), but teksilo-platform translates the T key to Key::T (crates/teksilo-platform/src/event_translation.rs:1446), so the branch is unreachable from a keyboard.`
   - `datetime-grid-keys-20260925-133115-3261836 'T jumps to today': 'no focus change on the bus in this act', said=[]`
@@ -335,12 +431,18 @@ Zooming to the months view is heard only as '2026', and the months are twelve Ta
 - **Scenario:** datetime-zoom
 - **Act:** Space on the title button 'May 2026'; Tab x3 into the months; Tab again.
 - **The reader should get:** The reader hears that the months of 2026 are showing; the months are one Tab stop entered on the shown month (May).
-- **The reader gets:** Only '2026' (the focused button's rename). Tab lands on 'January.', and Tab again on 'February.' (every month is a Tab stop).
+- **The reader got (`261a218f`):** Only '2026' (the focused button's rename). Tab lands on 'January.', and Tab again on 'February.' (every month is a Tab stop).
 - **Platform:** All platforms for the tab stops; speech measured on Linux / Orca
 - **Severity:** medium; **layer:** framework
-- **Status:** Fixed by `2d0446fc` (dateedit). Fixed part: zoom-out moves focus into the grid and is heard as the month with its year ('May 2026'); the months are one Tab stop (the grid's.
-- **Where:** crates/teksilo-widgets/src/calendar/zoom\_grid.rs:355-381; crates/teksilo-widgets/src/calendar/header.rs:199-216
-- **Evidence:**
+- **Status:** Fixed by `2d0446fc` (dateedit).
+- **Now (`c198e4d1`):** Zooming out moves focus into the months and the reader hears the month with its year: '2026' (cut) then 'May 2026.'. The months are one Tab stop: Tab from a month leaves the grid.
+- **Measured again:** fix-dateedit-zoom, datetime-zoom, datetime-dateedit-popover: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 fix-dateedit-zoom 'Space on the title button (May 2026)': '+80.1 ms object:state-changed:focused 1 [table cell] 'May 2026'', '+172.9 ms ORCA SAYS (CUT): '2026'', '+265.7 ms ORCA SAYS: 'May 2026.''`
+  - `pass1 fix-dateedit-zoom 'Tab from the months': '+25.1 ms object:state-changed:focused 1 [push button] 'Previous year'' and 'pass  focus lands on [push button] 'Previous year''`
+  - `pass2 datetime-dateedit-popover 'Space on the title: the months view': '+84.8 ms object:state-changed:focused 1 [table cell] 'April 2026'' and '+185.9 ms ORCA SAYS: 'April 2026.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar/zoom\_grid.rs:526 (a month is not a Tab stop); crates/teksilo-widgets/src/calendar/header.rs:207-225 (the title hands focus to the grid)
+- **Evidence (`261a218f`):**
   - `datetime-zoom-20260925-130331-2131260, Space on the title: '+60.5 ms object:property-change:accessible-name [push button] '2026' text='2026'' / '+98.6 ms ORCA SAYS: '2026'' / 'FAIL Orca says 'month''; Tab x3: '+1302.7 ms object:state-changed:focused 1 [table cell] 'January'' / 'ORCA SAYS: 'January.''`
   - `datetime-zoom-20260925-131710-2787163, Tab from the month: '+33.4 ms object:state-changed:focused 1 [table cell] 'February''`
   - `Cause: every ZoomCell is .focusable(enabled) (crates/teksilo-widgets/src/calendar/zoom_grid.rs:363); the grid's name 'Months' (zoom_grid.rs:163-164) is never spoken (layout table, see datetime-10) and nothing is announced on the mode change (header.rs:209-216).`
@@ -357,12 +459,20 @@ Opening a date field's calendar is not presented as a popup; its content hangs u
 - **Scenario:** datetime-dateedit-stale, datetime-dateedit-popover
 - **Act:** Alt+Down in the DateEdit field.
 - **The reader should get:** The reader learns a calendar popup opened (a dialog or named group 'Calendar, May 2026'), placed after the field in reading order; the field says it has a popup and whether it is expanded.
-- **The reader gets:** Only 'Saturday, May 2, 2026.'. The popover's root on the bus is '\[unknown\] ''' as the frame's first child (before the toolbar), holding the table. has-popup/expanded set by DateEdit reach no AT-SPI state, and they sit on the container, not on the 'Open calendar' button focus is on.
+- **The reader got (`261a218f`):** Only 'Saturday, May 2, 2026.'. The popover's root on the bus is '\[unknown\] ''' as the frame's first child (before the toolbar), holding the table. has-popup/expanded set by DateEdit reach no AT-SPI state, and they sit on the container, not on the 'Open calendar' button focus is on.
 - **Platform:** Linux AT-SPI / Orca measured; the unknown node exists on every adapter (Role::Unknown is not filtered by common\_filter); has-popup/expanded missing on AT-SPI is upstream
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/date\_edit.rs:1110-1121; crates/teksilo-core/src/deferred\_subtree.rs:222-226; crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:213-236
-- **Evidence:**
+- **Now (`c198e4d1`):** Opening the DateEdit calendar still says only the day. The popup's root on the bus is still an unnamed '\[unknown\]' node, the frame's first child ahead of the toolbar, holding the table. has-popup and expanded still reach no AT-SPI state.
+- **Measured again:** datetime-dateedit-stale, datetime-dateedit-popover, verify-datetime-reopen-others: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 datetime-dateedit-stale 'Alt+Down opens the calendar': '+78.1 ms object:children-changed:add [frame] 'Teksilo — Date / Time pickers' -> [unknown] ''' and '+215.1 ms ORCA SAYS: 'Sunday, May 2, 2027.''`
+  - `pass1 datetime-dateedit-stale tree-Alt-Down-opens-the-calendar.txt: "[frame] 'Teksilo — Date / Time pickers' {active}" / "  [unknown] ''" / "    [table] 'Calendar, May 2027' {focusable}"; the field is "[date editor] 'Date' ... rel=['controller-for']"`
+  - `pass1 datetime-dateedit-popover 'Alt+Down opens the DateEdit calendar': 'FAIL  Orca says 'Calendar'' / 'Orca said: 'Saturday, May 2, 2026.''`
+  - `pass1 verify-datetime-reopen-others 'Space opens the DateRangeEdit calendar': '+55.5 ms object:children-changed:add [frame] 'Teksilo — Date / Time pickers' -> [table] 'Calendar, May 2026''`
+  - `read from source: accesskit_atspi_common-0.21.0/src/node.rs:300-390 has no expanded or has-popup state`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/date\_edit.rs:1152-1161; crates/teksilo-core/src/deferred\_subtree.rs:222-226; crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:242-266
+- **Evidence (`261a218f`):**
   - `datetime-dateedit-stale-20260925-130553-2236815, Alt+Down: '+66.2 ms object:children-changed:add [frame] '' -> [unknown] ''' / 'ORCA SAYS: 'Saturday, May 2, 2026.''`
   - `same run tree-Alt-Down-opens-the-calendar.txt: "[frame] '' {active}" / "  [unknown] ''" / "    [table] 'Calendar, May 2026' {focusable}"`
   - `datetime-dateedit-popover-20260925-131250-2552592: 'FAIL Orca says 'Calendar'' on opening`
@@ -382,12 +492,18 @@ The DateTimeEdit and DateRangeEdit wrappers expose their halves' text run togeth
 - **Scenario:** (tree)
 - **Act:** Read the tree (flat review / where-am-I on the wrapper).
 - **The reader should get:** '05/02/2026 02:35 PM' and '05/02/2026 to 05/16/2026'.
-- **The reader gets:** text='05/02/202602:35 PM' and text='05/02/202605/16/2026' on the wrappers' Text interface.
+- **The reader got (`261a218f`):** text='05/02/202602:35 PM' and text='05/02/202605/16/2026' on the wrappers' Text interface.
 - **Platform:** Linux AT-SPI (measured); the consumer's text ranges are shared by all adapters
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/date\_time\_edit.rs:906-945; crates/teksilo-widgets/src/date\_range\_edit.rs:738-760
-- **Evidence:**
+- **Now (`c198e4d1`):** The wrappers' text still runs the halves together: 'Date and time' reads '05/02/202602:35 PM' and 'Date range' reads '05/02/202605/16/2026'.
+- **Measured again:** tabwalk-datetime-pickers, 2 of 2 runs (tree at launch)
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-datetime-pickers tree-launch.txt: "[date editor] 'Date and time' {editable,focusable,selectable-text,single-line} text='05/02/202602:35 PM'"`
+  - `pass1 tabwalk-datetime-pickers tree-launch.txt: "[date editor] 'Date range' {editable,focusable,selectable-text,single-line} text='05/02/202605/16/2026'"`
+  - `pass2 verify-datetime-rangeedit-stale 'Up in the start date (year)': '+43.5 ms object:text-changed:delete [date editor] 'Date range' text='02/202605/16/2026''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/date\_time\_edit.rs:917-955; crates/teksilo-widgets/src/date\_range\_edit.rs:747-778
+- **Evidence (`261a218f`):**
   - `tree-datetime-pickers-20260925-125905-2013173 tree-launch.txt: "[date editor] 'Date and time' {editable,focusable,selectable-text,single-line} text='05/02/202602:35 PM'" and "[date editor] 'Date range' ... text='05/02/202605/16/2026'"`
   - `Cause: the wrappers' text-input roles make accesskit_consumer build a text range over every descendant text run (text.rs:1402-1406); the separators are painted or a11y-hidden (date_time_edit.rs:586-589).`
   - `tree-datetime-pickers-20260925-132940-3172543 tree-launch.txt: "[date editor] 'Date and time' {editable,focusable,selectable-text,single-line} text='05/02/202602:35 PM'"`
@@ -403,12 +519,18 @@ Inside a calendar, Tab reaches the day grid before the header buttons above it
 - **Scenario:** (tabwalk)
 - **Act:** Tab through the example.
 - **The reader should get:** Tab order follows the visual and tree order: header buttons, then the grid, then Today (the APG date-picker order).
-- **The reader gets:** Grid day first ('Saturday, May 2, 2026.'), then Previous year, Previous month, title, Next month, Next year, Today.
+- **The reader got (`261a218f`):** Grid day first ('Saturday, May 2, 2026.'), then Previous year, Previous month, title, Next month, Next year, Today.
 - **Platform:** All platforms
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/calendar.rs:690-698
-- **Evidence:**
+- **Now (`c198e4d1`):** Inside each calendar Tab still reaches the grid's day first, then the five header buttons above it, then Today. In the months view Tab from a month also goes back up to 'Previous year'.
+- **Measured again:** tabwalk-datetime-pickers, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-datetime-pickers Tab 11: '+42.4 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026''; Tab 12: '+53.3 ms object:state-changed:focused 1 [push button] 'Previous year''; Tab 17: '+29.1 ms object:state-changed:focused 1 [push button] 'Today''`
+  - `pass1 tabwalk-datetime-pickers Tab 18: '[table cell] 'Sunday, September 27, 2026'', Tab 19: '[push button] 'Previous year'', Tab 24: '[push button] 'Today''`
+  - `pass1 fix-dateedit-zoom 'Tab from the months': '+25.1 ms object:state-changed:focused 1 [push button] 'Previous year''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar.rs:793-798
+- **Evidence (`261a218f`):**
   - `tabwalk-datetime-pickers-20260925-132032-2912751: Tab 11 '+29.8 ms object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'', Tab 12 '+30.3 ms object:state-changed:focused 1 [push button] 'Previous year'' ... Tab 17 'Today'`
   - `Cause: the Calendar root itself is the grid's Tab stop (calendar.rs:678-681 .focusable(enabled)) and precedes its descendants.`
   - `tabwalk-datetime-pickers-20260925-132959-3197203: Tab 11 'object:state-changed:focused 1 [table cell] 'Saturday, May 2, 2026'', Tab 12 '[push button] 'Previous year'' ... Tab 17 '[push button] 'Today''`
@@ -424,12 +546,19 @@ Every date/time editor carries an empty unnamed status bar, and Open calendar re
 - **Scenario:** (tree)
 - **Act:** Read the tree (object navigation).
 - **The reader should get:** No empty landmarks in the reading path; no description equal to the name.
-- **The reader gets:** "\[status bar\] ''" under each of the five editors; "\[push button\] 'Open calendar' desc='Open calendar'" and 'Open range calendar' likewise. Orca dedups the description on focus; other readers may read it twice.
+- **The reader got (`261a218f`):** "\[status bar\] ''" under each of the five editors; "\[push button\] 'Open calendar' desc='Open calendar'" and 'Open range calendar' likewise. Orca dedups the description on focus; other readers may read it twice.
 - **Platform:** Linux AT-SPI (measured)
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/validation\_strip.rs:147-163; crates/teksilo-widgets/src/date\_edit.rs:777-787
-- **Evidence:**
+- **Now (`c198e4d1`):** Each of the five editors still holds an empty unnamed status bar, and all three calendar triggers still carry their name again as their description: 'Open calendar' on the DateEdit and on the DateTimeEdit, and 'Open range calendar'.
+- **Measured again:** tabwalk-datetime-pickers, 2 of 2 runs (tree at launch)
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-datetime-pickers tree-launch.txt: "[status bar] ''" under each of the five editors (lines 147, 151, 155, 161, 167)`
+  - `pass1 tabwalk-datetime-pickers tree-launch.txt: "[push button] 'Open calendar' desc='Open calendar' {focusable}" under the DateEdit (line 146) and under the DateTimeEdit (line 160), and "[push button] 'Open range calendar' desc='Open range calendar' {focusable}" (line 166)`
+  - `pass2 tabwalk-datetime-pickers tree-launch.txt: the same five "[status bar] ''" lines and the same three triggers with desc equal to the name`
+  - `pass1 tabwalk-datetime-pickers: 'ORCA SAYS: 'Open calendar push button.'' and 'ORCA SAYS: 'Open range calendar push button.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/validation\_strip.rs:147-163; crates/teksilo-widgets/src/date\_edit.rs:799-808; crates/teksilo-widgets/src/date\_time\_edit.rs:669-675; crates/teksilo-widgets/src/date\_range\_edit.rs:511-517; crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:721-730
+- **Evidence (`261a218f`):**
   - `tree-launch.txt: "[status bar] ''" (5 times), "[push button] 'Open calendar' desc='Open calendar' {focusable}"`
   - `Cause: the ValidationStrip keeps Role::Status with no name while pristine (crates/teksilo-widgets/src/primitives/validation_strip.rs:149-163); the trigger's tooltip text is copied to both name and description.`
   - `tree-datetime-pickers-20260925-132940-3172543 tree-launch.txt: "[status bar] ''" under each of the five editors`
@@ -445,12 +574,19 @@ Tab or Shift+Tab out of a date field's open calendar sends the reader to the far
 - **Scenario:** verify-datetime-popover-tab, verify-datetime-popover-shifttab
 - **Act:** DateEdit: Alt+Down, then Tab six times (grid, 5 header buttons, out). Separately: Alt+Down, then Shift+Tab from the grid.
 - **The reader should get:** The popup is a disclosure (Teksilo's own model: Tab leaves it, focus.rs:104-114). Focus should leave to the stop next to the field it belongs to: the 24 h time field on Tab, the DateEdit's own Open calendar button or entry on Shift+Tab.
-- **The reader gets:** Tab from the last header button closes the popup and lands on the toolbar's 'Theme' combo box, the first stop of the window's Tab cycle. Shift+Tab from the grid closes it and lands on 'Open range calendar', the DateRangeEdit's button, eight stops from the DateEdit, which the reader can mistake for their own field's button.
+- **The reader got (`261a218f`):** Tab from the last header button closes the popup and lands on the toolbar's 'Theme' combo box, the first stop of the window's Tab cycle. Shift+Tab from the grid closes it and lands on 'Open range calendar', the DateRangeEdit's button, eight stops from the DateEdit, which the reader can mistake for their own field's button.
 - **Platform:** All platforms (Tab order is the framework's); measured on Linux AT-SPI / Orca 46.1
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-core/src/widget\_tree/focus\_impl.rs:437-470 (cycle\_focus); crates/teksilo-widgets/src/date\_edit.rs:704
-- **Evidence:**
+- **Now (`c198e4d1`):** Tab out of the DateEdit's open calendar still closes it and lands on the toolbar's 'Theme' combo box. Shift+Tab from the grid still closes it and lands on 'Open range calendar', the DateRangeEdit's button, not on the DateEdit's own field.
+- **Measured again:** verify-datetime-popover-tab, verify-datetime-popover-shifttab: 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-datetime-popover-tab 'Tab 6 inside the open calendar': '+19.2 ms object:children-changed:remove [frame] 'Teksilo — Date / Time pickers' -> [unknown] ''', '+19.5 ms object:state-changed:focused 1 [combo box] 'Theme'', '+72.3 ms ORCA SAYS: 'Theme combo box.''`
+  - `pass2 verify-datetime-popover-tab 'Tab 6 inside the open calendar': '+33.7 ms object:state-changed:focused 1 [combo box] 'Theme''`
+  - `pass1 verify-datetime-popover-shifttab 'Shift+Tab 1 from the open calendar's grid': '+41.2 ms object:state-changed:focused 1 [push button] 'Open range calendar'' and '+111.3 ms ORCA SAYS: 'Open range calendar push button.''`
+  - `pass2 verify-datetime-popover-shifttab 'Shift+Tab 1 from the open calendar's grid': '+60.5 ms object:state-changed:focused 1 [push button] 'Open range calendar''`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree/focus\_impl.rs:460-495 (cycle\_focus); crates/teksilo-widgets/src/date\_edit.rs:719
+- **Evidence (`261a218f`):**
   - `verify-datetime-popover-tab-20260925-133552-3573378, Tab 6: 'object:children-changed:remove [frame] '' -> [unknown] ''', 'object:state-changed:focused 1 [combo box] 'Theme'', 'ORCA SAYS: 'Toolbar tool bar'', 'ORCA SAYS: 'Theme combo box.''`
   - `verify-datetime-popover-shifttab-20260925-133721-3644612, Shift+Tab 1: 'object:state-changed:focused 1 [push button] 'Open range calendar'' / 'ORCA SAYS: 'Open range calendar push button.''`
   - `The main cycle, from the tabwalk: ... Tab 9 'Open range calendar', Tab 10 'Theme' ... So the popup's stops sit at the wrap point of the whole window's cycle, after the last editor and before the toolbar, not after the DateEdit.`
@@ -467,12 +603,18 @@ Stepping DateRangeEdit's start past its end silently swaps the two dates under t
 - **Scenario:** verify-datetime-rangeedit-stale
 - **Act:** Tab to the DateRangeEdit start date (05/02/2026, end 05/16/2026), press Up on the year.
 - **The reader should get:** The start becomes 05/02/2027 and the reader hears it. If that puts the start after the end, the widget either keeps the edit and reports the range invalid, or says what it did.
-- **The reader gets:** The halves are reordered without a word. The start field, where the caret still is, now reads 05/16/2026 (the old end) and the end field 05/02/2027. The stepped text '05/02/2027' never reaches the start field on the bus: its diff goes straight from 05/02/2026 to 05/16/2026. Orca says nothing, and the next Up steps a different date from the one the reader thinks they are editing.
+- **The reader got (`261a218f`):** The halves are reordered without a word. The start field, where the caret still is, now reads 05/16/2026 (the old end) and the end field 05/02/2027. The stepped text '05/02/2027' never reaches the start field on the bus: its diff goes straight from 05/02/2026 to 05/16/2026. Orca says nothing, and the next Up steps a different date from the one the reader thinks they are editing.
 - **Platform:** All platforms (widget logic); measured on Linux AT-SPI / Orca 46.1
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/date\_range\_edit.rs:813-834
-- **Evidence:**
+- **Now (`c198e4d1`):** Up on the start date's year still reorders the range without a word. The start field, where the caret is, now reads 05/16/2026 and the end field 05/02/2027. The start field never shows 05/02/2027 on the bus, and Orca says nothing.
+- **Measured again:** verify-datetime-rangeedit-stale, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-datetime-rangeedit-stale 'Up in the start date (year)': '+37.6 ms object:text-changed:delete [entry] 'Start date' text='02'', '+37.7 ms object:text-changed:insert [entry] 'Start date' text='16'', '+38.0 ms object:text-changed:insert [entry] 'End date' text='02/2027'', no ORCA SAYS`
+  - `pass2 verify-datetime-rangeedit-stale 'Up in the start date (year)': '+43.2 ms object:property-change:accessible-name [label] 'Range edit: 2026-05-16 – 2027-05-02' text='Range edit: 2026-05-16 – 2027-05-02'', no ORCA SAYS`
+  - `pass1 verify-datetime-rangeedit-stale 'Tab twice, to Open range calendar': '+102.9 ms ORCA SAYS (CUT): 'End date entry 05/02/2027 selected.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/date\_range\_edit.rs:823-841
+- **Evidence (`261a218f`):**
   - `verify-datetime-rangeedit-stale-20260925-133238-3336374 'Up in the start date (year)': 'object:text-changed:delete [date editor] 'End date' text='16/2026'', 'object:text-changed:insert [date editor] 'End date' text='02/2027'', 'object:text-changed:delete [date editor] 'Start date' text='02'', 'object:text-changed:insert [date editor] 'Start date' text='16'', 'object:property-change:accessible-name [label] 'Range edit: 2026-05-16 – 2027-05-02''; no ORCA SAYS`
   - `Cause: the half's merge builds the outer value with DateRange::new(s, e) (crates/teksilo-widgets/src/date_range_edit.rs:817-826), which orders the pair (calendar.rs:161-167). The ordered range is then written back into both halves. Nothing is announced (05).`
 - **Reproduced:** 2 of 2 (verify-datetime-rangeedit-stale 133238, 133546); deterministic
@@ -487,12 +629,17 @@ The calendar's Role::Grid node holds its header buttons, a separator and the Tod
 - **Scenario:** (tree)
 - **Act:** Read the tree (object navigation, or any future table navigation).
 - **The reader should get:** A grid's children are its rows (a column-header row, then the week rows), with row and column counts. The header and Today buttons sit outside the grid, inside a named group or dialog.
-- **The reader gets:** \[table\] 'Calendar, May 2026' has as direct children 5 push buttons, 7 table rows, a separator and 'Today'. No row or column count is set anywhere in the calendar. It costs nothing now, because no adapter implements a Table or Grid interface (10). It would make the table malformed the day AccessKit exposes one, which is 10's upstream fix.
+- **The reader got (`261a218f`):** \[table\] 'Calendar, May 2026' has as direct children 5 push buttons, 7 table rows, a separator and 'Today'. No row or column count is set anywhere in the calendar. It costs nothing now, because no adapter implements a Table or Grid interface (10). It would make the table malformed the day AccessKit exposes one, which is 10's upstream fix.
 - **Platform:** All adapters (node structure); seen on Linux AT-SPI
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/calendar.rs:776-790
-- **Evidence:**
+- **Now (`c198e4d1`):** The calendar's grid node still holds the five header buttons, the seven rows, a separator and Today, and no row or column count is set.
+- **Measured again:** tabwalk-datetime-pickers, 2 of 2 runs (tree at launch)
+- **Evidence (`c198e4d1`):**
+  - `pass1 tabwalk-datetime-pickers tree-launch.txt: "[table] 'Calendar, May 2026' {focusable}" with children "[push button] 'Previous year' {focusable}" ... "[push button] 'Next year' {focusable}", seven "[table row] ''", "[separator] ''", "[push button] 'Today' {focusable}"`
+  - `source: crates/teksilo-widgets/src/calendar.rs:879 builder.set_role(Role::Grid) on the calendar root; no set_row_count or set_column_count under calendar*`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/calendar.rs:877-879
+- **Evidence (`261a218f`):**
   - `tree-datetime-pickers-20260925-132940-3172543 tree-launch.txt: "[table] 'Calendar, May 2026' {focusable}" / "[push button] 'Previous year'" ... "[table row] ''" x7 / "[separator] ''" / "[push button] 'Today' {focusable}"`
   - `Cause: Calendar::accessibility sets Role::Grid on the calendar root (crates/teksilo-widgets/src/calendar.rs:776-779), whose subtree is header + weekday row + weeks + footer; grep finds no set_row_count or set_column_count under calendar*`
 - **Reproduced:** deterministic (every tree)

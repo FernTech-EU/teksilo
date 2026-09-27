@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Tables
 
 Examples: `data-grid`, `tree-table-view`.
 19 findings: 5 high, 9 medium, 5 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -15,10 +17,10 @@ How to read an entry, and what the words mean, is in
 | [tables-02](#tables-02) | data-grid | No table structure reaches any reader: no column header, no row/column position and no table size is ever spoken | high | Linux | upstream |
 | [tables-03](#tables-03) | data-grid | Row selection is never spoken: each change rebuilds the table, and the reader hears only the same cell text again | high | Linux | open |
 | [tables-04](#tables-04) | tree-table-view | Tree table: expanded / collapsed and the level are never spoken on Linux; expanding is heard as the folder name again | high | Linux | upstream |
-| [tables-05](#tables-05) | data-grid | Sorting, column filters, column resize and column reorder cannot be done from the keyboard, and the header offers no action to a screen reader | high | Linux | open |
+| [tables-05](#tables-05) | data-grid | Sorting, column filters, column resize and column reorder cannot be done from the keyboard, and the header offers no action to a screen reader | high | Linux | partly fixed |
 | [tables-06](#tables-06) | data-grid | Sort state ('sorted ascending') is never exposed to Orca | medium | Linux | upstream |
 | [tables-07](#tables-07) | data-grid | Applying a column filter tears the popover down and drops focus on the silent table: no result, no confirmation | medium | Linux | open |
-| [tables-08](#tables-08) | data-grid | The filter popover and its field are unnamed, and every trigger is called 'Filter' (untranslated) | medium | Linux | open |
+| [tables-08](#tables-08) | data-grid | The filter popover and its field are unnamed, and every trigger is called 'Filter' (untranslated) | medium | Linux | partly fixed |
 | [tables-09](#tables-09) | data-grid | An empty TextInput has no Text interface on AT-SPI, so the first character typed into it is never reported | medium | Linux | fixed |
 | [tables-10](#tables-10) | data-grid | Multi-line cells are read only up to their first line | medium | Linux | open |
 | [tables-11](#tables-11) | data-grid | A multi-row TableView does not say it is multi-selectable | low | Linux | open |
@@ -39,12 +41,21 @@ Tabbing onto the grid says nothing: the table has no name, no cursor and no size
 - **Scenario:** tables-grid-cells
 - **Act:** data-grid, tables-grid-cells / tables-grid-tab-trap: 'Tab into the table' (the 5th Tab: Theme, Reset filters, Reset sort, + Append row, then the table)
 - **The reader should get:** Focus lands on the grid and the reader hears what it is: a named table with its size (1000 rows, 7 columns), or the current cell (the ARIA grid pattern puts the cursor on a cell when the grid gets focus)
-- **The reader gets:** Silence. The focus event names an unnamed \[table\] with no active descendant (no cell cursor until the first arrow key). Orca 46.1 treats a table without the Table interface as a layout table, finds nothing to say ('pauses only'), and only stops speech. The same silence comes back after a column filter is applied (tables-07). TreeTableView fares a little better: Orca says 'tree table.', still with no name and no size.
+- **The reader got (`261a218f`):** Silence. The focus event names an unnamed \[table\] with no active descendant (no cell cursor until the first arrow key). Orca 46.1 treats a table without the Table interface as a layout table, finds nothing to say ('pauses only'), and only stops speech. The same silence comes back after a column filter is applied (tables-07). TreeTableView fares a little better: Orca says 'tree table.', still with no name and no size.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows/macOS by source only: the grid has no name there either (widget\_impl.rs only names it from a11y\_label).
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:1509-1513 (active\_descendant only when focused\_cell is Some); table\_view/keyboard.rs:141-151 (None = no cursor yet); tree\_table\_view/widget\_impl.rs:1574-1578; examples/data\_grid/src/main.rs:223 and examples/tree\_table\_view/src/main.rs:140 (no .a11y\_label)
-- **Evidence:**
+- **Now (`c198e4d1`):** Tabbing onto the data-grid table still says nothing: focus lands on an unnamed \[table\] with no cell cursor and no size, and Orca treats it as a layout table with nothing to speak. On the tree table Orca says only 'tree table.', with no name and no size.
+- **Measured again:** tables-grid-cells, tables-grid-tab-trap, verify-tables-entry, tabwalk-data-grid, tables-ttv-tree, verify-tables-ttv and tabwalk-tree-table-view, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-cells 'Tab into the table': +28.7 ms object:state-changed:focused 1 [table] ''; FAIL Orca has something to say for the new focus: 16:30:18.163659 SPEECH GENERATOR: Results for [table] are pauses only, Orca said []`
+  - `pass1 tables-grid-cells orca-debug.out: '16:30:18.160214 - AXTable: [table] is layout only: True (Doesn't support table interface.)'`
+  - `pass1 tables-grid-cells: [table] name='' interfaces=['Accessible', 'Component', 'Selection'] attributes={} states=['enabled', 'focusable', 'focused', 'sensitive', 'showing', 'visible']`
+  - `pass2 tables-grid-cells 'Tab into the table': 16:50:52.478770 SPEECH GENERATOR: Results for [table] are pauses only, Orca said []`
+  - `pass1 and pass2 tabwalk-data-grid 'Tab 5': object:state-changed:focused 1 [table] '' and no ORCA SAYS line`
+  - `pass1 tables-ttv-tree 'Tab into the tree table': +43.5 ms ORCA SAYS: 'tree table.'; pass2 +768.6 ms ORCA SAYS: 'tree table.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:1509-1513 (active\_descendant only when focused\_cell is Some); table\_view/keyboard.rs:141-151 (None = no cursor yet); tree\_table\_view/widget\_impl.rs:1574-1578; examples/data\_grid/src/main.rs:223 and examples/tree\_table\_view/src/main.rs:140 (no .a11y\_label)
+- **Evidence (`261a218f`):**
   - `3 of 3 runs (v2/135313, r2/140037, r3/140735): r3 report: '+15.7 ms object:state-changed:focused 1 [table] ''' then nothing spoken; check 'Orca has something to say for the new focus' FAIL 'Orca said []'`
   - `r3 orca-debug.out: '14:07:54.841928 - AXTable: [table] is layout only: True (Doesn't support table interface.)' / '14:07:54.846146 - SPEECH GENERATOR: Results for [table] are pauses only' / '14:07:54.848671 NULL SPEECH: stop'`
   - `tree after the act: "[table] name='' interfaces=['Accessible', 'Component', 'Selection'] attributes={} states=['enabled', 'focusable', 'focused', 'sensitive', 'showing', 'visible']"`
@@ -68,12 +79,22 @@ No table structure reaches any reader: no column header, no row/column position 
 - **Scenario:** tables-grid-cells
 - **Act:** data-grid and tree-table-view, every cell move: ArrowDown onto row 1, ArrowRight to Name / Email, Ctrl+End to row 1000; tree table ArrowDown / ArrowRight on a leaf
 - **The reader should get:** Moving to a new column says that column's header ('Name', 'Email', 'Size'), and a reader can learn where they are ('row 2 of 1000', or the ID of the row). The table's size is spoken on entry.
-- **The reader gets:** Only the cell's text: '1.', '2.', 'Blake 1.', 'user1@example.com.', '4321 B.'. After Ctrl+End to row 1000 on the Notes column Orca says only '—': the reader has no idea they are on the last of 1000 rows. Orca cannot find a table for the cell and no row or column index. Of what the widget publishes (Role::Grid/TreeGrid with row\_count/column\_count, Role::ColumnHeader, per-cell row\_index/column\_index, per-row position\_in\_set), Orca 46.1 reads none: row\_count, column\_count, row\_index, column\_index and level are not exported on AT-SPI; posinset is exported on tree rows but Orca's default script does not read it. Of 1000 rows, 25 are on the bus at the top and 14 (987 to 1000) after Ctrl+End, and nothing tells a reader about the other 975.
+- **The reader got (`261a218f`):** Only the cell's text: '1.', '2.', 'Blake 1.', 'user1@example.com.', '4321 B.'. After Ctrl+End to row 1000 on the Notes column Orca says only '—': the reader has no idea they are on the last of 1000 rows. Orca cannot find a table for the cell and no row or column index. Of what the widget publishes (Role::Grid/TreeGrid with row\_count/column\_count, Role::ColumnHeader, per-cell row\_index/column\_index, per-row position\_in\_set), Orca 46.1 reads none: row\_count, column\_count, row\_index, column\_index and level are not exported on AT-SPI; posinset is exported on tree rows but Orca's default script does not read it. Of 1000 rows, 25 are on the bus at the top and 14 (987 to 1000) after Ctrl+End, and nothing tells a reader about the other 975.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows by source: accesskit\_windows-0.35.0 implements no UIA Grid/GridItem/Table/TableItem pattern (node.rs:1333-1496 lists Toggle, Invoke, Value, RangeValue, ScrollItem, SelectionItem, Selection, Text, ExpandCollapse, Window only), so NVDA gets no coordinates or header either. macOS by source: accesskit\_macos-0.27.0 exposes only accessibilityRows/SelectedRows (node.rs:1106-1135), with no column headers or indices.
 - **Severity:** high; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** upstream accesskit\_atspi\_common-0.20.0/src/node.rs:415-436 (attributes), 494-521 (interfaces); Teksilo mitigation point crates/teksilo-widgets/src/table\_view/a11y.rs:96-101 (CellA11y::with\_name dead code)
-- **Evidence:**
+- **Now (`c198e4d1`):** Each cell move still reads only the cell's text ('1.', 'Blake 1.', 'user1@example.com.', '4321 B.'), and Ctrl+End to row 1000 on the Notes column says only '—'. No column header, row or column position, or table size reaches Orca. accesskit\_atspi\_common 0.21.0 still exports no Table or TableCell interface and no row, column or index attributes.
+- **Measured again:** tables-grid-cells and tables-ttv-tree, 2 of 2 runs each; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-cells 'ArrowDown onto the first row': ORCA SAYS: '1.'; FAIL Orca says 'ID' as a word, heard whole; FAIL Orca says 'row 1'`
+  - `pass1 tables-grid-cells orca-debug.out: '16:30:23.329626 - AXTable: Couldn't find table-implementing ancestor for [table cell]' / '16:30:23.329888 - AXTable: Row and col index attributes for [table cell]: None, None'`
+  - `pass1 tables-grid-cells 'ArrowRight to the Name column': ORCA SAYS: 'Blake 1.'; FAIL Orca says 'Name' as a word, heard whole`
+  - `pass1 tables-grid-cells 'Ctrl+End to the last row': ORCA SAYS: '—'; FAIL Orca says '1000'; pass2 the same: ORCA SAYS: '—', FAIL Orca says '1000'`
+  - `pass1 note: focused [table cell] name='' states=['enabled', 'focused', 'selectable', 'selected', 'sensitive', 'showing', 'visible'] attributes=None interfaces=['Accessible', 'Component'] actions=None`
+  - `pass1 and pass2 tables-ttv-tree 'ArrowRight on a leaf moves to the Size column': ORCA SAYS: '4321 B.' only`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:417-440 attributes() carries only placeholder-text, posinset, setsize, id, braillelabel, brailleroledescription; node.rs:484-513 interfaces() adds no Table or TableCell`
+- **Where (`c198e4d1`):** upstream accesskit\_atspi\_common-0.21.0/src/node.rs:417-440 (attributes), 484-513 (interfaces); Teksilo mitigation point crates/teksilo-widgets/src/table\_view/a11y.rs:96-101 (CellA11y::with\_name dead code)
+- **Evidence (`261a218f`):**
   - `3 of 3 runs, check 'Orca says 'ID' as a word' / 'Orca says 'Name'' / 'Orca says 'Email'' / 'Orca says 'row 1'' / 'Orca says '1000'' all FAIL; r3: '14:07:59.692017 - SPEECH OUTPUT: '1.'', '14:08:07.458374 - SPEECH OUTPUT: 'Blake 1.'', '14:08:25.719592 - SPEECH OUTPUT: '—''`
   - `r3 orca-debug.out: '14:07:59.679077 - AXTable: Couldn't find table-implementing ancestor for [table cell]' / '14:07:59.679311 - AXTable: Row and col index attributes for [table cell]: None, None'`
   - `focused cell as a reader can query it: "focused [table cell] name='' states=['enabled', 'focused', 'selectable', 'selected', 'sensitive', 'showing', 'visible'] attributes=None interfaces=['Accessible', 'Component'] actions=None"`
@@ -96,12 +117,21 @@ Row selection is never spoken: each change rebuilds the table, and the reader he
 - **Scenario:** tables-grid-selection
 - **Act:** data-grid (MultiRow), tables-grid-selection: ArrowDown (selects row 1), Space (unselect), Space (select), Shift+ArrowDown, Ctrl+A
 - **The reader should get:** A toggle is a selected-state change on the cell the reader is on (object:state-changed:selected), which Orca turns into 'selected' / 'not selected'. Select-all is reported.
-- **The reader gets:** No object:state-changed:selected and no object:selection-changed event, ever. Every selection change replaces the whole body (216 nodes; 405 on the first move, headers included), and a brand-new cell node takes focus. So Orca re-reads the cell text: Space gives '1.', Space again gives '1.', Ctrl+A gives '2.', with no selection word. The tree after the act does hold the new state (row 1 selected, then not). The status line never changes either (tables-16). Also, the table's AT-SPI Selection interface reports 0 selected children throughout (tables-15).
+- **The reader got (`261a218f`):** No object:state-changed:selected and no object:selection-changed event, ever. Every selection change replaces the whole body (216 nodes; 405 on the first move, headers included), and a brand-new cell node takes focus. So Orca re-reads the cell text: Space gives '1.', Space again gives '1.', Ctrl+A gives '2.', with no selection word. The tree after the act does hold the new state (row 1 selected, then not). The status line never changes either (tables-16). Also, the table's AT-SPI Selection interface reports 0 selected children throughout (tables-15).
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Orca never saw the Space key (a harness limitation), but its onSelectedChanged path needs a state-changed:selected event on the focused object, which the bus never carried, so a real keyboard would not change this. Windows not measured.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:205-224 and table\_view/body\_pane.rs:256-272 (selection bumps Rebuild versions); tree\_table\_view/body\_pane.rs:246-268
-- **Evidence:**
+- **Now (`c198e4d1`):** A selection change is still never spoken. There is no object:state-changed:selected and no object:selection-changed event; each change rebuilds the body and a new cell node takes focus, so Orca repeats the cell text: Space gives '1.', Space again gives '1.', Ctrl+A gives '2.'. The tree does hold the new selected state.
+- **Measured again:** tables-grid-selection and verify-tables-ttv, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-selection 'ArrowDown selects row 1': FAIL a object:state-changed:selected event from [*] '*'; FAIL a object:selection-changed event from [table] '*'; pass the row '1' has 'selected'`
+  - `pass1 tables-grid-selection 'Space unselects row 1': +135.2 ms object:state-changed:focused 1 [table cell] ''; +273.3 ms ORCA SAYS: '1.'; FAIL Orca says 'not selected'; pass the row '1' lacks 'selected'`
+  - `pass1 tables-grid-selection 'Space selects row 1 again': +280.3 ms ORCA SAYS: '1.'; FAIL evidence: the focus gains of the act (at most 0)`
+  - `pass1 tables-grid-selection 'Ctrl+A selects all': +207.5 ms ORCA SAYS: '2.'; FAIL Orca says 'selected'`
+  - `pass2 tables-grid-selection: the same events and speech ('1.', '1.', '1.', '2.', '2.')`
+  - `pass1 and pass2 verify-tables-ttv 'Space selects the cursor row': object:state-changed:focused 1 [table cell] ''; ORCA SAYS: 'README.'; 28 nodes went defunct in the act`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:205-224 and table\_view/body\_pane.rs:256-272 (selection bumps Rebuild versions); tree\_table\_view/body\_pane.rs:246-268
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: checks 'a object:state-changed:selected event from [*]' FAIL on ArrowDown, Space, Space; 'a object:selection-changed event from [table]' FAIL; 'the row '1' lacks 'selected'' pass after Space (so the state did change)`
   - `r3 Space act: '+95.6 ms object:state-changed:focused 1 [table cell] ''' (a new focus, not a state change); check 'evidence: the focus gains of the act (at most 0)' FAIL`
   - `r3 orca-debug.out: '14:09:10.399590 - SPEECH OUTPUT: '1.'' (Space off), '14:09:14.908672 - SPEECH OUTPUT: '1.'' (Space on), '14:09:24.131253 - SPEECH OUTPUT: '2.'' (Ctrl+A); 'Orca says 'not selected'' FAIL, 'Orca says 'selected'' FAIL`
@@ -123,12 +153,19 @@ Tree table: expanded / collapsed and the level are never spoken on Linux; expand
 - **Scenario:** tables-ttv-tree
 - **Act:** tree-table-view, tables-ttv-tree: ArrowDown to 'docs', ArrowRight (expand), ArrowDown onto 'README.md', ArrowLeft to parent, ArrowLeft (collapse)
 - **The reader should get:** 'docs, collapsed' on arrival, 'expanded' / 'collapsed' when toggled, and the depth ('level 2') on a child
-- **The reader gets:** 'docs.' on arrival, 'docs.' after ArrowRight, 'README.md.' on the child, 'docs.' after ArrowLeft. The children do appear and leave the bus, so the function works, but a reader is told nothing. The widget publishes level/expanded on the row and mirrors them onto the tree-column cell (a11y.rs with\_level/with\_expanded), but accesskit\_atspi\_common 0.20 exports no expandable/expanded state and no level attribute at all. Teksilo adds to the loss: every expand/collapse rebuilds the whole tree table (header row and body pane removed and re-added, 35 to 58 nodes defunct), so the change reaches Orca as focus on a new cell, not as a state change on the cell the reader is on.
+- **The reader got (`261a218f`):** 'docs.' on arrival, 'docs.' after ArrowRight, 'README.md.' on the child, 'docs.' after ArrowLeft. The children do appear and leave the bus, so the function works, but a reader is told nothing. The widget publishes level/expanded on the row and mirrors them onto the tree-column cell (a11y.rs with\_level/with\_expanded), but accesskit\_atspi\_common 0.20 exports no expandable/expanded state and no level attribute at all. Teksilo adds to the loss: every expand/collapse rebuilds the whole tree table (header row and body pane removed and re-added, 35 to 58 nodes defunct), so the change reaches Orca as focus on a new cell, not as a state change on the cell the reader is on.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows by source: accesskit\_windows maps expanded to the ExpandCollapse pattern and level to AriaProperties 'level' (node.rs:500-502, 1485), so NVDA can hear it. macOS by source: accesskit\_macos-0.27.0 has no disclosure/level methods (grep of node.rs finds none).
 - **Severity:** high; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** upstream accesskit\_atspi\_common-0.20.0/src/node.rs:301-386 (state), 415-436 (attributes); Teksilo rebuild at crates/teksilo-widgets/src/tree\_table\_view/widget\_impl.rs:131-182
-- **Evidence:**
+- **Now (`c198e4d1`):** The tree table still says only the name: 'docs.' on arrival, 'docs.' after ArrowRight expands it, 'README.md.' on the child, and 'docs.' after ArrowLeft collapses it. No expanded, collapsed or level is spoken, and expanding still rebuilds the header row and body (35 nodes defunct) so the change arrives as focus on a new cell.
+- **Measured again:** tables-ttv-tree, 2 of 2 runs; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-ttv-tree orca-debug.out: '16:31:13.697818 - SPEECH OUTPUT: 'docs.'' (arrive), '16:31:18.310909 - SPEECH OUTPUT: 'docs.'' (ArrowRight), '16:31:22.609559 - SPEECH OUTPUT: 'README.md.'' (child), '16:31:39.292849 - SPEECH OUTPUT: 'docs.'' (collapse)`
+  - `pass1 tables-ttv-tree 'ArrowRight expands 'docs'': +55.8 ms object:state-changed:focused 1 [table cell] ''; FAIL Orca says 'expanded'; 35 nodes went defunct in the act: {'push button': 2, 'table row': 5, 'gone': 23, 'column header': 3, 'panel': 1, 'table cell': 1}`
+  - `pass2 tables-ttv-tree 'ArrowRight expands 'docs'': +1810.7 ms ORCA SAYS: 'docs.'; 35 nodes went defunct in the act`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:301-389 state() has no Expandable, Expanded or Collapsed; node.rs:417-440 attributes() has no level`
+- **Where (`c198e4d1`):** upstream accesskit\_atspi\_common-0.21.0/src/node.rs:301-389 (state), 417-440 (attributes); Teksilo rebuild at crates/teksilo-widgets/src/tree\_table\_view/widget\_impl.rs:131-182
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: 'Orca says 'collapsed'' FAIL, 'Orca says 'expanded'' FAIL, 'Orca says 'level 1'' / 'level 2'' FAIL; 'the rows on the bus include 'README.md'' pass, 'the children left the bus' pass`
   - `r3 orca-debug.out: '14:13:44.035672 - SPEECH OUTPUT: 'docs.'' (arrive), '14:13:48.727419 - SPEECH OUTPUT: 'docs.'' (ArrowRight), '14:13:52.728374 - SPEECH OUTPUT: 'README.md.'' (child), '14:14:08.250420 - SPEECH OUTPUT: 'docs.'' (ArrowLeft collapse)`
   - `r3 events on ArrowRight: '14:13:48.503815 object:children-changed:add [tree table] -> table row', '14:13:48.508349 object:children-changed:remove [tree table]', '14:13:48.508602 object:state-changed:focused 1 [table cell]'; "35 nodes went defunct in the act: {'<Error>': 23, 'table row': 5, 'column header': 3, 'table cell': 1, 'push button': 2, 'panel': 1}"`
@@ -149,12 +186,23 @@ Sorting, column filters, column resize and column reorder cannot be done from th
 - **Scenario:** tables-grid-headers
 - **Act:** data-grid, tables-grid-headers: read the headers; AT-SPI 'click' on the Name header; tables-grid-tab-trap / tabwalk: Tab order
 - **The reader should get:** A keyboard or screen-reader user can sort by a column (focus a header and press Enter/Space, or a menu), open its filter, resize it and move it
-- **The reader gets:** The header cells are focusable(false) and never a Tab stop, and keyboard.rs has no chord for sort, reorder or resize. The Filter triggers are not focusable either (reachable only by pointer or by a screen reader's own activation). On AT-SPI the \[column header\] offers no action at all, so a screen reader's activation is refused. The resize path Teksilo built for AT (Increment/Decrement on the header) is unreachable on Linux, where AT-SPI exposes only 'click', and on Windows, where UIA RangeValue needs a numeric value the header deliberately omits. Only macOS can perform it.
+- **The reader got (`261a218f`):** The header cells are focusable(false) and never a Tab stop, and keyboard.rs has no chord for sort, reorder or resize. The Filter triggers are not focusable either (reachable only by pointer or by a screen reader's own activation). On AT-SPI the \[column header\] offers no action at all, so a screen reader's activation is refused. The resize path Teksilo built for AT (Increment/Decrement on the header) is unreachable on Linux, where AT-SPI exposes only 'click', and on Windows, where UIA RangeValue needs a numeric value the header deliberately omits. Only macOS can perform it.
 - **Platform:** Linux AT-SPI (measured). Windows and macOS by source (accesskit\_windows node.rs:599-601 RangeValue gated on numeric\_value; accesskit\_macos node.rs:1243-1247 allows accessibilityPerformIncrement when the action is supported).
 - **Severity:** high; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/header.rs:1075 (.focusable(false)), 941-1016 (sort cycle only on PointerUp), 1030-1062 (on\_access\_action handles only Increment/Decrement), 1175-1182 (actions advertised); table\_view/keyboard.rs (no sort/resize/reorder chord); header.rs:555 (Filter trigger)
-- **Evidence:**
+- **Status:** Partly fixed by `de3bb295`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** The column Filter glyphs are now focusable and reachable from the keyboard: Ctrl+Tab out of the table lands on the Name column's Filter ('Name column header. Filter push button.'), Ctrl+Tab again moves to the Email Filter, Enter opens the popover with focus in its field, and Escape returns to the Filter. Tab or Shift+Tab from a Filter goes back into the cells. Sorting, resizing and reordering columns still cannot be done from the keyboard, and the column headers still offer no action on AT-SPI, so a screen reader's click is refused.
+- **Measured again:** tables-grid-headers, tables-grid-filter and tables-grid-tab-trap, 2 of 2 runs each; remeasure-tables-filter-keyboard, 2 of 2 runs (the second with more acts)
+- **Evidence (`c198e4d1`):**
+  - `pass1 and pass2 tables-grid-headers 'read the headers': [column header] 'ID' interfaces=['Accessible', 'Component'] attributes={} actions=[] states=['enabled', 'sensitive', 'showing', 'visible'] description=None`
+  - `pass1 and pass2 tables-grid-headers 'AT-SPI click on the Name header': refused: {'path': '/org/a11y/atspi/accessible/0/79228162698731778330639466496', 'name': 'Name', 'role': 'column header'} offers no action on AT-SPI`
+  - `pass1 tables-grid-filter note: 3 [push button] 'Filter' nodes on the bus, states: [['enabled', 'focusable', 'sensitive', 'showing', 'visible'], ...]`
+  - `pass1 tables-grid-tab-trap 'Ctrl+Tab leaves the table': +34.3 ms object:state-changed:focused 1 [push button] 'Filter'; ORCA SAYS: 'Name column header.' / 'Filter push button.'`
+  - `judge remeasure-tables-filter-keyboard 'Enter on the Filter': +70.1 ms object:state-changed:focused 1 [entry] ''; ORCA SAYS: 'Filter dialog' / 'entry Filter…'`
+  - `judge remeasure-tables-filter-keyboard 'Escape closes the popover': object:state-changed:focused 1 [push button] 'Filter'; ORCA SAYS: 'Filter push button.'`
+  - `judge remeasure-tables-filter-keyboard 'Ctrl+Tab from the Filter': object:state-changed:focused 1 [push button] 'Filter'; ORCA SAYS: 'Email column header.' / 'Filter push button.'`
+  - `judge remeasure-tables-filter-keyboard 'Tab from the Filter': object:state-changed:focused 1 [table cell] ''; ORCA SAYS: 'Avery 0.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/header.rs:1075 (.focusable(false)), 941-1016 (sort cycle only on PointerUp), 1030-1062 (on\_access\_action handles only Increment/Decrement), 1175-1182 (actions advertised); table\_view/keyboard.rs (no sort/resize/reorder chord); header.rs:555 (Filter trigger), made focusable at crates/teksilo-widgets/src/overlay\_trigger.rs:278-294
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: "[column header] 'ID' interfaces=['Accessible', 'Component'] attributes={} actions=[] states=['enabled', 'sensitive', 'showing', 'visible'] description=None"; the same for 'Name'`
   - `3 of 3 runs, AT-SPI click on the Name header: "refused: {'path': '/org/a11y/atspi/accessible/0/79228162698731778330639466496', 'name': 'Name', 'role': 'column header'} offers no action on AT-SPI"`
   - `Filter triggers on the bus: "3 [push button] 'Filter' nodes on the bus, states: [['enabled', 'sensitive', 'showing', 'visible'], ...]" (no 'focusable'); the Tab walk goes '+ Append row push button.' then the table`
@@ -174,12 +222,19 @@ Sort state ('sorted ascending') is never exposed to Orca
 - **Scenario:** tables-grid-headers
 - **Act:** data-grid, tables-grid-headers: read the ID header (the example sorts by ID ascending at launch), then activate 'Reset sort'
 - **The reader should get:** The ID header says it is sorted ascending
-- **The reader gets:** The header's AT-SPI attributes are empty. The widget sets sort\_direction on the header (header.rs:1187-1193), but accesskit\_atspi\_common exports no 'sort' attribute, and Orca 46.1's default script hard-codes isSorted() to False anyway (only its web script reads aria-sort). A Linux reader can never learn the sort order.
+- **The reader got (`261a218f`):** The header's AT-SPI attributes are empty. The widget sets sort\_direction on the header (header.rs:1187-1193), but accesskit\_atspi\_common exports no 'sort' attribute, and Orca 46.1's default script hard-codes isSorted() to False anyway (only its web script reads aria-sort). A Linux reader can never learn the sort order.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows by source: accesskit\_windows writes AriaProperties 'sort=ascending' (node.rs:514-525); whether NVDA speaks it for a UIA DataItem was not measured. macOS: no sort export in accesskit\_macos-0.27.0 (grep).
 - **Severity:** medium; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/table\_view/header.rs:1187-1193 (sets sort\_direction); upstream accesskit\_atspi\_common node.rs:415-436, Orca script\_utilities.py:1039-1046
-- **Evidence:**
+- **Now (`c198e4d1`):** The ID header still publishes no sort on AT-SPI: its attributes are empty. accesskit\_atspi\_common 0.21.0 exports no sort attribute, and Orca 46.1's default script still answers isSorted with False.
+- **Measured again:** tables-grid-headers, 2 of 2 runs; adapter and Orca read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 and pass2 tables-grid-headers 'read the headers': FAIL the 'ID' header publishes its sort: [column header] 'ID' interfaces=['Accessible', 'Component'] attributes={} actions=[] states=['enabled', 'sensitive', 'showing', 'visible'] description=None`
+  - `pass1 and pass2 tables-grid-headers 'activate 'Reset sort'': FAIL the 'ID' header publishes its sort, attributes={}`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:417-440 attributes() has no sort`
+  - `/usr/lib/python3/dist-packages/orca/script_utilities.py:1039-1040: def isSorted(self, obj): return False`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/header.rs:1187-1193 (sets sort\_direction); upstream accesskit\_atspi\_common-0.21.0/src/node.rs:417-440, Orca script\_utilities.py:1039-1046
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: 'the 'ID' header publishes its sort' FAIL: "[column header] 'ID' interfaces=['Accessible', 'Component'] attributes={} actions=[] ..."`
   - `accesskit_atspi_common-0.20.0/src/node.rs:415-436 attributes() carries no sort`
   - `/usr/lib/python3/dist-packages/orca/script_utilities.py:1039-1062: isSorted returns False, so getSortOrderDescription is always ''`
@@ -196,12 +251,20 @@ Applying a column filter tears the popover down and drops focus on the silent ta
 - **Scenario:** tables-grid-filter
 - **Act:** data-grid, tables-grid-filter: AT-SPI click on the Name column's Filter, type 'Blake', press Enter
 - **The reader should get:** The table is filtered, the reader is told (at least where focus is; ideally how many rows are left), and focus stays somewhere meaningful (the field, the header, or a cell)
-- **The reader gets:** Enter commits the filter (filter.rs applies only on Enter). The resulting TableView rebuild destroys the header and the popover inside it, and focus falls to the table container, which has no name and no active descendant, so Orca says nothing ('pauses only'). Orca also drops the field's focus-lost event as defunct. The rows are filtered correctly (only Blake rows on the bus), but a reader has no way to know. Escape afterwards does nothing: the popover is already gone.
+- **The reader got (`261a218f`):** Enter commits the filter (filter.rs applies only on Enter). The resulting TableView rebuild destroys the header and the popover inside it, and focus falls to the table container, which has no name and no active descendant, so Orca says nothing ('pauses only'). Orca also drops the field's focus-lost event as defunct. The rows are filtered correctly (only Blake rows on the bus), but a reader has no way to know. Escape afterwards does nothing: the popover is already gone.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured)
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:120-124 (filters\_signal effect bumps the Rebuild version), 1509-1513; table\_view/filter.rs:188-199
-- **Evidence:**
+- **Now (`c198e4d1`):** Enter in the filter field still rebuilds the table, removes the popover, and drops focus on the unnamed \[table\] with no cursor, so Orca says nothing ('pauses only') and ignores the field's focus-lost event as defunct. The rows are filtered correctly. Escape afterwards does nothing. When a cell cursor existed before, focus lands on a cell and Orca reads it ('Blake 1.').
+- **Measured again:** tables-grid-filter and verify-tables-filter-cursor, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-filter 'Enter applies the filter': +177.4 ms object:state-changed:focused 1 [table] ''; +177.5 ms object:state-changed:focused 0 [entry] ''; FAIL Orca has something to say for the new focus: 16:30:27.862684 SPEECH GENERATOR: Results for [table] are pauses only, Orca said []; pass the table holds only Blake rows`
+  - `pass1 tables-grid-filter orca-debug.out: '16:30:27.866767 - EVENT MANAGER: Ignoring defunct object: [entry]'`
+  - `pass2 tables-grid-filter 'Enter applies the filter': 16:51:35.587167 SPEECH GENERATOR: Results for [table] are pauses only, Orca said []`
+  - `pass1 and pass2 tables-grid-filter 'Escape closes the filter': FAIL focus lands on [*] '*': no focus change on the bus in this act`
+  - `pass1 verify-tables-filter-cursor 'Enter applies the filter (with a cursor set before)': +152.4 ms object:state-changed:focused 1 [table cell] ''; +380.0 ms ORCA SAYS: 'Blake 1.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:120-124 (filters\_signal effect bumps the Rebuild version), 1509-1513; table\_view/filter.rs:188-199
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: 'Orca has something to say for the new focus' FAIL 'Orca said []'; 'the table holds only Blake rows' pass`
   - `r3 events: '+139.1 ms object:state-changed:focused 1 [table] ''' then '+139.1 ms object:state-changed:focused 0 [entry] '''`
   - `r3 orca-debug.out: '14:11:18.174322 - AXTable: [table] is layout only: True (Doesn't support table interface.)', '14:11:18.184077 - SPEECH GENERATOR: Results for [table] are pauses only', '14:11:18.186609 - EVENT MANAGER: Ignoring defunct object: [entry]'`
@@ -221,12 +284,19 @@ The filter popover and its field are unnamed, and every trigger is called 'Filte
 - **Scenario:** tables-grid-filter
 - **Act:** data-grid, tables-grid-filter: activate the Name column's Filter
 - **The reader should get:** A named popover and field ('Filter Name'), and triggers distinguishable by column
-- **The reader gets:** Orca says 'Name column header.' 'dialog' 'entry Filter…'. The \[dialog\] and the \[entry\] have no name, and the field is identified only by its placeholder 'Filter…'. It is a hard-coded English literal, as is the trigger name 'Filter', which all three columns share. The popover also holds an empty, unnamed \[status bar\] (0x0 extents) and a 'Clear' button whose description repeats its name.
+- **The reader got (`261a218f`):** Orca says 'Name column header.' 'dialog' 'entry Filter…'. The \[dialog\] and the \[entry\] have no name, and the field is identified only by its placeholder 'Filter…'. It is a hard-coded English literal, as is the trigger name 'Filter', which all three columns share. The popover also holds an empty, unnamed \[status bar\] (0x0 extents) and a 'Clear' button whose description repeats its name.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows by source: the placeholder maps to UIA HelpText, not Name.
 - **Severity:** medium; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/filter.rs:132 (String::from("Filter…")); header.rs:555 (named(lit!("Filter")))
-- **Evidence:**
+- **Status:** Partly fixed by `de3bb295`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** The popover is now named: Orca says 'Name column header.' 'Filter dialog' 'entry Filter…'. The dialog takes its name 'Filter' from its trigger, which is still the same untranslated 'Filter' on all three columns. The field is still unnamed and known only by its English placeholder 'Filter…', and the popover still holds an empty unnamed \[status bar\] and a 'Clear' button whose description repeats its name.
+- **Measured again:** tables-grid-filter and verify-tables-filter-cursor, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-filter orca-debug.out: '16:30:18.967778 - SPEECH OUTPUT: 'Name column header.'', '16:30:18.967826 - SPEECH OUTPUT: 'Filter dialog'', '16:30:18.967848 - SPEECH OUTPUT: 'entry Filter…''`
+  - `pass1 tables-grid-filter 'activate the Name column's Filter': +90.0 ms object:children-changed:add [column header] 'Name' -> [dialog] 'Filter'; FAIL the tree holds [dialog] 'Name'; FAIL the tree holds [entry] 'Name'`
+  - `pass1 tree after the act: [dialog] 'Filter' {active} > [entry] '' attrs={'placeholder-text': 'Filter…'}, [push button] 'Clear' desc='Clear', [status bar] ''; the Email and Role columns each hold [push button] 'Filter'`
+  - `pass2 tables-grid-filter: +3627.6 ms ORCA SAYS: 'Name column header.' / 'Filter dialog' / 'entry Filter…'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/filter.rs:132 (String::from("Filter…")); header.rs:555 (named(lit!("Filter")))
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: r3 '14:11:09.714216 - SPEECH OUTPUT: 'Name column header.'', '14:11:09.714261 - SPEECH OUTPUT: 'dialog'', '14:11:09.714281 - SPEECH OUTPUT: 'entry Filter…''`
   - `checks 'the tree holds [dialog] 'Name'' FAIL and 'the tree holds [entry] 'Name'' FAIL (r2, r3)`
   - `r2 tree: "'name': '', 'role': 'dialog'", "'name': '', 'role': 'entry', ... 'attributes': {'placeholder-text': 'Filter…'}", "'name': 'Clear', 'role': 'push button', 'description': 'Clear'", "'name': '', 'role': 'status bar', ... 'extents': [303, 156, 0, 0]"`
@@ -245,12 +315,20 @@ An empty TextInput has no Text interface on AT-SPI, so the first character typed
 - **Scenario:** tables-grid-filter
 - **Act:** data-grid, tables-grid-filter: type 'Blake' into the (empty) filter field
 - **The reader should get:** The field supports the Text interface from the start, and each typed character arrives as object:text-changed:insert, the first included
-- **The reader gets:** While the field is empty it exposes only Accessible and Component (no Text or EditableText, so there are no text ranges and no caret). The bus then carries inserts for 'l', 'a', 'k', 'e' at offsets 1-4, and none for the 'B' at offset 0. The text-input code intends to emit an empty run for an empty field (text\_input\_field/widget\_impl.rs:1100-1107), but this field still exposes no Text interface; accesskit\_consumer's supports\_text\_ranges needs at least one TextRun (text.rs:1402-1406). The same entry does have Text/EditableText once it holds text (the F2 cell editor). The cause inside the text-run emission path was not traced further. Other text fields probably share this: across other agents' runs the first entry inserts are also often at offset 1.
+- **The reader got (`261a218f`):** While the field is empty it exposes only Accessible and Component (no Text or EditableText, so there are no text ranges and no caret). The bus then carries inserts for 'l', 'a', 'k', 'e' at offsets 1-4, and none for the 'B' at offset 0. The text-input code intends to emit an empty run for an empty field (text\_input\_field/widget\_impl.rs:1100-1107), but this field still exposes no Text interface; accesskit\_consumer's supports\_text\_ranges needs at least one TextRun (text.rs:1402-1406). The same entry does have Text/EditableText once it holds text (the F2 cell editor). The cause inside the text-run emission path was not traced further. Other text fields probably share this: across other agents' runs the first entry inserts are also often at offset 1.
 - **Platform:** Linux AT-SPI (measured). By source the same consumer gate applies on Windows (Text pattern) and macOS.
 - **Severity:** medium; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-core/src/accessibility/text\_runs.rs:228-296 (TextRunSource::from\_geometry) reached from crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1108-1140
-- **Evidence:**
+- **Now (`c198e4d1`):** The empty filter field now has the Text and EditableText interfaces when it gets focus, and every typed character arrives as object:text-changed:insert, the first included: 'B' at offset 0, then 'l', 'a'. Orca speaks the 'B'.
+- **Measured again:** tables-grid-filter and verify-tables-filter-cursor, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-filter note: in the filter popover: focused [entry] name='' ... attributes={'placeholder-text': 'Filter…'} interfaces=['Accessible', 'Component', 'EditableText', 'Text']`
+  - `pass1 tables-grid-filter 'type 'Blake'': +59.6 ms object:text-changed:insert [entry] '' text='B' (detail1 0), then text='l' (1), text='a' (2), text='ke' (3)`
+  - `pass1 tables-grid-filter orca-debug.out: '16:30:23.732824 - EVENT MANAGER: object:text-changed:insert for [entry] in [application: 'data-grid'] (0, 1, B)'`
+  - `pass1 and pass2 verify-tables-filter-cursor 'type 'Blake'': object:text-changed:insert [entry] '' text='B' at detail1 0`
+  - `pass2 tables-grid-filter: the field's interfaces include 'EditableText' and 'Text'; the typing arrived as one insert text='Blake' at offset 0`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/accessibility/text\_runs.rs:228-300 (TextRunSource::from\_geometry; 269-275 give a geometry with no lines its one line) reached from crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1190-1231
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: "focused [entry] name='' states=['editable', ... 'focused', 'selectable-text', ...] attributes={'placeholder-text': 'Filter…'} interfaces=['Accessible', 'Component'] actions=None"`
   - `3 of 3 runs, inserts on the bus: '"detail1": 1 "text": "l" "detail1": 2 "text": "a" "detail1": 3 "text": "k" "detail1": 4 "text": "e"' (no insert at offset 0 for 'B'; the filter then matched 'Blake', so the B was typed)`
   - `compare the non-empty cell editor: "focused [entry] ... interfaces=['Accessible', 'Component', 'EditableText', 'Text']"`
@@ -268,12 +346,20 @@ Multi-line cells are read only up to their first line
 - **Scenario:** tables-grid-cells
 - **Act:** data-grid: ArrowRight to the Notes column of row 2 ('Onboarded in batch 1.' / 'Pending equipment request.'); tree-table-view: ArrowDown onto 'README.md' (description 'Project overview.' / 'Start here before anything else.')
 - **The reader should get:** The whole cell: 'Onboarded in batch 1. Pending equipment request.'; 'README.md, Project overview. Start here before anything else.'
-- **The reader gets:** 'Onboarded in batch 1.' and 'README.md.' only. Cells carry no name, so Orca picks the first descendant with text as the cell's content (script\_utilities.realActiveDescendant) and reads that one label. The second and third lines are unreachable without flat review.
+- **The reader got (`261a218f`):** 'Onboarded in batch 1.' and 'README.md.' only. Cells carry no name, so Orca picks the first descendant with text as the cell's content (script\_utilities.realActiveDescendant) and reads that one label. The second and third lines are unreachable without flat review.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows by source: a Role::Cell takes no label from its descendants (accesskit\_consumer node.rs:723-735 derives from descendants only for buttons, links, menu items, check/radio boxes), so the focused UIA DataItem has an empty Name; what NVDA says for it was not measured.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/a11y.rs:96-101 (with\_name dead code, no public cell label API); examples/data\_grid/src/main.rs:170-180 and examples/tree\_table\_view/src/main.rs:143-155 compose a cell from several labels
-- **Evidence:**
+- **Now (`c198e4d1`):** A multi-line cell is still read only up to its first line: row 2's Notes cell says 'Onboarded in batch 1.' and the tree table's README.md row says 'README.md.'. The cells have no name, so Orca reads their first label.
+- **Measured again:** tables-grid-cells and tables-ttv-tree, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-cells 'ArrowRight x4 to the Notes column (reading pace)': ORCA SAYS: 'Editor.' / '$35137.' / '● Yes.' / 'Onboarded in batch 1.'; FAIL Orca says 'Pending equipment request'`
+  - `pass1 tables-grid-cells orca-debug.out: '16:30:43.612328 - SPEECH OUTPUT: 'Onboarded in batch 1.''`
+  - `pass2 tables-grid-cells: +9162.0 ms ORCA SAYS: 'Onboarded in batch 1.'; FAIL Orca says 'Pending equipment request'`
+  - `pass1 tables-ttv-tree orca-debug.out: '16:31:22.592780 - AXObject: find_descendant: found [label: 'README.md'] in 0.0028s' then '16:31:22.609559 - SPEECH OUTPUT: 'README.md.''`
+  - `tree-launch: [table cell] '' {selectable} > [label] 'Onboarded in batch 1.', [label] 'Pending equipment request.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/a11y.rs:96-101 (with\_name dead code, no public cell label API); examples/data\_grid/src/main.rs:170-180 and examples/tree\_table\_view/src/main.rs:143-155 compose a cell from several labels
+- **Evidence (`261a218f`):**
   - `r2 and r3: 'Orca says 'Pending equipment request'' FAIL; Orca said 'Editor.' | '$35137.' | '● Yes.' | 'Onboarded in batch 1.' (the act was added after v2, so 2 of 2 runs)`
   - `r3 orca-debug.out: '14:08:19.869046 - AXObject: find_descendant: found [label: 'Onboarded in batch 1.'] in 0.0016s' then '14:08:19.878594 - SPEECH OUTPUT: 'Onboarded in batch 1.''`
   - `tree-table-view 3 of 3: '14:13:52.721394 - AXObject: find_descendant: found [label: 'README.md'] in 0.0018s' / '14:13:52.728374 - SPEECH OUTPUT: 'README.md.''`
@@ -292,12 +378,17 @@ A multi-row TableView does not say it is multi-selectable
 - **Scenario:** tables-grid-headers
 - **Act:** data-grid (TableSelectionMode::MultiRow), tables-grid-headers: read the tree
 - **The reader should get:** The grid carries the multiselectable state (UIA CanSelectMultiple on Windows), as TreeTableView already does
-- **The reader gets:** The \[table\] states are enabled, focusable, sensitive, showing, visible: no multiselectable. TreeTableView sets it (its own comment explains why), TableView does not.
+- **The reader got (`261a218f`):** The \[table\] states are enabled, focusable, sensitive, showing, visible: no multiselectable. TreeTableView sets it (its own comment explains why), TableView does not.
 - **Platform:** Linux AT-SPI (measured); Windows by source (UIA SelectionCanSelectMultiple is read from is\_multiselectable, accesskit\_windows node.rs:1417)
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:1470-1513 (no set\_multiselectable); compare tree\_table\_view/widget\_impl.rs:1539-1557
-- **Evidence:**
+- **Now (`c198e4d1`):** The multi-row data-grid table still does not carry the multiselectable state; the tree table does.
+- **Measured again:** tables-grid-headers, 2 of 2 runs; tabwalk-tree-table-view tree at launch
+- **Evidence (`c198e4d1`):**
+  - `pass1 and pass2 tables-grid-headers 'read the headers': FAIL the tree holds [table] '*': found [table] '' but states=['enabled', 'focusable', 'sensitive', 'showing', 'visible'] description=None`
+  - `pass1 tabwalk-tree-table-view tree-launch.txt: [tree table] '' {focusable,multiselectable}`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:1470-1513 (no set\_multiselectable); compare tree\_table\_view/widget\_impl.rs:1539-1557
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: 'the tree holds [table] '*'' (state multiselectable) FAIL: 'no such node in the tree after the act'`
   - `data-grid tree: "[table] name='' ... states=['enabled', 'focusable', 'sensitive', 'showing', 'visible']"; tree-table-view: "[tree table] ... states=['enabled', 'focusable', 'focused', 'multiselectable', ...]"`
   - `crates/teksilo-widgets/src/table_view/widget_impl.rs:1470-1513 has no set_multiselectable; crates/teksilo-widgets/src/tree_table_view/widget_impl.rs:1539-1557 has it`
@@ -314,12 +405,21 @@ Tab is trapped in the grid: Shift+Tab from the table goes into the first cell, T
 - **Scenario:** tables-grid-tab-trap
 - **Act:** data-grid, tables-grid-tab-trap: Tab into the table, Shift+Tab, Tab, Ctrl+Tab, Shift+Tab, Ctrl+Shift+Tab; tabwalk of data-grid and tree-table-view
 - **The reader should get:** Shift+Tab from the grid returns to '+ Append row'. Tab leaves the grid, or if Tab walks cells the way out is announced (WCAG 2.1.2: a non-standard exit must be advised). The first Tab into the cells lands on the first cell.
-- **The reader gets:** Shift+Tab from the table (no cursor yet) moves into cell (1, ID) and Orca says '1.': the reader cannot go back with Shift+Tab. Plain Tab and Shift+Tab move cell by cell (TabTraversal::CellsThenRows is the default) and stay at the ends, so 1000×7 stops. Only Ctrl+Tab / Ctrl+Shift+Tab leave, and nothing on the table (no name, no description) tells a reader. The first Tab from a cursor-less table skips the first cell: data-grid lands on 'Avery 0' (Name column) and tree-table-view on '768 B' (Size column), because Tab steps from the default (0,0) instead of landing on it, which the arrow keys were fixed to do.
+- **The reader got (`261a218f`):** Shift+Tab from the table (no cursor yet) moves into cell (1, ID) and Orca says '1.': the reader cannot go back with Shift+Tab. Plain Tab and Shift+Tab move cell by cell (TabTraversal::CellsThenRows is the default) and stay at the ends, so 1000×7 stops. Only Ctrl+Tab / Ctrl+Shift+Tab leave, and nothing on the table (no name, no description) tells a reader. The first Tab from a cursor-less table skips the first cell: data-grid lands on 'Avery 0' (Name column) and tree-table-view on '768 B' (Size column), because Tab steps from the default (0,0) instead of landing on it, which the arrow keys were fixed to do.
 - **Platform:** Linux (measured); keyboard behaviour, so the same on every platform
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/keyboard.rs:141-151, 438-462; table\_view/column.rs:186-197
-- **Evidence:**
+- **Now (`c198e4d1`):** Tab is still trapped in the grid. Shift+Tab from the cursor-less table goes into cell (1, ID) and Orca says '1.'; plain Tab and Shift+Tab walk cell by cell; only Ctrl+Tab and Ctrl+Shift+Tab leave, and nothing tells the reader. The first Tab from a cursor-less table still skips the first cell ('Avery 0' in data-grid, '768 B' in the tree table). Ctrl+Tab now lands on the Name column's Filter rather than on Theme.
+- **Measured again:** tables-grid-tab-trap, verify-tables-entry, tabwalk-data-grid and tabwalk-tree-table-view, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-tab-trap 'Shift+Tab from the table': FAIL focus lands on [push button] '+ Append row': +128.5 ms object:state-changed:focused 1 [table cell] ''; +237.5 ms ORCA SAYS: '1.'`
+  - `pass2 tables-grid-tab-trap 'Shift+Tab from the table': +1161.3 ms object:state-changed:focused 1 [table cell] ''; ORCA SAYS: '1.'`
+  - `pass1 tables-grid-tab-trap 'Ctrl+Tab leaves the table': +34.3 ms object:state-changed:focused 1 [push button] 'Filter'; ORCA SAYS: 'Name column header.' / 'Filter push button.'`
+  - `pass1 and pass2 tabwalk-data-grid: 'Tab 5' object:state-changed:focused 1 [table] '' with nothing spoken, 'Tab 6' ORCA SAYS: 'Avery 0.', then one cell per Tab to 'Tab 40' ORCA SAYS: '6.'`
+  - `pass1 and pass2 tabwalk-tree-table-view 'Tab 3': ORCA SAYS: '768 B.'`
+  - `pass1 and pass2 verify-tables-entry 'Shift+Tab again at the first cell': FAIL focus lands on [push button] '+ Append row'; ORCA SAYS: '1.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/keyboard.rs:141-151, 438-462; table\_view/column.rs:186-197
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: 'Shift+Tab from the table' check 'focus lands on [push button] '+ Append row'' FAIL: '+135.8 ms object:state-changed:focused 1 [table cell] ''', r3 '14:10:02.767056 - SPEECH OUTPUT: '1.''`
   - `3 of 3 runs: Ctrl+Tab '14:10:10.433570 - SPEECH OUTPUT: 'Theme combo box.''; Ctrl+Shift+Tab '14:10:18.287582 - SPEECH OUTPUT: '+ Append row push button.''`
   - `tabwalk data-grid: 'Tab 5' focus [table] with nothing spoken, then 'Tab 6' '+111.8 ms object:state-changed:focused 1 [table cell] ''' / 'ORCA SAYS: 'Avery 0.''; tabwalk tree-table-view: 'Tab 3' 'ORCA SAYS: '768 B.''`
@@ -337,12 +437,22 @@ Every cursor or selection move replaces the whole visible table on the bus (216-
 - **Scenario:** tables-grid-pace
 - **Act:** data-grid: any ArrowDown/Right/Tab in MultiRow mode (selection follows the cursor); tree-table-view: any cursor move, expand or collapse
 - **The reader should get:** A cursor move changes the active descendant (and, at most, one or two selected states); nodes survive
-- **The reader gets:** data-grid: first move 405 nodes defunct (every row, cell and label plus all 7 column headers and the 3 Filter buttons), each later selection-changing move 216 (the whole body pane); only Ctrl+Arrow (cursor without selection) replaces nothing. tree-table-view: every cursor move replaces the body (28-58 nodes) even without a selection change, because the body pane rebuilds on focused\_cell too; expand/collapse also replaces the header row. At a reading pace Orca coped (it drops only the departing cell's focus-lost event as defunct, harmless). At key-repeat pace it dropped the intermediate rows as defunct rather than as obsolete, and still read the row the cursor stopped on. This is the mechanism behind tables-03 and tables-04. A reader parked on a header (flat review) loses it on the first move.
+- **The reader got (`261a218f`):** data-grid: first move 405 nodes defunct (every row, cell and label plus all 7 column headers and the 3 Filter buttons), each later selection-changing move 216 (the whole body pane); only Ctrl+Arrow (cursor without selection) replaces nothing. tree-table-view: every cursor move replaces the body (28-58 nodes) even without a selection change, because the body pane rebuilds on focused\_cell too; expand/collapse also replaces the header row. At a reading pace Orca coped (it drops only the departing cell's focus-lost event as defunct, harmless). At key-repeat pace it dropped the intermediate rows as defunct rather than as obsolete, and still read the row the cursor stopped on. This is the mechanism behind tables-03 and tables-04. A reader parked on a header (flat review) loses it on the first move.
 - **Platform:** Linux AT-SPI (measured)
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:120-134 (filter, sort), 136-202 (every model change), 205-224 (selection); table\_view/body\_pane.rs:256-272; tree\_table\_view/body\_pane.rs:246-268 (focused\_cell too)
-- **Evidence:**
+- **Now (`c198e4d1`):** Each selection-changing cursor move still replaces the visible table on the bus: 405 nodes on the first move (headers and Filter buttons included), then 216 per move. Ctrl+Arrow (cursor only) replaces nothing in data-grid. In the tree table every cursor move replaces 28 to 58 nodes, Ctrl+Down included. At key-repeat pace Orca still reads the row the cursor stops on.
+- **Measured again:** tables-grid-cells, tables-grid-pace, verify-tables-ttv, tables-ttv-tree and verify-tables-live, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-cells 'ArrowDown onto the first row': 405 nodes went defunct in the act: {'table cell': 175, 'label': 193, 'column header': 7, 'table row': 26, 'push button': 3, 'panel': 1}`
+  - `pass1 tables-grid-cells 'ArrowDown to row 2': 216 nodes went defunct in the act: {'gone': 213, 'table cell': 1, 'table row': 1, 'panel': 1}`
+  - `pass1 tables-grid-pace 'Ctrl+ArrowDown: move the cursor without selecting': pass at most 10 nodes are replaced; ORCA SAYS: '13.'`
+  - `pass1 tables-grid-pace 'six ArrowDowns at key-repeat pace': ORCA SAYS (CUT): '6.', then ORCA SAYS: 'Data Grid' / '11.'`
+  - `pass1 and pass2 verify-tables-ttv 'Ctrl+ArrowDown: cursor only': 28 nodes went defunct in the act: {'table cell': 12, 'label': 12, 'table row': 4}`
+  - `pass1 and pass2 tables-ttv-tree: 56 defunct on ArrowDown twice, 35 on expand, 51 on ArrowLeft, 58 on collapse`
+  - `pass1 and pass2 verify-tables-live 'PageDown': 216 nodes went defunct in the act`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:120-134 (filter, sort), 136-202 (every model change), 205-224 (selection); table\_view/body\_pane.rs:256-272; tree\_table\_view/body\_pane.rs:246-268 (focused\_cell too)
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: "405 nodes went defunct in the act: {'label': 193, 'table cell': 175, 'table row': 26, 'column header': 7, 'panel': 1, 'push button': 3}" (first ArrowDown), "216 nodes went defunct in the act: {'<Error>': 213, 'table cell': 1, 'panel': 1, 'table row': 1}" (each later move); '222 events on the bus in the act'`
   - `tables-grid-pace 3 of 3: 'Ctrl+ArrowDown: move the cursor without selecting' 'at most 10 nodes are replaced' pass; 'six ArrowDowns at key-repeat pace' said only '11.' with six 'EVENT MANAGER: Ignoring defunct object' lines, e.g. v2 '13:57:49.596626 EVENT MANAGER: Ignoring defunct object: [DEAD]'; 'Orca does not drop the arriving focus as defunct' pass for the stop row`
   - `tree-table-view r3 per act: ArrowDown 28, Down×2 56, ArrowRight on a leaf (column move only) 51, collapse 58 nodes defunct`
@@ -361,12 +471,19 @@ The in-cell editor is an unnamed entry: the reader is not told which field they 
 - **Scenario:** tables-grid-edit
 - **Act:** data-grid, tables-grid-edit: ArrowRight to the Name cell, F2
 - **The reader should get:** 'Name, edit, Avery 0' (the editor labelled by its column)
-- **The reader gets:** 'entry Avery 0 selected.' The \[entry\] has no name and no labelled-by relation. The example's placeholder 'Name' is not exposed while the field holds text, and the column context is already lost on Linux (tables-02). Escape brings focus back to the cell, which is read ('Avery 0.').
+- **The reader got (`261a218f`):** 'entry Avery 0 selected.' The \[entry\] has no name and no labelled-by relation. The example's placeholder 'Name' is not exposed while the field holds text, and the column context is already lost on Linux (tables-02). Escape brings focus back to the cell, which is read ('Avery 0.').
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured)
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/data\_grid/src/main.rs:119-121 (TextInput::new(buffer).placeholder(lit!("Name")), no access\_label); framework improvement point crates/teksilo-widgets/src/table\_view/body\_pane.rs (editor mount)
-- **Evidence:**
+- **Now (`c198e4d1`):** F2 on a Name cell still opens an unnamed entry: Orca says 'entry Avery 0 selected.' with no column name. Escape returns to the cell ('Avery 0.').
+- **Measured again:** tables-grid-edit, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-edit 'F2 starts editing': +171.4 ms object:state-changed:focused 1 [entry] ''; +374.2 ms ORCA SAYS: 'entry Avery 0 selected.'; FAIL the tree holds [entry] 'Name'`
+  - `pass1 note: while editing: focused [entry] name='' states=['editable', 'enabled', 'focusable', 'focused', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] attributes=None interfaces=['Accessible', 'Component', 'EditableText', 'Text']`
+  - `pass2 tables-grid-edit 'F2 starts editing': FAIL the tree holds [entry] 'Name'; the same note while editing`
+  - `pass1 tables-grid-edit 'Escape cancels the edit': ORCA SAYS: 'Avery 0.'`
+- **Where (`c198e4d1`):** examples/data\_grid/src/main.rs:119-121 (TextInput::new(buffer).placeholder(lit!("Name")), no access\_label); framework improvement point crates/teksilo-widgets/src/table\_view/body\_pane.rs (editor mount)
+- **Evidence (`261a218f`):**
   - `3 of 3 runs: r3 '14:12:06.128800 - SPEECH OUTPUT: 'entry Avery 0 selected.''; r2/r3 'the tree holds [entry] 'Name'' FAIL`
   - `note while editing: "focused [entry] name='' states=['editable', 'enabled', 'focusable', 'focused', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] attributes=None interfaces=['Accessible', 'Component', 'EditableText', 'Text']"`
   - ``examples/data_grid/src/main.rs name_column: `TextInput::new(buffer).placeholder(lit!("Name"))` (placeholder only)``
@@ -383,12 +500,19 @@ The grid's Selection interface always reports 0 selected children
 - **Scenario:** tables-grid-selection
 - **Act:** data-grid, tables-grid-selection: after ArrowDown, Space, Shift+Down and Ctrl+A (1000 rows selected)
 - **The reader should get:** AT-SPI Selection (UIA ISelectionProvider.GetSelection) on the grid returns the selected rows
-- **The reader gets:** selected\_children = 0 after every act, including after Ctrl+A. accesskit\_consumer builds a container's selection from items(), which counts only 'item-like' direct filtered children (ListItem, TreeItem, ListBoxOption, …), never Row or Cell, and the rows sit under the body pane anyway. Teksilo's own comment (widget\_impl.rs:1471-1483) says Role::Grid gives NVDA/JAWS GetSelection; the pattern is there, but it is always empty.
+- **The reader got (`261a218f`):** selected\_children = 0 after every act, including after Ctrl+A. accesskit\_consumer builds a container's selection from items(), which counts only 'item-like' direct filtered children (ListItem, TreeItem, ListBoxOption, …), never Row or Cell, and the rows sit under the body pane anyway. Teksilo's own comment (widget\_impl.rs:1471-1483) says Role::Grid gives NVDA/JAWS GetSelection; the pattern is there, but it is always empty.
 - **Platform:** Linux AT-SPI (measured); Windows by source (accesskit\_windows node.rs:1420-1427 GetSelection uses the same items())
 - **Severity:** medium; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:1470-1490 (comment); upstream accesskit\_consumer node.rs:920-936, 1064-1073
-- **Evidence:**
+- **Now (`c198e4d1`):** The grid's AT-SPI Selection interface still reports 0 selected children after every selection act, Ctrl+A included, and the tree table reports 0 while a row is selected. accesskit\_consumer 0.39.1 still counts only item-like children, never rows or cells.
+- **Measured again:** tables-grid-selection and verify-tables-ttv, 2 of 2 runs each; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-selection run.json: the [table] node has selected_children 0 at launch and after ArrowDown, Space, Space, Shift+ArrowDown and Ctrl+A`
+  - `pass2 tables-grid-selection: the same, selected_children 0 after Ctrl+A`
+  - `pass1 and pass2 verify-tables-ttv: the [tree table] has selected_children 0 after 'Space selects the cursor row'`
+  - `accesskit_consumer-0.39.1/src/node.rs:920-936 is_item_like has no Row, Cell or GridCell; node.rs:1064-1073 items(); accesskit_atspi_common-0.21.0/src/node.rs:1302-1310 n_selected_children`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:1470-1490 (comment); upstream accesskit\_consumer-0.39.1/src/node.rs:920-936, 1064-1073; accesskit\_atspi\_common-0.21.0/src/node.rs:1302-1310
+- **Evidence (`261a218f`):**
   - `3 of 3 runs, the [table] node after each selection act: 'launch selected_children= 0', 'ArrowDown selects row 1 selected_children= 0', ... 'Ctrl+A selects all selected_children= 0'`
   - `accesskit_consumer-0.39.0/src/node.rs:920-936 is_item_like (no Row/Cell/GridCell), node.rs:1064-1073 items(); accesskit_atspi_common-0.20.0/src/node.rs:1268-1276 n_selected_children`
   - `a1 selection tree: 'Ctrl+A selects all selected_children= 0'`
@@ -405,12 +529,19 @@ data-grid example: 'Reset sort' and 'Reset filters' do nothing, the status line 
 - **Scenario:** tables-grid-headers
 - **Act:** data-grid, tables-grid-headers: activate 'Reset sort'; tables-grid-selection: Ctrl+A then read the status line; tables-grid-cells: ArrowRight onto Active
 - **The reader should get:** 'Reset sort' restores the ID sort and 'Reset filters' clears the filters; the status line follows the row and selection counts; Active reads 'Yes'/'No'
-- **The reader gets:** Activating 'Reset sort' produces no event at all. Both buttons are built with no handler. The status label is formatted once at build time and stays '1000 rows  ·  selection: 0' after Ctrl+A selects everything. The Active cells read '● Yes.' / '○ No.', so a speech synthesizer says the glyph names.
+- **The reader got (`261a218f`):** Activating 'Reset sort' produces no event at all. Both buttons are built with no handler. The status label is formatted once at build time and stays '1000 rows  ·  selection: 0' after Ctrl+A selects everything. The Active cells read '● Yes.' / '○ No.', so a speech synthesizer says the glyph names.
 - **Platform:** all (example code); measured on Linux
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/data\_grid/src/main.rs:162, 258-262, 271-272
-- **Evidence:**
+- **Now (`c198e4d1`):** In the data-grid example 'Reset sort' still does nothing (only the harness's click is on the bus), the status line still reads '1000 rows  ·  selection: 0' after Ctrl+A, and the Active cells still read '● Yes.' and '○ No.'.
+- **Measured again:** tables-grid-headers, tables-grid-selection, tables-grid-cells and tabwalk-data-grid, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 tables-grid-headers 'activate 'Reset sort'': +5.7 ms == harness:action click [push button] 'Reset sort' and nothing else`
+  - `pass2 tables-grid-headers 'activate 'Reset sort'': +21.1 ms == harness:action click [push button] 'Reset sort' and nothing else`
+  - `pass1 and pass2 tables-grid-selection 'check the status line': FAIL the tree holds [label] 'selection: 1000'`
+  - `pass1 tables-grid-cells 'ArrowRight x4 to the Notes column (reading pace)': ORCA SAYS: '● Yes.'; tabwalk-data-grid 'Tab 10': ORCA SAYS: '○ No.'`
+- **Where (`c198e4d1`):** examples/data\_grid/src/main.rs:162, 258-262, 271-272
+- **Evidence (`261a218f`):**
   - `3 of 3 runs, 'activate 'Reset sort'': only '+4.7 ms == harness:action click [push button] 'Reset sort'' and nothing else on the bus`
   - `3 of 3 runs: 'the tree holds [label] 'selection: 1000'' FAIL; tree label '1000 rows  ·  selection: 0'`
   - `r3: 'ORCA SAYS: '● Yes.''`
@@ -428,12 +559,19 @@ A live model change the reader did not make re-announces the focused cell and st
 - **Scenario:** verify-tables-live
 - **Act:** data-grid, verify-tables-live: cursor on row 1 (ID), then an AT-SPI click on '+ Append row' (appends ID 1001, off screen), twice
 - **The reader should get:** The row is added out of view; the cell the reader is on stays the same node, no focus event, nothing spoken (or, at most, a polite announcement of the change)
-- **The reader gets:** Every append rebuilds the whole TableView: 216 nodes go defunct, a new node for the same cell takes focus, and Orca stops whatever it was saying and says '1.' again. In a table fed by live data (logs, monitoring, a feed) the reader hears the current cell repeated, and interrupted, on every update.
+- **The reader got (`261a218f`):** Every append rebuilds the whole TableView: 216 nodes go defunct, a new node for the same cell takes focus, and Orca stops whatever it was saying and says '1.' again. In a table fed by live data (logs, monitoring, a feed) the reader hears the current cell repeated, and interrupted, on every update.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows/macOS by reasoning only: a new focused node is a focus change on every adapter.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:136-202
-- **Evidence:**
+- **Now (`c198e4d1`):** A row appended by something other than the reader still rebuilds the whole table: 216 nodes go defunct, a new node for the same cell takes focus, and Orca stops what it was saying and says '1.' again, on every append.
+- **Measured again:** verify-tables-live, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-tables-live 'a live append the reader did not make': +119.4 ms object:state-changed:focused 1 [table cell] ''; +329.1 ms ORCA SAYS: '1.'; 216 nodes went defunct in the act: {'gone': 213, 'panel': 1, 'table cell': 1, 'table row': 1}`
+  - `pass1 verify-tables-live orca-debug.out: '16:48:49.105005 - NULL SPEECH: stop' then '16:48:49.105203 - SPEECH OUTPUT: '1.''`
+  - `pass1 verify-tables-live 'a second live append': +115.9 ms object:state-changed:focused 1 [table cell] ''; ORCA SAYS: '1.'; 216 nodes went defunct`
+  - `pass2 verify-tables-live: both appends +199.8 ms and +137.3 ms object:state-changed:focused 1 [table cell] ''; ORCA SAYS: '1.' each time; 216 nodes went defunct each time`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:136-202
+- **Evidence (`261a218f`):**
   - `v1 'a live append ...': '14:30:28.568527 object:state-changed:focused 1 [table cell]', 216 defunct; orca-debug.out '14:30:28.676130 - NULL SPEECH: stop' then '14:30:28.676251 - SPEECH OUTPUT: '1.''`
   - `v2: '14:34:37.944202 NULL SPEECH: stop' / ''1.''; v3: '14:36:41.692516 NULL SPEECH: stop' / ''1.'' (and the same for each second append)`
   - `crates/teksilo-widgets/src/table_view/widget_impl.rs:136-202: any DataChange from the source bumps the root's Rebuild-bound version (v_for_data.set(next) at :200)`
@@ -449,12 +587,18 @@ After a filter is applied or cleared the cursor keeps its index, so the reader l
 - **Scenario:** verify-tables-filter-cursor
 - **Act:** data-grid, verify-tables-filter-cursor: cursor on 'Avery 0', filter Name='Blake' (Enter), ArrowDown to 'Blake 15', open the filter again and Clear it (AT-SPI)
 - **The reader should get:** The reader stays on the row they were on ('Blake 15') or is told where they are and why
-- **The reader gets:** After Enter the cursor is on 'Blake 1' (index 0 of the filtered rows, where 'Avery 0' was); after Clear the reader, who was on 'Blake 15', hears 'Blake 1.' (index 1 of the unfiltered rows). Nothing says the row changed.
+- **The reader got (`261a218f`):** After Enter the cursor is on 'Blake 1' (index 0 of the filtered rows, where 'Avery 0' was); after Clear the reader, who was on 'Blake 15', hears 'Blake 1.' (index 1 of the unfiltered rows). Nothing says the row changed.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured); keyboard/cursor behaviour, so the same elsewhere
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:120-124, 186-196
-- **Evidence:**
+- **Now (`c198e4d1`):** The cursor still keeps its index across a filter change: after the filter is cleared the reader, who was on 'Blake 15', hears 'Blake 1.', with nothing to say the row changed.
+- **Measured again:** verify-tables-filter-cursor, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-tables-filter-cursor orca-debug.out: '16:49:06.944790 - SPEECH OUTPUT: 'Blake 15.'' then, after Clear, '16:49:12.332093 - SPEECH OUTPUT: 'Blake 1.''`
+  - `pass2 verify-tables-filter-cursor orca-debug.out: '17:21:53.145866 - SPEECH OUTPUT: 'Blake 15.'' then '17:21:58.546162 - SPEECH OUTPUT: 'Blake 1.''`
+  - `pass1 verify-tables-filter-cursor 'Enter applies the filter (with a cursor set before)': the cursor was on 'Avery 0'; ORCA SAYS: 'Blake 1.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/table\_view/widget\_impl.rs:120-124, 186-196
+- **Evidence (`261a218f`):**
   - `v1: '14:29:43.549707 SPEECH OUTPUT: 'Blake 15.'' then after Clear '14:29:49.014669 SPEECH OUTPUT: 'Blake 1.''`
   - `v2: 'Blake 15.' then '14:33:58.268949: 'Blake 1.''; v3: 'Blake 15.' then '14:38:40.076424: 'Blake 1.''`
   - `focused_cell is a plain (row, col) index (table_view/keyboard.rs:141-151); the example uses an index SelectionModel (examples/data_grid/src/main.rs:207)`
@@ -470,12 +614,19 @@ An empty cell (a folder's Size) is silent: the reader cannot tell the cursor mov
 - **Scenario:** verify-tables-ttv-empty
 - **Act:** tree-table-view, verify-tables-ttv-empty: cursor on 'docs', Tab to its Size cell
 - **The reader should get:** 'blank' (or the column and an empty value)
-- **The reader gets:** Nothing. Orca stops the previous speech and speaks an empty utterance; the cell holds an empty \[label\] ''. Tab on to Kind then says 'folder.'.
+- **The reader got (`261a218f`):** Nothing. Orca stops the previous speech and speaks an empty utterance; the cell holds an empty \[label\] ''. Tab on to Kind then says 'folder.'.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured)
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/tree\_table\_view/src/main.rs:162-167
-- **Evidence:**
+- **Now (`c198e4d1`):** Tab onto a folder's empty Size cell in the tree table still says nothing: Orca stops the previous speech and speaks an empty utterance. Tab on to Kind says 'folder.'.
+- **Measured again:** verify-tables-ttv-empty, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-tables-ttv-empty 'Tab to the folder's empty Size cell': +24.9 ms object:state-changed:focused 1 [table cell] ''; FAIL Orca has something to say for the new focus: Orca said []`
+  - `pass1 verify-tables-ttv-empty orca-debug.out: '16:49:18.946447 - AXObject: find_descendant: found None in 0.0024s' / '16:49:18.954799 - SPEECH: Speak [[], PAUSE, PAUSE, PAUSE, PAUSE], acss: None'`
+  - `pass2 verify-tables-ttv-empty orca-debug.out: '17:22:15.573859 - SPEECH: Speak [[], PAUSE, PAUSE, PAUSE, PAUSE], acss: None'`
+  - `pass1 verify-tables-ttv-empty 'Tab to the Kind cell': ORCA SAYS: 'folder.'`
+- **Where (`c198e4d1`):** examples/tree\_table\_view/src/main.rs:162-167
+- **Evidence (`261a218f`):**
   - `v3 orca-debug.out '14:37:34.820542 - AXObject: find_descendant: found None' / '14:37:34.828325 - NULL SPEECH: stop' / '14:37:34.828356 - SPEECH: Speak [[], PAUSE, PAUSE, PAUSE, PAUSE]'`
   - `v4 '14:39:58.009232 - SPEECH: Speak [[], PAUSE, PAUSE, PAUSE, PAUSE]'; check 'Orca has something to say for the new focus' FAIL 2 of 2`
   - `tree: "[table cell] '' {focused,selectable,selected} > [label] ''"; examples/tree_table_view/src/main.rs:162-167 renders String::new() for size 0`

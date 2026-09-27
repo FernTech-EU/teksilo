@@ -6,12 +6,16 @@
 On 25 and 26 September 2026 every example in the workspace was run through
 the [reader harness](reader-harness.md) with Orca, on `main` at `261a218f`,
 and what a screen-reader user got was compared with what they should get.
-This page says how that was done, what was fixed, what stays open and what
-was not measured. The pages under it hold every finding, one entry each.
+On 27 September 2026, after the fixes below, every finding was measured
+again on `main` at `c198e4d1`. This page says how both were done, what was
+fixed, what stays open and what was not measured. The pages under it hold
+every finding, one entry each.
 
-Measured with Orca 46.1, KWin 6.6 (`kwin_wayland --virtual`), libatspi 2.52,
-and AccessKit 0.25 through `accesskit_consumer` 0.39,
-`accesskit_atspi_common` 0.20 and `accesskit_unix` 0.23.
+Both were measured with Orca 46.1, KWin 6.6 (`kwin_wayland --virtual`) and
+libatspi 2.52. The sweep ran AccessKit 0.25 through `accesskit_consumer`
+0.39, `accesskit_atspi_common` 0.20 and `accesskit_unix` 0.23; the re-measure
+ran AccessKit 0.25.1 through `accesskit_consumer` 0.39.1,
+`accesskit_atspi_common` 0.21.0 and `accesskit_unix` 0.24.0.
 
 ## How the sweep was done
 
@@ -28,7 +32,8 @@ Every entry says:
 
 - **Act**: what was done, as keys pressed through the compositor, an AT-SPI
   action, or a focus request, which are three different things to a reader;
-- **The reader should get** and **the reader gets**;
+- **The reader should get**, and what **the reader got** on `261a218f`;
+- **Now**: what the reader gets on `c198e4d1`, with the runs that show it;
 - **Platform**: where it was measured. Everything was measured on Linux. A
   claim about Windows or macOS comes from reading `accesskit_windows` 0.35 or
   `accesskit_macos` 0.27 and says so;
@@ -38,25 +43,51 @@ Every entry says:
 - **Layer**: *framework* (Teksilo), *example* (the example's own code),
   *upstream* (AccessKit, libatspi or Orca), *harness*;
 - **Evidence**: event lines from the AT-SPI listener, lines of Orca's debug
-  log, and the source (`file:line`) that explains them. The run directories
-  were not kept; the scenario named in the entry makes them again;
-- **Status**: the commit that fixed it, or why it stays open.
+  log, and the source that explains them, for each of the two commits. The
+  run directories are not in the repository; the scenario named in the entry
+  makes them again;
+- **Where**: the source (`file:line`) behind the finding, at `c198e4d1`; a
+  fixed finding with nothing left to point at keeps its lines at `261a218f`;
+- **Status**: from the re-measure: the commit that fixed it, or why it stays
+  open.
 
 K1 and K2 in some entries are the two fixes made before the sweep, which the
 sweep ran against: K1 names each window by its title (`89a567cd`), K2 is the
 announcer fix (`7545b207`).
 
+## How it was measured again
+
+On `c198e4d1` every scenario the sweep, its verifiers and the fixes had
+written (524), a Tab walk of every example, and one of each widget-catalog
+tab (76 in all) were run twice, each run in its own private session with
+Orca. For each group one agent read every finding against those runs, ran an
+act again where the two passes disagreed or nothing performed it, and
+re-pointed the finding's source lines at `c198e4d1`. A second agent, which had
+not written those conclusions, tried to refute every status that changed and
+checked every citation; where the two disagreed, a third settled it from the
+evidence. The scenarios' checks were written against `261a218f`, and some
+expect a defect that is now fixed, so a scenario's pass or fail was never
+taken as the verdict.
+
+All 126 findings the fixes reported fixed or partly fixed are fixed or partly fixed on `c198e4d1`; none reproduces as the sweep recorded it. 9 that a fix reported fixed are only partly fixed, with what is left in each entry: [menus-01](reader-findings/menus.md#menus-01), [menus-14](reader-findings/menus.md#menus-14), [collections-05](reader-findings/data-collections.md#collections-05), [spinbox-04](reader-findings/spin-box.md#spinbox-04), [password-02](reader-findings/password-field.md#password-02), [tabs-08](reader-findings/tabs.md#tabs-08), [tabs-13](reader-findings/tabs.md#tabs-13), [gridview-03](reader-findings/grid-view.md#gridview-03), [gridview-04](reader-findings/grid-view.md#gridview-04).
+
+26 findings that no fix reported are fixed or partly fixed now, by commit: `0e2b6377`: [toast-05](reader-findings/toast.md#toast-05), [toast-v3](reader-findings/toast.md#toast-v3), [catalog-c-17](reader-findings/catalog-c.md#catalog-c-17); `70183c50`: [catalog-a-12](reader-findings/catalog-a.md#catalog-a-12); `731cc2e1`: [text-16](reader-findings/text.md#text-16); `7545b207`: [catalog-b-08](reader-findings/catalog-b.md#catalog-b-08), [sceneetc-10](reader-findings/scene-and-more.md#sceneetc-10); `8448bb9a`: [catalog-c-M2](reader-findings/catalog-c.md#catalog-c-m2), [gridview-08](reader-findings/grid-view.md#gridview-08), [gridview-v1](reader-findings/grid-view.md#gridview-v1); `85624a1a`: [sceneetc-04](reader-findings/scene-and-more.md#sceneetc-04); `89a567cd`: [sceneetc-13](reader-findings/scene-and-more.md#sceneetc-13); `9636094c`: [menus-13](reader-findings/menus.md#menus-13); `d217ee62`: [docking-06](reader-findings/docking.md#docking-06); `de3bb295`: [toast-11](reader-findings/toast.md#toast-11), [catalog-a-20](reader-findings/catalog-a.md#catalog-a-20), [catalog-b-M1](reader-findings/catalog-b.md#catalog-b-m1), [catalog-c-16](reader-findings/catalog-c.md#catalog-c-16), [tables-05](reader-findings/tables.md#tables-05), [tables-08](reader-findings/tables.md#tables-08), [misc-16](reader-findings/misc.md#misc-16); `f9ffa98c`: [menus-06](reader-findings/menus.md#menus-06), [menus-19](reader-findings/menus.md#menus-19), [menus-v2](reader-findings/menus.md#menus-v2), [winintl-03](reader-findings/windows-i18n.md#winintl-03), [misc-M2](reader-findings/misc.md#misc-m2).
+
+2 are still wrong, but differently from what the sweep recorded; each entry's **Now** says how: [charts-04](reader-findings/charts.md#charts-04), [docking-M2](reader-findings/docking.md#docking-m2).
+
+30 have a new severity, with the reason in the entry: [datetime-07](reader-findings/datetime.md#datetime-07), [menus-01](reader-findings/menus.md#menus-01), [menus-13](reader-findings/menus.md#menus-13), [menus-14](reader-findings/menus.md#menus-14), [toast-02](reader-findings/toast.md#toast-02), [toast-11](reader-findings/toast.md#toast-11), [collections-05](reader-findings/data-collections.md#collections-05), [collections-m3](reader-findings/data-collections.md#collections-m3), [catalog-b-03](reader-findings/catalog-b.md#catalog-b-03), [catalog-b-08](reader-findings/catalog-b.md#catalog-b-08), [catalog-b-19](reader-findings/catalog-b.md#catalog-b-19), [catalog-b-M1](reader-findings/catalog-b.md#catalog-b-m1), [catalog-b-M3](reader-findings/catalog-b.md#catalog-b-m3), [spinbox-04](reader-findings/spin-box.md#spinbox-04), [password-02](reader-findings/password-field.md#password-02), [password-09](reader-findings/password-field.md#password-09), [password-v03](reader-findings/password-field.md#password-v03), [tabs-08](reader-findings/tabs.md#tabs-08), [gridview-03](reader-findings/grid-view.md#gridview-03), [gridview-04](reader-findings/grid-view.md#gridview-04), [gridview-10](reader-findings/grid-view.md#gridview-10), [radioclose-M1](reader-findings/radio-close.md#radioclose-m1), [winintl-03](reader-findings/windows-i18n.md#winintl-03), [winintl-v-03](reader-findings/windows-i18n.md#winintl-v-03), [text-v03](reader-findings/text.md#text-v03), [docking-M2](reader-findings/docking.md#docking-m2), [chrome-09](reader-findings/chrome.md#chrome-09), [chrome-17](reader-findings/chrome.md#chrome-17), [sceneetc-04](reader-findings/scene-and-more.md#sceneetc-04), [sceneetc-10](reader-findings/scene-and-more.md#sceneetc-10).
+
 ## The count
 
 | severity | framework | example | upstream | harness | all | fixed | partly fixed |
 |---|---|---|---|---|---|---|---|
-| critical | 28 | 1 | 5 | 0 | 34 | 27 | 2 |
-| high | 146 | 15 | 26 | 0 | 187 | 66 | 10 |
-| medium | 115 | 21 | 18 | 0 | 154 | 14 | 4 |
-| low | 75 | 26 | 17 | 1 | 119 | 3 | 0 |
-| all | 364 | 63 | 66 | 1 | 494 | 110 | 16 |
+| critical | 24 | 1 | 5 | 0 | 30 | 25 | 0 |
+| high | 132 | 15 | 21 | 0 | 168 | 65 | 8 |
+| medium | 123 | 21 | 20 | 0 | 164 | 13 | 20 |
+| low | 85 | 26 | 20 | 1 | 132 | 5 | 16 |
+| all | 364 | 63 | 66 | 1 | 494 | 108 | 44 |
 
-494 findings: 110 fixed, 16 partly fixed, 253 open in Teksilo, 63 open in the examples' own code, and 51 upstream. Every sweep finding was reproduced by the verifier; 85 of them were corrected on the way, and the verifiers added 80 the sweep had missed. The last page, the examples swept last, was swept on the build with the fixes and has no second agent's pass.
+On `c198e4d1`, of 494 findings: 108 fixed, 44 partly fixed, 233 open in Teksilo, 61 open in the examples' own code, and 47 upstream. A severity is the one the re-measure gave, which is the sweep's unless what the reader gets has changed. Every sweep finding was reproduced by the verifier; 85 of them were corrected on the way, and the verifiers added 80 the sweep had missed. The last page, the examples swept last, was swept on the build with the fixes and has no second agent's pass in the sweep.
 
 ## What was fixed
 
@@ -69,32 +100,32 @@ found a gap, its correction is part of the same commit.
 
 | commit | what a reader gets now | findings | tests written first |
 |---|---|---|---|
-| `7545b207` | Every message the framework's announcer says is heard, not only the first of a session: each comes from a node the platform has never seen. | (before the sweep) | announcer_tests (5), accessibility_impl announcer tests |
-| `89a567cd` | A window is announced by its title, not as a bare "frame". | (before the sweep) | window_name_tests (3) |
+| `7545b207` | Every message the framework's announcer says is heard, not only the first of a session: each comes from a node the platform has never seen. | [catalog-b-08](reader-findings/catalog-b.md#catalog-b-08), [sceneetc-10](reader-findings/scene-and-more.md#sceneetc-10) | announcer_tests (5), accessibility_impl announcer tests |
+| `89a567cd` | A window is announced by its title, not as a bare "frame". | [sceneetc-13](reader-findings/scene-and-more.md#sceneetc-13) | window_name_tests (3) |
 | `276ff85b` | Under Wayland, Orca hears every key typed into a Teksilo window: caret moves are spoken, typing is echoed, Orca's own commands work and the key they use no longer reaches the application. A password field's characters are withheld from the report. | [text-15](reader-findings/text.md#text-15) | key_report tests (49), among them the pairing, Num Lock, lost-release, wire-format and secure-field tests |
 | `5c8ff299` | Checking a box, flipping a switch, choosing a radio button or moving a slider is heard at once, and a slider reads 0.3, not 0.30000001192092896. | [dialogs-09](reader-findings/dialogs.md#dialogs-09), [menus-15](reader-findings/menus.md#menus-15), [collections-02](reader-findings/data-collections.md#collections-02), [catalog-a-02](reader-findings/catalog-a.md#catalog-a-02), [catalog-a-15](reader-findings/catalog-a.md#catalog-a-15), [catalog-c-25](reader-findings/catalog-c.md#catalog-c-25), [radioclose-02](reader-findings/radio-close.md#radioclose-02), [misc-04](reader-findings/misc.md#misc-04), [sceneetc-11](reader-findings/scene-and-more.md#sceneetc-11) | `a_reader_is_told_each_change_as_it_happens`, `a_reader_is_told_each_change_as_it_happens`, `a_reader_is_told_each_change_as_it_happens` and 3 more |
 | `b30770d5` | Tab away from a control whose tooltip is showing stays where Tab put it; a timed-out snackbar no longer pulls focus back. | [dialogs-06](reader-findings/dialogs.md#dialogs-06), [catalog-a-03](reader-findings/catalog-a.md#catalog-a-03), [catalog-c-02](reader-findings/catalog-c.md#catalog-c-02), [chrome-01](reader-findings/chrome.md#chrome-01) | `tabbing_away_from_a_shown_tooltip_keeps_focus_where_tab_put_it`, `tabbing_out_of_a_sticky_tooltip_keeps_focus_where_tab_put_it`, `a_timed_out_snackbar_leaves_focus_where_the_reader_moved_it` |
-| `9636094c` | Each move of a menu's highlight is heard; a menu is named after what opened it; a submenu opened from the keyboard stays open. | [menus-01](reader-findings/menus.md#menus-01), [menus-03](reader-findings/menus.md#menus-03), [menus-08](reader-findings/menus.md#menus-08), [collections-05](reader-findings/data-collections.md#collections-05), [collections-m3](reader-findings/data-collections.md#collections-m3), [catalog-b-03](reader-findings/catalog-b.md#catalog-b-03), [tabs-08](reader-findings/tabs.md#tabs-08), [gridview-04](reader-findings/grid-view.md#gridview-04), [text-v03](reader-findings/text.md#text-v03), [docking-10](reader-findings/docking.md#docking-10), [docking-11](reader-findings/docking.md#docking-11), [chrome-17](reader-findings/chrome.md#chrome-17), [misc-07](reader-findings/misc.md#misc-07) | `every_highlight_move_puts_the_item_in_front_of_the_reader`, `the_reader_follows_the_highlight_past_a_hidden_row`, `each_item_says_where_it_stands_in_its_menu` and 4 more |
-| `85624a1a` | A control a reader has met is heard again when its page, popup, calendar or scrolled region comes back: it reaches the platform under an id the platform never declared dead. | [dialogs-04](reader-findings/dialogs.md#dialogs-04), [datetime-02](reader-findings/datetime.md#datetime-02), [menus-02](reader-findings/menus.md#menus-02), [menus-04](reader-findings/menus.md#menus-04), [menus-05](reader-findings/menus.md#menus-05), [catalog-a-01](reader-findings/catalog-a.md#catalog-a-01), [catalog-a-M1](reader-findings/catalog-a.md#catalog-a-m1), [catalog-a-M2](reader-findings/catalog-a.md#catalog-a-m2), [catalog-b-01](reader-findings/catalog-b.md#catalog-b-01), [catalog-b-M2](reader-findings/catalog-b.md#catalog-b-m2), [catalog-c-10](reader-findings/catalog-c.md#catalog-c-10), [catalog-c-M1](reader-findings/catalog-c.md#catalog-c-m1), [spinbox-01](reader-findings/spin-box.md#spinbox-01), [password-02](reader-findings/password-field.md#password-02), [tabs-01](reader-findings/tabs.md#tabs-01), [tabs-13](reader-findings/tabs.md#tabs-13), [winintl-01](reader-findings/windows-i18n.md#winintl-01), [winintl-v-01](reader-findings/windows-i18n.md#winintl-v-01), [charts-M1](reader-findings/charts.md#charts-m1), [charts-M2](reader-findings/charts.md#charts-m2), [text-02](reader-findings/text.md#text-02), [docking-01](reader-findings/docking.md#docking-01), [docking-M1](reader-findings/docking.md#docking-m1), [console-07](reader-findings/console.md#console-07), [chrome-07](reader-findings/chrome.md#chrome-07), [chrome-v01](reader-findings/chrome.md#chrome-v01), [sceneetc-03](reader-findings/scene-and-more.md#sceneetc-03) | `a_page_shown_again_comes_back_under_ids_the_adapter_never_removed`, `a_control_scrolled_back_into_view_is_a_live_object`, `a_subtree_hidden_and_shown_again_comes_back_live` and 11 more |
+| `9636094c` | Each move of a menu's highlight is heard; a menu is named after what opened it; a submenu opened from the keyboard stays open. | [menus-01](reader-findings/menus.md#menus-01), [menus-03](reader-findings/menus.md#menus-03), [menus-08](reader-findings/menus.md#menus-08), [menus-13](reader-findings/menus.md#menus-13), [collections-05](reader-findings/data-collections.md#collections-05), [collections-m3](reader-findings/data-collections.md#collections-m3), [catalog-b-03](reader-findings/catalog-b.md#catalog-b-03), [tabs-08](reader-findings/tabs.md#tabs-08), [gridview-04](reader-findings/grid-view.md#gridview-04), [text-v03](reader-findings/text.md#text-v03), [docking-10](reader-findings/docking.md#docking-10), [docking-11](reader-findings/docking.md#docking-11), [chrome-17](reader-findings/chrome.md#chrome-17), [misc-07](reader-findings/misc.md#misc-07) | `every_highlight_move_puts_the_item_in_front_of_the_reader`, `the_reader_follows_the_highlight_past_a_hidden_row`, `each_item_says_where_it_stands_in_its_menu` and 4 more |
+| `85624a1a` | A control a reader has met is heard again when its page, popup, calendar or scrolled region comes back: it reaches the platform under an id the platform never declared dead. | [dialogs-04](reader-findings/dialogs.md#dialogs-04), [datetime-02](reader-findings/datetime.md#datetime-02), [menus-02](reader-findings/menus.md#menus-02), [menus-04](reader-findings/menus.md#menus-04), [menus-05](reader-findings/menus.md#menus-05), [catalog-a-01](reader-findings/catalog-a.md#catalog-a-01), [catalog-a-M1](reader-findings/catalog-a.md#catalog-a-m1), [catalog-a-M2](reader-findings/catalog-a.md#catalog-a-m2), [catalog-b-01](reader-findings/catalog-b.md#catalog-b-01), [catalog-b-M2](reader-findings/catalog-b.md#catalog-b-m2), [catalog-c-10](reader-findings/catalog-c.md#catalog-c-10), [catalog-c-M1](reader-findings/catalog-c.md#catalog-c-m1), [spinbox-01](reader-findings/spin-box.md#spinbox-01), [password-02](reader-findings/password-field.md#password-02), [tabs-01](reader-findings/tabs.md#tabs-01), [tabs-13](reader-findings/tabs.md#tabs-13), [winintl-01](reader-findings/windows-i18n.md#winintl-01), [winintl-v-01](reader-findings/windows-i18n.md#winintl-v-01), [charts-M1](reader-findings/charts.md#charts-m1), [charts-M2](reader-findings/charts.md#charts-m2), [text-02](reader-findings/text.md#text-02), [docking-01](reader-findings/docking.md#docking-01), [docking-M1](reader-findings/docking.md#docking-m1), [console-07](reader-findings/console.md#console-07), [chrome-07](reader-findings/chrome.md#chrome-07), [chrome-v01](reader-findings/chrome.md#chrome-v01), [sceneetc-03](reader-findings/scene-and-more.md#sceneetc-03), [sceneetc-04](reader-findings/scene-and-more.md#sceneetc-04) | `a_page_shown_again_comes_back_under_ids_the_adapter_never_removed`, `a_control_scrolled_back_into_view_is_a_live_object`, `a_subtree_hidden_and_shown_again_comes_back_live` and 11 more |
 | `b518253f` | A message raised as focus moves ("Moved to 2 of 3") is heard after the new focus, not cut by it. | [collections-04](reader-findings/data-collections.md#collections-04), [catalog-c-27](reader-findings/catalog-c.md#catalog-c-27), [tabs-03](reader-findings/tabs.md#tabs-03), [gridview-10](reader-findings/grid-view.md#gridview-10), [misc-09](reader-findings/misc.md#misc-09) | `a_message_raised_as_focus_moves_is_heard_after_the_move`, `a_message_raised_as_the_current_row_changes_is_heard_after_the_change`, `a_message_waits_for_focus_to_stop_moving` and 6 more |
 | `98211359` | In every single-line field the caret, the selection, an empty field's first character and a password's mask reach the reader; no plaintext of a password reaches the bus as it is revealed or hidden. | [datetime-04](reader-findings/datetime.md#datetime-04), [menus-v3](reader-findings/menus.md#menus-v3), [newkit-06](reader-findings/new-widgets-kit.md#newkit-06), [newkit-M1](reader-findings/new-widgets-kit.md#newkit-m1), [spinbox-03](reader-findings/spin-box.md#spinbox-03), [password-01](reader-findings/password-field.md#password-01), [password-10](reader-findings/password-field.md#password-10), [tables-09](reader-findings/tables.md#tables-09), [text-09](reader-findings/text.md#text-09), [text-10](reader-findings/text.md#text-10) | `caret_moves_and_selections_reach_the_reader`, `a_caret_move_after_typing_reaches_the_reader`, `an_empty_field_reports_its_first_and_last_character` and 7 more |
 | `c1a553ac` | The Settings page of the widget catalog (any `PrivacySettings` with telemetry) no longer panics in a debug build, and its switches are named by their row. | [catalog-c-01](reader-findings/catalog-c.md#catalog-c-01) | `each_consent_switch_is_named_by_its_row_label`, `a_privacy_settings_row_holds_the_invariants` |
 | `a9f25fd0` | After a live language switch a spin box reads, steps and commits in the new language; a special value ("Auto") is heard as such. | [spinbox-02](reader-findings/spin-box.md#spinbox-02), [spinbox-04](reader-findings/spin-box.md#spinbox-04), [spinbox-05](reader-findings/spin-box.md#spinbox-05) | `a_french_decimal_typed_after_a_switch_to_french_is_the_decimal_point`, `focus_a_step_and_leaving_keep_the_language_switched_to`, `a_grouped_number_stays_french_as_focus_arrives_and_steps` and 2 more |
 | `2d0446fc` | A date field's calendar opens on the field's date and never writes a date the user did not choose; the months and years views work from the keyboard and a reader; the fields are named. | [datetime-01](reader-findings/datetime.md#datetime-01), [datetime-03](reader-findings/datetime.md#datetime-03), [datetime-06](reader-findings/datetime.md#datetime-06), [datetime-07](reader-findings/datetime.md#datetime-07), [datetime-13](reader-findings/datetime.md#datetime-13), [catalog-b-11](reader-findings/catalog-b.md#catalog-b-11) | `the_months_view_never_commits_the_day_it_hides`, `an_arrow_in_the_months_view_is_a_focus_change_to_the_month`, `enter_on_a_month_shows_its_days_and_escape_goes_back_to_them` and 15 more |
-| `de3bb295` | A custom trigger for a dialog, snackbar, wizard or popover is a named Tab stop; a popover with nothing focusable puts the reader on its named dialog, and Tab goes on from there. | [dialogs-01](reader-findings/dialogs.md#dialogs-01), [dialogs-02](reader-findings/dialogs.md#dialogs-02), [dialogs-03](reader-findings/dialogs.md#dialogs-03), [dialogs-v-02](reader-findings/dialogs.md#dialogs-v-02), [catalog-a-11](reader-findings/catalog-a.md#catalog-a-11), [catalog-c-07](reader-findings/catalog-c.md#catalog-c-07), [catalog-c-08](reader-findings/catalog-c.md#catalog-c-08), [catalog-c-11](reader-findings/catalog-c.md#catalog-c-11) | `a_custom_popover_trigger_is_a_tab_stop_heard_as_its_name`, `a_custom_dialog_trigger_puts_focus_on_its_named_button`, `a_custom_button_trigger_opens_its_snackbar_from_the_readers_click` and 9 more |
-| `731cc2e1` | Focus in a rich-text editor, code editor, plain-text editor or log view lands on its text, which can be named (`.label(..)`). | [catalog-b-02](reader-findings/catalog-b.md#catalog-b-02), [text-01](reader-findings/text.md#text-01), [text-07](reader-findings/text.md#text-07), [console-01](reader-findings/console.md#console-01), [console-09](reader-findings/console.md#console-09), [sceneetc-05](reader-findings/scene-and-more.md#sceneetc-05) | `focus_on_a_composite_is_published_on_the_node_that_stands_for_it`, `a_focus_request_on_the_proxy_focuses_the_composite_it_stands_for`, `the_context_menu_the_composite_owns_is_offered_on_its_proxy` and 6 more |
+| `de3bb295` | A custom trigger for a dialog, snackbar, wizard or popover is a named Tab stop; a popover with nothing focusable puts the reader on its named dialog, and Tab goes on from there. | [dialogs-01](reader-findings/dialogs.md#dialogs-01), [dialogs-02](reader-findings/dialogs.md#dialogs-02), [dialogs-03](reader-findings/dialogs.md#dialogs-03), [dialogs-v-02](reader-findings/dialogs.md#dialogs-v-02), [toast-11](reader-findings/toast.md#toast-11), [catalog-a-11](reader-findings/catalog-a.md#catalog-a-11), [catalog-a-20](reader-findings/catalog-a.md#catalog-a-20), [catalog-b-M1](reader-findings/catalog-b.md#catalog-b-m1), [catalog-c-07](reader-findings/catalog-c.md#catalog-c-07), [catalog-c-08](reader-findings/catalog-c.md#catalog-c-08), [catalog-c-11](reader-findings/catalog-c.md#catalog-c-11), [catalog-c-16](reader-findings/catalog-c.md#catalog-c-16), [tables-05](reader-findings/tables.md#tables-05), [tables-08](reader-findings/tables.md#tables-08), [misc-16](reader-findings/misc.md#misc-16) | `a_custom_popover_trigger_is_a_tab_stop_heard_as_its_name`, `a_custom_dialog_trigger_puts_focus_on_its_named_button`, `a_custom_button_trigger_opens_its_snackbar_from_the_readers_click` and 9 more |
+| `731cc2e1` | Focus in a rich-text editor, code editor, plain-text editor or log view lands on its text, which can be named (`.label(..)`). | [catalog-b-02](reader-findings/catalog-b.md#catalog-b-02), [catalog-b-M2](reader-findings/catalog-b.md#catalog-b-m2), [text-01](reader-findings/text.md#text-01), [text-02](reader-findings/text.md#text-02), [text-07](reader-findings/text.md#text-07), [text-16](reader-findings/text.md#text-16), [console-01](reader-findings/console.md#console-01), [console-09](reader-findings/console.md#console-09), [sceneetc-05](reader-findings/scene-and-more.md#sceneetc-05) | `focus_on_a_composite_is_published_on_the_node_that_stands_for_it`, `a_focus_request_on_the_proxy_focuses_the_composite_it_stands_for`, `the_context_menu_the_composite_owns_is_offered_on_its_proxy` and 6 more |
 | `c515e521` | Ctrl+Tab and Ctrl+Shift+Tab leave a code or plain-text editor, and the editor tells a reader so. | [console-02](reader-findings/console.md#console-02) | `ctrl_tab_leaves_the_editor_and_writes_nothing`, `ctrl_shift_tab_leaves_the_editor_backwards_and_dedents_nothing`, `the_editor_tells_a_reader_how_to_leave_it` and 2 more |
-| `f9ffa98c` | Each combo box option is spoken as the arrows reach it, and only Enter commits it. | [menus-07](reader-findings/menus.md#menus-07), [menus-14](reader-findings/menus.md#menus-14), [menus-18](reader-findings/menus.md#menus-18), [catalog-a-09](reader-findings/catalog-a.md#catalog-a-09), [winintl-04](reader-findings/windows-i18n.md#winintl-04), [misc-05](reader-findings/misc.md#misc-05), [misc-22](reader-findings/misc.md#misc-22) | `each_option_is_spoken_as_the_arrows_reach_it`, `a_long_list_is_spoken_option_by_option_too`, `a_long_list_is_one_list_box_of_named_options` and 8 more |
-| `0e2b6377` | A new toast is heard without the others being read again; focus stays where it was; a focused toast does not expire; the bell and log keep focus. | [toast-01](reader-findings/toast.md#toast-01), [toast-02](reader-findings/toast.md#toast-02), [toast-04](reader-findings/toast.md#toast-04), [toast-06](reader-findings/toast.md#toast-06), [toast-07](reader-findings/toast.md#toast-07), [toast-v1](reader-findings/toast.md#toast-v1), [toast-v2](reader-findings/toast.md#toast-v2), [catalog-c-13](reader-findings/catalog-c.md#catalog-c-13), [catalog-c-14](reader-findings/catalog-c.md#catalog-c-14) | `a_rebuild_restores_focus_into_the_innermost_ancestor_that_survived`, `a_new_toast_is_heard_and_the_toasts_already_shown_are_not`, `an_expiring_toast_leaves_the_others_unannounced` and 10 more |
-| `8448bb9a` | A grid view reader stays on its tile when the selection changes, and hears the count in words. | [gridview-01](reader-findings/grid-view.md#gridview-01), [gridview-02](reader-findings/grid-view.md#gridview-02), [gridview-03](reader-findings/grid-view.md#gridview-03) | `an_assistive_focus_on_a_tile_leaves_the_keyboard_on_the_grid`, `a_selection_change_keeps_the_readers_tile_and_changes_its_state`, `the_count_is_said_in_words_with_no_translations_installed` and 4 more |
+| `f9ffa98c` | Each combo box option is spoken as the arrows reach it, and only Enter commits it. | [menus-06](reader-findings/menus.md#menus-06), [menus-07](reader-findings/menus.md#menus-07), [menus-14](reader-findings/menus.md#menus-14), [menus-18](reader-findings/menus.md#menus-18), [menus-19](reader-findings/menus.md#menus-19), [menus-v2](reader-findings/menus.md#menus-v2), [catalog-a-09](reader-findings/catalog-a.md#catalog-a-09), [winintl-03](reader-findings/windows-i18n.md#winintl-03), [winintl-04](reader-findings/windows-i18n.md#winintl-04), [misc-05](reader-findings/misc.md#misc-05), [misc-22](reader-findings/misc.md#misc-22), [misc-M2](reader-findings/misc.md#misc-m2) | `each_option_is_spoken_as_the_arrows_reach_it`, `a_long_list_is_spoken_option_by_option_too`, `a_long_list_is_one_list_box_of_named_options` and 8 more |
+| `0e2b6377` | A new toast is heard without the others being read again; focus stays where it was; a focused toast does not expire; the bell and log keep focus. | [toast-01](reader-findings/toast.md#toast-01), [toast-02](reader-findings/toast.md#toast-02), [toast-04](reader-findings/toast.md#toast-04), [toast-05](reader-findings/toast.md#toast-05), [toast-06](reader-findings/toast.md#toast-06), [toast-07](reader-findings/toast.md#toast-07), [toast-v1](reader-findings/toast.md#toast-v1), [toast-v2](reader-findings/toast.md#toast-v2), [toast-v3](reader-findings/toast.md#toast-v3), [catalog-c-13](reader-findings/catalog-c.md#catalog-c-13), [catalog-c-14](reader-findings/catalog-c.md#catalog-c-14), [catalog-c-17](reader-findings/catalog-c.md#catalog-c-17) | `a_rebuild_restores_focus_into_the_innermost_ancestor_that_survived`, `a_new_toast_is_heard_and_the_toasts_already_shown_are_not`, `an_expiring_toast_leaves_the_others_unannounced` and 10 more |
+| `8448bb9a` | A grid view reader stays on its tile when the selection changes, and hears the count in words. | [catalog-c-M2](reader-findings/catalog-c.md#catalog-c-m2), [gridview-01](reader-findings/grid-view.md#gridview-01), [gridview-02](reader-findings/grid-view.md#gridview-02), [gridview-03](reader-findings/grid-view.md#gridview-03), [gridview-08](reader-findings/grid-view.md#gridview-08), [gridview-v1](reader-findings/grid-view.md#gridview-v1) | `an_assistive_focus_on_a_tile_leaves_the_keyboard_on_the_grid`, `a_selection_change_keeps_the_readers_tile_and_changes_its_state`, `the_count_is_said_in_words_with_no_translations_installed` and 4 more |
 | `e7764b0f` | A screen reader can no longer click or focus the page behind an in-tree modal. | [dialogs-08](reader-findings/dialogs.md#dialogs-08), [radioclose-M1](reader-findings/radio-close.md#radioclose-m1) | `an_at_click_behind_a_modal_does_nothing`, `an_at_focus_request_behind_a_modal_leaves_focus_in_it`, `what_opens_over_the_modal_takes_requests` and 3 more |
 | `27022d39` | A context menu opened with Shift+F10 or the Menu key acts where the caret is; closing a field's own menu does not select the whole field. | [text-v01](reader-findings/text.md#text-v01), [text-v02](reader-findings/text.md#text-v02) | `shift_f10_leaves_the_caret_where_the_reader_put_it`, `shift_f10_keeps_the_selection_the_menu_acts_on`, `shift_f10_leaves_the_caret_where_the_reader_put_it` and 5 more |
-| `70183c50` | The chosen segment of a segmented control is read as checked. | [catalog-a-10](reader-findings/catalog-a.md#catalog-a-10), [charts-08](reader-findings/charts.md#charts-08), [sceneetc-12](reader-findings/scene-and-more.md#sceneetc-12) | `the_reader_hears_the_selected_segment_checked`, `a_segmented_control_raises_no_selection_changed` |
-| `d217ee62` | Taking AccessKit 0.25.1 (accesskit_atspi_common 0.21.0 on Linux): a disabled control is reported disabled, so Orca says it is unavailable. | [menus-12](reader-findings/menus.md#menus-12), [catalog-a-05](reader-findings/catalog-a.md#catalog-a-05), [catalog-b-19](reader-findings/catalog-b.md#catalog-b-19), [password-09](reader-findings/password-field.md#password-09), [tabs-11](reader-findings/tabs.md#tabs-11), [chrome-09](reader-findings/chrome.md#chrome-09) | none: the change is AccessKit's; measured with the harness |
+| `70183c50` | The chosen segment of a segmented control is read as checked. | [catalog-a-10](reader-findings/catalog-a.md#catalog-a-10), [catalog-a-12](reader-findings/catalog-a.md#catalog-a-12), [charts-08](reader-findings/charts.md#charts-08), [sceneetc-12](reader-findings/scene-and-more.md#sceneetc-12) | `the_reader_hears_the_selected_segment_checked`, `a_segmented_control_raises_no_selection_changed` |
+| `d217ee62` | Taking AccessKit 0.25.1 (accesskit_atspi_common 0.21.0 on Linux): a disabled control is reported disabled, so Orca says it is unavailable. | [menus-12](reader-findings/menus.md#menus-12), [catalog-a-05](reader-findings/catalog-a.md#catalog-a-05), [catalog-b-19](reader-findings/catalog-b.md#catalog-b-19), [password-09](reader-findings/password-field.md#password-09), [tabs-11](reader-findings/tabs.md#tabs-11), [docking-06](reader-findings/docking.md#docking-06), [chrome-09](reader-findings/chrome.md#chrome-09) | none: the change is AccessKit's; measured with the harness |
 
 ## What stays open
 
-In Teksilo itself 265 findings stay open or partly fixed: 6 critical, 84 high, 102 medium, 73 low.
+In Teksilo itself 266 findings stay open or partly fixed on `c198e4d1`: 4 critical, 71 high, 111 medium, 80 low.
 
 The critical and high ones in Teksilo itself, by what the reader lacks. Each
 id links to its entry.
@@ -117,7 +148,7 @@ id links to its entry.
   ([toast-10](reader-findings/toast.md#toast-10), [catalog-c-15](reader-findings/catalog-c.md#catalog-c-15)) and a date segment's step ([datetime-05](reader-findings/datetime.md#datetime-05)) are
   silent. Messages raised as focus arrives that are not the announcer's, a
   field's validation message or a message box's own live region, are still
-  cut ([password-03](reader-findings/password-field.md#password-03), [password-05](reader-findings/password-field.md#password-05), [toast-05](reader-findings/toast.md#toast-05)).
+  cut ([password-03](reader-findings/password-field.md#password-03), [password-05](reader-findings/password-field.md#password-05)).
 - **State a reader cannot see.** A list's cursor without a selection
   ([collections-01](reader-findings/data-collections.md#collections-01), [catalog-c-26](reader-findings/catalog-c.md#catalog-c-26)), a row's check box ([collections-03](reader-findings/data-collections.md#collections-03)),
   a table's name, cursor and selection ([tables-01](reader-findings/tables.md#tables-01), [tables-03](reader-findings/tables.md#tables-03)), a chart's
@@ -127,16 +158,15 @@ id links to its entry.
   content, which sits inside its button where Orca's flat review does not
   look ([dialogs-v-01](reader-findings/dialogs.md#dialogs-v-01), [catalog-c-18](reader-findings/catalog-c.md#catalog-c-18)).
 - **No name.** The ColorPicker's channels ([catalog-b-05](reader-findings/catalog-b.md#catalog-b-05), [misc-03](reader-findings/misc.md#misc-03)),
-  ColorEdit ([misc-16](reader-findings/misc.md#misc-16), [catalog-b-M1](reader-findings/catalog-b.md#catalog-b-m1)), the SceneView ([sceneetc-09](reader-findings/scene-and-more.md#sceneetc-09),
-  [sceneetc-04](reader-findings/scene-and-more.md#sceneetc-04)), the dock resize handles ([docking-05](reader-findings/docking.md#docking-05)), ShortcutSettings'
-  buttons ([chrome-13](reader-findings/chrome.md#chrome-13)), InputDialog's field ([newkit-03](reader-findings/new-widgets-kit.md#newkit-03)), the previewer's
-  knobs ([sceneetc-14](reader-findings/scene-and-more.md#sceneetc-14)), a composite tooltip read as "Tooltip"
-  ([catalog-a-04](reader-findings/catalog-a.md#catalog-a-04)); names left in English in a French interface
-  ([catalog-b-09](reader-findings/catalog-b.md#catalog-b-09)).
+  ColorEdit ([misc-16](reader-findings/misc.md#misc-16)), the SceneView ([sceneetc-09](reader-findings/scene-and-more.md#sceneetc-09)), the dock resize
+  handles ([docking-05](reader-findings/docking.md#docking-05)), ShortcutSettings' buttons ([chrome-13](reader-findings/chrome.md#chrome-13)),
+  InputDialog's field ([newkit-03](reader-findings/new-widgets-kit.md#newkit-03)), the previewer's knobs ([sceneetc-14](reader-findings/scene-and-more.md#sceneetc-14)), a
+  composite tooltip read as "Tooltip" ([catalog-a-04](reader-findings/catalog-a.md#catalog-a-04)); names left in English
+  in a French interface ([catalog-b-09](reader-findings/catalog-b.md#catalog-b-09)).
 - **Focus lost or thrown after an action.** Hiding or moving a dock
-  ([docking-02](reader-findings/docking.md#docking-02), [docking-04](reader-findings/docking.md#docking-04), [docking-06](reader-findings/docking.md#docking-06), [docking-M2](reader-findings/docking.md#docking-m2)), pinning or
-  removing a recent project ([misc-10](reader-findings/misc.md#misc-10)), a snackbar timing out ([dialogs-06](reader-findings/dialogs.md#dialogs-06),
-  [dialogs-07](reader-findings/dialogs.md#dialogs-07)), a banner dismissed ([newkit-01](reader-findings/new-widgets-kit.md#newkit-01)), Enter on a corkboard card
+  ([docking-02](reader-findings/docking.md#docking-02), [docking-04](reader-findings/docking.md#docking-04), [docking-06](reader-findings/docking.md#docking-06)), pinning or removing a recent
+  project ([misc-10](reader-findings/misc.md#misc-10)), a snackbar timing out under the reader's focus
+  ([dialogs-07](reader-findings/dialogs.md#dialogs-07)), a banner dismissed ([newkit-01](reader-findings/new-widgets-kit.md#newkit-01)), Enter on a corkboard card
   ([sceneetc-06](reader-findings/scene-and-more.md#sceneetc-06)), Alt+letter on a collapsed menu bar ([chrome-16](reader-findings/chrome.md#chrome-16)).
 - **Text without its structure.** Rich text runs its paragraphs together and
   drops lists, links and formatting ([text-03](reader-findings/text.md#text-03), [text-04](reader-findings/text.md#text-04), [text-05](reader-findings/text.md#text-05),
@@ -149,12 +179,29 @@ id links to its entry.
   the compositor shows no confirmation until later input ([radioclose-01](reader-findings/radio-close.md#radioclose-01));
   SearchField's suggestions are silent ([newkit-02](reader-findings/new-widgets-kit.md#newkit-02)).
 
-Partly fixed, with the part left open in each entry: [dialogs-04](reader-findings/dialogs.md#dialogs-04) (the
-popover's own focus), [catalog-b-03](reader-findings/catalog-b.md#catalog-b-03) and [chrome-17](reader-findings/chrome.md#chrome-17) (one Tab stop per menu
-bar item), [collections-m3](reader-findings/data-collections.md#collections-m3) (context menus stay unnamed), [text-v03](reader-findings/text.md#text-v03),
-[datetime-06](reader-findings/datetime.md#datetime-06), [datetime-07](reader-findings/datetime.md#datetime-07), [toast-02](reader-findings/toast.md#toast-02), [toast-07](reader-findings/toast.md#toast-07), [sceneetc-05](reader-findings/scene-and-more.md#sceneetc-05), and
-[radioclose-M1](reader-findings/radio-close.md#radioclose-m1): a modal that opens as a native window, the default on
-Windows and macOS, still lets a screen reader act on the window behind it.
+Partly fixed: each entry's **Now** says what is left. Most of what is left
+comes from four places:
+
+- A menu opened from the keyboard (Shift+F10, the Menu key, F10) now puts
+  focus on the menu itself, so the reader hears "menu." and the first command
+  only after the first Down ([collections-05](reader-findings/data-collections.md#collections-05), [collections-m3](reader-findings/data-collections.md#collections-m3), [tabs-08](reader-findings/tabs.md#tabs-08),
+  [gridview-04](reader-findings/grid-view.md#gridview-04), [text-v03](reader-findings/text.md#text-v03), [catalog-b-03](reader-findings/catalog-b.md#catalog-b-03)); and a screen reader's own focus
+  request on a menu item still does nothing ([menus-01](reader-findings/menus.md#menus-01)).
+- A screen reader's focus request on a grid view tile is now refused without a
+  word ([gridview-03](reader-findings/grid-view.md#gridview-03)), where it used to split focus from the cursor.
+- A string value, a combo box's or a minimap's, still reaches no AT-SPI client
+  ([menus-06](reader-findings/menus.md#menus-06), [winintl-03](reader-findings/windows-i18n.md#winintl-03), [sceneetc-10](reader-findings/scene-and-more.md#sceneetc-10)). What changed is around it:
+  choosing in a combo box returns focus to it, and each move of the minimap
+  is spoken.
+- A dialog opened from a custom trigger is now named after the trigger, and
+  what it holds is still unnamed or out of reach: the notification log's
+  entries ([catalog-c-16](reader-findings/catalog-c.md#catalog-c-16)) and the table filter's field ([tables-08](reader-findings/tables.md#tables-08)). A
+  ColorEdit's picker is named after its hex code, which does not say it is a
+  colour picker ([misc-16](reader-findings/misc.md#misc-16)).
+
+The others are single findings, among them [radioclose-M1](reader-findings/radio-close.md#radioclose-m1): a modal that opens
+as a native window, the default on Windows and macOS, still lets a screen
+reader act on the window behind it.
 
 In the examples' own code, the most common open finding is a control the
 example leaves unnamed; two are critical or near it: the menus example's
@@ -165,23 +212,26 @@ example's in-window commands do nothing on Linux ([chrome-18](reader-findings/ch
 
 The sweep traced 66 findings to code outside Teksilo. None has been
 reported upstream yet: publishing an issue is a decision for the project, so
-this is the list to report from. Where Teksilo can work round one, the entry
-says so; the node-id fix above is such a work-round.
+this is the list to report from. Each line below was checked again against
+the versions the re-measure ran, and every behaviour in it is still there
+except the disabled state, which `accesskit_atspi_common` 0.21.0 fixed. Where
+Teksilo can work round one, the entry says so; the node-id fix above is such a
+work-round.
 
 | Component | What it does | Findings |
 |---|---|---|
-| `accesskit_atspi_common` 0.20, `adapter.rs:90-111` | A node that leaves the tree is announced defunct, and the same id added again is never announced alive, so libatspi and Orca drop it for good. Teksilo now hands a returning node a new id. | catalog-a-01, catalog-a-M1, catalog-a-M2, spinbox-01, winintl-01, sceneetc-03, tabs-13 |
-| `accesskit_unix` 0.23, `atspi/bus.rs:434-473` | The `Cache` `AddAccessible` / `RemoveAccessible` signals go out with a flattened body, which libatspi 2.52 refuses ("unknown signature"), so a client never learns of a removal. | catalog-b-M3, password-v03, winintl-v-03 |
-| `accesskit_atspi_common` 0.20, `node.rs:300-386` (`state`) | No `EXPANDABLE`/`EXPANDED`, no `HAS_POPUP`, no `INVALID_ENTRY`; a read-only node is `READ_ONLY` without `SENSITIVE`, which Orca reads as "grayed". It also exported a disabled node as `ENABLED` and `SENSITIVE`; 0.21.0 no longer does (AccessKit #788), and Teksilo takes it from `d217ee62`. | menus-17, catalog-a-06, collections-06, catalog-c-20, chrome-08, docking-07, dialogs-11, password-07, spinbox-08, tables-04, misc-19 |
-| `accesskit_atspi_common` 0.20, `node.rs:650-658` | AT-SPI's `Value` interface carries a number only; a combo box's current text value reaches no AT-SPI client. Teksilo could publish it as the combo box's text. | menus-06, catalog-a-07, winintl-03, misc-06, text-14 |
-| `accesskit_atspi_common` 0.20, `node.rs:959-977` | Relations: no `NODE_CHILD_OF` (tree level), `FLOWS_TO` or `MEMBER_OF` (radio group). | collections-m2, radioclose-05, sceneetc-08 |
-| `accesskit_atspi_common` 0.20, `node.rs:415-436`, `494-521` | No `Table`/`TableCell` interfaces and no table attributes, so no header, row, column or size is spoken, and Orca treats a grid as a layout table. | tables-02, tables-04, gridview-09, datetime-10 |
-| `accesskit_atspi_common` 0.20, `node.rs:532-545` | One action only (`click`): custom actions, Expand/Collapse and steps are not offered. | misc-25, gridview-11, sceneetc-27 |
-| `accesskit_atspi_common` 0.20, `node.rs:1097` | No keyboard shortcut or access key. | catalog-b-19, chrome-25 |
-| `accesskit_atspi_common` 0.20, `Selection` | The selection interface counts no selected child where the selected rows or tiles sit below a group. | tables-15, gridview-08 |
-| `accesskit_atspi_common` 0.20, `adapter.rs:184-195`, `287-288` | Text changes are emitted for nodes outside the exported tree; Orca drains them as dead objects and lags. | spinbox-11, misc-24, winintl-15 |
-| `accesskit_atspi_common` 0.20, `adapter.rs:78-80` | A selected item in newly added content raises a selection event that moves Orca's locus of focus off the real focus. | catalog-a-12, catalog-c-06, chrome-24, chrome-v03 |
-| `accesskit_unix` 0.23, `interfaces/accessible.rs:64-67` | The object's `Locale` is always empty; the language is only a text attribute Orca 46.1 does not use. | winintl-16 |
+| `accesskit_atspi_common` 0.21.0, `adapter.rs:49-112` | A node that leaves the tree is announced defunct (`:104-105`), and the same id added again is never announced alive, so libatspi and Orca drop it for good. Teksilo now hands a returning node a new id, which cures these findings on Linux. | catalog-a-01, catalog-a-M1, catalog-a-M2, spinbox-01, winintl-01, sceneetc-03, tabs-13 |
+| `accesskit_unix` 0.24.0, `atspi/bus.rs:441-481` | The `Cache` `AddAccessible` / `RemoveAccessible` signals go out with a flattened body, which libatspi 2.52 refuses ("unknown signature"), so a client never learns of a removal. | catalog-b-M3, password-v03, winintl-v-03 |
+| `accesskit_atspi_common` 0.21.0, `node.rs:301-389` (`state`) | No `EXPANDABLE`/`EXPANDED`, no `HAS_POPUP`, no `INVALID_ENTRY`; a read-only node is `READ_ONLY` without `SENSITIVE`, which Orca reads as "grayed". Until 0.21.0 it also exported a disabled node as `ENABLED` and `SENSITIVE`; 0.21.0 no longer does (AccessKit #788, `:376-382`), and Teksilo takes it from `d217ee62`. | menus-17, catalog-a-06, collections-06, catalog-c-20, chrome-08, docking-07, dialogs-11, password-07, spinbox-08, tables-04, misc-19 |
+| `accesskit_atspi_common` 0.21.0, `node.rs:38-44`, `476-482` | AT-SPI's `Value` interface carries a number only; a combo box's current text value reaches no AT-SPI client. Teksilo could publish it as the combo box's text. | menus-06, catalog-a-07, winintl-03, misc-06, text-14 |
+| `accesskit_atspi_common` 0.21.0, `node.rs:972-989` | Relations: no `NODE_CHILD_OF` (tree level), `FLOWS_TO` or `MEMBER_OF` (radio group). | collections-m2, radioclose-05, sceneetc-08 |
+| `accesskit_atspi_common` 0.21.0, `node.rs:417-440`, `484-514` | No `Table`/`TableCell` interfaces and no table attributes, so no header, row, column or size is spoken, and Orca treats a grid as a layout table. | tables-02, tables-04, gridview-09, datetime-10 |
+| `accesskit_atspi_common` 0.21.0, `node.rs:524-538` | One action only (`click`): custom actions, Expand/Collapse and steps are not offered. | misc-25, gridview-11, sceneetc-27 |
+| `accesskit_atspi_common` 0.21.0, `node.rs:1113` | No keyboard shortcut or access key. | catalog-b-19, chrome-25 |
+| `accesskit_atspi_common` 0.21.0, `node.rs:1302-1310`, with `accesskit_consumer` 0.39.1, `node.rs:920-936` | The selection interface counts no selected child where the selected rows or tiles sit below a group. | tables-15, gridview-08 |
+| `accesskit_atspi_common` 0.21.0, `adapter.rs:184-195`, `286-290` | Text changes are emitted for nodes outside the exported tree; Orca drains them as dead objects and lags. | spinbox-11, misc-24, winintl-15 |
+| `accesskit_atspi_common` 0.21.0, `adapter.rs:79-81` | A selected item in newly added content raises a selection event that moves Orca's locus of focus off the real focus. | catalog-a-12, catalog-c-06, chrome-24, chrome-v03 |
+| `accesskit_unix` 0.24.0, `atspi/interfaces/accessible.rs:65-67` | The object's `Locale` is always empty; the language is only a text attribute Orca 46.1 does not use. | winintl-16 |
 | Orca 46.1 | Its own choices: a virtualized list's position counts only the realized rows; a password field's placeholder, a splitter's value and a tooltip resembling the button's name are not spoken; a rail activity switch is announced only after Space. | collections-09, password-v05, catalog-a-16, chrome-10, docking-09, chrome-23, docking-16, spinbox-v02 |
 | libatspi 2.52 | In a Wayland session it gives Orca its legacy keyboard device, which hears only keys the application reports, and does not use KWin's `KeyboardMonitor`. Teksilo now reports keys. | text-15 |
 
@@ -233,29 +283,43 @@ libatspi's stale cache; an observation raised on every overlay close for a
 focus loss Orca drops harmlessly; and a module that did not import taking the
 whole scenario registry down with it.
 
+The re-measure found the scenarios themselves behind the framework. For 54
+findings the judges marked the scenario's own checks as stale: they were
+written against `261a218f` and expect a defect a fix removed (an unnamed
+dialog, a menu that opens on its first item, a Tab order that has since
+gained a stop), or they pass for a reason unrelated to their name, since
+from `276ff85b` Orca echoes every key, so a check that Orca says something is
+met by the key's name alone. `scenarios/datetime.py` fixes today's date as
+the day of the sweep, and `password-caps-lock-start-on` needs the scenario
+before it to leave Caps Lock on in the same session. A scenario also goes on
+acting after a scene it could not set, so one run pressed Enter on the
+catalog's language button and measured the rest in French. None of this
+was changed for the re-measure, where each verdict rests on what the runs
+show; bringing the scenarios up to date is work on the harness still to do.
+
 ## The findings, by example
 
 - [Dialogs and popovers](reader-findings/dialogs.md): 15 findings, 1 critical, 10 high, 2 medium, 2 low
-- [Date and time pickers](reader-findings/datetime.md): 20 findings, 3 critical, 5 high, 7 medium, 5 low
-- [Menus and drop-downs](reader-findings/menus.md): 22 findings, 3 critical, 8 high, 7 medium, 4 low
-- [Toasts and the notification log](reader-findings/toast.md): 19 findings, 1 critical, 10 high, 5 medium, 3 low
-- [Lists and trees](reader-findings/data-collections.md): 18 findings, 9 high, 6 medium, 3 low
+- [Date and time pickers](reader-findings/datetime.md): 20 findings, 3 critical, 4 high, 8 medium, 5 low
+- [Menus and drop-downs](reader-findings/menus.md): 22 findings, 2 critical, 8 high, 5 medium, 7 low
+- [Toasts and the notification log](reader-findings/toast.md): 19 findings, 1 critical, 9 high, 5 medium, 4 low
+- [Lists and trees](reader-findings/data-collections.md): 18 findings, 7 high, 6 medium, 5 low
 - [Widget catalog, first eight tabs](reader-findings/catalog-a.md): 28 findings, 3 critical, 12 high, 8 medium, 5 low
-- [Widget catalog, middle eight tabs](reader-findings/catalog-b.md): 24 findings, 4 critical, 11 high, 8 medium, 1 low
+- [Widget catalog, middle eight tabs](reader-findings/catalog-b.md): 24 findings, 3 critical, 8 high, 11 medium, 2 low
 - [Widget catalog, last six tabs](reader-findings/catalog-c.md): 37 findings, 1 critical, 14 high, 17 medium, 5 low
 - [New widgets kit](reader-findings/new-widgets-kit.md): 14 findings, 5 high, 4 medium, 5 low
-- [Spin boxes](reader-findings/spin-box.md): 13 findings, 2 critical, 3 high, 3 medium, 5 low
-- [Password field](reader-findings/password-field.md): 19 findings, 8 high, 5 medium, 6 low
-- [Tabs](reader-findings/tabs.md): 18 findings, 1 critical, 5 high, 7 medium, 5 low
+- [Spin boxes](reader-findings/spin-box.md): 13 findings, 2 critical, 2 high, 3 medium, 6 low
+- [Password field](reader-findings/password-field.md): 19 findings, 6 high, 6 medium, 7 low
+- [Tabs](reader-findings/tabs.md): 18 findings, 1 critical, 4 high, 7 medium, 6 low
 - [Tables](reader-findings/tables.md): 19 findings, 5 high, 9 medium, 5 low
-- [Grid view](reader-findings/grid-view.md): 17 findings, 1 critical, 5 high, 5 medium, 6 low
-- [Radio tiles and close confirmation](reader-findings/radio-close.md): 7 findings, 3 high, 1 medium, 3 low
-- [Windows and languages](reader-findings/windows-i18n.md): 22 findings, 2 critical, 4 high, 6 medium, 10 low
+- [Grid view](reader-findings/grid-view.md): 17 findings, 4 high, 5 medium, 8 low
+- [Radio tiles and close confirmation](reader-findings/radio-close.md): 7 findings, 2 high, 2 medium, 3 low
+- [Windows and languages](reader-findings/windows-i18n.md): 22 findings, 2 critical, 2 high, 8 medium, 10 low
 - [Charts](reader-findings/charts.md): 16 findings, 6 high, 5 medium, 5 low
-- [Rich text and input methods](reader-findings/text.md): 22 findings, 2 critical, 12 high, 4 medium, 4 low
-- [Docking](reader-findings/docking.md): 20 findings, 3 critical, 7 high, 5 medium, 5 low
+- [Rich text and input methods](reader-findings/text.md): 22 findings, 2 critical, 11 high, 5 medium, 4 low
+- [Docking](reader-findings/docking.md): 20 findings, 3 critical, 6 high, 6 medium, 5 low
 - [Terminal, log view and code editor](reader-findings/console.md): 21 findings, 2 critical, 8 high, 5 medium, 6 low
-- [Tooltips, menu bars and window chrome](reader-findings/chrome.md): 34 findings, 1 critical, 11 high, 13 medium, 9 low
+- [Tooltips, menu bars and window chrome](reader-findings/chrome.md): 34 findings, 11 high, 13 medium, 10 low
 - [Pickers, files and drag and drop](reader-findings/misc.md): 27 findings, 2 critical, 13 high, 8 medium, 4 low
-- [Scenes, animation and the rest](reader-findings/scene-and-more.md): 32 findings, 2 critical, 13 high, 9 medium, 8 low
+- [Scenes, animation and the rest](reader-findings/scene-and-more.md): 32 findings, 2 critical, 11 high, 11 medium, 8 low
 - [The examples swept last](reader-findings/remaining.md): 10 findings, 5 medium, 5 low

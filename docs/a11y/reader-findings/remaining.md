@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # The examples swept last
 
 Examples: `simple-button`, `automation_bridge_smoke`, `telemetry-plausible`, `telemetry-teksilo`, `web-view-demo`.
 10 findings: 5 medium, 5 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -30,12 +32,23 @@ The window opens with nothing focused: the reader hears only the window's title 
 - **Scenario:** rest-simple-button
 - **Act:** launch (every run); rest-simple-button 'the window as launched, nothing pressed'
 - **The reader should get:** The window opens with focus on its one control, so Orca reads 'Teksilo — Simple Button frame', then 'Click Me push button' and its description; Space activates it at once.
-- **The reader gets:** Focus is on the frame itself: Orca says 'Teksilo — Simple Button frame.' and nothing else. The button is heard only after a first Tab. The same launch reading happens in automation\_bridge\_smoke, telemetry-plausible and web-view-demo (focus on the frame, only the title spoken).
+- **The reader got (`261a218f`):** Focus is on the frame itself: Orca says 'Teksilo — Simple Button frame.' and nothing else. The button is heard only after a first Tab. The same launch reading happens in automation\_bridge\_smoke, telemetry-plausible and web-view-demo (focus on the frame, only the title spoken).
 - **Platform:** all (framework policy, the same on every platform). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-app/src/window\_manager.rs:96-135
-- **Evidence:**
+- **Now (`c198e4d1`):** The window still opens with focus on the frame. Orca says 'Teksilo — Simple Button frame.' and nothing else, and the button is heard only after a first Tab. automation\_bridge\_smoke, telemetry-plausible and web-view-demo open the same way.
+- **Measured again:** rest-simple-button, 2 of 2 runs; the launch of every other job in the group agrees
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-simple-button 'launch': '+263.5 ms object:state-changed:focused 1 [frame] 'Teksilo — Simple Button'' / '+351.4 ms ORCA SAYS: 'Teksilo — Simple Button frame.''`
+  - `pass1 rest-simple-button 'the window as launched, nothing pressed': FAIL 'the window opens with focus on a control, not on the bare frame' - 'after launch focus is on [frame] 'Teksilo — Simple Button''`
+  - `pass2 rest-simple-button 'the window as launched, nothing pressed': the same FAIL`
+  - `pass1 rest-simple-button 'Tab to the button': '+58.3 ms ORCA SAYS: 'Click Me push button.''`
+  - `pass1 rest-telemetry-accept-reject 'launch': '+376.0 ms object:state-changed:focused 1 [frame] 'Teksilo — Plausible telemetry demo'' / '+465.7 ms ORCA SAYS: 'Teksilo — Plausible telemetry demo frame.''`
+  - `pass1 rest-web-view 'launch': '+390.5 ms object:state-changed:focused 1 [frame] 'Teksilo — WebView demo'' / '+510.6 ms ORCA SAYS: 'Teksilo — WebView demo frame.''`
+  - `pass1 rest-bridge-smoke 'launch': '+252.0 ms object:state-changed:focused 1 [frame] 'automation bridge smoke'' / '+307.3 ms ORCA SAYS: 'automation bridge smoke frame.''`
+  - `crates/teksilo-app/src/window_manager.rs:122-136 (unchanged): a plain window takes focus only from widget_initial_focus_hint`
+- **Where (`c198e4d1`):** crates/teksilo-app/src/window\_manager.rs:96-135; examples/simple\_button/src/main.rs:20-31
+- **Evidence (`261a218f`):**
   - `launch: '+280.9 ms object:state-changed:focused 1 [frame] 'Teksilo — Simple Button'' / ORCA SAYS 'Teksilo — Simple Button frame.' (rest-simple-button, 3 of 3 runs; tree and tabwalk runs the same)`
   - `rest-simple-button: FAIL 'the window opens with focus on a control, not on the bare frame' - 'after launch focus is on [frame] 'Teksilo — Simple Button'' (runs 2 and 3; run 1 predates the check and shows the same events)`
   - `crates/teksilo-app/src/window_manager.rs:96-135: initial_window_focus gives a plain (non-modal) window focus only through an explicit Widget::initial_focus_hint; 'There is no first_focusable_descendant fallback on purpose'`
@@ -52,12 +65,20 @@ The debug inspector (F12): closing it from inside drops focus onto the bare wind
 - **Scenario:** rest-simple-button-inspector
 - **Act:** rest-simple-button-inspector: Tab to 'Click Me', F12, Tab (onto 'Pick'), F12
 - **The reader should get:** F12 opens the inspector and says so; every control in it has a name; F12 again closes it and puts focus back where the reader was before entering it ('Click Me').
-- **The reader gets:** Opening it is announced only by Orca reading a page tab that has no focus ('Tree page tab.', the known selection-moves-Orca's-locus pattern of chrome-24). Its toolbar holds a focusable unnamed \[panel\] (the Off/Sel/All bounds SegmentedControl), an unnamed \[slider\] (overlay opacity) and an \[entry\] with only a placeholder ('filter type names…'); the close button is named '×'; 'Overflow ✓' and 'Watch' carry their on/off state only as a check-mark glyph in the name. Closing it with F12 while focus is on 'Pick' drops focus onto the frame: Orca says 'Teksilo — Simple Button frame.'. Debug builds only.
+- **The reader got (`261a218f`):** Opening it is announced only by Orca reading a page tab that has no focus ('Tree page tab.', the known selection-moves-Orca's-locus pattern of chrome-24). Its toolbar holds a focusable unnamed \[panel\] (the Off/Sel/All bounds SegmentedControl), an unnamed \[slider\] (overlay opacity) and an \[entry\] with only a placeholder ('filter type names…'); the close button is named '×'; 'Overflow ✓' and 'Watch' carry their on/off state only as a check-mark glyph in the name. Closing it with F12 while focus is on 'Pick' drops focus onto the frame: Orca says 'Teksilo — Simple Button frame.'. Debug builds only.
 - **Platform:** all (framework; debug builds only). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-inspector/src/shell.rs:359-470; crates/teksilo-inspector/src/tabs/tree.rs:63; crates/teksilo-inspector/src/state.rs:375-377
-- **Evidence:**
+- **Now (`c198e4d1`):** F12 is still announced only as 'Tree page tab.' with no focus change. The bounds control is an unnamed focusable panel, the opacity slider and the filter field are unnamed, the close button is '×', and 'Overflow ✓' carries its state as a glyph. Closing with F12 from 'Pick' still drops focus on the frame: Orca says 'Teksilo — Simple Button frame.'.
+- **Measured again:** rest-simple-button-inspector, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-simple-button-inspector 'F12 opens the inspector': '+82.6 ms object:selection-changed [page tab list] ''' / '+185.8 ms ORCA SAYS: 'Tree page tab.''`
+  - `pass1 rest-simple-button-inspector 'F12 opens the inspector': FAIL 'every focusable control has a name' - 'unnamed focusable [panel] attrs=None', 'unnamed focusable [slider] attrs=None', "unnamed focusable [entry] attrs={'placeholder-text': 'filter type names…'}"`
+  - `pass1 rest-simple-button-inspector tree-F12-opens-the-inspector.txt: "[push button] 'Overflow ✓' {focusable}", "[push button] 'Watch' {focusable}", "[push button] '×' {focusable}"`
+  - `pass1 rest-simple-button-inspector 'F12 closes the inspector': '+11.5 ms object:state-changed:focused 1 [frame] 'Teksilo — Simple Button'' / '+77.0 ms ORCA SAYS: 'Teksilo — Simple Button frame.''; FAIL 'focus lands on [push button] 'Click Me''`
+  - `pass2 rest-simple-button-inspector 'F12 closes the inspector': '+19.1 ms object:state-changed:focused 1 [frame] 'Teksilo — Simple Button'' / '+141.1 ms ORCA SAYS: 'Teksilo — Simple Button frame.''`
+- **Where (`c198e4d1`):** crates/teksilo-inspector/src/shell.rs:359-470; crates/teksilo-inspector/src/tabs/tree.rs:63; crates/teksilo-inspector/src/state.rs:375-377
+- **Evidence (`261a218f`):**
   - `F12 opens: '+179.3 ms object:selection-changed [page tab list] ''' / ORCA SAYS 'Tree page tab.'; no focus change (3 of 3 runs)`
   - `F12 opens: FAIL 'every focusable control has a name' - 'unnamed focusable [panel]', 'unnamed focusable [slider]', 'unnamed focusable [entry] attrs={'placeholder-text': 'filter type names…'}' (runs 2 and 3)`
   - `tree-F12-opens-the-inspector.txt: "[push button] '×' {focusable}", "[push button] 'Overflow ✓' {focusable}"`
@@ -77,12 +98,19 @@ The debug inspector (F12): closing it from inside drops focus onto the bare wind
 - **Scenario:** rest-bridge-smoke
 - **Act:** rest-bridge-smoke 'the window as launched' (tree), tabwalk
 - **The reader should get:** Every control a reader meets can be used, or is not presented as a control. The probe is a test fixture; a reader meeting it should hear it as status text, not a button.
-- **The reader gets:** Flat review reaches '\[push button\] 'input-probe'' with no Action interface, no focusable state and an empty description; Tab never visits it. Its value (the last input it saw) is a string on a Role::Button, which accesskit\_atspi\_common exposes on no interface (Value is numeric only, Text only for text ranges), so a reader cannot read what it observed either.
+- **The reader got (`261a218f`):** Flat review reaches '\[push button\] 'input-probe'' with no Action interface, no focusable state and an empty description; Tab never visits it. Its value (the last input it saw) is a string on a Role::Button, which accesskit\_atspi\_common exposes on no interface (Value is numeric only, Text only for text ranges), so a reader cannot read what it observed either.
 - **Platform:** all (the tree is the same everywhere). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/automation\_bridge\_smoke/src/main.rs:135-142 (example)
-- **Evidence:**
+- **Now (`c198e4d1`):** 'input-probe' is still a push button with no Action interface and no focusable state. Tab never reaches it, and its observed value is exposed on no interface a reader can read.
+- **Measured again:** rest-bridge-smoke, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-bridge-smoke 'the window as launched': FAIL "[push button] 'input-probe' is focusable" - "[push button] 'input-probe' states=['enabled', 'sensitive', 'showing', 'visible']", 'actions=[]', 'description=None'`
+  - `pass2 rest-bridge-smoke 'the window as launched': the same FAIL`
+  - `pass1 rest-bridge-smoke 'Tab from Save': '+6.5 ms ORCA SAYS: 'tab'', no focus event; Save is the only Tab stop`
+  - `accesskit_atspi_common 0.21.0 src/node.rs:476-482: Text only when supports_text_ranges, Value only for a numeric current_value`
+- **Where (`c198e4d1`):** examples/automation\_bridge\_smoke/src/main.rs:135-142 (example); accesskit\_atspi\_common-0.21.0/src/node.rs:476-482
+- **Evidence (`261a218f`):**
   - `tree: "{'name': 'input-probe', 'role': 'push button', 'states': ['enabled', 'sensitive', 'showing', 'visible'], 'interfaces': ['Accessible', 'Component']}"`
   - `rest-bridge-smoke: FAIL '[push button] 'input-probe' is focusable' - "states=['enabled', 'sensitive', 'showing', 'visible']", 'actions=[]' (runs 2 and 3; run 1 recorded the same states)`
   - `tabwalk: Tab 1 -> 'Save push button.', Tabs 2-5 -> only the key echo 'tab'`
@@ -100,12 +128,22 @@ Every consent change and every recorded event rebuilds the whole privacy panel, 
 - **Scenario:** rest-telemetry-accept-reject, rest-telemetry-withdraw, rest-telemetry-inspect
 - **Act:** rest-telemetry-accept-reject 'Space on Accept all'; rest-telemetry-withdraw 'Enter confirms' (Withdraw consent, then OK); rest-telemetry-inspect 'AT-SPI click on Fire 'click' intent while focus is on the accordion'
 - **The reader should get:** After Accept all focus stays on Accept all and the next Tab goes on to 'Inspect data sent'. After confirming Withdraw consent focus returns to Withdraw consent. An event recorded while the reader sits on the Inspect accordion leaves them there, with the accordion as they left it.
-- **The reader gets:** Accept all: focus jumps up to the consent switch ('Anonymous usage metrics toggle button pressed.'), and the next Tab goes to 'Reject all'. Withdraw + OK: focus lands on 'Reject all', and because focus re-enters the panel from the dialog Orca first reads the panel's whole 977-character notice again, then 'Reject all push button.'; nothing says consent was withdrawn. An event recorded while focus is on the Inspect accordion moves focus to the switch ('Anonymous usage metrics toggle button pressed.') and the accordion comes back collapsed, for sighted users too. Reject all and the switch itself only seem to keep focus because they are the first focusable control of the rebuilt panel (the switch is disabled while consent is refused).
+- **The reader got (`261a218f`):** Accept all: focus jumps up to the consent switch ('Anonymous usage metrics toggle button pressed.'), and the next Tab goes to 'Reject all'. Withdraw + OK: focus lands on 'Reject all', and because focus re-enters the panel from the dialog Orca first reads the panel's whole 977-character notice again, then 'Reject all push button.'; nothing says consent was withdrawn. An event recorded while focus is on the Inspect accordion moves focus to the switch ('Anonymous usage metrics toggle button pressed.') and the accordion comes back collapsed, for sighted users too. Reject all and the switch itself only seem to keep focus because they are the first focusable control of the rebuilt panel (the switch is disabled while consent is refused).
 - **Platform:** all (framework; the rebuild and the focus rule are platform-independent). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/privacy\_settings.rs:208-219, 820-823; crates/teksilo-core/src/widget\_tree/layout\_impl.rs:419-434, 892-902
-- **Evidence:**
+- **Now (`c198e4d1`):** Every consent change and every recorded event still rebuilds the whole panel. After Accept all, focus jumps to the consent switch and the next Tab goes to 'Reject all'. After Withdraw consent and OK, Orca rereads the panel's whole notice and lands on 'Reject all'. An event recorded while focus is on the Inspect accordion moves focus to the switch.
+- **Measured again:** rest-telemetry-accept-reject, rest-telemetry-withdraw and rest-telemetry-inspect, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-telemetry-accept-reject 'Space on Accept all': '+41.9 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics'' / '+142.7 ms ORCA SAYS: 'Anonymous usage metrics toggle button pressed.''; FAIL 'focus ends on [push button] 'Accept all''`
+  - `pass1 rest-telemetry-accept-reject 'Tab after Accept all': '+11.6 ms object:state-changed:focused 1 [push button] 'Reject all''; pass2 '+12.6 ms object:state-changed:focused 1 [push button] 'Reject all''`
+  - `pass1 rest-telemetry-withdraw 'Enter confirms': '+50.1 ms object:state-changed:focused 1 [push button] 'Reject all'' / '+306.4 ms ORCA SAYS: 'Privacy & Telemetry settings panel.'', then the notice, then '+306.5 ms ORCA SAYS: 'Reject all push button.''`
+  - `pass2 rest-telemetry-withdraw 'Enter confirms': '+42.8 ms object:state-changed:focused 1 [push button] 'Reject all''`
+  - `pass1 rest-telemetry-inspect 'AT-SPI click on Fire 'click' intent while focus is on the accordion': '+37.7 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics'' / '+150.1 ms ORCA SAYS: 'Anonymous usage metrics toggle button pressed.''; pass2 '+51.7 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics''`
+  - `crates/teksilo-widgets/src/privacy_settings.rs:208-219: consent state and recent_log_revision still bound at BindingLevel::Rebuild; :820-823 the accordion still gets a fresh Signal::new(false)`
+  - `crates/teksilo-core/src/widget_tree/layout_impl.rs:377-402, 425-436, 892-902: focus now goes to the first focusable of the innermost surviving ancestor; the rebuild here destroys every child, so that ancestor is still the PrivacySettings node`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/privacy\_settings.rs:208-219, 820-823; crates/teksilo-core/src/widget\_tree/layout\_impl.rs:377-402, 425-436, 892-902
+- **Evidence (`261a218f`):**
   - `Space on Accept all: '+52.7 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics'', '+53.6 ms object:state-changed:focused 0 [push button] 'Accept all'', then defunct for every old node; ORCA SAYS 'Anonymous usage metrics toggle button pressed.'; FAIL 'focus ends on [push button] 'Accept all'' - 'focus moved to [toggle button] 'Anonymous usage metrics'' (3 of 3 runs)`
   - `Tab after Accept all: FAIL 'focus lands on [push button] 'Inspect data sent'' - '+19.4 ms object:state-changed:focused 1 [push button] 'Reject all'' (3 of 3 runs)`
   - `Enter confirms (Withdraw): '+61.0 ms object:state-changed:focused 1 [push button] 'Reject all'', '[push button] 'Withdraw consent'' defunct; ORCA SAYS 'Privacy & Telemetry settings panel.', a 977-character 'Data is processed by Plausible Insights OÜ; …' (Orca's unrelatedLabels for the panel), 'Reject all push button.' (3 of 3 runs)`
@@ -125,12 +163,18 @@ The consent switch is not described by the line under its label, so moving onto 
 - **Scenario:** rest-telemetry-switch
 - **Act:** rest-telemetry-switch 'Shift+Tab back onto the switch' (from Reject all)
 - **The reader should get:** Orca says 'Anonymous usage metrics toggle button pressed' and then what the switch shares ('Counts of which buttons / menu items / shortcuts are used, plus app version and OS.'), as a sighted user reads beside it.
-- **The reader gets:** 'Anonymous usage metrics toggle button pressed.' and nothing more. The explanation is a separate label; a reader hears it only inside the 977-character block Orca reads as the panel's unrelated labels when focus first enters the panel from outside it.
+- **The reader got (`261a218f`):** 'Anonymous usage metrics toggle button pressed.' and nothing more. The explanation is a separate label; a reader hears it only inside the 977-character block Orca reads as the panel's unrelated labels when focus first enters the panel from outside it.
 - **Platform:** all (framework; description relations are the same tree everywhere). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/privacy\_settings.rs:436-439
-- **Evidence:**
+- **Now (`c198e4d1`):** Moving onto the consent switch still reads only 'Anonymous usage metrics toggle button pressed.'. The line that says what it shares is not attached as its description.
+- **Measured again:** rest-telemetry-switch, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-telemetry-switch 'Shift+Tab back onto the switch': FAIL "Orca says 'Counts of which buttons'" - "Orca said: 'Anonymous usage metrics toggle button pressed.'"`
+  - `pass2 rest-telemetry-switch 'Shift+Tab back onto the switch': '+31.9 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics'' / '+113.2 ms ORCA SAYS: 'Anonymous usage metrics toggle button pressed.''`
+  - `crates/teksilo-widgets/src/privacy_settings.rs:436-439: the toggle gets access_labelled_by(label_id) only; description_id is not linked`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/privacy\_settings.rs:436-439
+- **Evidence (`261a218f`):**
   - `Shift+Tab back onto the switch: '+32.3 ms object:state-changed:focused 1 [toggle button] 'Anonymous usage metrics'' / ORCA SAYS 'Anonymous usage metrics toggle button pressed.'; FAIL "Orca says 'Counts of which buttons'" (2 of 2 runs of the final scenario; the earlier grab_focus return in runs 1-3 read the same)`
   - `tree-launch.txt: "[label] 'Counts of which buttons / menu items / shortcuts are used, plus app version and OS.'" beside "[toggle button] 'Anonymous usage metrics' {focusable}" with no desc`
   - `crates/teksilo-widgets/src/privacy_settings.rs:436-439: label_id and description_id are built, the toggle gets access_labelled_by(label_id) only`
@@ -146,12 +190,20 @@ A web view whose engine failed reads 'Loading… panel' forever: neither loading
 - **Scenario:** rest-web-view
 - **Act:** rest-web-view 'the window as launched' and 'Tab to the web view'; tabwalk Tab 9
 - **The reader should get:** While the page loads the web view is busy; when the engine or the page fails, the reader is told (a description or name saying it could not load), as a sighted user sees the error wash.
-- **The reader gets:** The engine failed to open (wry cannot embed WebKitGTK in a Wayland parent, the session this harness gives it), the widget went to its Error state and paints the StatusError wash, but the node is '\[panel\] 'Loading…'' with no busy state and an empty description, so Orca says 'Loading… panel.' every time. 'Loading…' is the example's own seed for the title signal, which names the node and is never replaced when the engine fails. Enter on it says only the key echo 'return'. A sighted user gets only a colour change too, with no text.
+- **The reader got (`261a218f`):** The engine failed to open (wry cannot embed WebKitGTK in a Wayland parent, the session this harness gives it), the widget went to its Error state and paints the StatusError wash, but the node is '\[panel\] 'Loading…'' with no busy state and an empty description, so Orca says 'Loading… panel.' every time. 'Loading…' is the example's own seed for the title signal, which names the node and is never replaced when the engine fails. Enter on it says only the key echo 'return'. A sighted user gets only a colour change too, with no text.
 - **Platform:** all (framework: the accessibility node is the same on every platform; the failure reproduced here is Linux/Wayland). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-webview/src/lib.rs:1116-1134; crates/teksilo-webview/src/styles/recipe\_web\_view\_style.rs:111-114
-- **Evidence:**
+- **Now (`c198e4d1`):** The web view whose engine failed still reads 'Loading… panel.' with no busy state and an empty description. Nothing tells the reader the page did not load.
+- **Measured again:** rest-web-view and tabwalk-web-view-demo, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-web-view 'the window as launched': FAIL 'the web view tells a reader its page did not load' - "[panel] name='Loading…' description='' states=['enabled', 'focusable', 'sensitive', 'showing', 'visible']"`
+  - `pass1 rest-web-view 'Tab to the web view': '+11.8 ms object:state-changed:focused 1 [panel] 'Loading…'' / '+86.9 ms ORCA SAYS: 'Loading… panel.''`
+  - `pass2 rest-web-view 'Tab to the web view': the same FAIL and speech`
+  - `pass2 tabwalk-web-view-demo Tab 9: '+43.8 ms ORCA SAYS: 'Loading… panel.''`
+  - `pass1 rest-web-view 'Enter on the web view': '+8.6 ms ORCA SAYS: 'return''`
+- **Where (`c198e4d1`):** crates/teksilo-webview/src/lib.rs:1116-1134; crates/teksilo-webview/src/styles/recipe\_web\_view\_style.rs:111-114
+- **Evidence (`261a218f`):**
   - `tree: "{'name': 'Loading…', 'role': 'panel', 'states': ['enabled', 'focusable', 'sensitive', 'showing', 'visible'], 'actions': [{'name': 'click'}]}"`
   - `rest-web-view: FAIL 'the web view tells a reader its page did not load' - "[panel] name='Loading…' description='' states=['enabled', 'focusable', 'focused', 'sensitive', 'showing', 'visible']" (runs 2, 3 and 4)`
   - `tabwalk Tab 9 and rest-web-view 'Tab to the web view': '+11.8 ms object:state-changed:focused 1 [panel] 'Loading…'' / ORCA SAYS 'Loading… panel.' (4 of 4 runs plus the tabwalk)`
@@ -172,12 +224,20 @@ Nothing tells a reader the web view is web content or that Enter goes into the p
 - **Scenario:** rest-web-view
 - **Act:** rest-web-view 'Tab to the web view'
 - **The reader should get:** Focus on the frame says it is a web page (a document or embedded role, or a role description) and that Enter moves into it.
-- **The reader gets:** 'Loading… panel.' (with a working engine it would be '&lt;page title&gt; panel.'). The Enter hint is set only as keyboard\_shortcut, which no AccessKit adapter exports; the action's key binding on AT-SPI is empty. This is the console-06 pattern (a way in or out published only as keyboard\_shortcut), new here for the WebView, together with the role mapping.
+- **The reader got (`261a218f`):** 'Loading… panel.' (with a working engine it would be '&lt;page title&gt; panel.'). The Enter hint is set only as keyboard\_shortcut, which no AccessKit adapter exports; the action's key binding on AT-SPI is empty. This is the console-06 pattern (a way in or out published only as keyboard\_shortcut), new here for the WebView, together with the role mapping.
 - **Platform:** Linux: Role::WebView becomes AT-SPI 'panel' (accesskit\_atspi\_common 0.20 node.rs:288). From source only: accesskit\_windows 0.35 maps it to UIA Document (node.rs:210), accesskit\_macos 0.27 to NSAccessibilityUnknownRole (node.rs:177). None of the three adapters reads keyboard\_shortcut (no occurrence in their sources).
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-webview/src/lib.rs:1116-1134
-- **Evidence:**
+- **Now (`c198e4d1`):** Focus on the web view still reads 'Loading… panel.'. Nothing says it is web content or that Enter goes into the page, and the Enter hint is still published only as keyboard\_shortcut, which no adapter exports.
+- **Measured again:** rest-web-view, 2 of 2 runs; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-web-view 'Tab to the web view': FAIL "Orca says 'Enter'" - "Orca said: 'Loading… panel.'"`
+  - `pass2 rest-web-view 'Tab to the web view': the same FAIL`
+  - `accesskit_atspi_common 0.21.0 src/node.rs:288 'Role::WebView => AtspiRole::Panel'; src/node.rs:1113 the action's key_binding is always ""`
+  - `accesskit_windows 0.35.1 src/node.rs:210 Role::WebView => UIA_DocumentControlTypeId; accesskit_macos 0.27.1 src/node.rs:177 Role::WebView => NSAccessibilityUnknownRole`
+  - `grep for keyboard_shortcut in accesskit_atspi_common 0.21.0, accesskit_unix 0.24.0, accesskit_windows 0.35.1 and accesskit_macos 0.27.1 sources: no match`
+- **Where (`c198e4d1`):** crates/teksilo-webview/src/lib.rs:1116-1134
+- **Evidence (`261a218f`):**
   - `rest-web-view 'Tab to the web view': ORCA SAYS 'Loading… panel.'; FAIL "Orca says 'Enter'" (runs 2, 3 and 4; run 1 said the same without the check)`
   - `tree: "'actions': [{'name': 'click', 'description': '', 'key_binding': ''}]" on the web view node`
   - `crates/teksilo-webview/src/lib.rs:1120 set_role(Role::WebView); :1131-1133 set_keyboard_shortcut("Enter") as the only statement of the Enter step`
@@ -195,12 +255,19 @@ The Browser / Native UI tab switch is two plain buttons: nothing says which tab 
 - **Scenario:** rest-web-view
 - **Act:** rest-web-view 'Space on Native UI', 'Space on Browser'
 - **The reader should get:** The two tabs expose which one is selected, and switching tells the reader what is now shown, as a sighted user sees the body change.
-- **The reader gets:** Both are plain '\[push button\]'s with no selected, pressed or checked state. After Space on Native UI the web view leaves the tree, the native panel's two labels arrive and the status label's text changes ('Native UI tab — WebView subview hidden ✓'), but Orca says nothing at all; the same on the way back.
+- **The reader got (`261a218f`):** Both are plain '\[push button\]'s with no selected, pressed or checked state. After Space on Native UI the web view leaves the tree, the native panel's two labels arrive and the status label's text changes ('Native UI tab — WebView subview hidden ✓'), but Orca says nothing at all; the same on the way back.
 - **Platform:** all (the example's tree). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/web\_view\_demo/src/main.rs:88-96, 151-158 (example)
-- **Evidence:**
+- **Now (`c198e4d1`):** 'Browser' and 'Native UI' are still plain push buttons with no selected, pressed or checked state. Switching changes the status label and the body, and Orca says nothing either way.
+- **Measured again:** rest-web-view, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-web-view 'Space on Native UI': '+36.7 ms object:text-changed:insert [label] 'Browser tab — WebView subview VISIBLE' text='Native UI tab — WebView subview hidden ✓'', no ORCA SAYS; FAIL "Orca says 'Native UI tab'"`
+  - `pass1 rest-web-view 'Space on Browser': '+23.3 ms object:text-changed:insert [label] 'Native UI tab — WebView subview hidden ✓' text='Browser tab — WebView subview VISIBLE'', no ORCA SAYS; FAIL "Orca says 'Browser tab'"`
+  - `pass2 rest-web-view: the same two FAILs`
+  - `pass2 rest-web-view tree-launch.txt: "[push button] 'Browser' {focusable}", "[push button] 'Native UI' {focusable}"`
+- **Where (`c198e4d1`):** examples/web\_view\_demo/src/main.rs:88-96, 151-158 (example)
+- **Evidence (`261a218f`):**
   - `Space on Native UI: '+41.4 ms object:text-changed:delete [label] 'Browser tab — WebView subview VISIBLE'', '+41.5 ms object:text-changed:insert … text='Native UI tab — WebView subview hidden ✓'', no ORCA SAYS in the act; FAIL "Orca says 'Native UI tab'" (4 of 4 runs)`
   - `Space on Browser: the reverse text change, no speech; FAIL "Orca says 'Browser tab'" (4 of 4 runs)`
   - `tree: "[push button] 'Browser' {focusable}", "[push button] 'Native UI' {focusable}"`
@@ -217,12 +284,18 @@ Back, Forward and Reload are named by glyphs ('◀', '▶', '↻')
 - **Scenario:** rest-web-view
 - **Act:** tabwalk Tabs 3-5; rest-web-view 'the window as launched'
 - **The reader should get:** 'Back push button', 'Forward push button', 'Reload push button'.
-- **The reader gets:** Orca sends the bare glyph to the synthesizer: '◀ push button.', '▶ push button.', '↻ push button.'. Whether it is voiced as its Unicode name ('black left-pointing triangle') or dropped depends on the synthesizer's symbol tables; either way the action is not named.
+- **The reader got (`261a218f`):** Orca sends the bare glyph to the synthesizer: '◀ push button.', '▶ push button.', '↻ push button.'. Whether it is voiced as its Unicode name ('black left-pointing triangle') or dropped depends on the synthesizer's symbol tables; either way the action is not named.
 - **Platform:** all (the example's names). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/web\_view\_demo/src/main.rs:99-119 (example)
-- **Evidence:**
+- **Now (`c198e4d1`):** Back, Forward and Reload are still named by glyphs. Orca says '◀ push button.', '▶ push button.' and '↻ push button.'.
+- **Measured again:** rest-web-view and tabwalk-web-view-demo, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-web-view-demo Tabs 3-5: '+47.8 ms ORCA SAYS: '◀ push button.'', '+43.5 ms ORCA SAYS: '▶ push button.'', '+49.5 ms ORCA SAYS: '↻ push button.''`
+  - `pass1 rest-web-view 'the window as launched': FAIL 'every push button is named in words' - "[push button] '◀'", "[push button] '▶'", "[push button] '↻'"`
+  - `pass2 rest-web-view 'the window as launched': the same FAIL`
+- **Where (`c198e4d1`):** examples/web\_view\_demo/src/main.rs:99-119 (example)
+- **Evidence (`261a218f`):**
   - `tabwalk: '+83.4 ms ORCA SAYS: '◀ push button.'', '+65.1 ms ORCA SAYS: '▶ push button.'', '+66.7 ms ORCA SAYS: '↻ push button.''`
   - `rest-web-view: FAIL 'every push button is named in words' - "[push button] '◀'", "'▶'", "'↻'" (runs 2, 3 and 4)`
   - `examples/web_view_demo/src/main.rs:99, 106, 113: Button::new(lit!("◀")), ("▶"), ("↻")`
@@ -238,12 +311,18 @@ An empty label sits in the toolbar (the loading glyph's slot), and the loading s
 - **Scenario:** rest-web-view
 - **Act:** rest-web-view 'the window as launched'
 - **The reader should get:** No empty stop in flat review; loading, when shown, is said in words or as a busy state.
-- **The reader gets:** '\[label\] ''' with 0 characters between the URL and the status line whenever nothing loads; while loading it would read '  ⏳'.
+- **The reader got (`261a218f`):** '\[label\] ''' with 0 characters between the URL and the status line whenever nothing loads; while loading it would read '  ⏳'.
 - **Platform:** all (the example's tree). Measured on Linux AT-SPI/Orca 46.1.
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/web\_view\_demo/src/main.rs:147-148 (example)
-- **Evidence:**
+- **Now (`c198e4d1`):** An empty label with no text still sits between the URL and the status line when nothing loads.
+- **Measured again:** rest-web-view, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 rest-web-view 'the window as launched': FAIL "the tree holds no [label] ''" - "found [label] ''"`
+  - `pass2 rest-web-view 'the window as launched': the same FAIL`
+  - `pass2 rest-web-view tree-launch.txt: "[label] 'app://index.html'", "[label] ''", "[label] 'Browser tab — WebView subview VISIBLE'"`
+- **Where (`c198e4d1`):** examples/web\_view\_demo/src/main.rs:147-148 (example)
+- **Evidence (`261a218f`):**
   - `tree: "{'name': '', 'role': 'label', 'text': {'characters': 0, 'text': ''}}"`
   - `rest-web-view: FAIL "the tree holds no [label] ''" - "found [label] ''" (runs 2, 3 and 4)`
   - `examples/web_view_demo/src/main.rs:147-148: TextWidget::new(lit!("")).text(loading.map(|l| if *l { "  ⏳" } else { "" }))`

@@ -1,32 +1,34 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Password field
 
 Examples: `password-field`.
-19 findings: 8 high, 5 medium, 6 low.
+19 findings: 6 high, 6 medium, 7 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
 | id | example | finding | severity | platform | status |
 |---|---|---|---|---|---|
 | [password-01](#password-01) | password-field | A masked password field says nothing on Linux: no echo while typing, no content on focus, no Text interface | high | Linux | fixed |
-| [password-02](#password-02) | password-field | The Caps Lock warning is heard once per field: every later warning comes from a defunct node and Orca drops it | high | Linux | fixed |
+| [password-02](#password-02) | password-field | The Caps Lock warning is heard once per field: every later warning comes from a defunct node and Orca drops it | medium | Linux | partly fixed |
 | [password-03](#password-03) | password-field | Arriving in a password field with Caps Lock on: the warning comes before the focus event and Orca cuts it; the field's own focus speech never mentions it | high | Linux | open |
 | [password-04](#password-04) | password-field | Caps Lock state is guessed by counting presses: when Caps Lock is on at launch the warning is inverted | high | Linux | open |
 | [password-05](#password-05) | password-field | A validation message raised by leaving a field is cut by Orca every time | high | Linux | open |
 | [password-06](#password-06) | password-field | An empty, untouched password field is flagged invalid as soon as focus leaves it, even for its own reveal toggle | medium | Linux | open |
 | [password-07](#password-07) | password-field | The invalid state Teksilo sets on the field reaches no platform (no invalid-entry state) | low | Linux | upstream |
 | [password-08](#password-08) | password-field | RevealMode::Hold exposes a 'button' no reader can operate: no action, not focusable, skipped by Tab | medium | Linux | open |
-| [password-09](#password-09) | password-field | The disabled Sign in button reads as enabled and sensitive on AT-SPI, and a reader's focus request lands on it | medium | Linux | partly fixed |
+| [password-09](#password-09) | password-field | The disabled Sign in button reads as enabled and sensitive on AT-SPI, and a reader's focus request lands on it | low | Linux | partly fixed |
 | [password-10](#password-10) | password-field | The first character typed or pasted into an empty text field is never reported: an empty field has no text run and no Text interface | medium | Linux | fixed |
 | [password-11](#password-11) | password-field | The Username field has no name: Orca reads its placeholder as if it were the field's content | high | Linux | open (example) |
 | [password-12](#password-12) | password-field | The showcase captions duplicate the fields' names and are read as one run-on sentence on entering the panel | low | Linux | open (example) |
 | [password-13](#password-13) | password-field | Every reveal toggle has the same name and no relation to its field | low | Linux | open |
 | [password-v01](#password-v01) | password-field | On macOS the Caps Lock warning never appears: winit delivers no KeyboardInput for Caps Lock there, and that is Teksilo's only source | high | macOS | open |
 | [password-v02](#password-v02) | password-field | Confirm password keeps reading 'Passwords don't match' after Password is changed to match, while Sign in has become enabled | medium | Linux | open |
-| [password-v03](#password-v03) | password-field | libatspi discards every AccessKit cache signal (wrong D-Bus signature), which is why a re-added node stays defunct to Orca | high | Linux | upstream |
+| [password-v03](#password-v03) | password-field | libatspi discards every AccessKit cache signal (wrong D-Bus signature), which is why a re-added node stays defunct to Orca | medium | Linux | upstream |
 | [password-v04](#password-v04) | password-field | Every field carries an empty, unnamed status-bar node (its idle ValidationStrip), and Orca's 'read status bar' finds the first of them | low | Linux | open |
 | [password-v05](#password-v05) | password-field | Orca never speaks a password field's placeholder, so the hint 'At least 8 characters' is never heard on Linux | low | Linux | upstream |
 | [password-v06](#password-v06) | password-field | RevealWhileTyping shows the password in clear on screen, and nothing tells a screen-reader user | low | Linux | open |
@@ -39,12 +41,22 @@ A masked password field says nothing on Linux: no echo while typing, no content 
 - **Scenario:** password-typing, password-echo-modes
 - **Act:** password-typing: "type 'q7zx9wkp' into Password", "the Password field after typing", "Shift+Tab to Username and Tab back to Password", "Backspace in Password"; password-echo-modes: "type 'x' into Reveal while typing"
 - **The reader should get:** Each keystroke and deletion is echoed as a mask character (GTK's password entry reports '●' inserted and Orca speaks it; Orca turns off its own key echo in password text and relies on text-inserted events). On arriving at a filled field the reader hears it holds N masked characters (Orca's password-text format reads currentLineText).
-- **The reader gets:** Nothing at all. The typing and Backspace acts carry no AT-SPI event, and Orca says nothing. The node exposes only Accessible and Component, with no Text interface (confirmed by a fresh libatspi client), so the bullet string Teksilo sets as the node's value has nowhere to go on AT-SPI. Coming back to the filled field, Orca says only 'Password password text.', exactly as for an empty field. The reader cannot tell whether a keystroke landed, how long the password is, or whether the field is empty. RevealWhileTyping behaves the same. No plaintext leaks, which is correct.
+- **The reader got (`261a218f`):** Nothing at all. The typing and Backspace acts carry no AT-SPI event, and Orca says nothing. The node exposes only Accessible and Component, with no Text interface (confirmed by a fresh libatspi client), so the bullet string Teksilo sets as the node's value has nowhere to go on AT-SPI. Coming back to the filled field, Orca says only 'Password password text.', exactly as for an empty field. The reader cannot tell whether a keystroke landed, how long the password is, or whether the field is empty. RevealWhileTyping behaves the same. No plaintext leaks, which is correct.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows, from source only: accesskit\_windows node.rs:592-597 exposes the value ('••••••••') through the Value pattern and node.rs:727-728 sets IsPassword, so this is Linux-specific. macOS, from source only: AXSecureTextField subrole (accesskit\_macos node.rs:277).
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1073-1085 (the protected branch sets role and value but emits no text run); crates/teksilo-widgets/src/primitives/text\_input\_field.rs:731-738 (a masked field keeps no retained measurement)
-- **Evidence:**
+- **Now (`c198e4d1`):** A masked field now has a Text interface holding one mask character per character. Each keystroke reaches the bus as an inserted '•' and Orca echoes '•'; a deletion reaches it as deleted mask characters. Coming back to a filled field, Orca says 'Password password text  8 • characters  selected.'. RevealWhileTyping echoes '•' too, NoEcho puts nothing on the bus, and no plaintext leaks.
+- **Measured again:** password-typing, password-echo-modes and fix-text-caret-password, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 password-typing 'type 'q7zx9wkp' into Password': +18.1 ms object:text-changed:insert [password text] 'Password' text='•' / +25.9 ms ORCA SAYS (CUT): '•' ... +265.3 ms object:text-changed:insert [password text] 'Password' text='•' / +273.8 ms ORCA SAYS: '•'; pass no event carries 'q7zx9wkp'`
+  - `pass1 password-typing 'the Password field after typing': fresh probe after-typing {'role': 'password text', 'name': 'Password', 'interfaces': ['Accessible', 'Component', 'EditableText', 'Text'], ... 'text': '••••••••'}`
+  - `pass1 password-typing 'Shift+Tab to Username and Tab back to Password': +1460.3 ms ORCA SAYS: 'Password password text  8 • characters  selected.' (pass2: +1067.0 ms, the same)`
+  - `pass2 password-typing 'Backspace in Password': +15.4 ms object:text-changed:delete [password text] 'Password' text='••••••••' / +22.6 ms ORCA SAYS: 'Selection deleted.'`
+  - `pass2 fix-text-caret-password 'End, BackSpace in Password': pass [password text] reports '•' deleted / +209.2 ms ORCA SAYS: '•'`
+  - `pass1 password-echo-modes 'type 'x' into Reveal while typing': +200.7 ms object:text-changed:insert [password text] 'Reveal while typing' text='•' / +209.7 ms ORCA SAYS: '•' (pass2 the same)`
+  - `pass2 password-echo-modes 'type 'y' into No echo': pass no event carries 'y'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1158-1168 (a protected field's text is the mask, empty under NoEcho) and 1202-1236 (its runs are pushed); crates/teksilo-widgets/src/primitives/text\_input\_field.rs:729-743 (the mask is what is measured and retained)
+- **Evidence (`261a218f`):**
   - `report (password-typing-20260925-140038-4154311), act "type 'q7zx9wkp' into Password": FAIL  a object:text-changed:insert event from [password text] '*' / no object:text-changed:insert event from [password text] '*'; FAIL  Orca says something / Orca said nothing (the act carries no event at all)`
   - `fresh libatspi client after typing: {'found': True, 'role': 'password text', 'name': 'Password', 'interfaces': ['Accessible', 'Component'], ... 'text_error': "Error: atspi_error: Unknown interface 'org.a11y.atspi.Text' (1)"}`
   - `act "Shift+Tab to Username and Tab back to Password": +1031.0 ms object:state-changed:focused 1 [password text] 'Password' / +1063.6 ms ORCA SAYS: 'Password password text.'`
@@ -69,12 +81,20 @@ The Caps Lock warning is heard once per field: every later warning comes from a 
 - **Scenario:** password-caps-lock
 - **Act:** "Caps Lock on again" (after on, then off) and "Shift+Tab twice back to Password with Caps Lock on"
 - **The reader should get:** Every time Caps Lock turns on in a password field, or focus comes back to a field while it is on, the reader hears 'Caps Lock is on'.
-- **The reader gets:** Only the first warning in a field is spoken. The warning is a live Role::Status TextWidget shown with visible\_when. Hiding it removes the node, which AT-SPI announces as defunct, and showing it again re-adds the same id. libatspi keeps the object defunct, so Orca logs 'Ignoring defunct object' and drops every later announcement. This does not go through ctx.announce, so the K2 fix to the framework announcer does not cover it.
+- **The reader got (`261a218f`):** Only the first warning in a field is spoken. The warning is a live Role::Status TextWidget shown with visible\_when. Hiding it removes the node, which AT-SPI announces as defunct, and showing it again re-adds the same id. libatspi keeps the object defunct, so Orca logs 'Ignoring defunct object' and drops every later announcement. This does not go through ctx.announce, so the K2 fix to the framework announcer does not cover it.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows and macOS, from source only: node\_added raises UIA LiveRegionChanged (accesskit\_windows adapter.rs:256-261) or posts an announcement (accesskit\_macos event.rs:237-239), with no defunct state, so the drop should be Linux-only.
-- **Severity:** high; **layer:** framework
-- **Status:** Fixed by `85624a1a` (node-ids). Fixed part: password-caps-lock: second Caps Lock warning heard 1/1.
-- **Where:** crates/teksilo-widgets/src/password\_field.rs:491-500 (live TextWidget toggled by ctx.visible\_when)
-- **Evidence:**
+- **Severity:** medium; **layer:** framework
+- **Severity in the sweep:** high. The defunct drop is gone and a toggle in place is heard. What remains, the warning lost on returning to the field, is the arrival cut already counted as password-03.
+- **Status:** Partly fixed by `85624a1a` (node-ids). What remains is under **Now**.
+- **Now (`c198e4d1`):** Turning Caps Lock on a second time in the field is now heard: the warning comes back as a new node and Orca says 'Caps Lock is on'. Orca no longer drops it as defunct. Coming back to the field with Caps Lock on is still not heard: the warning appears in the same update as the focus move and Orca cuts it, which is the defect of password-03.
+- **Measured again:** password-caps-lock, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 password-caps-lock 'Caps Lock on again': +16.7 ms object:announcement [status bar] 'Caps Lock is on' text='Caps Lock is on' / +26.7 ms ORCA SAYS: 'Caps Lock is on' (pass2: +15.9 ms / +23.7 ms ORCA SAYS: 'Caps Lock is on')`
+  - `pass1 and pass2 password-caps-lock orca-debug.out: no 'Ignoring defunct object' line`
+  - `pass2 password-caps-lock 'Shift+Tab twice back to Password with Caps Lock on': +30.1 ms object:announcement [status bar] 'Caps Lock is on' / +32.5 ms object:state-changed:focused 1 [toggle button] 'Toggle password visibility' / +42.9 ms ORCA SAYS (CUT): 'Caps Lock is on' ... +890.4 ms ORCA SAYS: 'Password password text.' / +890.4 ms ORCA SAYS: 'Use at least 8 characters.'`
+  - `pass1 password-caps-lock 'Shift+Tab twice back to Password with Caps Lock on': the same, Orca's 'Caps Lock is on' cut by a stop 74 ms in`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/password\_field.rs:500-509 (live TextWidget toggled by ctx.visible\_when)
+- **Evidence (`261a218f`):**
   - `password-caps-lock-20260925-135318-4038418, act "Caps Lock on in the Password field": +16.8 ms object:announcement [status bar] 'Caps Lock is on' text='Caps Lock is on'; Orca 13:53:27.309617 - SPEECH OUTPUT: 'Caps Lock is on'`
   - `act "Caps Lock off": +11.9 ms object:state-changed:defunct 1 [status bar] 'Caps Lock is on'`
   - `act "Caps Lock on again": +13.6 ms object:announcement [status bar] 'Caps Lock is on' text='Caps Lock is on' (path /org/a11y/atspi/accessible/0/79228167015269891578674544640, same as the defunct one); Orca 13:53:35.076576 EVENT MANAGER: Ignoring defunct object: [status bar: 'Caps Lock is on']; check FAIL Orca says 'Caps Lock is on' / Orca dropped: 'Caps Lock is on'`
@@ -97,12 +117,19 @@ Arriving in a password field with Caps Lock on: the warning comes before the foc
 - **Scenario:** password-caps-lock
 - **Act:** "Tab to Confirm password with Caps Lock on"
 - **The reader should get:** Tabbing into a password field while Caps Lock is on, the reader is told Caps Lock is on (the warning's main use case).
-- **The reader gets:** The new field's warning node is added, with its announcement, in the same update as the focus move. The consumer hands node changes to adapters before the focus event, so Orca starts 'Caps Lock is on' and stops it about 40 ms later to read 'Confirm password password text.'. The warning is not part of the field's name or description, so nothing in the focus speech carries it either. When the field's warning has been shown before, the drop in password-02 applies instead.
+- **The reader got (`261a218f`):** The new field's warning node is added, with its announcement, in the same update as the focus move. The consumer hands node changes to adapters before the focus event, so Orca starts 'Caps Lock is on' and stops it about 40 ms later to read 'Confirm password password text.'. The warning is not part of the field's name or description, so nothing in the focus speech carries it either. When the field's warning has been shown before, the drop in password-02 applies instead.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows/macOS not measured; the ordering is the consumer's (tree.rs:640-673), and NVDA is said to keep live-region text across a focus change.
 - **Severity:** high; **layer:** framework
-- **Status:** Open. In the announce-focus fix topic, not fixed there: Same class as password-05: the Caps Lock warning is a widget live-region node added as focus arrives (password\_field.rs:499-500), not an announcer message. The widget-level idea from the finding stands: describe the field by the warning.
-- **Where:** crates/teksilo-widgets/src/password\_field.rs:499-500 (visible = caps.zip(&focused), where focused is the row's focus\_within, so the warning appears in the same update as the focus move)
-- **Evidence:**
+- **Status:** Open.
+- **Now (`c198e4d1`):** Tabbing into a password field with Caps Lock on, the warning reaches the bus a millisecond or two before the focus event and Orca stops it about 40 to 115 ms in to read the field. The focus speech is 'Confirm password password text.' or 'Password password text.', with nothing about Caps Lock.
+- **Measured again:** password-caps-lock and verify-password-caps-arrive, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 password-caps-lock 'Tab to Confirm password with Caps Lock on': +18.3 ms object:announcement [status bar] 'Caps Lock is on' / +20.9 ms object:state-changed:focused 1 [password text] 'Confirm password' / +43.0 ms ORCA SAYS (CUT): 'Caps Lock is on' / +99.0 ms ORCA SAYS: 'Confirm password password text.'`
+  - `pass2 password-caps-lock 'Tab to Confirm password with Caps Lock on': +23.2 ms object:announcement / +25.4 ms focused 1 [password text] 'Confirm password' / +39.7 ms ORCA SAYS (CUT): 'Caps Lock is on' / +114.5 ms ORCA SAYS: 'Confirm password password text.'`
+  - `pass1 verify-password-caps-arrive 'Tab to Password with Caps Lock on (the warning's first showing)': +27.5 ms object:announcement [status bar] 'Caps Lock is on' / +32.1 ms object:state-changed:focused 1 [password text] 'Password' / +69.1 ms ORCA SAYS (CUT): 'Caps Lock is on' / +184.3 ms ORCA SAYS: 'Password password text.'`
+  - `pass2 verify-password-caps-arrive, same act: +34.5 ms ORCA SAYS (CUT): 'Caps Lock is on' / +76.0 ms ORCA SAYS: 'Password password text.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/password\_field.rs:507-509 (visible = caps.zip(&focused), where focused is the row's focus\_within, so the warning appears in the same update as the focus move)
+- **Evidence (`261a218f`):**
   - `password-caps-lock-20260925-135318-4038418: +12.9 ms object:announcement [status bar] 'Caps Lock is on' text='Caps Lock is on' / +14.6 ms object:state-changed:focused 1 [password text] 'Confirm password'`
   - `Orca: 13:53:42.862449 - SPEECH OUTPUT: 'Caps Lock is on' / 13:53:42.910134 - NULL SPEECH: stop / 13:53:42.910258 - SPEECH OUTPUT: 'Confirm password password text.'`
   - `observation: 'Caps Lock is on' reached the bus 1.8 ms before the act's focus change; Orca's 'Caps Lock is on' was cut by a stop 48 ms in (estimated)`
@@ -123,12 +150,20 @@ Caps Lock state is guessed by counting presses: when Caps Lock is on at launch t
 - **Scenario:** password-caps-lock-leave-on then password-caps-lock-start-on (same invocation, same KWin session)
 - **Act:** start-on: "Tab to Password with Caps Lock on" and "press Caps Lock (it is now really off)"
 - **The reader should get:** With Caps Lock on, the field warns. When the user turns it off, nothing claims it is on.
-- **The reader gets:** Teksilo starts from caps\_lock\_active = false and flips it on every CapsLock key-down, and never reads the OS lock state. If Caps Lock is already on when the app starts (or is toggled while another window has focus), the state is inverted. Arriving in Password with Caps Lock really on gives no warning. Pressing Caps Lock to turn it off makes the app announce 'Caps Lock is on', and Orca speaks it. A fresh AT-SPI client proves the real lock state: Username held 'Q' before the press and 'Qq' after it.
+- **The reader got (`261a218f`):** Teksilo starts from caps\_lock\_active = false and flips it on every CapsLock key-down, and never reads the OS lock state. If Caps Lock is already on when the app starts (or is toggled while another window has focus), the state is inverted. Arriving in Password with Caps Lock really on gives no warning. Pressing Caps Lock to turn it off makes the app announce 'Caps Lock is on', and Orca speaks it. A fresh AT-SPI client proves the real lock state: Username held 'Q' before the press and 'Qq' after it.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). The tracking code in teksilo-app is platform-independent, so every platform is affected by source.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-app/src/app.rs:2605-2620 (the only writer of the Caps Lock state, via set\_caps\_lock\_from\_os at app.rs:2619); crates/teksilo-app/src/window\_manager.rs:1069
-- **Evidence:**
+- **Now (`c198e4d1`):** Teksilo still guesses Caps Lock by counting presses from 'off'. When the app starts with Caps Lock on, arriving in Password gives no warning, and pressing Caps Lock to turn it off makes the app announce 'Caps Lock is on', which Orca speaks.
+- **Measured again:** 1 of 1 run in which the scene held (a judge run of leave-on then start-on in one session); the batch's 2 passes could not set the scene
+- **Evidence (`c198e4d1`):**
+  - `judge run password-caps-lock-start-on-20260927-175459 (after leave-on in the same session): fresh probe username-on text 'Q' (the lock is on at launch)`
+  - `same run 'Tab to Password with Caps Lock on': +15.6 ms object:state-changed:focused 1 [password text] 'Password' / +55.6 ms ORCA SAYS: 'Password password text.'; FAIL the bus carries an announcement of 'Caps Lock is on' (no object:announcement in the act)`
+  - `same run 'press Caps Lock (it is now really off)': +26.6 ms object:announcement [status bar] 'Caps Lock is on' text='Caps Lock is on' / +41.4 ms ORCA SAYS: 'Caps Lock is on'`
+  - `same run: fresh probe username-off text 'Qq' (the lock really went off)`
+  - `crates/teksilo-app/src/app.rs:2157-2162: managed.caps_lock_active = !managed.caps_lock_active on each CapsLock key-down; window_manager.rs:1069 caps_lock_active: false`
+- **Where (`c198e4d1`):** crates/teksilo-app/src/app.rs:2145-2162 (note\_physical\_key, the only writer of the Caps Lock state, via set\_caps\_lock\_from\_os at app.rs:2161); crates/teksilo-app/src/window\_manager.rs:1069
+- **Evidence (`261a218f`):**
   - `password-caps-lock-start-on-20260925-140335-4154311: fresh probe username-on: {... 'text': 'Q'} (Caps Lock is on at launch)`
   - `act "Tab to Password with Caps Lock on": +12.2 ms object:state-changed:focused 1 [password text] 'Password'; +61.0 ms ORCA SAYS: 'Password password text.'; FAIL the bus carries an announcement of 'Caps Lock is on' / no object:announcement in the act`
   - `act "press Caps Lock (it is now really off)": +16.2 ms object:announcement [status bar] 'Caps Lock is on' text='Caps Lock is on' / +29.5 ms ORCA SAYS: 'Caps Lock is on'`
@@ -150,12 +185,21 @@ A validation message raised by leaving a field is cut by Orca every time
 - **Scenario:** password-validation (also seen in password-caps-lock, password-blur-empty, password-caps-lock-start-on, tabwalk)
 - **Act:** "Tab away from the short password" and "type 'abcdefgX' into Confirm, Tab away"
 - **The reader should get:** Leaving a field with an invalid value, the reader hears the whole message ('Use at least 8 characters', 'Passwords don't match').
-- **The reader gets:** The validator runs in the focus-loss handler. The ValidationStrip's name change and assertive announcement land in the same update as the focus move, ahead of the focus event, and Orca stops the message about 30-80 ms in to read the toggle. The reader hears it only by going back to the field, where the description gives 'Use at least 8 characters.'. A reader who moves on never learns of the error. Password-09 compounds this: Sign in reads as enabled, so a reader has no hint of why the form does not submit. None of these messages goes through ctx.announce, so the K2 fix does not cover them.
+- **The reader got (`261a218f`):** The validator runs in the focus-loss handler. The ValidationStrip's name change and assertive announcement land in the same update as the focus move, ahead of the focus event, and Orca stops the message about 30-80 ms in to read the toggle. The reader hears it only by going back to the field, where the description gives 'Use at least 8 characters.'. A reader who moves on never learns of the error. Password-09 compounds this: Sign in reads as enabled, so a reader has no hint of why the form does not submit. None of these messages goes through ctx.announce, so the K2 fix does not cover them.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows/macOS not measured (the consumer orders node changes before focus on every adapter).
 - **Severity:** high; **layer:** framework
-- **Status:** Open. In the announce-focus fix topic, not fixed there: Same platform ordering, but a different producer. The message is the ValidationStrip's own live name change (validation\_strip.rs:148-160, Role::Status + Live::Assertive), raised in on\_blur (text\_input\_field/widget\_impl.rs:114-129). It is not ctx.announce, so this fix does not touch it. Two options: (a) a walker rule that holds any widget live region's new text for one update when the update moves focus, emitting the delivered name, or keeping a new live node hidden when it is off the focus path; this is broader and changes the timing of every widget live region; (b) have a blur-raised message go through ctx.announce, which now waits for the focus move, while the strip stays silent for that change.
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:115-129 (validator on blur); crates/teksilo-widgets/src/primitives/validation\_strip.rs:148-160
-- **Evidence:**
+- **Status:** Open.
+- **Now (`c198e4d1`):** Leaving a field with an invalid value still raises the message in the same update as the focus move. Orca starts 'Use at least 8 characters' or "Passwords don't match" and stops it about 35 to 150 ms in to read the toggle. The message is heard whole only on returning to the field, from its description.
+- **Measured again:** password-validation, verify-password-stale-confirm, password-blur-empty, password-caps-lock and tabwalk-password-field, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 password-validation 'Tab away from the short password': +18.7 ms object:property-change:accessible-name [status bar] 'Use at least 8 characters' / +19.0 ms object:announcement / +19.4 ms object:state-changed:focused 1 [toggle button] 'Toggle password visibility' / +36.9 ms ORCA SAYS (CUT): 'Use at least 8 characters' / +82.9 ms ORCA SAYS: 'Toggle password visibility toggle button not pressed.'`
+  - `pass1 password-validation, same act: +372.8 ms ORCA SAYS (CUT): 'Use at least 8 characters' / +666.0 ms ORCA SAYS: 'Toggle password visibility toggle button not pressed.'`
+  - `pass2 password-validation 'type 'abcdefgX' into Confirm, Tab away': +641.2 ms object:announcement [status bar] "Passwords don't match" / +641.5 ms focused 1 [toggle button] / +662.6 ms ORCA SAYS (CUT): "Passwords don't match" / +716.6 ms ORCA SAYS: 'Toggle password visibility toggle button not pressed.' (pass1 cut the same way)`
+  - `pass2 password-validation 'Shift+Tab back to Password': +87.5 ms ORCA SAYS: 'Password password text ••• selected.' / +87.6 ms ORCA SAYS: 'Use at least 8 characters.'`
+  - `pass1 and pass2 verify-password-stale-confirm 'Tab away from Confirm (mismatch)': Orca's "Passwords don't match" cut by a stop 41 ms and 47 ms in`
+  - `pass1 and pass2 tabwalk-password-field Tab 2: 'Use at least 8 characters' reached the bus 0.3 to 0.9 ms before the focus change and was cut`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:115-129 (validator on blur); crates/teksilo-widgets/src/primitives/validation\_strip.rs:148-160
+- **Evidence (`261a218f`):**
   - `password-validation-20260925-140511-23050: +16.6 ms object:announcement [status bar] 'Use at least 8 characters' text='Use at least 8 characters' (0.3 ms before the focus change to the toggle)`
   - `Orca: 14:05:24.308697 - SPEECH OUTPUT: 'Use at least 8 characters' / 14:05:24.339173 - NULL SPEECH: stop / 14:05:24.339284 - SPEECH OUTPUT: 'Toggle password visibility toggle button not pressed.'`
   - `Orca: 14:05:42.526167 - SPEECH OUTPUT: 'Passwords don't match' / 14:05:42.572705 - NULL SPEECH: stop / 14:05:42.572821 - SPEECH OUTPUT: 'Toggle password visibility toggle button not pressed.'`
@@ -177,12 +221,19 @@ An empty, untouched password field is flagged invalid as soon as focus leaves it
 - **Scenario:** password-blur-empty (also password-caps-lock, tabwalk)
 - **Act:** "Tab on from the empty, untouched Password"
 - **The reader should get:** Passing through an empty field, or moving to the field's own reveal toggle, does not raise an error the user has not earned yet.
-- **The reader gets:** The validator runs on every focus loss, whatever the field's state. Tabbing from the empty Password to its own eye button sets 'Use at least 8 characters', which is announced (and cut, see password-05). From then on, every arrival in the field reads 'Password password text. Use at least 8 characters.', before the user has typed anything.
+- **The reader got (`261a218f`):** The validator runs on every focus loss, whatever the field's state. Tabbing from the empty Password to its own eye button sets 'Use at least 8 characters', which is announced (and cut, see password-05). From then on, every arrival in the field reads 'Password password text. Use at least 8 characters.', before the user has typed anything.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). The behaviour is platform-independent.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:115-129 and text\_input\_field.rs:1149-1175 (run\_validator\_and\_apply has no pristine check)
-- **Evidence:**
+- **Now (`c198e4d1`):** Tabbing from the empty, untouched Password to its own reveal toggle still raises 'Use at least 8 characters', which is announced and cut. Every later arrival in the field reads 'Password password text.' then 'Use at least 8 characters.', before anything was typed.
+- **Measured again:** password-blur-empty and tabwalk-password-field, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 password-blur-empty 'Tab on from the empty, untouched Password': +25.2 ms object:announcement [status bar] 'Use at least 8 characters' / +26.0 ms object:state-changed:focused 1 [toggle button] 'Toggle password visibility' / +43.4 ms ORCA SAYS (CUT): 'Use at least 8 characters'`
+  - `pass2 password-blur-empty, same act: +19.6 ms object:announcement [status bar] 'Use at least 8 characters' / +20.1 ms focused 1 [toggle button] / +33.9 ms ORCA SAYS (CUT): 'Use at least 8 characters'`
+  - `pass2 password-blur-empty 'Shift+Tab back to Password': +72.8 ms ORCA SAYS: 'Password password text.' / +72.8 ms ORCA SAYS: 'Use at least 8 characters.'`
+  - `pass2 tabwalk-password-field Tab 2: +34.4 ms object:announcement [status bar] 'Use at least 8 characters'; Tab 16: +70.5 ms ORCA SAYS: 'Use at least 8 characters.'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:115-129 and crates/teksilo-widgets/src/primitives/text\_input\_field.rs:1160-1186 (run\_validator\_and\_apply has no pristine check); crates/teksilo-widgets/src/password\_field.rs:514-520 (the toggle sits in the row, outside the TextInputField's focus)
+- **Evidence (`261a218f`):**
   - `password-blur-empty-20260925-135848-4105235: +18.3 ms object:announcement [status bar] 'Use at least 8 characters' text='Use at least 8 characters' / +18.4 ms object:state-changed:focused 1 [toggle button] 'Toggle password visibility'`
   - `act "Shift+Tab back to Password": +70.5 ms ORCA SAYS: 'Password password text.' / +70.5 ms ORCA SAYS: 'Use at least 8 characters.'`
   - `tabwalk-password-field-20260925-141235-179040, Tab 2 (empty Password to its toggle): +14.7 ms object:announcement [status bar] 'Use at least 8 characters'`
@@ -201,12 +252,17 @@ The invalid state Teksilo sets on the field reaches no platform (no invalid-entr
 - **Scenario:** password-validation
 - **Act:** "Shift+Tab back to Password" (after 'abc' was rejected)
 - **The reader should get:** An invalid field carries AT-SPI STATE\_INVALID\_ENTRY (Orca says 'invalid entry'), UIA IsDataValidForForm=false, or macOS AXInvalid.
-- **The reader gets:** The field's states show no invalid-entry state. Only the description carries the message. TextInputField sets Invalid::True, but accesskit\_atspi\_common 0.20 never maps it, and the Windows and macOS adapters never read Node::invalid either. Teksilo's code comment claims this surfaces aria-invalid.
+- **The reader got (`261a218f`):** The field's states show no invalid-entry state. Only the description carries the message. TextInputField sets Invalid::True, but accesskit\_atspi\_common 0.20 never maps it, and the Windows and macOS adapters never read Node::invalid either. Teksilo's code comment claims this surfaces aria-invalid.
 - **Platform:** Linux AT-SPI (measured). Windows/macOS, from source only: accesskit\_windows-0.35.0 and accesskit\_macos-0.27.0 never read invalid().
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** accesskit\_atspi\_common-0.20.0/src/node.rs:301-386 (state(): no Invalid mapping); Teksilo's side at crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1180-1190
-- **Evidence:**
+- **Now (`c198e4d1`):** The invalid Password field still carries no invalid-entry state; only its description holds the message. accesskit\_atspi\_common 0.21.0 still never maps Invalid, and the Windows and macOS adapters in use still never read it. For a password field Orca reads the error from the description anyway.
+- **Measured again:** password-validation, 2 of 2 runs; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass2 password-validation 'Shift+Tab back to Password': FAIL [password text] 'Password' has state invalid-entry / states=['editable', 'enabled', 'focusable', 'focused', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] description='Use at least 8 characters' (pass1 the same)`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:301-386 (state()): no Invalid mapping; grep -i invalid in accesskit_windows-0.35.1/src and accesskit_macos-0.27.1/src finds no use of Node::invalid`
+- **Where (`c198e4d1`):** accesskit\_atspi\_common-0.21.0/src/node.rs:301-386 (state(): no Invalid mapping); Teksilo's side at crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1279-1289
+- **Evidence (`261a218f`):**
   - `password-validation-20260925-140511-23050: FAIL  [password text] 'Password' has state invalid-entry / [password text] 'Password' interfaces=['Accessible', 'Component'] states=['editable', 'enabled', 'focusable', 'focused', 'selectable-text', 'sensitive', 'showing', 'single-line', 'visible'] text=None description='Use at least 8 characters'`
   - `crates/teksilo-widgets/src/primitives/text_input_field/widget_impl.rs:1186-1190: builder.inner_mut().set_invalid(Invalid::True)`
   - `accesskit_atspi_common-0.20.0 node.rs:300-386 (state()): no invalid mapping; grep -i invalid in accesskit_windows-0.35.0/src/node.rs and accesskit_macos-0.27.0/src finds no use of Node::invalid`
@@ -224,12 +280,19 @@ RevealMode::Hold exposes a 'button' no reader can operate: no action, not focusa
 - **Scenario:** password-hold, tabwalk
 - **Act:** "the Hold to reveal button as the tree gives it", "Tab from the Hold to reveal field", "activate the Hold button through AT-SPI"
 - **The reader should get:** A node announced as a push button can be reached and pressed: it takes focus, offers a click action, and a reader's activation reveals the field (or it is hidden from AT when it cannot be operated).
-- **The reader gets:** The \[push button\] 'Toggle password visibility' has only the Accessible and Component interfaces, with no Action interface and no focusable state. Tab goes from 'Hold to reveal' straight to 'Always protected'. The reader's own activation fails with 'offers no action on AT-SPI'. The reveal is pointer-only, but AT is shown a control that does nothing.
+- **The reader got (`261a218f`):** The \[push button\] 'Toggle password visibility' has only the Accessible and Component interfaces, with no Action interface and no focusable state. Tab goes from 'Hold to reveal' straight to 'Always protected'. The reader's own activation fails with 'offers no action on AT-SPI'. The reveal is pointer-only, but AT is shown a control that does nothing.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). By source, the same node (Role::Button with no Click or Focus action) reaches every platform.
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/password\_field.rs:513-538
-- **Evidence:**
+- **Now (`c198e4d1`):** The Hold to reveal affordance is still a \[push button\] 'Toggle password visibility' with no Action interface and no focusable state. Tab goes from 'Hold to reveal' straight to 'Always protected', and a reader's activation fails with 'offers no action on AT-SPI'.
+- **Measured again:** password-hold and tabwalk-password-field, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 password-hold 'the Hold to reveal button as the tree gives it': [push button] 'Toggle password visibility' interfaces=['Accessible', 'Component'] states=['enabled', 'sensitive', 'showing', 'visible'] text=None description=None actions=None (pass2 the same)`
+  - `pass2 password-hold 'Tab from the Hold to reveal field': +17.1 ms object:state-changed:focused 1 [password text] 'Always protected' / +64.7 ms ORCA SAYS: 'Always protected password text  7 • characters  selected.'`
+  - `pass2 password-hold 'activate the Hold button through AT-SPI': AT-SPI action failed: {'path': '/org/a11y/atspi/accessible/0/79228177788168430625052688384', 'name': 'Toggle password visibility', 'role': 'push button'} offers no action on AT-SPI`
+  - `pass2 tabwalk-password-field Tab 11 [password text] 'Hold to reveal', then Tab 12 [password text] 'Always protected'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/password\_field.rs:521-548 (the Hold arm: pointer handler, Role::Button, no action or focus); password\_field.rs:88-92 (RevealMode::Hold doc)
+- **Evidence (`261a218f`):**
   - `password-hold-20260925-141029-98166: [push button] 'Toggle password visibility' interfaces=['Accessible', 'Component'] states=['enabled', 'sensitive', 'showing', 'visible'] text=None description=None actions=None`
   - `act "Tab from the Hold to reveal field": +13.2 ms object:state-changed:focused 1 [password text] 'Always protected' / ORCA SAYS: 'Always protected password text.'`
   - `act "activate the Hold button through AT-SPI": AT-SPI action failed: {'path': '/org/a11y/atspi/accessible/0/79228177788168430625052688384', 'name': 'Toggle password visibility', 'role': 'push button'} offers no action on AT-SPI`
@@ -249,12 +312,21 @@ The disabled Sign in button reads as enabled and sensitive on AT-SPI, and a read
 - **Scenario:** password-sign-in
 - **Act:** "the disabled Sign in button as the tree gives it", "a reader's own focus request on the disabled Sign in"
 - **The reader should get:** While both passwords are empty, Sign in reads as unavailable (Orca 'grayed'). A reader's focus request is refused, and when it becomes available a state change tells the reader.
-- **The reader gets:** States are \['enabled', 'focusable', 'sensitive', 'showing', 'visible'\] although enabled\_when(can\_submit) is false and Tab skips the button. accesskit\_atspi\_common adds Enabled\|Sensitive to every role outside its read-only list, whatever the node's disabled flag. Teksilo's Button advertises Action::Focus even while disabled, so AT-SPI grab\_focus focuses it, and Orca says 'Sign in push button.' with no hint it does nothing. Because the state set is the same either way, no event tells the reader when Sign in becomes enabled.
+- **The reader got (`261a218f`):** States are \['enabled', 'focusable', 'sensitive', 'showing', 'visible'\] although enabled\_when(can\_submit) is false and Tab skips the button. accesskit\_atspi\_common adds Enabled\|Sensitive to every role outside its read-only list, whatever the node's disabled flag. Teksilo's Button advertises Action::Focus even while disabled, so AT-SPI grab\_focus focuses it, and Orca says 'Sign in push button.' with no hint it does nothing. Because the state set is the same either way, no event tells the reader when Sign in becomes enabled.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). Windows/macOS, from source only: UIA IsEnabled and AXEnabled follow is\_disabled, so the wrong state is Linux-only.
-- **Severity:** medium; **layer:** upstream
-- **Status:** Fixed by `d217ee62` (accesskit-update). Fixed part: the state part only, measured on d217ee62: 'Sign in' is neither enabled nor sensitive (password-sign-in); a reader's focus request still lands on it, which is Teksilo's to fix.
-- **Where:** root cause accesskit\_atspi\_common-0.20.0/src/node.rs:376-380; Teksilo's share crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1163-1201 (an AT Focus is serviced with no enabled check) and crates/teksilo-widgets/src/button.rs:1301-1302 (Focus advertised unconditionally)
-- **Evidence:**
+- **Severity:** low; **layer:** upstream
+- **Severity in the sweep:** medium. The reader now hears 'grayed' on the disabled button and gets a state change when it becomes available. Only the focus request landing on a disabled button remains, and the reader is told what it is.
+- **Status:** Partly fixed by `d217ee62` (accesskit-update). What remains is under **Now**.
+- **Now (`c198e4d1`):** The disabled Sign in now reads as unavailable: it has neither enabled nor sensitive, and Orca says 'Sign in push button grayed.'. When it becomes available the bus carries state-changed:enabled 1 and sensitive 1. A reader's own focus request still lands on the disabled button, although the reader now hears that it is grayed.
+- **Measured again:** password-sign-in, verify-password-stale-confirm and password-validation, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 password-sign-in 'the disabled Sign in button as the tree gives it': pass [push button] 'Sign in' has no state enabled / pass has no state sensitive (pass2 the same)`
+  - `pass2 password-sign-in 'a reader's own focus request on the disabled Sign in': +16.6 ms object:state-changed:focused 1 [push button] 'Sign in' / +54.0 ms ORCA SAYS: 'Sign in push button grayed.' (pass1 the same)`
+  - `pass1 verify-password-stale-confirm 'make Password 'abcdefgX' (now equal to Confirm)': +403.1 ms object:state-changed:enabled 1 [push button] 'Sign in' / +403.2 ms object:state-changed:sensitive 1 [push button] 'Sign in' (pass2 the same)`
+  - `pass2 password-validation 'fix Confirm (Backspace, 'h'), Tab to its toggle': +385.5 ms object:state-changed:enabled 1 [push button] 'Sign in'`
+  - `accesskit_atspi_common-0.21.0/src/node.rs:376-382: Enabled|Sensitive is now inserted only when !state.is_disabled()`
+- **Where (`c198e4d1`):** root cause fixed upstream at accesskit\_atspi\_common-0.21.0/src/node.rs:376-382; Teksilo's share crates/teksilo-core/src/widget\_tree/pointer\_router.rs:1175-1220 (an AT Focus is serviced with no enabled check) and crates/teksilo-widgets/src/button.rs:1301-1302 (Focus advertised unconditionally)
+- **Evidence (`261a218f`):**
   - `password-sign-in-20260925-141101-98166: FAIL [push button] 'Sign in' has no state enabled / [push button] 'Sign in' interfaces=['Accessible', 'Action', 'Component'] states=['enabled', 'focusable', 'sensitive', 'showing', 'visible'] ... actions=[{'name': 'click', ...}]`
   - `act "a reader's own focus request on the disabled Sign in": +21.5 ms object:state-changed:focused 1 [push button] 'Sign in' / +43.6 ms ORCA SAYS: 'Sign in push button.'`
   - `tabwalk-password-field-20260925-141235-179040: Tab 4 [toggle button] (Confirm's), then Tab 5 [password text] 'Masked' (Tab skips the disabled Sign in)`
@@ -274,12 +346,21 @@ The first character typed or pasted into an empty text field is never reported: 
 - **Scenario:** password-typing (control act), password-copy, password-caps-lock-leave-on/start-on
 - **Act:** "the empty Username entry, from a fresh AT-SPI client", "type 'bob' into Username", "Ctrl+V into Username after copying the revealed field"
 - **The reader should get:** An empty entry already supports Text (0 characters), so its first insertion raises text-changed:insert, as the comment at widget\_impl.rs:1105-1108 promises ('Runs are emitted even for an empty field').
-- **The reader gets:** The empty Username exposes no Text interface. Typing 'bob' reports only 'o' and 'b'; the first 'b' gives a caret move and no insertion. Pasting 'hunter2' into the empty field reports no insertion at all, although a fresh client then reads 'hunter2'. The retained measurement of '' comes from layout\_single\_line and has no line. from\_geometry adds a fallback line only when the lines cover less than a non-empty text, so no run is emitted. The empty-line run path in push\_text\_runs is never reached, supports\_text\_ranges() is false, and the adapter skips the change. This affects every TextInputField (TextInput, SpinBox, SearchField, a revealed PasswordField).
+- **The reader got (`261a218f`):** The empty Username exposes no Text interface. Typing 'bob' reports only 'o' and 'b'; the first 'b' gives a caret move and no insertion. Pasting 'hunter2' into the empty field reports no insertion at all, although a fresh client then reads 'hunter2'. The retained measurement of '' comes from layout\_single\_line and has no line. from\_geometry adds a fallback line only when the lines cover less than a non-empty text, so no run is emitted. The empty-line run path in push\_text\_runs is never reached, supports\_text\_ranges() is false, and the adapter skips the change. This affects every TextInputField (TextInput, SpinBox, SearchField, a revealed PasswordField).
 - **Platform:** Linux AT-SPI (measured). Windows/macOS not measured; they also gate text events on supports\_text\_ranges.
 - **Severity:** medium; **layer:** framework
 - **Status:** Fixed by `98211359` (text-caret).
-- **Where:** crates/teksilo-core/src/accessibility/text\_runs.rs:228-296 (TextRunSource::from\_geometry: no fallback line for empty text, 267-282)
-- **Evidence:**
+- **Now (`c198e4d1`):** An empty entry now exposes Text. The first character typed or pasted into it and the deletion that empties it are all reported, and Orca speaks each deleted character. Pasting 'hunter2' into the empty Username raises text-changed:insert 'hunter2' and Orca says 'hunter2'.
+- **Measured again:** password-typing, verify-password-empty-edits and password-copy, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 password-typing 'the empty Username entry, from a fresh AT-SPI client': pass a fresh AT-SPI client sees interface Text`
+  - `pass2 password-typing 'type 'bob' into Username': +17.6 ms object:text-changed:insert [entry] '' text='b' / +52.1 ms text='o' / +90.0 ms text='b'; pass [entry] reports 'bob' inserted`
+  - `pass2 verify-password-empty-edits 'type 'a' into the empty Username': +27.0 ms object:text-changed:insert [entry] '' text='a'`
+  - `pass2 verify-password-empty-edits 'BackSpace (Username 'a' to empty)': +20.1 ms object:text-changed:delete [entry] '' text='a' / +29.3 ms ORCA SAYS: 'a'; pass a fresh AT-SPI client sees interface Text`
+  - `pass2 verify-password-empty-edits 'type 'c' into the emptied Username': +17.6 ms object:text-changed:insert [entry] '' text='c'`
+  - `pass2 password-copy 'Ctrl+V into Username after copying the revealed field': +35.5 ms object:text-changed:insert [entry] '' text='hunter2' / +67.3 ms ORCA SAYS: 'hunter2'`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/accessibility/text\_runs.rs:264-287 (from\_geometry now adds a line for a geometry with no lines, so an empty text emits its run)
+- **Evidence (`261a218f`):**
   - `password-typing-20260925-140038-4154311: fresh libatspi client: {'found': True, 'role': 'entry', 'name': '', 'interfaces': ['Accessible', 'Component'], ... 'text_error': "Error: atspi_error: Unknown interface 'org.a11y.atspi.Text' (1)"}`
   - `act "type 'bob' into Username": +19.2 ms object:text-caret-moved [entry] '' / +52.2 ms object:text-changed:insert [entry] '' text='o' / +88.4 ms object:text-changed:insert [entry] '' text='b'; FAIL [entry] reports 'bob' inserted / inserted text from [entry]: 'ob'`
   - `password-copy-20260925-140123-4154311, act "Ctrl+V into Username after copying the revealed field": only +30.1 ms object:text-caret-moved [entry] ''; fresh probe revealed: {... 'interfaces': ['Accessible', 'Component', 'EditableText', 'Text'], ... 'text': 'hunter2'}`
@@ -302,12 +383,18 @@ The Username field has no name: Orca reads its placeholder as if it were the fie
 - **Scenario:** every run's launch act (tree audit), tabwalk
 - **Act:** launch; tabwalk Tab 15
 - **The reader should get:** The field is announced as 'Username, entry' (TextInput has .label()).
-- **The reader gets:** The entry has no name, which the launch audit reports as unnamed-control. Orca says 'entry you@example.com.', which can be heard as a field that already holds that address. The visible caption 'Username' is a separate label linked to nothing.
+- **The reader got (`261a218f`):** The entry has no name, which the launch audit reports as unnamed-control. Orca says 'entry you@example.com.', which can be heard as a field that already holds that address. The visible caption 'Username' is a separate label linked to nothing.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured); the missing name reaches every platform by source.
 - **Severity:** high; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/password\_field/src/main.rs:84-87
-- **Evidence:**
+- **Now (`c198e4d1`):** The Username entry still has no name. The launch audit reports it as an unnamed control, and Orca says 'entry you@example.com.', which can be heard as a field already holding that address.
+- **Measured again:** every launch in both passes; tabwalk-password-field, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-password-field launch: tree audit unnamed-control: [entry] '': a focusable entry with no name`
+  - `pass2 tabwalk-password-field Tab 15: +99.3 ms ORCA SAYS: 'Sign in panel.' / +99.3 ms ORCA SAYS: 'entry you@example.com.'`
+  - `pass2 tabwalk-password-field tree-launch.txt: [entry] '' {editable,focusable,focused,selectable-text,single-line} attrs={'placeholder-text': 'you@example.com'}; [label] 'Username' with no relation`
+- **Where (`c198e4d1`):** examples/password\_field/src/main.rs:84-87
+- **Evidence (`261a218f`):**
   - `tree audit: unnamed-control: [entry] '': a focusable entry with no name`
   - `launch: +457.4 ms object:state-changed:focused 1 [entry] ''; ORCA SAYS: 'Sign in panel.' / ORCA SAYS: 'entry you@example.com.'`
   - `tree: [entry] '' {editable,focusable,focused,selectable-text,single-line} attrs={'placeholder-text': 'you@example.com'}`
@@ -325,12 +412,18 @@ The showcase captions duplicate the fields' names and are read as one run-on sen
 - **Scenario:** tabwalk, password-echo-modes, password-hold, password-protected, password-copy
 - **Act:** tabwalk Tab 5 (first focus in the Echo modes panel)
 - **The reader should get:** Entering the panel, the reader hears the panel name, then the focused field.
-- **The reader gets:** Orca says 'Echo modes panel.', then 'Reveal while typing No echo (length hidden) Hold to reveal (press the eye) Always protected for AT', then the field. Every caption is a label related to no control; Orca reads unrelated labels of three or more words when focus enters a panel. The fields are already named by .label(), so the captions are redundant noise, and the list runs together.
+- **The reader got (`261a218f`):** Orca says 'Echo modes panel.', then 'Reveal while typing No echo (length hidden) Hold to reveal (press the eye) Always protected for AT', then the field. Every caption is a label related to no control; Orca reads unrelated labels of three or more words when focus enters a panel. The fields are already named by .label(), so the captions are redundant noise, and the list runs together.
 - **Platform:** Linux / Orca 46.1 (measured).
 - **Severity:** low; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/password\_field/src/main.rs:198-207
-- **Evidence:**
+- **Now (`c198e4d1`):** Entering the Echo modes panel, Orca still says 'Echo modes panel.', then the captions run together as 'Reveal while typing No echo (length hidden) Hold to reveal (press the eye) Always protected for AT', then the field.
+- **Measured again:** tabwalk-password-field, password-echo-modes, password-hold, password-copy, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-password-field Tab 5: +294.4 ms ORCA SAYS: 'Echo modes panel.' / +294.5 ms ORCA SAYS: 'Reveal while typing No echo (length hidden) Hold to reveal (press the eye) Always protected for AT' / +294.5 ms ORCA SAYS: 'Masked password text  7 • characters  selected.'`
+  - `pass2 password-echo-modes 'focus Reveal while typing (a reader's own focus request)': +105.4 ms ORCA SAYS: 'Echo modes panel.' / 'Reveal while typing No echo (length hidden) Hold to reveal (press the eye) Always protected for AT' / 'Reveal while typing password text  7 • characters  selected.'`
+  - `pass2 password-hold and password-copy: the same run-on caption string on entering the panel`
+- **Where (`c198e4d1`):** examples/password\_field/src/main.rs:198-207
+- **Evidence (`261a218f`):**
   - `tabwalk-password-field-20260925-141235-179040 Tab 5: +158.6 ms ORCA SAYS: 'Echo modes panel.' / +158.6 ms ORCA SAYS: 'Reveal while typing No echo (length hidden) Hold to reveal (press the eye) Always protected for AT' / +158.6 ms ORCA SAYS: 'Masked password text.'`
   - `examples/password_field/src/main.rs:211-222 (labeled(): caption TextWidget beside a field already named by .label())`
   - `Orca script_utilities.py:1771: def unrelatedLabels(self, root, onlyShowing=True, minimumWords=3)`
@@ -347,12 +440,18 @@ Every reveal toggle has the same name and no relation to its field
 - **Scenario:** tree password-field, tabwalk
 - **Act:** launch tree
 - **The reader should get:** A reader listing buttons (Orca's structural navigation or button list, NVDA's elements list) can tell which field each eye button reveals, e.g. 'Show Confirm password', or via a controls relation.
-- **The reader gets:** Five toggle buttons and the Hold push button are all named 'Toggle password visibility', with description 'Toggle visibility' and no relations. Only the Tab context tells them apart.
+- **The reader got (`261a218f`):** Five toggle buttons and the Hold push button are all named 'Toggle password visibility', with description 'Toggle visibility' and no relations. Only the Tab context tells them apart.
 - **Platform:** Linux AT-SPI (measured); the fixed name reaches every platform by source.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/password\_field.rs:507-510; the description comes from IconButton::visibility\_toggle's tooltip at icon\_button.rs:560-565
-- **Evidence:**
+- **Now (`c198e4d1`):** All six reveal toggles are still \[toggle button\] 'Toggle password visibility', with description 'Toggle visibility' and no relations, and the Hold to reveal push button has the same name. Orca says 'Toggle password visibility toggle button not pressed.' at every toggle, so only the Tab order tells them apart.
+- **Measured again:** tabwalk-password-field, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 and pass2 tabwalk-password-field launch tree (tree-launch.txt, identical in both passes): [toggle button] 'Toggle password visibility' desc='Toggle visibility' {focusable} after each of Password, Confirm password, Masked, Reveal while typing, No echo and Always protected (six toggles), with no rel= on any; [push button] 'Toggle password visibility' after Hold to reveal, with no description and no relation`
+  - `pass2 tabwalk-password-field Tab 2, 4, 6, 8, 10 and 13: ORCA SAYS: 'Toggle password visibility toggle button not pressed.' (6 times in each pass)`
+  - `crates/teksilo-widgets/src/password_field.rs:519 and 547: both branches set access_label(tr_widget!(a11y_password_reveal())), en-US.ftl:62 'a11y-password-reveal = Toggle password visibility', a fixed string with no reference to the field`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/password\_field.rs:514-519 (toggle) and 546-547 (Hold); the description comes from IconButton::visibility\_toggle's tooltip at crates/teksilo-widgets/src/icon\_button.rs:560-565
+- **Evidence (`261a218f`):**
   - `tree-password-field-20260925-134617-3931473: [toggle button] 'Toggle password visibility' {'description': 'Toggle visibility', 'states': ['enabled', 'focusable', 'sensitive', 'showing', 'visible'], 'interfaces': ['Accessible', 'Action', 'Component'], ...} repeated after each of Password, Confirm password, Masked, Reveal while typing, No echo, Always protected; no 'relations' on any`
   - `crates/teksilo-widgets/src/password_field.rs:505-510: IconButton::visibility_toggle(...).access_label(tr_widget!(a11y_password_reveal())), a fixed string with no reference to the field`
   - `tabwalk-password-field-20260925-142628-460915 launch tree: toggle button 'Toggle password visibility' desc='Toggle visibility' rel=None after each of Password, Confirm password, Masked, Reveal while typing, No echo, Always protected; push button 'Toggle password visibility' desc=None after Hold to reveal`
@@ -368,12 +467,19 @@ On macOS the Caps Lock warning never appears: winit delivers no KeyboardInput fo
 - **Scenario:** source reading
 - **Act:** any: Caps Lock turned on in, or before reaching, a PasswordField
 - **The reader should get:** The reader is told Caps Lock is on, as on the other platforms (the example's own doc promises 'a warning glyph appears and screen readers announce it').
-- **The reader gets:** By source: nothing, ever. macOS reports Caps Lock only as flagsChanged. winit 0.30.13's update\_modifiers makes a KeyboardInput only for a key its key\_to\_modifier knows (Alt, Control, Super, Shift) and otherwise breaks out. Teksilo's only writer of the Caps Lock state is the CapsLock KeyboardInput arm in teksilo-app, so caps\_lock stays false and the warning node is never shown, for sighted users too.
+- **The reader got (`261a218f`):** By source: nothing, ever. macOS reports Caps Lock only as flagsChanged. winit 0.30.13's update\_modifiers makes a KeyboardInput only for a key its key\_to\_modifier knows (Alt, Control, Super, Shift) and otherwise breaks out. Teksilo's only writer of the Caps Lock state is the CapsLock KeyboardInput arm in teksilo-app, so caps\_lock stays false and the warning node is never shown, for sighted users too.
 - **Platform:** macOS, from winit and Teksilo source only (not measurable here). Linux and Windows get the counting behaviour of password-04 instead.
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-app/src/app.rs:2605-2620
-- **Evidence:**
+- **Now (`c198e4d1`):** By source, unchanged: on macOS winit 0.30.13 still sends no KeyboardInput for Caps Lock, and Teksilo's only writer of the Caps Lock state is still the CapsLock key-down in note\_physical\_key. The warning never appears on macOS, for sighted users too.
+- **Measured again:** read from source
+- **Evidence (`c198e4d1`):**
+  - `winit-0.30.13/src/platform_impl/macos/view.rs:520-525: flags_changed -> update_modifiers(event, true)`
+  - `` winit-0.30.13/src/platform_impl/macos/view.rs:949-951: `let Some(event_modifier) = key_to_modifier(&logical_key) else { break 'send_event; };` ``
+  - `winit-0.30.13/src/platform_impl/macos/view.rs:81-89: key_to_modifier maps only Alt, Control, Super, Shift`
+  - `crates/teksilo-app/src/app.rs:2157-2162: the CapsLock key-down toggles caps_lock_active; app.rs:2161 is the only call of set_caps_lock_from_os; the workspace still resolves winit 0.30.13 (Cargo.lock)`
+- **Where (`c198e4d1`):** crates/teksilo-app/src/app.rs:2145-2162
+- **Evidence (`261a218f`):**
   - `winit-0.30.13/src/platform_impl/macos/view.rs:521-525: flags_changed -> update_modifiers(event, true)`
   - ``winit-0.30.13/src/platform_impl/macos/view.rs:949-951: `let Some(event_modifier) = key_to_modifier(&logical_key) else { break 'send_event; };` (no KeyboardInput)``
   - `winit-0.30.13/src/platform_impl/macos/view.rs:81-89: key_to_modifier maps only Alt, Control, Super, Shift`
@@ -390,12 +496,18 @@ Confirm password keeps reading 'Passwords don't match' after Password is changed
 - **Scenario:** verify-password-stale-confirm
 - **Act:** "make Password 'abcdefgX' (now equal to Confirm)" then "Tab twice to Confirm"
 - **The reader should get:** Once the two passwords match, arriving at Confirm password does not report a mismatch, and the form's state is consistent (Sign in enabled, no error).
-- **The reader gets:** Confirm's validator reads Password but runs only on Confirm's own blur, submit or edits, so its feedback and the field's description stay 'Passwords don't match'. Orca says 'Confirm password password text. Passwords don't match.' although the passwords match and Sign in is already enabled. The error clears only when focus leaves Confirm again. PasswordField offers no way to re-run a validator when a value it depends on changes.
+- **The reader got (`261a218f`):** Confirm's validator reads Password but runs only on Confirm's own blur, submit or edits, so its feedback and the field's description stay 'Passwords don't match'. Orca says 'Confirm password password text. Passwords don't match.' although the passwords match and Sign in is already enabled. The error clears only when focus leaves Confirm again. PasswordField offers no way to re-run a validator when a value it depends on changes.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured). The stale feedback is platform-independent (the red strip stays on screen too).
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:115-140
-- **Evidence:**
+- **Now (`c198e4d1`):** After Password is changed to match Confirm, Sign in becomes available, but arriving at Confirm still reads 'Confirm password password text  8 • characters  selected.' then "Passwords don't match.". The stale description clears only when focus leaves Confirm again.
+- **Measured again:** verify-password-stale-confirm, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 verify-password-stale-confirm 'Tab twice to Confirm': +751.0 ms ORCA SAYS: 'Confirm password password text  8 • characters  selected.' / +751.0 ms ORCA SAYS: "Passwords don't match."; FAIL [password text] 'Confirm password' has no description containing "don't match" (description="Passwords don't match")`
+  - `pass2 verify-password-stale-confirm, same act: +812.4 ms ORCA SAYS: 'Confirm password password text  8 • characters  selected.' / +812.5 ms ORCA SAYS: "Passwords don't match."`
+  - `pass2 verify-password-stale-confirm 'Tab twice to Sign in': +21.5 ms object:property-change:accessible-description [password text] 'Confirm password' text='' (cleared only on Confirm's own blur)`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:115-141 (the validator is wrapped only into on\_blur and on\_submit)
+- **Evidence (`261a218f`):**
   - `verify-password-stale-confirm-20260925-142628-410320, act "Tab twice to Confirm": +698.2 ms object:state-changed:focused 1 [password text] 'Confirm password' / +733.8 ms ORCA SAYS: 'Confirm password password text.' / +733.8 ms ORCA SAYS: "Passwords don't match."; FAIL [password text] 'Confirm password' has no description containing "don't match" (description="Passwords don't match")`
   - `same run, act "Tab twice to Sign in": +11.3 ms object:property-change:accessible-description [password text] 'Confirm password' text='' (cleared only on Confirm's own blur), then ORCA SAYS: 'Sign in push button.'`
   - `verify-password-stale-confirm-20260925-142719-410320: the same, ORCA SAYS: "Passwords don't match." on arrival`
@@ -412,11 +524,22 @@ libatspi discards every AccessKit cache signal (wrong D-Bus signature), which is
 - **Scenario:** every run (visible in every batch log)
 - **Act:** any act that adds or re-adds a node (the Caps Lock warning shown again, in password-02)
 - **The reader should get:** When a node comes back, its AddAccessible cache signal gives libatspi clients (Orca) its current state set and interfaces, so a node that was defunct is live again.
-- **The reader gets:** accesskit\_unix emits AddAccessible with the body signature (so)(so)(so)iiassusau and RemoveAccessible with 'so', while libatspi 2.52 expects one struct argument, ((so)(so)(so)iiassusau). Every libatspi client logs 'AddAccessible with unknown signature' and ignores the signal. Nothing else clears the DEFUNCT state libatspi cached from state-changed:defunct, so Orca keeps dropping the re-added node's announcements. This is the upstream mechanism under password-02 and K2. It is also why a long-lived libatspi client's interface list goes stale after a role swap, which is the sweep's harness issue 1. (That libatspi would replace the cached states from a well-formed AddAccessible is inferred from its cache design, not read in its source, which is not installed here.)
+- **The reader got (`261a218f`):** accesskit\_unix emits AddAccessible with the body signature (so)(so)(so)iiassusau and RemoveAccessible with 'so', while libatspi 2.52 expects one struct argument, ((so)(so)(so)iiassusau). Every libatspi client logs 'AddAccessible with unknown signature' and ignores the signal. Nothing else clears the DEFUNCT state libatspi cached from state-changed:defunct, so Orca keeps dropping the re-added node's announcements. This is the upstream mechanism under password-02 and K2. It is also why a long-lived libatspi client's interface list goes stale after a role swap, which is the sweep's harness issue 1. (That libatspi would replace the cached states from a well-formed AddAccessible is inferred from its cache design, not read in its source, which is not installed here.)
 - **Platform:** Linux AT-SPI, every AccessKit application
-- **Severity:** high; **layer:** upstream
+- **Severity:** medium; **layer:** upstream
+- **Severity in the sweep:** high. Teksilo now works round its main symptom in this group (85624a1a gives a returning node a new id), so a reader no longer loses the re-shown warning. The upstream signal bug remains for any cached state a client keeps.
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Evidence:**
+- **Now (`c198e4d1`):** accesskit\_unix 0.24.0 still sends AddAccessible and RemoveAccessible with the flattened signature, and libatspi still refuses every one: 37 AddAccessible when this example launches, and more as nodes come and go. Teksilo now hands a node that comes back a new id, so the re-shown Caps Lock warning is no longer dropped as defunct. The refused cache signals themselves remain.
+- **Measured again:** every run in both passes; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-password-field listener.log: '(process:3571929): dbind-WARNING **: 17:36:00.209: AT-SPI: AddAccessible with unknown signature (so)(so)(so)iiassusau', 37 times`
+  - `pass2 password-caps-lock listener.log: '(process:1762373): dbind-WARNING **: 16:38:59.020: AT-SPI: Unknown signature so for RemoveAccessible', 4 times`
+  - `launch-only runs' reports (28 of the 34 password-field reports): 'libatspi refused the application's cache signals: AddAccessible refused 37x, RemoveAccessible refused 0x'; password-caps-lock-start-on and verify-password-caps-arrive, both passes: 'AddAccessible refused 38x, RemoveAccessible refused 1x'; password-caps-lock, both passes: 'AddAccessible refused 41x, RemoveAccessible refused 4x'`
+  - `accesskit_unix-0.24.0/src/atspi/bus.rs:441-446 emit_cache_add and 448-461 emit_cache_remove pass the cache item or object reference as the whole signal body; 463-481 emit_cache_signal`
+  - `accesskit_atspi_common-0.21.0/src/adapter.rs:61 emit_cache_added on add; 104-106 StateChanged(Defunct, true) then emit_cache_removed on remove; nothing emits Defunct false on re-add`
+  - `pass1 and pass2 password-caps-lock 'Caps Lock on again': the announcement comes from a new path (/org/a11y/atspi/accessible/0/158456325028528675187087900672, not the defunct /org/a11y/atspi/accessible/0/79228167015269891578674544640), and 'ORCA SAYS: 'Caps Lock is on''; orca-debug.out in both passes has no 'Ignoring defunct object' line`
+- **Where (`c198e4d1`):** accesskit\_unix-0.24.0/src/atspi/bus.rs:441-481; accesskit\_atspi\_common-0.21.0/src/adapter.rs:61, 104-106
+- **Evidence (`261a218f`):**
   - `logs/batchA.log: '(process:279818): dbind-WARNING **: 14:18:56.203: AT-SPI: AddAccessible with unknown signature (so)(so)(so)iiassusau', 152 times (batchB 264, batchC 229, batchD 334, batchE 148, tabwalk 37); 'AT-SPI: Unknown signature so for RemoveAccessible' x4`
   - `strings /usr/lib/x86_64-linux-gnu/libatspi.so.0: '((so)(so)(so)iiassusau)' (the expected signature)`
   - `accesskit_unix-0.23.0/src/atspi/bus.rs:434-439: emit_cache_add -> emit_cache_signal("AddAccessible", &item); 456-473: the item is passed as the whole signal body, so its fields are sent flattened`
@@ -433,12 +556,16 @@ Every field carries an empty, unnamed status-bar node (its idle ValidationStrip)
 - **Scenario:** launch tree (tabwalk-password-field)
 - **Act:** launch
 - **The reader should get:** A validation strip with no message stays out of the reader's tree, or at least is not a STATUS\_BAR that shadows a real status bar.
-- **The reader gets:** The launch tree has eight \[status bar\] '' nodes, one after each field, the Username TextInput included, although it has no validator. Each is an object-navigation stop with nothing in it. Orca's 'present status bar' command reads the first STATUS\_BAR descendant of the frame, which here is the Username field's empty strip; in an app with a real StatusBar below any text field it would shadow that bar. Keeping the node permanently is deliberate (it avoids the defunct drop of a re-added live node), so the fix is a role or name choice, not removal.
+- **The reader got (`261a218f`):** The launch tree has eight \[status bar\] '' nodes, one after each field, the Username TextInput included, although it has no validator. Each is an object-navigation stop with nothing in it. Orca's 'present status bar' command reads the first STATUS\_BAR descendant of the frame, which here is the Username field's empty strip; in an app with a real StatusBar below any text field it would shadow that bar. Keeping the node permanently is deliberate (it avoids the defunct drop of a re-added live node), so the fix is a role or name choice, not removal.
 - **Platform:** Linux AT-SPI (the tree was measured; the Orca command is from source, since the harness cannot press Orca's own keys). By source it reaches every platform as a Role::Status node.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/validation\_strip.rs:148-164
-- **Evidence:**
+- **Now (`c198e4d1`):** The launch tree still has eight empty \[status bar\] '' nodes, one after each field, the Username entry included. Each is an empty object-navigation stop, and Orca's status bar command would find the Username field's empty strip first.
+- **Measured again:** tabwalk-password-field, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-password-field tree-launch.txt: '[status bar] ''' after each of the entry, Password, Confirm password, Masked, Reveal while typing, No echo, Hold to reveal, Always protected`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/validation\_strip.rs:148-164
+- **Evidence (`261a218f`):**
   - `tabwalk-password-field-20260925-142628-460915 launch tree: 'entry '' ...' followed by 'status bar '' desc=None', and likewise after each of Password, Confirm password, Masked, Reveal while typing, No echo, Hold to reveal, Always protected`
   - `crates/teksilo-widgets/src/primitives/validation_strip.rs:148-164: Role::Status is set unconditionally; the name is set only for Invalid/Corrected ('Empty Status node — present in the AT tree')`
   - `/usr/lib/python3/dist-packages/orca/where_am_i_presenter.py:370-381 present_status_bar -> AXUtilities.get_status_bar(frame); ax_utilities.py:189-198 returns the first STATUS_BAR descendant`
@@ -454,11 +581,18 @@ Orca never speaks a password field's placeholder, so the hint 'At least 8 charac
 - **Scenario:** tabwalk, password-typing
 - **Act:** Tab to the empty Password field
 - **The reader should get:** Arriving at an empty field, the reader hears its hint (Orca reads placeholderText for an empty ENTRY).
-- **The reader gets:** 'Password password text.' only, although the node carries placeholder-text 'At least 8 characters'. Orca 46.1's PASSWORD\_TEXT format has no placeholderText, unlike ENTRY. So on Linux the length rule is heard only after a failed attempt, and then cut (password-05).
+- **The reader got (`261a218f`):** 'Password password text.' only, although the node carries placeholder-text 'At least 8 characters'. Orca 46.1's PASSWORD\_TEXT format has no placeholderText, unlike ENTRY. So on Linux the length rule is heard only after a failed attempt, and then cut (password-05).
 - **Platform:** Linux / Orca 46.1 (measured). Upstream Orca, for any toolkit.
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Evidence:**
+- **Now (`c198e4d1`):** Arriving at the empty Password, Orca still says only 'Password password text.', although the node carries placeholder-text 'At least 8 characters'. Orca 46.1's password-text format has no placeholder.
+- **Measured again:** tabwalk-password-field and password-typing, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass2 tabwalk-password-field Tab 1: +19.4 ms object:state-changed:focused 1 [password text] 'Password' / +109.3 ms ORCA SAYS: 'Password password text.'`
+  - `pass2 tabwalk-password-field tree-launch.txt: [password text] 'Password' attrs={'placeholder-text': 'At least 8 characters'}`
+  - `/usr/lib/python3/dist-packages/orca/formatting.py:405-406 (PASSWORD_TEXT: no placeholderText)`
+- **Where (`c198e4d1`):** /usr/lib/python3/dist-packages/orca/formatting.py:405-406 (upstream Orca)
+- **Evidence (`261a218f`):**
   - `tabwalk-password-field-20260925-142628-460915 Tab 1: +10.8 ms object:state-changed:focused 1 [password text] 'Password' / +44.4 ms ORCA SAYS: 'Password password text.'; launch tree: password text 'Password' attrs={'placeholder-text': 'At least 8 characters'}`
   - `/usr/lib/python3/dist-packages/orca/formatting.py:405-406 (PASSWORD_TEXT: no placeholderText) vs 257-258 (ENTRY: '(currentLineText or placeholderText)')`
 - **Reproduced:** Every arrival at the empty Password in the verifier's runs (tabwalk, typing x2, caps-arrive x3). Structural.
@@ -473,11 +607,18 @@ RevealWhileTyping shows the password in clear on screen, and nothing tells a scr
 - **Scenario:** password-echo-modes
 - **Act:** "focus Reveal while typing (a reader's own focus request)"
 - **The reader should get:** A user who cannot see the screen learns that their password is displayed in clear while they type (a shoulder-surfing risk), as the Toggle mode tells them with 'pressed'.
-- **The reader gets:** 'Reveal while typing password text.', which says what it does only because the demo named the field after its mode. The node is a plain PasswordInput with no state or description saying the text is visible. By design the AT protection ignores the focus reveal.
+- **The reader got (`261a218f`):** 'Reveal while typing password text.', which says what it does only because the demo named the field after its mode. The node is a plain PasswordInput with no state or description saying the text is visible. By design the AT protection ignores the focus reveal.
 - **Platform:** Linux / Orca 46.1 (measured); by source every platform.
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Evidence:**
+- **Now (`c198e4d1`):** Focusing Reveal while typing, Orca says 'Reveal while typing password text  7 • characters  selected.'. Nothing in the node's state or description says the text is shown in clear on screen; only the demo's field name hints at it.
+- **Measured again:** password-echo-modes and tabwalk-password-field, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 password-echo-modes 'focus Reveal while typing (a reader's own focus request)': +530.6 ms ORCA SAYS: 'Reveal while typing password text  7 • characters  selected.' (pass2: +105.4 ms, the same)`
+  - `pass2 tabwalk-password-field Tab 7: +129.7 ms ORCA SAYS: 'Reveal while typing password text  7 • characters  selected.'`
+  - `pass2 tabwalk-password-field launch tree: password text 'Reveal while typing' desc=None`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_input\_field/widget\_impl.rs:1123-1135 (AT protection tracks only the explicit reveal toggle, not the RevealWhileTyping focus reveal)
+- **Evidence (`261a218f`):**
   - `password-echo-modes-20260925-142936-489494, act "focus Reveal while typing": ORCA SAYS: 'Reveal while typing password text.'; pass no event or node carries 'hunter2'`
   - `crates/teksilo-widgets/src/primitives/text_input_field/widget_impl.rs:1058-1071 (AT protection tracks only the explicit reveal toggle, not the RevealWhileTyping focus reveal)`
 - **Reproduced:** 1 of 1 verifier run, and the sweep's 2. Structural.

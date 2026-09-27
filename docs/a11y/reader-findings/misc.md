@@ -1,11 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
-<!-- Written from the sweep's results of 25 and 26 September 2026: a record of what was measured then, not regenerated. See ../reader-findings.md. -->
+<!-- Generated from the sweep of 25 and 26 September 2026 (on 261a218f) and its re-measure of 27 September 2026 (on c198e4d1). See ../reader-findings.md. -->
 
 # Pickers, files and drag and drop
 
 Examples: `color-picker-demo`, `font-picker`, `recent-projects`, `file-dialogs`, `file-drop`, `drag-and-drop`, `text-and-layout`.
 27 findings: 2 critical, 13 high, 8 medium, 4 low.
+Swept on `261a218f` on 25 and 26 September 2026, measured again on
+`c198e4d1` on 27 September 2026.
 How to read an entry, and what the words mean, is in
 [Screen-reader findings](../reader-findings.md).
 
@@ -26,7 +28,7 @@ How to read an entry, and what the words mean, is in
 | [misc-13](#misc-13) | color-picker-demo | A picked swatch never becomes 'selected' for AT: its name and state are computed once at build | high | all | open |
 | [misc-14](#misc-14) | color-picker-demo | HexColorInput is two nested entries with the same name, so every focus speaks the field twice | medium | Linux | open |
 | [misc-15](#misc-15) | color-picker-demo | The ColorPicker's preview and saturation × brightness field carry their value only as a string value, which AT-SPI does not export | medium | Linux | open |
-| [misc-16](#misc-16) | color-picker-demo | ColorEdit triggers are named only by their hex, and the nullable one by an em dash ('— push button.'); its popover dialog is unnamed | high | all | open |
+| [misc-16](#misc-16) | color-picker-demo | ColorEdit triggers are named only by their hex, and the nullable one by an em dash ('— push button.'); its popover dialog is unnamed | high | all | partly fixed |
 | [misc-17](#misc-17) | color-picker-demo | A plain window opens with focus in its first TextInput, wherever it is: color-picker-demo starts inside the first picker's Hex field, text selected | medium | all | open |
 | [misc-18](#misc-18) | drag-and-drop | drag-and-drop: the Songs, Playlist and Up next lists and the Folders tree are unnamed ('multi-select list box.', 'tree.') | high | all | open (example) |
 | [misc-19](#misc-19) | drag-and-drop | TreeView hierarchy is invisible on AT-SPI: no expandable/expanded state and no level ('Documents.' before and after Right arrow) | high | Linux | upstream |
@@ -37,7 +39,7 @@ How to read an entry, and what the words mean, is in
 | [misc-24](#misc-24) | color-picker-demo | Text changes of nodes outside the exported tree (off-screen pickers sharing the colour) still emit text-changed events, 22 per keypress, which Orca drops as defunct | low | Linux | upstream |
 | [misc-25](#misc-25) | drag-and-drop | The non-drag alternatives' AccessKit custom actions (Move Up/Down/…, the colour field's four steps) are not exported on AT-SPI | low | Linux | upstream |
 | [misc-M1](#misc-m1) | drag-and-drop | Every StandardListItem / StandardTreeItem row exposes a second, role-less node with the row's name (\[unknown\] 'Hyperballad' under \[list item\] 'Hyperballad') | low | Linux | open |
-| [misc-M2](#misc-m2) | color-picker-demo | Framework accessibility strings hard-coded in English: the ColorPicker's saturation × brightness field (name, value, announcement, four custom actions) and the searchable ComboBox's 'Search…' field | medium | all | open |
+| [misc-M2](#misc-m2) | color-picker-demo | Framework accessibility strings hard-coded in English: the ColorPicker's saturation × brightness field (name, value, announcement, four custom actions) and the searchable ComboBox's 'Search…' field | medium | all | partly fixed |
 
 ### misc-01 {#misc-01}
 
@@ -47,12 +49,20 @@ A ColorPicker's Live::Polite root makes every named control inside it announce i
 - **Scenario:** misc-color-scroll (and every color-picker launch)
 - **Act:** launch color-picker-demo; Tab from the 2nd picker's last swatch into the Compact picker (scrolls); Shift+Tab from Theme to the bottom of the page; Space on a ColorEdit trigger
 - **The reader should get:** the reader hears the window and the focused control; scrolling or opening a popover says only where focus went
-- **The reader gets:** launch: 52 object:announcement events (every swatch, 'Hex', 'R', 'G', 'Hue', 'Color presets', ...) each spoken with interrupt=True, then 'frame.', 'Color picker panel.', 'Hex entry #3584E4'. Scroll into the Compact picker: 5 announcements; Shift+Tab to the page bottom: 53 announcements; ColorEdit popover: 7 announcements ('Hue','Hex','Color picker','Cancel','Hex','Done','Saturation and brightness') before 'dialog'
+- **The reader got (`261a218f`):** launch: 52 object:announcement events (every swatch, 'Hex', 'R', 'G', 'Hue', 'Color presets', ...) each spoken with interrupt=True, then 'frame.', 'Color picker panel.', 'Hex entry #3584E4'. Scroll into the Compact picker: 5 announcements; Shift+Tab to the page bottom: 53 announcements; ColorEdit popover: 7 announcements ('Hue','Hex','Color picker','Cancel','Hex','Done','Saturation and brightness') before 'dialog'
 - **Platform:** Linux AT-SPI/Orca measured. Windows and macOS by source: accesskit\_windows adapter.rs:256-263 raises UIA LiveRegionChanged, and accesskit\_macos event.rs:236-240 posts an announcement, for every added node with a name whose inherited live() is not Off, so both get the same flood
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_picker.rs:813-833 (builder.set\_live(Live::Polite) on the root Group)
-- **Evidence:**
+- **Now (`c198e4d1`):** Every launch of color-picker-demo still raises 52 announcements, one for each named control inside the pickers, and Orca starts and cuts nearly all of them before it reads the window and 'Hex entry #3584E4'. Tabbing into the Compact picker still raises 5 announcements, Shift+Tab to the bottom of the page 53, and opening a ColorEdit popover 7 ('Color picker', 'Cancel', 'Done', 'Hex', 'Hue', 'Saturation and brightness', 'Hex') before '#E91E63 dialog'. The reading of the real focus still survives uncut after the flood.
+- **Measured again:** misc-color-scroll 2 of 2 runs; launch flood in 12 of 12 color-picker-demo launches over both passes
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-scroll 'launch': '+1755.0 ms object:announcement [label] 'H' text='H'' ... '+1829.7 ms object:announcement [slider] 'Hue' text='Hue'' then '+1833.2 ms object:state-changed:focused 1 [entry] 'Hex''; 52 announcements, 51 cut, then 'ORCA SAYS: 'Teksilo — ColorPicker gallery frame.'', 'ORCA SAYS: 'Color picker panel.'', 'ORCA SAYS: 'Hex entry #3584E4''`
+  - `pass1 and pass2, misc-color-channels, misc-color-hex, misc-color-scroll, misc-color-swatches, verify-misc-color-fr and tabwalk-color-picker-demo 'launch': 52 object:announcement events and 50 to 52 utterances cut in each of the 12 launches`
+  - `pass1 misc-color-scroll 'Tab into the Compact picker, which scrolls into view': '+61.1 ms object:announcement [slider] 'Hue' text='Hue'' ... '+68.5 ms object:announcement [panel] 'Color picker' text='Color picker'' then '+72.5 ms object:state-changed:focused 1 [panel] 'Saturation and brightness''; 'ORCA SAYS (CUT): 'Hue'' x5 of 5, then 'ORCA SAYS: 'Saturation and brightness panel.''`
+  - `pass2 misc-color-scroll 'Shift+Tab wraps to the last control of the page': 'FAIL at most 1 object:announcement events' / '53 object:announcement events', then 'ORCA SAYS: ',  push button.'' at +834.0 ms`
+  - `pass2 misc-color-scroll 'Space opens its picker popover': '+104.6 ms object:announcement [panel] 'Color picker' text='Color picker'' ... '+112.2 ms object:announcement [entry] 'Hex' text='Hex'', 'ORCA SAYS (CUT): 'Color picker'' ... 'ORCA SAYS (CUT): 'Hex'', then 'ORCA SAYS: '#E91E63 dialog''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_picker.rs:813-833 (builder.set\_live(Live::Polite) on the root Group at 821; file unchanged). Adapter: accesskit\_atspi\_common-0.21.0/src/adapter.rs:72-78 still announces every added node with a name whose inherited live is not Off
+- **Evidence (`261a218f`):**
   - `tree-color-picker-demo report.txt launch: '+1601.8 ms object:announcement [push button] 'Swatch #F29933' text='Swatch #F29933'' ... '+1679.8 ms object:announcement [label] 'B' text='B'' then '+1685.9 ms object:state-changed:focused 1 [entry] 'Hex''`
   - `misc-color-channels-20260925-150110 orca-debug.out: '15:01:13.476144 - SPEECH OUTPUT: 'Swatch #F29933'' / '15:01:13.476148 - NULL SPEECH: speak 'Swatch #F29933' interrupt=True' ... '15:01:13.672731 - SPEECH OUTPUT: 'frame.'' / '15:01:13.777490 - SPEECH OUTPUT: 'Color picker panel.''`
   - `launch tally: 52 announcements, 52-53 utterances cut, in 7 of 7 launches (tree, tabwalk, channels x2, hex x2, scroll x3, swatches x2)`
@@ -73,12 +83,19 @@ The ColorPicker's 'Color changed to #…' announcement never fires: the message 
 - **Scenario:** misc-color-hex, misc-color-channels, misc-color-swatches
 - **Act:** commit #FF8800 in the Hex field (Ctrl+A, type, Enter); Up arrow on the R spinner; Space on a preset swatch
 - **The reader should get:** 'Color changed to #FF8800' (the picker's documented live region, color\_picker.rs:27-29)
-- **The reader gets:** Orca says nothing after committing the hex; only '54' after the spinner step; nothing after picking a swatch. The bus carries only accessible-value changes of the spinners and the Hue slider
+- **The reader got (`261a218f`):** Orca says nothing after committing the hex; only '54' after the spinner step; nothing after picking a swatch. The bus carries only accessible-value changes of the spinners and the Hue slider
 - **Platform:** Linux measured. Windows (accesskit\_windows adapter.rs:310-322) and macOS (accesskit\_macos event.rs:301-310) also raise their live-region event only on a name change, so the message is lost everywhere
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_picker.rs:813-833 (set\_value of color-picker-changed-announcement on the live Group); cache effect at ~464-484
-- **Evidence:**
+- **Now (`c198e4d1`):** Committing a colour still produces no announcement. After typing #FF8800 and Enter in the Hex field the reader hears only the echo of the typed keys; after Up on the first spinner only '54'; after Space on a preset swatch nothing. The spinners and the Hue slider change value and text, and nothing says 'Color changed to'.
+- **Measured again:** misc-color-hex, misc-color-channels, misc-color-swatches, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-hex 'select all and type #FF8800, then Enter': after 'ORCA SAYS: 'return'' only text-changed and accessible-value events on [spin button] '' and '+634.3 ms object:property-change:accessible-value [slider] 'Hue''; no object:announcement; 'FAIL Orca says one of ['Color changed to #FF8800']'`
+  - `pass2 misc-color-hex 'select all and type #FF8800, then Enter': no object:announcement; 'ORCA SAYS: '00'' is the last speech; 'FAIL Orca says one of ['Color changed to #FF8800']'`
+  - `pass1 misc-color-channels 'Up arrow on it': 'ORCA SAYS: '54'' / 'FAIL Orca says one of ['Color changed to #3684E4', '3684E4']' (same in pass2)`
+  - `pass1 and pass2 misc-color-swatches 'Space on Swatch #3685E3': only text-changed and accessible-value events, no object:announcement, Orca silent`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_picker.rs:813-833 (set\_value of color-picker-changed-announcement on the live Group at 827-830); cache effect at ~464-484 (file unchanged)
+- **Evidence (`261a218f`):**
   - `misc-color-hex-20260925-150036 'select all and type #FF8800, then Enter': events '+602.4 ms object:property-change:accessible-value [spin button] ''' ... '+611.7 ms object:property-change:accessible-value [slider] 'Hue''; 'FAIL Orca says one of ['Color changed to #FF8800'] / Orca said nothing in the act'; orca-debug.out has no SPEECH OUTPUT between 15:00:49.839 and 15:00:53.586`
   - `misc-color-channels 'Up arrow on it': 'ORCA SAYS: '54'' / 'FAIL Orca says one of ['Color changed to #3684E4', '3684E4']'`
   - `tree: [panel] 'Color picker' {focusable} carries no value on AT-SPI`
@@ -97,12 +114,19 @@ Every RGB / HSV / alpha spinner of the ColorPicker has no accessible name ('53 s
 - **Scenario:** misc-color-channels
 - **Act:** Tab from the Hex field through the spinners
 - **The reader should get:** 'Red 53 spin button', 'Green 132 …', 'Hue 213 …' (the long labels color-picker-red-label etc. exist in en-US.ftl:314-316 and are unused)
-- **The reader gets:** '53 spin button.', '132 spin button.', '228 spin button.', '213 spin button.', '77 spin button.', '89 spin button.'; the painted 'R'/'G'/… is a separate \[label\] not linked to the spinner
+- **The reader got (`261a218f`):** '53 spin button.', '132 spin button.', '228 spin button.', '213 spin button.', '77 spin button.', '89 spin button.'; the painted 'R'/'G'/… is a separate \[label\] not linked to the spinner
 - **Platform:** all platforms (the name is missing in the AccessKit tree); measured on Linux
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_picker.rs:862-989 (make\_\*\_spinner\_from\_value never call .label(); spinner\_cell 981-987 adds an unlinked TextWidget)
-- **Evidence:**
+- **Now (`c198e4d1`):** Every RGB, HSV and alpha spinner still has no accessible name. Tabbing from the Hex field says '53 spin button.', then '132 spin button.', '228 spin button.' and so on, with no channel name. The launch audit still lists 13 unnamed spin buttons.
+- **Measured again:** misc-color-channels 2 of 2 runs; tabwalk-color-picker-demo 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-channels 'Tab from the Hex field to the first RGB spinner': '+37.4 ms object:state-changed:focused 1 [spin button] ''' / 'ORCA SAYS: '53 spin button.'' / 'FAIL Orca says one of ['Red', 'R spin']'`
+  - `pass2 misc-color-channels 'Tab to the next spinner': 'ORCA SAYS: '132 spin button.'' / 'FAIL Orca says one of ['Green', 'G spin']'`
+  - `pass1 misc-color-channels 'launch' audit: 13 x 'unnamed-control: [spin button] '': a focusable spin button with no name (its text is '53')' ...`
+  - `pass1 tabwalk-color-picker-demo: 'ORCA SAYS: '53 spin button.'', ''132 spin button.'', ''228 spin button.'', ''213 spin button.'', ''77 spin button.'', ''89 spin button.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_picker.rs:862-989 (make\_\*\_spinner\_from\_value never call .label(); spinner\_cell 981-987 adds an unlinked TextWidget; file unchanged)
+- **Evidence (`261a218f`):**
   - `tree audit at launch: 13 x 'unnamed-control: [spin button] '': a focusable spin button with no name (its text is '53')' …`
   - `tabwalk-color-picker-demo: '+30.8 ms object:state-changed:focused 1 [spin button] ''' / 'ORCA SAYS: '53 spin button.''`
   - `misc-color-channels: 'FAIL Orca says one of ['Red', 'R spin'] / Orca said: '53 spin button.''`
@@ -121,12 +145,20 @@ Checking 'Monospace only' (a Checkbox) never reaches the bus until focus moves a
 - **Scenario:** misc-font-mono-toggle, misc-font-picker
 - **Act:** Space on the focused 'Monospace only' check box (and AT-SPI click)
 - **The reader should get:** object:state-changed:checked at once and 'checked' spoken
-- **The reader gets:** no state-changed:checked within 4 s of 2 Spaces and 1 AT-SPI click per run, nor with a following Shift; when focus later moves (Shift+Tab) the stale change is flushed in the same update and Orca's 'checked' is cut by the new focus
+- **The reader got (`261a218f`):** no state-changed:checked within 4 s of 2 Spaces and 1 AT-SPI click per run, nor with a following Shift; when focus later moves (Shift+Tab) the stale change is flushed in the same update and Orca's 'checked' is cut by the new focus
 - **Platform:** Linux measured; the missing re-walk is in teksilo-core, so all platforms
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `5c8ff299` (state-publish).
-- **Where:** crates/teksilo-widgets/src/checkbox.rs:383-387 and styles/recipe\_checkbox\_style.rs:146-155 (check state bound RepaintOnly only); checkbox.rs:496-600 handlers never request an a11y re-walk
-- **Evidence:**
+- **Now (`c198e4d1`):** Space on 'Monospace only' now puts object:state-changed:checked on the bus within about 24 ms, and Orca says 'checked' or 'not checked' at once. An AT-SPI click does the same. The Tab that follows carries nothing stale.
+- **Measured again:** misc-font-mono-toggle, verify-misc-mono-tree, misc-font-picker, 2 of 2 runs each
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-font-mono-toggle 'Space 1: check Monospace only': '+23.6 ms object:state-changed:checked 1 [check box] 'Monospace only'' / 'ORCA SAYS: 'checked''`
+  - `pass1 misc-font-mono-toggle 'Space 2: uncheck Monospace only': '+23.6 ms object:state-changed:checked 0 [check box] 'Monospace only'' / 'ORCA SAYS: 'not checked''`
+  - `pass2 misc-font-mono-toggle 'AT-SPI click on Monospace only': '+11.0 ms object:state-changed:checked 1 [check box] 'Monospace only'' / 'ORCA SAYS: 'checked''`
+  - `pass2 verify-misc-mono-tree 'Space, then read the adapter's tree': '+24.1 ms object:state-changed:checked 1 [check box] 'Monospace only'' / 'pass the tree the adapter holds shows the box checked'; 'Tab to Writing system': no checked event, 'ORCA SAYS: 'Writing system combo box.''`
+  - `pass1 misc-font-picker 'Space checks Monospace only': '+24.3 ms object:state-changed:checked 1 [check box] 'Monospace only'' / 'ORCA SAYS: 'checked''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/checkbox.rs:389-396 (the check state bound at BindingLevel::AccessibilityOnly on the check box's own node); accessibility() at 653
+- **Evidence (`261a218f`):**
   - `misc-font-picker-20260925-150305 'Space checks Monospace only' (15:03:47.13-15:03:50.32): 'FAIL a object:state-changed:checked event from [check box] '*' / no object:state-changed:checked event'`
   - `same run events.jsonl: '15:03:51.547505 object:state-changed:checked 1' arrives with the Shift+Tab act (started 15:03:51.526); orca-debug.out '15:03:51.558289 - SPEECH OUTPUT: 'checked'' / '15:03:51.603931 - NULL SPEECH: stop' / '15:03:51.604042 - SPEECH OUTPUT: 'Font family combo box.''`
   - `misc-font-mono-toggle x4 runs: 0 object:state-changed:checked events in events.jsonl (9 activations in the 3 isolation runs, including 'AT-SPI click on Monospace only: FAIL … no object:state-changed:checked event')`
@@ -147,12 +179,21 @@ Arrowing through an open ComboBox list is silent: the font list (searchable) and
 - **Scenario:** misc-font-picker
 - **Act:** Font family: Alt+Down, Down, Down, type 'mono', Down, Enter. Writing system: Alt+Down, Down, Enter
 - **The reader should get:** each Down speaks the highlighted font ('C059', 'D050000L', 'DejaVu Sans Mono') / script ('Latin')
-- **The reader gets:** Alt+Down: 'list box', 'Search…'. Every Down: only object:state-changed:selected on a list item and object:selection-changed on the list box, no focus or active-descendant change, Orca silent. Typing 'mono' narrows the list (setsize 277 -&gt; 14) silently. Enter: 'Font family combo box.' Writing system: Alt+Down, Down, Enter all silent. Together with misc-06 the reader can never learn which font is highlighted or chosen
+- **The reader got (`261a218f`):** Alt+Down: 'list box', 'Search…'. Every Down: only object:state-changed:selected on a list item and object:selection-changed on the list box, no focus or active-descendant change, Orca silent. Typing 'mono' narrows the list (setsize 277 -&gt; 14) silently. Enter: 'Font family combo box.' Writing system: Alt+Down, Down, Enter all silent. Together with misc-06 the reader can never learn which font is highlighted or chosen
 - **Platform:** Linux measured; no focus/active-descendant is emitted in the AccessKit tree, so Windows/macOS readers have nothing to follow either (not measured)
 - **Severity:** critical; **layer:** framework
-- **Status:** Fixed by `f9ffa98c` (combobox). Fixed part: critical): arrowing through the font list and the writing-system list now speaks each font or script (C059, D050000L, DejaVu Sans Mono, Latin); arrows no longer commit, and Enter picks.
-- **Where:** crates/teksilo-widgets/src/combo\_box/panel.rs:620-700 (arrows set `selected`, no active\_descendant); combo\_box/item.rs:207-218 (Role::ListBoxOption carries the selected state inside ListView's own item wrapper); combo\_box.rs:904-916 (non-searchable arrows commit through pick\_at)
-- **Evidence:**
+- **Status:** Fixed by `f9ffa98c` (combobox).
+- **Now (`c198e4d1`):** Arrowing through the open font list now moves focus to each option and Orca speaks it: 'List with 30 items', 'C059.', then 'D050000L.'; after typing 'mono', Down says 'List with 14 items', 'DejaVu Sans Mono.'. The writing-system list opens on '(all scripts)' and Down says 'Latin.'. The arrows no longer commit: the preview changes only on Enter.
+- **Measured again:** misc-font-picker 2 of 2 runs; verify-misc-combo-ws 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-font-picker 'Down arrow': '+13.0 ms object:state-changed:focused 1 [list item] 'C059'' / 'ORCA SAYS: 'List with 30 items'' / 'ORCA SAYS: 'C059.''`
+  - `pass2 misc-font-picker 'Down arrow again': '+31.2 ms object:state-changed:focused 1 [list item] 'D050000L'' / 'ORCA SAYS: 'D050000L.''`
+  - `pass1 misc-font-picker 'Down arrow in the filtered list': '+11.7 ms object:state-changed:focused 1 [list item] 'DejaVu Sans Mono'' / 'ORCA SAYS: 'List with 14 items'' / 'ORCA SAYS: 'DejaVu Sans Mono.''`
+  - `pass2 misc-font-picker 'Down arrow in the writing-system list': '+17.0 ms object:state-changed:focused 1 [list item] 'Latin'' / 'ORCA SAYS: 'Latin.''`
+  - `pass1 misc-font-picker 'Enter to pick it': '+25.7 ms object:children-changed:add [panel] '' -> [label] 'The quick brown fox jumps over the lazy dog. — 0123456789 ?!&@'' (the preview changes on Enter, not on the arrows)`
+  - `pass2 verify-misc-combo-ws 'Down arrow again': '+19.4 ms object:state-changed:focused 1 [list item] 'Greek'' / 'ORCA SAYS: 'Greek.''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/combo\_box.rs:1360-1375 (the combo names the highlighted option as its active\_descendant while open); combo\_box/panel.rs:630-650 (the search field does the same); combo\_box/item.rs:128-150 (the highlighted row publishes its node)
+- **Evidence (`261a218f`):**
   - `misc-font-picker-20260925-150305 'Down arrow': '+28.9 ms object:state-changed:selected 1 [list item] 'C059'' / '+30.5 ms object:selection-changed [list box] ''' / 'FAIL Orca says something / Orca said nothing in the act' / 'FAIL … no focus change on the bus in this act'`
   - `same run 'Down arrow in the writing-system list': '+9.3 ms object:state-changed:selected 1 [list item] 'Latin'' / 'FAIL Orca says 'Latin''; 'Enter picks it': 'no focus change on the bus in this act', Orca silent`
   - `orca-debug.out '15:03:18.187945 - SPEECH OUTPUT: 'list box'' / '15:03:18.187977 - SPEECH OUTPUT: 'Search…'' then no SPEECH OUTPUT through the arrows`
@@ -173,12 +214,21 @@ A ComboBox's current value is not exported on AT-SPI: 'Font family combo box.' a
 - **Scenario:** misc-font-picker, misc-text-layout
 - **Act:** Tab to Theme (every example); Enter to pick 'DejaVu Sans Mono', then Shift+Tab back to Font family
 - **The reader should get:** 'Font family combo box DejaVu Sans Mono', 'Theme combo box Light'
-- **The reader gets:** 'Font family combo box.' and 'Theme combo box.' only; the tree shows no value, text or child for the combo boxes
+- **The reader got (`261a218f`):** 'Font family combo box.' and 'Theme combo box.' only; the tree shows no value, text or child for the combo boxes
 - **Platform:** Linux (AT-SPI) only by source: accesskit\_windows node.rs:592-597 exposes a string value through ValuePattern; accesskit\_atspi\_common exposes it nowhere
 - **Severity:** high; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/combo\_box.rs:1247-1263 (value set correctly); gap in accesskit\_atspi\_common-0.20.0/src/node.rs:38-44, 486-492
-- **Evidence:**
+- **Now (`c198e4d1`):** A combo box's current value is still not exported on AT-SPI. After picking DejaVu Sans Mono the reader hears 'Font family combo box.'; after picking Latin, 'Writing system combo box.'; the theme switcher reads 'Theme combo box.' everywhere. The tree shows no value, text or child under a closed combo box.
+- **Measured again:** misc-font-picker 2 of 2 runs, misc-text-layout 2 of 2, verify-misc-combo-ws 2 of 2; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-font-picker 'Enter to pick it': '+28.4 ms object:state-changed:focused 1 [combo box] 'Font family'' / 'ORCA SAYS: 'Font family combo box.'' / 'FAIL Orca says one of ['Mono', 'mono']'`
+  - `pass2 misc-font-picker 'Shift+Tab back to Font family': 'ORCA SAYS: 'Font family combo box.'' / 'FAIL Orca says one of ['Mono', 'mono']'`
+  - `pass2 misc-font-picker 'Enter picks it': 'ORCA SAYS: 'Writing system combo box.'' / 'FAIL Orca says 'Latin''`
+  - `pass1 and pass2 misc-text-layout 'Tab to the theme switcher': 'ORCA SAYS: 'Theme combo box.'' / 'FAIL Orca says one of ['Light', 'Dark', 'System']'`
+  - `pass1 misc-font-picker tree-launch.txt: '[combo box] 'Font family' {focusable}' with no child`
+  - `source: accesskit_atspi_common-0.21.0/src/node.rs:38-44 uses the value as a name only when label_comes_from_value (Role::Label, accesskit_consumer-0.39.1/src/node.rs:744-746); node.rs:476-482 gives Text only for text ranges and Value only for a numeric value`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/combo\_box.rs:1327-1350 (value set correctly at 1342); gap in accesskit\_atspi\_common-0.21.0/src/node.rs:38-44, 476-482
+- **Evidence (`261a218f`):**
   - `misc-font-picker 'Enter to pick it': '+8.5 ms object:state-changed:focused 1 [combo box] 'Font family'' / 'ORCA SAYS: 'Font family combo box.'' / 'FAIL Orca says one of ['Mono', 'mono']'`
   - `misc-text-layout 'Tab to the theme switcher': 'ORCA SAYS: 'Theme combo box.'' / 'FAIL Orca says one of ['Light', 'Dark', 'System']'`
   - `tree-text-and-layout run.json: combo box 'Theme' interfaces ['Accessible','Action','Component','Selection'], child_count 0`
@@ -197,12 +247,19 @@ The row context menu (the non-drag reorder's menu route) is silent: focus sits o
 - **Scenario:** misc-drag-and-drop
 - **Act:** drag-and-drop: Menu key on the Unravel row, Down, Enter
 - **The reader should get:** 'Move Up menu item' on Down; Enter runs the heard command
-- **The reader gets:** 'menu.' on open; Down emits nothing on the bus and Orca says nothing; Enter runs 'Move Up' (announced 'Moved to 2 of 10', itself lost, see misc-09) although the reader never heard which row was current
+- **The reader got (`261a218f`):** 'menu.' on open; Down emits nothing on the bus and Orca says nothing; Enter runs 'Move Up' (announced 'Moved to 2 of 10', itself lost, see misc-09) although the reader never heard which row was current
 - **Platform:** Linux measured; no focus or active-descendant is published, so no adapter can report it
 - **Severity:** high; **layer:** framework
 - **Status:** Fixed by `9636094c` (menus).
-- **Where:** crates/teksilo-widgets/src/menu\_list.rs:227-233 (documented: arrows move focused\_index, not tree focus), 991-993 (Role::Menu, no active\_descendant, no name)
-- **Evidence:**
+- **Now (`c198e4d1`):** The row context menu now makes its highlight the reader's focus. The Menu key says 'menu.', Down says 'Move Up.', and Enter runs Move Up, the command the reader just heard, then 'Unravel.' and 'Moved to 2 of 10'. The context menu itself is still unnamed, so it opens as 'menu.'.
+- **Measured again:** misc-drag-and-drop, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-drag-and-drop 'open the row's context menu with the Menu key': '+35.3 ms object:state-changed:focused 1 [menu] ''' / 'ORCA SAYS: 'menu.''`
+  - `pass1 misc-drag-and-drop 'Down arrow in the menu': '+16.0 ms object:state-changed:focused 1 [menu item] 'Move Up'' / 'ORCA SAYS: 'Move Up.''`
+  - `pass2 misc-drag-and-drop 'Down arrow in the menu': '+16.0 ms object:state-changed:focused 1 [menu item] 'Move Up'' / 'ORCA SAYS: 'Move Up.''`
+  - `pass2 misc-drag-and-drop 'Enter on the current menu row': '+69.2 ms object:state-changed:focused 1 [list item] 'Unravel'' / '+72.1 ms object:announcement [status bar] 'Moved to 2 of 10' text='Moved to 2 of 10'' / 'ORCA SAYS: 'Moved to 2 of 10''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/menu\_list.rs:1121-1156 (Role::Menu names the highlighted row as its active\_descendant, labelled\_by the opener when there is one); 596-602 (the highlight bound at AccessibilityOnly)
+- **Evidence (`261a218f`):**
   - `misc-drag-and-drop-20260925-150304 'open the row's context menu': '+22.1 ms object:state-changed:focused 1 [menu] ''' / 'ORCA SAYS: 'menu.''; tree: [menu] '' {focusable,focused} with [menu item] 'Move Up' / 'Move Down' / 'Move to Top' / 'Move to Bottom' (not focusable)`
   - `'Down arrow in the menu': no events; 'FAIL Orca says 'Move''`
   - `'Enter on the current menu row': '+26.3 ms object:announcement [status bar] … text='Moved to 2 of 10''`
@@ -221,12 +278,19 @@ No keyboard route for cross-view drags: songs cannot reach the Playlist, Up next
 - **Scenario:** misc-drag-and-drop, misc-file-drop
 - **Act:** drag-and-drop: context menu on a song; Tab through; file-drop: Tab walk and tree
 - **The reader should get:** a menu row / chord such as 'Add to Playlist' (WCAG 2.5.7 / 2.1.1), and focusable drag-out rows
-- **The reader gets:** the row menu offers only Move Up/Down/to Top/to Bottom; Playlist, Up next and Trash are drop-only; in file-drop Tab goes straight from the window to the first Browse…, the '⠿ Drag this file out' rows are unfocusable panels with no action, the internal DropTarget is an unnamed panel
+- **The reader got (`261a218f`):** the row menu offers only Move Up/Down/to Top/to Bottom; Playlist, Up next and Trash are drop-only; in file-drop Tab goes straight from the window to the first Browse…, the '⠿ Drag this file out' rows are unfocusable panels with no action, the internal DropTarget is an unnamed panel
 - **Platform:** all (no route exists in the widget tree); measured on Linux
 - **Severity:** critical; **layer:** framework
 - **Status:** Open.
-- **Where:** docs/a11y/non-drag-alternatives.md:176-183 (the documented gap: keyboard pick-up / put-down, census row 30); crates/teksilo-widgets/src/list\_view/body\_pane.rs:473-489 (RowCommands extra: Vec::new()); crates/teksilo-widgets/src/drop\_target.rs:864-868 (unnamed Role::Group); examples/file\_drop/src/main.rs:97-176
-- **Evidence:**
+- **Now (`c198e4d1`):** There is still no keyboard route for cross-view drags. The Songs row menu offers only Move Up, Move Down, Move to Top and Move to Bottom, so a song cannot reach the Playlist, Up next or Trash. In file-drop, Tab goes from the window to the first Browse… and the two '⠿ Drag this … out' rows are unfocusable panels with no action; the internal drop target is an unnamed panel.
+- **Measured again:** misc-drag-and-drop 2 of 2 runs, misc-file-drop 2 of 2, tabwalk-file-drop 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-drag-and-drop 'open the row's context menu with the Menu key': 'FAIL the menu offers a way to copy the song to the playlist' (same in pass2)`
+  - `pass1 misc-file-drop 'the tree: a keyboard route to the drag-out rows and the internal target': 'FAIL the drag-out rows are focusable, or offer an action' / 'FAIL the internal drop target is named' (same in pass2)`
+  - `pass1 misc-file-drop tree: '[panel] ''' > '[label] '⠿  Drag this file out →  (main.rs)'' (no focusable state); '[panel] ''' > '[label] 'Internal drop target — drop a row here (recovers the typed value)''`
+  - `pass1 tabwalk-file-drop: '+56.0 ms object:state-changed:focused 1 [push button] 'Browse…'' / 'ORCA SAYS: 'Drop images here panel.'', then the second Browse…`
+- **Where (`c198e4d1`):** docs/a11y/non-drag-alternatives.md:176-183; crates/teksilo-widgets/src/list\_view/body\_pane.rs:475-491 (RowCommands extra: Vec::new() at 489); crates/teksilo-widgets/src/drop\_target.rs:864-868 (unnamed Role::Group); examples/file\_drop/src/main.rs:97-176
+- **Evidence (`261a218f`):**
   - `misc-drag-and-drop 'open the row's context menu': 'FAIL the menu offers a way to copy the song to the playlist / no node matched'`
   - `misc-file-drop 'the tree': 'FAIL the drag-out rows are focusable, or offer an action / no node matched'; 'FAIL the internal drop target is named / no node matched'`
   - `tabwalk-file-drop: Tab 1 -> '[push button] 'Browse…'' ('Drop images here panel.'), Tab 2 -> second Browse…, Tab 3 -> back to the first`
@@ -246,12 +310,19 @@ A keyboard reorder's 'Moved to N of 10' is sent in the same update as focus movi
 - **Scenario:** misc-drag-and-drop
 - **Act:** Alt+Down, Alt+Down, Alt+Up, and the menu's Move Up, on 'Unravel' in Songs
 - **The reader should get:** 'Moved to 3 of 10' (the one utterance the non-drag alternative owes)
-- **The reader gets:** 'Unravel.' only. The announcement reaches the bus 0.1-11 ms before object:state-changed:focused on a new 'Unravel' node (all ten rows are removed and re-added on every move); the first message of a run is cut (r1, r3) or had already lost its node (r2), later ones are also dropped as defunct (K2)
+- **The reader got (`261a218f`):** 'Unravel.' only. The announcement reaches the bus 0.1-11 ms before object:state-changed:focused on a new 'Unravel' node (all ten rows are removed and re-added on every move); the first message of a run is cut (r1, r3) or had already lost its node (r2), later ones are also dropped as defunct (K2)
 - **Platform:** Linux measured; the ordering (announcement, then focus in the same update) is Teksilo's
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `b518253f` (announce-focus). Fixed part: drag-and-drop Songs keyboard reorder 'Moved to N of 10' cut.
-- **Where:** crates/teksilo-widgets/src/list\_view/widget\_impl.rs:235-262 (commit, select, ctx.announce in one handler; the rebuild then refocuses a new row node)
-- **Evidence:**
+- **Status:** Fixed by `b518253f` (announce-focus).
+- **Now (`c198e4d1`):** A keyboard reorder is now heard. Each Alt+Down, Alt+Up and the menu's Move Up says 'Unravel.' and then the whole 'Moved to 3 of 10' (or 4, or 2), uncut. The rows are still rebuilt and focus still moves to a new 'Unravel' node, but the announcement now reaches the bus a few milliseconds after that focus change instead of just before it.
+- **Measured again:** misc-drag-and-drop, 2 of 2 runs (8 of 8 moves heard in full)
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-drag-and-drop 'Alt+Down moves Unravel one place later': '+56.1 ms object:state-changed:focused 1 [list item] 'Unravel'' / '+58.7 ms object:announcement [status bar] 'Moved to 3 of 10' text='Moved to 3 of 10'' / 'ORCA SAYS: 'Unravel.'' / 'ORCA SAYS: 'Moved to 3 of 10''`
+  - `pass1 misc-drag-and-drop 'Alt+Down again': 'ORCA SAYS: 'Unravel.'' / 'ORCA SAYS: 'Moved to 4 of 10''`
+  - `pass2 misc-drag-and-drop 'Alt+Up moves it back': '+45.1 ms object:state-changed:focused 1 [list item] 'Unravel'' / '+53.9 ms object:announcement [status bar] 'Moved to 3 of 10' text='Moved to 3 of 10'' / 'ORCA SAYS: 'Moved to 3 of 10''`
+  - `pass2 misc-drag-and-drop 'Enter on the current menu row': 'ORCA SAYS: 'Unravel.'' / 'ORCA SAYS: 'Moved to 2 of 10''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/list\_view/widget\_impl.rs:234-264 (commit, select, ctx.announce in one handler, as before); crates/teksilo-core/src/announcer.rs:71-105 and crates/teksilo-core/src/widget\_tree/accessibility\_emit\_impl.rs:401-440 hold a message out of an update that moves focus
+- **Evidence (`261a218f`):**
   - `misc-drag-and-drop-20260925-150304 report: '+39.1 ms object:announcement [status bar] 'Moved to 3 of 10'' / '+49.9 ms object:state-changed:focused 1 [list item] 'Unravel'' / 'ORCA SAYS (CUT): 'Moved to 3 of 10'' / 'ORCA SAYS: 'Unravel.''`
   - `orca-debug.out: '15:03:24.694088 - SPEECH OUTPUT: 'Moved to 3 of 10'' / '15:03:24.728618 - OBJECT EVENT: object:state-changed:focused for [list item: 'Unravel']' / '15:03:24.781776 - NULL SPEECH: stop'`
   - `misc-drag-and-drop-20260925-145506: '+42.5 ms object:children-changed:add [panel] '' -> [list item] 'Hyperballad'' … all ten rows re-added, then '+49.3 ms object:state-changed:focused 1 [list item] 'Unravel''`
@@ -271,12 +342,18 @@ recent-projects: after Pin or Remove on any row, focus jumps to the first row's 
 - **Scenario:** misc-recent-projects
 - **Act:** Space on Teksilo's Pin (3rd row); Space on the 3rd row's Remove
 - **The reader should get:** focus stays in the acted-on row (its new 'Unpin') or moves to a neighbour, and the reader hears 'pinned' / 'removed'
-- **The reader gets:** 'Open push button.' each time, on playground's (row 1) Open; the next Tab lands on playground's 'Pin'
+- **The reader got (`261a218f`):** 'Open push button.' each time, on playground's (row 1) Open; the next Tab lands on playground's 'Pin'
 - **Platform:** Linux measured; focus placement is teksilo-core's, so all platforms
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-core/src/widget\_tree/layout\_impl.rs:863-869 (pending\_focus\_restore → first\_focusable\_descendant of the rebuilt subtree)
-- **Evidence:**
+- **Now (`c198e4d1`):** After Pin or Remove on the third row, focus still jumps to the first row's 'Open' (playground's) and the reader hears only 'Open push button.'. Nothing says the project was pinned or removed, and the next Tab lands on playground's 'Pin'.
+- **Measured again:** misc-recent-projects, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-recent-projects 'Space on Teksilo's Pin': '+30.9 ms object:state-changed:focused 1 [push button] 'Open'' / 'ORCA SAYS: 'Open push button.'' / 'FAIL focus lands on [push button] 'Unpin''; tree after the act: [label] 'playground' ... [push button] 'Open' {focusable,focused}, and [label] '★ Teksilo' ... [push button] 'Unpin'`
+  - `pass1 misc-recent-projects 'Tab after pinning': '+14.2 ms object:state-changed:focused 1 [push button] 'Pin'' / 'ORCA SAYS: 'Pin push button.''`
+  - `pass2 misc-recent-projects 'Space on the third row's Remove': '+35.5 ms object:state-changed:focused 1 [push button] 'Open'' / 'ORCA SAYS: 'Open push button.''; tree after the act: [label] 'playground' ... [push button] 'Open' {focusable,focused}`
+- **Where (`c198e4d1`):** crates/teksilo-core/src/widget\_tree/layout\_impl.rs:892-902 (the restore still lands on first\_focusable\_descendant of the rebuilt subtree; the subtree is recorded at 428)
+- **Evidence (`261a218f`):**
   - `misc-recent-projects-20260925-150152 'Space on Teksilo's Pin': '+34.1 ms object:state-changed:focused 1 [push button] 'Open'' / 'ORCA SAYS: 'Open push button.''; tree after the act: row ['playground'] ['Open*','Pin','Remove'], row ['★ Teksilo'] ['Open','Unpin','Remove']`
   - `'Tab after pinning': '+8.5 ms object:state-changed:focused 1 [push button] 'Pin'' / 'ORCA SAYS: 'Pin push button.''`
   - `'Space on the third row's Remove': '+31.4 ms object:state-changed:focused 1 [push button] 'Open'' (playground's) / 'ORCA SAYS: 'Open push button.''`
@@ -295,12 +372,18 @@ recent-projects: pressing 'Hide paths' drops focus to the window ('frame.'); the
 - **Scenario:** misc-recent-projects
 - **Act:** Space on 'Hide paths'
 - **The reader should get:** focus on the 'Show paths' button that replaces it
-- **The reader gets:** object:state-changed:focused 1 \[frame\] '' and 'frame.'; Tab then goes to 'Theme combo box'
+- **The reader got (`261a218f`):** object:state-changed:focused 1 \[frame\] '' and 'frame.'; Tab then goes to 'Theme combo box'
 - **Platform:** Linux measured
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/recent\_projects/src/main.rs:256-268 (two buttons swapped with visible\_when)
-- **Evidence:**
+- **Now (`c198e4d1`):** Pressing 'Hide paths' still drops focus to the window, now read as 'Teksilo — Recent Projects Demo frame.' because the window has a name. Pressing 'Show paths' does the same. The next Tab restarts at the toolbar's Theme combo box.
+- **Measured again:** misc-recent-projects 2 of 2 runs, verify-misc-recent-show 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-recent-projects 'Space on Hide paths': '+40.1 ms object:state-changed:focused 1 [frame] 'Teksilo — Recent Projects Demo'' / 'ORCA SAYS: 'Teksilo — Recent Projects Demo frame.'' / 'FAIL focus lands on [push button] 'Show paths''`
+  - `pass1 misc-recent-projects 'Tab after Hide paths': '+215.3 ms object:state-changed:focused 1 [combo box] 'Theme'' / 'ORCA SAYS: 'Theme combo box.''`
+  - `pass2 verify-misc-recent-show 'Space on Show paths': '+27.1 ms object:state-changed:focused 1 [frame] 'Teksilo — Recent Projects Demo'' / 'ORCA SAYS: 'Teksilo — Recent Projects Demo frame.''`
+- **Where (`c198e4d1`):** examples/recent\_projects/src/main.rs:263-275 (the two buttons swapped with visible\_when; file unchanged)
+- **Evidence (`261a218f`):**
   - `misc-recent-projects-20260925-150152: '+35.4 ms object:children-changed:add [frame] '' -> [push button] 'Show paths'' / '+37.6 ms object:children-changed:remove [frame] '' -> [push button] 'Hide paths'' / '+38.4 ms object:state-changed:focused 1 [frame] ''' / 'ORCA SAYS: 'frame.''`
   - `'Tab after Hide paths': '+7.5 ms object:state-changed:focused 1 [combo box] 'Theme''`
   - `source: examples/recent_projects/src/main.rs:265-277 swaps two buttons with visible_when; teksilo-core clears focus when the focused node goes dormant (layout_impl.rs:862 only restores after a rebuild)`
@@ -317,12 +400,18 @@ The ColorPicker preset grid: arrows move an invisible index (silent), Enter appl
 - **Scenario:** misc-color-swatches
 - **Act:** focus 'Color presets', Right arrow; Tab from the grid
 - **The reader should get:** per the module doc (swatch\_grid.rs:4-12): one Tab stop, arrows move focus between swatches and speak them, Tab leaves
-- **The reader gets:** Right arrow: no event, Orca silent. Tab from the grid goes to 'Swatch #E84D3D' and then through all 12 swatches (13 Tab stops per grid, 2 grids in view)
+- **The reader got (`261a218f`):** Right arrow: no event, Orca silent. Tab from the grid goes to 'Swatch #E84D3D' and then through all 12 swatches (13 Tab stops per grid, 2 grids in view)
 - **Platform:** all (no focus/active descendant is published); measured on Linux
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_picker/swatch\_grid.rs:120-189 (arrows set focused\_index only); color\_picker/swatch.rs (each cell focusable)
-- **Evidence:**
+- **Now (`c198e4d1`):** In the preset grid, Right arrow still produces no event and Orca says nothing. Tab from the grid still goes to 'Swatch #E84D3D' and then through every swatch: 13 Tab stops per grid.
+- **Measured again:** misc-color-swatches 2 of 2 runs; tabwalk-color-picker-demo 2 of 2
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-swatches 'Right arrow inside the grid': no events; 'FAIL Orca says 'Swatch'' (same in pass2)`
+  - `pass2 misc-color-swatches 'Tab once from the grid': '+32.7 ms object:state-changed:focused 1 [push button] 'Swatch #E84D3D'' / 'ORCA SAYS: 'Swatch #E84D3D push button.'' / 'FAIL Tab leaves the grid (one tab stop for the whole grid)'`
+  - `pass1 tabwalk-color-picker-demo: 'ORCA SAYS: 'Color presets.'' then 'Swatch #E84D3D push button.' ... 'Swatch #F5F5F5 push button.', 12 swatch stops`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_picker/swatch\_grid.rs:120-189 (arrows set focused\_index only; file unchanged); color\_picker/swatch.rs:204 (each cell focusable)
+- **Evidence (`261a218f`):**
   - `misc-color-swatches 'Right arrow inside the grid': no events; 'FAIL Orca says 'Swatch''`
   - `'Tab once from the grid': '+26.9 ms object:state-changed:focused 1 [push button] 'Swatch #E84D3D'' / 'FAIL Tab leaves the grid (one tab stop for the whole grid)'`
   - `tabwalk-color-picker-demo: Tab 9 'Color presets.', Tabs 10-21 'Swatch #E84D3D push button.' … 'Swatch #F5F5F5 push button.'`
@@ -340,12 +429,18 @@ A picked swatch never becomes 'selected' for AT: its name and state are computed
 - **Scenario:** misc-color-swatches
 - **Act:** Space on 'Swatch #3685E3' (the hex field then shows #3685E3)
 - **The reader should get:** 'Swatch #3685E3, selected' (color-picker-swatch-selected-suffix) and the selected state
-- **The reader gets:** no name change, no state change, silence; the tree after the act still has 'Swatch #3685E3' without selected
+- **The reader got (`261a218f`):** no name change, no state change, silence; the tree after the act still has 'Swatch #3685E3' without selected
 - **Platform:** all (AccessKit tree is stale); measured on Linux
 - **Severity:** high; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_picker/swatch\_grid.rs:88-116 (is\_selected computed at build; `selected` bound RepaintOnly on the grid)
-- **Evidence:**
+- **Now (`c198e4d1`):** Space on 'Swatch #3685E3' still changes the colour (the Hex field shows #3685E3) with no name or state change on the swatch and no speech. The tree after the act still shows the swatch without selected.
+- **Measured again:** misc-color-swatches, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-swatches 'Space on Swatch #3685E3': only text-changed and accessible-value events on the spinners, Hex and Hue; 'FAIL Orca says 'selected''`
+  - `pass2 misc-color-swatches 'Space on Swatch #3685E3': same events, 'FAIL Orca says 'selected''`
+  - `pass2 misc-color-swatches tree-Space-on-Swatch--3685E3.txt: '[push button] 'Swatch #3685E3' {focusable,focused}' while '[entry] 'Hex' {editable,selectable-text,single-line} text='#3685E3''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_picker/swatch\_grid.rs:88-116 (is\_selected computed at build; `selected` bound RepaintOnly; file unchanged)
+- **Evidence (`261a218f`):**
   - `misc-color-swatches 'Space on Swatch #3685E3': only accessible-value events on spin buttons and the Hue slider; 'FAIL Orca says 'selected' / Orca unheard: 'selected''`
   - `tree after the act: name 'Swatch #3685E3' states ['enabled','focusable','focused','sensitive','showing','visible']; Hex entry text '#3685E3'`
   - ``source: swatch_grid.rs:88-116 is_selected = selected.get() == color at build, and `selected` is bound RepaintOnly (l.91-95), so the ColorSwatch's selected flag and accessibility never update``
@@ -362,12 +457,19 @@ HexColorInput is two nested entries with the same name, so every focus speaks th
 - **Scenario:** misc-color-hex
 - **Act:** focus any Hex field (launch focus, Tab, Shift+Tab)
 - **The reader should get:** 'Hex entry #FF8800 selected.' once
-- **The reader gets:** 'Hex entry #FF8800' (the outer, non-focusable wrapper as context) then 'Hex entry #FF8800 selected.'
+- **The reader got (`261a218f`):** 'Hex entry #FF8800' (the outer, non-focusable wrapper as context) then 'Hex entry #FF8800 selected.'
 - **Platform:** Linux/Orca measured
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/hex\_color\_input.rs:599-630
-- **Evidence:**
+- **Now (`c198e4d1`):** Every focus of a Hex field still speaks it twice: 'Hex entry #FF8800' for the outer wrapper, then 'Hex entry #FF8800 selected.' for the field itself. The same happens at every launch with #3584E4.
+- **Measured again:** misc-color-hex 2 of 2 runs; 12 of 12 launches
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-hex 'Tab away and back to the Hex field': 'ORCA SAYS: 'Hex entry #FF8800'' / 'ORCA SAYS: 'Hex entry #FF8800 selected.'' / 'FAIL Orca says 'Hex entry' at most 1 time(s)'`
+  - `pass2 misc-color-hex 'Tab away and back to the Hex field': 'ORCA SAYS: 'Hex entry #FF8800'' / 'ORCA SAYS: 'Hex entry #FF8800 selected.''`
+  - `pass1 and pass2, every color-picker-demo 'launch' (12 of 12): 'ORCA SAYS: 'Hex entry #3584E4'' / 'ORCA SAYS: 'Hex entry #3584E4 selected.''`
+  - `pass2 misc-color-swatches tree: '[entry] 'Hex' {editable,selectable-text,single-line} text='#3685E3'' > '[entry] 'Hex' {editable,focusable,selectable-text,single-line} text='#3685E3''`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/hex\_color\_input.rs:599-630 (file unchanged)
+- **Evidence (`261a218f`):**
   - `tree: [entry] 'Hex' {editable,selectable-text,single-line} text='#3584E4' > [entry] 'Hex' {editable,focusable,focused,…} text='#3584E4' + [status bar] ''`
   - `misc-color-hex-20260925-150036 'Tab away and back': 'ORCA SAYS: 'Hex entry #FF8800'' / 'ORCA SAYS: 'Hex entry #FF8800 selected.''; orca-debug.out '15:00:56.332578 - SPEECH OUTPUT: 'Hex entry #FF8800'' / '15:00:56.332616 - SPEECH OUTPUT: 'Hex entry #FF8800 selected.''`
   - `every launch: '15:01:13.777528 - SPEECH OUTPUT: 'Hex entry #3584E4'' / '15:01:13.777541 - SPEECH OUTPUT: 'Hex entry #3584E4 selected.''`
@@ -386,12 +488,20 @@ The ColorPicker's preview and saturation × brightness field carry their value o
 - **Scenario:** misc-color-channels
 - **Act:** Shift+Tab to 'Selected color'; Shift+Tab to 'Saturation and brightness'
 - **The reader should get:** 'Selected color #3684E4' (color-picker-current-color-readout exists, unused) and 'Saturation 77%, brightness 89%'
-- **The reader gets:** 'Selected color push button.' and 'Saturation and brightness panel.'; the pair is only heard through the arrow keys' ctx.announce (K2-affected)
+- **The reader got (`261a218f`):** 'Selected color push button.' and 'Saturation and brightness panel.'; the pair is only heard through the arrow keys' ctx.announce (K2-affected)
 - **Platform:** Linux by measurement and source; Windows exposes a string value via ValuePattern (accesskit\_windows node.rs:592-597)
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_picker/swatch.rs:363-381; color\_picker/hsv\_canvas.rs:385-401
-- **Evidence:**
+- **Now (`c198e4d1`):** Shift+Tab to the preview still gives 'Selected color push button.' with no colour, and Shift+Tab to the colour field gives 'Saturation and brightness panel.' with no values. The pair is heard only when an arrow key moves it, through the field's announcement.
+- **Measured again:** misc-color-channels, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-channels 'Shift+Tab three times to the Selected color preview': +475.9 ms object:state-changed:focused 1 [push button] 'Selected color' / ORCA SAYS: 'Selected color push button.' / FAIL Orca says one of ['#3684E4', '3684E4']`
+  - `pass1 misc-color-channels 'Shift+Tab to Saturation and brightness': +56.8 ms object:state-changed:focused 1 [panel] 'Saturation and brightness' / ORCA SAYS: 'Saturation and brightness panel.' / FAIL Orca says one of ['Saturation 77', '77%']`
+  - `pass2 misc-color-channels 'Shift+Tab three times to the Selected color preview': ORCA SAYS: 'Selected color push button.'`
+  - `pass2 misc-color-channels 'Shift+Tab to Saturation and brightness': ORCA SAYS: 'Saturation and brightness panel.'`
+  - `pass1 misc-color-channels 'Right arrow on Saturation and brightness': +59.5 ms object:announcement [status bar] 'Saturation 77%, brightness 89%' / ORCA SAYS: 'Saturation 77%, brightness 89%'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_picker/swatch.rs:363-381; crates/teksilo-widgets/src/color\_picker/hsv\_canvas.rs:385-401
+- **Evidence (`261a218f`):**
   - `misc-color-channels: '+504.1 ms object:state-changed:focused 1 [push button] 'Selected color'' / 'ORCA SAYS: 'Selected color push button.'' / 'FAIL Orca says one of ['#3684E4', '3684E4']'`
   - `'Shift+Tab to Saturation and brightness': 'ORCA SAYS: 'Saturation and brightness panel.'' / 'FAIL Orca says one of ['Saturation 77', '77%']'`
   - `source: swatch.rs:363-381 name 'Selected color', hex in set_value; hsv_canvas.rs:385-401 pair in set_value; atspi node.rs:38-44`
@@ -408,12 +518,21 @@ ColorEdit triggers are named only by their hex, and the nullable one by an em da
 - **Scenario:** misc-color-scroll
 - **Act:** Shift+Tab from Theme to the last ColorEdit; Shift+Tab to the first; Space
 - **The reader should get:** 'Color #E91E63, opens a picker' / 'Color, none' (color-edit-trigger-name and -name-empty exist in en-US.ftl:334-335, unused); a named dialog
-- **The reader gets:** '— push button.', '#E91E63 push button.', then 'dialog', 'Color picker panel.'
+- **The reader got (`261a218f`):** '— push button.', '#E91E63 push button.', then 'dialog', 'Color picker panel.'
 - **Platform:** all (names in the AccessKit tree); measured on Linux
 - **Severity:** high; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_edit.rs:432-467
-- **Evidence:**
+- **Status:** Partly fixed by `de3bb295`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** The ColorEdit triggers are still named only by their hex ('#E91E63 push button.') or by an em dash ('— push button.'). The picker popover is no longer an unnamed dialog: it is named after its trigger, so the reader hears '#E91E63 dialog', which still does not say it is a colour picker.
+- **Measured again:** misc-color-scroll, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-scroll 'Shift+Tab wraps to the last control of the page': +137.2 ms object:state-changed:focused 1 [push button] '—' / ORCA SAYS: '— push button.'`
+  - `pass1 misc-color-scroll 'Shift+Tab twice to the first ColorEdit': +269.8 ms object:state-changed:focused 1 [push button] '#E91E63' / ORCA SAYS: '#E91E63 push button.' / FAIL focus lands on [push button] 'Color #E91E63'`
+  - `pass1 misc-color-scroll 'Space opens its picker popover': +155.8 ms object:children-changed:add [panel] '' -> [dialog] '#E91E63' / ORCA SAYS: '#E91E63 dialog' / ORCA SAYS: 'Color picker panel.'`
+  - `pass2 misc-color-scroll 'Shift+Tab wraps to the last control of the page': ORCA SAYS: '— push button.'`
+  - `pass2 misc-color-scroll 'Shift+Tab twice to the first ColorEdit': ORCA SAYS: '#E91E63 push button.'`
+  - `pass2 misc-color-scroll 'Space opens its picker popover': ORCA SAYS: '#E91E63 dialog'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_edit.rs:432-467; the popover's name comes from crates/teksilo-widgets/src/popover\_widget.rs:648 (labelled\_by its trigger); color-edit-trigger-name and -name-empty still unused at crates/teksilo-widgets/locales/en-US.ftl:334-335
+- **Evidence (`261a218f`):**
   - `misc-color-scroll (3 runs): '+156.6 ms object:state-changed:focused 1 [push button] ', '' / 'ORCA SAYS: ',  push button.''`
   - `'Shift+Tab twice to the first ColorEdit': '+258.2 ms object:state-changed:focused 1 [push button] '#E91E63'' / 'ORCA SAYS: '#E91E63 push button.''`
   - `'Space opens its picker popover': tree [dialog] '' {active}; 'ORCA SAYS: 'dialog''`
@@ -431,12 +550,20 @@ A plain window opens with focus in its first TextInput, wherever it is: color-pi
 - **Scenario:** misc-color-channels (launch)
 - **Act:** launch color-picker-demo
 - **The reader should get:** focus on the window (as the other examples) or an explicitly chosen control
-- **The reader gets:** 'Color picker panel.', 'Hex entry #3584E4', 'Hex entry #3584E4 selected.'; the toolbar, headings, canvas, Hue slider and preview come before it; a stray keystroke replaces the selected hex
+- **The reader got (`261a218f`):** 'Color picker panel.', 'Hex entry #3584E4', 'Hex entry #3584E4 selected.'; the toolbar, headings, canvas, Hue slider and preview come before it; a stray keystroke replaces the selected hex
 - **Platform:** all (teksilo-app focus policy); measured on Linux
 - **Severity:** medium; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-app/src/window\_manager.rs:121-135 with crates/teksilo-core/src/widget\_tree/focus\_impl.rs:404-422 and crates/teksilo-widgets/src/text\_input/widget\_impl.rs:457-459
-- **Evidence:**
+- **Now (`c198e4d1`):** color-picker-demo still opens with focus in the first picker's Hex field, its text selected: the reader hears 'Color picker panel.', 'Hex entry #3584E4', 'Hex entry #3584E4 selected.' A stray keystroke replaces the colour.
+- **Measured again:** misc-color-channels, misc-color-scroll and verify-misc-color-fr, 6 of 6 launches
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-channels launch: +1711.8 ms window:activate [frame] 'Teksilo — ColorPicker gallery' / +1712.2 ms object:state-changed:focused 1 [entry] 'Hex' / ORCA SAYS: 'Hex entry #3584E4 selected.'`
+  - `pass2 misc-color-channels launch: +1548.6 ms object:state-changed:focused 1 [entry] 'Hex' / ORCA SAYS: 'Hex entry #3584E4 selected.'`
+  - `pass1 misc-color-scroll launch: +1833.2 ms object:state-changed:focused 1 [entry] 'Hex'`
+  - `pass2 misc-color-scroll launch: +2122.2 ms object:state-changed:focused 1 [entry] 'Hex'`
+  - `pass1 verify-misc-color-fr launch: ORCA SAYS: 'Hex entry #3584E4 selected.'`
+- **Where (`c198e4d1`):** crates/teksilo-app/src/window\_manager.rs:121-135 with crates/teksilo-core/src/widget\_tree/focus\_impl.rs:420-438 and crates/teksilo-widgets/src/text\_input/widget\_impl.rs:457-459
+- **Evidence (`261a218f`):**
   - `misc-color-channels-20260925-150110 launch: '+1469.6 ms window:activate [frame] ''' / '+1469.8 ms object:state-changed:focused 1 [entry] 'Hex''`
   - `7 of 7 color-picker launches`
   - `source: text_input/widget_impl.rs:457-459 returns the inner field as initial_focus_hint unconditionally (documented for modals, text_input.rs:446-453); window_manager.rs:121-135 honours widget_initial_focus_hint for non-modal windows too`
@@ -453,12 +580,20 @@ drag-and-drop: the Songs, Playlist and Up next lists and the Folders tree are un
 - **Scenario:** misc-drag-and-drop
 - **Act:** Tab through the example
 - **The reader should get:** 'Songs multi-select list box', 'Playlist …', 'Folders tree' (the visible headings)
-- **The reader gets:** 'multi-select list box.', 'multi-select list box.', 'list box.', 'tree.'
+- **The reader got (`261a218f`):** 'multi-select list box.', 'multi-select list box.', 'list box.', 'tree.'
 - **Platform:** all; measured on Linux
 - **Severity:** high; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/drag\_and\_drop/src/main.rs:170, 229, 334, 397 (ListView/TreeView built with no access\_label)
-- **Evidence:**
+- **Now (`c198e4d1`):** The Songs, Playlist and Up next lists and the Folders tree are still unnamed: Tab gives 'multi-select list box.', 'multi-select list box.', 'list box.' and 'tree.'.
+- **Measured again:** misc-drag-and-drop, 2 of 2 runs; tabwalk-drag-and-drop, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-drag-and-drop 'Tab into the Songs list': +198.7 ms object:state-changed:focused 1 [list box] '' / ORCA SAYS: 'multi-select list box.' / FAIL Orca says 'Songs'`
+  - `pass1 misc-drag-and-drop 'Tab to the Playlist': ORCA SAYS: 'multi-select list box.' / FAIL Orca says 'Playlist'`
+  - `pass1 misc-drag-and-drop 'Tab to Up next': ORCA SAYS: 'list box.' / FAIL Orca says one of ['Up next', 'queue']`
+  - `pass1 misc-drag-and-drop 'Tab to Folders': +14.2 ms object:state-changed:focused 1 [tree] '' / ORCA SAYS: 'tree.' / FAIL Orca says 'Folders'`
+  - `pass2 misc-drag-and-drop 'Tab into the Songs list': ORCA SAYS: 'multi-select list box.' / FAIL Orca says 'Songs'`
+- **Where (`c198e4d1`):** examples/drag\_and\_drop/src/main.rs:170, 229, 334, 397
+- **Evidence (`261a218f`):**
   - `tabwalk-drag-and-drop: '+9.9 ms object:state-changed:focused 1 [list box] ''' / 'ORCA SAYS: 'multi-select list box.''; '+18.9 ms object:state-changed:focused 1 [tree] ''' / 'ORCA SAYS: 'tree.''`
   - `misc-drag-and-drop x3: 'FAIL Orca says 'Songs'', 'FAIL Orca says 'Playlist'', 'FAIL Orca says one of ['Up next', 'queue']', 'FAIL Orca says 'Folders''`
   - `source: examples/drag_and_drop/src/main.rs:165-190, 225-240, 330-345 build ListView/TreeView with no access_label; ListView/TreeView have no label builder (extract_widget_api shows none)`
@@ -475,12 +610,20 @@ TreeView hierarchy is invisible on AT-SPI: no expandable/expanded state and no l
 - **Scenario:** misc-drag-and-drop
 - **Act:** Down to Documents, Right arrow to expand
 - **The reader should get:** 'Documents collapsed' then 'expanded', children at level 2
-- **The reader gets:** 'Documents.' both times; children appear as flat siblings with posinset restarting
+- **The reader got (`261a218f`):** 'Documents.' both times; children appear as flat siblings with posinset restarting
 - **Platform:** Linux and macOS by source (accesskit\_atspi\_common node.rs state()/attributes() map neither; accesskit\_macos has no is\_expanded/level); Windows exports both (accesskit\_windows node.rs:500, 719)
 - **Severity:** high; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** crates/teksilo-widgets/src/list\_item\_a11y.rs:270-300 (correct); gap in accesskit\_atspi\_common-0.20.0/src/node.rs:301-436
-- **Evidence:**
+- **Now (`c198e4d1`):** On Linux, the tree still carries no expandable, expanded or collapsed state and no level: Down to Documents and Right to expand both give 'Documents.', and the children appear as flat siblings with posinset restarting at 1.
+- **Measured again:** misc-drag-and-drop, 2 of 2 runs; adapters read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-drag-and-drop 'Down arrow in Folders': +29.3 ms object:state-changed:focused 1 [tree item] 'Documents' / ORCA SAYS: 'Documents.' / FAIL Orca says one of ['collapsed', 'expandable']`
+  - `pass1 misc-drag-and-drop 'Right arrow expands Documents': ORCA SAYS: 'Documents.' / FAIL Orca says 'expanded'`
+  - `pass1 misc-drag-and-drop tree after 'Right arrow expands Documents': [tree item] 'Documents' {focused,selectable,selected} attrs={'posinset': '1'} / [tree item] 'notes.md' {selectable} attrs={'posinset': '1'}`
+  - `pass2 misc-drag-and-drop 'Right arrow expands Documents': ORCA SAYS: 'Documents.'`
+  - `source: accesskit_atspi_common-0.21.0/src/node.rs:301-387 state() maps no Expandable/Expanded/Collapsed; node.rs:417-440 attributes() has no level`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/list\_item\_a11y.rs:285-311 (correct); gap in accesskit\_atspi\_common-0.21.0/src/node.rs:301-387 and 417-440
+- **Evidence (`261a218f`):**
   - `misc-drag-and-drop 'Down arrow in Folders': 'ORCA SAYS: 'Documents.'' / 'FAIL Orca says one of ['collapsed', 'expandable']'; 'Right arrow expands Documents': 'ORCA SAYS: 'Documents.'' / 'FAIL Orca says 'expanded''`
   - `tree after expanding: Documents states ['enabled','focused','selectable','selected','sensitive','showing','visible'] attrs {'posinset': '1'}; notes.md {'posinset': '1'} as a sibling`
   - `source: list_item_a11y.rs:270-300 TreeItemWrapper sets level and expanded; accesskit_atspi_common node.rs:301-385 (no Expandable/Expanded/Collapsed), 415+ (no level attribute)`
@@ -497,12 +640,21 @@ Status lines change silently: a file dialog's result, the font size, the seeding
 - **Scenario:** misc-file-dialogs, misc-recent-projects
 - **Act:** file-dialogs: Escape cancels / pick a file; recent-projects: Bigger font, Seed demo entries
 - **The reader should get:** 'Open cancelled.' / 'Opened: …' / 'Font size: 17 pt' spoken, as a sighted user reads them
-- **The reader gets:** accessible-name changes on plain labels; Orca says only the refocused button ('Open file… push button.') or nothing
+- **The reader got (`261a218f`):** accessible-name changes on plain labels; Orca says only the refocused button ('Open file… push button.') or nothing
 - **Platform:** all (no live region); measured on Linux
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/file\_dialogs/src/main.rs:183-185; examples/recent\_projects/src/main.rs:195-215
-- **Evidence:**
+- **Now (`c198e4d1`):** The status lines still change silently. After Escape in the file dialog the reader hears 'Open file… push button.', not 'Open cancelled.'; after opening a file, not 'Opened: …'. Bigger font and Seed demo entries in recent-projects say nothing.
+- **Measured again:** misc-file-dialogs, 2 of 2 runs; misc-recent-projects, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-file-dialogs 'Escape cancels the dialog': +17.5 ms object:property-change:accessible-name [label] 'Open cancelled.' / ORCA SAYS: 'Open file… push button.' / FAIL Orca says 'Open cancelled'`
+  - `pass1 misc-file-dialogs 'Space on Open file…, type a path in the dialog, Enter': +5577.0 ms object:property-change:accessible-name [label] 'Opened: ~/Devel/wt-remeasure/examples/file_dialogs/Cargo.toml' / ORCA SAYS: 'Open file… push button.' / FAIL Orca says 'Opened'`
+  - `pass2 misc-file-dialogs 'Escape cancels the dialog': ORCA SAYS: 'Open file… push button.' / FAIL Orca says 'Open cancelled'`
+  - `pass1 misc-recent-projects 'Space on Bigger font': +30.0 ms object:property-change:accessible-name [label] 'Font size: 17 pt' / FAIL Orca says '17'`
+  - `pass1 misc-recent-projects 'Space on Seed demo entries': FAIL Orca says something / Orca said nothing in the act`
+  - `pass2 misc-recent-projects 'Space on Bigger font': FAIL Orca says '17'`
+- **Where (`c198e4d1`):** examples/file\_dialogs/src/main.rs:86-91, 187-189; examples/recent\_projects/src/main.rs:189-203 (the seed action), 224-226 (the font size label)
+- **Evidence (`261a218f`):**
   - `misc-file-dialogs-20260925-145946 'Escape cancels the dialog': '+20.7 ms object:property-change:accessible-name [label] 'Open cancelled.'' / 'ORCA SAYS (CUT): 'frame.'' / 'ORCA SAYS: 'Open file… push button.'' / 'FAIL Orca says 'Open cancelled''`
   - `same run, after picking a file: 'pass a object:property-change:accessible-name event from [label] 'Opened:'' / 'FAIL Orca says 'Opened''`
   - `misc-recent-projects 'Space on Bigger font': '+34.5 ms object:property-change:accessible-name [label] 'Font size: 17 pt'' / 'FAIL Orca says '17''; 'Space on Seed demo entries': 'FAIL Orca says something / Orca said nothing in the act'`
@@ -521,12 +673,19 @@ recent-projects row buttons are all 'Open', 'Pin', 'Remove': no project in the n
 - **Scenario:** misc-recent-projects
 - **Act:** Tab into the rows
 - **The reader should get:** 'Open Skribisto', 'Unpin Skribisto' (or a toggle button with pressed state)
-- **The reader gets:** 'Open push button.', 'Pin push button.'
+- **The reader got (`261a218f`):** 'Open push button.', 'Pin push button.'
 - **Platform:** all; measured on Linux
 - **Severity:** medium; **layer:** example
 - **Status:** Open, in the example's own code.
-- **Where:** examples/recent\_projects/src/main.rs:330-345
-- **Evidence:**
+- **Now (`c198e4d1`):** The row buttons are still 'Open push button.', 'Pin push button.' and 'Remove push button.', with no project in the name and no pinned state.
+- **Measured again:** misc-recent-projects, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-recent-projects 'Tab into the first row': +199.9 ms object:state-changed:focused 1 [push button] 'Open' / ORCA SAYS: 'Open push button.' / FAIL the focused row button says which project it acts on`
+  - `pass1 misc-recent-projects 'Tab through that row': ORCA SAYS: 'Pin push button.' / FAIL the focused row button says which project it acts on`
+  - `pass2 misc-recent-projects 'Tab into the first row': ORCA SAYS: 'Open push button.'`
+  - `pass2 misc-recent-projects 'Tab through that row': ORCA SAYS: 'Pin push button.'`
+- **Where (`c198e4d1`):** examples/recent\_projects/src/main.rs:330-345
+- **Evidence (`261a218f`):**
   - `misc-recent-projects 'Tab into the first row': '+195.5 ms object:state-changed:focused 1 [push button] 'Open'' / 'ORCA SAYS: 'Open push button.'' / 'FAIL the focused row button says which project it acts on'`
   - `'Tab through that row': 'ORCA SAYS: 'Pin push button.''`
   - `source: examples/recent_projects/src/main.rs:320-340`
@@ -543,12 +702,20 @@ The searchable ComboBox popup: unnamed search entry (placeholder only), an \[unk
 - **Scenario:** misc-font-picker
 - **Act:** Alt+Down on Font family
 - **The reader should get:** a named search field and one list item per font
-- **The reader gets:** 'list box', 'Search…'; tree \[combo box\] 'Font family' &gt; \[unknown\] '' &gt; \[list box\] '' &gt; \[entry\] '' (placeholder-text 'Search…') + \[status bar\] '' + \[list box\] '' &gt; \[list item\] '' &gt; \[list item\] 'C059' …
+- **The reader got (`261a218f`):** 'list box', 'Search…'; tree \[combo box\] 'Font family' &gt; \[unknown\] '' &gt; \[list box\] '' &gt; \[entry\] '' (placeholder-text 'Search…') + \[status bar\] '' + \[list box\] '' &gt; \[list item\] '' &gt; \[list item\] 'C059' …
 - **Platform:** Linux measured
 - **Severity:** high; **layer:** framework
-- **Status:** Fixed by `f9ffa98c` (combobox). Fixed part: the searchable popup's field is named ("Font family editable combo box") and its options are no longer doubled.
-- **Where:** crates/teksilo-widgets/src/combo\_box/item.rs:207-218 (ListBoxOption inside ListView's ListItem wrapper); combo\_box/panel.rs:563-567 (search TextInput with only a lit!("Search…") placeholder)
-- **Evidence:**
+- **Status:** Fixed by `f9ffa98c` (combobox).
+- **Now (`c198e4d1`):** Alt+Down on Font family now puts focus on a named search field: the reader hears 'Font family editable combo box Search.'. The popup has no role-less root, and each font is one named list item, so Down gives 'List with 30 items', 'C059.'.
+- **Measured again:** misc-font-picker, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-font-picker 'open the font list with Alt+Down': +162.5 ms object:state-changed:focused 1 [entry] 'Font family' / ORCA SAYS: 'Font family editable combo box Search.'`
+  - `pass1 misc-font-picker tree-open-the-font-list-with-Alt-Down.txt: [combo box] 'Font family' > [entry] 'Font family' attrs={'placeholder-text': 'Search'} + [status bar] '' + [list box] '' > [list item] 'C059' {selectable} attrs={'posinset': '1', 'setsize': '277'}; no unnamed list item and no [unknown] node`
+  - `pass1 misc-font-picker 'Down arrow': +13.3 ms object:selection-changed [list box] '' / ORCA SAYS: 'List with 30 items' / ORCA SAYS: 'C059.'`
+  - `pass2 misc-font-picker 'open the font list with Alt+Down': ORCA SAYS: 'Font family editable combo box Search.'`
+  - `pass2 misc-font-picker tree-Alt-Down-opens-the-writing-system-list.txt: [list box] '' > [list item] '(all scripts)' {focused,selectable,selected}; no doubled items`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/combo\_box/panel.rs:225-228 (ListView made presentational), 644-651 (search field labelled and localized placeholder); crates/teksilo-widgets/src/combo\_box/item.rs:255
+- **Evidence (`261a218f`):**
   - `misc-font-picker tree-open-the-font-list-with-Alt-Down.txt: '[list item] '' {selectable} attrs={'setsize': '277', 'posinset': '1'}' > '[list item] 'C059' {selectable} attrs={'posinset': '1', 'setsize': '277'}' (30 of 60 list items unnamed)`
   - `'+192.8 ms object:state-changed:focused 1 [entry] ''' / 'ORCA SAYS: 'list box'' / 'ORCA SAYS: 'Search…''`
   - `source: combo_box/panel.rs:563-566 TextInput placeholder only; combo_box/item.rs:209 ListBoxOption inside the virtualized list's own item wrapper`
@@ -566,12 +733,19 @@ Section titles are plain labels, never headings (text-and-layout and every other
 - **Scenario:** misc-text-layout
 - **Act:** read the tree of text-and-layout
 - **The reader should get:** 'Typography Styles', 'Layout Primitives', 'Text & Layout' as headings a reader can jump between
-- **The reader gets:** \[label\] 'Typography Styles', \[label\] 'Layout Primitives'
+- **The reader got (`261a218f`):** \[label\] 'Typography Styles', \[label\] 'Layout Primitives'
 - **Platform:** all
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/primitives/text\_widget.rs:954-958 (always Role::Label); no Role::Heading emitter in teksilo-widgets outside rich\_text/code\_editor
-- **Evidence:**
+- **Now (`c198e4d1`):** 'Text & Layout', 'Typography Styles' and 'Layout Primitives' are still plain labels, so a reader cannot jump between them as headings. TextWidget still has no heading API.
+- **Measured again:** misc-text-layout, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-text-layout 'read the window as a reader browses it': FAIL the tree holds [heading] 'Typography Styles' / FAIL the tree holds [heading] 'Layout Primitives' / FAIL the tree holds [heading] 'Text & Layout'`
+  - `pass1 misc-text-layout tree-read-the-window-as-a-reader-browses-it.txt: [label] 'Text & Layout' / [label] 'Typography Styles' / [label] 'Layout Primitives'`
+  - `pass2 misc-text-layout 'read the window as a reader browses it': the same three FAIL lines`
+  - `source: no Role::Heading emitter in crates/teksilo-widgets/src outside rich_text and code_editor at c198e4d1`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/primitives/text\_widget.rs:954-958
+- **Evidence (`261a218f`):**
   - `misc-text-layout: 'FAIL the tree holds [heading] 'Typography Styles' / no such node in the tree after the act' (same for 'Layout Primitives', 'Text & Layout')`
   - `source: text_widget.rs:954-999 always Role::Label; no Role::Heading emitter in teksilo-widgets outside rich_text/code_editor`
   - `misc-text-layout-20260925-152854: 'FAIL the tree holds [heading] 'Typography Styles'' etc.`
@@ -587,12 +761,19 @@ Text changes of nodes outside the exported tree (off-screen pickers sharing the 
 - **Scenario:** misc-color-channels
 - **Act:** Up arrow on the R spinner
 - **The reader should get:** events only for nodes a reader can reach
-- **The reader gets:** object:text-changed from 17 paths absent from the tree (\[&lt;Error&gt;\] sources) and 'EVENT MANAGER: Ignoring defunct object: \[DEAD\]' x22
+- **The reader got (`261a218f`):** object:text-changed from 17 paths absent from the tree (\[&lt;Error&gt;\] sources) and 'EVENT MANAGER: Ignoring defunct object: \[DEAD\]' x22
 - **Platform:** Linux
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** accesskit\_atspi\_common-0.20.0/src/adapter.rs:184-195 (emit\_text\_change\_if\_needed) called from node\_updated 287-288 before the filter comparison
-- **Evidence:**
+- **Now (`c198e4d1`):** Each Up arrow on the R spin button still sends text-changed events from nodes outside the exported tree (the off-screen pickers sharing the colour), and Orca drops 22 of them as defunct. Speech is not affected here.
+- **Measured again:** misc-color-channels, 2 of 2 runs; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-color-channels 'Up arrow on it': +51.9 ms object:text-changed:delete [gone] '' text='5' / +54.9 ms object:text-changed:insert [gone] '' text='6' … and 22 x 'observed Orca ignored an event whose source was defunct'`
+  - `pass2 misc-color-channels 'Up arrow on it': 22 text-changed events from [gone] sources and 22 x 'observed Orca ignored an event whose source was defunct' ('16:35:32.141359 EVENT MANAGER: Ignoring defunct object: [DEAD]')`
+  - `pass1 misc-color-channels 'Right arrow on Saturation and brightness': 'EVENT MANAGER: object:text-changed:delete for [DEAD] in [application: 'color-picker-demo'] (2, 3, 681) is not obsoleted'`
+  - `source: accesskit_atspi_common-0.21.0/src/adapter.rs:287-288 node_updated calls emit_text_change_if_needed before comparing filter results`
+- **Where (`c198e4d1`):** accesskit\_atspi\_common-0.21.0/src/adapter.rs:184-195 (emit\_text\_change\_if\_needed) called from node\_updated 287-288
+- **Evidence (`261a218f`):**
   - `misc-color-channels-20260925-145159 'Up arrow on it': '+35.3 ms object:text-changed:delete [<Error>] '' text='3'' … and 22 x 'observed Orca ignored an event whose source was defunct' ('14:52:11.944751 EVENT MANAGER: Ignoring defunct object: [DEAD]')`
   - `17 source paths of these events are not in the launch tree (run.json check)`
   - `source: accesskit_atspi_common adapter.rs:287-289 node_updated calls emit_text_change_if_needed before comparing filter results`
@@ -609,12 +790,18 @@ The non-drag alternatives' AccessKit custom actions (Move Up/Down/…, the colou
 - **Scenario:** misc-drag-and-drop
 - **Act:** read the actions of a ListView row / TreeView row
 - **The reader should get:** obligation 3 of docs/a11y/non-drag-alternatives.md: the moves as actions
-- **The reader gets:** actions \['click'\] only
+- **The reader got (`261a218f`):** actions \['click'\] only
 - **Platform:** Linux by source and measurement
 - **Severity:** low; **layer:** upstream
 - **Status:** Upstream, outside Teksilo: not fixed here.
-- **Where:** accesskit\_atspi\_common-0.20.0/src/node.rs:532-534 (n\_actions: 1 if clickable else 0)
-- **Evidence:**
+- **Now (`c198e4d1`):** Every list item and tree item still exports only the 'click' action on AT-SPI. The reorder moves, Expand/Collapse and the colour field's four steps are not offered as actions; the keyboard chords and the context menu remain the Linux route.
+- **Measured again:** misc-drag-and-drop, 2 of 2 runs; adapter read from source
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-drag-and-drop run.json tree after 'Right arrow expands Documents': every [list item] and [tree item] actions=[{'name': 'click', 'description': '', 'key_binding': ''}]`
+  - `pass1 misc-drag-and-drop 'Down arrow in the menu': ORCA SAYS: 'Move Up.' (the moves exist as menu rows only)`
+  - `source: accesskit_atspi_common-0.21.0/src/node.rs:525-527 n_actions() returns 1 if clickable else 0`
+- **Where (`c198e4d1`):** accesskit\_atspi\_common-0.21.0/src/node.rs:525-527
+- **Evidence (`261a218f`):**
   - `misc-drag-and-drop tree after 'Right arrow expands Documents': every tree item actions ['click']`
   - `source: accesskit_atspi_common node.rs:533-535 n_actions() returns 1 if clickable else 0`
   - `misc-drag-and-drop tree: every [list item]/[tree item] actions=[{'name': 'click'}]`
@@ -630,12 +817,19 @@ Every StandardListItem / StandardTreeItem row exposes a second, role-less node w
 - **Scenario:** misc-drag-and-drop (launch)
 - **Act:** launch drag-and-drop; arrow through Songs and Folders
 - **The reader should get:** one node per row: the list item / tree item, named
-- **The reader gets:** each row has a child \[unknown\] node with the same name, which the launch audit flags 13 times. Every arrow press removes and re-adds it (children-changed add/remove, then defunct), which adds bus noise. In object navigation a reader meets a duplicate stop with no role.
+- **The reader got (`261a218f`):** each row has a child \[unknown\] node with the same name, which the launch audit flags 13 times. Every arrow press removes and re-adds it (children-changed add/remove, then defunct), which adds bus noise. In object navigation a reader meets a duplicate stop with no role.
 - **Platform:** Linux measured (AtspiRole::Unknown); the node exists in the AccessKit tree, so every platform gets it
 - **Severity:** low; **layer:** framework
 - **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/standard\_item.rs:916-935, 1383-1385
-- **Evidence:**
+- **Now (`c198e4d1`):** Each StandardListItem and StandardTreeItem row still has a child \[unknown\] node with the row's name, 13 at launch. Every arrow press still removes and re-adds it, with a defunct event, and object navigation still meets a duplicate stop with no role.
+- **Measured again:** misc-drag-and-drop, 2 of 2 runs; tabwalk-drag-and-drop, 2 of 2 runs
+- **Evidence (`c198e4d1`):**
+  - `pass1 misc-drag-and-drop launch tree audit: 'unknown-role: [unknown] 'Hyperballad': a node whose role the adapter could not map' … 13 entries, including 'Documents', 'Downloads', 'README.txt'`
+  - `pass2 misc-drag-and-drop launch tree audit: the same 13 entries`
+  - `pass1 misc-drag-and-drop 'Down arrow in Songs': +16.4 ms object:children-changed:add [list item] 'Hyperballad' -> [unknown] 'Hyperballad' / +16.9 ms object:children-changed:remove [list item] 'Hyperballad' -> [unknown] 'Hyperballad' / +17.2 ms object:state-changed:defunct 1 [unknown] 'Hyperballad'`
+  - `pass1 misc-drag-and-drop tree-Right-arrow-expands-Documents.txt: [list item] 'Hyperballad' {selectable} attrs={'setsize': '10', 'posinset': '1'} > [unknown] 'Hyperballad' attrs={'setsize': '10'}`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/standard\_item.rs:916-935, 1383-1385; crates/teksilo-core/src/accessibility.rs:473-479
+- **Evidence (`261a218f`):**
   - `misc-drag-and-drop-20260925-151249 launch tree audit: 'unknown-role: [unknown] 'Hyperballad': a node whose role the adapter could not map' … 13 entries ('Documents', 'Downloads', 'README.txt' for the tree too); 13 in each of 3 runs`
   - `tree: '[list item] 'Hyperballad' {selectable} attrs={'setsize': '10', 'posinset': '1'}' > '[unknown] 'Hyperballad' attrs={'setsize': '10'}'`
   - `'Down arrow in Songs': '+10.1 ms object:children-changed:add [list item] 'Hyperballad' -> [unknown] 'Hyperballad'' / '+11.1 ms object:children-changed:remove …' / '+11.5 ms object:state-changed:defunct 1 [unknown] 'Hyperballad''`
@@ -652,12 +846,19 @@ Framework accessibility strings hard-coded in English: the ColorPicker's saturat
 - **Scenario:** verify-misc-color-fr
 - **Act:** focus the saturation × brightness field, arrow it; open a searchable ComboBox (font-picker)
 - **The reader should get:** localized strings, like the rest of the picker (color-picker-\* keys exist in 23 locales)
-- **The reader gets:** 'Saturation and brightness', 'Saturation {n}%, brightness {n}%', 'Increase saturation' … and 'Search…' in English whatever the locale
+- **The reader got (`261a218f`):** 'Saturation and brightness', 'Saturation {n}%, brightness {n}%', 'Increase saturation' … and 'Search…' in English whatever the locale
 - **Platform:** all (strings in the AccessKit tree); by source, not measured in another language
 - **Severity:** medium; **layer:** framework
-- **Status:** Open.
-- **Where:** crates/teksilo-widgets/src/color\_picker/hsv\_canvas.rs:97-100, 238-242, 395-400; crates/teksilo-widgets/src/combo\_box/panel.rs:565
-- **Evidence:**
+- **Status:** Partly fixed by `f9ffa98c`, found by the re-measure: that commit did not report it. What remains is under **Now**.
+- **Now (`c198e4d1`):** The searchable ComboBox's field is now named by the combo box and its placeholder is a localized key, so that half is gone. The ColorPicker's saturation and brightness field is still English whatever the locale: its name, its value, its announcement and its four custom actions.
+- **Measured again:** read from source; verify-misc-color-fr 2 of 2 runs cannot show it, as the example supports only en-US
+- **Evidence (`c198e4d1`):**
+  - `source: crates/teksilo-widgets/src/color_picker/hsv_canvas.rs:97-100 lit!("Increase saturation") etc.; :238-242 ctx.announce(format!("Saturation {}%, brightness {}%", …)); :395-400 set_name(lit!("Saturation and brightness"))`
+  - `source: crates/teksilo-widgets/src/combo_box/panel.rs:646-647 .label(self.search_label.clone()).placeholder(teksilo_i18n::tr_widget!(a11y_builtin_search())); a11y-builtin-search is in all 23 locale files`
+  - `pass1 verify-misc-color-fr 'Shift+Tab three times to the saturation × brightness field': ORCA SAYS: 'Saturation and brightness panel.'`
+  - `pass1 verify-misc-color-fr 'Right arrow on it': ORCA SAYS: 'Saturation 78%, brightness 89%'`
+- **Where (`c198e4d1`):** crates/teksilo-widgets/src/color\_picker/hsv\_canvas.rs:97-100, 238-242, 395-400
+- **Evidence (`261a218f`):**
   - `crates/teksilo-widgets/src/color_picker/hsv_canvas.rs:97-100 lit!("Increase saturation") etc.; :238-242 ctx.announce(format!("Saturation {}%, brightness {}%", …)); :395-400 set_name(lit!("Saturation and brightness")) and set_value(format!(…))`
   - `crates/teksilo-widgets/src/combo_box/panel.rs:565 .placeholder(lit!("Search…")): that placeholder is the search entry's only accessible text (misc-22)`
   - `no key for either in crates/teksilo-widgets/locales/en-US.ftl (color-picker-saturation-label/-value-label exist but are for other uses)`
