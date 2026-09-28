@@ -13,6 +13,8 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-28
+
 ### Changed
 
 - `text-document` 1.12.3.
@@ -3593,7 +3595,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/FernTech-EU/teksilo/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/FernTech-EU/teksilo/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/FernTech-EU/teksilo/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/FernTech-EU/teksilo/compare/v0.12.1...v0.13.0
