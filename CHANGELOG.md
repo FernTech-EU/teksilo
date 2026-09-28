@@ -76,6 +76,18 @@ by crate for clarity, not because crates version independently.
   expects the trigger, or, where the press gave the trigger no focus, the
   control that had it before.
 
+#### Workspace
+
+- **`Cargo.lock` recorded text-document and text-typeset with no source or
+  checksum.** A developer's local `[patch.crates-io]` overlay strips both,
+  and 0.13.1 and 0.14.0 were tagged with such a lockfile: `cargo metadata
+  --locked` failed on a fresh clone, and `cargo audit` skipped those eleven
+  crates. The lockfile resolves from crates.io again, a new CI job fails one
+  that does not, and `tools/relock-crates-io.sh` repairs it. The script keeps
+  every crate at the version the lockfile was tested with, and leaves the
+  lockfile untouched with an error naming each crate when crates.io cannot
+  supply that version, rather than taking the newest release.
+
 ## [0.14.0] - 2026-09-26
 
 ### Added

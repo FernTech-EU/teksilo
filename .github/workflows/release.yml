@@ -18,9 +18,9 @@ env:
 jobs:
   # The gate on `publish`. A crates.io version cannot be unpublished or reused,
   # so the tag re-runs the *entire* CI matrix (Linux, X11 under Xvfb, Windows,
-  # macOS, the automation bridge, clippy, docs, SPDX headers) against its own
-  # commit rather than assuming main was green when the tag was cut. A tag can
-  # be moved or re-cut for free; a publish cannot.
+  # macOS, the automation bridge, clippy, docs, SPDX headers, the lockfile)
+  # against its own commit rather than assuming main was green when the tag
+  # was cut. A tag can be moved or re-cut for free; a publish cannot.
   #
   # `validate` deliberately does NOT wait for this: its publish-order and
   # tag-vs-version checks are seconds of stdlib Python, and their whole value
@@ -151,13 +151,15 @@ jobs:
             fi
 
             echo "::group::cargo publish (attempt $attempt, $pending pending)"
-            # `--allow-dirty` is about Cargo.lock, not the manifest. The
-            # committed lockfile records text-document and text-typeset as path
-            # dependencies, because a developer's `.cargo/config.toml` patches
-            # them to the sibling checkouts. No runner has that patch, so the
-            # first cargo command here re-resolves them to registry sources and
-            # rewrites the lockfile — a dirty tree the release did not cause
-            # and must not refuse to publish over.
+            # `--allow-dirty` is about Cargo.lock, not the manifest. A
+            # developer's `.cargo/config.toml` patches text-document and
+            # text-typeset to the sibling checkouts, and a lockfile written
+            # with that patch active records them as path dependencies, which
+            # the first cargo command on a runner rewrites to registry
+            # sources. The `lockfile` job in ci.yml, which this release waits
+            # on, now fails such a lockfile before anything is published. The
+            # flag stays as a second line, so that a lockfile rewrite the
+            # release did not cause still cannot refuse the publish.
             if cargo publish --workspace --allow-dirty "${excludes[@]}"; then
               echo "::endgroup::"
               echo "Publish complete."

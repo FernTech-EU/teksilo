@@ -48,7 +48,7 @@ env:
 jobs:
   ci:
     name: CI
-    needs: [test-linux, test-x11, test-cross, test-automation, check, rustfmt, clippy, docs, spdx]
+    needs: [test-linux, test-x11, test-cross, test-automation, check, rustfmt, clippy, docs, spdx, lockfile]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -62,7 +62,8 @@ jobs:
              [[ "${{ needs.rustfmt.result }}" != "success" ]] || \
              [[ "${{ needs.clippy.result }}" != "success" ]] || \
              [[ "${{ needs.docs.result }}" != "success" ]] || \
-             [[ "${{ needs.spdx.result }}" != "success" ]]; then
+             [[ "${{ needs.spdx.result }}" != "success" ]] || \
+             [[ "${{ needs.lockfile.result }}" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi
@@ -730,3 +731,35 @@ jobs:
 
       - name: Check SPDX headers
         run: python3 tools/check_spdx_headers.py --check
+
+  # A developer's gitignored `.cargo/config.toml` patches text-document and
+  # text-typeset to the sibling checkouts, and a build with that patch active
+  # strips their `source` and `checksum` lines from Cargo.lock. No other job
+  # notices, since each one re-resolves the lockfile on the fly; but
+  # `cargo metadata --locked` then fails on a fresh clone, and `cargo audit`
+  # skips every entry that has no source. v0.13.1 and v0.14.0 both shipped
+  # such a lockfile.
+  lockfile:
+    name: Lockfile resolves from crates.io
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo.lock needs no change to resolve from crates.io
+        run: |
+          if ! cargo metadata --locked --format-version 1 >/dev/null; then
+            echo "::error::Cargo.lock does not resolve from crates.io alone: a local [patch.crates-io] overlay strips source and checksum from the crates it patches. Run tools/relock-crates-io.sh and commit the result."
+            exit 1
+          fi
+          echo "Cargo.lock resolves from crates.io with no change."
+
+      # The script this job sends developers to must keep every crate at the
+      # version the lockfile was tested with, and refuse when crates.io
+      # cannot supply one, rather than take the newest release in silence.
+      - name: The relock script keeps every tested version
+        run: bash tools/relock-crates-io-test.sh

@@ -1199,9 +1199,10 @@ python3 tools/extract_widget_api.py --test
 python3 tools/check_spdx_headers.py --check
 mdbook build
 (cd examples/telemetry_codegen && cargo teksilo-telemetry-lint --fail-on-warnings)
+tools/relock-crates-io.sh    # last; CI's `lockfile` job runs `cargo metadata --locked`
 ```
 
-Five things about that list that have each cost real time:
+Six things about that list that have each cost real time:
 
 - **The doc gate must be the `--document-private-items` form.** The short form
   never documents a `pub(crate)` item, so it structurally cannot see a broken
@@ -1216,6 +1217,21 @@ Five things about that list that have each cost real time:
 - **`check_spdx_headers.py` only inspects tracked files**, so run it after
   `git add` (path-scoped) or a new file passes by being invisible.
 - **`typos` reads `_typos.toml` at the root**, not anything under `.github/`.
+- **Every cargo command with the sibling overlay active strips `Cargo.lock`**:
+  a `[patch.crates-io]` package is recorded as a path package, with no
+  `source` or `checksum`. v0.13.1 and v0.14.0 were tagged that way. Run
+  `tools/relock-crates-io.sh` after the last cargo command and before staging
+  `Cargo.lock`; any cargo command run in the checkout afterwards strips it
+  again. Cargo reads `.cargo/config.toml` from the working directory upward,
+  not from the manifest's directory, so the script resolves from a scratch
+  directory, and a worktree nested under a patched checkout is patched too.
+  Once the patch is out of the way, cargo resolves a stripped entry again to
+  the newest release the manifest allows, so the script sets each crate back
+  to the version it was tested at. When crates.io cannot supply that version
+  (a sibling ahead of its last release, such as a text-document bump made
+  before the publish), or its release differs from the checkout, it leaves
+  `Cargo.lock` as it was and fails: publish first, then relock.
+  `tools/relock-crates-io-test.sh` covers it and runs in the `lockfile` job.
 - **`cargo check --workspace --all-features` is not a gate**, but the missing Noto
   fonts no longer break it: five `fonts-*` faces were never committed, and
   `teksilo-text/build.rs` now turns an absent face into a build **warning** (and
