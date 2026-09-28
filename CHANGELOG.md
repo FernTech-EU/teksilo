@@ -13,6 +13,10 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed
+
+- `text-document` 1.12.4.
+
 ### Fixed
 
 #### Widgets
