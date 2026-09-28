@@ -15,6 +15,8 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+- `text-document` 1.12.3.
+
 #### Accessibility
 
 - **AccessKit 0.25.1.** `accesskit` 0.25.1 and `accesskit_consumer` 0.39.1,
