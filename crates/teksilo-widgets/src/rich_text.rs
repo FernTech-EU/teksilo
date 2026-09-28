@@ -57,12 +57,15 @@ pub(crate) mod hit_test;
 pub(crate) mod image_cache;
 mod keyboard;
 mod mouse;
+mod nesting;
 pub(crate) mod paint;
 mod policy;
 mod state;
 pub(crate) mod touch;
 pub(crate) mod touch_mount;
 
+#[cfg(test)]
+mod nesting_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -1437,6 +1440,11 @@ impl RichTextEditor {
     /// pressing Tab while the caret is on a list item — same behaviour,
     /// same `nest_current_list_item` codepath, exposed for toolbar
     /// buttons that do not want to synthesise key events.
+    ///
+    /// Also a no-op at the editor's list ceiling (level 16, a top-level item
+    /// being level 1). A list item in a blockquote or a table cell moves as
+    /// one in the main text does; in a table cell, where Tab moves to the next
+    /// cell, this is the way to nest an item.
     pub fn indent(&self) {
         keyboard::indent_current_block(&mut self.state.borrow_mut());
         sync_cursor_signals(&self.state);
@@ -1485,28 +1493,34 @@ impl RichTextEditor {
     /// unwrap the innermost enclosing blockquote if already inside one.
     /// No-op (returns silently) when the selection spans multiple
     /// frames.
+    ///
+    /// The wrap is also a no-op where it would take a block past the
+    /// editor's quote ceiling (64 levels), including a quote the selection
+    /// holds: the wrap takes the whole selection one level deeper. The
+    /// unwrap is never limited.
     pub fn toggle_blockquote(&self) {
-        {
-            let st = self.state.borrow();
-            let _ = st.cursor.toggle_blockquote();
-        }
+        nesting::toggle_blockquote(&self.state.borrow());
         sync_cursor_signals(&self.state);
     }
 
     /// Equivalent to pressing Tab inside a blockquote — wraps the
     /// current block in a deeper nested quote. No-op when the caret is
-    /// not in a quote.
+    /// not in a quote, and where the wrap would take a block past the
+    /// editor's quote ceiling (64 levels).
     pub fn increase_blockquote_depth(&self) {
-        {
-            let st = self.state.borrow();
-            let _ = st.cursor.increase_blockquote_depth();
-        }
+        nesting::increase_blockquote_depth(&self.state.borrow());
         sync_cursor_signals(&self.state);
     }
 
-    /// Equivalent to pressing Shift+Tab inside a blockquote — pops one
-    /// nesting level. At depth 1 unwraps the block to a plain
-    /// paragraph. No-op when the caret is not in a quote.
+    /// Take the caret's block out of one blockquote nesting level. At depth 1
+    /// this unwraps the block to a plain paragraph. No-op when the caret is
+    /// not in a quote.
+    ///
+    /// Shift+Tab in a quote does the same outside a list or a table. On a list
+    /// item it is a list outdent instead (see [`outdent`](Self::outdent)): it
+    /// moves the item one list level up and leaves the quote around it alone.
+    /// This command takes a list item out of one quote level and keeps its
+    /// list level.
     pub fn decrease_blockquote_depth(&self) {
         {
             let st = self.state.borrow();
@@ -2368,8 +2382,11 @@ impl EditorHandle {
     /// Whether this editor holds no text at all.
     ///
     /// `character_count() == 0`, so a document of one empty paragraph is empty but one
-    /// holding only spaces is not — the distinction a caller usually wants is
-    /// `to_djot().trim().is_empty()`, and this is the cheap O(1) pre-check.
+    /// holding only spaces is not. The distinction a caller usually wants is
+    /// `to_plain_text().trim().is_empty()`, and this is the cheap O(1) pre-check. The Djot
+    /// does not answer it: from text-document 1.12.3 on, [`to_djot`](Self::to_djot) keeps a
+    /// paragraph's edge spaces between `{}` markers, so a paragraph of spaces writes a
+    /// non-empty text.
     pub fn is_empty(&self) -> bool {
         self.state.borrow().document.is_empty()
     }
@@ -3185,7 +3202,8 @@ impl EditorHandle {
     }
 
     /// Indent the caret's current list item by one nesting level.
-    /// No-op when the caret is not inside a list. Equivalent to Tab.
+    /// No-op when the caret is not inside a list, and at the list ceiling (see
+    /// [`RichTextEditor::indent`]). Equivalent to Tab.
     pub fn indent(&self) {
         keyboard::indent_current_block(&mut self.state.borrow_mut());
         sync_cursor_signals(&self.state);
@@ -3229,27 +3247,26 @@ impl EditorHandle {
 
     /// Wrap the current block/selection in a blockquote, or unwrap the
     /// innermost enclosing blockquote if already inside one. Toolbar
-    /// counterpart for a Ctrl+Shift+Q-style toggle.
+    /// counterpart for a Ctrl+Shift+Q-style toggle. The wrap does nothing
+    /// where it would take a block past the quote ceiling (see
+    /// [`RichTextEditor::toggle_blockquote`]).
     pub fn toggle_blockquote(&self) {
-        {
-            let st = self.state.borrow();
-            let _ = st.cursor.toggle_blockquote();
-        }
+        nesting::toggle_blockquote(&self.state.borrow());
         sync_cursor_signals(&self.state);
     }
 
     /// Wrap the current block in a deeper nested quote. Equivalent to
-    /// Tab inside a blockquote.
+    /// Tab inside a blockquote: a no-op outside a quote and at the quote
+    /// ceiling (see [`RichTextEditor::increase_blockquote_depth`]).
     pub fn increase_blockquote_depth(&self) {
-        {
-            let st = self.state.borrow();
-            let _ = st.cursor.increase_blockquote_depth();
-        }
+        nesting::increase_blockquote_depth(&self.state.borrow());
         sync_cursor_signals(&self.state);
     }
 
-    /// Pop the caret out of one blockquote nesting level. Equivalent to
-    /// Shift+Tab inside a blockquote.
+    /// Pop the caret out of one blockquote nesting level. Shift+Tab does the
+    /// same in a quote outside a list or a table; on a list item it is a list
+    /// outdent and leaves the quote alone (see
+    /// [`RichTextEditor::decrease_blockquote_depth`]).
     pub fn decrease_blockquote_depth(&self) {
         {
             let st = self.state.borrow();

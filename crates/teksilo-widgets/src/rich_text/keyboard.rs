@@ -24,6 +24,7 @@ use teksilo_text::{CursorAffinity, TextDirection};
 use crate::common::text_nav::{self, CaretStep, LineStep};
 
 use super::clipboard;
+use super::nesting;
 use super::policy::EditCommandKind;
 use super::state::{EditorState, SharedState};
 use super::sync_cursor_signals;
@@ -470,7 +471,10 @@ pub(super) fn handle_key(
                 //  * Inside a list item → increase indent. Works from
                 //    any caret position within the block so the user
                 //    doesn't have to Home first.
+                //  * Inside a blockquote → nest one level deeper.
                 //  * Otherwise → insert a literal `\t`.
+                // The two nesting arms stop at the nesting ceilings and then
+                // do nothing (see `nesting`).
                 // Ctrl+Tab is left unhandled (OS focus navigation).
                 let cell_info = st.cursor.current_table_cell().map(|c| {
                     (
@@ -484,7 +488,13 @@ pub(super) fn handle_key(
                 if let Some((table_id, row, col, rows, cols)) = cell_info {
                     navigate_table_cell(&mut st, table_id, row, col, rows, cols, 1);
                 } else if is_cursor_in_list(&st) {
-                    indent_current_block(&mut st);
+                    // The list keeps the key even where the item cannot go
+                    // deeper (the list ceiling): passing it on would nest the
+                    // quote around the item instead, or type a tab over the
+                    // selection.
+                    if filter.accepts(EditCommandKind::IndentBlock) {
+                        indent_current_block(&mut st);
+                    }
                 } else if st.cursor.is_in_blockquote()
                     && filter.accepts(EditCommandKind::IncreaseBlockquoteDepth)
                 {
@@ -492,7 +502,13 @@ pub(super) fn handle_key(
                     // current block in a deeper nested quote. Order
                     // matters — the list check above takes priority for
                     // a list-inside-quote scenario.
-                    let _ = st.cursor.increase_blockquote_depth();
+                    //
+                    // At the quote ceiling the key is spent here and nothing
+                    // changes, as in a list at its deepest level. Falling
+                    // through to the literal-tab arm would answer a request
+                    // for depth by typing a tab character, over the selected
+                    // paragraphs when there is a selection.
+                    nesting::increase_blockquote_depth(&st);
                 } else if filter.accepts(EditCommandKind::InsertTab) {
                     collapse_selection_before_insert(&st);
                     let _ = st.cursor.insert_text("\t");
@@ -1603,12 +1619,14 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
 // ---------------------------------------------------------------------------
 
 /// Whether the caret's current block belongs to a list.
+///
+/// Asked through `current_list`, which reads the block the caret stands in,
+/// as every list command after this check does. The block at the caret's
+/// character index is the next paragraph when the caret is at the end of an
+/// item's text, so at the end of a list's last item Tab typed a tab character,
+/// or nested the quote holding the next paragraph, instead of moving the item.
 fn is_cursor_in_list(st: &EditorState) -> bool {
-    let pos = st.cursor.position();
-    st.document
-        .block_at_position(pos)
-        .and_then(|b| b.list())
-        .is_some()
+    st.cursor.current_list().is_some()
 }
 
 /// Move the current list item into its own list at `target_indent`,
@@ -1632,6 +1650,11 @@ fn is_cursor_in_list(st: &EditorState) -> bool {
 /// visually indistinguishable; for ordered styles numbering restarts
 /// per sublist. A future pass could merge with an adjacent sibling
 /// list at the same `(style, indent)`.
+///
+/// The item may sit in the main text, a blockquote or a table cell:
+/// `create_list` finds the caret's block in any of them from text-document
+/// 1.12.3 on. Up to 1.12.2 it read the main text's own blocks only, so there
+/// the item left its list and joined none.
 fn nest_current_list_item(st: &mut EditorState, target_indent: u8) {
     let Some(list) = st.cursor.current_list() else {
         return;
@@ -1651,20 +1674,17 @@ fn nest_current_list_item(st: &mut EditorState, target_indent: u8) {
 /// inside a list item. See [`nest_current_list_item`] for the split
 /// rationale.
 ///
+/// Does nothing at the list ceiling ([`nesting::MAX_LIST_DEPTH`]), which
+/// [`nesting::deeper_list_indent`] decides.
+///
 /// Exposed `pub(super)` so the parent `rich_text` module can wire it
 /// into `RichTextEditor::indent` / `EditorHandle::indent` — toolbar
 /// buttons need the same behaviour as Tab without going through key
 /// dispatch.
 pub(super) fn indent_current_block(st: &mut EditorState) {
-    let Some(list) = st.cursor.current_list() else {
-        return;
-    };
-    let level = list.indent();
-    let target = level.saturating_add(1);
-    if target == level {
-        return;
+    if let Some(target) = nesting::deeper_list_indent(st) {
+        nest_current_list_item(st, target);
     }
-    nest_current_list_item(st, target);
 }
 
 /// Decrease the current item's nesting depth by 1. Used by Shift+Tab

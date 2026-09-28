@@ -47,6 +47,8 @@ pub enum EditCommandKind {
     DeleteNext,
     DeleteWordLeft,
     DeleteWordRight,
+    /// Move the caret's list item one level deeper (Tab in a list; the
+    /// `indent` command).
     IndentBlock,
     DedentBlock,
     ToggleBold,

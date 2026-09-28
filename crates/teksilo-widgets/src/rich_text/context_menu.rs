@@ -202,7 +202,10 @@ fn build_menu(state: SharedState) -> MenuList {
         .accepts(EditCommandKind::ToggleBlockquote)
     {
         let state_for_bq = state.clone();
-        let cross_frame_selection = state.borrow().cursor.selection_spans_multiple_frames();
+        // Greyed out where the toggle would do nothing: a selection across a
+        // frame boundary, or a wrap that would take a quote past the nesting
+        // ceiling. `toggle_blockquote` itself stops by the same rule.
+        let available = super::nesting::toggle_is_available(&state.borrow());
         let in_quote = state.borrow().cursor.is_in_blockquote();
         let label = if in_quote {
             tr_widget!(menu_remove_blockquote())
@@ -212,12 +215,9 @@ fn build_menu(state: SharedState) -> MenuList {
         list = list.separator();
         list = list.item(
             MenuItem::new(label)
-                .enabled(!cross_frame_selection)
+                .enabled(available)
                 .on_activate_fn(move |evt_ctx| {
-                    {
-                        let st = state_for_bq.borrow();
-                        let _ = st.cursor.toggle_blockquote();
-                    }
+                    super::nesting::toggle_blockquote(&state_for_bq.borrow());
                     super::sync_cursor_signals(&state_for_bq);
                     evt_ctx.request_frame();
                 }),

@@ -29,6 +29,43 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+#### Widgets
+
+- **Holding Tab in a rich text quote or list nested it without end.** Each
+  press wrapped the block in one more blockquote, or moved the list item one
+  level deeper, for as long as the key repeated: about a hundred presses
+  built a quote that a Djot loader bounding its parser's recursion refuses to
+  open again. Tab now stops at 64 blockquote levels and 16 list levels and
+  then does nothing, rather than typing a tab character over the text. The
+  ways back out (Shift+Tab, `outdent`, `decrease_blockquote_depth`, and
+  Backspace at the start of a quote or a list item) are not limited by
+  depth. A document already deeper than the limits opens and edits as it
+  is. The deepest structure the gestures can now build, a level-16 list item
+  inside 64 quotes, costs a Djot parser at most 80 levels of recursion.
+  `indent`, `increase_blockquote_depth` and `toggle_blockquote` stop at the
+  same place, and a toggle or a Tab over a selection is judged by the deepest
+  quote the selection holds, since the wrap takes all of it one level down.
+  The default context menu greys out its blockquote row where the toggle
+  would do nothing.
+- **Tab or Shift+Tab on a list item inside a quote took the item out of its
+  list.** Moving an item to another level rebuilds its list, and up to
+  text-document 1.12.2 `create_list` only reached blocks in the document's
+  root frame, so inside a quote or a table cell the item left its list and
+  joined none; every later Tab then nested the quote instead. With
+  text-document 1.12.3, Tab and Shift+Tab in a quote, and `indent` and
+  `outdent` there or in a table cell, move the item one level as they do in
+  the main text, stop at the same list ceiling, and undo in one step.
+- **Tab at the end of a list's last item typed a tab character.** The editor
+  asked whether the caret was in a list by reading the block at its
+  character index, which at the end of an item's text is the paragraph after
+  it. Tab there typed a tab into the item, or, where a quoted paragraph
+  followed a quoted list, nested that paragraph's quote one level deeper for
+  every press. The check now reads the caret's own block, as the list
+  commands do.
+- **`increase_blockquote_depth` quoted a paragraph that was not in a quote.**
+  It is documented as the command behind Tab in a quote and as doing nothing
+  outside one, and now does nothing outside one.
+
 #### Automation
 
 - **The curated dialogs probe reported a popover's focus as lost.**

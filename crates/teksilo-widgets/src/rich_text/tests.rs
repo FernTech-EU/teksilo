@@ -4359,13 +4359,10 @@ fn editor_toggle_blockquote_wraps_then_unwraps() {
     );
 }
 
-// List-inside-quote Tab precedence: the keyboard handler checks
-// `is_cursor_in_list` BEFORE the blockquote branch (keyboard.rs ladder
-// in the Tab arm). That ordering is visually inspectable in the
-// source; a behavioural test would require the mock layout to
-// preserve `current_list()` membership across `toggle_blockquote`,
-// which today is brittle under headless tests (the wrap moves blocks
-// between frames). Tracking as a polish item for D3.
+// List-inside-quote Tab precedence (the keyboard handler checks
+// `is_cursor_in_list` before the blockquote branch) is covered in
+// `nesting_tests.rs`, over a list imported inside a quote rather than
+// one wrapped by `toggle_blockquote`.
 
 /// User-reported bug: typing Enter at end of `> A`, then Enter again,
 /// previously inserted a line BEFORE A and lost a quote level. Expected:
@@ -6528,8 +6525,12 @@ fn editor_handle_reports_emptiness() {
 }
 
 /// `is_empty` is a character count, so whitespace is content. Callers that mean "nothing
-/// worth keeping" want `to_djot().trim()`, and this pins the difference so nobody has to
-/// discover it from behaviour.
+/// but blank space" want `to_plain_text().trim()`, and this pins the difference so nobody
+/// has to discover it from behaviour.
+///
+/// The Djot is not that test. From text-document 1.12.3 on it keeps a paragraph's edge
+/// spaces between `{}` markers, so they come back on a reload, and a paragraph of spaces
+/// writes `{}   {}`: its trimmed Djot is not empty.
 #[test]
 fn editor_handle_counts_whitespace_as_content() {
     let doc = TextDocument::new();
@@ -6538,8 +6539,13 @@ fn editor_handle_counts_whitespace_as_content() {
     handle.insert_text("   ");
     assert!(!handle.is_empty(), "spaces are characters");
     assert!(
-        handle.to_djot().trim().is_empty(),
-        "but nothing worth keeping"
+        handle.to_plain_text().trim().is_empty(),
+        "but nothing other than blank space"
+    );
+    assert!(
+        !handle.to_djot().trim().is_empty(),
+        "the Djot keeps the spaces, so its trimmed text is not the test: {:?}",
+        handle.to_djot()
     );
 }
 
@@ -6551,6 +6557,11 @@ fn editor_handle_insert_text_keeps_a_newline_inside_one_block() {
     // into the current block verbatim, so a `\n` becomes literal content rather
     // than a paragraph break. A caller that wants a new paragraph cannot get one
     // this way — hence `insert_djot` / `insert_block`.
+    //
+    // Read from the document's blocks, not its Djot. From text-document 1.12.3
+    // on, the Djot writer sets down each line of such a block as a paragraph of
+    // its own, so the text comes back line for line on a reload; the document
+    // still holds one block until then.
     let doc = TextDocument::new();
     doc.set_plain_text("first").unwrap();
     let editor = RichTextEditor::editor(doc.clone());
@@ -6559,10 +6570,11 @@ fn editor_handle_insert_text_keeps_a_newline_inside_one_block() {
     handle.select_range(5, 5);
     handle.insert_text("\nsecond");
 
-    let djot = doc.to_djot().unwrap_or_default();
-    assert!(
-        !djot.contains("\n\n"),
-        "insert_text must not create a second block, got:\n{djot}"
+    let blocks: Vec<String> = doc.blocks().iter().map(|block| block.text()).collect();
+    assert_eq!(
+        blocks,
+        ["first\nsecond"],
+        "insert_text must not create a second block"
     );
 }
 
