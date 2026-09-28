@@ -13,6 +13,61 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **Dragging a rich text selection that held a table dropped it a character
+  early.** A selection from inside a paragraph to the start of the paragraph
+  after a table holds the table whole and leaves the two paragraphs apart, so
+  its removal takes one position fewer than the selection spans. The editor
+  moved the drop point back by the whole span, and the passage landed one
+  character before it: inside the word there, or in front of a paragraph's
+  full stop, which was left in a paragraph of its own after the table. The
+  drop point is now held by a cursor of its own, which the document moves
+  across the removal, and the move is one edit, so one undo takes it back
+  where it took two.
+- **Dragging a selection of table cells moved a copy of the table and left
+  the emptied grid behind.** A selection from one cell to another copies as a
+  table of those cells, but its removal only empties them. Dropped back into
+  the editor it came from, such a drag now does nothing: no caret shows a
+  landing place while it is over that editor, and the cells stay selected.
+  The editor has no modifier that makes a drag a copy. Dropped into another
+  editor, the cells are copied as before.
+- **Shift and an arrow over a selection holding a whole table turned it into
+  a range of the table's cells.** The text before and after the table left
+  the selection at the first press. Shift with an arrow now moves the
+  selection's end as text, so the table stays whole or is given back, also
+  when the table's last cell is empty.
+- **Shift with Up, Page Up or Home could not give back a table the selection
+  had taken.** A selection that runs into a table holds it whole, its moving
+  end at the table's far edge. A step back into the table with Shift and Up,
+  Down, Page Up, Page Down or Home landed on that same edge again, so the
+  selection could only grow. The step now gives the table back and takes the
+  end to the table's other side, as Shift with Left or Right does since
+  text-document 1.12.4.
+- **Ctrl+A in a table cell selected the cell, then the table, and showed
+  neither.** The second and third presses make cell selections, which the
+  editor never handed to the paint, so both looked like the first press, which
+  selects the cell's paragraph. Cell selections, from Ctrl+A, from Shift and an
+  arrow at a cell's edge, or from a drag from one cell to another, are now
+  painted cell by cell, and a selection running across a table paints its
+  cells whole instead of drawing each row's highlight on over the next column.
+- **Tab, Shift+Tab and Enter did nothing in a table inside a quotation.** The
+  editor looked the table up among the main text's own paragraphs and tables,
+  where a table in a quotation is not. It now reads into quotations however
+  deeply they nest, so Tab and Shift+Tab move between the cells, Tab in the
+  last cell adds a row and enters it, and Enter moves down a column or, on the
+  last row, to the paragraph that follows the table, in the quotation or
+  after it.
+- **An input method composing over a selection made from left to right left
+  its first candidate in the text.** The caret stood at the selection's end,
+  and the composition's range was measured from there although the candidate
+  replaced the selection at its start. The next candidate and the commit then
+  took away the wrong characters, or none: composing 你 over a selected word
+  left `n你` behind. The range is now measured back from where the candidate
+  ends.
+
 ## [0.14.1] - 2026-09-28
 
 ### Changed

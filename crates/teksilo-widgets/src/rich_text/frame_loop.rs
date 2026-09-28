@@ -247,13 +247,7 @@ pub(crate) fn tick(state: &mut EditorState, delta: f32) -> bool {
     // arrow/Home/End/PageUp/PageDown navigation.
     if state.engine.has_full_layout() {
         let caret_on = state.caret_visible.get() && state.has_focus;
-        let cursor_display = teksilo_text::CursorDisplay {
-            position: state.cursor.position(),
-            anchor: state.cursor.anchor(),
-            affinity: state.cursor_affinity,
-            visible: caret_on,
-            selected_cells: Vec::new(),
-        };
+        let cursor_display = state.cursor_display(caret_on);
         state.engine.set_cursor(&cursor_display);
     }
 

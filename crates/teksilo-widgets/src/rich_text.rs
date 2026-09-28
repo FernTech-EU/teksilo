@@ -67,6 +67,8 @@ pub(crate) mod touch_mount;
 #[cfg(test)]
 mod nesting_tests;
 #[cfg(test)]
+mod table_selection_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod touch_tests;
@@ -3817,6 +3819,15 @@ impl Widget for RichTextEditor {
                         // still gets it.
                         return teksilo_core::DropFeedback::NoFeedback;
                     }
+                    // A drop this editor refuses gets no caret promising where
+                    // it would land, and the selection it carries stays put.
+                    if payload
+                        .get_typed::<EditorTextDrag>()
+                        .is_some_and(|drag| self::mouse::refuses_text_drop(&state, drag))
+                    {
+                        self::mouse::clear_drop_caret(&state);
+                        return teksilo_core::DropFeedback::NoFeedback;
+                    }
                     if !self::mouse::move_caret_for_drag(&state, pos) {
                         self::mouse::clear_drop_caret(&state);
                         return teksilo_core::DropFeedback::NoFeedback;
@@ -3845,6 +3856,14 @@ impl Widget for RichTextEditor {
                     // Live, for the same reason as `on_drag_hover` above.
                     let read_only = state.borrow().policy.is_read_only();
                     if read_only || !droppable(&payload) {
+                        return false;
+                    }
+                    // Refused before the caret is placed below, which would
+                    // collapse the selection the drag carries.
+                    if payload
+                        .get_typed::<EditorTextDrag>()
+                        .is_some_and(|drag| self::mouse::refuses_text_drop(&state, drag))
+                    {
                         return false;
                     }
                     // Place the caret one last time: a drop can arrive without a

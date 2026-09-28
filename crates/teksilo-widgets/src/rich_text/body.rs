@@ -555,13 +555,7 @@ impl Widget for RichTextEditorBody {
                 CaretPolicy::Blinking => st.caret_visible.get() && st.has_focus && st.window_active,
             }
         };
-        let cursor_display = teksilo_text::CursorDisplay {
-            position: st.cursor.position(),
-            anchor: st.cursor.anchor(),
-            affinity: st.cursor_affinity,
-            visible: caret_on_now,
-            selected_cells: Vec::new(),
-        };
+        let cursor_display = st.cursor_display(caret_on_now);
         st.engine.set_cursor(&cursor_display);
 
         // Forward the widget's scroll state to the typesetter so

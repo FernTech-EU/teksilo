@@ -1096,11 +1096,22 @@ fn handle_ime_composition(
             // (A no-op when a preedit range was just removed above: that path
             // leaves the cursor collapsed at the range start.)
             collapse_selection_before_insert(&st);
-            let start = st.cursor.position();
-            let _ = st.cursor.insert_text(&clean);
-            let end = st.cursor.position();
-            st.ime_preedit = Some(clean);
-            st.ime_preedit_range = Some(start..end);
+            // The preedit's range is read after the insertion, back from where
+            // it leaves the caret: over a selection the text goes in where the
+            // selection started, and the caret before it stood at the
+            // selection's end when it was made forward. Measured from there,
+            // the range missed the preedit, and the next candidate and the
+            // commit took away the wrong characters, or none.
+            let inserted = clean.chars().count();
+            if st.cursor.insert_text(&clean).is_ok() {
+                let end = st.cursor.position();
+                st.ime_preedit = Some(clean);
+                st.ime_preedit_range = Some(end.saturating_sub(inserted)..end);
+            } else {
+                // Nothing went in, so there is no preedit to take away later:
+                // a range recorded here would name text the writer typed.
+                st.ime_preedit = None;
+            }
         } else {
             st.ime_preedit = None;
         }
@@ -1425,8 +1436,11 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
         LineEdge::Start => line_start,
         LineEdge::End => line_end,
     };
-    if target != pos {
-        st.cursor.set_position(target, mode);
+    if target != pos && !move_moving_end(st, target, mode) {
+        // The step gave back a table the selection held, and the caret is not
+        // on this line at all.
+        st.cursor_affinity = CursorAffinity::Downstream;
+        return;
     }
 
     // Keep the caret drawn on the line it was sent to. Only a soft-wrap
@@ -1564,11 +1578,47 @@ fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
     }
 
     if let Some(hit) = st.engine.hit_test(x, target_y) {
-        if hit.position != pos {
-            st.cursor.set_position(hit.position, mode);
-        }
-        st.cursor_affinity = hit.affinity;
+        st.cursor_affinity = if hit.position == pos || move_moving_end(st, hit.position, mode) {
+            hit.affinity
+        } else {
+            CursorAffinity::Downstream
+        };
     }
+}
+
+/// Move the caret to `target`, where a visual step (a line, a page, a line's
+/// edge) landed, extending the selection under `KeepAnchor`. Returns whether
+/// the caret is at `target`, so the caller knows whether the affinity the step
+/// found still applies.
+///
+/// A step back into a table the selection holds whole gives the table back.
+/// `set_position` moves any position in such a table to its edge on the far
+/// side from the selection's fixed end, and after taking the table in, the
+/// moving end already stands there: the step changed nothing, and Shift with
+/// Up, Page Up or Home could only grow the selection. text-document's
+/// `move_position` releases the table when the moving end steps back into it
+/// from that edge, taking the end to the table's other side, so a step the
+/// table's edge swallowed is handed to `move_position` as one character in the
+/// step's direction: enough to land in the table, whatever the step's length.
+fn move_moving_end(st: &mut EditorState, target: usize, mode: MoveMode) -> bool {
+    let from = st.cursor.position();
+    if mode == MoveMode::KeepAnchor && target != from {
+        // A clone is a cursor of its own with the same selection, so the step
+        // is tried there and the editor's cursor moves once.
+        let trial = st.cursor.clone();
+        trial.set_position(target, MoveMode::KeepAnchor);
+        if trial.position() == from {
+            let toward = if target < from {
+                MoveOperation::PreviousCharacter
+            } else {
+                MoveOperation::NextCharacter
+            };
+            st.cursor.move_position(toward, MoveMode::KeepAnchor, 1);
+            return st.cursor.position() == target;
+        }
+    }
+    st.cursor.set_position(target, mode);
+    true
 }
 
 /// Move the cursor up or down by roughly one viewport page, and
@@ -1599,10 +1649,11 @@ fn move_cursor_page(st: &mut EditorState, direction: i32, mode: MoveMode) {
         (center_y + (direction as f32) * page_step).clamp(0.0, st.engine.content_height());
 
     if let Some(hit) = st.engine.hit_test(x, target_y) {
-        if hit.position != pos {
-            st.cursor.set_position(hit.position, mode);
-        }
-        st.cursor_affinity = hit.affinity;
+        st.cursor_affinity = if hit.position == pos || move_moving_end(st, hit.position, mode) {
+            hit.affinity
+        } else {
+            CursorAffinity::Downstream
+        };
     }
 
     // Scroll so the new caret position is visible. We do a simple
@@ -1777,54 +1828,87 @@ fn move_cursor_to_cell_first_block(st: &mut EditorState, table_id: usize, row: u
 }
 
 /// Step the caret to the first block immediately following the given
-/// table. If the table is the last element in the document, no-op.
+/// table, in reading order: the paragraph after it in its quotation, or
+/// after the quotation when the table ends it. If nothing follows the table,
+/// no-op.
 fn move_cursor_after_table(st: &mut EditorState, table_id: usize) {
     use teksilo_text::text_document::FlowElement;
-    let flow = st.document.flow();
-    let mut found = false;
-    for element in &flow {
-        if found {
-            match element {
-                FlowElement::Block(block) => {
-                    st.cursor
-                        .set_position(block.position(), MoveMode::MoveAnchor);
-                    return;
-                }
-                FlowElement::Table(t) => {
-                    if let Some(cell) = t.cell(0, 0)
-                        && let Some(block) = cell.blocks().first()
-                    {
-                        st.cursor
-                            .set_position(block.position(), MoveMode::MoveAnchor);
-                        return;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if let FlowElement::Table(t) = element
-            && t.id() == table_id
-        {
-            found = true;
-        }
+    let mut elements = ReadingOrder::of(&st.document);
+    if !elements
+        .by_ref()
+        .any(|element| matches!(&element, FlowElement::Table(t) if t.id() == table_id))
+    {
+        return;
+    }
+    let next = elements.find_map(|element| match element {
+        FlowElement::Block(block) => Some(block.position()),
+        FlowElement::Table(t) => t
+            .cell(0, 0)
+            .and_then(|cell| cell.blocks().first().map(|block| block.position())),
+        FlowElement::Frame(_) => None,
+    });
+    if let Some(position) = next {
+        st.cursor.set_position(position, MoveMode::MoveAnchor);
     }
 }
 
-/// Look up a table by id via the document's flow. Returns `None` if
-/// the id isn't in the current flow.
+/// Look up a table by id in the document's flow, quotations included.
+/// Returns `None` if no table has that id.
 fn find_table_by_id(
     st: &EditorState,
     table_id: usize,
 ) -> Option<teksilo_text::text_document::TextTable> {
     use teksilo_text::text_document::FlowElement;
-    for element in st.document.flow() {
-        if let FlowElement::Table(t) = element
-            && t.id() == table_id
-        {
-            return Some(t);
+    ReadingOrder::of(&st.document).find_map(|element| match element {
+        FlowElement::Table(t) if t.id() == table_id => Some(t),
+        _ => None,
+    })
+}
+
+/// The document's blocks and tables in reading order, each quotation's own
+/// flow in its place rather than as a frame: what a caret runs through,
+/// however deep the quotations nest. A table's cells are its own and are not
+/// listed.
+///
+/// `TextDocument::flow` lists the main text's own elements only, with a
+/// quotation as one `Frame`: looked up there, a table in a quotation was not
+/// found, and Tab, Shift+Tab and Enter in its cells did nothing. Walked with
+/// a stack, as text-document walks a flow, so a quotation nested past any
+/// depth costs no recursion, and a frame met twice is read once.
+struct ReadingOrder {
+    stack: Vec<std::vec::IntoIter<teksilo_text::text_document::FlowElement>>,
+    seen: std::collections::HashSet<usize>,
+}
+
+impl ReadingOrder {
+    fn of(document: &teksilo_text::text_document::TextDocument) -> Self {
+        Self {
+            stack: vec![document.flow().into_iter()],
+            seen: std::collections::HashSet::new(),
         }
     }
-    None
+}
+
+impl Iterator for ReadingOrder {
+    type Item = teksilo_text::text_document::FlowElement;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use teksilo_text::text_document::FlowElement;
+        loop {
+            let frame = self.stack.last_mut()?;
+            match frame.next() {
+                None => {
+                    self.stack.pop();
+                }
+                Some(FlowElement::Frame(sub_frame)) => {
+                    if self.seen.insert(sub_frame.id()) {
+                        self.stack.push(sub_frame.flow().into_iter());
+                    }
+                }
+                Some(element) => return Some(element),
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1843,40 +1927,49 @@ fn find_table_by_id(
 pub(super) fn try_extend_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
     use teksilo_text::text_document::SelectionKind;
 
-    // If already in cell-selection mode, extend the existing range.
-    if let SelectionKind::Cells(range)
-    | SelectionKind::Mixed {
-        cell_range: range, ..
-    } = st.cursor.selection_kind()
-    {
-        // Use the cached table dimensions from the first selected
-        // cell. If the range is degenerate we can't know the table
-        // bounds reliably, so bail.
-        let cells = st.cursor.selected_cells();
-        let Some(first) = cells.first() else {
-            return false;
-        };
-        let rows = first.table.rows();
-        let cols = first.table.columns();
-        if rows == 0 || cols == 0 {
-            return false;
-        }
+    let range = match st.cursor.selection_kind() {
+        // Already in cell-selection mode: extend the existing range.
+        SelectionKind::Cells(range) => range,
+        // A selection holding a table whole, with text before it, after it or
+        // both, is a text selection: its moving end steps as text, and the
+        // document keeps the table whole or gives it back. Taken for a cell
+        // range, every Shift and arrow turned it into one and dropped the text.
+        // It is not a caret at a cell boundary either, even with its moving end
+        // in an empty last cell, which is the start of a cell as well as its end.
+        SelectionKind::Mixed { .. } => return false,
+        SelectionKind::None | SelectionKind::Text => return start_cell_selection(st, dcol, drow),
+    };
 
-        let new_end_row = (range.end_row as i32 + drow).clamp(0, rows as i32 - 1) as usize;
-        let new_end_col = (range.end_col as i32 + dcol).clamp(0, cols as i32 - 1) as usize;
-
-        st.cursor.select_cell_range(
-            range.table_id,
-            range.start_row,
-            range.start_col,
-            new_end_row,
-            new_end_col,
-        );
-        return true;
+    // Use the cached table dimensions from the first selected
+    // cell. If the range is degenerate we can't know the table
+    // bounds reliably, so bail.
+    let cells = st.cursor.selected_cells();
+    let Some(first) = cells.first() else {
+        return false;
+    };
+    let rows = first.table.rows();
+    let cols = first.table.columns();
+    if rows == 0 || cols == 0 {
+        return false;
     }
 
-    // Not yet in cell-selection mode: check if the caret is at a cell
-    // boundary that an arrow press would cross.
+    let new_end_row = (range.end_row as i32 + drow).clamp(0, rows as i32 - 1) as usize;
+    let new_end_col = (range.end_col as i32 + dcol).clamp(0, cols as i32 - 1) as usize;
+
+    st.cursor.select_cell_range(
+        range.table_id,
+        range.start_row,
+        range.start_col,
+        new_end_row,
+        new_end_col,
+    );
+    true
+}
+
+/// Start a cell selection when the caret stands at a cell boundary that the
+/// arrow press `(dcol, drow)` would cross, taking in the cell beyond it.
+/// Returns `false`, touching nothing, anywhere else.
+fn start_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
     let Some(cell_ref) = st.cursor.current_table_cell() else {
         return false;
     };

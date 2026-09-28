@@ -337,6 +337,18 @@ pub(crate) struct EditorState {
     /// reads as uncertainty about whether it will accept.
     pub drop_caret: bool,
 
+    /// The last drag of a selection this editor started carried a cell
+    /// selection (`SelectionKind::Cells`), a rectangle of a table's cells.
+    ///
+    /// Written by every drag start, and read only for a drop back into this
+    /// same editor, which always follows a start here. Such a selection copies
+    /// as a table of its cells while its removal only empties them, so a move
+    /// would leave the emptied grid behind and put a copy of the table at the
+    /// drop point: the editor refuses that drop (see
+    /// `mouse::refuses_text_drop`). The drag payload cannot carry this itself
+    /// without growing the public `EditorTextDrag`.
+    pub drag_holds_cells: bool,
+
     /// When `true` (**the default**), moving the caret reveals it inside any
     /// *enclosing* scroll area (via `EventContext::ensure_visible`) — the
     /// standard editor "caret stays on screen while you type / navigate"
@@ -865,6 +877,7 @@ impl EditorState {
             last_link_fg: None,
             has_focus: false,
             drop_caret: false,
+            drag_holds_cells: false,
             follow_caret_in_page: true,
             window_active: true,
             focus_signal: Signal::new(false),
@@ -1002,6 +1015,32 @@ impl EditorState {
     pub fn flow_snapshot_for_a11y(&self) -> teksilo_text::text_document::FlowSnapshot {
         self.document
             .snapshot_flow_masked_no_paint(&self.effective_mask())
+    }
+
+    /// What the typesetter draws for the cursor: the caret, shown when
+    /// `visible`, and the selection, table cells included.
+    ///
+    /// The cells are the ones the cursor's selection holds: a rectangle of
+    /// them (Ctrl+A's second and third press in a table, Shift and an arrow at
+    /// a cell's edge, a drag from one cell to another), or the whole of a
+    /// table a text selection runs across. The typesetter paints each of them
+    /// whole and leaves their text out of the text highlight. Given none, a
+    /// cell selection that position and anchor do not describe was never
+    /// painted: Ctrl+A in a table selected the cell, then the table, and
+    /// looked as if it had selected the cell's paragraph each time.
+    pub fn cursor_display(&self, visible: bool) -> teksilo_text::CursorDisplay {
+        teksilo_text::CursorDisplay {
+            position: self.cursor.position(),
+            anchor: self.cursor.anchor(),
+            affinity: self.cursor_affinity,
+            visible,
+            selected_cells: self
+                .cursor
+                .selected_cells()
+                .into_iter()
+                .map(|cell| (cell.table.id(), cell.row, cell.column))
+                .collect(),
+        }
     }
 
     /// Drain the local event queue, classifying events for the layout

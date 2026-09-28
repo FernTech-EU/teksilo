@@ -51,7 +51,7 @@ use std::rc::Rc;
 use teksilo_canvas::{Point, Rect};
 use teksilo_core::event::{EventResponse, PointerButton, WidgetEvent};
 use teksilo_core::widget::{CursorIcon, EventContext};
-use teksilo_text::text_document::{MoveMode, SelectionType};
+use teksilo_text::text_document::{MoveMode, SelectionKind, SelectionType};
 
 use teksilo_tokens::{InputTokens, PointerKind, TargetRole};
 
@@ -305,8 +305,30 @@ fn start_text_drag(state: &SharedState, ctx: &mut EventContext) {
     if let Some(source) = source {
         ctx.start_drag(source, payload);
     }
-    state.borrow_mut().drag_state = DragState::Idle;
+    {
+        let mut st = state.borrow_mut();
+        // Read before anything moves the caret: a drop back into this editor
+        // refuses to move a cell selection, and the hover that follows moves the
+        // caret off it.
+        st.drag_holds_cells = matches!(st.cursor.selection_kind(), SelectionKind::Cells(_));
+        st.drag_state = DragState::Idle;
+    }
     ctx.request_frame();
+}
+
+/// Whether this editor refuses `drag` outright: a cell selection dropped back
+/// into the editor it came from.
+///
+/// A rectangle of a table's cells copies as a table of those cells, while the
+/// removal of its range only empties them, so the move put a copy of the table
+/// at the drop point and left the emptied grid where it was. The editor has no
+/// modifier that turns a drag into a copy, so nothing happens. Asked before the
+/// caret follows the drag, so no caret promises a landing place the drop would
+/// then refuse, and the cells stay selected. Dropped into another editor, the
+/// cells are a copy there as any dragged text is.
+pub(super) fn refuses_text_drop(state: &SharedState, drag: &super::EditorTextDrag) -> bool {
+    let st = state.borrow();
+    st.self_id == Some(drag.source) && st.drag_holds_cells
 }
 
 /// Insert dragged editor text at the caret, removing the original when the drop
@@ -343,6 +365,11 @@ pub(super) fn apply_text_drop(
     {
         return false;
     }
+    // A cell selection is not moved at all: see `refuses_text_drop`. The drop
+    // handler asks first; this keeps the refusal whatever calls here.
+    if state.borrow().drag_holds_cells {
+        return false;
+    }
 
     // Dropped inside the very text being dragged: there is no move to make, and
     // deleting the range would destroy the selection the writer was carrying.
@@ -352,21 +379,27 @@ pub(super) fn apply_text_drop(
         return true;
     }
 
-    // Remove the original first, then insert. Deleting shifts everything after
-    // the range left by its length, so a drop *after* the range has to be
-    // re-based or the text lands that many characters too far right.
+    // Remove the original first, then insert where the drop point went. A
+    // cursor of its own holds the drop point, and the document moves it across
+    // the removal as it moves every live cursor. Re-basing the offset by the
+    // range's length instead assumed the removal takes as many positions as the
+    // range spans, which a range holding a table does not always do: running
+    // from inside one paragraph to the start of the one after the table, it
+    // leaves the two paragraphs apart and takes one position less, so the text
+    // landed a character early, inside the word before the drop point.
+    //
+    // One edit block, so that one Undo takes the whole move back.
     {
         let st = state.borrow();
+        let landing = st.document.cursor_at(drop_at);
+        st.cursor.begin_edit_block();
         st.cursor.set_position(lo, MoveMode::MoveAnchor);
         st.cursor.set_position(hi, MoveMode::KeepAnchor);
         let _ = st.cursor.remove_selected_text();
-        let target = if drop_at > hi {
-            drop_at - (hi - lo)
-        } else {
-            drop_at
-        };
-        st.cursor.set_position(target, MoveMode::MoveAnchor);
+        st.cursor
+            .set_position(landing.position(), MoveMode::MoveAnchor);
         let _ = st.cursor.insert_fragment(&drag.fragment);
+        st.cursor.end_edit_block();
     }
     true
 }

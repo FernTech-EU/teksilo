@@ -2130,6 +2130,68 @@ fn editor_ime_composition_cancelled_leaves_document_clean() {
     );
 }
 
+/// A composition started over a selection replaces it, once, with the preedit
+/// where the selection was. Selected forward, the caret stands at the
+/// selection's end, and the preedit's range was measured from there although
+/// the candidate went in at the selection's start: the range ran backwards, the
+/// next candidate found no preedit to take away, and the first one stayed in
+/// the text.
+#[test]
+fn a_composition_over_a_forward_selection_replaces_it_once() {
+    use teksilo_core::event::WidgetEvent;
+
+    for (anchor, position) in [(0, 5), (5, 0)] {
+        let doc = TextDocument::new();
+        doc.set_plain_text("Hello world").unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let state = editor.state_handle();
+
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        focus_editor(&mut tree, id);
+        handle.select_range(anchor, position);
+
+        tree.dispatch_event(WidgetEvent::ImeComposition {
+            text: "n".to_string(),
+            cursor: None,
+        });
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        assert_eq!(
+            doc.to_plain_text().unwrap_or_default(),
+            "n world",
+            "selected {anchor}..{position}: the preedit replaces the selection"
+        );
+        assert_eq!(
+            state.borrow().ime_preedit_range,
+            Some(0..1),
+            "selected {anchor}..{position}: the preedit is where the selection was"
+        );
+
+        tree.dispatch_event(WidgetEvent::ImeComposition {
+            text: "ni".to_string(),
+            cursor: None,
+        });
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        assert_eq!(
+            doc.to_plain_text().unwrap_or_default(),
+            "ni world",
+            "selected {anchor}..{position}: the next candidate replaces the preedit"
+        );
+
+        tree.dispatch_event(WidgetEvent::ImeCommit {
+            text: "你".to_string(),
+        });
+        tick_past_debounce(&mut tree);
+        assert_eq!(
+            doc.to_plain_text().unwrap_or_default(),
+            "你 world",
+            "selected {anchor}..{position}: the commit replaces the preedit"
+        );
+    }
+}
+
 #[test]
 fn editor_paste_external_identical_plain_does_not_reuse_stale_fragment() {
     // Regression: previously the self-round-trip check compared plain
