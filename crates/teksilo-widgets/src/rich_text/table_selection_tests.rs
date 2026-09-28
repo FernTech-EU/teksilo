@@ -671,6 +671,115 @@ fn a_selection_holding_a_table_paints_its_cells_whole() {
     );
 }
 
+/// Two tables with a paragraph between them, and a paragraph on either side.
+const TWO_TABLES: &str = "Alpha beta.\n\n| a1 | b1 |\n|---|---|\n| c1 | d1 |\n\nMiddle text.\n\n\
+                          | p1 | q1 |\n|---|---|\n| r1 | s1 |\n\nOmega end.\n";
+
+/// Every table a selection holds is painted cell by cell, not only the first:
+/// the second was painted a line at a time, its highlight drawn on over the
+/// next column.
+#[test]
+fn a_selection_holding_two_tables_paints_the_cells_of_both_whole() {
+    let mut m = mount(TWO_TABLES);
+    let from = m.at("Alpha beta.", 6);
+    let to = m.at("Omega end.", 3);
+    m.handle.select_range(from, to);
+    let paint = selection_paint(&mut m);
+    for text in ["a1", "b1", "c1", "d1", "p1", "q1", "r1", "s1"] {
+        assert!(
+            painted(&paint, in_the_cell_beside(&m, text)),
+            "the cell holding {text} must be painted whole: {paint:?}"
+        );
+    }
+}
+
+/// The same for the whole text, where Ctrl+A outside a table selects it all.
+#[test]
+fn ctrl_a_paints_the_cells_of_every_table_whole() {
+    let mut m = mount(TWO_TABLES);
+    m.caret(m.at("Middle text.", 2));
+    m.press(Key::A, Modifiers::COMMAND);
+    let paint = selection_paint(&mut m);
+    for text in ["a1", "b1", "c1", "d1", "p1", "q1", "r1", "s1"] {
+        assert!(
+            painted(&paint, in_the_cell_beside(&m, text)),
+            "the cell holding {text} must be painted whole: {paint:?}"
+        );
+    }
+}
+
+/// Started in a cell of the second table and taken back into the first, the
+/// selection holds both tables whole, from one table's edge to the other's,
+/// which the document reads as text rather than as a table and some text.
+#[test]
+fn a_selection_from_one_table_into_another_paints_the_cells_of_both_whole() {
+    let mut m = mount(TWO_TABLES);
+    m.handle.select_range(m.at("q1", 1), m.at("b1", 1));
+    assert!(
+        matches!(m.kind(), SelectionKind::Text),
+        "setup: the document reads the selection as text, not {:?}",
+        m.kind()
+    );
+    let paint = selection_paint(&mut m);
+    for text in ["a1", "b1", "c1", "d1", "p1", "q1", "r1", "s1"] {
+        assert!(
+            painted(&paint, in_the_cell_beside(&m, text)),
+            "the cell holding {text} must be painted whole: {paint:?}"
+        );
+    }
+}
+
+/// A selection that stops holding a table stops painting its cells, and a
+/// rectangle of cells replaced by another one is painted as the new one,
+/// although neither end of the cursor moved: the paint keeps what it read
+/// until the selection changes, and must see that it did.
+#[test]
+fn the_painted_cells_follow_the_selection_as_it_changes() {
+    let mut m = mount(TABLE_BETWEEN);
+    let (from, _) = select_across_the_table(&mut m);
+    let held = selection_paint(&mut m);
+    assert!(
+        painted(&held, in_the_cell_beside(&m, "a1")),
+        "setup: {held:?}"
+    );
+
+    m.handle.select_range(from, m.at("Alpha beta.", 10));
+    let text = selection_paint(&mut m);
+    assert!(
+        !painted(&text, in_the_cell_beside(&m, "a1")),
+        "the table is not held any more: {text:?}"
+    );
+
+    m.caret(m.at("a1", 1));
+    m.press(Key::A, Modifiers::COMMAND);
+    m.press(Key::A, Modifiers::COMMAND);
+    let cell = selection_paint(&mut m);
+    assert!(
+        painted(&cell, in_the_cell_beside(&m, "a1")),
+        "the second Ctrl+A leaves both ends where the first did, and paints the cell: {cell:?}"
+    );
+    assert!(
+        !painted(&cell, in_the_cell_beside(&m, "b1")),
+        "and only that cell: {cell:?}"
+    );
+    m.press(Key::A, Modifiers::COMMAND);
+    let table = selection_paint(&mut m);
+    assert!(
+        painted(&table, in_the_cell_beside(&m, "b1")),
+        "the third Ctrl+A leaves both ends where the second did, and paints the table: {table:?}"
+    );
+
+    // Selected again from end to end, the rectangle is gone although the
+    // cursor's two ends are the ones it had.
+    let (anchor, position) = m.selection();
+    m.handle.select_range(anchor, position);
+    let text = selection_paint(&mut m);
+    assert!(
+        !painted(&text, in_the_cell_beside(&m, "b1")),
+        "the rectangle of cells must not outlive the selection that made it: {text:?}"
+    );
+}
+
 // ── A table in a quotation ───────────────────────────────────────────────
 
 /// A quotation holding a paragraph and a table, then a paragraph outside it.

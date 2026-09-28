@@ -26,6 +26,7 @@ use crate::common::text_nav::{self, CaretStep, LineStep};
 use super::clipboard;
 use super::nesting;
 use super::policy::EditCommandKind;
+use super::reading_order::ReadingOrder;
 use super::state::{EditorState, SharedState};
 use super::sync_cursor_signals;
 
@@ -975,11 +976,9 @@ pub(super) fn apply_select_all_ladder(st: &mut EditorState) {
 
     match next_level {
         1 => st.cursor.select(SelectionType::BlockUnderCursor),
-        2 => st
-            .cursor
-            .select_table_cell(cell.table_id, cell.row, cell.column),
+        2 => st.select_table_cell(cell.table_id, cell.row, cell.column),
         3 => {
-            st.cursor.select_cell_range(
+            st.select_cell_range(
                 cell.table_id,
                 0,
                 0,
@@ -1865,52 +1864,6 @@ fn find_table_by_id(
     })
 }
 
-/// The document's blocks and tables in reading order, each quotation's own
-/// flow in its place rather than as a frame: what a caret runs through,
-/// however deep the quotations nest. A table's cells are its own and are not
-/// listed.
-///
-/// `TextDocument::flow` lists the main text's own elements only, with a
-/// quotation as one `Frame`: looked up there, a table in a quotation was not
-/// found, and Tab, Shift+Tab and Enter in its cells did nothing. Walked with
-/// a stack, as text-document walks a flow, so a quotation nested past any
-/// depth costs no recursion, and a frame met twice is read once.
-struct ReadingOrder {
-    stack: Vec<std::vec::IntoIter<teksilo_text::text_document::FlowElement>>,
-    seen: std::collections::HashSet<usize>,
-}
-
-impl ReadingOrder {
-    fn of(document: &teksilo_text::text_document::TextDocument) -> Self {
-        Self {
-            stack: vec![document.flow().into_iter()],
-            seen: std::collections::HashSet::new(),
-        }
-    }
-}
-
-impl Iterator for ReadingOrder {
-    type Item = teksilo_text::text_document::FlowElement;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        use teksilo_text::text_document::FlowElement;
-        loop {
-            let frame = self.stack.last_mut()?;
-            match frame.next() {
-                None => {
-                    self.stack.pop();
-                }
-                Some(FlowElement::Frame(sub_frame)) => {
-                    if self.seen.insert(sub_frame.id()) {
-                        self.stack.push(sub_frame.flow().into_iter());
-                    }
-                }
-                Some(element) => return Some(element),
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Cell-range selection (Shift+Arrow when at a cell boundary)
 // ---------------------------------------------------------------------------
@@ -1940,15 +1893,21 @@ pub(super) fn try_extend_cell_selection(st: &mut EditorState, dcol: i32, drow: i
         SelectionKind::None | SelectionKind::Text => return start_cell_selection(st, dcol, drow),
     };
 
-    // Use the cached table dimensions from the first selected
-    // cell. If the range is degenerate we can't know the table
-    // bounds reliably, so bail.
-    let cells = st.cursor.selected_cells();
-    let Some(first) = cells.first() else {
+    // The table's size bounds the rectangle. The table is read from the cell
+    // the caret stands in, which is one of its cells whenever the rectangle
+    // was made by a key or a drag, and looked up by its id otherwise. Read
+    // through `selected_cells`, every Shift and arrow looked each cell of the
+    // rectangle up among all of the table's cells: two seconds a press over a
+    // whole table of five thousand cells.
+    let table = match st.cursor.current_table_cell() {
+        Some(cell) if cell.table.id() == range.table_id => Some(cell.table),
+        _ => find_table_by_id(st, range.table_id),
+    };
+    let Some(table) = table else {
         return false;
     };
-    let rows = first.table.rows();
-    let cols = first.table.columns();
+    let rows = table.rows();
+    let cols = table.columns();
     if rows == 0 || cols == 0 {
         return false;
     }
@@ -1956,7 +1915,7 @@ pub(super) fn try_extend_cell_selection(st: &mut EditorState, dcol: i32, drow: i
     let new_end_row = (range.end_row as i32 + drow).clamp(0, rows as i32 - 1) as usize;
     let new_end_col = (range.end_col as i32 + dcol).clamp(0, cols as i32 - 1) as usize;
 
-    st.cursor.select_cell_range(
+    st.select_cell_range(
         range.table_id,
         range.start_row,
         range.start_col,
@@ -1991,7 +1950,7 @@ fn start_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
     let table_id = table.id();
     let target_row = (row as i32 + drow).max(0) as usize;
     let target_col = (column as i32 + dcol).max(0) as usize;
-    st.cursor.select_cell_range(
+    st.select_cell_range(
         table_id,
         row.min(target_row),
         column.min(target_col),

@@ -517,27 +517,23 @@ fn a_list_item_in_a_table_cell_moves_through_indent_and_outdent() {
             );
         }
 
-        // The cell takes Tab before the list does. In a table inside a quote
-        // Tab does not reach the next cell yet (`keyboard::find_table_by_id`
-        // looks for the table in the top-level flow only), so there only the
-        // item's level is checked.
+        // The cell takes Tab before the list does, in a quote as in the main
+        // text.
         let editor = RichTextEditor::editor(doc.clone());
         let handle = editor.handle();
         let state = editor.state_handle();
         let mut tree = mount_focused(editor);
         handle.select_range(cell, cell);
         press(&mut tree, Key::Tab, Modifiers::NONE, 1);
-        if quotes == 0 {
-            assert_eq!(
-                state
-                    .borrow()
-                    .cursor
-                    .current_table_cell()
-                    .map(|at| (at.row, at.column)),
-                Some((0, 1)),
-                "Tab in a cell must still go to the next cell: {markdown:?}"
-            );
-        }
+        assert_eq!(
+            state
+                .borrow()
+                .cursor
+                .current_table_cell()
+                .map(|at| (at.row, at.column)),
+            Some((0, 1)),
+            "Tab in a cell must still go to the next cell: {markdown:?}"
+        );
         assert_eq!(
             listing(&doc),
             before,

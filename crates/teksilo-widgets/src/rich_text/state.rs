@@ -349,6 +349,20 @@ pub(crate) struct EditorState {
     /// without growing the public `EditorTextDrag`.
     pub drag_holds_cells: bool,
 
+    /// The table cells the paint last drew whole, with the selection and the
+    /// text they were read for (see [`EditorState::cursor_display`]).
+    pub selected_cells_memo: Option<SelectedCellsMemo>,
+
+    /// Counts the cell selections this editor has made through
+    /// [`EditorState::select_cell_range`] and
+    /// [`EditorState::select_table_cell`].
+    ///
+    /// Such a selection changes neither the text nor either end of the
+    /// cursor, so without it `selected_cells_memo` would keep painting the
+    /// selection it replaced. Every cell selection goes through those two
+    /// methods for that reason, never through the cursor directly.
+    pub cell_selections_made: u64,
+
     /// When `true` (**the default**), moving the caret reveals it inside any
     /// *enclosing* scroll area (via `EventContext::ensure_visible`) — the
     /// standard editor "caret stays on screen while you type / navigate"
@@ -878,6 +892,8 @@ impl EditorState {
             has_focus: false,
             drop_caret: false,
             drag_holds_cells: false,
+            selected_cells_memo: None,
+            cell_selections_made: 0,
             follow_caret_in_page: true,
             window_active: true,
             focus_signal: Signal::new(false),
@@ -1022,25 +1038,156 @@ impl EditorState {
     ///
     /// The cells are the ones the cursor's selection holds: a rectangle of
     /// them (Ctrl+A's second and third press in a table, Shift and an arrow at
-    /// a cell's edge, a drag from one cell to another), or the whole of a
+    /// a cell's edge, a drag from one cell to another), or the whole of every
     /// table a text selection runs across. The typesetter paints each of them
     /// whole and leaves their text out of the text highlight. Given none, a
     /// cell selection that position and anchor do not describe was never
     /// painted: Ctrl+A in a table selected the cell, then the table, and
     /// looked as if it had selected the cell's paragraph each time.
-    pub fn cursor_display(&self, visible: bool) -> teksilo_text::CursorDisplay {
+    ///
+    /// Read once per change of the selection or the text and kept in
+    /// `selected_cells_memo`: the paint asks twice a frame, and the read
+    /// walks the document when the selection holds a table.
+    pub fn cursor_display(&mut self, visible: bool) -> teksilo_text::CursorDisplay {
         teksilo_text::CursorDisplay {
             position: self.cursor.position(),
             anchor: self.cursor.anchor(),
             affinity: self.cursor_affinity,
             visible,
-            selected_cells: self
-                .cursor
-                .selected_cells()
-                .into_iter()
-                .map(|cell| (cell.table.id(), cell.row, cell.column))
-                .collect(),
+            selected_cells: self.selected_cells(),
         }
+    }
+
+    /// Select the rectangle of cells from `(start_row, start_col)` to
+    /// `(end_row, end_col)` of the table `table_id`. The editor's cell
+    /// selections go through here rather than through the cursor, so that
+    /// the paint sees them (see `cell_selections_made`).
+    pub fn select_cell_range(
+        &mut self,
+        table_id: usize,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+    ) {
+        self.cursor
+            .select_cell_range(table_id, start_row, start_col, end_row, end_col);
+        self.cell_selections_made = self.cell_selections_made.wrapping_add(1);
+    }
+
+    /// Select the one cell `(row, column)` of the table `table_id`, as
+    /// [`select_cell_range`](Self::select_cell_range) selects a rectangle.
+    pub fn select_table_cell(&mut self, table_id: usize, row: usize, column: usize) {
+        self.cursor.select_table_cell(table_id, row, column);
+        self.cell_selections_made = self.cell_selections_made.wrapping_add(1);
+    }
+
+    /// The `(table, row, column)` of every cell the selection holds, from
+    /// `selected_cells_memo` while the selection and the text are the ones
+    /// it was read for.
+    ///
+    /// `TextCursor::selected_cells` is not used: it names the cells of the
+    /// first table a text selection runs across only, so a second table in
+    /// the selection, or every table after the first in a whole-text Ctrl+A,
+    /// was painted a line at a time, over its columns; and it looks each
+    /// cell up among all of its table's cells, which made a frame over a
+    /// selected table of a thousand cells take a tenth of a second.
+    fn selected_cells(&mut self) -> Vec<(usize, usize, usize)> {
+        use teksilo_text::text_document::SelectionKind;
+
+        let key = SelectedCellsKey {
+            revision: self.document.content_revision(),
+            version: self.document_version.get(),
+            anchor: self.cursor.anchor(),
+            position: self.cursor.position(),
+            cell_selections_made: self.cell_selections_made,
+        };
+        if let Some(memo) = &self.selected_cells_memo
+            && memo.key == key
+        {
+            // Any move of the cursor drops a rectangle of cells, also one that
+            // leaves both ends where they were, so that one is asked again. The
+            // question is cheap with a rectangle standing: the document answers
+            // it before it looks at any table.
+            let still_valid = match &memo.rectangle {
+                None => true,
+                Some(range) => matches!(
+                    self.cursor.selection_kind(),
+                    SelectionKind::Cells(now) if now == *range
+                ),
+            };
+            if still_valid {
+                return memo.cells.clone();
+            }
+        }
+
+        let (rectangle, cells) = match self.cursor.selection_kind() {
+            SelectionKind::None => (None, Vec::new()),
+            SelectionKind::Cells(range) => {
+                let cells = cells_in(&range);
+                (Some(range), cells)
+            }
+            SelectionKind::Mixed { .. } => (None, self.cells_of_tables_held()),
+            // Text holds a whole table only when its two ends stand in two
+            // different tables; anywhere else, walking the document for one
+            // would find nothing.
+            SelectionKind::Text => {
+                let table_at = |at: usize| {
+                    self.document
+                        .cursor_at(at)
+                        .current_table_cell()
+                        .map(|cell| cell.table.id())
+                };
+                match (table_at(key.anchor), table_at(key.position)) {
+                    (Some(one), Some(other)) if one != other => (None, self.cells_of_tables_held()),
+                    _ => (None, Vec::new()),
+                }
+            }
+        };
+        self.selected_cells_memo = Some(SelectedCellsMemo {
+            key,
+            rectangle,
+            cells: cells.clone(),
+        });
+        cells
+    }
+
+    /// Every cell of every table a text selection holds whole: each table
+    /// whose first cell starts inside the selection, in the main text or in
+    /// a quotation.
+    fn cells_of_tables_held(&self) -> Vec<(usize, usize, usize)> {
+        use teksilo_text::text_document::{CellRange, FlowElement};
+
+        let (anchor, position) = (self.cursor.anchor(), self.cursor.position());
+        let (start, end) = (anchor.min(position), anchor.max(position));
+        let mut cells = Vec::new();
+        for element in super::reading_order::ReadingOrder::of(&self.document) {
+            let FlowElement::Table(table) = element else {
+                continue;
+            };
+            let Some(first) = table
+                .cell(0, 0)
+                .and_then(|cell| cell.blocks().first().map(|block| block.position()))
+            else {
+                continue;
+            };
+            // Reading order is the order of the positions: no table after
+            // this one starts inside the selection.
+            if first >= end {
+                break;
+            }
+            if first > start {
+                let whole = CellRange {
+                    table_id: table.id(),
+                    start_row: 0,
+                    start_col: 0,
+                    end_row: table.rows().saturating_sub(1),
+                    end_col: table.columns().saturating_sub(1),
+                };
+                cells.extend(cells_in(&whole));
+            }
+        }
+        cells
     }
 
     /// Drain the local event queue, classifying events for the layout
@@ -1325,6 +1472,39 @@ pub(crate) fn accumulate_recolor_range(
             Some((lo, hi - lo))
         }
     }
+}
+
+/// The cells [`EditorState::cursor_display`] last handed the paint, and what
+/// they were read for.
+pub(crate) struct SelectedCellsMemo {
+    key: SelectedCellsKey,
+    /// The rectangle of cells the selection was, when it was one.
+    rectangle: Option<teksilo_text::text_document::CellRange>,
+    cells: Vec<(usize, usize, usize)>,
+}
+
+/// What the cells a selection holds depend on. The text is read twice over:
+/// `content_revision` moves with every edit, and `document_version` with a
+/// load in place as well, which leaves the revision where it was.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct SelectedCellsKey {
+    revision: u64,
+    version: u64,
+    anchor: usize,
+    position: usize,
+    cell_selections_made: u64,
+}
+
+/// `(table, row, column)` for every grid position in `range`, spanned ones
+/// included: the typesetter paints each position its own column and row
+/// wide, so a merged cell is painted whole by the positions it covers.
+fn cells_in(range: &teksilo_text::text_document::CellRange) -> Vec<(usize, usize, usize)> {
+    let table_id = range.table_id;
+    (range.start_row..=range.end_row)
+        .flat_map(|row| {
+            (range.start_col..=range.end_col).map(move |column| (table_id, row, column))
+        })
+        .collect()
 }
 
 #[cfg(test)]

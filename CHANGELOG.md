@@ -55,8 +55,15 @@ by crate for clarity, not because crates version independently.
   editor never handed to the paint, so both looked like the first press, which
   selects the cell's paragraph. Cell selections, from Ctrl+A, from Shift and an
   arrow at a cell's edge, or from a drag from one cell to another, are now
-  painted cell by cell, and a selection running across a table paints its
-  cells whole instead of drawing each row's highlight on over the next column.
+  painted cell by cell, and a selection running across tables paints the cells
+  of every one of them whole instead of drawing each row's highlight on over
+  the next column. A table inside a quotation is still painted as before: the
+  typesetter draws the cells of the main text's tables only.
+- **Shift and an arrow over a rectangle of a large table's cells took a
+  moment per press.** Each press looked every selected cell up among all of the
+  table's cells: once Ctrl+A had selected a whole table, a press took about 80
+  milliseconds over a table of a thousand cells and two seconds over one of
+  five thousand. The editor now reads the table's size once.
 - **Tab, Shift+Tab and Enter did nothing in a table inside a quotation.** The
   editor looked the table up among the main text's own paragraphs and tables,
   where a table in a quotation is not. It now reads into quotations however

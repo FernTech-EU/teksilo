@@ -60,6 +60,7 @@ mod mouse;
 mod nesting;
 pub(crate) mod paint;
 mod policy;
+mod reading_order;
 mod state;
 pub(crate) mod touch;
 pub(crate) mod touch_mount;
