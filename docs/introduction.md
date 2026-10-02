@@ -11,6 +11,8 @@ and GPU rendering.
 
 Linux, Windows, and macOS are the primary targets. The API is pre-1.0.
 Read [status and limitations](status-and-limitations.md) before adopting it.
+The [roadmap](milestones.md) outlines the remaining work toward an API freeze
+targeted for January 2027 and summarizes development so far.
 
 ## Start here
 

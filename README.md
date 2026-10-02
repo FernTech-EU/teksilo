@@ -112,6 +112,16 @@ Project. Architecture, design reviews, code review and final acceptance were hum
 
 **Scale:** 40+ framework crates · 700k+ lines of Rust · 100+ widgets · 1600+ builder methods.
 
+## Roadmap to V1
+
+The V1 API freeze is targeted for **January 2027**. Remaining milestones are a
+`LiveImage` widget for video, VM screens, and camera previews driven by another
+thread; validation on touchscreen and pen-capable hardware; and fixes from
+users' real-world applications beyond the maintainer's own use cases.
+
+See [Roadmap](docs/milestones.md) for the development
+retrospective and planned work. The V1 release date is not yet set.
+
 ## Authorship and review
 
 The rules under which Teksilo is built:

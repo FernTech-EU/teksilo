@@ -11,6 +11,7 @@
 - [Features](features.md)
 - [Examples and tooling](examples-and-tooling.md)
 - [Status and limitations](status-and-limitations.md)
+- [Roadmap](milestones.md)
 - [Contributing and project information](project-information.md)
 - [Guide index](guide-index.md)
 
