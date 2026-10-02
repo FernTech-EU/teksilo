@@ -409,7 +409,7 @@ fn a_scripted_touch_sequence_reproduces_the_documented_arbitration_row() {
     for (i, (dx, dy, winner)) in row.steps.iter().enumerate() {
         let seen = reported_steps[i + 1]["pointer"]["sequence_winner"]
             .as_u64()
-            .map(&name_of);
+            .map(name_of);
         assert_eq!(
             seen.as_deref(),
             winner.as_deref(),

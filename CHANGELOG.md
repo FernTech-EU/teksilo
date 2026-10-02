@@ -13,6 +13,14 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored the generated gesture arbitration table and refreshed the search
+  corpus after documentation edits changed its no-winner markers.
+- Removed an unnecessary borrow flagged by Clippy on Rust 1.99.
+- Restored crates.io sources and checksums in the release lockfile so clean
+  checkouts can resolve dependencies with `--locked`.
+
 ## [0.14.3] - 2026-10-02
 
 ### Changed
