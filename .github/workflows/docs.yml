@@ -19,6 +19,8 @@ on:
     paths:
       - "crates/**"
       - "docs/**"
+      - "README.md"
+      - "tools/sync_readme_docs.py"
       - "tools/extract_widget_api.py"
       - "book.toml"
       - ".github/workflows/docs.yml"
@@ -46,6 +48,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0 # full history for sitemap lastmod dates
+
+      - name: Check shared README sections
+        run: python3 tools/sync_readme_docs.py --check
 
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
@@ -132,6 +137,12 @@ jobs:
           ## Documentation
 
           - [Introduction](${BASE_URL}/introduction.html): Overview and where to start
+          - [Your first application](${BASE_URL}/first-application.html): Installation and reactive counter
+          - [Features](${BASE_URL}/features.html): Framework capabilities
+          - [Examples and tooling](${BASE_URL}/examples-and-tooling.html): Demos and cargo teksilo
+          - [Status and limitations](${BASE_URL}/status-and-limitations.html): Stability and known gaps
+          - [Project information](${BASE_URL}/project-information.html): Contributing, licensing, and support
+          - [Guide index](${BASE_URL}/guide-index.html): Subsystem documentation
 
           ### Architecture & roadmap
 

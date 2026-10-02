@@ -104,7 +104,7 @@ The test suite is roughly 9,400 tests in teksilo and over 12,000 across the whol
 
 Teksilo builds on two earlier MPL-2.0 crates already at v1.x: [text-document](https://github.com/ferntech-eu/text-document) (rich-text document model) and [text-typeset](https://github.com/ferntech-eu/text-typeset) (typesetting engine).
 
-Production deployment is currently limited to FernTech's own applications; the 0.x version label reflects this scope. The known gaps are listed at the end of this README.
+The known gaps are listed at the end of this README.
 
 Project. Architecture, design reviews, code review and final acceptance were human; code generation and routine refactoring were LLM-assisted (Claude Opus and Mistral Medium) under that review.
 

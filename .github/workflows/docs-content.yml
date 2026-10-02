@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+name: Check documentation content
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "tools/sync_readme_docs.py"
+      - ".github/workflows/docs-content.yml"
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "tools/sync_readme_docs.py"
+      - ".github/workflows/docs-content.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  shared-content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check shared README sections
+        run: python3 tools/sync_readme_docs.py --check
