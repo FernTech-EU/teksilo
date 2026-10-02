@@ -15,6 +15,7 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+- Updated the `text-document` dependency to 1.12.5.
 - **Breaking: cargo-teksilo CLI.** Removed `setup`, bare `probe`, and `version`.
   Use `init`, `probe install`, and `--version` (tool version) or `status`
   (resolved app version). User installation is now
