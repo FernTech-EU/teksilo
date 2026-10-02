@@ -78,13 +78,15 @@ Available in `docs/` and on [https://docs.teksilo.rs](https://docs.teksilo.rs).
 
 ## Who is this for
 
-Built primarily for professional desktop applications (writing tools, IDEs, dispatcher consoles, admin panels) where users spend hours and expect full keyboard navigation, screen-reader support, and locale-aware formatting. Small tools and one-off utilities are equally well served: the batteries-included surface means a "window with a list and a few buttons" needs little more than the boilerplate above.
+Teksilo targets desktop applications with sustained keyboard use, rich text,
+localization, and assistive-technology support: editors, writing tools, consoles,
+and administration interfaces. It also provides individual controls for smaller
+applications.
 
-Default styles are inspired by JetBrains' Int UI, with a light and dark theme that meet WCAG 2.1 AA contrast out of the box. No Win95-style "classic" theme is provided; the framework is intended for modern desktop applications.
-
-Particularly relevant to projects with regulatory accessibility or internationalization requirements (EU Accessibility Act, US Section 508, France RGAA, government procurement, regulated industries such as healthcare and finance). Accessibility and localization are architectural, not retrofitted: a real AccessKit bridge binds on every window on Linux, Windows, and macOS; every widget declares its role, name, and value at the trait level, with a per-widget override surface for labels, descriptions, and relationships; and Fluent-backed translations are checked at compile time. The default light and dark themes meet WCAG 2.1 AA contrast out of the box, enforced by a CI gate; an opt-in high-contrast variant follows the OS "increase contrast" setting, re-queried on window focus; and keyboard alternatives cover the primary drag interactions. Conformance obligations attach to your application, not the toolkit: Teksilo's role is to supply correct primitives and stay out of the way.
-
-Also useful as a shelf of ready-to-use widgets if you're shopping the Rust GUI ecosystem for a specific component (rich text editor, table view, tree view, scene canvas, calendar, color picker) to drop into your app.
+The default light and dark themes follow JetBrains' Int UI. Accessibility and
+translation support are built into the widget APIs. Test the completed
+application against its users' needs and applicable requirements; toolkit
+features alone do not establish application conformance.
 
 ## Design priorities
 
@@ -160,7 +162,7 @@ The rules under which Teksilo is built:
 
 **Persistent settings.** Reactive K/V store and typed structs with migrations, atomic writes, and crash-safe quarantine of corrupt files. Automatic window-state restore with monitor-aware geometry sanitize.
 
-**Scene canvas.** Pannable, zoomable viewport for non-grid content: story corkboards, mind maps, node-graph editors, simple maps. Heavyweight `Widget` nodes and lightweight `SceneItem`s coexist under one transform, both fully accessible.
+**Scene canvas.** Pannable, zoomable viewport for non-grid content: story corkboards, mind maps, node-graph editors, simple maps. Heavyweight `Widget` nodes and lightweight `SceneItem`s coexist under one transform, with accessibility APIs for both tiers.
 
 **Charts.** BarChart, LineChart, and PieChart (with donut and center slot), generic over the app's data type. Pluggable axis-label formatters and theme integration are built in.
 
@@ -298,11 +300,17 @@ preparation step. When a sibling publishes a new version, bump the version in
 `[workspace.dependencies]` in `Cargo.toml` — the patch carries no version of
 its own, so a local build will not tell you that you are behind.
 
-One consequence to know about: the committed `Cargo.lock` records the two
-siblings as path dependencies, which is the shape a patched build produces. A
-build **without** the patch re-resolves them to registry sources and rewrites
-the lockfile, so `git status` shows `Cargo.lock` modified. That rewrite is not
-a change worth committing — `git checkout Cargo.lock` and carry on.
+The committed `Cargo.lock` must resolve from crates.io without local patches.
+Building with the overrides above can add local package entries and remove
+registry checksums. Before committing a dependency change, run:
+
+```sh
+bash tools/relock-crates-io.sh
+```
+
+The script restores registry sources while preserving the tested versions. It
+fails if those versions cannot be resolved without the local checkouts. CI
+checks the committed lockfile with `cargo metadata --locked`.
 
 `teksilo-analytics-native` is the exception to all of this. It is excluded from
 the workspace (it builds protobuf from source, which needs `cmake` and a C++
@@ -326,8 +334,8 @@ Reference documents live in `docs/`. Good entry points:
 
 - **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods need to be tested by actual users.
 - **X11 verification breadth.** The X11 custom title bar and drag-and-drop backends ship and are covered by protocol tests, but live verification has been done against KWin (via XWayland) and, in CI, Openbox. Other window managers are untested, and there is no run against a standalone Xorg server. A window manager without `_NET_WM_MOVERESIZE` is detected up front and keeps native decorations rather than producing an immovable window.
-- **Mobile and web.** Linux, Windows and macOS are the primary targets. No mobile or web targets.
-- **API stability.** Pre-1.0; breaking changes are expected between minor versions.
+- **Mobile and web.** Linux, Windows and macOS are the primary targets. No mobile or web targets. Web support is technically possible, but would lose accessibility, which is a core goal of the framework.
+- **API stability.** Pre-1.0; breaking changes are expected between minor versions. Yet, the biggest architecture changes of v0 are mostly settled, and the core concepts are unlikely to change drastically.
 
 ## Architecture stack
 

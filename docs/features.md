@@ -34,7 +34,7 @@
 
 **Persistent settings.** Reactive K/V store and typed structs with migrations, atomic writes, and crash-safe quarantine of corrupt files. Automatic window-state restore with monitor-aware geometry sanitize.
 
-**Scene canvas.** Pannable, zoomable viewport for non-grid content: story corkboards, mind maps, node-graph editors, simple maps. Heavyweight `Widget` nodes and lightweight `SceneItem`s coexist under one transform, both fully accessible.
+**Scene canvas.** Pannable, zoomable viewport for non-grid content: story corkboards, mind maps, node-graph editors, simple maps. Heavyweight `Widget` nodes and lightweight `SceneItem`s coexist under one transform, with accessibility APIs for both tiers.
 
 **Charts.** BarChart, LineChart, and PieChart (with donut and center slot), generic over the app's data type. Pluggable axis-label formatters and theme integration are built in.
 

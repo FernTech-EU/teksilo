@@ -1,14 +1,14 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Data Sources — the read-and-command interface
+# Data Sources: the read-and-command interface
 
-The four data views — `ListView`, `TreeView`, `TableView`, `TreeTableView` —
+The four data views, `ListView`, `TreeView`, `TableView`, `TreeTableView`,
 do **not** own a private store they mutate. They read from, and *command*, a
 **data source**: a trait the application implements (or reuses a built-in impl
 of) that owns the truth. This is Teksilo's answer to Qt's `QAbstractItemModel`
-capability protocol — `flags` / `canDropMimeData` / `dropMimeData` for drag-and-
-drop, `canFetchMore` / `fetchMore` for lazy loading — but expressed as
+capability protocol, `flags` / `canDropMimeData` / `dropMimeData` for drag-and-
+drop, `canFetchMore` / `fetchMore` for lazy loading, but expressed as
 **defaulted methods on concrete-`T` source traits**, not a type-erased
 `QVariant`/`QModelIndex` base class. A view reads `&T` directly; the source
 answers "may this drop happen?" and "apply it"; the view only renders the
@@ -23,13 +23,13 @@ There are two traits, both in `teksilo-data`:
 
 Neither is object-safe (associated types + generic `with_item`/`with_entry`),
 so a view consumes it generically via `from_source(...)` and erases it into an
-internal closure bundle — the view type stays `ListView<T>` / `TreeView<T>`,
+internal closure bundle, the view type stays `ListView<T>` / `TreeView<T>`,
 **not** `ListView<T, S>`. The `Key` is captured at the `from_source` boundary,
 so it never leaks into the view's type parameters.
 
 > **When to implement a source vs. use a built-in model.** A bounded, in-memory
 > collection that the view-model owns is a `ListModel` / `TreeModel` (which
-> *are* sources — see the matrix below); reach for them first. Implement a
+> *are* sources, see the matrix below); reach for them first. Implement a
 > source trait **directly** when the truth lives elsewhere (a DB cursor, an
 > entity store, a paged feed) or doesn't fit in memory. Then there is no
 > second copy to keep in sync. See [data-models.md §14](data-models.md).
@@ -60,12 +60,12 @@ pub trait ListDataSource: 'static {
 
 A read-only in-memory source implements only `len` + `with_item` +
 `observe_changes`. `with_item` returns `None` for an out-of-bounds index **or**
-an in-bounds index whose data isn't resident yet (a lazy window miss — §4).
+an in-bounds index whose data isn't resident yet (a lazy window miss, §4).
 
 ### `TreeDataSource`
 
 A tree source exposes its **per-view flattened, currently-visible** rows (the
-`TreeSlice` shape — expand state is per view, so two `TreeView`s over one source
+`TreeSlice` shape, expand state is per view, so two `TreeView`s over one source
 have independent expansion):
 
 ```rust
@@ -100,7 +100,7 @@ other per-row state survive a reflatten).
 `contains_key` is **visibility-independent**: a node collapsed under an ancestor
 (or scrolled out of a lazy window) still exists. It's what keyed-selection
 pruning consults, so a collapsed-but-present node keeps its selection and only a
-*deleted* node is dropped. The default is visible-only — an external store whose
+*deleted* node is dropped. The default is visible-only, an external store whose
 nodes persist while collapsed should override it.
 
 ---
@@ -136,7 +136,7 @@ via the builder; `TreeTableView` fuses a `TreeDataSource` with columns. See
 
 ---
 
-## 3. Capability — drag-and-drop validation
+## 3. Capability: drag-and-drop validation
 
 The source owns DnD. The view never paints an "always valid" insertion line; it
 asks the source on every hover and refuses a rejected drop. The vocabulary
@@ -152,7 +152,7 @@ struct DropCommit<'a, K> { source: DragSource<'a, K>, target: K, position: DropP
 enum   DropPosition      { Before, Into, After }          // Into = reparent (trees only)
 ```
 
-The source methods (all default to inert — `NoDrag` / `Reject` / `false` / no-op):
+The source methods (all default to inert, `NoDrag` / `Reject` / `false` / no-op):
 
 ```rust
 fn drag(&self, key: &Self::Key) -> DragEligibility;       // may this row start a drag?
@@ -187,7 +187,7 @@ row); `ListModel` overrides it with its index-safe `move_items` block move.
    `DragSource::Foreign { payload }`; the source downcasts the payload itself
    (`payload.get_typed::<MyPaletteDrop>()`, `payload.files()`, …). The same
    `can_accept` / `accept_drop` path covers intra-view reorder, list→list
-   transfer, palette→outline drop, and OS file drops — one protocol, not a bolt-
+   transfer, palette→outline drop, and OS file drops, one protocol, not a bolt-
    on.
 5. **Source-side completion.** After a `Foreign` drop is accepted *elsewhere*,
    the framework calls `on_drag_out(key)` on the **origin** source. A
@@ -196,7 +196,7 @@ row); `ListModel` overrides it with its index-safe `move_items` block move.
 
 **Keyboard reorder.** `Alt`+`Arrow` (and `Alt`+`Home` / `Alt`+`End` for the far
 ends) turns the move into the same `(target, position)` pair a pointer drop would
-carry — for trees, the sibling target derived from `parent`/`child_keys` — and
+carry, for trees, the sibling target derived from `parent`/`child_keys`, and
 commits it through the source's `accept_drop` / `reorder_within`. The decoding and
 commit live once in `common::ordered_move`, shared with the row context menu and
 the AccessKit custom actions, and all five data views (GridView included) use it.
@@ -205,15 +205,15 @@ the AccessKit custom actions, and all five data views (GridView included) use it
 `TreeModel` can reuse
 [`tree_apply_reorder`](../crates/teksilo-data/src/tree_data_source.rs) (applies a
 `(source, target, position)` move with the remove-then-insert index adjustment)
-and `tree_is_desc_or_self` (the cycle guard — you cannot drop a node into its
+and `tree_is_desc_or_self` (the cycle guard, you cannot drop a node into its
 own subtree). The built-in `TreeSlice` / `SortFilterTreeModel` `accept_drop`
 impls are built on them.
 
 ---
 
-## 4. Capability — lazy / windowed loading
+## 4. Capability: lazy / windowed loading
 
-There is **no** view-level `on_near_end` hook — incremental loading is a source
+There is **no** view-level `on_near_end` hook, incremental loading is a source
 capability (all defaulted to fully-resident):
 
 ```rust
@@ -229,22 +229,22 @@ Each realize pass the view calls `request_window(start..end)` for its visible +
 buffer range, and when the scroll nears the end consults `can_fetch_more()` →
 `fetch_more()`. A row whose `with_item`/`with_entry` returns `None` **and** whose
 `row_state(i) == Loading` is rendered as a **placeholder skeleton** at the row's
-estimated height instead of being skipped — so selection, focus, and scroll math
+estimated height instead of being skipped, so selection, focus, and scroll math
 stay stable while the page loads. A `Loading` row keeps its `PrefixSumOffsets`
 estimate (it is never `set_row_height`-ed), so layout doesn't jump.
 
 Two shapes are supported:
 
-- **Windowed** (total known, sliding resident window — the 1M-row DB): `len()` /
+- **Windowed** (total known, sliding resident window, the 1M-row DB): `len()` /
   `visible_count()` returns the total; `row_state` is `Loading` outside the
   resident window; `request_window` slides the window.
-- **Append** (total unknown — infinite scroll): `can_fetch_more` / `fetch_more`
+- **Append** (total unknown, infinite scroll): `can_fetch_more` / `fetch_more`
   grow the source.
 
-When a page lands, a flat source emits `DataChange::WindowLoaded { range }` — a
+When a page lands, a flat source emits `DataChange::WindowLoaded { range }`, a
 variant **distinct** from `ItemsInserted` so index-based `SelectionModel` does
 **not** index-shift (the rows already existed; only their data arrived); the
-divergence prefix is `range.start`. Trees need no new variant — a
+divergence prefix is `range.start`. Trees need no new variant, a
 `version_signal()` bump + `first_changed_index()` cover it. The page fetch itself
 runs off-thread / on the app executor and updates the resident buffer on the
 main thread (the existing `AsyncCompletionHandle` machinery); the next realize
@@ -269,7 +269,7 @@ let list = ListView::from_source_keyed(source, keyed.clone(), delegate);
 
 The view resolves `is_selected(source.key_at(i))` at the realization loop and
 `select(key)` in the click handler. On `ItemsRemoved` / `Reset` it calls
-`prune_missing(|k| source has k)` — for trees that consults `contains_key`, so a
+`prune_missing(|k| source has k)`, for trees that consults `contains_key`, so a
 collapsed-but-present node keeps its selection. `extend_to` ranges over the
 current visible key order; an anchor scrolled out gracefully degrades to single
 select. `from_source_keyed` (all four views) opts in; plain `from_source` keeps
@@ -287,24 +287,24 @@ index selection.
 | `SortFilterTreeModel<T>` | `TreeDataSource` | `NodeId` | as `TreeSlice` | resident |
 | `TreeDataSlice<K, T>` | `TreeDataSource` | your `K` | policy injected (`set_drag_policy` / `set_drop_resolver` / `set_reorder`), cycle guard first | resident |
 
-`TreeModel<T>` is **not** itself a `TreeDataSource` — it carries no per-view
+`TreeModel<T>` is **not** itself a `TreeDataSource`, it carries no per-view
 expand state; wrap it in a `TreeSlice` (independent expansion per view) or a
 `SortFilterTreeModel`, or feed an indent-ordered outline to a `TreeDataSlice`. External sources supply their own `Key` (an `i64` entity
-id, a `Uuid`, …) and implement the trait directly — that domain key is exactly
+id, a `Uuid`, …) and implement the trait directly, that domain key is exactly
 what removes the need for a mirror model.
 
 ---
 
 ## See also
 
-- [data-models.md](data-models.md) — the built-in models, projections, the
+- [data-models.md](data-models.md), the built-in models, projections, the
   `first_changed_index()` divergence side-channel (§13), and projecting an
   external source of truth (§14).
-- [table-view.md](table-view.md) — `TableView` / `TreeTableView` columns, row
+- [table-view.md](table-view.md), `TableView` / `TreeTableView` columns, row
   heights, and source binding.
-- [grid-view.md](grid-view.md) — `GridView` rides the same `ListDataSource`
+- [grid-view.md](grid-view.md), `GridView` rides the same `ListDataSource`
   capabilities (drag routing + `fetch_more` + placeholders).
-- [drag-and-drop.md](drag-and-drop.md) — the framework DnD pipeline the source
+- [drag-and-drop.md](drag-and-drop.md), the framework DnD pipeline the source
   protocol routes through, `DropTarget`/`DropZone`, and drop-target bubbling.
 - Source: [list_data_source.rs](../crates/teksilo-data/src/list_data_source.rs),
   [tree_data_source.rs](../crates/teksilo-data/src/tree_data_source.rs),

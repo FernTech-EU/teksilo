@@ -64,11 +64,17 @@ preparation step. When a sibling publishes a new version, bump the version in
 `[workspace.dependencies]` in `Cargo.toml`, the patch carries no version of
 its own, so a local build will not tell you that you are behind.
 
-One consequence to know about: the committed `Cargo.lock` records the two
-siblings as path dependencies, which is the shape a patched build produces. A
-build **without** the patch re-resolves them to registry sources and rewrites
-the lockfile, so `git status` shows `Cargo.lock` modified. That rewrite is not
-a change worth committing, `git checkout Cargo.lock` and carry on.
+The committed `Cargo.lock` must resolve from crates.io without local patches.
+Building with the overrides above can add local package entries and remove
+registry checksums. Before committing a dependency change, run:
+
+```sh
+bash tools/relock-crates-io.sh
+```
+
+The script restores registry sources while preserving the tested versions. It
+fails if those versions cannot be resolved without the local checkouts. CI
+checks the committed lockfile with `cargo metadata --locked`.
 
 `teksilo-analytics-native` is the exception to all of this. It is excluded from
 the workspace (it builds protobuf from source, which needs `cmake` and a C++

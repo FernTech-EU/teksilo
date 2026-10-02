@@ -14,10 +14,9 @@
 - [Contributing and project information](project-information.md)
 - [Guide index](guide-index.md)
 
-# Architecture & roadmap
+# Architecture
 
 - [Architecture](architecture.md)
-- [Property-based testing](property-testing.md)
 
 # Authoring widgets
 
@@ -42,7 +41,6 @@
 # teksu! DSL & formatting
 
 - [teksu! macro reference](teksu-macro-reference.md)
-- [teksu! language spec](teksu-language-spec-v3.md)
 - [teksilo-fmt](teksilo-fmt.md)
 - [teksilo-fmt in VS Code](teksilo-fmt-vscode.md)
 
@@ -61,19 +59,12 @@
 - [Multi-window](multi-window.md)
 - [Title bar](title-bar.md)
 
-# Touch & pen migration
+# Touch & pen
 
 - [Touch & pen](touch-and-pen.md)
-- [Touch verification — the hardware procedure](touch-verification.md)
-- [Touch verification sign-off](touch-verification-signoff.md)
 - [Porting widgets to the pointer model](porting-widgets-to-the-pointer-model.md)
 - [Soft keyboard](soft-keyboard.md)
 - [Touch text editing](text-touch-editing.md)
-- [Density inventory](density-inventory.md)
-- [Density-projection gaps](density-projection-gaps.md)
-- [Widget pointer inventory](widget-pointer-inventory.md)
-- [Hover-affordance census](hover-affordance-census.md)
-- [Drag-operation census](drag-operation-census.md)
 - [Kinetic scrolling](kinetic-scrolling.md)
 
 # Data, persistence, telemetry
@@ -90,7 +81,6 @@
 # Specialized widgets
 
 - [Docking layout](docking.md)
-  - [Horizontal activity rail (backlog)](docking-horizontal-rail.md)
 - [Table & tree-table views](table-view.md)
 - [Code & plain-text editors](code-editor.md)
 - [Log view (streaming)](log-view.md)

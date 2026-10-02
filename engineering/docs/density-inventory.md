@@ -8,7 +8,7 @@ Every dp dimension that `teksilo-widgets`, the three theme presets and
 each — the route by which that dimension reaches a density, or the reason it has
 none. This is the artifact to audit conformance against, and the fixture list P40's
 target-conformance gate walks; it is also the evidence behind the target numbers
-quoted in [the touch design](events-and-gestures.md).
+quoted in [the touch design](../../docs/events-and-gestures.md).
 
 **Status: P20 has landed.** The treatment column is no longer a plan. Each row
 either names the function that resolves it (`FooRecipe::for_tokens`,
@@ -717,7 +717,7 @@ the dock gutter, all five `SCROLLBAR_THICKNESS` copies, the five duplicated
 **The five auto-scroll copies are gone.** `ListView`, `TreeView`, `TableView`,
 `TreeTableView`, `GridView`'s marquee and the `TabBar` strip each carried their own
 `EDGE = 32.0` / `MAX_VELOCITY = 12.0` and their own copy of the ramp; all six now
-call [`common::drag_autoscroll`](../crates/teksilo-widgets/src/common/drag_autoscroll.rs).
+call [`common::drag_autoscroll`](../../crates/teksilo-widgets/src/common/drag_autoscroll.rs).
 Its `band_for(PointerKind)` is the reason the constants left this table rather than
 gaining a density route: the edge band is a property of the *device* — a cursor
 lands where it is put, a fingertip's reported centre wanders — so it widens for a

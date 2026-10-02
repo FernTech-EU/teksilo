@@ -6,7 +6,7 @@
 //! Placement: `tests/`, because every item under test (`rubber_band`,
 //! `ClampingSimulation`, `BouncingSimulation`, `KineticScroller`) is `pub` in
 //! the `pub mod kinetic` of `teksilo-core` and therefore reachable from an
-//! external test crate. See `docs/property-testing.md` for the decision
+//! external test crate. See `engineering/docs/property-testing.md` for the decision
 //! procedure.
 //!
 //! Case counts: proptest's default 256 everywhere. Every property here
@@ -19,7 +19,7 @@
 //! PROPTEST_CASES=4096 cargo test -p teksilo-core --test prop_kinetic
 //! ```
 //!
-//! **Run these under the safe protocol** (`docs/property-testing.md`, "The safe
+//! **Run these under the safe protocol** (`engineering/docs/property-testing.md`, "The safe
 //! run protocol"): build with `--no-run`, then run the binary under
 //! `ulimit -v`. That document opens with an incident in which an uncoupled
 //! generator pairing a `1e6` extent with a `1.0` cell size asked for ~1e12
@@ -109,7 +109,7 @@ fn arb_velocity() -> impl Strategy<Value = f32> {
 /// Cost: a `Vec` of at most 24 `f32`s, plus one closed-form simulation
 /// evaluation each — the dominant per-case cost of this suite, and a bounded
 /// one. 24 is chosen over a larger count for the reason
-/// `docs/property-testing.md` gives: properties find bugs through many small
+/// `engineering/docs/property-testing.md` gives: properties find bugs through many small
 /// cases, and a shrunk counterexample with 24 instants is still readable.
 fn arb_instants(span: f32) -> impl Strategy<Value = Vec<Duration>> {
     prop::collection::vec(0.0f32..span, 1..24).prop_map(|mut v| {

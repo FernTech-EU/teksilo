@@ -1,22 +1,14 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Window-Active Appearance
+# Window-active appearance
 
-Serious desktop apps change how a window looks when it loses OS focus: the text
-caret stops blinking and disappears, text and list selections desaturate to a
-muted grey, and accent-coloured chrome dims. Teksilo does this automatically and
-gives apps an opt-in hook for custom content.
-
-This mirrors the modern, accepted pattern across toolkits — a **reactive ambient
-flag the view reads declaratively**, plus **theme-driven inactive colours**:
-SwiftUI `@Environment(\.appearsActive)` (macOS 15), Jetpack Compose
-`LocalWindowInfo.isWindowFocused`, GTK4 `:backdrop`, Qt `QPalette::Inactive`,
-WPF `InactiveSelectionHighlightBrush`.
+Teksilo adjusts carets, selections, and themed colors when a window loses OS
+focus. Custom widgets can read the active-window state or opt into dimming.
 
 ## What "active" means
 
-A window is **active** when it is `focused AND not occluded` — it holds OS
+A window is **active** when it is `focused AND not occluded`, it holds OS
 keyboard focus and isn't fully hidden behind another window. This is computed
 per window by `teksilo-app` from winit's `Focused` / `Occluded` events and
 published as a reactive signal on each window's widget tree.
@@ -25,7 +17,7 @@ published as a reactive signal on each window's widget tree.
 focus *within* its window while that window is inactive. The vivid selection
 shows only when **both** are true (view focused *and* window active); otherwise
 the selection is muted. The same muted colour serves both "focus is elsewhere in
-this window" and "this window is inactive" — matching macOS's single
+this window" and "this window is inactive", matching macOS's single
 "unemphasized" selection colour and GTK's `:backdrop`.
 
 State is **per window**: deactivating one window never affects another (there is
@@ -41,7 +33,7 @@ no app-wide fan-out, unlike theme or text-scale).
 | In an event handler | `ctx.window_active() -> bool` (on `EventContext`) |
 | On the tree | `WidgetTree::window_active_signal()` / `is_window_active()` |
 
-It starts `true` — a window must not be born inactive before its first focus
+It starts `true`, a window must not be born inactive before its first focus
 event arrives. A flip triggers a **repaint only** (never a relayout): geometry is
 unchanged, so the caret keeps its space and nothing reflows.
 
@@ -52,21 +44,21 @@ These are correctness, not features, so they are **on by default**:
 - **Accent desaturation (theme-side, covers every control).** When the window is
   inactive, the paint walker swaps in a theme projection
   (`ColorTokens::for_inactive_window`) whose **accent family and focus indicators
-  are desaturated toward graphite** —
+  are desaturated toward graphite**,
   the macOS / Qt `QPalette::Inactive` model. Because every themed control
   resolves its accent from the live `ColorTokens` at paint time, this single
   swap greys out *all* of them with **no per-widget code**: the default
   (`Filled`) `Button`, `Toggle`'s on-track, checked `Checkbox` / `RadioButton`,
   the selected `TabBar` tab and `SegmentedControl` segment, `Slider` fills,
   `ProgressBar`, `Badge`, links-as-accent, and focus rings (`BorderRole::Focused`
-  / `focus_ring`). It applies to **any** preset that populates these tokens —
-  IntUI, Material 3 (where `accent` = M3 *primary*), and future presets — for
+  / `focus_ring`). It applies to **any** preset that populates these tokens,
+  IntUI, Material 3 (where `accent` = M3 *primary*), and future presets, for
   free. Deliberately untouched: selection, status, and text tokens (see below).
 - **Caret hiding.** The text caret hides in an inactive window for every caret
   policy, in both text stacks (`RichTextEditor` and every `TextInput` /
   `PasswordField` / `SpinBox` / `SearchField` built on `TextInputField`). It
   returns immediately when the window reactivates and the field still holds
-  focus. There is no opt-out — every native toolkit hides the caret here.
+  focus. There is no opt-out, every native toolkit hides the caret here.
 - **Selection desaturation.** A selected row/cell/run shows the vivid selection
   only while its view is focused **and** the window is active; otherwise it falls
   back to the muted inactive colour. This is handled **per widget** (not
@@ -81,15 +73,15 @@ These are correctness, not features, so they are **on by default**:
 | `TextInput` family | `selection_bg_active` | `selection_bg_inactive` |
 
 Keyboard focus rings grey out (not hide) in an inactive window, uniformly, via
-the theme-side accent projection above — no per-widget check. `MenuList` is
-excluded by design — an open menu is always active.
+the theme-side accent projection above, no per-widget check. `MenuList` is
+excluded by design, an open menu is always active.
 
 ### Single-line fields hide their selection when *they* lose focus
 
 The table above is the **window** axis. On the **view-focus** axis the
 `TextInput` family (`TextInput`, `PasswordField`, `SpinBox`, `SearchField`,
 `DateEdit` / `TimeEdit` / `DateTimeEdit`, `HexColorInput`, and anything else
-built on `TextInputField`) does not desaturate — it paints **no selection at
+built on `TextInputField`) does not desaturate, it paints **no selection at
 all** while the field itself is unfocused, even in an active window. So a form
 of fields tabbed through in turn shows exactly one selection: the one that the
 keystrokes reach.
@@ -104,7 +96,7 @@ there is no selection left to draw. Qt's carve-out is the same distinction made
 here: losing the *window* dims, losing the *caret* hides.
 
 Multi-line editors (`RichTextEditor`, `CodeEditor`, `LogView`) stay on the
-desaturating rule for both axes — `QTextEdit`, `NSTextView` and every code
+desaturating rule for both axes, `QTextEdit`, `NSTextView` and every code
 editor keep a blurred view's selection visible, because there it marks a region
 of a document being worked on rather than a transient edit state.
 
@@ -113,13 +105,13 @@ Copy path needs it, and native fields keep it too); only the painting changes.
 
 ### Custom selection colours stay fixed
 
-If an app sets an explicit selection colour — e.g.
-`RichTextEditor::editor(doc).selection_color(my_blue)` — that colour is used
+If an app sets an explicit selection colour, e.g.
+`RichTextEditor::editor(doc).selection_color(my_blue)`, that colour is used
 **as-is** and is *not* auto-desaturated when the window goes inactive. This
 matches macOS, where an app-set selection colour opts out of system management.
 Only theme-driven (default) selections desaturate.
 
-## `DimWhenInactive` — opt-in for custom content
+## `DimWhenInactive`: opt-in for custom content
 
 The automatic layers cover stock widgets. For *custom* content an app wants to
 fade back in a background window (a colourful side panel, a bespoke accent
@@ -140,7 +132,7 @@ its pending child, and `VStack::new().dim_when_inactive(0.7).child(a).child(b)`
 silently built `DimWhenInactive > b`. It was removed, and
 `teksilo_teksu_guard::foreign_wrapper_returns` now fails the build if a method
 of that shape comes back. It is layout- and a11y-transparent, and the opacity
-**snaps** (no tween) — correct under `prefers-reduced-motion`, since window
+**snaps** (no tween), correct under `prefers-reduced-motion`, since window
 activation is an OS state change, not a user-initiated motion.
 
 ## Keeping a widget vivid when inactive
@@ -148,13 +140,13 @@ activation is an OS state change, not a user-initiated motion.
 There is no need to opt out of the automatic behaviour for normal apps. If a
 widget genuinely must stay vivid regardless of window focus (a live status
 indicator, a kiosk display), paint it directly from theme tokens and simply
-don't consult `ctx.window_active` — or, app-wide, never call
+don't consult `ctx.window_active`, or, app-wide, never call
 `set_window_active(false)`.
 
 ## Accessibility
 
 Caret hiding and selection desaturation are **paint-only**. They do not change
-the AccessKit tree, the announced selection state, or any node value — a screen
+the AccessKit tree, the announced selection state, or any node value, a screen
 reader still reports the selection and caret position normally. The visual
 change is purely cosmetic.
 
@@ -179,7 +171,7 @@ A fresh tree starts active (`is_window_active() == true`). See the tests in
 
 ## Demo
 
-`cargo run -p multi_window` — two windows, each with a status label, a
+`cargo run -p multi-window`, two windows, each with a status label, a
 `TextInput`, and a `DimWhenInactive` panel. Click between them to watch the
 inactive window hide its caret, mute its selection, dim its panel, and flip its
 status label.
@@ -189,7 +181,7 @@ status label.
 - The reactive primitive lives on `WidgetTree` (`window_active_signal`), written
   by `set_window_active` and threaded onto `PaintContext` / `BuildContext` /
   `EventContext` exactly like the global text-scale value.
-- A focus flip calls `WidgetArena::mark_all_needs_paint_only()` — a repaint of
+- A focus flip calls `WidgetArena::mark_all_needs_paint_only()`, a repaint of
   every active node, with no relayout and no cache clearing. Window-focus changes
   are rare (user-driven), so this is cheaper than `set_theme`'s `mark_all_dirty`
   (which also relayouts) and means any paint-time `ctx.window_active` reader is

@@ -3,7 +3,7 @@
 
 //! WCAG 2.2 SC 2.5.7: every dragging operation has a single-pointer route.
 //!
-//! One module per operation in [the drag census](../../../docs/drag-operation-census.md),
+//! One module per operation in [the drag census](../../../engineering/docs/drag-operation-census.md),
 //! and five assertions per operation, because the obligations are not
 //! interchangeable: the command **exists** as a menu row, it is **reachable by
 //! keyboard**, it is **exposed as an AccessKit custom action**, it makes **the

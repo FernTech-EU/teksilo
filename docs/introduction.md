@@ -23,13 +23,15 @@ Read [status and limitations](status-and-limitations.md) before adopting it.
 <!-- BEGIN README: Who is this for -->
 ## Who is this for
 
-Built primarily for professional desktop applications (writing tools, IDEs, dispatcher consoles, admin panels) where users spend hours and expect full keyboard navigation, screen-reader support, and locale-aware formatting. Small tools and one-off utilities are equally well served: the batteries-included surface means a "window with a list and a few buttons" needs little more than the [first application example](first-application.md).
+Teksilo targets desktop applications with sustained keyboard use, rich text,
+localization, and assistive-technology support: editors, writing tools, consoles,
+and administration interfaces. It also provides individual controls for smaller
+applications.
 
-Default styles are inspired by JetBrains' Int UI, with a light and dark theme that meet WCAG 2.1 AA contrast out of the box. No Win95-style "classic" theme is provided; the framework is intended for modern desktop applications.
-
-Particularly relevant to projects with regulatory accessibility or internationalization requirements (EU Accessibility Act, US Section 508, France RGAA, government procurement, regulated industries such as healthcare and finance). Accessibility and localization are architectural, not retrofitted: a real AccessKit bridge binds on every window on Linux, Windows, and macOS; every widget declares its role, name, and value at the trait level, with a per-widget override surface for labels, descriptions, and relationships; and Fluent-backed translations are checked at compile time. The default light and dark themes meet WCAG 2.1 AA contrast out of the box, enforced by a CI gate; an opt-in high-contrast variant follows the OS "increase contrast" setting, re-queried on window focus; and keyboard alternatives cover the primary drag interactions. Conformance obligations attach to your application, not the toolkit: Teksilo's role is to supply correct primitives and stay out of the way.
-
-Also useful as a shelf of ready-to-use widgets if you're shopping the Rust GUI ecosystem for a specific component (rich text editor, table view, tree view, scene canvas, calendar, color picker) to drop into your app.
+The default light and dark themes follow JetBrains' Int UI. Accessibility and
+translation support are built into the widget APIs. Test the completed
+application against its users' needs and applicable requirements; toolkit
+features alone do not establish application conformance.
 <!-- END README: Who is this for -->
 
 <!-- BEGIN README: Design priorities -->

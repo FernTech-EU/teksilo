@@ -23,7 +23,7 @@ A narrower fix was proposed (keep the existing vertical rail alive at zero band
 depth), accepted, and then found unsound on a closer reading of the geometry.
 **The argument for why lives at its site**, in the `band_depth` / `split_side`
 reasoning in
-[`docking/geometry.rs`](../crates/teksilo-widgets/src/docking/geometry.rs) —
+[`docking/geometry.rs`](../../crates/teksilo-widgets/src/docking/geometry.rs) —
 read it before re-proposing one. The conclusion it reaches is the reason this
 page exists: the reopen affordance for top/bottom requires a *horizontal* rail,
 and there is no cheap version.
@@ -73,9 +73,9 @@ behaviour-change sign-off.
 
 ## Reference
 
-- [Docking](docking.md) — the consumer guide; §4 covers side visibility and the
+- [Docking](../../docs/docking.md) — the consumer guide; §4 covers side visibility and the
   external-button workaround this would replace.
-- [`docking/geometry.rs`](../crates/teksilo-widgets/src/docking/geometry.rs) —
+- [`docking/geometry.rs`](../../crates/teksilo-widgets/src/docking/geometry.rs) —
   the region engine, and the geometry argument against the cheap fix.
-- [`docking/activity_bar.rs`](../crates/teksilo-widgets/src/docking/activity_bar.rs)
+- [`docking/activity_bar.rs`](../../crates/teksilo-widgets/src/docking/activity_bar.rs)
   — the rail widget that would gain an axis.

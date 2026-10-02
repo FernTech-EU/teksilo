@@ -27,7 +27,9 @@ REGION = re.compile(
 
 def normalize(text):
     text = re.sub(r'^(#{1,6} .+?) \u2014 ', r'\1: ', text, flags=re.MULTILINE)
-    return text.replace(' \u2014 ', ', ').replace('\u2014', ', ')
+    text = text.replace(' \u2014 ', ', ').replace('\u2014', ', ')
+    text = re.sub(r'[ \t]+,', ',', text)
+    return '\n'.join(line.rstrip() for line in text.splitlines())
 
 
 def sections(source):

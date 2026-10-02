@@ -32,7 +32,7 @@
 //! A21 touch/pen helpers, `sequence_winner`/`sequence_members`, `MemberRole`,
 //! `MemberState`, `CancelReason`, `PanClaim`, `TouchAction`. The two widget
 //! shapes come from `tests/common/mod.rs` for the reason its module doc gives.
-//! See `docs/property-testing.md` for the decision procedure.
+//! See `engineering/docs/property-testing.md` for the decision procedure.
 //!
 //! # Not re-litigated here
 //!

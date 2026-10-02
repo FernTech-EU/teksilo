@@ -140,7 +140,7 @@ impl ResizeStrip {
 ///
 /// Only a hit dimension is routed through [`dp`] here: the strip's painted
 /// thickness is the same at every density, which is what keeps the frame from
-/// eating into content — see `docs/density-inventory.md`.
+/// eating into content — see `engineering/docs/density-inventory.md`.
 fn grab_outset(visual: f32, kind: PointerKind, tokens: &InputTokens) -> f32 {
     if !kind.is_direct() || !visual.is_finite() || visual <= 0.0 {
         return 0.0;

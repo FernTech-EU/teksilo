@@ -54,9 +54,9 @@ fn main() {
 Notes:
 
 - `TeksiloAppBuilder` has no `.window_title`, `.window_size`, `.root`, or
-  `.custom_chrome` — every window is described by `WindowConfig`.
+  `.custom_chrome`, every window is described by `WindowConfig`.
   One conceptual surface, no special-casing for the initial window.
-- `root_builder` receives `(tree, WindowState)` — the state clone is
+- `root_builder` receives `(tree, WindowState)`, the state clone is
   how a widget can bind against its own window's signals at
   construction time, without going through a `BuildContext`.
 
@@ -81,7 +81,7 @@ pub struct WindowConfig {
     pub initial_placement: WindowPlacement,
     pub decorations: DecorationsMode,
     pub resizable: bool,
-    pub size_to_content: SizeToContent,  // Off (default) | Height — dialogs that grow with content
+    pub size_to_content: SizeToContent,  // Off (default) | Height, dialogs that grow with content
     pub always_on_top: bool,
     pub skip_taskbar: bool,
     pub activate_from_env: bool,         // consume an xdg_activation startup token (Wayland)
@@ -102,13 +102,13 @@ pub struct WindowConfig {
 with an id has its geometry **saved** on every move/resize, and **restored** at
 creation. `restore_geometry` splits them.
 
-They need splitting whenever **several windows share one geometry slot** — a
+They need splitting whenever **several windows share one geometry slot**, a
 multi-window (or, like Skribisto, multi-*process*) app that remembers "where the
 window was" rather than "where *this document's* window was". Restore the saved
 geometry into every window and they all land on the same pixel, stacked. What you
 want is:
 
-- the **first** window: restore it — reopen where the user left off;
+- the **first** window: restore it, reopen where the user left off;
 - any window opened **alongside** it: let the window manager place it (it
   cascades), but **still save** its geometry, so whichever window the user moved
   or closed last is the one that reopens.
@@ -127,7 +127,7 @@ Word, Firefox and most document apps.
 Per-*document* geometry (Scrivener, Sublime, the JetBrains IDEs) is a different
 design: it keys the slot on the document, so windows never collide and every one
 restores. It only works if the document is known **before** the window is created
-— i.e. a launcher/welcome window that opens a *separate* document window, rather
+,  i.e. a launcher/welcome window that opens a *separate* document window, rather
 than a blank window that later loads a document into itself.
 
 Builder form for the common cases:
@@ -155,14 +155,14 @@ supports:
 
 | Variant | Meaning |
 |---|---|
-| `Floating` | Regular overlapping window — uses `WindowState::size` / `position` as current geometry |
+| `Floating` | Regular overlapping window, uses `WindowState::size` / `position` as current geometry |
 | `Maximized` | Fills the current monitor's work area |
 | `Fullscreen` | Exclusive fullscreen (Space-based on macOS) |
 | `Minimized` | Hidden to the taskbar / dock |
 
 Size and position are **not** inside `Floating`. They live on
 `WindowState` as their own signals and always hold the last-known
-*restored* values — matching macOS `frameAutosaveName` and Windows
+*restored* values, matching macOS `frameAutosaveName` and Windows
 `WINDOWPLACEMENT` behavior, so "un-maximize" and "un-fullscreen"
 restore the window to the right rect without ambiguity.
 
@@ -176,7 +176,7 @@ preserves the restored rect as you cross through `Maximized` /
 |---|---|
 | `Native` | OS-provided title bar, borders, resize handles. Default |
 | `CustomChrome` | No native title bar; a `PlatformTitleBarHost` is attached so the app can paint its own. On X11, falls back to `Native` when the window manager lacks `_NET_WM_MOVERESIZE` (see [title-bar.md](title-bar.md)) |
-| `None` | Borderless, no host — splash screens, popups, fully chrome-less embeds |
+| `None` | Borderless, no host, splash screens, popups, fully chrome-less embeds |
 
 ### `ModalConfig`
 
@@ -286,18 +286,18 @@ impl Widget for AppRoot {
 }
 ```
 
-The button label re-renders automatically when fullscreen is toggled —
+The button label re-renders automatically when fullscreen is toggled,
 whether the toggle came from the button itself, the F11 shortcut, or
 the user pressing the green traffic light on macOS. All three paths
 write into the same `placement()` signal.
 
-### Two-way OS sync — how it works
+### Two-way OS sync: how it works
 
 `WindowState::new` wires an observer to every writable signal
-(`focused` has none — it is purely OS-driven). The observer:
+(`focused` has none, it is purely OS-driven). The observer:
 
 1. Checks the `applying_from_os` flag on `WindowStateInner`.
-2. If set (OS-initiated write): does nothing — the OS already knows.
+2. If set (OS-initiated write): does nothing, the OS already knows.
 3. If unset (app-initiated write): pushes a `WindowCommand` onto the
    shared `pending_os_commands` queue.
 
@@ -358,7 +358,7 @@ callback receives `None` wherever the platform cannot provide one.
 
 When you call `ctx.open_window(config)`, the winit-level window is
 created **before the call returns**. The returned `TeksiloWindowId` is
-immediately usable — you can pass it to `focus_window`, read its
+immediately usable, you can pass it to `focus_window`, read its
 `window_state(id)`, or reference it as a modal parent in a subsequent
 `open_window` call in the same handler.
 
@@ -383,7 +383,7 @@ ctx.register_action(Action::new("app.help").on_invoke(|_i, ctx| {
 ```
 
 Under the hood: `WindowOpsImpl::open_window` calls
-`WindowManager::create_window(config, event_loop)` — which builds the
+`WindowManager::create_window(config, event_loop)`, which builds the
 winit window, wires `WindowState` observers, runs the root builder,
 registers `ManagedWindow` in the windows map, and returns the id.
 Nothing is deferred.
@@ -414,7 +414,7 @@ Nothing is deferred.
     let path = path.clone();
     ctx.open_window(
         WindowConfig::new()
-            .title(format!("{} — My App", path.file_name().unwrap().to_string_lossy()))
+            .title(format!("{}, My App", path.file_name().unwrap().to_string_lossy()))
             .id(wid)
             .size(1200, 800)
             .root(move |tree, _state| tree.add(DocumentRoot::open(path))),
@@ -425,7 +425,7 @@ Nothing is deferred.
 **Opening a window from a background thread** (`on_external_with_ctx`):
 
 Both recipes above run inside a handler, where an `EventContext` already
-exists. A background thread has none — and neither does
+exists. A background thread has none, and neither does
 `TeksiloAppBuilder::on_app_event`, which receives `&AppEvent` and nothing
 else, so `ctx.open_window` is simply not reachable from there (calling it on
 a standalone context panics: "open_window called outside of a dispatch").
@@ -444,7 +444,7 @@ TeksiloAppBuilder::new()
     .on_ready(spawn_ipc_listener)          // background thread → send_external
     .on_external_with_ctx(move |payload, ctx| {
         let Some(req) = payload.downcast_ref::<OpenDocument>() else {
-            return false;                  // not ours — leave it unclaimed
+            return false;                  // not ours, leave it unclaimed
         };
         let wid = format!("doc:{}", req.path.display());
         match ctx.find_window(&wid) {
@@ -462,7 +462,7 @@ Notes:
   payloads, `CloseWindowRequest`, title-bar synthetics, `RepaintWindowRequest`)
   are handled *before* this hook and never reach it, so it never has to
   defend against them.
-- It is a **single slot**, like `on_app_event` — a second call replaces the
+- It is a **single slot**, like `on_app_event`, a second call replaces the
   first. For fan-out use `register_app_event_observer`, which composes (but
   gets no context).
 - With no window open there is nowhere to mint a context from, and the call
@@ -513,11 +513,11 @@ based on `ModalPresentation::Auto` and platform capability.
 
 ---
 
-## Intercepting close / quit — confirmation guards
+## Intercepting close / quit: confirmation guards
 
 A window can refuse to close. Each `WindowConfig` carries an optional
-**close guard** that the framework runs — with a real `EventContext`
-for that window's own tree — *before* any **interactive** close gesture
+**close guard** that the framework runs, with a real `EventContext`
+for that window's own tree, *before* any **interactive** close gesture
 tears the window down:
 
 - the OS close button, `Alt+F4`, `Cmd+W` (winit `CloseRequested`);
@@ -529,14 +529,14 @@ The guard returns `CloseResponse::Close` to let the close proceed, or
 window closing, so a guard that vetoes the final window's close also
 keeps the app alive.
 
-Guards are **strictly per-window** — closing one window never consults
-another's guard — so this is correct for multi-window apps: an editor
+Guards are **strictly per-window**, closing one window never consults
+another's guard, so this is correct for multi-window apps: an editor
 window with unsaved changes can veto its own close while a tool palette
 beside it closes freely.
 
 ### Veto-then-reissue (the async-confirmation pattern)
 
-A confirmation dialog is asynchronous — it waits for a click — so the
+A confirmation dialog is asynchronous, it waits for a click, so the
 guard cannot answer "close?" synchronously. The idiomatic shape is to
 **veto now, confirm, then re-issue a forced close**:
 
@@ -591,15 +591,15 @@ short-circuits to a veto and fires `on_close_blocked`; a `true` signal
 
 | Close origin | Guarded? |
 | --- | --- |
-| OS close button / `Alt+F4` / `Cmd+W` | ✅ yes |
-| Custom-chrome title-bar close button | ✅ yes |
-| `ctx.close_window()` | ✅ yes |
-| `ctx.close_window_forced()` | ❌ bypasses |
-| `ctx.close_window_by_id(id)` | ❌ bypasses (explicit programmatic close) |
-| `WindowState::close()` | ❌ bypasses |
-| Modal-dismissal / framework teardown | ❌ bypasses |
+| OS close button / `Alt+F4` / `Cmd+W` | Yes yes |
+| Custom-chrome title-bar close button | Yes yes |
+| `ctx.close_window()` | Yes yes |
+| `ctx.close_window_forced()` | No bypasses |
+| `ctx.close_window_by_id(id)` | No bypasses (explicit programmatic close) |
+| `WindowState::close()` | No bypasses |
+| Modal-dismissal / framework teardown | No bypasses |
 
-A window with no guard configured always closes immediately — the guard
+A window with no guard configured always closes immediately, the guard
 machinery only runs when `on_close_requested` or `can_close` is set.
 
 Working demo: `cargo run -p close-confirmation` (main window: full
@@ -612,28 +612,28 @@ Working demo: `cargo run -p close-confirmation` (main window: full
 
 1. `run()` builds a `TeksiloAppHandler` and spins up the winit event loop.
 2. On `resumed()`, the handler calls
-   `WindowManager::create_window(initial_window_config, event_loop)` —
+   `WindowManager::create_window(initial_window_config, event_loop)`,
    synchronous winit creation, widget tree built, first paint requested.
 3. On every `winit::WindowEvent`:
    - Event translation → `WidgetEvent`.
-   - `dispatch_in_window(winit_id, evt, event_loop)` — temporarily
+   - `dispatch_in_window(winit_id, evt, event_loop)`, temporarily
      removes the window from the map, constructs `WindowOpsImpl` with
      `&mut WindowManager` + `&ActiveEventLoop`, calls
      `tree.dispatch_event_with_ops(evt, ops)`, reinserts the window.
    - Handlers can call `ctx.open_window(...)` which synchronously
-     reaches `wm.create_window(...)` — modal parents attach to either
+     reaches `wm.create_window(...)`, modal parents attach to either
      the dispatching window (via the stashed raw handle on the ops
      object) or to another window that's still in the map.
 4. After dispatch, `post_event`:
    - Drains tree-level pending operations (locale, theme, follow-system
      theme, text scale, close-window).
    - Processes modal requests and dismissals.
-   - Drains `pending_closes` (`WindowManager::process_pending` — from
+   - Drains `pending_closes` (`WindowManager::process_pending`, from
      any source: `ctx.close_window()`, `ctx.close_window_by_id(id)`,
      close requests via `TitleBarHostCallbacks::request_close`). Each
-     entry is either *guarded* (interactive gestures — runs the window's
+     entry is either *guarded* (interactive gestures, runs the window's
      close guard, may be vetoed) or *forced* (explicit programmatic
-     closes + framework teardown — unconditional). See **Intercepting
+     closes + framework teardown, unconditional). See **Intercepting
      close / quit** above.
    - Runs queued post-mount actions.
    - Drains every window's `pending_os_commands`
@@ -642,7 +642,7 @@ Working demo: `cargo run -p close-confirmation` (main window: full
      there as a forced close, torn down on the next tick's
      `process_pending`.
 5. `handle_redraw_requested` runs `layout_with_ops` + `render_with_ops`
-   — both thread ops through, so state-change-triggered handlers
+, both thread ops through, so state-change-triggered handlers
    (data-driven rebuilds, delayed overlays, drag-tick) can open
    windows too.
 
@@ -697,7 +697,7 @@ duration of the handler run. That releases the mutable borrow on
 raw window handle lets modal-parent lookups reach back to the
 dispatching window.
 
-If you're a handler, none of this is visible — you just call
+If you're a handler, none of this is visible, you just call
 `ctx.open_window(...)` and it returns an id.
 
 ---
@@ -720,28 +720,28 @@ let show_restore = ctx
 (A fullscreen window is restorable too, so it shows "restore", never
 "maximize".)
 
-The `PlatformTitleBarHost` trait shrank — it no longer owns `minimize`,
+The `PlatformTitleBarHost` trait shrank, it no longer owns `minimize`,
 `toggle_maximize`, `close`, `is_maximized`, `is_maximized_signal`, or
 `notify_window_resized`. It keeps only what's genuinely chrome-specific
 (insets, whether it renders its own controls or needs custom resize
 handles, drag/resize interaction, hit regions, `show_window_menu` /
 `has_window_menu`).
-Custom chrome now works with `DecorationsMode::Native` windows too —
+Custom chrome now works with `DecorationsMode::Native` windows too,
 the TitleBar widget binds to `WindowState::placement` either way.
 
 ### Tests / headless
 
 Standalone `WidgetTree`s without an attached app use `NoopWindowOps`:
 
-- `tree.dispatch_event(evt)` — wraps with `NoopWindowOps`
-- `tree.layout(proposal)` — wraps with `NoopWindowOps`
-- `tree.render()` — wraps with `NoopWindowOps`
-- `tree.tick_gestures(now)` — wraps with `NoopWindowOps`
-- `tree.focus(id)` / `tree.focus_with_origin(id, origin)` — wraps
-- `tree.dismiss_overlay(id)` — wraps
+- `tree.dispatch_event(evt)`, wraps with `NoopWindowOps`
+- `tree.layout(proposal)`, wraps with `NoopWindowOps`
+- `tree.render()`, wraps with `NoopWindowOps`
+- `tree.tick_gestures(now)`, wraps with `NoopWindowOps`
+- `tree.focus(id)` / `tree.focus_with_origin(id, origin)`, wraps
+- `tree.dismiss_overlay(id)`, wraps
 
 A handler that calls `ctx.open_window(...)` from any of these paths
-panics (by design — the test has no event loop to create a window in).
+panics (by design, the test has no event loop to create a window in).
 `ctx.find_window`, `ctx.window_state`, `ctx.windows` return `None` /
 empty.
 
@@ -823,13 +823,13 @@ installing an observer through the current window's build context.
 - End-to-end demo:
   [`examples/multi_window`](../examples/multi_window/src/main.rs).
 - Implementation:
-  - Types — [`crates/teksilo-core/src/window/`](../crates/teksilo-core/src/window/)
-  - Dispatch — [`crates/teksilo-core/src/widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs)
-  - Window manager — [`crates/teksilo-app/src/window_manager.rs`](../crates/teksilo-app/src/window_manager.rs)
-  - `EventContext` methods — [`crates/teksilo-core/src/widget/event_context.rs`](../crates/teksilo-core/src/widget/event_context.rs)
+  - Types, [`crates/teksilo-core/src/window/`](../crates/teksilo-core/src/window/)
+  - Dispatch, [`crates/teksilo-core/src/widget_tree/pointer_router.rs`](../crates/teksilo-core/src/widget_tree/pointer_router.rs)
+  - Window manager, [`crates/teksilo-app/src/window_manager.rs`](../crates/teksilo-app/src/window_manager.rs)
+  - `EventContext` methods, [`crates/teksilo-core/src/widget/event_context.rs`](../crates/teksilo-core/src/widget/event_context.rs)
 - Related docs:
-  - [`title-bar.md`](title-bar.md) — custom chrome integration
-  - [`shortcut-intent-action.md`](shortcut-intent-action.md) — the
+  - [`title-bar.md`](title-bar.md), custom chrome integration
+  - [`shortcut-intent-action.md`](shortcut-intent-action.md), the
     input pipeline that typically drives `open_window` calls
-  - [`reactive-theme.md`](reactive-theme.md) — the signal system
+  - [`reactive-theme.md`](reactive-theme.md), the signal system
     `WindowState` is built on

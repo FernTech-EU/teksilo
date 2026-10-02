@@ -6,14 +6,14 @@
 A block-structured DSL for Teksilo widget trees. `teksu!` is a thin syntactic
 transform: every invocation desugars one-to-one to Teksilo V2 builder calls
 at macro-expansion time. No hidden allocation, no runtime parsing, no
-virtual tree — the output is exactly the code you could have written by
+virtual tree, the output is exactly the code you could have written by
 hand.
 
 This document is the user-facing reference, and it is **normative for
 behaviour**: where it and the design spec disagree, this document is right.
 For the design rationale (why the grammar has this shape, what was left out,
 and what shipped differently from what was designed), see
-[teksu-language-spec-v3.md](teksu-language-spec-v3.md).
+[teksu-language-spec-v3.md](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/teksu-language-spec-v3.md).
 
 > **Labels in these examples.** For brevity the examples below pass bare string literals
 > (`Button("Save")`). With the default `i18n` feature a widget label is a `LocalizedString`
@@ -43,13 +43,13 @@ teksu!(ctx => <root-element>)    // inserts the root via ctx.add, returns Widget
 teksu!(<root-element>)           // returns a widget value (for .child(...), etc.)
 ```
 
-`ctx` in the preamble is an identifier — name it whatever your local
+`ctx` in the preamble is an identifier, name it whatever your local
 is called (`tree`, `build_ctx`, `ctx`, …). The `=>` is literal syntax.
 Expansion routes every internal `add` call through that ident, so
 `teksu!(tree => ...)` emits `tree.add(...)`.
 
 Without the preamble, expansion falls back to an unqualified `ctx`
-when bindings are present — that local must be in scope at the call
+when bindings are present, that local must be in scope at the call
 site. A block with no bindings (escapes included: `#{ expr }` lowers to
 a plain `.child(expr)`) doesn't need `ctx` available.
 
@@ -58,7 +58,7 @@ a plain `.child(expr)`) doesn't need `ctx` available.
 ## Elements
 
 An element is `TypePath [::ctor] [(args)] [{ body }]`. The constructor
-part is optional — the macro emits `::new(args)` when you omit it:
+part is optional, the macro emits `::new(args)` when you omit it:
 
 ```rust
 Button("Click")                 // → Button::new("Click")
@@ -69,8 +69,8 @@ Padding::uniform(24.0)          // → Padding::uniform(24.0)
 
 Dispatch rule: the last path segment's first character decides. A
 lowercase first letter (or a leading underscore) marks an explicit
-constructor — emitted as-is. An UpperCamel first letter marks a type
-name — the macro appends `::new` automatically.
+constructor, emitted as-is. An UpperCamel first letter marks a type
+name, the macro appends `::new` automatically.
 
 ### Positional args
 
@@ -119,7 +119,7 @@ TitleBar(host) {
 
 A comma followed by a `name:` property, a structural keyword (`if`,
 `for`, `match`, `let`), a spread `..`, an escape `#{`, or a binding
-`name =` terminates the arg list — those tokens start a new body item.
+`name =` terminates the arg list, those tokens start a new body item.
 An UpperCamel element after a comma stays as a continuation argument (so
 `tab: "Overview", Card { ... }` works).
 
@@ -648,8 +648,8 @@ Card {
 A binding or `#{ }` escape is only needed when the same widget ID is
 referenced from multiple places (e.g. a handler closure captures it).
 If you just want to attach a pre-existing ID once, the equivalent
-property form — `child: id` for a body child, `slot_name: id` for a
-Category B slot — is shorter and is plain Rust inside the argument
+property form, `child: id` for a body child, `slot_name: id` for a
+Category B slot, is shorter and is plain Rust inside the argument
 position. There is no `_id` variant to remember: one name per slot,
 and it takes either.
 
@@ -769,7 +769,7 @@ Imperative escape for code that isn't a single element. Two shapes,
 determined by whether the block's last statement has a trailing `;`:
 
 ```rust
-// Expression form — block value becomes a child.
+// Expression form, block value becomes a child.
 VStack {
     TextWidget("Header")
     rust {
@@ -779,7 +779,7 @@ VStack {
     TextWidget("Footer")
 }
 
-// Side-effect form — runs for effect, produces no child.
+// Side-effect form, runs for effect, produces no child.
 VStack {
     rust {
         ctx.subscribe_event(origin, move |e| { /* ... */ });
@@ -800,7 +800,7 @@ no-preamble form and `ctx.add` the result yourself.
 ## Handlers
 
 Handlers are properties whose value is a closure. The macro preserves
-closure syntax verbatim — `move`, capture, and arity stay as you wrote
+closure syntax verbatim, `move`, capture, and arity stay as you wrote
 them.
 
 ```rust
@@ -833,8 +833,8 @@ position, and relative order within each of the two groups is preserved.
 
 The return type is the criterion, not the `on_` prefix: a wrapping method
 replaces the widget with `WidgetWithHandlers<T>`, which exposes none of
-the widget's own setters, so anything written after it — a child, a
-`spacing`, a named slot — would resolve against the wrapper and fail. The
+the widget's own setters, so anything written after it, a child, a
+`spacing`, a named slot, would resolve against the wrapper and fail. The
 reorder is what lets you write handlers and children in any order.
 
 Every family of `WidgetBuilder` method is covered: gestures, focus and
@@ -894,8 +894,8 @@ Panel {
 
 The macro emits one targeted error for the common mistake:
 
-- **Bare child inside a Category B widget** — "`Card` is a Category B
-  widget with named slots — use `content: <widget>` instead of a bare
+- **Bare child inside a Category B widget**, "`Card` is a Category B
+  widget with named slots, use `content: <widget>` instead of a bare
   child element". Points at the misplaced child.
 
 Its other errors are structural and self-explanatory: a multi-arm `if`
@@ -960,20 +960,20 @@ diagnostic under the user's token, thanks to span-preserving emission.
   proc-macro server; IDE features work on the expanded code. If you see
   "expected an expression" errors on non-Rust-shaped tokens (`#{ }`,
   bare-lowercase properties, `Widget { body }` at body position), the
-  proc-macro server has stopped expanding — reload it from the command
+  proc-macro server has stopped expanding, reload it from the command
   palette (`rust-analyzer: Restart server`) or rebuild the workspace.
 
 ---
 
 ## Further reading
 
-- [teksu-language-spec-v3.md](teksu-language-spec-v3.md): the design
+- [teksu-language-spec-v3.md](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/teksu-language-spec-v3.md): the design
   rationale, its worked translations, a changelog of where the shipped
   macro diverged from the design, and **Why there is no v4**, which
   carries the September 2026 measurements and the two exits that stay
   available if the question reopens.
 - [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
-  — trybuild fixtures exercising every supported form.
-- [crates/teksilo-parse/src/](../crates/teksilo-parse/src/) — the parser
-  and IR; [crates/teksilo-macros/src/](../crates/teksilo-macros/src/) — the
+, trybuild fixtures exercising every supported form.
+- [crates/teksilo-parse/src/](../crates/teksilo-parse/src/), the parser
+  and IR; [crates/teksilo-macros/src/](../crates/teksilo-macros/src/), the
   lowering (parse → IR → lower).

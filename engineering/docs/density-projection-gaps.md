@@ -294,7 +294,7 @@ finding anything fails instead of passing mute.
 * [density-inventory.md](density-inventory.md) — the constant-by-constant audit
   the density sweep produced, and the rules
   `crates/teksilo-widgets/tests/density_projection.rs` holds it to.
-* [density-and-targets.md](density-and-targets.md) — what `dp`, `spacing` and
+* [density-and-targets.md](../../docs/density-and-targets.md) — what `dp`, `spacing` and
   `density_min_size` mean, and the ladder they walk.
-* [touch-and-pen.md](touch-and-pen.md) §10.1 — the dead-API ledger this page was
+* [touch-and-pen.md](../../docs/touch-and-pen.md) §10.1 — the dead-API ledger this page was
   split out of.

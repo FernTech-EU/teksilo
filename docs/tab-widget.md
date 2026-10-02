@@ -8,7 +8,7 @@ Two cooperating widgets for tabbed content in Teksilo: a header-only
 [`ListDataSource<Item = T>`](../crates/teksilo-data/src/list_data_source.rs)
 and a [`TabDelegate<T>`](../crates/teksilo-widgets/src/tab_widget/delegate.rs),
 and an all-in-one [`TabWidget`](../crates/teksilo-widgets/src/tab_widget.rs)
-that pairs a `TabBar` with a `Switcher` of content panes — sharing one
+that pairs a `TabBar` with a `Switcher` of content panes, sharing one
 `Signal<Option<TabId>>` selection.
 
 `TabBar<T>` is the primitive: use it on its own when the header strip
@@ -96,22 +96,22 @@ let bar = TabBar::horizontal(
 
 A tab's runtime identity is split across three types, each with one job:
 
-- [`TabId`](../crates/teksilo-widgets/src/tab_widget/id.rs) — stable identity.
+- [`TabId`](../crates/teksilo-widgets/src/tab_widget/id.rs), stable identity.
   A `NonZeroU64` wrapper. Allocate fresh ids with `TabId::fresh()` (a
   monotonic counter), or wrap an external key with
   `TabId::from_raw(NonZeroU64)` when the identity comes from app-side
-  storage (document UUID, file-path hash, …) — fresh ids would re-allocate
+  storage (document UUID, file-path hash, …), fresh ids would re-allocate
   every restart and break session-restore round-trips.
-- [`TabInfo`](../crates/teksilo-widgets/src/tab_widget/info.rs) — presentation
+- [`TabInfo`](../crates/teksilo-widgets/src/tab_widget/info.rs), presentation
   metadata: `title`, `icon`, `tooltip`, `closable`, `pinned`, `enabled`
   (plus `context_menu`, rich / composite tooltips and `focusable_panel`).
   Title and tooltip are `LocalizedString` (accept `tr!(...)`); the icon is
   a factory closure (no `IconWidget: Clone` requirement) called each
   build, so it picks up theme/state changes naturally.
-- [`TabHandle`](../crates/teksilo-widgets/src/tab_widget/handle.rs) — the
+- [`TabHandle`](../crates/teksilo-widgets/src/tab_widget/handle.rs), the
   thing that lives in the data source. Carries `id`, `info`, a `kind`
   discriminator, and an `Rc<dyn Any>` payload. Heavy state (the document,
-  the image, the page) lives on `payload` — **not** on the content
+  the image, the page) lives on `payload`, **not** on the content
   widget. Reorders, sort/filter rebuilds, and pin-toggle rebuilds destroy
   and recreate widgets freely; the handle's payload is stable and the
   registered factory produces a fresh view over it whenever the framework
@@ -128,7 +128,7 @@ A tab's runtime identity is split across three types, each with one job:
 first, in declaration order; dynamic tabs follow.
 
 **Static tabs** are fixed for the widget's lifetime. The content is built
-once and **memoized** — subsequent rebuilds (caused by adjacent
+once and **memoized**, subsequent rebuilds (caused by adjacent
 dynamic-model mutations, locale changes, theme flips) reuse the same pane
 `WidgetId`, so per-pane state (focus, scroll, animation progress) is
 preserved.
@@ -156,7 +156,7 @@ preserved.
 The `<S>` type parameter pins the payload type. The framework downcasts
 `handle.payload` to `S` before calling the factory and panics with a
 clear "tab kind X was registered for Y but payload has different type"
-message on mismatch — `Any` never leaks into app code. The `kind`
+message on mismatch, `Any` never leaks into app code. The `kind`
 `"__static__"` is reserved for static tabs and panics at registration.
 
 Dynamic panes are **also memoized**, keyed by `TabId`. The memo map is
@@ -174,12 +174,12 @@ their widgets become unreachable and the arena reaps them.
 
 Cross-boundary reorders (drag a dynamic tab past a static tab in the
 unified ordering) are silently rejected by the **default** reorder
-handler — the framework warns once per process and keeps the move from
+handler, the framework warns once per process and keeps the move from
 happening. Install an explicit `on_reorder(...)` to interleave them.
 
 ---
 
-## TabDelegate&lt;T&gt; — the per-item resolver
+## TabDelegate&lt;T&gt;: the per-item resolver
 
 `TabBar<T>` is generic over the data source's item type, so the bar
 needs a closure-of-closures to extract per-tab presentation. That's
@@ -201,7 +201,7 @@ TabDelegate::new(|i, item: &T| label_for(i, item))   // required
 
 Closures run **at build time**, every build. Mutating an item through
 `ListModel::set(i, …)` fires `DataChange::ItemUpdated` which rebuilds
-the bar — closures re-run, labels and icons re-resolve. Locale changes
+the bar, closures re-run, labels and icons re-resolve. Locale changes
 propagate the same way because `LocalizedString` already carries
 reactive resolution semantics. There is no eager `resolve_now()`.
 
@@ -242,7 +242,7 @@ through `Signal<Option<TabId>>`.
 
 ---
 
-## Selection — `Signal<Option<TabId>>`
+## Selection: `Signal<Option<TabId>>`
 
 Selection is **id-based**. The bar holds a stable `TabId` per item
 (extracted by the `id_of` closure passed to the constructor) and the
@@ -265,13 +265,13 @@ What this guarantees:
   the rest.
 
 The framework's stale-id fallback: when the active tab is closed, the
-bar selects the **next neighbour** (browser convention) — the index of
+bar selects the **next neighbour** (browser convention), the index of
 the tab that took the closed tab's slot, or the new last tab if the
 closed tab was at the end.
 
 ---
 
-## Orientation — reactive
+## Orientation: reactive
 
 [`TabBarOrientation`](../crates/teksilo-widgets/src/tab_widget/delegate.rs)
 is `Horizontal` (default) or `Vertical`. On `TabWidget`:
@@ -281,7 +281,7 @@ TabWidget::new(selected)
     .horizontal()                              // default
     .vertical()                                // sidebar / IDE-perspective convention
 
-// or — reactive, driven by an external signal:
+// or, reactive, driven by an external signal:
 let orient = Signal::new(TabBarOrientation::Horizontal);
 TabWidget::new(selected).orientation(orient.clone());
 // later:
@@ -291,12 +291,12 @@ orient.set(TabBarOrientation::Vertical);  // bar flips, panes preserved
 `TabWidget` binds the orientation signal at `BindingLevel::Rebuild` so
 flipping it from a toolbar button rebuilds the outer layout (HStack ↔
 VStack) and re-creates the inner `TabBar` with the new orientation.
-**Memoized panes survive the rebuild** — focus, scroll, and per-document
+**Memoized panes survive the rebuild**, focus, scroll, and per-document
 state are preserved.
 
 `TabBar<T>` chooses orientation through its constructor only:
 `TabBar::horizontal(...)` / `TabBar::vertical(...)`. Switching at
-runtime means rebuilding the bar — which is what the `TabWidget`
+runtime means rebuilding the bar, which is what the `TabWidget`
 wrapper does for you.
 
 Vertical bars use **upright** text (single-line, ellipsis-truncated),
@@ -306,11 +306,11 @@ per-glyph layout rotation. This matches VS Code's activity-bar style.
 
 ---
 
-## Tab sizing — Shared vs Independent
+## Tab sizing: Shared vs Independent
 
 ```rust
 pub enum TabSizing {
-    /// All non-pinned tabs share the same extent on the layout axis —
+    /// All non-pinned tabs share the same extent on the layout axis,
     /// width in horizontal, height in vertical. Available region
     /// divided equally, clamped to [min_tab_extent, max_tab_extent].
     Shared,
@@ -329,10 +329,10 @@ pub enum TabSizing {
 | Orientation  | "Layout axis" | Default       | Meaning                                                           |
 |--------------|---------------|---------------|-------------------------------------------------------------------|
 | `Horizontal` | width         | `Shared`      | Uniform tab widths (Firefox / Chrome convention).                 |
-| `Vertical`   | height        | `Shared`      | Uniform pill heights — fixed at `editor_tab_height`.              |
+| `Vertical`   | height        | `Shared`      | Uniform pill heights, fixed at `editor_tab_height`.              |
 
 Pinned tabs are **always fixed-extent** (`pinned_tab_width`) regardless
-of `TabSizing` — that's what "pinned" means visually.
+of `TabSizing`, that's what "pinned" means visually.
 
 The two orientations apply Shared sizing differently:
 
@@ -359,7 +359,7 @@ The two orientations apply Shared sizing differently:
   This matches VS Code, IntelliJ tool-window tabs, and the user
   expectation of sidebar tabs being short pills. The `min_tab_width`
   / `max_tab_width` knobs are width-defaulted (96 / 240) and
-  intentionally **don't apply to vertical's height axis** — they'd
+  intentionally **don't apply to vertical's height axis**, they'd
   force pills unreasonably tall.
 
 `Fill` is the nav-rail / full-bleed look; it needs a bounded width to fill
@@ -371,7 +371,7 @@ one-line operation from a toolbar button.
 
 ---
 
-## Tab display mode — icon / text / icon + text
+## Tab display mode: icon / text / icon + text
 
 Each tab declares both a title and (optionally) an icon; a **bar-level**
 `TabDisplayMode` decides what is painted, so an app can offer a "tab size"
@@ -381,8 +381,8 @@ by hand:
 ```rust
 pub enum TabDisplayMode {
     Auto,      // render each tab as its TabInfo declares (default; back-compat)
-    Text,      // title only — icons hidden even when present
-    Icon,      // icon only — title promoted to the hover tooltip
+    Text,      // title only, icons hidden even when present
+    Icon,      // icon only, title promoted to the hover tooltip
     IconText,  // icon + title
 }
 ```
@@ -399,7 +399,7 @@ Mode-specific behaviour:
   the title to the tooltip when the caller set none. A tab with **no icon**
   falls back to its title's **initial letter**, so the mode is never blank.
 - **`Text`** drops the icon; **`IconText`** keeps both (and so does `Auto`,
-  which is the identity transform — they differ only in intent).
+  which is the identity transform, they differ only in intent).
 - The content `TabPanel` keeps its real title as its AT name in every mode, so
   a screen reader navigating to the panel still hears the full name even when
   the chrome is icon-only. The **tab header** also keeps the original title as
@@ -432,7 +432,7 @@ Indices in callbacks (`on_close(i)`, `selected.set(i)`,
 `on_reorder(from, to)`) remain **model indices**, not view positions.
 
 A pinned tab's title is promoted to its tooltip (replacing any tooltip the
-caller set) — pinned tabs render icon-only and otherwise have no way for the
+caller set), pinned tabs render icon-only and otherwise have no way for the
 user to identify them on hover.
 
 DnD across the pinned/unpinned boundary fires
@@ -456,7 +456,7 @@ TabWidget::new(selected)
         // implies .reorderable(true).
     })
     .on_pin_toggle(|id: TabId, new_pinned: bool, ctx: &mut EventContext| {
-        // no default — pinning is app semantics.
+        // no default, pinning is app semantics.
     });
 ```
 
@@ -464,7 +464,7 @@ Note the indirection: `TabWidget` callbacks speak `TabId`, but inside,
 the bar receives indices. The wrapper translates at the boundary using
 the `index_to_id` table captured at build time. On stand-alone
 `TabBar<T>` the callbacks are `Fn(usize, &mut EventContext)` /
-`Fn(usize, usize, &mut EventContext)` — the caller is closer to the data
+`Fn(usize, usize, &mut EventContext)`, the caller is closer to the data
 source and may prefer indices. Every callback receives the firing
 `EventContext`, so a close can be routed through a confirmation dialog
 before the model is mutated.
@@ -499,10 +499,10 @@ is a drag source; the bar is the drop target.
   (`TabBarChromeConfig::drop_indicator`), which paints it.
 - **Drop indicator.** A 2 dp accent-color line at the insertion
   boundary. Vertical line for horizontal bar, horizontal line for
-  vertical bar — both the paint and the hover-to-insertion-boundary
+  vertical bar, both the paint and the hover-to-insertion-boundary
   math are axis-aware.
 - **Edge auto-scroll.** `on_drag_tick` ramps scroll velocity inside a
-  32 dp edge zone, capped at 12 dp/frame — same constants as `ListView`.
+  32 dp edge zone, capped at 12 dp/frame, same constants as `ListView`.
 - **Pinned/unpinned model index translation.** Insertion is computed in
   unpinned-view space; the bar maintains an `unpinned_to_model` map and
   converts before applying the post-removal `-1` adjustment (`from <
@@ -515,12 +515,12 @@ Drag-reorder is fully wired in both orientations.
 
 ---
 
-## Cross-`TabWidget` transfer — migrating tabs between containers
+## Cross-`TabWidget` transfer: migrating tabs between containers
 
 Opt-in app-internal drag-and-drop **between two tabbed containers**: drag
 a tab out of one `TabWidget` and drop it between the tabs of another. The
-dragged `TabHandle` moves intact — its `Rc<dyn Any>` payload (the heavy
-per-tab state) is preserved, not rebuilt — so a half-edited document
+dragged `TabHandle` moves intact, its `Rc<dyn Any>` payload (the heavy
+per-tab state) is preserved, not rebuilt, so a half-edited document
 keeps its scroll position, undo stack, and so on after the move.
 
 ```rust
@@ -542,7 +542,7 @@ let group_b = TabWidget::new(sel_b)
 (its dynamic tabs become draggable to other accepting widgets) and a
 **target** (it accepts tabs dragged in, painting the usual insertion-line
 indicator). With the defaults above, accepting a tab inserts it into the
-receiver's `dynamic_model` and the source removes it from its own — each
+receiver's `dynamic_model` and the source removes it from its own, each
 container mutates **only its own model**.
 
 Override either side:
@@ -552,17 +552,17 @@ Override either side:
     // target side: insert `handle` into our model at the dynamic-region index
 })
 .on_transfer_out(|tab_id: TabId, ctx| {
-    // source side: one of our tabs landed elsewhere — remove it
+    // source side: one of our tabs landed elsewhere, remove it
 })
 ```
 
 How it works (the "split, each bar owns its model" model):
 
 - The source publishes a payload carrying a **clone** of the `TabHandle`
-  (cheap — the heavy state is behind an `Rc`).
+  (cheap, the heavy state is behind an `Rc`).
 - On drop in a different bar, the target's `on_drop` calls
   `on_tab_received` with the moved handle and the model insertion index
-  (no `-1` correction — there's no source slot in *this* model).
+  (no `-1` correction, there's no source slot in *this* model).
 - The source is notified via the framework's native
   `on_drag_ended(DropOutcome::InApp { accepted: true })` hook, which fires
   `on_transfer_out`. A self-reorder flag (set by the source bar's own
@@ -572,19 +572,19 @@ How it works (the "split, each bar owns its model" model):
 
 Constraints:
 
-- **Static tabs are excluded** — they have no content factory on a
+- **Static tabs are excluded**, they have no content factory on a
   receiving widget, so they're never transferable (they still reorder in
   place). `TabWidget` installs the predicate that enforces this.
 - **Type-safe interop only**: `TabWidget` ↔ `TabWidget` (both are
   `TabBar<TabHandle>` underneath). A `TabBar<OtherT>` never matches.
 - **Same-window only.** Cross-*window* transfer is feasible via the DnD
   layer's typed re-entry but needs `mime_data` on the payload to escalate
-  at the window boundary — not wired here.
+  at the window boundary, not wired here.
 - Requires `T: Clone` (`TabHandle` is). Stand-alone `TabBar<T>` exposes
   the same `accept_external_tabs` / `on_tab_received` / `on_transfer_out`
   methods, index-based.
 
-## Non-tab drops — `on_external_drop` (open a dropped file as a tab)
+## Non-tab drops: `on_external_drop` (open a dropped file as a tab)
 
 Accept payloads that **aren't** tabs: an in-app foreign drag (a row
 dragged from a `TreeView` / `ListView` carrying app data) or an OS
@@ -613,7 +613,7 @@ TabWidget::new(sel)
   `on_external_drop`** (a failed `TabBarDragData<T>` downcast leaves the
   payload intact for inspection).
 - OS drops reuse the same `on_drop` path, so installing the handler makes
-  the bar an OS-drop target automatically — the app must still call
+  the bar an OS-drop target automatically, the app must still call
   `TeksiloAppBuilder::install_external_dnd()` for the OS pipeline.
 - Independent of `accept_external_tabs`: a bar can do tab-migration,
   file-opening, both, or neither.
@@ -646,7 +646,7 @@ animates `scroll_x` by ~one tab-width via `Signal::animate_to` with
 
 On a horizontal bar, vertical-only wheel deltas remap to horizontal
 scroll (Firefox / Chrome convention). Shift+wheel always remaps,
-regardless of orientation — useful on touchpads where two-finger scroll
+regardless of orientation, useful on touchpads where two-finger scroll
 is ambiguous. Diagonal trackpad gestures pass through.
 
 ```rust
@@ -673,8 +673,8 @@ popover.
 
 | Mode | Behaviour |
 | --- | --- |
-| `Auto` (default) | Shown **only when the tab headers overflow** the viewport — the same condition that reveals the scroll arrows (`visible_when` on the ScrollArea's `max_scroll` signal). Stays out of the way until it is useful. |
-| `Always` | Shown whenever the bar has at least one tab, even when everything fits (a persistent fast-jump affordance — the old default). |
+| `Auto` (default) | Shown **only when the tab headers overflow** the viewport, the same condition that reveals the scroll arrows (`visible_when` on the ScrollArea's `max_scroll` signal). Stays out of the way until it is useful. |
+| `Always` | Shown whenever the bar has at least one tab, even when everything fits (a persistent fast-jump affordance, the old default). |
 | `Never` | Never built. |
 
 `show_overflow_dropdown(bool)` is a convenience over `overflow_button`:
@@ -689,7 +689,7 @@ announce it as a popup trigger.
 ### Keyboard `ScrollIntoView`
 
 Tab keyboard nav into an off-screen tab is handled by the framework's
-existing `WidgetEvent::ScrollIntoView` path on `ScrollArea` — when a
+existing `WidgetEvent::ScrollIntoView` path on `ScrollArea`, when a
 tab header gains focus and lies outside the viewport, ScrollArea
 auto-scrolls to bring it on-screen. No tab-specific code is needed.
 
@@ -707,17 +707,17 @@ bar:
 
 Both accept `impl Widget + 'static` or a pre-registered `WidgetId` (the
 `teksu!` DSL path). The slot widget is
-registered once on first build and **memoized** — subsequent rebuilds
+registered once on first build and **memoized**, subsequent rebuilds
 reuse the same id, so a slot's internal state (button hover, tooltip
 visibility, focus) survives bar rebuilds.
 
 Slots scroll **with** the bar's outer chrome, not with the headers row
-— a "+" button in the trailing slot stays visible regardless of
+,  a "+" button in the trailing slot stays visible regardless of
 horizontal scroll position.
 
 ---
 
-## Appearance — backgrounds, text colour, dividers, indicator
+## Appearance: backgrounds, text colour, dividers, indicator
 
 All of these builders exist on both `TabBar` and `TabWidget` (the
 `TabWidget` form forwards to its inner bar). They tune the default
@@ -741,7 +741,7 @@ TabWidget::new(selected)
 
 Each accepts any `Color`, `SurfaceRole`, or `Signal<Color>` (an
 `impl Into<ColorProp>`). Internally the three states are three flush
-`RectWidget`s gated by `visible_when` — switching state just toggles
+`RectWidget`s gated by `visible_when`, switching state just toggles
 which one paints (a repaint, never a rebuild), so selection state and
 focus survive.
 
@@ -756,7 +756,7 @@ and its icon tint follow the role):
 ```
 
 Disabled tabs always read as `TextRole::Disabled`. (Full per-state font
-*style* — e.g. bold-when-selected — is not a built-in knob; use a custom
+*style*, e.g. bold-when-selected, is not a built-in knob; use a custom
 `TabStyle` if you need it.)
 
 ### Bar background
@@ -785,8 +785,8 @@ scrolls with the tabs; in the pinned strip it is an interleaved
 
 The highlight that marks the selected tab defaults to the **outer** edge
 (top for a horizontal bar, leading for a vertical bar). Move it to the
-**inner** edge — below the label on a horizontal bar, trailing on a
-vertical bar — with:
+**inner** edge, below the label on a horizontal bar, trailing on a
+vertical bar, with:
 
 ```rust
 use teksilo::widgets::TabIndicatorPosition;
@@ -821,7 +821,7 @@ selection writes are absorbed harmlessly. Focus moves with selection;
 `ScrollArea` scrolls the bar to keep the focused tab visible via the
 existing `ScrollIntoView` event.
 
-`Enter` and `Space` behave identically — both let keyboard / screen-reader
+`Enter` and `Space` behave identically, both let keyboard / screen-reader
 users dive from the tab strip straight into the panel without hunting for
 the Tab stop. This matches the desktop tab-control convention (Windows /
 JAWS: Space or Enter *invokes* a tab and a well-built control sets focus to
@@ -830,11 +830,11 @@ invocable controls. The dive lands on the panel's first focusable control; a
 panel that opted into focusability itself (`TabInfo::focusable_panel(true)`)
 with no inner controls receives focus directly; a panel with neither leaves
 focus on the header (it is never trapped on a non-interactive container).
-This is `TabWidget`-only — a standalone `TabBar` has no content panel, so
+This is `TabWidget`-only, a standalone `TabBar` has no content panel, so
 `Enter` / `Space` there only activate.
 
 The framework dispatches both ArrowLeft/Up and ArrowRight/Down to the
-"prev/next" handlers regardless of orientation — the same key map works
+"prev/next" handlers regardless of orientation, the same key map works
 for horizontal and vertical bars without re-mapping.
 
 ---
@@ -880,9 +880,9 @@ publish for their own browser tabs.
 |-----------------------------|-----------------------------------------|
 | bar-strip backdrop          | `bar_background` (settable)             |
 | per-tab fill                | `tab_background` (settable)             |
-| label text — selected       | `selected_text_role` (settable)         |
-| label text — idle           | `idle_text_role` (settable)             |
-| label text — disabled       | `TextRole::Disabled` (always)           |
+| label text, selected       | `selected_text_role` (settable)         |
+| label text, idle           | `idle_text_role` (settable)             |
+| label text, disabled       | `TextRole::Disabled` (always)           |
 | accent indicator (selected) | `theme.colors.accent`                   |
 | bar bottom separator        | `BorderRole::Default` (`TabBar::separator(false)` removes it) |
 | close button hover          | `SurfaceRole::Hover`                    |
@@ -910,12 +910,12 @@ always render at `TextRole::Disabled`.
 Static numbers are `pub const`s in
 [`recipe_tab_style`](../crates/teksilo-widgets/src/styles/recipe_tab_style.rs):
 
-- `TAB_EDITOR_HEIGHT` (default 50 dp) — height of horizontal bar tabs.
-- `TAB_TOOL_WINDOW_HEIGHT` (default 28 dp) — reserved for future
+- `TAB_EDITOR_HEIGHT` (default 50 dp), height of horizontal bar tabs.
+- `TAB_TOOL_WINDOW_HEIGHT` (default 28 dp), reserved for future
   tool-window tab variant; not currently consumed by vertical bars.
   `TabWidget::tab_bar_height(dp)` / `compact_bar()` (38 dp) override the
   50 dp strip height instead.
-- `TAB_UNDERLINE_ACTIVE` (default 2 dp) — thickness of the selection
+- `TAB_UNDERLINE_ACTIVE` (default 2 dp), thickness of the selection
   indicator. The indicator's color comes from `theme.colors.accent`.
 
 The accent indicator paints at the **top edge** in horizontal bars and
@@ -960,7 +960,7 @@ TabWidget::new(selected)
   custom actions for AT-driven reorder; "Close" custom action; `HasPopup`
   on the dropdown
 - `TabWidget::bar_visibility(TabBarVisibility::{Always, WhenMultiple,
-  Never})`, statically or bound to a signal — hides the strip without
+  Never})`, statically or bound to a signal, hides the strip without
   tearing down the panes
 - `Signal<Option<TabId>>` selection that survives reorders, removals,
   locale and theme changes
@@ -968,7 +968,7 @@ TabWidget::new(selected)
 **Intentionally not shipped:**
 
 - multi-line / wrapping horizontal bar (was prototyped via
-  `Wrap::max_lines(...)`; dropped — lots of layout machinery for a
+  `Wrap::max_lines(...)`; dropped, lots of layout machinery for a
   feature most desktop apps don't use, and the overflow dropdown covers
   the same fast-jump need)
 - touchscreen flick momentum on the scroll viewport (desktop trackpads
@@ -977,18 +977,18 @@ TabWidget::new(selected)
   wiring, ~150 LOC, separate task)
 - `TabRecipe::tool_window_height` (`TAB_TOOL_WINDOW_HEIGHT`, 28 dp) is
   reserved on the default `RecipeTabStyle` but not yet consumed by
-  vertical bars — they currently pick up the editor-tab height
+  vertical bars, they currently pick up the editor-tab height
   (`TAB_EDITOR_HEIGHT`) like horizontal bars
 
 ---
 
 ## Demos
 
-- `cargo run -p tab-widget` — full showcase: static tabs (pinned,
+- `cargo run -p tab-widget`, full showcase: static tabs (pinned,
   disabled, default), three dynamic tabs from a `ListModel<TabHandle>`,
   registered `dynamic_tab::<DocState>` factory, "+ New tab" trailing
   button, theme / orientation / sizing toggle buttons, drag-reorder,
   overflow dropdown, pinned-tab tooltip promotion, status bar showing
   the resolved selection.
-- `cargo run -p widget-catalog` — TabWidget appears in the catalog for
+- `cargo run -p widget-catalog`, TabWidget appears in the catalog for
   visual regression checks.

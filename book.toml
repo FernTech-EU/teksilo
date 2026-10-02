@@ -15,6 +15,7 @@
 title = "Teksilo Documentation"
 authors = ["Cyril Jacquet"]
 description = "Reference and design documentation for the Teksilo pure-Rust GUI framework."
+# Engineering records live outside this source tree in engineering/docs/.
 # Internal screen-reader findings stay in docs/a11y/ but are omitted from
 # docs/SUMMARY.md, so mdBook does not publish them.
 src = "docs"

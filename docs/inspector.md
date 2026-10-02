@@ -58,8 +58,8 @@ lines. In debug builds it:
 2. Stores a shared `InspectorState` (toggle / selection / picker
    mode / overlay mode / opacity / user-root ids) into `app_state`.
 3. Registers an app-wide `DefaultPostRoot` hook through
-   `TeksiloAppBuilder::register_post_root` — which composes with other
-   window chrome such as the toast host rather than replacing it — that
+   `TeksiloAppBuilder::register_post_root`, which composes with other
+   window chrome such as the toast host rather than replacing it, that
    wraps every window's user root with `InspectorShell` and registers
    the F12 shortcut.
 4. If the app has wired a `SettingsStore` via
@@ -74,8 +74,8 @@ lines. In debug builds it:
 | **`--teksilo-inspector` CLI arg** | Open the inspector at startup. |
 | **`TEKSILO_INSPECTOR=1` env** | Same as the CLI arg. |
 | **`×` toolbar button** | Closes the panel (F12 reopens). |
-| **`InspectorState::toggle()`** | The public door. Reach the state through `ctx.app_state::<InspectorState>()` and put the inspector behind whatever the application already has — a debug menu item, a hidden button, a gesture of its own. |
-| **A hold in the bottom-trailing corner** | The framework's own coarse-pointer door — see below. |
+| **`InspectorState::toggle()`** | The public door. Reach the state through `ctx.app_state::<InspectorState>()` and put the inspector behind whatever the application already has, a debug menu item, a hidden button, a gesture of its own. |
+| **A hold in the bottom-trailing corner** | The framework's own coarse-pointer door, see below. |
 | **Persisted state** | If the app uses `SettingsStore`, the toggle remembers its last state across launches. |
 
 ```rust
@@ -87,8 +87,8 @@ if let Some(inspector) = ctx.app_state::<teksilo_inspector::InspectorState>() {
 ### The corner grip
 
 F12 is a keyboard chord, so on a machine with no keyboard the inspector needs
-another way in. Once a session has produced a **coarse** pointer sample — a
-finger — a grip appears in the window's bottom-trailing corner while the panel
+another way in. Once a session has produced a **coarse** pointer sample, a
+finger, a grip appears in the window's bottom-trailing corner while the panel
 is closed, and a **hold** on it opens the panel. It advertises `Role::Button`
 with the same action, so an assistive-technology user reaches it too.
 
@@ -96,17 +96,17 @@ What it costs is exactly one corner: the grip's node fills the window but is
 hittable only inside its own square (`Widget::hit_shape`), which is the density's
 target size, so a press anywhere else reaches the application unchanged. Inside
 the square the press belongs to the grip. It paints a visible mark for that
-reason — the cost is never silent — and it is not mounted at all until a finger
+reason, the cost is never silent, and it is not mounted at all until a finger
 has been seen, so a mouse-driven session never grows one.
 
 The shortcut id is `__teksilo_inspector.toggle`. The double-underscore
-prefix marks it as framework-reserved — do not bind it from app code.
+prefix marks it as framework-reserved, do not bind it from app code.
 It is also shown dimmed in the inspector's Shortcuts tab.
 
 ## Panel keyboard shortcuts
 
 Once the panel is open, a handful of chords speed up common actions.
-They are **scoped to the panel subtree** — they only fire when focus is
+They are **scoped to the panel subtree**, they only fire when focus is
 on the panel or one of its descendants, so `Ctrl+P` / `Ctrl+B` / `Esc`
 never shadow the user app's own bindings. Click anywhere in the panel
 (a tab header, a button) to take focus, then:
@@ -132,48 +132,48 @@ appear dimmed in the Shortcuts tab.
 [ Pick ] [ Off | Sel | All ] [ ── opacity ── ] [ Overflow ] [ Watch ]   [ × ]
 ```
 
-- **Pick** — toggles the picker tool. While picking, a transparent
+- **Pick**, toggles the picker tool. While picking, a transparent
   overlay covers the user-root area. Clicking on a widget opens a
   context menu listing the deepest-hit widget plus its ancestors
   (up to 10 entries, walking up to the user-root inclusive). Pick
-  any row to select that level — useful for composites where the
+  any row to select that level, useful for composites where the
   deepest hit is an inner leaf (e.g. a `TextWidget` inside a
   `Button`) but you want the wrapping widget. Click outside the
   menu or press Escape to dismiss; the picker auto-exits after one
   selection or dismissal.
-- **Bounds overlay** — `Off` (no overlay), `Sel` (stroke around the
+- **Bounds overlay**, `Off` (no overlay), `Sel` (stroke around the
   selected widget only), `All` (stroke every widget; layout
   primitives in cyan, content widgets in magenta; cursor-following
-  tooltip with type + size — see *Bounds overlay color legend*).
-- **Opacity slider** — dims the bounds-overlay strokes for dense UIs.
+  tooltip with type + size, see *Bounds overlay color legend*).
+- **Opacity slider**, dims the bounds-overlay strokes for dense UIs.
   Range 0.1 .. 1.0.
-- **Overflow toggle** — turns the overflow overlay on/off (see below).
+- **Overflow toggle**, turns the overflow overlay on/off (see below).
   A check mark in the label reflects the state.
-- **Watch** — arms the Pointers tab's live contact readout. While it is armed
+- **Watch**, arms the Pointers tab's live contact readout. While it is armed
   a full-window surface takes every pointer event, so the application receives
   none: the label says which state it is in, and the surface paints a tint and
   a mark under each contact. Off by default.
-- **×** — closes the panel.
+- **×**, closes the panel.
 
 ## Overflow overlay
 
 Independent of the bounds-overlay mode and **on by default** in debug builds:
 wherever a distributing container's children spill past its bounds, the
 inspector paints Flutter-style **yellow/black hazard stripes** on the overhang
-plus a bright red border — so over-constrained layouts are impossible to miss.
+plus a bright red border, so over-constrained layouts are impossible to miss.
 It paints even with the panel closed (any time the inspector is installed).
 
 Detection rules (in [highlight.rs](../crates/teksilo-inspector/src/highlight.rs),
 `collect_overflow`):
 
-- Only **distributing containers** are checked — `HStack`, `VStack`, `Grid`,
-  `FormLayout` — so intentional overlap (`ZStack`, scene content, overlays)
+- Only **distributing containers** are checked, `HStack`, `VStack`, `Grid`,
+  `FormLayout`, so intentional overlap (`ZStack`, scene content, overlays)
   never false-positives.
 - Containers that **clip** their children (`ScrollArea`, `MaxSize`) are skipped
-  — their overflow is expected and clipped away.
+, their overflow is expected and clipped away.
 - An overhang under `0.5 px` is ignored (rounding noise).
 
-After [over-constraint handling](layout-primitives.md#34-shrinkable--opt-a-child-into-compression),
+After [over-constraint handling](layout-primitives.md#34-shrinkable-opt-a-child-into-compression),
 shrinkable content compresses to fit and shows **no** stripes; stripes mean the
 layout genuinely cannot fit (only rigid children, or every shrinkable child
 already at its `min`). Toggle from the toolbar; the choice persists via
@@ -183,16 +183,16 @@ already at its `min`). Toggle from the toolbar; the choice persists via
 
 | Tab | What it shows |
 |---|---|
-| **Tree** | Live widget hierarchy, indented by depth. Click a row to select. Top text input filters by case-insensitive substring match against each type's last segment. When the picker resolves to a widget that's currently off-screen, the row scrolls into view automatically (skipped when the user clicked the row directly — the row is already on-screen). Excludes every InspectorShell subtree (multi-window safe). |
+| **Tree** | Live widget hierarchy, indented by depth. Click a row to select. Top text input filters by case-insensitive substring match against each type's last segment. When the picker resolves to a widget that's currently off-screen, the row scrolls into view automatically (skipped when the user clicked the row directly, the row is already on-screen). Excludes every InspectorShell subtree (multi-window safe). |
 | **Properties** | For the selected widget: type, bounds, dirty flags, parent, children count, activation, `clips_children`, `event_pass_through`, plus a single-line `debug_repr` row. **Copy** button dumps every row plus the full multi-line Debug repr to the clipboard via `ClipboardHandle`. **Right-click** any row to open a `Copy value` context menu that copies just that row's value. |
 | **Accessibility** | Role / name / value / advertised actions / toggled / expanded / selected / hidden, from the widget's `accessibility(builder)` output. |
-| **Theme** | Preset buttons (**Light** / **Dark**) — clicking calls `EventContext::set_theme(...)`. **Apply** folds every per-row draft back into the active theme; **Reset** discards drafts and re-syncs from the active theme. **Export** dumps the current `Theme` as pretty JSON to the clipboard; **Import** parses the clipboard JSON back into a `Theme` and applies it (silently ignores parse errors). Below: a curated list of editable colors (accent, surfaces, text roles, borders, status colors), then an alpha slider for each of the eight shape-shadow tokens. Each row carries a `ColorEdit` field — clicking it opens a `ColorPicker` popover with HSV canvas, hue / alpha strips, RGB spinners, hex input, and preset swatches. The picker writes through to the row's draft on every drag; Apply commits the batch. |
+| **Theme** | Preset buttons (**Light** / **Dark**), clicking calls `EventContext::set_theme(...)`. **Apply** folds every per-row draft back into the active theme; **Reset** discards drafts and re-syncs from the active theme. **Export** dumps the current `Theme` as pretty JSON to the clipboard; **Import** parses the clipboard JSON back into a `Theme` and applies it (silently ignores parse errors). Below: a curated list of editable colors (accent, surfaces, text roles, borders, status colors), then an alpha slider for each of the eight shape-shadow tokens. Each row carries a `ColorEdit` field, clicking it opens a `ColorPicker` popover with HSV canvas, hue / alpha strips, RGB spinners, hex input, and preset swatches. The picker writes through to the row's draft on every drag; Apply commits the batch. |
 | **Locale** | Every locale declared in `I18nConfig::supported_locales`. Click a row to call `EventContext::set_locale(...)`. The active locale is highlighted. |
 | **Focus** | Current focused widget plus its ancestor chain (root → leaf). Leaf shown in primary color, ancestors dimmed. |
 | **Shortcuts** | Every shortcut in the tree's `ShortcutRegistry` with its effective primary keystroke. Framework-reserved ids (`__`-prefixed) are dimmed. |
 | **Overlays** | Active overlays from `OverlayManager`, with their content + anchor labels. |
-| **Pointers** | Two halves. Always live: the input tokens in force (density, target and grab sizes, slop budget, the touch profile's thresholds) and every node in the user tree that declares a **pointer policy** — a pan claim, a `touch_action`, a gesture dead zone, a hit-slop policy, a multi-contact policy, a drag activation — each with the *effective* touch action folded down its ancestor chain beside its own. That is the half that answers "why does this not pan under a finger": the answer is usually a declaration several nodes above the one that should have panned. Behind **Watch**: the live contacts, with kind, position, frozen touch action and press state. |
-| **Models** | Data models registered via `.debug_named(...)` (see *Data models*). For each: name, kind (`ListModel`, `TreeModel`, `SelectionModel`, `KeyedSelectionModel`, `ChartModel`, `ChartSelection`), and len. Click a row to select it — its `debug_dump` output is shown below. With nothing selected, the most recently registered model is dumped (dimmed row highlight). Click the same row again to clear the selection. |
+| **Pointers** | Two halves. Always live: the input tokens in force (density, target and grab sizes, slop budget, the touch profile's thresholds) and every node in the user tree that declares a **pointer policy**, a pan claim, a `touch_action`, a gesture dead zone, a hit-slop policy, a multi-contact policy, a drag activation, each with the *effective* touch action folded down its ancestor chain beside its own. That is the half that answers "why does this not pan under a finger": the answer is usually a declaration several nodes above the one that should have panned. Behind **Watch**: the live contacts, with kind, position, frozen touch action and press state. |
+| **Models** | Data models registered via `.debug_named(...)` (see *Data models*). For each: name, kind (`ListModel`, `TreeModel`, `SelectionModel`, `KeyedSelectionModel`, `ChartModel`, `ChartSelection`), and len. Click a row to select it, its `debug_dump` output is shown below. With nothing selected, the most recently registered model is dumped (dimmed row highlight). Click the same row again to clear the selection. |
 
 ## Data models
 
@@ -215,17 +215,17 @@ let row_selection: SelectionModel =
 ```
 
 `ListModel`, `TreeModel` and `ChartModel` require `T: Debug + 'static`
-(used by the dump). `debug_named` is always available — in release builds it is a
+(used by the dump). `debug_named` is always available, in release builds it is a
 no-op pass-through, so call sites do not need `#[cfg]` lines.
 
 Internally, each model registers a `Weak<dyn ModelDebug>` adapter in
 the thread-local `teksilo_data::debug_registry`:
 
-- `ListModel` / `TreeModel` / `ChartModel` — the adapter holds a `Weak` to the
+- `ListModel` / `TreeModel` / `ChartModel`, the adapter holds a `Weak` to the
   model's inner `Rc<RefCell<…>>`, so it never extends the model's
   lifetime. When the last model handle drops, the registration
   becomes dead and is pruned on the next `snapshot()`.
-- `SelectionModel` / `KeyedSelectionModel` / `ChartSelection` — no
+- `SelectionModel` / `KeyedSelectionModel` / `ChartSelection`, no
   shared inner to hang the adapter on; the strong adapter `Rc` lives
   inside an `Rc<RefCell<Option<…>>>` cloned across handles. When the
   last clone drops, the holder reaches zero, the adapter is freed,
@@ -240,18 +240,18 @@ When `TeksiloAppBuilder::settings(SettingsBundle::new())` has been wired,
 the inspector bridges six signals to keys under the framework-reserved
 `__teksilo_inspector.*` namespace:
 
-- `__teksilo_inspector.open` (bool) — last toggle state. Once a value
+- `__teksilo_inspector.open` (bool), last toggle state. Once a value
   has been persisted it seeds the panel at startup and **wins over**
   `--teksilo-inspector` / `TEKSILO_INSPECTOR`; the flags decide only
   while nothing has been persisted yet.
-- `__teksilo_inspector.overflow_overlay` (bool) — the toolbar's
+- `__teksilo_inspector.overflow_overlay` (bool), the toolbar's
   **Overflow** toggle.
 - `__teksilo_inspector.bounds_mode` (`"off"` / `"selection"` / `"all"`)
 - `__teksilo_inspector.overlay_opacity` (f32)
-- `__teksilo_inspector.active_tab` (i64) — index of the last-used panel
+- `__teksilo_inspector.active_tab` (i64), index of the last-used panel
   tab. Stored as `i64` because TOML lacks unsigned integers and
   `usize` width varies by target. Out-of-range values seed at 0.
-- `__teksilo_inspector.panel_height` (f32) — last user-set panel height.
+- `__teksilo_inspector.panel_height` (f32), last user-set panel height.
   Clamped to `[120, 720]` on load and on every observer fire so a
   hand-edited or stale value can't shrink the panel below the toolbar
   or grow it past the user-root.
@@ -270,29 +270,29 @@ top edge tracks the cursor exactly under live layout.
 
 When the bounds overlay is set to **All**:
 
-- **Cyan** strokes — *layout primitives* (anything whose
-  `Widget::type_name()` contains `::primitives::` —
+- **Cyan** strokes, *layout primitives* (anything whose
+  `Widget::type_name()` contains `::primitives::`,
   `HStack`, `VStack`, `ZStack`, `Padding`, `Expand`, `Spacer`,
   `FixedSize`, `Switcher`, `Center`, …).
-- **Magenta** strokes — *content widgets* (everything else).
-- **Blue accent** — the currently selected widget, drawn 2 px on top.
+- **Magenta** strokes, *content widgets* (everything else).
+- **Blue accent**, the currently selected widget, drawn 2 px on top.
 
 A small **cursor-following tooltip** also follows the mouse in
 `All` mode, showing the deepest widget under the pointer and its
-laid-out size — for example `Button · 96×32`. Background tint matches
+laid-out size, for example `Button · 96×32`. Background tint matches
 the bounds-stroke color (cyan for layout primitives, magenta for
 content widgets); positioned above the widget by default, flipping
 below or shifting left if it would clip the user-root area. Suppressed
 when the cursor is over the inspector's own panel. Driven off the
-framework's `WidgetTree::hovered_signal()` (added in slice 6) — no
+framework's `WidgetTree::hovered_signal()` (added in slice 6), no
 polling.
 
 `All` mode also paints **spacing bands** behind the strokes:
 
-- **Yellow** fill — the four `Padding`-inset bands between a
+- **Yellow** fill, the four `Padding`-inset bands between a
   `Padding` widget's outer rect and its child's inner rect
   (top, bottom, leading, trailing).
-- **Green** fill — the gap between consecutive `HStack` / `VStack`
+- **Green** fill, the gap between consecutive `HStack` / `VStack`
   siblings, spanning the parent's cross-axis extent.
 
 The bands are translucent so the underlying widget colors still show
@@ -325,8 +325,8 @@ through. Use the opacity slider to dim them for dense UIs.
   competes for the press. At Touch the slot around it is target-sized, which is
   the one density where changing the layout is allowed.
 - **Row heights follow the density only where rows are pressed.** The Tree,
-  Properties, Models and Locale tabs — whose rows *are* targets, picked by
-  dividing a press's y by the row height — take the density's `target_size` at
+  Properties, Models and Locale tabs, whose rows *are* targets, picked by
+  dividing a press's y by the row height, take the density's `target_size` at
   any density that admits a finger, and keep the dense 18 dp at Compact. The
   read-only listings (Overlays, Shortcuts, Focus, Accessibility, Theme, Pointers)
   keep 18 dp at every density: a row nothing can press is not a target, and
@@ -335,7 +335,7 @@ through. Use the opacity slider to dim them for dense UIs.
 - **A density switch does not re-bake the application's own widgets while the
   inspector is installed.** `WidgetTree::set_input_density` marks every *root*
   for rebuild, and after wrapping, the shell is the only root; the shell
-  re-attaches the application's root rather than rebuilding it (it has to — it
+  re-attaches the application's root rather than rebuilding it (it has to, it
   did not build it and cannot), so the application keeps the dimensions its last
   build chose until something else rebuilds it. Before the shell re-attached it,
   the same switch **destroyed** it.
@@ -349,7 +349,7 @@ through. Use the opacity slider to dim them for dense UIs.
 - Highlight overlay: [crates/teksilo-inspector/src/highlight.rs](../crates/teksilo-inspector/src/highlight.rs)
 - Picker tool: [crates/teksilo-inspector/src/picker.rs](../crates/teksilo-inspector/src/picker.rs)
 - Resize handle: [crates/teksilo-inspector/src/resize_handle.rs](../crates/teksilo-inspector/src/resize_handle.rs)
-  — 6 dp of paint at every density, given a target-sized **slot** at Touch by a
+, 6 dp of paint at every density, given a target-sized **slot** at Touch by a
   `TouchTarget` in the shell (the framework's miss-only slop pass tops it up
   inside that slot), and answering the `Increment` / `Decrement` actions it
   advertises so an assistive-technology user can resize the panel without a drag
@@ -363,17 +363,17 @@ through. Use the opacity slider to dim them for dense UIs.
 ## Related core API additions (debug-build only in spirit)
 
 These public APIs were added to teksilo-core to support the inspector
-but are not gated by `cfg` — they are useful for any tooling that
+but are not gated by `cfg`, they are useful for any tooling that
 wants to introspect a running tree:
 
 - `WidgetTree::hovered() -> Option<WidgetId>`
-- `WidgetTree::hovered_signal() -> Signal<Option<WidgetId>>` — reactive
+- `WidgetTree::hovered_signal() -> Signal<Option<WidgetId>>`, reactive
   mirror updated at every hover change (added in slice 6 to drive the
   AllBounds tooltip without polling)
-- `WidgetTree::focused_signal() -> Signal<Option<WidgetId>>` — reactive
+- `WidgetTree::focused_signal() -> Signal<Option<WidgetId>>`, reactive
   mirror of focused id, drives the inspector's Focus tab without
   polling (added in slice 7)
-- `OverlayManager::version() -> &Signal<u64>` — bumped on every
+- `OverlayManager::version() -> &Signal<u64>`, bumped on every
   show/dismiss, drives the inspector's Overlays tab without polling
   (added in slice 7)
 - `WidgetTree::hit_test(point)` (overlay-aware and mouse-exact;

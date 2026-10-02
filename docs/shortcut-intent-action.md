@@ -5,15 +5,15 @@
 
 Teksilo's input-to-behavior pipeline has three first-class concepts:
 
-- **[`Shortcut`](../crates/teksilo-core/src/shortcut.rs)** — a rebindable
+- **[`Shortcut`](../crates/teksilo-core/src/shortcut.rs)**, a rebindable
   keyboard binding (`KeyStroke` → intent name). Owned by the
   [`ShortcutRegistry`](../crates/teksilo-core/src/shortcut.rs); user
   rebindings layer on top of widget-declared defaults.
-- **[`Intent`](../crates/teksilo-core/src/intent.rs)** — a runtime
+- **[`Intent`](../crates/teksilo-core/src/intent.rs)**, a runtime
   "something wants to happen" message: a stable name plus an optional
   type-erased payload. Produced by shortcuts, by widgets via
   `ctx.send_intent(...)`, or programmatically.
-- **[`Action`](../crates/teksilo-core/src/action.rs)** — a widget-owned
+- **[`Action`](../crates/teksilo-core/src/action.rs)**, a widget-owned
   handler bound to an intent name. When an intent dispatches, the
   framework walks **source-widget → root** and lets the first matching
   enabled action consume (or propagate) it.
@@ -31,7 +31,7 @@ Full end-to-end example:
 
 ## Mental model: three paths, one dispatcher
 
-Every intent hits the same dispatcher — actions don't care where the
+Every intent hits the same dispatcher, actions don't care where the
 intent came from. The three firing paths:
 
 | Path                          | How the intent is built                                     | Anchor for source→root walk     |
@@ -47,7 +47,7 @@ downcastable data the handler extracts when it needs typed fields.
 
 ## `KeyStroke`
 
-A single chord — one `Key` plus its `Modifiers`:
+A single chord, one `Key` plus its `Modifiers`:
 
 ```rust
 KeyStroke::new(Key::S, Modifiers::CTRL)
@@ -71,13 +71,13 @@ Desktop platforms disagree about which key carries application accelerators, and
 on macOS the disagreement is not cosmetic: Control there belongs to the text
 system and to the secondary click, while ⌘ is what a user presses for Save or
 Find. So a **declared** shortcut default written with `Ctrl` is read as *the
-platform's primary accelerator* and resolves to ⌘ on macOS — the convention Qt
+platform's primary accelerator* and resolves to ⌘ on macOS, the convention Qt
 spells `Qt::CTRL`, and the one Teksilo's native menu bar has always applied to
 its key equivalents. Write the chord once:
 
 ```rust
 Shortcut::new("editor.find").primary(KeyStroke::ctrl(Key::F)).build()
-// Ctrl+F on Windows and Linux, ⌘F on macOS — one declaration, no cfg branching.
+// Ctrl+F on Windows and Linux, ⌘F on macOS, one declaration, no cfg branching.
 ```
 
 `KeyStroke::command(Key::F)` is the same chord with the intent stated outright;
@@ -108,8 +108,8 @@ Shortcut::new("view.next_tab")
 ### Caret motion is a separate question
 
 Inside a text surface the accelerator is not the whole story. macOS lays the
-caret motions out across *three* modifiers — `⌥←/→` for word, `⌘←/→` for the
-line edge, `⌘↑/↓` for the document — where Windows and Linux use `Ctrl+←/→`
+caret motions out across *three* modifiers, `⌥←/→` for word, `⌘←/→` for the
+line edge, `⌘↑/↓` for the document, where Windows and Linux use `Ctrl+←/→`
 plus bare `Home`/`End`. No single "is the accelerator held?" flag can express
 that, so `RichTextEditor`, `CodeEditor` and every field built on
 `TextInputField` read their arrows through
@@ -140,32 +140,32 @@ Shortcut::new("app.save")                  // stable id (dispatch key)
 
 Key fields ([source](../crates/teksilo-core/src/shortcut.rs)):
 
-- **`id: &'static str`** — stable key used for persistence, menu
+- **`id: &'static str`**, stable key used for persistence, menu
   lookups (`MenuItem::for_shortcut`), and dispatch. Dot-style
   convention: `"editor.format.bold"`. Doubles as the intent name when
   `.intent(...)` isn't set.
-- **`primary` / `secondary`** — the two default chords. User overrides
+- **`primary` / `secondary`**, the two default chords. User overrides
   (loaded from disk or set through the settings UI) are applied per
   slot independently.
-- **`scope: ShortcutScope`** — `Global` (fires regardless of focus) or
+- **`scope: ShortcutScope`**, `Global` (fires regardless of focus) or
   `Scoped(WidgetId)` (fires only when focus is inside that subtree).
   Widget-declared shortcuts default to scoped; app-level declarations
   use global.
-- **`on_activate`** — optional closure invoked at activation time.
+- **`on_activate`**, optional closure invoked at activation time.
   Receives the matched `KeyStroke` (so you can branch on which chord
   fired) and an `EventContext` (for side effects). Returns anything
-  `Into<Intent>` — typically an `IntentKind` variant. Omit when the
+  `Into<Intent>`, typically an `IntentKind` variant. Omit when the
   shortcut only needs the name: the registry synthesizes
   `Intent::new(intent_name)` for you.
-- **`enabled_when: Option<Prop<bool>>`** — reactive "is this
+- **`enabled_when: Option<Prop<bool>>`**, reactive "is this
   shortcut live?" predicate (the builder takes any `impl Into<Prop<bool>>`,
   so a `Signal<bool>` or a plain `bool`). When `false`, the shortcut is treated as
-  *if not registered* — the keystroke falls through to the focused
+  *if not registered*, the keystroke falls through to the focused
   widget's normal `on_key` dispatch. Compose composite predicates with
   the [`Signal<bool>` combinators](#composing-enabled_when-predicates)
   (`and` / `or` / `not`) or [`Signal::zip`](../crates/teksilo-core/src/signal.rs)
   for typed tuples.
-- **`propagate_when_disabled: bool`** — controls what happens when the
+- **`propagate_when_disabled: bool`**, controls what happens when the
   matching `Action` is disabled: `true` (default) lets the intent
   continue bubbling; `false` consumes at that level ("owned but
   dormant").
@@ -181,7 +181,7 @@ let editor_focused: Signal<bool> = …;
 let readonly:       Signal<bool> = …;
 let in_editor:      Signal<bool> = …;
 
-// `focus && !readonly && in_editor` — each source registered independently
+// `focus && !readonly && in_editor`, each source registered independently
 // with the binding registry, so widgets observing `when` re-render on any flip.
 let when = editor_focused.and(&readonly.not()).and(&in_editor);
 
@@ -202,15 +202,15 @@ arbitrary projections. The same combinators work for `Action::enabled_when`.
 
 Two-layer store, both keyed by shortcut **id** (`&'static str`):
 
-1. **Defaults** — records registered by widgets during `build()` or
-   declared statically via [`Widget::declare_shortcuts`](#static-declaration--widgetdeclare_shortcuts).
+1. **Defaults**, records registered by widgets during `build()` or
+   declared statically via [`Widget::declare_shortcuts`](#static-declaration-widgetdeclare_shortcuts).
    Re-registering the same id **upserts**: code-owned fields are
    refreshed, the user override is preserved. Id is the unique key,
-   so two widgets declaring the same id share the entry — see
+   so two widgets declaring the same id share the entry, see
    [Same-id collisions](#same-id-collisions).
-2. **Overrides** — user-supplied keystroke rebindings keyed by
+2. **Overrides**, user-supplied keystroke rebindings keyed by
    shortcut id, persisted across widget rebuilds (*graveyard*
-   semantics — a widget that disappears and reappears keeps its
+   semantics, a widget that disappears and reappears keeps its
    customised bindings).
 
 The merged view is [`EffectiveShortcut`](../crates/teksilo-core/src/shortcut.rs):
@@ -226,7 +226,7 @@ Menus, tooltips, and settings widgets observe it and re-read through
 Inside `build()`:
 
 ```rust
-// Widget-scoped (default: Scoped(self_id) — fires only when focus is
+// Widget-scoped (default: Scoped(self_id), fires only when focus is
 // inside the widget's subtree):
 ctx.register_shortcut(
     Shortcut::new("editor.format.bold")
@@ -235,7 +235,7 @@ ctx.register_shortcut(
         .build(),
 );
 
-// App-level (Global — fires regardless of focus):
+// App-level (Global, fires regardless of focus):
 ctx.register_shortcut_global(
     Shortcut::new("app.save")
         .name("Save")
@@ -248,11 +248,11 @@ Both register **with ownership**: when the widget is destroyed or
 rebuilt, the framework calls `unregister_all_for_owner(widget_id)` so
 stale entries don't leak.
 
-### Static declaration — `Widget::declare_shortcuts`
+### Static declaration: `Widget::declare_shortcuts`
 
 `ctx.register_shortcut` runs from `build()`, so a chord only enters
 the registry once its owning widget has actually been built. That's
-fine for always-mounted widgets — `build()` runs immediately on
+fine for always-mounted widgets, `build()` runs immediately on
 insert. It's **not** fine when the widget lives behind a lazy
 boundary:
 
@@ -268,13 +268,13 @@ subtree at least once. A rebind UI whose contents depend on where
 you've clicked is the wrong shape.
 
 `Widget::declare_shortcuts(&self) -> Vec<Shortcut>` opts in to
-**eager registration of metadata** — same id and keystrokes, no
+**eager registration of metadata**, same id and keystrokes, no
 handler:
 
 ```rust
 impl Widget for SaveTools {
     fn declare_shortcuts(&self) -> Vec<Shortcut> {
-        // Metadata only — no on_activate, no captured state.
+        // Metadata only, no on_activate, no captured state.
         vec![
             Shortcut::new("app.save")
                 .name("Save")
@@ -284,7 +284,7 @@ impl Widget for SaveTools {
     }
 
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
-        // Install the handler. Same id — the registry upserts.
+        // Install the handler. Same id, the registry upserts.
         let do_save = self.do_save.clone();
         ctx.register_shortcut(
             Shortcut::new("app.save")
@@ -303,12 +303,12 @@ impl Widget for SaveTools {
 
 The framework walks `declare_shortcuts` at three sites:
 
-- **Insertion** — `tree.add(w)` / `ctx.add_child(parent, w)`, right
+- **Insertion**, `tree.add(w)` / `ctx.add_child(parent, w)`, right
   after handler-set extraction, *before* `build()`.
-- **Rebuild** — right after `unregister_all_for_owner` wipes the
+- **Rebuild**, right after `unregister_all_for_owner` wipes the
   previous build's registrations, so declared metadata survives the
   rebuild cycle even if `build()` only conditionally re-registers.
-- **`Switcher::build`** — for every still-`Pending` slot. The
+- **`Switcher::build`**, for every still-`Pending` slot. The
   Switcher pre-registers each lazy page's declared shortcuts owned
   by itself, so the chord is visible from the moment the Switcher
   builds, *without* mounting the page. When the page is eventually
@@ -322,7 +322,7 @@ the first frame regardless of which views the user has visited.
 
 **When you don't.** Always-mounted widgets (app root, top-level
 toolbar, modeless docked panels). Build-time `register_shortcut`
-already runs immediately on insert — same visibility, no
+already runs immediately on insert, same visibility, no
 duplication.
 
 **Pairing convention.** When you opt in, mirror the metadata in
@@ -338,13 +338,13 @@ opt-in.
 ### Same-id collisions
 
 The registry is keyed by **id**, not by `(id, owner)`. Two widgets
-registering the same id is not an error — it's intentional aliasing.
+registering the same id is not an error, it's intentional aliasing.
 Concrete behaviour:
 
-- `defaults: HashMap<&'static str, Shortcut>` — the second
+- `defaults: HashMap<&'static str, Shortcut>`, the second
   registration **replaces** the first (last-write-wins). Metadata,
   default keystrokes, and handler from the loser are discarded.
-- `overrides: HashMap<String, KeyStrokeOverride>` — one override per
+- `overrides: HashMap<String, KeyStrokeOverride>`, one override per
   id. A user rebind of `"app.save"` applies to whichever shortcut
   is currently in `defaults`. Two widgets sharing an id share the
   user rebind.
@@ -358,7 +358,7 @@ Concrete behaviour:
 **Use this intentionally.** If two widgets implement the same
 logical action (`"app.save"` from a toolbar button, a menu item,
 and a keyboard chord all targeting the same code), declaring the
-same id is correct — the user rebinds once, all three follow.
+same id is correct, the user rebinds once, all three follow.
 
 **The footgun.** Two *unrelated* widgets accidentally picking the
 same id. Rebinding one silently rebinds the other. Hierarchical
@@ -369,7 +369,7 @@ Framework-internal chords use a `__` prefix by convention
 
 ### Same-chord precedence
 
-Distinct ids may bind the **same chord** — a normal IDE pattern (a
+Distinct ids may bind the **same chord**, a normal IDE pattern (a
 global `Ctrl+W` "close window" alongside a panel-scoped `Ctrl+W` "close
 tab"). When a chord matches more than one enabled shortcut, the
 dispatcher resolves them by **focus and scope specificity**, not by id
@@ -390,7 +390,7 @@ inapplicable scoped binding never "eats" the chord from an applicable
 global one, and a global binding never shadows an in-focus scoped one.
 
 Scope applicability needs the widget tree (descendant checks), which the
-registry can't see — so it hands back every candidate via
+registry can't see, so it hands back every candidate via
 `matches_by_keystroke` and the dispatcher does the focus-aware
 selection. (`find_by_keystroke`, which returns just the first by id
 order, ignores scope and is for non-dispatch queries only.)
@@ -405,14 +405,14 @@ aliasing above.
 User overrides are per-slot (`SlotOverride::{Default, Bound(ks),
 Unbound}`):
 
-- `Default` — delegate to whatever default the shortcut currently
+- `Default`, delegate to whatever default the shortcut currently
   declares (a later code-side change flows through).
-- `Bound(ks)` — lock the slot to this chord.
-- `Unbound` — lock the slot to *no* chord.
+- `Bound(ks)`, lock the slot to this chord.
+- `Unbound`, lock the slot to *no* chord.
 
 Rebinding primary does not disturb secondary, and vice versa. The
 registry's `rebind_primary` / `rebind_secondary` only touch the
-targeted slot — they do **not** auto-unbind conflicting shortcuts.
+targeted slot, they do **not** auto-unbind conflicting shortcuts.
 Use `ShortcutRegistry::find_conflict(keystroke, excluding_id)` before
 rebinding if you want the "exactly one effective binding per chord"
 invariant; that is what the pre-built
@@ -421,7 +421,7 @@ widget does in its capture-event handler.
 
 ---
 
-## `CaptureHandle` — one-shot key capture
+## `CaptureHandle`: one-shot key capture
 
 Used to implement "press a chord" rebind UIs. `ctx.begin_key_capture`
 returns a [`CaptureHandle`](../crates/teksilo-core/src/shortcut.rs): the
@@ -439,7 +439,7 @@ self.active_capture = Some(handle);   // hold onto it
 
 Re-arming (calling `begin_key_capture` again while a previous handle
 is still alive) creates a fresh slot; the old slot is already orphaned
-so dropping the old handle cancels only the old slot — no race with
+so dropping the old handle cancels only the old slot, no race with
 the newer capture. The pre-built
 [`ShortcutSettings`](../crates/teksilo-widgets/src/shortcut_settings.rs)
 widget packages this flow (Rebind buttons, conflict resolution, reset).
@@ -448,7 +448,7 @@ widget packages this flow (Rebind buttons, conflict resolution, reset).
 
 ## `Intent`
 
-Runtime message — name + optional payload. Construction:
+Runtime message, name + optional payload. Construction:
 
 ```rust
 use teksilo::core::Intent;
@@ -456,7 +456,7 @@ use teksilo::core::Intent;
 // Name-only (parameter-less):
 let i = Intent::new("app.save");
 
-// Typed payload (any T: 'static — stored in an Rc<dyn Any>):
+// Typed payload (any T: 'static, stored in an Rc<dyn Any>):
 let i = Intent::with_payload("app.scroll_by", -1_i32);
 let i = Intent::with_payload("app.add_item", my_dto);
 
@@ -485,17 +485,17 @@ if let Some(AppIntent::Open(path)) = AppIntent::from_intent(intent) {
 
 Action handlers return `IntentResponse`:
 
-- **`Handled`** (default) — stop walking; the intent is consumed here.
-- **`Propagated`** — observe-and-keep-going; ancestor widgets also get
+- **`Handled`** (default), stop walking; the intent is consumed here.
+- **`Propagated`**, observe-and-keep-going; ancestor widgets also get
   a chance. Useful when a widget wants to react (update a draft
   indicator) but lets an ancestor perform the primary action.
 
-`ActionBuilder::on_invoke` always reports `Handled` — use
+`ActionBuilder::on_invoke` always reports `Handled`, use
 `on_invoke_with_response` when you need to propagate.
 
 ---
 
-## `IntentKind` — typed DTO bridge
+## `IntentKind`: typed DTO bridge
 
 Use `#[derive(IntentKind)]` on an enum that catalogs the app's intents.
 Each variant declares its name via `#[name = "..."]`:
@@ -505,11 +505,11 @@ use teksilo::IntentKind;
 
 #[derive(Debug, IntentKind)]
 enum AppIntent {
-    // Unit variants — no payload fields:
+    // Unit variants, no payload fields:
     #[name = "app.save"]       Save,
     #[name = "app.quit"]       Quit,
 
-    // Tuple variants — whole variant is the payload:
+    // Tuple variants, whole variant is the payload:
     #[name = "app.open"]       Open(String),
     #[name = "app.scroll_by"]  ScrollBy(i32),
 
@@ -552,8 +552,8 @@ ctx.send_intent(AppIntent::GoToLine { line: 42 });   // struct
 
 ### Why the derive is dumb on purpose
 
-The macro never inspects fields. Any variant shape works — unit,
-tuple, struct, arbitrary user types — because the whole variant is
+The macro never inspects fields. Any variant shape works, unit,
+tuple, struct, arbitrary user types, because the whole variant is
 stored as the payload. The only requirement: the enum itself is
 `'static` (typically trivially true).
 
@@ -586,35 +586,35 @@ Key bits:
   different names on the same widget if needed; at a given level, if
   two actions match the same name, the first (by declaration order)
   wins.
-- **`intent: &'static str`** — the dispatch key. Must exactly match
+- **`intent: &'static str`**, the dispatch key. Must exactly match
   `Intent::name`. Typo-safety comes from `IntentKind`'s name attributes,
   not from the action side.
-- **`enabled_when: Option<Prop<bool>>`** — reactive predicate (builder
+- **`enabled_when: Option<Prop<bool>>`**, reactive predicate (builder
   takes `impl Into<Prop<bool>>`). When
   `false`, the action is skipped during dispatch (the intent
-  propagates past this level as if no match existed here — unless the
+  propagates past this level as if no match existed here, unless the
   firing shortcut has `propagate_when_disabled == false`, in which case
   it is consumed dormant).
-- **`on_invoke(|intent, ctx| …)`** — handler that always reports
+- **`on_invoke(|intent, ctx| …)`**, handler that always reports
   `Handled`.
-- **`on_invoke_with_response(|intent, ctx| …) -> IntentResponse`** — when
+- **`on_invoke_with_response(|intent, ctx| …) -> IntentResponse`**, when
   the handler needs to decide `Handled` vs `Propagated` at runtime.
 
 ### Scoped vs global actions
 
 `ctx.register_action(action)` attaches the action to the **registering widget's
-node** — it only fires when that widget is on the intent's source→root walk.
+node**, it only fires when that widget is on the intent's source→root walk.
 That's right for actions co-located with their UI (a panel handling a command
 fired from within itself).
 
 `ctx.register_action_global(action)` registers an **app-global** action consulted
-as a dispatch **fallback** — *after* the source→root walk finds no consuming node
-action — so it fires no matter where the intent originated. Use it for app-wide
+as a dispatch **fallback**, *after* the source→root walk finds no consuming node
+action, so it fires no matter where the intent originated. Use it for app-wide
 commands whose handler lives at the app root but whose triggers are scattered
 across the tree **and the window chrome**:
 
 - A **menu-bar dropdown** renders in an *overlay*, not under the widget that
-  built the menu — so a `MenuEntry::intent("app.x")` dispatched from it will
+  built the menu, so a `MenuEntry::intent("app.x")` dispatched from it will
   **not** reach an action registered with `register_action` on a sibling widget
   (e.g. the app body). This is the most common footgun: the menu item looks
   wired but nothing happens.
@@ -639,19 +639,19 @@ ctx.register_action_global(
 
 ### Handler patterns: extract only when needed
 
-The framework already name-matches before invoking a handler — an
+The framework already name-matches before invoking a handler, an
 action's invocation is proof of `intent.name == action.intent`. You
 only call `from_intent` when you need the *typed fields*.
 
 ```rust
-// Unit intent — no fields to extract, react by name alone.
+// Unit intent, no fields to extract, react by name alone.
 // This also means the handler fires whether the intent came from
 // a shortcut (name-only) or from `send_intent(AppIntent::Save)`.
 Action::new("app.save").on_invoke(|_intent, _ctx| {
     println!("[action] Save");
 });
 
-// Data-bearing intent — extract the typed variant:
+// Data-bearing intent, extract the typed variant:
 Action::new("app.open").on_invoke(|intent, _ctx| {
     if let Some(AppIntent::Open(path)) = AppIntent::from_intent(intent) {
         open_file(path);
@@ -690,15 +690,15 @@ ordering.
 
 - **Shortcut path**: anchor is the focused widget for scoped shortcuts.
   Global shortcuts use the focused widget when present, otherwise fall
-  back to the first arena root — so global shortcuts fire even before
+  back to the first arena root, so global shortcuts fire even before
   anything has been focused or after the focused widget is destroyed
   by a rebuild.
 - **`ctx.send_intent(...)`**: anchor is the widget whose handler ran.
-  Default `propagate_when_disabled = true` — programmatic sends have
+  Default `propagate_when_disabled = true`, programmatic sends have
   no shortcut to consult and take the least-surprising path.
-  ⚠️ When the handler runs in an **overlay** (menu dropdown, popover), the
+  Note:️ When the handler runs in an **overlay** (menu dropdown, popover), the
   anchor is the overlay's content, whose source→root walk does **not** pass
-  through the widget that opened it — register an app-global action
+  through the widget that opened it, register an app-global action
   (`register_action_global`) for commands fired from menus/chrome.
 - **Outside any handler** (a test, an app-layer hook): `WidgetTree::dispatch_intent`
   is crate-internal; call `ctx.send_intent(...)` inside
@@ -724,8 +724,8 @@ A KeyDown event flows through three stages, in this order:
    picks the one whose scope applies to the current focus (see
    [Same-chord precedence](#same-chord-precedence) above). If an
    applicable shortcut is found, its intent is activated and the key
-   event is consumed. If no candidate applies — every match is a
-   `Scoped` binding outside the focused subtree — the event falls
+   event is consumed. If no candidate applies, every match is a
+   `Scoped` binding outside the focused subtree, the event falls
    through to stage 2.
 2. **Ancestor key preview.** If no shortcut matched, the framework
    walks the focused widget's strict ancestors root → parent-of-target,
@@ -743,7 +743,7 @@ so a host `Ctrl+C` shortcut cannot steal the chord it forwards to its child.
 **Implication: shortcuts always win over `on_key_preview`.** An
 ancestor that wants to override a registered shortcut should *also*
 register a shortcut (with `enabled_when` gating which one fires when
-both are eligible) — `on_key_preview` cannot stop a shortcut because
+both are eligible), `on_key_preview` cannot stop a shortcut because
 shortcuts are resolved first. Use `on_key_preview` for chords *not*
 in the registry: a messenger composer claiming Enter that nobody
 registered as a shortcut, a list view consuming arrow keys that no
@@ -752,15 +752,15 @@ ancestor declared.
 ### Taking a text chord: `Ctrl+Z`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, `Ctrl+A`
 
 The same rule has a sharp edge worth naming, because an application that
-wants **one** Undo command — one chord, one menu row, routed to whatever
-the user is actually editing — has to register `Ctrl+Z` globally, and the
+wants **one** Undo command, one chord, one menu row, routed to whatever
+the user is actually editing, has to register `Ctrl+Z` globally, and the
 moment it does it has taken that key away from every text widget in the
 tree. `RichTextEditor`, `TextInputField` and `CodeEditor` all handle those
 chords in stage 3, so a global shortcut silently wins over all of them.
 
 Do not try to answer that from the application's own knowledge. It can
 recognise the surfaces it built and kept a handle on, and it is blind to
-the rest — a rename box in a table cell, a search field, an input inside a
+the rest, a rename box in a table cell, a search field, an input inside a
 dialog it did not write. Guessing gets it exactly backwards: `Ctrl+Z` in
 the widget it forgot undoes something else entirely, which is worse than
 not shipping the feature. A hand-maintained list of text widgets is
@@ -772,7 +772,7 @@ Ask the framework instead. Every text widget calls
 so the tree can answer completely:
 
 ```rust
-// Once, during build — the handle shares the tree's focus signal, so it
+// Once, during build, the handle shares the tree's focus signal, so it
 // stays live and can be read from a frame tick.
 let surfaces = ctx.text_surfaces();
 
@@ -783,15 +783,15 @@ match surfaces.focused() {
 }
 ```
 
-`TextSurfaces::focused()` yields an `Rc<dyn TextSurface>` — undo/redo,
-`history_frozen`, selection, read-only, clipboard, select-all — for
+`TextSurfaces::focused()` yields an `Rc<dyn TextSurface>`, undo/redo,
+`history_frozen`, selection, read-only, clipboard, select-all, for
 whichever widget holds the focus, whatever kind it is. Registrations are
 owned by the registering widget and torn down on its rebuild or destroy,
 exactly like `register_action_global`.
 
 Pair it with `enabled_when`. A disabled shortcut is treated as *not
 registered*, so the keystroke falls through to the focused widget's own
-handling — which is what you want whenever the router has nothing to
+handling, which is what you want whenever the router has nothing to
 offer. Between the two, the application only ever intercepts a text chord
 when it knows what it is doing.
 
@@ -857,7 +857,7 @@ impl Widget for Root {
             }
         }));
 
-        // --- UI — menus, buttons, tooltips all reference shortcuts
+        // --- UI, menus, buttons, tooltips all reference shortcuts
         //     by id. Labels refresh when the user rebinds because the
         //     widgets observe `shortcut_registry.version()`.
         let menu = MenuBar::new().menu(lit!("File"), || {
@@ -904,12 +904,12 @@ impl Widget for Root {
 | Typed enum bridge                          | `#[derive(IntentKind)]` + `#[name = "…"]` on each variant            |
 | Recover typed variant                      | `AppIntent::from_intent(intent)`                                     |
 | Raw payload lookup                         | `intent.payload::<T>()`                                              |
-| Observe registry changes                   | `ctx.shortcut_registry().version()` — `Signal<u64>`                  |
-| Effective view of a shortcut               | `ctx.effective_shortcut("id")` — merged defaults + overrides         |
+| Observe registry changes                   | `ctx.shortcut_registry().version()`, `Signal<u64>`                  |
+| Effective view of a shortcut               | `ctx.effective_shortcut("id")`, merged defaults + overrides         |
 | Menu label follows rebinds                 | `MenuItem::new(...).for_shortcut("id")`                              |
 | Tooltip shows chord + rebinds live         | `TooltipContent::new(...).for_shortcut("id")`                        |
 | Rebind UI out of the box                   | `ShortcutSettings::new()`                                            |
-| One-shot key capture                       | `ctx.begin_key_capture(\|ks, registry, ctx\| …)` — returns `CaptureHandle` |
+| One-shot key capture                       | `ctx.begin_key_capture(\|ks, registry, ctx\| …)`, returns `CaptureHandle` |
 
 ---
 
@@ -921,4 +921,4 @@ impl Widget for Root {
   [`action.rs`](../crates/teksilo-core/src/action.rs)
 - Derive macro: [`crates/teksilo-macros/src/intent_kind.rs`](../crates/teksilo-macros/src/intent_kind.rs)
 - Pre-built settings widget: [`crates/teksilo-widgets/src/shortcut_settings.rs`](../crates/teksilo-widgets/src/shortcut_settings.rs)
-- [Architecture §11](architecture.md#11-actions-intents-and-shortcuts): one-paragraph summary pointing back here
+- [Architecture §11](architecture.md#input-and-accessibility): one-paragraph summary pointing back here

@@ -1394,7 +1394,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
         // and is in neither: appending it here made the node announce "100 %"
         // and review "100", the divergence `audit::text_range_divergences`
         // exists to catch. The unit reaches a reader once the field emits it
-        // as text; `docs/accessibility-internal-audit.md` records the gap.
+        // as text; `engineering/docs/accessibility-internal-audit.md` records the gap.
         let field = field.access_customize({
             let label = self.label.clone();
             let value = self.value.clone();

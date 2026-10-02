@@ -3,7 +3,7 @@
 
 //! The `teksu!` DSL proc-macro for Teksilo widget trees.
 //!
-//! See `docs/teksu-language-spec-v3.md` for the surface language. This
+//! See `engineering/docs/teksu-language-spec-v3.md` for the surface language. This
 //! crate implements a one-to-one syntactic transform from the DSL to
 //! Teksilo V2 builder calls. The macro's only job is to remove syntactic
 //! noise: every construct desugars to code the user could have written
@@ -76,7 +76,7 @@ pub(crate) fn teksilo_core_root() -> TokenStream2 {
 ///                                  // for passing to .child(...) etc.
 /// ```
 ///
-/// See `docs/teksu-language-spec-v3.md` for the full surface language.
+/// See `engineering/docs/teksu-language-spec-v3.md` for the full surface language.
 #[proc_macro]
 pub fn teksu(input: TokenStream) -> TokenStream {
     match teksilo_parse::parse_root(input.into()) {

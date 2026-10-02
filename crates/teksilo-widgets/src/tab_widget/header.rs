@@ -41,7 +41,7 @@
 //! `RevealPolicy::Always` (Touch) no `visible_when` gate is installed at all,
 //! so a finger simply sees it — and an assistive "Close" custom action
 //! ([`CLOSE_ACTION_ID`]) reaches it without hover or a middle-click. That is
-//! row 5 of `docs/hover-affordance-census.md`, now closed.
+//! row 5 of `engineering/docs/hover-affordance-census.md`, now closed.
 
 use std::cell::RefCell;
 use std::rc::Rc;

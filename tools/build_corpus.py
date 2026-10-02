@@ -15,10 +15,8 @@ Deliberately excluded, for three different reasons:
   symbol-lookup path already reads their source of truth, so indexing the
   generated pages too would duplicate that path and dilute BM25 scores.
 * ``docs/SUMMARY.md`` — an mdBook table of contents, not prose.
-* ``docs/docking-horizontal-rail.md`` — prose, and readable prose, but
-  written for a *contributor* ("delete these tests", "rewrite this
-  function") about work that has not been started. It is excluded for
-  audience, not for form: see ``EXCLUDED_TOP_LEVEL_DOCS``.
+* ``engineering/docs/`` contains maintainer records and design history outside
+  the consumer documentation source tree. It is not indexed.
 
 **Nothing is copied.** ``corpus/`` holds ``index.json`` and nothing else.
 An earlier version mirrored all 158 source files into ``corpus/`` and
@@ -198,38 +196,10 @@ DEFAULT_OUT_DIR = CORPUS_CRATE_DIR / "corpus"
 # hand-written prose. See the module docstring for why these are excluded.
 EXCLUDED_DOC_SUBDIRS = {"widgets", "data-collections", "settings", "scene"}
 
-# Two entries, excluded for two unrelated reasons.
-#
-# `SUMMARY.md` is not prose — an mdBook table of contents, all links.
-#
-# `docs/docking-horizontal-rail.md` IS prose. It is excluded because it is
-# addressed to a different reader: it is an unstarted contributor backlog
-# ("delete these tests", "rewrite this function") for a docking feature that
-# `docs/docking.md` already documents as shipped. Measured against this
-# corpus, its 6 chunks took slots #1 AND #2 on `rail orientation` — pushing
-# `docs/docking.md › 5. Tabs or an activity rail`, the consumer guide's own
-# section on exactly that, to #3 — and it ranked #1 on four of five plausible
-# rail queries. The one consumer-actionable fact it carries is already in
-# `docs/docking.md:262-272`, said better. An agent that lands on it reads
-# planned work as though it were API.
-#
-# It keeps its book chapter and its link from `docs/docking.md`; it just
-# stops competing for a consumer agent's top slot.
-#
-# Why this is a skip-list entry and NOT a `kind: "backlog"` value, which is
-# the obvious alternative and the one the next reader will propose: the two
-# existing `kind` values are *derived*. "footer" falls out of a regex on the
-# heading conjoined with a link-density threshold on the body — mechanical,
-# test-enforced, and computed afresh from the file on every build. "Is this
-# document unstarted work?" is editorial judgement; no regex derives it, so a
-# `kind: "backlog"` would have to be hand-declared in a marker at the top of
-# each file. That rots the wrong way. A file whose marker was never added
-# ships as an ordinary guide, wearing the tool's blessing, and nothing ever
-# notices — the failure is silent and points at the agent. A skip-list rots
-# the safe way: forget to add an entry and a doc is merely indexed, which is
-# the status quo; the list is short, lives beside its reasons, and a reader
-# reviewing one file sees every judgement call at once.
-EXCLUDED_TOP_LEVEL_DOCS = {"SUMMARY.md", "docking-horizontal-rail.md"}
+# The book TOC is navigation, not prose. Engineering records live outside
+# DOCS_DIR and are not consumer search results.
+
+EXCLUDED_TOP_LEVEL_DOCS = {"SUMMARY.md"}
 
 # A guide's closing navigation footer — "See also", "Reference", "Code
 # references" — is a list of links, not prose, and it is not retrievable

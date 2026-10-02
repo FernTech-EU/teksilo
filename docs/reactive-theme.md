@@ -3,7 +3,7 @@
 
 # Reactive Theme Reference
 
-> This doc covers the **reactive** layer — how `Theme` flows through
+> This doc covers the **reactive** layer, how `Theme` flows through
 > `Signal`s, roles, and props so a theme swap repaints without a
 > rebuild. For the broader styling picture (the four-tier ladder:
 > tokens → variants → recipes → style protocols, `Theme` construction,
@@ -20,8 +20,8 @@ Teksilo runs its theme through three layers of reactive primitives:
 
 The rules:
 
-1. **`set_theme` never rebuilds.** It updates the signal and dirty-marks every node; the next layout/paint pass reads the new theme and repaints affected widgets. Focus, scroll offsets, expanded panels — all interaction state survives a theme switch.
-2. **Roles resolve at paint/layout time.** A widget that stores `ColorProp::TextRole(TextRole::Primary)` looks up `ctx.theme.colors.text_primary` in its `paint` — never at build time.
+1. **`set_theme` never rebuilds.** It updates the signal and dirty-marks every node; the next layout/paint pass reads the new theme and repaints affected widgets. Focus, scroll offsets, expanded panels, all interaction state survives a theme switch.
+2. **Roles resolve at paint/layout time.** A widget that stores `ColorProp::TextRole(TextRole::Primary)` looks up `ctx.theme.colors.text_primary` in its `paint`, never at build time.
 3. **User code almost never needs to name `theme_signal`.** Builders accept roles directly; `Signal<Role>` covers the interaction-driven case.
 
 ---
@@ -31,7 +31,7 @@ The rules:
 ```rust
 use teksilo::prelude::*;  // re-exports Color, Role enums, ColorProp, TextStyleProp
 
-// Plain text — default role is TextRole::Primary.
+// Plain text, default role is TextRole::Primary.
 TextWidget::new(lit!("Hello"))
 
 // Role-based color: resolved against current theme, reactive.
@@ -52,7 +52,7 @@ Panel::new()
     .border_color(BorderRole::Default)
     .corner_radius(8.0)
 
-// Reactive SurfaceRole — the role itself depends on interaction state.
+// Reactive SurfaceRole, the role itself depends on interaction state.
 let bg_role = interaction.map(|s| match s {
     InteractionState::Hovered => SurfaceRole::Hover,
     InteractionState::Pressed => SurfaceRole::Pressed,
@@ -71,11 +71,11 @@ pub fn set_theme(&mut self, theme: Theme)
 
 Declared at [`crates/teksilo-core/src/widget_tree.rs`](../crates/teksilo-core/src/widget_tree.rs) (around line 2120). Sequence:
 
-1. `self.theme = theme.clone()` — the cached `&Theme` accessor still works.
-2. `self.theme_signal.set(theme)` — fires observers (derived `Signal<Theme>`s, role-carrying `ColorProp`s via their bindings).
-3. `self.recompute_effective_theme()` — re-derives the cached effective theme the walkers read (typography scaled by the global text scale).
-4. `self.arena.mark_all_dirty()` — every node needs layout and paint.
-5. `self.a11y_dirty = true` — labels re-shape under the new typography, so their text runs are re-walked.
+1. `self.theme = theme.clone()`, the cached `&Theme` accessor still works.
+2. `self.theme_signal.set(theme)`, fires observers (derived `Signal<Theme>`s, role-carrying `ColorProp`s via their bindings).
+3. `self.recompute_effective_theme()`, re-derives the cached effective theme the walkers read (typography scaled by the global text scale).
+4. `self.arena.mark_all_dirty()`, every node needs layout and paint.
+5. `self.a11y_dirty = true`, labels re-shape under the new typography, so their text runs are re-walked.
 
 No `rebuild_built_widgets` call, no focus clearing. `set_locale` follows the same pattern on `locale_signal`.
 
@@ -105,7 +105,7 @@ let light = intui::light();   // teksilo_core::presets::intui::light
 let dark  = intui::dark();
 ```
 
-Both are neutral Int UI baselines — not visually distinctive, designed to be customized. Apps usually start from one of them and override the slots they care about. For the full styling picture (variants, recipes, style traits) see [`styling-system.md`](styling-system.md).
+Both are neutral Int UI baselines, not visually distinctive, designed to be customized. Apps usually start from one of them and override the slots they care about. For the full styling picture (variants, recipes, style traits) see [`styling-system.md`](styling-system.md).
 
 ### Programmatic customization via struct spread
 
@@ -138,13 +138,13 @@ let editor_light = Theme {
 tree.set_theme(editor_light);
 ```
 
-`ColorTokens::light_default()` and the other raw-token defaults still live in `teksilo-tokens` — only the `Theme`-level constructor moved.
+`ColorTokens::light_default()` and the other raw-token defaults still live in `teksilo-tokens`, only the `Theme`-level constructor moved.
 
 The same pattern works for sub-trees via `set_theme_override(panel_id, |theme| { ... })` (see above).
 
 ### Loading from a file
 
-`Theme` and every token struct derive `serde::Serialize` and `serde::Deserialize`, so themes round-trip through any serde format the app picks (TOML, JSON, RON, YAML). The `style_slots` and `extensions` fields are `#[serde(skip)]` — a deserialized `Theme` gets empty defaults for those, so style-trait overrides are re-installed in code, not loaded from the file. The runtime cost is one read + one deserialize + one `set_theme` call:
+`Theme` and every token struct derive `serde::Serialize` and `serde::Deserialize`, so themes round-trip through any serde format the app picks (TOML, JSON, RON, YAML). The `style_slots` and `extensions` fields are `#[serde(skip)]`, a deserialized `Theme` gets empty defaults for those, so style-trait overrides are re-installed in code, not loaded from the file. The runtime cost is one read + one deserialize + one `set_theme` call:
 
 ```rust
 use std::fs;
@@ -155,11 +155,11 @@ let theme: Theme = toml::from_str(&toml)?;
 tree.set_theme(theme);
 ```
 
-Authoring a theme file is the inverse — `toml::to_string(&intui::light())?` writes a complete starter file the user can edit.
+Authoring a theme file is the inverse, `toml::to_string(&intui::light())?` writes a complete starter file the user can edit.
 
-### Partial files — current limitation
+### Partial files: current limitation
 
-The token structs **do not** carry `#[serde(default)]` on their fields, so a file missing any field fails to deserialize. (The exceptions are `InputTokens`, defaulted at struct level, and `Theme::id` / `Theme::input`, defaulted so older files still load.) To accept hand-edited theme files that only specify a few overrides, the app needs to do the merge itself — typically by deserializing into an `Option`-wrapped or `serde_json::Value` shape, then folding non-null values onto a base produced by `intui::light()`. A future change can add `#[serde(default)]` so partial files merge automatically; until it lands, treat the file format as "all fields required."
+The token structs **do not** carry `#[serde(default)]` on their fields, so a file missing any field fails to deserialize. (The exceptions are `InputTokens`, defaulted at struct level, and `Theme::id` / `Theme::input`, defaulted so older files still load.) To accept hand-edited theme files that only specify a few overrides, the app needs to do the merge itself, typically by deserializing into an `Option`-wrapped or `serde_json::Value` shape, then folding non-null values onto a base produced by `intui::light()`. A future change can add `#[serde(default)]` so partial files merge automatically; until it lands, treat the file format as "all fields required."
 
 ---
 
@@ -175,7 +175,7 @@ Foreground text color.
 ### `SurfaceRole`
 Filled-area color (panel backgrounds, button fills, selection highlights).
 
-`Main` (default), `Content`, `Raised`, `Sunken`, `Hover`, `Pressed`, `Selected`, `SelectedInactive`, `AltRow`, `Accent`, `AccentHover`, `AccentPressed`, `AccentDisabled`, `Field`, `Disabled`, `AccentSubtle`, `StatusInfo`, `StatusSuccess`, `StatusWarning`, `StatusError`, `ErrorContainer`, `Container`, `ContainerRaised`, `ContainerSunken`, `TooltipBg`, `EditorBg`, `EditorCaret`, `EditorCurrentLineBg`, `EditorSelectionBg`, `Scrim`, **`Transparent`** (paints nothing — the "no surface" slot in interaction chains).
+`Main` (default), `Content`, `Raised`, `Sunken`, `Hover`, `Pressed`, `Selected`, `SelectedInactive`, `AltRow`, `Accent`, `AccentHover`, `AccentPressed`, `AccentDisabled`, `Field`, `Disabled`, `AccentSubtle`, `StatusInfo`, `StatusSuccess`, `StatusWarning`, `StatusError`, `ErrorContainer`, `Container`, `ContainerRaised`, `ContainerSunken`, `TooltipBg`, `EditorBg`, `EditorCaret`, `EditorCurrentLineBg`, `EditorSelectionBg`, `Scrim`, **`Transparent`** (paints nothing, the "no surface" slot in interaction chains).
 
 The `OnError`/`*Container` roles are the cross-design-language slots shared by Material 3 / Fluent / macOS / GTK4-Adwaita; design-language-specific colors (M3 secondary/tertiary triads, full tonal ladder) live in per-theme extensions instead.
 
@@ -184,7 +184,7 @@ Stroke color.
 
 `Default` (default), `Strong`, `Focused`, `Error`, `Warning`, `Divider`, `DividerStrong`, `TooltipBorder`, `Accent`, `AccentDisabled`, `Field`, `Disabled`, **`Transparent`**.
 
-**Disabled auto-dim.** When a leaf resolves a role-based `ColorProp` in a disabled subtree (`enabled == false`), `TextRole` substitutes `Disabled` and the accent `SurfaceRole`/`BorderRole` family (`Accent`/`AccentHover`/`AccentPressed`, `BorderRole::Accent`) substitutes its `AccentDisabled` counterpart, and the neutral interactive `SurfaceRole::Field` / `BorderRole::Field` substitute `Disabled` — so role-driven control chrome dims without per-widget handling. Other surfaces/borders pass through (a disabled `Panel` keeps its surface). `ColorProp::undimmed(..)` opts a colour that carries *state* (a save indicator, a severity) out of the substitution. See [styling-system.md](styling-system.md), "How a widget goes grey when disabled".
+**Disabled auto-dim.** When a leaf resolves a role-based `ColorProp` in a disabled subtree (`enabled == false`), `TextRole` substitutes `Disabled` and the accent `SurfaceRole`/`BorderRole` family (`Accent`/`AccentHover`/`AccentPressed`, `BorderRole::Accent`) substitutes its `AccentDisabled` counterpart, and the neutral interactive `SurfaceRole::Field` / `BorderRole::Field` substitute `Disabled`, so role-driven control chrome dims without per-widget handling. Other surfaces/borders pass through (a disabled `Panel` keeps its surface). `ColorProp::undimmed(..)` opts a colour that carries *state* (a save indicator, a severity) out of the substitution. See [styling-system.md](styling-system.md), "How a widget goes grey when disabled".
 
 ### `TextStyleRole`
 Typography role.
@@ -193,7 +193,7 @@ Typography role.
 
 Every role has a `resolve(&ColorTokens)` (or `resolve(&TypographyTokens)` for `TextStyleRole`) method. Paint/layout code already calls those under the hood when reading a `ColorProp` / `TextStyleProp`.
 
-**Adding a role.** Add the variant to the enum, extend `resolve(..)`, re-export from `teksilo::prelude`. Add a role only when more than one widget repeatedly wants the same token — otherwise a `.color(Color::..)` literal is fine.
+**Adding a role.** Add the variant to the enum, extend `resolve(..)`, re-export from `teksilo::prelude`. Add a role only when more than one widget repeatedly wants the same token, otherwise a `.color(Color::..)` literal is fine.
 
 ---
 
@@ -215,7 +215,7 @@ pub enum ColorProp {
 
 Widget color builders accept `impl Into<ColorProp>`. Every input shape above implements `From` (except `Undimmed`), plus `From<Prop<Color>>` for migrating legacy callers and `From<RecipeColor>`. Call `cp.resolve(&theme, enabled)` in paint (pass `ctx.effective_enabled`, which drives the disabled substitution) and `cp.register_if_bound(self_id, registry, level)` in build to hook signal-bearing variants into dirty-tracking.
 
-Role variants need no binding registration — the tree-wide `mark_all_dirty` inside `set_theme` already forces a repaint.
+Role variants need no binding registration, the tree-wide `mark_all_dirty` inside `set_theme` already forces a repaint.
 
 ### Which variant to use
 
@@ -240,15 +240,15 @@ pub enum TextStyleProp {
 
 `TextWidget::style(...)` and the other style-accepting builders take `impl Into<TextStyleProp>`. Default is `TextStyleRole::Body`, so a bare `TextWidget::new(lit!("x"))` follows the theme typography.
 
-Resolved at paint/layout via `prop.resolve(&ctx.theme.typography)`. Changing `Theme::typography` on a running tree updates every `TextWidget` that uses a role; widgets that passed a raw `TextStyle` stay frozen (that's the user intent — custom fonts stay custom).
+Resolved at paint/layout via `prop.resolve(&ctx.theme.typography)`. Changing `Theme::typography` on a running tree updates every `TextWidget` that uses a role; widgets that passed a raw `TextStyle` stay frozen (that's the user intent, custom fonts stay custom).
 
 ---
 
 ## Interaction-driven colors: the `Signal<Role>` pattern
 
-For state-dependent colors (hover, pressed, focus, disabled), emit a `Signal<Role>` from the interaction signal and pass it as `ColorProp` directly — the paint layer handles the theme lookup. No explicit `theme_signal` zip.
+For state-dependent colors (hover, pressed, focus, disabled), emit a `Signal<Role>` from the interaction signal and pass it as `ColorProp` directly, the paint layer handles the theme lookup. No explicit `theme_signal` zip.
 
-### Template — a variant × state role map
+### Template: a variant × state role map
 
 ```rust
 fn resolve_bg_role(variant: ButtonVariant, state: InteractionState) -> SurfaceRole {
@@ -291,9 +291,9 @@ The `interaction` signal is the *only* upstream root the role signals observe. W
 
 Three cases keep an explicit `theme_signal`:
 
-1. **Color transformations** (`token.with_alpha(0.2)` etc.) — no role represents "accent at 12 % alpha"; use `theme_signal.map(|t| t.colors.accent.with_alpha(0.12))` to get a `Signal<Color>`.
-2. **Effects on external state** — the rich-text engine's per-frame palette, for instance. See [`primitives/text_input_field.rs`](../crates/teksilo-widgets/src/primitives/text_input_field.rs) for the `ctx.effect(&theme_signal, move |theme| { ... })` pattern.
-3. **Layout snapshots** — `let shape = ctx.theme_signal().get().shape` at the top of `build()` captures corner radii; `let layout = ctx.theme_signal().get().layout` captures spacing values. These rarely differ across themes; the snapshot is fine.
+1. **Color transformations** (`token.with_alpha(0.2)` etc.), no role represents "accent at 12 % alpha"; use `theme_signal.map(|t| t.colors.accent.with_alpha(0.12))` to get a `Signal<Color>`.
+2. **Effects on external state**, the rich-text engine's per-frame palette, for instance. See [`primitives/text_input_field.rs`](../crates/teksilo-widgets/src/primitives/text_input_field.rs) for the `ctx.effect(&theme_signal, move |theme| { ... })` pattern.
+3. **Layout snapshots**, `let shape = ctx.theme_signal().get().shape` at the top of `build()` captures corner radii; `let layout = ctx.theme_signal().get().layout` captures spacing values. These rarely differ across themes; the snapshot is fine.
 
 ---
 
@@ -313,7 +313,7 @@ Pass a static `f32`, a `Signal<f32>`, or a `Prop<f32>`; the builder registers a 
 
 ---
 
-## DX — what developers should write
+## DX: what developers should write
 
 **Good (most common paths):**
 
@@ -345,7 +345,7 @@ let bg = interaction.map(|s| map_to_surface_role(*s));
 RectWidget::new().background(bg)
 ```
 
-**Avoid (legacy pattern — only keep when no role fits):**
+**Avoid (legacy pattern, only keep when no role fits):**
 
 ```rust
 // Don't write this for normal theme colors:
@@ -361,7 +361,7 @@ RectWidget::new().background(bg)
 
 | Old form | New form |
 |----------|----------|
-| `.color(ctx.theme().colors.text_primary)` | `.color(TextRole::Primary)` (or drop — it's the default) |
+| `.color(ctx.theme().colors.text_primary)` | `.color(TextRole::Primary)` (or drop, it's the default) |
 | `.background(theme.colors.surface_raised)` | `.background(SurfaceRole::Raised)` |
 | `.border_color(theme.colors.border)` | `.border_color(BorderRole::Default)` |
 | `.style(theme.typography.body_bold.clone())` | `.style(TextStyleRole::BodyBold)` |

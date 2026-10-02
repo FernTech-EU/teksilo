@@ -12,7 +12,7 @@
 
 ## Status: what this document is for
 
-[teksu-macro-reference.md](teksu-macro-reference.md) is **normative for behaviour**. When the
+[teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is **normative for behaviour**. When the
 two documents disagree about what the macro does, the reference is right and this file is
 stale; where neither settles it, the source does, and the section below names the file and line
 for each rule.
@@ -32,7 +32,7 @@ v4** immediately below.
 
 ## Why there is no v4
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A September 2026 review asked whether the grammar should be revised. The answer was that v3 is
 close enough to good enough not to start a v4, but not because the DSL was fine: it shipped
@@ -184,7 +184,7 @@ method calls, and all three of Freya's stated reasons measure in its favour.
 
 ## Changelog from v3 as shipped
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Fourteen places where v3 as written does not describe v3 as built. Each was verified against the
 source before the body text was changed, and every corrected code example was compiled.
@@ -296,7 +296,7 @@ producing a widget, and lowers to `.child(expr)`
 
 ## Changelog from v2
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Four structural changes, all driven by review of v2 against the actual widget catalog and by subsequent design discussion.
 
@@ -323,7 +323,7 @@ Em-dashes and middle dots in quoted source strings are preserved verbatim. The "
 
 ## 1. Design Principles
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 The `teksu!` macro is a thin syntactic transform. It is not a new runtime, not a new type system, and not a new reactivity model. Every `teksu!` block desugars to a sequence of builder calls against Teksilo API. There is no hidden allocation, no intermediate virtual tree, no diff step. The macro's only job is to remove syntactic noise from code that already expresses a widget tree.
 
@@ -343,7 +343,7 @@ Fifth, the macro never introduces new capabilities. If a construct cannot be exp
 
 ## 2. Lexical Structure
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A `teksu!` invocation takes one of two forms.
 
@@ -360,13 +360,13 @@ Disambiguation is lexical. The macro parser looks at the first tokens: if the le
 
 ## 3. Elements
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 An element is the fundamental unit of the language. It names a widget type (possibly with an explicit constructor path), optionally carries positional arguments and a body block containing properties, bindings, and child elements.
 
 ### 3.1 Grammar
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 ```
 element       := type_path ( "::" constructor )? ( "(" positional_args ")" )?
@@ -401,7 +401,7 @@ At positions where an `arg` is expected, the parser uses "commit on distinctive 
 
 ### 3.2 Constructors
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 The type path in an element may end with an explicit associated function name. If present, the macro emits that function as the constructor. If absent, the macro emits `::new` as the default.
 
@@ -420,7 +420,7 @@ Parenthesized arguments after the constructor are passed verbatim in order. An e
 
 ### 3.3 Bindings: `name = Element`
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Naming a widget binds its `WidgetId` to a local so it can be referenced later. Bindings work in two places: at body position inside a container, and in property-argument position.
 
@@ -525,7 +525,7 @@ namespace: keep them distinct.
 
 ### 3.4 Properties
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A property is `name: arg1, arg2, ...` and desugars to a builder method call with those arguments.
 
@@ -712,7 +712,7 @@ Properties are never reinterpreted. `color: c.text_primary` emits `.color(c.text
 
 ### 3.5 Handlers
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Handler attachment is a property. The grammar does not distinguish handlers from configuration. Convention names them `on_*`, but this is enforced by each widget's builder API, not by the macro.
 
@@ -738,7 +738,7 @@ All three desugar to the method call named by the property. The macro does not m
 
 #### Reorder of wrapping properties
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A property whose name is a method on the `WidgetBuilder` trait returning `WidgetWithHandlers<T>` is moved to the **end** of the emitted chain. Every other body item keeps its source position, and relative order within each of the two groups is preserved.
 
@@ -750,7 +750,7 @@ An argument-free wrapping method (§3.4's bare-lowercase form) is reordered on t
 
 ### 3.6 Child Elements
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A bare element at body position, with no `name:` prefix and no `name =` binding, is a child element. Children desugar to `.child(...)` calls on the parent, using the inline-child resolution path from architecture §6.
 
@@ -843,13 +843,13 @@ compiler's own `no method named 'child'` error is clear enough.
 
 ## 4. Widget Categories
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Every Teksilo widget falls into one of two categories based on how it accepts content. The category determines which DSL form applies.
 
 ### 4.1 Category A: Has `.child()`
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 These widgets accept one or more children through a `.child(..)` method taking `impl IntoTeksiChild`, so the same name takes a widget or a `WidgetId`. Body-block child syntax in the DSL maps directly. (`Cycle` and `RadioGroup` are the exceptions whose `.child(..)` takes `impl Widget` only, so a binding or an id cannot attach there.)
 
@@ -883,7 +883,7 @@ Bare children and bound children both desugar to `.child(..)`.
 
 ### 4.2 Category B: Named Slots
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 These widgets have no `.child()` method. Content goes through named setter methods, one per semantic slot. Most slot methods take `impl IntoTeksiChild`, so `.slot_name(..)` accepts a widget or a `WidgetId`; there is no `*_id` twin. The exceptions take a widget value only: `PopoverWidget::content` and `Wizard::trigger` (`impl Widget`), `Dialog::content` (a factory), `Breadcrumb::item` (a `BreadcrumbItem`) and `Wizard::step` (a `Step`).
 
@@ -925,13 +925,13 @@ A binding or a `#{ expr }` escape in a slot position uses the slot's own name. T
 
 ### 4.3 Leaf Widgets
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Widgets with no child-accepting methods at all. Buttons, TextWidget, IconWidget, ImageWidget, RectWidget, Badge, Link, Spacer, Divider, Toggle, Checkbox, RadioButton, Slider, ProgressBar. These have properties but no body children or slots. Their DSL form is just `Type(args) { property: value, on_handler: closure, ... }`.
 
 ### 4.4 Wizard
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Wizard is structurally its own case: it takes a title in the constructor and wires multi-step content through `.step(Step)` and `.steps(iter)` methods. It is not refactored in Appendix A because its shape does not fit cleanly into either Category A or B. For DSL authoring, treat Wizard like Category B with named slots, adding `step` and `steps` to the slot vocabulary.
 
@@ -941,13 +941,13 @@ As shipped the macro agrees: `Wizard` is in `is_category_b_widget`, so a bare ch
 
 ## 5. Structural Forms
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Pure element syntax handles fixed structure, fixed properties, fixed children. The remaining cases, conditional inclusion, iteration, local bindings, side effects, and programmatic subtree splicing, get first-class structural forms rather than forcing users back to builder syntax mid-block.
 
 ### 5.1 `if` Forms
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 The condition is an arbitrary Rust `if` head, including `if let` and `else if` chains.
 
@@ -1031,7 +1031,7 @@ after build. Being explicit about which one you get is arguably the better outco
 
 ### 5.2 `for` Forms
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Iteration produces a stream of children from a regular Rust iterator.
 
@@ -1064,7 +1064,7 @@ For dynamic item collections backed by `ListModel<T>`, use the `ListView` widget
 
 ### 5.3 `match` Forms
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 ```rust
 VStack {
@@ -1086,7 +1086,7 @@ VStack::new()
 
 ### 5.4 `let` Forms
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A `let` binding at body position introduces a computed value used by subsequent elements.
 
@@ -1103,7 +1103,7 @@ When a body contains `let` bindings, the desugaring switches from a pure builder
 
 ### 5.5 Spread Forms
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A spread `..expr` inlines an iterable of children at that position. v3 said "a `Vec<WidgetId>`
 or an iterator of widgets". The emitted loop calls `.child(item)` once per item
@@ -1134,7 +1134,7 @@ Spread is for programmatic child list assembly (plugin registries, restored work
 
 ### 5.6 `rust` Forms
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 A `rust { ... }` block switches to imperative construction. Two shapes, distinguished by whether the block produces a value.
 
@@ -1190,13 +1190,13 @@ A block that borrows `ctx` mutably, like the `subscribe_event` call above, only 
 
 ## 6. Escape Hatches
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 One escape into host Rust, in addition to the `rust { }` block.
 
 ### 6.1 Expression Escape: `#{ expr }`
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Anywhere a child element or property value is expected, `#{ expr }` takes a Rust expression and
 inserts its value at that position. At child position it emits `.child(expr)`; at a slot
@@ -1238,13 +1238,13 @@ For bare identifiers at property-value positions, `#{ }` is not required: `text:
 
 ## 7. Worked Translations
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Each translation takes a block from one of the uploaded example files and shows the `teksu!` equivalent against the actual post-refactor constructor and method names. Translations assume Appendix A has been applied.
 
 ### 7.1 simple-button
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source:
 
@@ -1280,7 +1280,7 @@ The explicit `::new` names the constructor. Four lines instead of six, property 
 
 ### 7.2 text-and-layout, outer Padding and VStack
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source:
 
@@ -1334,7 +1334,7 @@ All `.child(...)` wrappers collapse. Siblings land at equal depth. `::uniform` a
 
 ### 7.3 text-and-layout, build_color_box helper
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source:
 
@@ -1392,7 +1392,7 @@ The return type changes from `Panel` to `impl Widget` because the macro's output
 
 ### 7.4 title-bar-demo, multi-argument properties and slots
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source:
 
@@ -1439,7 +1439,7 @@ Three things to note. First, `border: color, width` is the multi-argument proper
 
 ### 7.5 tab-widget, full TabWidget with multi-arg element values
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source (abbreviated):
 
@@ -1555,7 +1555,7 @@ escape hatch that `crates/teksilo/tests/teksi/pass/54_paren_wraps_method_chain.r
 
 ### 7.6 overlay-demo, Dialog / Popover / Snackbar (post-refactor)
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source with post-refactor API:
 
@@ -1679,7 +1679,7 @@ Five things exercise the language here. First, `ScrollArea` is Category A post-r
 
 ### 7.7 internationalization, mixed declarative and imperative
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source:
 
@@ -1773,7 +1773,7 @@ All the hoisted `let id = ctx.add(...)` in the source collapse into declarative 
 
 ### 7.8 widget-catalog, event subscription in rust block
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Source (abbreviated):
 
@@ -1941,7 +1941,7 @@ The `let` forms at body position handle the signal cloning. The `rust { }` side-
 
 ### 7.9 Card, Category B with bound slot widget
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 An illustration of the `name = Element` binding used in slot position:
 
@@ -1996,9 +1996,9 @@ teksu!(
 
 ## 8. Handler Attachment Rules
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
-The V2 model splits handlers between two attachment patterns ([events-and-gestures.md](events-and-gestures.md)): handlers on child widgets (Checkbox on MinSize, Accordion on its header) and handlers attached to `self` via `HandlerSet::new()` + `ctx.apply_self_handlers()` (Button, Toggle, Slider, SegmentedControl).
+The V2 model splits handlers between two attachment patterns ([events-and-gestures.md](../../docs/events-and-gestures.md)): handlers on child widgets (Checkbox on MinSize, Accordion on its header) and handlers attached to `self` via `HandlerSet::new()` + `ctx.apply_self_handlers()` (Button, Toggle, Slider, SegmentedControl).
 
 `teksu!` does not change this. Handlers written on an element attach via the builder methods of that element. Which attachment mechanism the builder uses internally is a per-widget implementation detail.
 
@@ -2008,13 +2008,13 @@ For the rarer case of attaching handlers to `self` inside a widget's own `build(
 
 ## 9. Error Reporting Discipline
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Every span the macro emits must be traceable to a user token. The `tr!` macro established the precedent: a missing translation key produces an error pointing at the key identifier. `teksu!` adheres to the same discipline.
 
 ### 9.1 Span Mapping Rules
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Type errors on widget constructors point at the type path. `Buton::new("x") { ... }` fails with `cannot find type 'Buton'` under the `Buton` identifier.
 
@@ -2030,7 +2030,7 @@ Parsing errors where an element prefix matched but the element failed to parse f
 
 ### 9.2 Common Errors
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 v3 illustrated this section with three invented messages. Two of them were never written, and
 one described a rule that went the other way: commas between body items are accepted, not
@@ -2117,7 +2117,7 @@ better, and both worth knowing:
 
 ## 10. What `teksu!` Does Not Do
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 **Implicit theme access.** Every reference to theme tokens is an explicit Rust path. Implicit access would require a thread-local (fights multi-window) or an injected ctx parameter (breaks error messages). Possible mitigation, not implemented: a small `themed!` helper macro that expands to `let t = &theme.typography; let c = &theme.colors;`.
 
@@ -2137,7 +2137,7 @@ better, and both worth knowing:
 
 ## 11. Implementation Notes
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 The macro is exported through the `teksilo` umbrella as `teksilo::teksu!`. v3 put the whole
 implementation in one new crate, `teksilo-macros`. **It shipped split across two**, because the
@@ -2198,7 +2198,7 @@ That is the gap a golden-file tier would have closed.
 
 ## 12. Summary
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 The `teksu!` language is a block-structured DSL for Teksilo widget trees. It reads like QML or Kotlin, compiles to V2 builder calls with no runtime overhead, preserves existing reactivity and capture semantics without new syntax, and produces user-facing error spans.
 
@@ -2210,14 +2210,14 @@ Two things this design asked for were not built: type-directed reactive `if` (§
 universal `*_id` twin (Appendix A.6), which was removed in favour of one slot method taking
 `impl IntoTeksiChild`. The `IntoTeksiChild` routing for `#{ }` (§6.1) did land, in the builders
 rather than the macro. Two things arrived after the design was written: commas as optional body
-separators (§3.1) and the expression child (§3.6). [teksu-macro-reference.md](teksu-macro-reference.md) is normative for
+separators (§3.1) and the expression child (§3.6). [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for
 all of it.
 
 ---
 
 ## Appendix A: Required Framework Changes
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 The DSL assumes these framework changes are applied. Each is mechanical and takes roughly an
 hour; all together, an afternoon.
@@ -2231,7 +2231,7 @@ hour; all together, an afternoon.
 
 ### A.1 Category C Dissolution
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Move primary content from constructor argument to setter method on four widgets.
 
@@ -2357,7 +2357,7 @@ pub fn trigger_id(mut self, id: WidgetId) -> Self
 
 ### A.4 TeksiBranch Types and IntoTeksiChild Trait
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Add to `teksilo-core`. **Shipped in `widget_builder_branching.rs`**, not `widget_builder.rs`,
 and re-exported from `teksilo_core` and the `teksilo` prelude. The three `TeksiBranch*` enums
@@ -2384,7 +2384,7 @@ method families consult.
 
 ### A.5 Summary of Effort
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 Category C dissolution: 4 widgets, roughly 20 lines of change each. Method renames: 5 widgets, roughly 3 lines each. Id-taking twins: 8 widgets, roughly 30 new methods total at 3 lines each. TeksiBranch infrastructure: 1 new file, roughly 200 lines including the impls.
 
@@ -2439,7 +2439,7 @@ removed some of the pressure that made hoisting-then-binding the common shape.
 
 ## Appendix B: Known Open Questions
 
-> **Non-normative.** Design rationale. [teksu-macro-reference.md](teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
+> **Non-normative.** Design rationale. [teksu-macro-reference.md](../../docs/teksu-macro-reference.md) is normative for behaviour; where the two disagree, this file is stale.
 
 One question carried over from v2's appendix.
 

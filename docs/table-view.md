@@ -3,7 +3,7 @@
 
 # TableView and TreeTableView
 
-Two production-grade tabular widgets for Teksilo: a flat
+Two tabular widgets for Teksilo: a flat
 [`TableView<T>`](../crates/teksilo-widgets/src/table_view.rs) over any
 `ListDataSource<Item = T>` and a hierarchical
 [`TreeTableView<T>`](../crates/teksilo-widgets/src/tree_table_view.rs) over a
@@ -83,22 +83,22 @@ Three mutually exclusive modes (the last builder call wins), identical on
 `TableView` and `TreeTableView`:
 
 ```rust
-.row_height(28.0)                 // uniform — the default fast path
+.row_height(28.0)                 // uniform, the default fast path
 .row_height_fn(|row| { /* … */ }) // exact per-row callback
 .auto_row_height(30.0)            // measured, 30 px estimate seed
 ```
 
-- **Uniform** (`row_height`) — every row is the same height. Pure
+- **Uniform** (`row_height`), every row is the same height. Pure
   arithmetic, no allocation; this is the historical behavior and stays
   the default (28 px from the table style).
-- **Exact** (`row_height_fn`) — a pure callback `fn(visible_index) -> f32`
+- **Exact** (`row_height_fn`), a pure callback `fn(visible_index) -> f32`
   seeds a prefix-sum offset table (O(log n) row↔y lookups). No
   measurement pass, exact scrollbar, zero jitter. The callback is
   re-swept from the first changed index on every model change, so it
   must be deterministic for the data it indexes.
-- **Auto-measure** (`auto_row_height(estimate)`) — each realized row
+- **Auto-measure** (`auto_row_height(estimate)`), each realized row
   reports the height of its **tallest cell**, measured at the cell's
-  column width (height-for-width — wrapped text just works). Unrealized
+  column width (height-for-width, wrapped text just works). Unrealized
   rows assume the estimate. Two consequences:
   - *Scroll anchoring*: when a correction shifts content above the
     viewport top, `scroll_y` is adjusted in the same pass so on-screen
@@ -123,24 +123,24 @@ automatically:
 - appending rows keeps every measured height (divergence = old length),
   even though `SortFilterListModel` notifies with a blanket `Reset`;
 - expanding/collapsing a `TreeTableView` node keeps the heights of all rows
-  above the toggle — no scroll jump;
+  above the toggle, no scroll jump;
 - a sort flip invalidates from the first reordered row.
 
 ### Which row a `y` coordinate resolves to
 
 `row_height_fn` / `item_height_fn` / `item_height` are public callbacks with
-no floor above `0.0`, and spacing defaults to `0.0` — a zero-height row is an
+no floor above `0.0`, and spacing defaults to `0.0`, a zero-height row is an
 ordinary, supported configuration (a filtered-to-nothing group header, a
 collapsed detail row), not a corner case to route around. The shared
 [`PrefixSumOffsets`](../crates/teksilo-widgets/src/common/row_offsets.rs)
 table underlies both the exact and auto-measure modes and its `row_at(y)` is
-the single place that resolves a pixel coordinate to a row index — it's what
+the single place that resolves a pixel coordinate to a row index, it's what
 both a click and a drag-drop hover call, so it is also the raw drop-target
 identity in `TreeView`/`TreeTableView` DnD and the hit-tested tile in
 `GridView` (see [drag-and-drop.md §9](drag-and-drop.md)).
 
-A **fully** degenerate table — every row height *and* the spacing are
-zero, the fully-collapsed-or-filtered-to-nothing case — used to disagree
+A **fully** degenerate table, every row height *and* the spacing are
+zero, the fully-collapsed-or-filtered-to-nothing case, used to disagree
 with `RowMetrics::uniform`'s equivalent geometry: `Uniform::row_at`
 short-circuits on `step <= 0.0` and answers row 0, while the offset table
 ties every entry and `partition_point` resolved to the *last* tied index,
@@ -150,8 +150,8 @@ height is zero) and answers `0`, so a click and a drop at the same `y`
 agree regardless of which row-height mode the view uses.
 
 That check is deliberately narrower than "resolve every tie to the first
-index." A **partially** degenerate table — a run of zero-height rows
-between two real ones — must keep the *last*-tied answer: heights
+index." A **partially** degenerate table, a run of zero-height rows
+between two real ones, must keep the *last*-tied answer: heights
 `[50, 0, 50]` give offsets `[0, 50, 50, 100]`, and at `y = 50` the right row
 is 2, the real row that actually starts there, not the invisible row 1.
 Answering with a zero-height row there would silently retarget a click or a
@@ -181,7 +181,7 @@ Column::new("id", lit!("ID"), |row, ctx| Box::new(TextWidget::new(lit!(row.id.to
 ```
 
 Column ids are the persistence key for sort, filter, width, and order
-signals — keep them stable across releases.
+signals, keep them stable across releases.
 
 `CellContext` passed to the cell delegate carries:
 
@@ -209,7 +209,7 @@ Qt's `stretchLastSection`, NSTableView's `lastColumnOnlyAutoresizingStyle`:
 the **last column in display order** takes whatever width the other columns
 leave, so a pixel-sized table (`Fixed` / `Auto` columns, or widths the user
 has dragged) never ends in a bare strip at its trailing edge. It is
-positional, not a property of a column — after a reorder the *new* last
+positional, not a property of a column, after a reorder the *new* last
 column stretches and the previous one goes back to its own width.
 
 While a column stretches:
@@ -226,7 +226,7 @@ While a column stretches:
 `Flex` columns already share every spare pixel among themselves, so a table
 of `Flex` columns looks the same with or without it.
 
-## Sort / filter / widths / order — the signal contract
+## Sort / filter / widths / order: the signal contract
 
 Both widgets publish six reactive signals. Mutating any of them
 triggers the right rebuild level (no full layout when scrolling, no
@@ -254,7 +254,7 @@ let order = ctx.settings().signal_for(&TABLE_ORDER);   // Signal<Vec<String>>
 // Restore before the table is mounted, then keep both directions in sync.
 // `TableView` is not `Clone` (it is moved into the tree), so the closures
 // hold clones of its signal, which share state with the mounted table.
-// Hold the returned `ObserverHandle`s for as long as the table lives —
+// Hold the returned `ObserverHandle`s for as long as the table lives,
 // dropping one unsubscribes it.
 table.set_column_order(order.get());
 let table_order = table.column_order_signal().clone();
@@ -269,7 +269,7 @@ let persist = table_order.observe({
 // Repeat for sort (encoded as a string).
 ```
 
-The map-valued signals — widths, filters, pinning — cannot be `SettingsStore`
+The map-valued signals, widths, filters, pinning, cannot be `SettingsStore`
 keys: a `HashMap` serializes as a TOML table, which the store's nested-key
 model cannot tell apart from a group of keys, so `signal_for` panics at
 registration. Persist them in one app-layout struct through a
@@ -277,17 +277,17 @@ registration. Persist them in one app-layout struct through a
 pair a widths round trip with `ColumnResizePolicy::OnRelease`, or write on
 your own debounce).
 
-The signal API is the persistence boundary on purpose — the widget
+The signal API is the persistence boundary on purpose, the widget
 emits, the application persists. There are no `on_*_changed` hooks; an
 `observe` on the signal is the same thing without the typo surface.
 
 Note the shape: two observers pointing at each other. `Signal::set` carries
 **no equality check** by design, so such a pair is an unbounded mutual
-recursion unless one edge guards its write — and a `ColumnResizePolicy::Live`
+recursion unless one edge guards its write, and a `ColumnResizePolicy::Live`
 resize writes a width on every pointer move, so the loop would fire on the
-first tick of the first drag. The table's imperative setters —
+first tick of the first drag. The table's imperative setters,
 `set_column_widths`, `set_column_width`, `set_sort`, `clear_sort`,
-`set_filter`, `clear_filters`, `set_column_order`, `set_column_pinning` — are
+`set_filter`, `clear_filters`, `set_column_order`, `set_column_pinning`, are
 therefore **equality-guarded**: an unchanged value neither writes nor
 notifies, which is what makes the round trip settle after one pass. A write
 straight to the signal (as in the closures above, which cannot reach the
@@ -312,7 +312,7 @@ proxy.filters_signal(table.filters_signal().clone());
 The proxy:
 
 - maintains a single visible-index map shared between sort and filter,
-- emits `DataChange::Reset` once per upstream change (one rebuild, not two) —
+- emits `DataChange::Reset` once per upstream change (one rebuild, not two),
   except an `ItemUpdated` that neither changes the row's filter verdict nor
   moves it past a neighbour, which is forwarded as a scoped `ItemUpdated`
   (see below),
@@ -333,7 +333,7 @@ plays the same role, plus a `TreeFilterMode` switch:
 | `KeepAncestors`     | a match keeps every ancestor visible (file-tree convention; the **default**)                    |
 | `KeepDescendants`   | a match keeps its full subtree visible (useful for "find a folder, see what's inside")          |
 
-`TreeTableView::filter_mode(...)` forwards to the proxy in place — calling
+`TreeTableView::filter_mode(...)` forwards to the proxy in place, calling
 it on the builder mutates the shared `Rc<RefCell<…>>` even though the
 method consumes `Self`. It only has an effect on a view built with
 `from_projection`; the other constructors hold no proxy to forward to.
@@ -346,7 +346,7 @@ described above. Both proxies first try a cheap fast path: re-check just the
 edited row's filter verdict and its rank against its *current* visible
 neighbours, instead of re-filtering and re-sorting every row. They fall back
 to the full rebuild whenever the row enters/leaves the visible set, or moves
-past a neighbour — including a neighbour it now **ties** with. The tie case
+past a neighbour, including a neighbour it now **ties** with. The tie case
 matters because the full rebuild sorts with `Vec::sort_by`, which is
 stable, so it always resolves a tie the same way (source index for the list,
 original sibling order for the tree); leaving an edited row in its old slot
@@ -360,7 +360,7 @@ would have to walk `tree.children(parent)` to recover a tied node's sibling
 index, so it bails to a full reprojection on **any** tie rather than pay that
 cost on every update. Sorting a large tree on a low-cardinality column (a
 status enum, a boolean) therefore falls back to a full reprojection more
-often than the equivalent flat list would — worth knowing when picking what
+often than the equivalent flat list would, worth knowing when picking what
 column to sort on.
 
 ---
@@ -384,7 +384,7 @@ the glyph; the popover content is a `TextInput` with a trailing clear
   filter and `TextRole::Secondary` otherwise.
 
 Callers that already use `SortFilterListModel<T>` /
-`SortFilterTreeModel<T>` get filtered output for free —
+`SortFilterTreeModel<T>` get filtered output for free,
 `filters_signal` re-projects the visible list whenever the popover
 mutates the map.
 
@@ -406,7 +406,7 @@ the header label still cycles the sort as before.
 
 | Mode                 | Backing model                                       | Notes                                                           |
 |----------------------|-----------------------------------------------------|-----------------------------------------------------------------|
-| `None`               | —                                                   | clicks just move focus                                          |
+| `None`               |,                                                   | clicks just move focus                                          |
 | `SingleRow`          | `teksilo_data::SelectionModel`                         | replaces; modifier keys ignored                                 |
 | `MultiRow` (default) | `teksilo_data::SelectionModel` with `SelectionMode::Multi` | Ctrl-click toggles, Shift-click extends, Shift+Arrow extends |
 | `SingleCell`         | `CellSelectionModel`                                | Excel-style; one `(row,col)` at a time                          |
@@ -414,8 +414,8 @@ the header label still cycles the sort as before.
 
 Both selection models auto-adjust on `DataChange::ItemsInserted` /
 `ItemsRemoved` / `ItemsMoved`, so selection follows fine-grained upstream
-mutation; a `DataChange::Reset` — which a `SortFilterListModel` emits on every
-sort or filter change — clears an index-based selection. A
+mutation; a `DataChange::Reset`, which a `SortFilterListModel` emits on every
+sort or filter change, clears an index-based selection. A
 `KeyedSelectionModel` (via `from_source_keyed`) prunes only the keys that
 disappeared, so it survives sorting and filtering.
 
@@ -423,8 +423,8 @@ disappeared, so it survives sorting and filtering.
 `SelectionModel`, selection is keyed by the **flat visible index** of the
 tree projection; expanding/collapsing re-numbers indices, so don't pin such a
 selection across an `expand_all()` without a re-mapping step. To key it by
-node identity instead, pass a `KeyedSelectionModel` — `.keyed_selection(..)`
-(`NodeId`-keyed) or `from_source_keyed(source, keyed)` — which survives
+node identity instead, pass a `KeyedSelectionModel`, `.keyed_selection(..)`
+(`NodeId`-keyed) or `from_source_keyed(source, keyed)`, which survives
 expand / collapse / filter / reorder.
 
 ---
@@ -498,7 +498,7 @@ clear behaviour).
 | Tab / Shift+Tab             | next / previous cell in row order, wrapping rows (configurable via `tab_traversal`)   |
 | Shift + Arrow               | extend selection in `MultiRow` / `MultiCell` modes                                    |
 | Ctrl + Arrow                | move the focused cell without touching a selection that can hold several rows or cells; a single one follows the cursor |
-| Ctrl-Tab / Ctrl-Shift-Tab   | leave the table (next / previous focusable widget) — the escape from cell traversal   |
+| Ctrl-Tab / Ctrl-Shift-Tab   | leave the table (next / previous focusable widget), the escape from cell traversal   |
 | Space                       | check the focused cell if it holds a checkbox, else toggle selection at focus          |
 | Ctrl-Space / Shift-Space    | `MultiCell`: select the column / the row (Excel and the ARIA grid pattern)             |
 | Enter                       | invoke `on_row_activate` (or fall back to toggle-select)                              |
@@ -511,7 +511,7 @@ clear behaviour).
 
 The same handler powers both widgets via the
 [`RowNavigator`](../crates/teksilo-widgets/src/table_view/row_navigator.rs)
-trait — `FlatNavigator` for `TableView`, `TreeNavigator` for
+trait, `FlatNavigator` for `TableView`, `TreeNavigator` for
 `TreeTableView`.
 
 ---
@@ -520,7 +520,7 @@ trait — `FlatNavigator` for `TableView`, `TreeNavigator` for
 
 Under a finger the rules differ, and they are shared with the other four data
 views: [Data views under a finger](data-view-touch.md) covers when a press
-commits the selection, why both reorders — rows and columns — wait for a hold,
+commits the selection, why both reorders, rows and columns, wait for a hold,
 why the column-header strip is a pan surface, and how the tree-table's drop
 bands widen.
 
@@ -528,7 +528,7 @@ bands widen.
 
 The grip is **centred on the divider**: it reaches `RESIZE_HANDLE_WIDTH`
 (default 4 px) into the cell on *each* side, the same `PM_HeaderGripMargin`
-convention `QHeaderView` uses. So a header cell owns two grips — the one at
+convention `QHeaderView` uses. So a header cell owns two grips, the one at
 its reading-order trailing edge, which resizes its own column, and the one at
 its leading edge, which resizes its **predecessor**, whose trailing edge that
 same divider is. Aiming at the seam and landing a pixel late therefore still
@@ -545,7 +545,7 @@ Two exceptions narrow a grip:
   for click-to-sort and reorder-drag instead of becoming all grip.
 
 The header strip paints a separator at every column boundary,
-**independent of [`GridLines`](../crates/teksilo-widgets/src/table_view/column.rs)** — in the header the separator
+**independent of [`GridLines`](../crates/teksilo-widgets/src/table_view/column.rs)**, in the header the separator
 *is* the affordance (it is the only thing showing where the grip is), which is
 why every desktop table draws header separators unconditionally. `GridLines`
 stays a body decoration.
@@ -562,7 +562,7 @@ table.column_resize_policy(ColumnResizePolicy::OnRelease)   // commit on Pointer
 
 Under `OnRelease` nothing moves until the button comes up, so the view paints
 a full-height guide line at the prospective divider for the duration of the
-drag — the same rubber band Qt and Excel show.
+drag, the same rubber band Qt and Excel show.
 
 **Only the columns after the divider reflow.** The grabbed divider follows the
 pointer one-for-one; the columns before it keep their widths and the `Flex`
@@ -571,8 +571,8 @@ overflows into horizontal scroll). That is NSTableView's and `QHeaderView`'s
 behaviour, and it needs one thing from the write: a `Flex` column that
 precedes the resized one and has no override yet is **frozen at its current
 width** in the same `column_widths_signal` update. Otherwise the solver would
-share the resized column's delta among *every* flex column — the preceding
-ones included — so the column's leading edge would slide the other way and the
+share the resized column's delta among *every* flex column, the preceding
+ones included, so the column's leading edge would slide the other way and the
 divider would track the pointer at a fraction of its speed (or not at all,
 with all the remaining flex weight ahead of it). The frozen widths are the
 ones already on screen, so nothing jumps; they simply stop flexing on later
@@ -581,8 +581,8 @@ persist `column_widths_signal` will therefore see entries for those columns
 too.
 
 The committed width is clamped to the column's `[min_width, max_width]`
-**before** it is written, so `column_widths_signal` — the handle apps read
-back and persist — always mirrors what the table actually renders (the
+**before** it is written, so `column_widths_signal`, the handle apps read
+back and persist, always mirrors what the table actually renders (the
 solver re-applies the same clamp when it resolves widths).
 
 The handler converts window-space pointer coordinates into cell-local
@@ -596,7 +596,7 @@ state would otherwise keep dragging the column on the next bare pointer move.
 
 **Accessibility.** A resizable column header advertises AccessKit
 `Increment` / `Decrement`, each stepping the column by `COLUMN_RESIZE_STEP`
-(8 px) with the same clamping as a drag — the non-pointer path for screen
+(8 px) with the same clamping as a drag, the non-pointer path for screen
 readers, switch access, and the [automation MCP](automation-mcp.md). No
 numeric value or range is published on the `ColumnHeader` node: it would be
 announced on every ordinary pass over the table, which costs the common case
@@ -604,7 +604,7 @@ to serve a rare one.
 
 ### Column reorder
 
-Drag a header cell from outside the resize zone — after a long press if the
+Drag a header cell from outside the resize zone, after a long press if the
 pointer is coarse, so a finger's swipe along the strip stays a horizontal pan
 ([data-view-touch.md §3](data-view-touch.md)). The column-reorder
 drag emits `ColumnReorderDragData { col_id, source_table_id }`. The
@@ -622,9 +622,9 @@ Row drag-and-drop is owned by the **backing source**, not the view (see
 [data-source.md §3](data-source.md)). The view computes a geometric
 `(target, position)`, asks the source `can_accept` on every hover (an
 insertion line shows an accepted landing; a `Reject` suppresses it),
-and commits via the source's `accept_drop` on release — there is no
+and commits via the source's `accept_drop` on release, there is no
 `on_row_drop` callback. `target` is a row index resolved from the pointer's
-`y` the same way a click resolves one — see ["Which row a `y` coordinate
+`y` the same way a click resolves one, see ["Which row a `y` coordinate
 resolves to"](#which-row-a-y-coordinate-resolves-to) above for the
 zero-height-row tie-break that keeps a click and a drop agreeing.
 
@@ -641,7 +641,7 @@ arrives as `DragSource::Foreign { payload }` at the *same*
 same `accept_drop` / `reorder_within`.
 
 **TreeTableView.** Set `.reorderable(true)`; a row drag routes through
-the tree source with the **cycle guard** — `tree_apply_reorder` refuses
+the tree source with the **cycle guard**, `tree_apply_reorder` refuses
 to drop a node into its own subtree, and handles the
 insertion-vs-reparent (`Before`/`After` sibling vs `Into` child) index
 math. Reorder is suppressed while a sort is active (a sorted projection
@@ -666,7 +666,7 @@ likewise routed through the source.
   modes, where the cell is the selectable unit) with `row_index` and
   `column_index`, plus `selected` reflecting the current selection.
 - The filter popover's trigger inherits the popover's `set_expanded`
-  state and is named `"Filter"` — locating it via screen-reader search
+  state and is named `"Filter"`, locating it via screen-reader search
   is the same as locating any popover button.
 
 Virtualization vs accessibility: only rendered rows materialize cell
@@ -734,11 +734,11 @@ not bugs.
 
 ## Demos
 
-- `cargo run -p data-grid` — 1000-row flat
+- `cargo run -p data-grid`, 1000-row flat
   [`TableView`](../examples/data_grid/src/main.rs) with
   `SortFilterListModel`, `MultiRow` selection, alternating rows, and
   filterable name/email/role columns.
-- `cargo run -p tree-table-view` — mock filesystem
+- `cargo run -p tree-table-view`, mock filesystem
   [`TreeTableView`](../examples/tree_table_view/src/main.rs) with
   `KeepAncestors` filtering, twist-arrow expand/collapse, and the same
   drag-resize / drag-reorder behaviour as the flat table.

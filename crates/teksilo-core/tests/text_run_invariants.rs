@@ -37,7 +37,7 @@
 //! ```
 //!
 //! Build and run separately, with a memory cap, per
-//! `docs/property-testing.md`:
+//! `engineering/docs/property-testing.md`:
 //!
 //! ```text
 //! cargo test -p teksilo-core --test text_run_invariants --no-run

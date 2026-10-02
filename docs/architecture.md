@@ -1,619 +1,111 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Teksilo Architecture Document
+# Architecture
+
+Teksilo retains a widget tree and runs event, layout, accessibility, and paint
+passes over it. This page describes the boundaries relevant to custom widgets
+and framework maintenance. Start with [your first application](first-application.md)
+for application setup.
 
-**Version:** 0.3 — slim refresh
-**Date:** May 6, 2026
-**Author:** Cyril Jacquet, with Claude (Anthropic) and Mistral Medium as sounding boards and formatting help.
-**Status:** Living reference — framework-internals doc; companion focused docs in this directory own the per-subsystem API surface
+## Widget model
 
-> **Document scope.** This document covers the *framework-internals* topics
-> that have no dedicated home elsewhere: scrolling, arena state, Canvas,
-> rendering pipeline, HiDPI, threading, testability, crate structure,
-> and the comparative-design rationale. Every subsystem with a dedicated
-> reference doc in this directory has been collapsed here to a one-paragraph
-> pointer; section numbers are preserved so external links by `§N` and
-> heading-slug anchors continue to resolve.
->
-> If you are looking for *how to use* a subsystem, the focused doc is the
-> right entry point. Read this doc when you are debugging the engine,
-> porting to a new platform, writing a custom widget that needs the Canvas
-> escape hatch, or onboarding to maintain the framework itself.
->
-> **Where the per-subsystem references live:**
->
-> - Layout: [`layout-primitives.md`](layout-primitives.md)
-> - Events / gestures / focus / DnD lifecycle: [`events-and-gestures.md`](events-and-gestures.md)
-> - Animation: [`animation.md`](animation.md)
-> - Idle / zero-frame rule: [`idle-and-animation.md`](idle-and-animation.md)
-> - Reactivity & theming: [`reactive-theme.md`](reactive-theme.md)
-> - Shortcuts / intents / actions: [`shortcut-intent-action.md`](shortcut-intent-action.md)
-> - i18n: [`i18n.md`](i18n.md)
-> - Accessibility overrides: [`accessibility-overrides.md`](accessibility-overrides.md)
-> - Drag and drop: [`drag-and-drop.md`](drag-and-drop.md)
-> - Data models: [`data-models.md`](data-models.md)
-> - Settings and persistence: [`settings.md`](settings.md)
-> - Telemetry: [`telemetry.md`](telemetry.md)
-> - Multi-window: [`multi-window.md`](multi-window.md)
-> - Custom title bar: [`title-bar.md`](title-bar.md)
-> - Tooltips and overlays: [`tooltips.md`](tooltips.md)
-> - `teksu!` DSL: [`teksu-macro-reference.md`](teksu-macro-reference.md), [`teksu-language-spec-v3.md`](teksu-language-spec-v3.md)
-> - Inspector: [`inspector.md`](inspector.md)
-> - Widget catalog snapshot: `tools/extract_widget_api.py --all`
-> - Per-widget reference docs: [`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`teksilo-scene.md`](teksilo-scene.md)
+A `Widget` can compose children in `build`, draw in `paint`, or do both.
+Layout uses a proposal-and-response model: parents propose sizes, children
+respond, and parents place them. The widget arena owns mounted widgets and
+provides stable identifiers for their lifetime.
 
----
+Use [layout primitives](layout-primitives.md) for composition and
+[events and gestures](events-and-gestures.md) for input handling.
+[`Button`](../crates/teksilo-widgets/src/button.rs) is a concrete example of a
+composed control with theme, focus, and accessibility behavior.
 
-## 1. Vision and Positioning
+## State and updates
 
-Teksilo is a pure-Rust GUI framework for serious desktop applications — the kind of software where a user sits down for hours at a time and reaches for the keyboard first. A writing tool for novelists, an IDE, a dispatch console, a course manager for a taxi company's driver training. Teksilo is infrastructure for professional desktop software that needs native look and feel, full keyboard and screen-reader accessibility, and a rich text surface built from the ground up.
+`Signal<T>` stores observable state. `map` derives a value; `Prop<T>` lets a
+builder accept a static value or a signal. Bindings request repaint, layout, or
+rebuild according to what changed. Keep observer handles alive while their
+subscriptions are needed.
 
-Teksilo's thesis rests on three pillars. First, accessibility is a structural requirement, not an afterthought — AccessKit is integrated at the trait level, not bolted on. Second, rich text is a first-class concern — the text-document and text-typeset crates provide a complete document model and typesetting engine covering shaping, bidi, line-breaking, and atlas rasterization. Third, the framework is designed to be consumed by applications with structured architecture (Clean Architecture, MVVM), providing a typed Shortcut / Intent / Action pipeline and reactive data-model crate (`teksilo-data`) rather than leaving application structure as an exercise for the developer.
+Handlers use `EventContext` to request structural changes. Deferred operations
+run when the framework can safely mutate the tree. A rebuild can replace
+widget IDs; do not retain an ID beyond the mounted widget's lifetime.
 
-### 1.1 Relationship to structured application architectures
+Use models for changing collections, `visible_when` for conditional visibility,
+and the appropriate view for large collections. See [data models](data-models.md).
 
-Teksilo is the outermost layer of an application — the "Frameworks & UI" ring in Clean Architecture's concentric circles. It has no dependency on any particular application framework. Applications with a layered domain / use-case / view-model split shaped several of its architectural choices (typed intents for command flow, view-models over raw entities, data sources for paged external collections), but nothing in Teksilo requires such a split.
+## Input and accessibility
 
-The integration surface is the typed intent system (Teksilo widgets emit application-defined intent variants that ancestor `Action`s consume — see [`shortcut-intent-action.md`](shortcut-intent-action.md)) and the reactive data models in `teksilo-data` (application-written view-models hold entity collections as `ListModel<EntityVM>` / `TreeModel<EntityVM>` that widgets bind to — see [`data-models.md`](data-models.md)).
+Events follow preview and bubble dispatch. Pointer identity, capture, gesture
+arbitration, and cancellation belong to the framework. Custom controls must
+follow the [pointer contract](porting-widgets-to-the-pointer-model.md).
 
-Teksilo splits internally into focused crates (see §25) each with a single concern, rather than imposing a Clean-Architecture split on its own internals. Layout, rendering, and event dispatch have fundamentally different performance characteristics from transactional domain operations; the useful seams fall in different places.
+Widgets declare accessibility information beside their layout and paint methods.
+The framework builds an AccessKit tree and routes its actions to widgets.
+Applications can adjust labels, relationships, roles, and subtree behavior
+through [accessibility overrides](accessibility-overrides.md).
 
-### 1.2 Reuse Strategy
+Keyboard bindings resolve through the [shortcut, intent, and action
+pipeline](shortcut-intent-action.md). Input handling and accessibility support
+still require application-level testing.
 
-Teksilo builds on established crates rather than reinventing solved problems. **winit** for windowing and HiDPI; **wgpu** for GPU rendering; **text-document + text-typeset** for the rich text model and typesetting (harfrust shaping, swash rasterization, etagere atlas, unicode-linebreak, unicode-bidi); **AccessKit** for cross-platform a11y; **fluent-rs** for i18n; **tiny-skia** for Tier 3 path rasterization.
+## Rendering and text
 
----
+Widgets paint through the canvas abstraction. The renderer uses wgpu; platform
+integration owns windows and the event loop. Idle rendering is demand-driven.
+Animations and asynchronous activity must participate in wake-up scheduling.
+See [idle and animation](idle-and-animation.md).
 
-## 2. Layout Model
+The text stack combines `text-document` for document operations and
+`text-typeset` for shaping and layout. `teksilo-text` connects that stack to the
+canvas. Application code can access the document model directly.
 
-Full reference: [`layout-primitives.md`](layout-primitives.md). The protocol is SwiftUI-style negotiation — the parent proposes a size, the child responds with `LayoutResponse { size, flex, min, shrink }`, the parent decides the main axis (grow via `flex`, shrink via `shrink`/`min`), measures the cross axis at each child's final main size (**height-for-width**), and places. Slack distribution, the shrink/over-constraint model, the `Shrinkable` wrapper, zero-basis vs `respect_intrinsic`, container/per-child alignment, and the size-wrapper primitives (`Expand`, `Shrinkable`, `FixedSize`, `MinSize`, `MaxSize`, `Center`, `Padding`, `Spacer`, `Divider`) all live there. A per-pass memoization cache (`WidgetArena::cached_layout_response`, keyed `(id, proposal)`, cleared each pass) keeps the main-then-cross queries O(n); widgets that mutate state in `layout_response` opt out via `Widget::cacheable_layout() -> false`.
+## Crate boundaries
 
-What's *not* in the focused doc and stays here:
+| Layer | Main crates |
+| --- | --- |
+| Values, colors, and theme tokens | `teksilo-tokens` |
+| Drawing interface | `teksilo-canvas` |
+| Tree, state, layout, events, and styles | `teksilo-core` |
+| Reactive collections | `teksilo-data` |
+| Controls and specialized views | `teksilo-widgets`, `teksilo-charts`, `teksilo-scene` |
+| Text integration | `teksilo-text` |
+| GPU and operating-system integration | `teksilo-render`, `teksilo-platform` |
+| Application lifecycle | `teksilo-app` |
+| Application-facing exports and features | `teksilo` |
 
-### 2.1 Binding Levels and Dirty Propagation
+The core tree can be exercised without a window or GPU. Platform behavior and
+rendering need separate integration checks.
 
-Some property changes affect only a widget's visual appearance (a color change). Others affect the widget's size (a text change, a constraint change). The binding system distinguishes these two cases because they trigger different dirty-tracking responses.
+## Common extension points
 
-**Repaint-level bindings** (`color`, `background`, `border_color`) mark the widget for repaint only when the bound state changes. The layout pass is skipped — the widget's position and size are unchanged. This is the fast path, used for interaction-driven visual state changes (hover color, pressed color, enabled/disabled appearance).
+| Task | Reference |
+| --- | --- |
+| Change appearance | [Styling](styling-system.md), [reactive themes](reactive-theme.md) |
+| Add translation | [Internationalization](i18n.md) |
+| Add windows | [Multi-window](multi-window.md) |
+| Persist state | [Settings](settings.md) |
+| Run asynchronous work | [Async](async.md) |
+| Inspect a running application | [Inspector](inspector.md), [automation](automation-mcp.md) |
+| Use declarative syntax | [Macro reference](teksu-macro-reference.md) |
 
-**Relayout-level bindings** (`text`, `width`, `height`, `min_width`, `max_height`) mark the widget for relayout when the bound state changes. The layout pass reruns on the affected subtree, and the dirty flag propagates upward to ancestors because a child's size change may affect its parent's size, which may affect the grandparent's size, and so on. Propagation stops at an ancestor whose own size is not affected by its children (for example, a `FixedSize` wrapper with a static width).
+## Constraints
 
-The classification is determined by the primitive widget's binding method implementation, not by the consumer. A `TextWidget` implementor knows that `text` is relayout-level because changing the text changes the widget's `layout_response` result. A composite widget author or application developer does not need to think about this distinction — they call `text(state)` and the framework handles the rest.
+Keep widget state on the UI thread. Transfer background results through the
+supported event or async interfaces. Treat painting, layout, and observers as
+separate phases; avoid mutating data while holding a borrow that callbacks need.
 
-**Layout utility widgets with dynamic constraints.** The size constraint widgets (`MinSize`, `MaxSize`, `FixedSize`) accept state bindings for their constraint values, enabling dynamic resizing from application state changes, user-driven splitter interactions, or animation ticks. `FixedSize::width(state)` registers a relayout-level binding — when the state changes, the widget's constraint changes, triggering relayout of the affected subtree.
+The public API is pre-1.0. Verify extension code against the version used by the
+application. See [status and limitations](status-and-limitations.md).
 
-**Relayout propagation.** When a widget is marked for relayout, the framework marks the widget and all its ancestors up to the root as needing relayout. During the layout pass, it starts from the highest dirty ancestor and works downward, re-running `layout_response` and `place_children` for each dirty node. Clean subtrees are skipped. This is the same incremental layout approach used by web browsers and by Qt's layout system. A relayout always implies a repaint for the affected widgets.
+## Reference
 
----
+- [Widget trait](../crates/teksilo-core/src/widget.rs)
+- [Widget tree](../crates/teksilo-core/src/widget_tree.rs)
+- [Event context](../crates/teksilo-core/src/widget/event_context.rs)
 
-## 3. Scrolling and Viewports
 
-A scroll area is a container whose content may be larger than the visible space. The scroll area acts as a viewport — a window into a potentially large content region. Only the visible portion of the content is rendered, clipped to the viewport boundary.
+## Engineering reference
 
-Scrolling is designed to require minimal changes to the framework. The scroll offset is encoded through the existing layout placement mechanism, not as a separate coordinate transformation layer. Hit testing, event dispatch, and the state system require no modifications. The changes are confined to the arena (one new flag), the paint pass (clip rect support), the renderer (scissor rects), focus management (scroll-into-view), and the scroll area widget itself.
-
-### 3.1 Layout: Unbounded Proposals and Offset Placement
-
-A scroll area participates in layout like any other container widget. In `layout_response`, it claims the space its parent offers — this becomes the viewport size. In `place_children`, it proposes an unbounded size on the scroll axis to its content child. For a vertical scroll area, the content receives `SizeProposal { width: Some(viewport_width), height: None }` — "use the viewport width, but be as tall as you need." The content child responds with its natural height (potentially thousands of logical pixels).
-
-The scroll area then positions its content child at `(viewport.x, viewport.y - scroll_offset.y)`. This encodes the scroll offset as a position offset within the normal placement system. No special coordinate transformation infrastructure is needed — the existing `place_children` / `WidgetPlacement` mechanism handles it. The recursive layout function processes the content child and its descendants with the offset origin, and all bounds stored in the arena end up in correct screen-space positions.
-
-`SizeProposal` already supports `None` values for unbounded dimensions. No changes to the `SizeProposal` type or to `layout_widget_recursive` are required.
-
-### 3.2 Hit Testing: No Changes Required
-
-The existing `hit_test_recursive` provides viewport clipping implicitly. It checks `bounds.contains(point)` on the parent before recursing into children. A point outside the scroll area's viewport bounds is rejected at the scroll area's bounds check, and no child is tested. Children scrolled above the viewport have negative screen-space y coordinates that no in-viewport point would match. Children within the viewport have correct screen-space bounds (computed from the offset placement) that match pointer positions directly.
-
-No changes to the hit testing code are needed. The scroll offset encoded in placement positions and the existing parent-bounds containment check together provide correct viewport-clipped hit testing.
-
-### 3.3 Clipping in the Paint Pass
-
-The paint pass requires one new capability: clipping child rendering output to the scroll area's viewport bounds. Without clipping, children positioned near the edge of the viewport would render partially outside it.
-
-The arena's `WidgetNode` carries a `clips_children: bool` flag (default `false`). The scroll area widget sets this flag to `true` on its own arena node. When the paint walk (`paint_widget_cached` in `widget_tree/rendering_impl.rs`) enters a node with `clips_children: true`, it pushes a clip rect (the node's own bounds, which represent the viewport) onto the Canvas before recursing into children, and clears the clip after all children are painted.
-
-The Canvas provides `set_clip(Rect)` and `clear_clip()` methods that produce `DrawCommand::SetClip` and `DrawCommand::ClearClip` entries in the RenderFrame; the walk checks the flag, pushes the clip, recurses, and pops it. The flag clips *children* only — a widget that must clip its own `paint()` output calls `set_clip` / `clear_clip` itself.
-
-### 3.4 Renderer: Scissor Rect Implementation
-
-The renderer (`crates/teksilo-render/src/renderer.rs`) maps the `SetClip` and `ClearClip` draw commands to wgpu's scissor rect API: `pass.set_scissor_rect(x, y, width, height)` for `SetClip` (coordinates in physical pixels, multiplied by scale factor), after flushing every pending batch, since a scissor change is a state change.
-
-Nested scroll areas (rare but valid — a scrollable sidebar inside a scrollable page) use a clip rect stack. Each `SetClip` pushes a rect, and the effective clip is the intersection of all rects in the stack. `ClearClip` pops the top rect and restores the previous intersection, or the full surface when the stack is empty.
-
-### 3.5 Focus and Scroll-Into-View
-
-When Tab navigation moves focus to a widget that is inside a scroll area but outside the current viewport, the scroll area must scroll to make the focused widget visible. Without this, keyboard users cannot see what they have focused.
-
-After `focus_with_origin` sets focus to a widget, the framework walks up the ancestor chain (`scroll_rect_into_view` in `widget_tree/focus_impl.rs`). For every ancestor with `clips_children: true`, it checks whether the focused widget's bounds — or the sub-rectangle its `Widget::focus_reveal_rect` nominates, such as a caret line — are fully within that ancestor's viewport bounds. If not, the framework dispatches a `WidgetEvent::ScrollIntoView { target_bounds, margin, align, motion, .. }` to the clipping ancestor; nested scroll areas each get a turn, outermost included. The scroll area handles this event by adjusting its scroll offset to bring the target bounds into view, using the minimum scroll change needed to make the widget fully visible (or centering it if the widget is larger than the viewport).
-
-### 3.6 The ScrollBar Widget
-
-The scroll bar is a standalone Level 2 widget in `teksilo-widgets`, not a rendering detail inside ScrollArea. A standalone widget participates in the framework's hit testing and event dispatch. Its thumb is a region within its bounds that the framework's existing pointer routing handles.
-
-**It publishes no accessibility node.** This paragraph used to describe one — `Role::ScrollBar` with `set_numeric_value`, `set_min_numeric_value`, `set_max_numeric_value` and `Action::SetValue` — and that design was not built. `ScrollBar::accessibility` calls `set_hidden()`: a scroll bar is pointer chrome, assistive technology scrolls through the parent's `ScrollUp`/`ScrollDown`/`ScrollLeft`/`ScrollRight`, and a visible bar node would add a Tab stop and a second way to say the same thing. The scroll system therefore produces **one** node, not two. See [`scroll-area.md`](scroll-area.md) for what 0.12.1 actually emits.
-
-The ScrollBar stores the current scroll position and the content-to-viewport ratio (both provided by the ScrollArea via shared `Signal<f32>`). It computes thumb position and size from these values. It handles `PointerDown` on the thumb (start drag), `PointerMove` during drag (update position), `PointerUp` (end drag), and `PointerDown` on the track (page-scroll toward click position). It supports both vertical and horizontal orientations.
-
-### 3.7 ScrollArea and ScrollBar Interaction
-
-The ScrollArea owns the scroll state (`Signal<f32>` for each axis). The ScrollBar reads from and writes to this shared state. The ScrollArea and ScrollBar communicate through the reactive binding system, not through events or callbacks.
-
-The ScrollArea supports three scroll bar display modes via `ScrollBarMode` (`ScrollBarStyle` is the name of the Tier-3 style trait that paints the bar, not of the mode).
-
-**Overlay mode** (default, matching macOS and modern Linux). The ScrollArea's viewport occupies the full available width — the scroll bar does not reduce the content area. The bar floats over the content, thin while idle and widening when the pointer approaches the trailing edge; the viewport width never changes, and the transition can be animated through the animation scheduler.
-
-The word "overlay" here names what the *user* sees, not a mechanism. It is **not** routed through the overlay system: this paragraph once said the bar was shown via `OverlayPlacement::NearAnchor` / `DismissBehavior::PointerLeave`, and that is not what shipped. In 0.12.1 both bars are ordinary layout children in every visibility mode — `build()` adds them with `ctx.add` and `place_children` positions them. The modes differ only in whether the bar reserves thickness in the layout.
-
-**Permanent mode** (matching traditional Windows/GTK style). The ScrollBar is a layout sibling of the content viewport: `place_children` reserves the bar's thickness, so the viewport is narrower by the scroll bar's width. The scroll bar is always visible and always interactive. The viewport width is constant (reduced by the scroll bar width but never changing dynamically).
-
-**Thin mode.** Floats over the content like Overlay but only ever shows the thin resting indicator, never the full track — a passive scroll-position display for minimal UIs.
-
-The mode is selected per instance via `ScrollArea::new().child(content).scroll_bar_style(ScrollBarMode::Overlay)` (the default), `ScrollBarMode::Permanent` or `ScrollBarMode::Thin`; when each axis's bar appears is a separate `ScrollBarPolicy` (`AsNeeded` / `AlwaysOn` / `AlwaysOff`). There is no theme-wide default and no accessibility preference that overrides the mode.
-
-### 3.8 The Scroll Area Widget
-
-The ScrollArea is a Level 2 (`Widget` trait) widget in `teksilo-widgets`. It is the viewport container — it owns the clipping behavior, the layout negotiation with unbounded proposals, and the content offset placement described in Sections 3.1–3.5.
-
-The scroll offset for each axis is stored as a `Signal<f32>` (not a raw `Vec2`), because the ScrollBar widget needs to read and write the position through the reactive binding system. When the ScrollBar's thumb is dragged, it sets the shared `Signal<f32>`. The ScrollArea's binding on that state triggers a relayout, which re-runs `place_children` with the updated offset. When the user scrolls via mouse wheel or trackpad (`WidgetEvent::Scroll`), the ScrollArea updates the `Signal<f32>` directly, and the ScrollBar's thumb position updates via the same binding path.
-
-The ScrollArea creates and manages its ScrollBar children according to the active `ScrollBarMode` (Section 3.7). In every mode the bars are layout children and paint themselves — the ScrollArea's own `paint()` draws nothing; in overlay mode the bar floats over the content and widens on pointer proximity, in permanent mode it is positioned as a sibling of the content viewport. The ScrollArea sets `clips_children: true` on its arena node so the paint pass clips content to the viewport bounds.
-
-The ScrollArea handles `WidgetEvent::ScrollIntoView` to support focus-driven scrolling (Section 3.5) — it adjusts the `Signal<f32>` offset to bring the target bounds into view.
-
-For accessibility, the ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges) and page-level scroll actions (`Action::ScrollDown`, `Action::ScrollUp`, `Action::ScrollLeft`, `Action::ScrollRight`) — advertised per axis, and only for a direction that axis can actually still travel. That is the whole of it: the ScrollBar is hidden from the tree (§3.6), so there is one node, not two.
-
-### 3.9 Interaction with Virtualized Lists
-
-The `ListView` widget (backed by `ListModel<T>` or `ListDataSource`) depends on scrolling. The scroll offset determines which items are visible. The `ListView` only instantiates widget subtrees in the arena for visible items plus a small buffer above and below the viewport. As the user scrolls, items leaving the viewport have their subtrees destroyed and items entering the viewport have new subtrees created.
-
-The `ListView` does not need a general-purpose "scroll area wrapper" — it implements the scrolling behavior internally, because it needs tight control over which items have widget subtrees. It uses the same mechanisms as the scroll area (offset placement, `clips_children: true`, `WidgetEvent::Scroll` handling) but also manages the item lifecycle in the arena.
-
-### 3.10 Accessibility for Scroll Areas and Lists
-
-The scroll system produces **one** AccessKit node. The ScrollArea declares `Role::ScrollView` with scroll position properties (`set_scroll_x`, `set_scroll_y` and their min/max ranges), `set_clips_children()`, and page-level scroll actions (`Action::ScrollUp`, `Action::ScrollDown`, `Action::ScrollLeft`, `Action::ScrollRight`) — each advertised only while that direction has somewhere left to go. Screen readers use it both to announce the scrollable region and to move it.
-
-The `ScrollBar` is `set_hidden()` (§3.6). An earlier design gave it a second node with `Role::ScrollBar`, `set_numeric_value` and `Action::SetValue`; it was not built, because a scroll bar is pointer chrome and a node for it buys a Tab stop and a duplicate announcement rather than a capability.
-
-One gap is worth stating here rather than leaving to be rediscovered: **a `ScrollArea` has no keyboard handler**, so PageUp/PageDown/Home/End/arrows do nothing to it. A keyboard user moves it only indirectly, by Tabbing to a focusable descendant and letting the reveal walk follow (§3.5). Content with no focusable descendants is keyboard-unreachable inside one. The data views (`ListView`, `TableView`, `GridView`) and the editors bind these keys themselves and are unaffected. See [`scroll-area.md`](scroll-area.md) and [`touch-and-pen.md`](touch-and-pen.md) §10.2.
-
-For lists, AccessKit provides `Role::List` with `Role::ListItem` for static lists, and `Role::ListBox` with `Role::ListBoxOption` for interactive selectable lists. The critical properties for virtualized lists are `set_position_in_set(index)` on each visible item and `set_size_of_set(total_count)` on the list container. These tell screen readers the logical position of each item ("item 5 of 200") even when the AccessKit tree only contains the items currently visible in the viewport. Items outside the viewport do not exist in the arena and therefore do not appear in the AccessKit tree — no special mechanism is needed to exclude them.
-
----
-
-## 4. Widget State Ownership
-
-Teksilo uses a retained widget tree with arena-backed flat storage, following the approach proven by Masonry's TreeArena.
-
-All widgets live in a flat `SlotMap`-like arena. Parent-child relationships are stored as ID references within the arena. The tree structure is explicit (unlike a pure ECS where relationships are implicit), but the flat storage avoids Rust's borrow-checker challenges with recursive mutable tree traversal.
-
-The framework processes the tree through well-defined passes (event, layout, accessibility, paint), each of which traverses the arena without holding multiple mutable references simultaneously. This is the key insight from Masonry: separate the passes so that no pass needs to mutate a widget while reading another widget's state.
-
----
-
-## 5. Widget Extensibility
-
-The unified `Widget` trait has a single `build(&mut self, ctx)` for composition, a single `paint()` for own-visuals, and both are optional with sensible defaults. Leaf widgets implement `layout_response` + `paint`; container widgets implement `layout_response` + `place_children` + `children`; composing widgets implement `build` + `layout_response` (delegating to the child); hybrid widgets (Card, ScrollArea) implement `build` + `paint`. Reference: CLAUDE.md "Unified Widget Trait" and [`crates/teksilo-widgets/src/button.rs`](../crates/teksilo-widgets/src/button.rs).
-
-### 5.1 The Slot System
-
-Standard widgets ship with named extension points — slots — at structural boundaries where extension is anticipated. A slot is an optional placeholder that takes zero space when empty and accommodates arbitrary widget content when filled. Slots are part of a widget's public API contract; standard composites in teksilo-widgets ship them where extension is commonly needed: `leading_slot` / `trailing_slot` on `StandardListItem` / `StandardTreeItem`, `trailing_slot` on `Breadcrumb`, `bar_leading_slot` / `bar_trailing_slot` on `TabWidget`, `header` / `content` / `footer` on `Card`. A slot takes a built widget (most accept anything `IntoTeksiChild`, which includes a pre-registered `WidgetId`; some also have `_boxed` / `_id` twins), not a factory closure.
-
-```rust
-// `selected` is a Signal<Option<TabId>>; it stays None until the first tab is added.
-TabWidget::new(selected)
-    .tab(tr!(chapter_one()), chapter_editor(1))
-    .bar_trailing_slot(
-        HStack::new()
-            .child(
-                IconButton::new(IconWidget::from_svg_icon(plus))
-                    .tooltip(tr!(add_chapter()))
-                    .on_activate_fn(|ctx| ctx.send_intent(AppIntent::AddChapter)),
-            )
-            .child(
-                IconButton::new(IconWidget::from_svg_icon(chevron_down))
-                    .tooltip(tr!(chapter_menu()))
-                    .on_activate_fn(|ctx| ctx.send_intent(AppIntent::OpenChapterMenu)),
-            ),
-    )
-```
-
----
-
-## 6. UI Construction Patterns
-
-The framework provides three child-addition shapes on container builders — `child(impl IntoTeksiChild)` for inline insertion (it also accepts a pre-registered `WidgetId`), and `children(iter)` / `child_opt(Option<_>)` for iterator and conditional shapes — plus the `Repeater` for dynamic non-virtualized collections driven by `ListModel<T>` change notifications. Composites use the static `child()` chain when content structure is fixed for the lifetime of the widget; `visible_when(Signal<bool>)` toggles individual subtrees between active and dormant without reconstruction; the `Repeater` handles small collections that change during interaction; `ListView` virtualizes large collections. The `teksu!` DSL desugars to these same builder calls.
-
-References: CLAUDE.md "Widget Construction Patterns", [`teksu-macro-reference.md`](teksu-macro-reference.md), [`data-models.md`](data-models.md) (Repeater vs ListView).
-
----
-
-## 7. Reactivity Model
-
-`Signal<T>` is the only reactive primitive. `Signal::new(x)` is mutable; `signal.map(f)` is read-only and derived; multi-source combinators (`a.zip(&b)`, `a.and(&b)` / `a.or(&b)` / `s.not()`) compose, and `selector.flat_map(|t| inner_signal(t))` switches the result to follow a dynamically-selected inner signal (reactive "switchLatest", O(1) binding). `Prop<T>` is the widget-property wrapper accepting either a static `T` or a signal-bound value. `ObserverHandle` provides RAII cleanup; `WeakSignal<T>` breaks reference cycles. Builders accept `impl Into<Prop<T>>` for properties and `impl Into<ColorProp>` / `impl Into<TextStyleProp>` for theme-aware colors and typography.
-
-The division of labor: simple property reactivity is **declarative** (the widget declares a binding, the framework reacts); structural changes (switching tabs, adding/removing children, activating/dormant-ing subtrees) are **imperative**, requested from a handler via `EventContext` (`ctx.set_dormant`, `ctx.activate`, `ctx.destroy`, and `ctx.with_widget_mut::<W>(id, level, |w| …)` for a typed by-id mutation of any mounted widget that opts into `Widget::as_any_mut` — e.g. reaching `SceneView::scene_mut()`). These are deferred and applied after the handler returns, when the framework holds `&mut` arena access. This split is what lets Teksilo avoid both full view diffing and ad-hoc observer soup.
-
-References: CLAUDE.md "Signals & Reactivity", [`reactive-theme.md`](reactive-theme.md), [`events-and-gestures.md`](events-and-gestures.md) (deferred operations).
-
----
-
-## 8. Conditional Rendering and Dormancy
-
-The widget arena supports three activation states for widget subtrees.
-
-**Active** — fully operational. Participates in layout, receives events, paints, has AccessKit nodes, holds rendering resources.
-
-**Dormant** — state preserved, rendering resources released. Does not participate in layout, receives no events, has no AccessKit nodes. The widget data and state values remain in the arenas. Reactivation triggers relayout and repaint, but no reconstruction.
-
-**Destroyed** — removed from the arena entirely. State is gone. Must be rebuilt from scratch.
-
-Three construction strategies control the memory/responsiveness tradeoff for multi-pane widgets:
-
-**Eager** — all subtrees built at construction time, inactive ones set to Dormant. Switching is instant. Suitable for tab widgets with a small number of tabs.
-
-**Lazy** — subtrees built on first activation, then preserved as Dormant. Suitable when building a subtree is expensive and the user may never visit all tabs.
-
-**Transient** — subtrees built on activation, destroyed on deactivation. Lowest memory, highest switch cost. Suitable for browser-like scenarios where each tab is independent.
-
-These are patterns, not an API enum. `Switcher` implements Lazy for a page handed to `child(widget)` (built on first selection, then kept dormant) and Eager for a page handed over as a pre-registered `WidgetId`; no stock widget implements Transient — a handler gets it with `ctx.destroy`.
-
-### Rebuild and child reconciliation
-
-When a widget's `build()` re-runs (a `BindingLevel::Rebuild` signal fired, or an explicit rebuild request), the framework reconciles the widget's children against what the new `build()` returned. `Widget::preserves_children_on_rebuild()` selects the policy:
-
-- **`false` (default) — re-derive.** Every old child subtree is destroyed up front, then `build()` produces a fresh set. Correct for data-driven widgets (`Repeater::indexed`, `ListView`) that reconstruct children from current model state with fresh `WidgetId`s. A `false` widget must not re-attach an old child id — it is already gone.
-- **`true` — reconcile.** `build()` re-attaches (by id) the children it keeps and drops the rest. The framework keeps every re-attached child's subtree intact — focus, scroll offset, text contents, signal subscriptions all survive — and destroys only the children the new build dropped *and* did not re-parent elsewhere. This is the mode for widgets that memoize stateful children across rebuilds: `Switcher` pages, `TabWidget` / `DockingLayout` panes, the reconciling `Repeater::new` items, `FormLayout` rows, `PopoverWidget` content, the `CompositeTooltipWidget` body, `SceneView`'s heavyweight scene widgets, and `MenuBar`'s leading/trailing slot widgets (re-derived menu triggers reaped, memoized slots kept — so a stateful slot control survives a model-version rebuild).
-
-The reconcile is **scoped** (it only considers the rebuilt widget's own direct children, so floating retained nodes held outside the child tree — e.g. dormant menu/popover content registered via `ctx.add` — are never touched) and **parent-authoritative**: a kept subtree that the rebuild re-parents *out* of a dropped sibling and into the new tree survives, because the destroy walk follows live `parent` pointers rather than the dropped sibling's now-stale `children` list. The per-node teardown frees the arena slot via a single-node removal (`Arena::remove_node`), so the recursion the destroy walk already performed is not duplicated by the arena. Net effect: a `preserve = true` widget that removes a child (a closed tab, a superseded tooltip chrome) genuinely reaps it — it does not leave a stranded, still-`Active` orphan in the arena.
-
----
-
-## 9. Event System
-
-Full reference: [`events-and-gestures.md`](events-and-gestures.md). Preview pass (root → strict ancestors of target) plus bubble pass (target → root); attached handlers stored on `WidgetNode` (`.on_tap` / `.on_hover` / `.on_key` / `.on_key_preview` / `.on_focus` / `.on_scroll` / `.on_pointer_event` / `.on_access_action`); auto-wired gesture recognizers; `EventContext` API including deferred mutations (`set_dormant` / `activate` / `destroy` / `with_widget_mut::<W>` / `request_focus` / `request_accessibility_update` / `dismiss_all_overlays`); subtree state signals (`.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)`); AccessAction routing through the same dispatch machinery. `request_accessibility_update()` (also on `BuildContext`) forces an AccessKit re-walk after a handler/build restructures its subtree in a way a relayout wouldn't otherwise surface to AT.
-
-Backend events (database change notifiers, file watchers, message buses) plug in via the `EventSource` trait — widgets subscribe from `build()` via `BuildContext::subscribe_event`, and cross-thread forwarding goes through winit's `EventLoopProxy`. Per-widget lifetime cleanup: when the widget is destroyed, the subscription handle drops and the source unsubscribes. A **rebuild** is not a destroy: `build()` re-runs and re-subscribes, and the `SubscriptionId` it gets back is the one the previous build used at that same position (`BuildContext::reusable_sub_ids`). That identity has to span rebuilds because it is what crosses the thread boundary — a publisher captures the id and posts it, the UI thread dispatches it frames later, and minting a fresh id in between would strand every event already in flight. Matching is positional: the Nth subscribe call of one build inherits the Nth of the last, a build that subscribes fewer times leaves the surplus torn down, and a build that subscribes more allocates fresh ids for the extras.
-
----
-
-## 10. Gesture Recognition
-
-Full reference: [`events-and-gestures.md`](events-and-gestures.md). UIKit-style state machines (TapRecognizer, DoubleTapRecognizer / TripleTapRecognizer, LongPressRecognizer, DragRecognizer) with a `GestureArena` per live contact (held in each node's `GestureArenaSet`) for competition; cross-widget arbitration is the router's per-pointer `PointerSequence`. Recognizers are auto-wired from attached handlers — the framework instantiates a `TapRecognizer` when a node has an `on_tap` handler, a `DragRecognizer` when it has `on_drag`, and so on. Tap-family callbacks receive `&TapEvent { position, button, modifiers, pointer }`; default acceptance is `ButtonMask::PRIMARY` only (right-click never spuriously fires `on_tap`), widened via `.accept_tap_buttons(...)` and friends.
-
----
-
-## 11. Actions, Intents, and Shortcuts
-
-Full reference: [`shortcut-intent-action.md`](shortcut-intent-action.md). The three-layer pipeline: `Shortcut` (rebindable keystroke → intent name) → `Intent` (runtime DTO with optional typed payload) → `Action` (ancestor-registered handler keyed by intent name). `#[derive(IntentKind)]` with `#[name = "..."]` provides the typed-enum DTO bridge (unit, tuple, and struct variants). `ShortcutRegistry` holds two layers (declared defaults + persisted user overrides with graveyard semantics) and exposes a `Signal<u64> version` so menu labels and tooltips re-render on rebinds.
-
----
-
-## 12. Internationalization
-
-Full reference: [`i18n.md`](i18n.md). Fluent-rs runtime (`I18nManager`, `LocalizedString`, locale resolution, `.ftl` file watcher, fallback chains, `LayoutDirection` signal); compile-time-validating macros `tr!` / `tr_widget!` / `tr_signal!` / `tr_signal_widget!` that read `.ftl` files at expansion and validate every call against the parsed key map; locale-aware formatters (`NumberFormatter`, `TeksiloDateTimeFormatter`, `TeksiloDateTime`) backed by ICU4X (icu_decimal / icu_datetime / icu_calendar) with a custom `DATETIME()` Fluent function and bundle `set_formatter` callback so `{ NUMBER(...) }` / `{ DATETIME(...) }` inside `.ftl` messages render correctly across locales. Framework-string registration for `teksilo-widgets` is **explicit**: applications call `.framework_locales(teksilo_widgets::framework_locales())` on the `I18nConfig` builder chain.
-
----
-
-## 13. Overlay System
-
-Full reference: [`tooltips.md`](tooltips.md) for tooltips (plain + rich + registry, sticky-on-dwell, focus-driven a11y promotion). Multi-window modal flow lives in [`multi-window.md`](multi-window.md).
-
-Engine internals: `OverlayManager` per `WidgetTree`. Two rendering layers — `OverlayLayer::InTree` (drawn into the same `RenderFrame` as the host) and `OverlayLayer::NativePopup` (separate winit window, used for menus that must escape the host window's bounds); `OverlayLayer::Auto` picks based on placement and platform. `OverlayPlacement` covers `Below` / `Above` / `BelowPreferred` (auto-flips on insufficient space) / `TrailingEdge` / `AtPointer` / `AtPointerAvoiding` / `AboveSelection` / `NearAnchor` / `Centered` / `BottomCenter` / `ViewportCorner` / `FullViewport`. `DismissBehavior::ClickOutside | EscapeKey | EscapeOrClickOutside | PointerLeave { delay } | Manual` plus an Escape-cascade root handler. Delayed-open overlays (submenu hover delays) cancel via `EventContext::cancel_delayed_overlay(id)`. Overlay anchor positions invalidate on host relayout. AccessKit nodes for overlay content cascade under their logical parent, not the geometric root, so tooltips DescribeBy their anchor and menus Owned-By their menu bar item.
-
-`OverlayRequest::with_fade(duration)` wires the framework-managed opacity tween at show/dismiss — caller specifies the duration, framework handles the signal, the `set_opacity` scope, and the deferred dormant-set after the dismiss tween completes.
-
----
-
-## 14. Drag and Drop
-
-Full reference: [`drag-and-drop.md`](drag-and-drop.md). Three scenarios (intra-widget reorder, inter-widget transfer, external/OS drops) share one machinery: typed `DragPayload`, source/target traits, hit testing under the cursor, drop-zone preview overlay, edge auto-scroll during hover, spring-load on dwell, full keyboard equivalence (`Cut` / `Copy` / `Paste` actions on a focused list/tree). **Inbound** external drops (files / text / URLs dragged from the OS into a window) are implemented via the `ExternalDndBackend` per-OS backends (macOS `NSDraggingDestination` verified; Windows OLE, Wayland `wl_data_device`, X11 XDND via an `XdndProxy` helper window) and reuse the same machinery — see [`drag-and-drop.md` §11](drag-and-drop.md) and the `DropZone` widget. **Outbound** drags (Teksilo window → another app) are implemented on every desktop target (macOS `NSDraggingSource` + Wayland `wl_data_source` verified; Windows OLE `IDropSource`; X11 XDND source) — a MIME-carrying `start_drag` auto-escalates at the window boundary, with typed re-entry enabling cross-window DnD. See [`drag-and-drop.md` §11.5](drag-and-drop.md).
-
----
-
-## 15. Data Model
-
-Full reference: [`data-models.md`](data-models.md). The `teksilo-data` crate sits between the widget tree and application view-models, providing `ListModel<T>`, `TreeModel<T>` + `TreeSlice<T>`, `SelectionModel`, and the `ListDataSource` trait for paged/external collections. `SortFilterListModel<T>` and `SortFilterTreeModel<T>` are projection wrappers that sort and filter without copying the source. `DataChange` / `TreeChange` notifications drive `Repeater`, `ListView`, `TreeView`, `TableView`, `TreeTableView` updates.
-
-The crate is separate from `teksilo-core` because collections are a higher layer than the widget tree — view-models live in the application, hold these models as fields, and bind widgets to them. A data layer can equally implement the source traits over its own store instead of feeding a built-in model; nothing in `teksilo-data` requires a particular application architecture.
-
----
-
-## 16. Canvas API
-
-### 16.1 Purpose
-
-The Canvas is the high-level drawing API that widget authors program against. It replaces direct `RenderFrame` manipulation with operations that match how developers think about graphics — shapes, colors, text, transforms.
-
-```rust
-fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
-    let theme = ctx.theme;
-    canvas.fill_rounded_rect(bounds, CornerRadius::uniform(6.0), theme.colors.accent);
-    canvas.draw_text(&self.label, bounds, &theme.typography.body, theme.colors.text_primary);
-}
-```
-
-### 16.2 Three-Tier Rendering
-
-The Canvas internally classifies each drawing operation and routes it to the appropriate rendering tier.
-
-**Tier 1 — Axis-aligned rectangles.** `fill_rect`, `stroke_rect`, simple `draw_line`. Translated directly to `DecorationRect` entries. Zero rasterization cost. Covers the majority of UI drawing.
-
-**Tier 2 — SDF shader shapes.** Rounded rectangles, circles, ellipses, gradients. Rendered as quads with a specialized fragment shader computing signed distance fields. Smooth antialiasing at any resolution without rasterization. The `RenderFrame` gains `ShapeQuad` entries for this tier.
-
-**Tier 3 — Arbitrary paths.** Complex shapes, custom curves, SVG icons. Rasterized on CPU via tiny-skia, cached in a shape atlas, rendered as textured quads. Rasterization is amortized by caching — static paths rasterize once.
-
-### 16.3 Path Builder
-
-The `Path` type provides a builder for arbitrary shapes:
-
-```rust
-let star = Path::star(center, outer_radius, inner_radius, 5);
-canvas.fill_path(&star, Color::new(1.0, 0.84, 0.0, 1.0));
-```
-
-### 16.4 Text Integration
-
-The Canvas delegates text rendering to the shared `Typesetter` instance from text-typeset. `draw_text` handles simple single-line text. `draw_text_layout` renders pre-measured text for cases where layout measurement and painting are separated. The RichTextEditor widget uses `draw_render_frame` to embed a complete text-typeset `RenderFrame` at a specific position, sharing the same glyph atlas.
-
-### 16.5 Paint Types
-
-Beyond solid colors, the Canvas supports `Paint` types: `LinearGradient`, `RadialGradient`, `ConicGradient`, and `Image`. Gradients are rendered in the SDF fragment shader (Tier 2). Widgets carry a fill as a `PaintProp` (a flat `ColorProp` or a gradient, in `teksilo-core`); `RectWidget` resolves it to a `Paint` at paint time (gradient endpoints are rect-local, computed from the widget's size). Anything `Into<ColorProp>` is also `Into<PaintProp>` as a solid, so the common case is unchanged.
-
----
-
-## 17. Rendering Pipeline
-
-### 17.1 Frame Lifecycle
-
-A frame is produced only when something has changed. Between frames, the application is idle and the GPU is quiescent. The frame lifecycle has five phases executing sequentially on the main thread.
-
-**Phase 1: Event processing.** Raw input from winit is translated and dispatched through the widget tree. State changes from property bindings are resolved. Widgets are marked dirty.
-
-**Phase 2: Layout.** SwiftUI-style negotiation runs only on dirty subtrees. Output: positioned rectangle for every active widget.
-
-**Phase 3: Accessibility sync.** The AccessKit tree is updated incrementally — only changed nodes are pushed.
-
-**Phase 4: Paint.** Each dirty widget's `paint()` is called with a Canvas. The Canvas accumulates drawing operations and produces a merged `RenderFrame`.
-
-**Phase 5: GPU submission.** Atlas textures are uploaded, vertex buffers are built, draw calls are issued through wgpu. The surface presents.
-
-### 17.2 RenderFrame
-
-The `RenderFrame` is the boundary between platform-independent logic (teksilo-core, teksilo-canvas) and GPU-specific code (teksilo-render). Its drawable types are `GlyphQuad` (textured from glyph atlas), `ImageQuad` (textured from image), `DecorationRect` (untextured colored rectangle), `CosmeticLine` (hairline), `ShapeQuad` (SDF-rendered shape), `ShadowQuad`, `RasterizedQuad` / `PathEntry` (Tier 3 paths, textured from the path atlas), and `AnimatedQuadDraw` (shader-driven animated quads, with their `AnimParams`). A `draw_order` array records painter's order (back-to-front) for correct occlusion across all drawable types.
-
-### 17.3 GPU Pipeline
-
-Seven render pipelines in teksilo-render: the **quad pipeline** (textured quads for glyphs, images, rasterized paths), the **rect pipeline** (untextured colored quads for decorations), the **SDF pipeline** (signed distance field shapes with optional gradient fills), the **shadow pipeline**, the **path-gradient pipeline** (gradient-filled Tier 3 paths), and the **anim-proc** / **anim-sprite** pipelines (shader-driven animated quads such as `Spinner`) — plus the dual-Kawase blur passes in `blur.rs`, which run offscreen. Draws are batched per pipeline; a state change (clip, opacity, transform) flushes every open batch.
-
-### 17.4 Atlas Management
-
-Two atlas textures serve different purposes. The **glyph atlas** is owned by the shared Typesetter (from text-typeset), containing rasterized glyph bitmaps. The **path atlas** (`path_atlas.rs`) stores Tier 3 rasterized path results from tiny-skia. Both use LRU eviction — dormant widgets' entries age out naturally. Application images are not atlased: `ImageManager` uploads each one as its own mip-mapped texture, keyed by name.
-
-#### Glyph atlas lifecycle and the eviction contract
-
-Glyph quads bake **atlas pixel coordinates** at paint time, and the framework retains painted output at several layers (per-widget `cached_paint` / `cached_post_paint`, the assembled `cached_frame`, the scene per-item cache). LRU eviction can therefore invalidate quads that are still being replayed — the contract that keeps this sound has three legs:
-
-1. **Keep-alive.** Every replay of a retained frame calls `TextBackend::touch_layout` for each of the frame's `layout_keys` (per-widget cache hits, post-paint cache hits, and the full-frame early-out in `rendering_impl.rs`), refreshing the glyphs' LRU timestamps so on-screen glyphs never age out.
-2. **Eviction reporting.** `TextFontService::eviction_epoch` is the single source of truth: it is bumped by *every* eviction path — the `atlas_snapshot` scan, the scan at the start of every rich-text `render()` (`build_render_frame`), and the wholesale reset on scale-factor change. `TypesetterBridge::atlas_info` compares it against a last-seen value and reports `glyphs_evicted`; the app-level recovery in `teksilo-app` then clears the bridge caches and calls `invalidate_all_paints` on **every** window (the bridge and atlas are shared process-wide), requesting redraws. Caches living outside the widget arena (the scene `ItemCoordinateCache`) instead self-gate on `TextBackend::glyph_epoch` at paint time.
-3. **Versioned uploads.** Each window's renderer owns its own GPU atlas texture. `atlas_info(seen_version)` carries a monotonic content `version`; a window uploads (and receives pixels) only when its recorded `atlas_uploaded_version` lags. This replaces consume-once dirty semantics, so several windows all converge on the same atlas content instead of the first caller consuming the upload for everyone.
-
-**Debug-build corruption catcher.** In debug builds, every evicted atlas rectangle is poison-filled magenta (text-typeset), so any stale-UV sampling is visually unmistakable; and every retained-frame replay validates its layouts via `TextBackend::debug_validate_layout` — a glyph whose live atlas rect no longer matches the baked quads aborts with a diagnostic (`RectMismatch`), and a layout the backend no longer knows logs a loud warning (`StaleKey`). Release builds compile all of this out.
-
-### 17.5 Dirty Tracking
-
-Each widget has a dirty flag at two granularities: **needs relayout** (size may have changed) and **needs repaint** (appearance changed, size unchanged). Clean widgets replay cached Canvas output without recomputation.
-
----
-
-## 18. HiDPI and Scaling
-
-Layout works in logical pixels. Rendering works in physical pixels. The conversion happens at the boundary between Phase 4 (paint) and Phase 5 (GPU submission).
-
-`SizeProposal`, widget dimensions, spacing, padding, and font sizes are all logical. The Canvas also works in logical coordinates — `canvas.fill_circle(center, 10.0, color)` draws a circle with a 10-logical-pixel radius regardless of display density.
-
-The scale factor is applied in two places: text-typeset rasterizes glyphs at physical pixel size (logical × scale factor), and teksilo-render multiplies screen coordinates by the scale factor when building vertex buffers.
-
-When the scale factor changes (window dragged to a different monitor), the glyph and shape atlases are invalidated and a full relayout is triggered.
-
----
-
-## 19. Theming — the four-tier styling ladder
-
-Full references: [`styling-system.md`](styling-system.md) (the four-tier ladder — tokens → variants → recipes → style protocols) and [`reactive-theme.md`](reactive-theme.md) (the `Signal<Theme>` reactive layer).
-
-`Theme` lives in `teksilo-core::styles` (not `teksilo-tokens`) so the per-widget style trait protocols and the typed `Rc<dyn FooStyle>` slot bag can sit on the same struct. It carries a `ThemeId` (`"intui.light"`, `"custom"`, …), a required `appearance: ThemeAppearance` ({Light, Dark} — drives shadow density, OS-theme matching, asset selection), five token groups (`ColorTokens`, `LayoutTokens`, `TypographyTokens`, `ShapeTokens`, `MotionTokens`) plus `InputTokens` (density, target sizes, gesture slop), `ComponentStyleSlots` (typed style-trait overrides), and a `ThemeExtensions` registry. (The former `ComponentStyles` dimension struct has been removed.) There is no `Theme::default()` / `Theme::*_default()` — apps pick a preset explicitly (`teksilo_core::presets::intui::{light, dark}`).
-
-Every themable widget composes its chrome through a Tier-3 style trait (`ButtonStyle`, `ToggleStyle`, …) rather than self-painting: the widget builds its parts, hands a `*StyleConfig` to the active style, and uses the returned `WidgetId` as its root child. The style is resolved per-call (`.style(...)`) → theme-wide (`theme.style_slots.<widget>`) → `Recipe*Style` default. `Signal<Theme>` reactivity — `set_theme` updates the signal and dirty-marks every node, no rebuild; focus, scroll, text-input cursor, expanded sections all survive a switch. Role-based widget surface (`TextRole`, `SurfaceRole`, `BorderRole`, `TextStyleRole`) plus `ColorProp` / `TextStyleProp` wrappers; widgets resolve roles against the current theme at paint/layout time. Subtree theme overrides via `set_theme_override(id, |theme| …)`. Themes derive `Serialize` + `Deserialize` for user-loadable theme files (the `style_slots` and `extensions` fields are `#[serde(skip)]`).
-
----
-
-## 20. Threading Model
-
-### 20.1 Single UI Thread
-
-All five phases of the frame lifecycle run sequentially on the main thread. The widget tree, state arena, overlay manager, Canvas, and all contexts are non-`Send` types — the compiler prevents accidental access from background threads.
-
-A call from a Teksilo command handler into the application's domain layer executes synchronously. The core needs no `async`/`await` and no runtime; `teksilo-async` is an opt-in main-thread executor (`spawn_local` / `spawn_blocking`) driven by `teksilo-app`'s `on_loop_tick` hook, with `teksilo-tokio` / `teksilo-async-std` as reactor adapters — see [`async.md`](async.md).
-
-### 20.2 Background Work
-
-Long operations run on background threads owned by the application (or by its data layer). The background thread communicates with the UI thread through winit's `EventLoopProxy` — a unidirectional channel that wakes the event loop and delivers custom events. The UI thread processes these events like any other input, triggering data source refreshes and widget repaints.
-
-### 20.3 Incremental Work
-
-Operations that take 5–50ms (too short for a background thread, too long for a single frame) are broken into chunks via `request_idle_callback`. The event loop runs idle work during gaps between frames, respecting a time budget.
-
-### 20.4 Event Loop
-
-The winit event loop uses `ControlFlow::Wait` — it sleeps when no events are pending and no widgets are dirty. CPU and GPU consumption is near-zero when the user is not interacting. Full rationale and the four enforcement gates: [`idle-and-animation.md`](idle-and-animation.md).
-
-### 20.5 Animation
-
-Teksilo does not ship a separate animation subsystem. Animation is a thin layer over `Signal<f32>`: `signal.animate_to(target, duration, easing)` asks the tree's `AnimationScheduler` to smoothly interpolate the value over time, and any widget bound to the signal re-paints on each tick as the value slides. The scheduler integrates with the frame lifecycle (pause when the window is occluded, rebase on resume, skip offscreen ticks, cancel animations on widget rebuild/destroy), so widgets never own animation lifetime manually.
-
-The design intent is narrow: motion is reserved for a small set of floating transitions — dialog appearance, snackbar slide-in, accordion expansion, toggle thumb motion, indeterminate progress, smooth programmatic scroll. Hover, press, and focus state changes are explicitly *instant* in Int UI's vocabulary; they are expressed as `Signal<Role>` mapped from an interaction signal and resolved per-frame through the theme, not through the animation scheduler. Looping animations respect `ctx.prefers_reduced_motion()`.
-
-Full rationale, API, worked examples, and testing patterns: [`animation.md`](animation.md).
-
----
-
-## 21. Accessibility
-
-Full reference: [`accessibility-overrides.md`](accessibility-overrides.md). AccessKit is integrated at the `Widget` trait level — every widget's `accessibility(builder)` declares role, name, state, and available actions. AT actions flow through the same dispatch as pointer/keyboard input via `WidgetEvent::AccessAction`. Builder-level `.access_*` modifiers (`access_label`, `access_description`, `access_hidden`, `access_role`, `access_disabled`, `access_controls` / `described_by` / `labelled_by`, `access_live`, `access_shortcut_id` / `access_shortcut_literal`, `access_action` / `access_remove_action` / `access_custom_action`, `access_exclude_subtree` / `access_merge_subtree`, `access_customize`) let app authors augment, replace, or annotate any widget's accessibility info from the outside.
-
-Dormant subtrees produce no AccessKit nodes (screen readers only see active content). Overlay content generates correct AccessKit tree structures: tab lists have `Role::TabList` and `Role::Tab` nodes, menus have `Role::Menu` and `Role::MenuItem` nodes, a tooltip is its anchor's description (copied while hidden, and written from the anchor's `DescribedBy` relation while shown, since no AccessKit adapter reads the relation itself; see [A description from `described_by`](accessibility-overrides.md#a-description-from-described_by)). Scene-content a11y customization (off-screen modes, logical groups) lives in [`teksilo-scene-a11y.md`](teksilo-scene-a11y.md).
-
----
-
-## 22. Window Management
-
-Full reference: [`multi-window.md`](multi-window.md). Each window owns its own independent `WidgetTree`, layout pass, paint pass, `RenderFrame`, and wgpu surface. Application-level context (theme, locale, `ShortcutRegistry`, data-model handles, app-scoped backend wiring) is shared across windows. `WindowConfig` is the single creation entry point for both initial and runtime-opened windows; `WindowState` is the per-window cloneable signal handle (placement, title, size, position, focused, resizable, always_on_top). Two-way OS↔state sync uses an `applying_from_os` re-entrancy guard to prevent observer→OS→observer loops.
-
-Custom window chrome (drag region, resize strip, window controls, per-OS title bar host backends): [`title-bar.md`](title-bar.md).
-
----
-
-## 23. Settings and Persistence
-
-Full reference: [`settings.md`](settings.md). In-memory is the source of truth — `Signal<T>` and `*Model<T>` handles drive both UI and disk; the disk side is a debounced atomic projection (write-temp + rename, single shared I/O thread per process). Three persistence shapes: `SettingsStore` (dotted-key K/V for scalars), `SettingsFile<T>` (typed single-struct with `Versioned` + `Migrator<T>` migrations on raw `toml::Value`), and `PersistedListModel<T>` / `PersistedTreeModel<T>` (bridges from `ListModel<T>` / `TreeModel<T>`). Built-in services: `MruList<T: MruEntry>` for generic dedupe + pin + LRU-cap recents; `WindowStateService` with framework-driven auto-save/restore for any `WindowConfig` carrying `id(...)`. Saved geometry is sanitized on restore against the current monitor's work area. Wayland ignores window position by protocol design (size and `WindowPlacement` round-trip).
-
----
-
-## 24. Testability
-
-### 24.1 Headless by Design
-
-The widget tree runs without a window, without GPU, and without winit. All five phases (minus GPU submission) execute in pure Rust with no platform dependencies. Tests use teksilo-core's `WidgetTree` directly:
-
-```rust
-#[test]
-fn button_click_fires_action() {
-    use std::cell::Cell;
-    use std::rc::Rc;
-    let mut tree = WidgetTree::new();
-    let clicked = Rc::new(Cell::new(false));
-    let clicked_flag = clicked.clone();
-    let root = tree.add(FillWidget::new());
-    tree.push_action(
-        root,
-        Action::new("app.save").on_invoke(move |_i, _c| clicked_flag.set(true)),
-    );
-    let button = tree.add_child(
-        root,
-        Button::new(lit!("Save")).on_activate_fn(|ctx| ctx.send_intent(AppIntent::Save)),
-    );
-    tree.layout(SizeProposal::exact(200.0, 40.0));
-    tree.click(button);
-    assert!(clicked.get());
-}
-```
-
-(`FillWidget` and `push_action` are `pub(crate)` test helpers inside `teksilo-core`; a test in another crate registers the `Action` from a root widget's `build()` with `ctx.register_action` instead.)
-
-### 24.2 What Is Testable
-
-Layout (given a widget tree, do children end up at the right positions), event dispatch (does the right widget receive events, does focus cycle correctly), state transitions (hover/pressed/disabled), accessibility (correct AccessKit role, name, actions), render output (expected quads/shapes in the RenderFrame), theming (palette swap produces correct colors), gesture recognition (pure state machine tests), overlay behavior (tooltip timing via simulated clock), drag-and-drop (payload transfer, insertion indicator rendering), and composition (multiple widgets interacting correctly).
-
-### 24.3 CI Friendly
-
-No `Xvfb`, no GPU, no display server required. Pure logic tests run in `cargo test` in milliseconds. The simulated clock (`tree.advance_time()`) enables deterministic testing of time-dependent behavior.
-
----
-
-## 25. Crate Structure
-
-Full per-crate descriptions live in CLAUDE.md "Crate Architecture". The dependency graph is the part that belongs here.
-
-### 25.1 Dependency Graph
-
-```text
-teksilo-tokens
-    ↑
-teksilo-canvas
-    ↑
-    ├── teksilo-text ← text-typeset, text-document
-    ├── teksilo-render ← wgpu, tiny-skia
-    │
-teksilo-core ← accesskit
-    ↑
-    ├── teksilo-data
-    │       ↑
-    │   teksilo-settings ← serde, toml, etcetera, tempfile
-    │       ↑
-    │   teksilo-telemetry ← uuid, redb
-    │
-    ├── teksilo-i18n ← fluent-rs, icu_decimal, icu_datetime, icu_calendar
-    │
-    ├── teksilo-platform ← winit, accesskit_winit  (+ teksilo-render)
-    │
-teksilo-widgets (core, data, settings, telemetry, i18n, text,
-                 platform — the file-dialog and native-menu surfaces)
-    ↑
-teksilo-app (wires the text backend into Canvas, teksilo-widgets,
-             teksilo-platform, teksilo-i18n, teksilo-settings —
-             auto-restores/saves window geometry; optionally
-             teksilo-text, teksilo-telemetry, teksilo-webview)
-    ↑
-teksilo (umbrella, re-exports)
-```
-
-`teksilo-text` depends only on `teksilo-canvas` (for the `TextBackend` trait), `teksilo-tokens`, `text-typeset` and `text-document`. It does not depend on `teksilo-core` or any platform crate. The `TextBackend` trait is defined in `teksilo-canvas` so that the Canvas can call text rendering methods without knowing which backend implementation is active.
-
-The RichTextEditor widget (in `teksilo-widgets`) reaches `text-document` and `text-typeset` through `teksilo-text`'s re-exports (`teksilo_text::text_document`, `teksilo_text::RichTextEngine`). The application owns the `TextDocument` instance and passes it to the widget — Teksilo never owns or wraps the document model. The application reaches the model directly for highlighter, cursors and import/export — through `teksilo::text_document`, or its own `text-document` dependency, which Cargo deduplicates.
-
-Platform-specific code (winit, wgpu, accesskit_winit) is confined to `teksilo-render` and `teksilo-platform`. `teksilo-widgets` links `teksilo-platform` for two trait surfaces (file dialogs, native menu), but the widget tree itself never touches a window or a GPU and stays headlessly testable.
-
-### 25.2 The teksilo Umbrella
-
-The standard application developer depends on a single crate: `teksilo`. It re-exports the public API and controls feature flags. `widgets`, `text` and `i18n` are default features (opt-out, not opt-in) — alongside `inspector`, `toast`, `file-dialog`, `clipboard` and the `fonts-arabic` / `fonts-hebrew` fallback bundles — because the kinds of applications Teksilo targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. Rich text has no feature of its own: `RichTextEditor` ships in `teksilo-widgets`, and `TextInput` itself derives from it. Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
-
----
-
-## 26. Button — Reference Widget Design
-
-The button serves as the reference implementation exercising most architectural features: composition of primitives, interaction state as a `Signal<InteractionState>`, role-based color resolution per visual state, attached handler activation from multiple input paths, AccessKit role and actions. A new widget author implementing their first custom widget should read [`crates/teksilo-widgets/src/button.rs`](../crates/teksilo-widgets/src/button.rs) — it's the authoritative exemplar, and concrete code is more useful than prose at this point. See also [`reactive-theme.md`](reactive-theme.md) for the `Signal<Role>` pattern Button uses for its visual states.
-
-What Button exercises:
-
-- **Composition.** The content — an optional `IconWidget` and a `TextWidget` label, arranged in an `HStack` or `VStack` by `IconLocation` (`Leading` / `Trailing` / `Top` / `Bottom`, or `IconOnly` / `None`), optionally flanked by leading/trailing slot widgets — is handed to the active `ButtonStyle::make_body`, which builds the chrome (fill, border, corner radius, focus ring, padding, min size) around it. Leading/Trailing positions respect locale `LayoutDirection`.
-- **Visual states.** Five (idle, hovered, pressed, focused, disabled) × seven variants (`Filled`, `Tinted`, `Outlined`, `Plain`, `Ghost`, `Link`, `Destructive`) → (background role, border role, text role) resolved at paint time via `Signal<InteractionState>` mapped to `Signal<Role>`.
-- **Behavior.** Pointer enter/leave/down/up drives interaction state; keyboard Space/Enter triggers activation (via `on_key`); cursor is `Pointer` on hover; the `TapRecognizer` auto-wired from `on_tap` commits the click on release.
-- **Accessibility.** `Role::Button`, name from label (resolved via `tr!` / `tr_widget!`), disabled state, actions (`Click`, `Focus`). Focus ring painted only on keyboard focus (origin-aware).
-
----
-
-## 27. Architectural Comparisons
-
-### 27.1 vs. QPalette → Design Tokens
-
-QPalette covers color roles across three interaction groups. Teksilo's design token system extends that scope to spacing, typography, and shape, uses typed Rust structs, and supports subtree overrides through environment propagation.
-
-### 27.2 vs. QAbstractItemModel → `ListModel<T>` and `TreeModel<T>`
-
-Qt's `QAbstractItemModel` uses a role-based, type-erased data access protocol (`QVariant`). Teksilo's `ListModel<T>` and `TreeModel<T>` are concrete generic types: the delegate closure receives `&T` directly, with compile-time type safety. The `ListDataSource` trait provides an escape hatch for large/external datasets, also with an associated `Item` type.
-
-### 27.3 vs. Existing Rust GUI Frameworks
-
-Teksilo's focus areas are accessibility (AccessKit at the trait level, tested by every test), text rendering (text-document + text-typeset), and widget extensibility (unified Widget trait with slots). Its layout and event design are comparable to Xilem/Masonry. It is currently weaker on rendering sophistication (quad-based vs. Vello's GPU compute renderer) and much younger than established frameworks.
-
-The primary reference point for Teksilo's feature scope is Qt Widgets — the framework most commonly used for the kind of professional desktop applications Teksilo targets.
-
----
-
-## 28. Widget Catalog
-
-The current widget inventory is no longer maintained as prose in this document — it drifted faster than it could be edited. The authoritative sources are:
-
-- **`tools/extract_widget_api.py --all`** — emits the public surface (struct, builder methods, enums, module doc) of every widget in `teksilo-widgets`. Run `python3 tools/extract_widget_api.py --list` to see the full file list, or pass widget names to extract just those.
-- **CLAUDE.md** — the "Implementation Status" block and the per-widget reference docs ([`table-view.md`](table-view.md), [`tab-widget.md`](tab-widget.md), [`charts.md`](charts.md), [`tooltips.md`](tooltips.md), [`teksilo-scene.md`](teksilo-scene.md)) cover the widgets with the deepest API surface.
-
-For a one-shot dump suitable for downstream tooling: `python3 tools/extract_widget_api.py --all -f json -o widgets.json`.
-
----
-
-## 29. V2 Widget Authoring Model
-
-The unified `Widget` trait, `Signal<T>` reactivity, attached handlers, `BuildContext::signal` / `effect` / `animated_signal` / `app_state` / `subscribe_event`, the four widget shapes (leaf / container / composing / hybrid), and the `take_widget` / `restore_widget` arena extraction pattern that makes `build(&mut self)` borrow-safe — all documented in CLAUDE.md "Unified Widget Trait" plus the focused docs ([`events-and-gestures.md`](events-and-gestures.md), [`reactive-theme.md`](reactive-theme.md), [`animation.md`](animation.md)). The V2 model is what the entire widget library is written against; reading [`crates/teksilo-widgets/src/button.rs`](../crates/teksilo-widgets/src/button.rs) is the fastest way to see all of it together in one widget.
-
-The `teksu!` DSL desugars to V2 builder calls one-to-one at macro-expansion time — no runtime, no virtual tree. References: [`teksu-macro-reference.md`](teksu-macro-reference.md) (user-facing, and normative for behaviour) and [`teksu-language-spec-v3.md`](teksu-language-spec-v3.md) (design rationale).
+[Implementation details and review history](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/architecture.md)
+are retained in the repository.

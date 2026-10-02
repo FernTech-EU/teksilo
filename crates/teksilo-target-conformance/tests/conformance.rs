@@ -95,7 +95,7 @@ fn census() -> &'static [TargetViolation] {
 /// [`the_allow_lists_roster_is_what_it_says_it_is`], which pins how many entries
 /// there are, how many rest on an exception, and how many are escalated. The
 /// enumeration of Compact-visible exceptions the programme has taken lives in
-/// `docs/density-inventory.md` §0 and nowhere else, for the same reason — a
+/// `engineering/docs/density-inventory.md` §0 and nowhere else, for the same reason — a
 /// count in prose is a count that drifts.
 ///
 /// Two shapes recur. A control that paints under 24 dp on one axis **packed
@@ -131,7 +131,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               horizontally an outset could reach the floor on that axis alone, \
               which would not clear the violation. WCAG 2.2 SC 2.5.8 \
               *Equivalent*: the same value is set by typing in the field, by \
-              Up/Down, and by the wheel. docs/density-inventory.md named \
+              Up/Down, and by the wheel. engineering/docs/density-inventory.md named \
               partition_targets as this row's mechanism, which cannot be right \
               -- the step buttons are their own nodes beside their own sibling, \
               the same error P25 corrected for the SplitButton chevron; that \
@@ -187,7 +187,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               the width short at Compact only, since Comfortable's wider ring \
               clears it. WCAG 2.2 SC 2.5.8 *Equivalent*: the ColorPicker sets \
               the same value through its H/S/V spin boxes and its hex field. \
-              The geometric remedy is a further docs/density-inventory.md \u{a7}0 \
+              The geometric remedy is a further engineering/docs/density-inventory.md \u{a7}0 \
               entry -- SWATCH_SIZE 22 -> 24 dp, Compact included, exactly as \
               the previewer's navigator row and the macOS control height were \
               raised -- which would clear both shapes at once.",
@@ -454,7 +454,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               so the audit reads half of the affordance; both are far under the \
               floor and the discrepancy is a reporting gap, not the shortfall. \
               NOT excused under SC 2.5.8 *Equivalent*: \
-              docs/drag-operation-census.md row 7 rates this operation \
+              engineering/docs/drag-operation-census.md row 7 rates this operation \
               *Partial* -- `on_access_action` Increment/Decrement by \
               `COLUMN_RESIZE_STEP` exists, and there is no keyboard route at \
               all, because the header cell is `.focusable(false)` and carries \
@@ -496,7 +496,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
             // reaches 21.75 against its own 21.8 of paint, 1.6 quanta short,
             // and the pre-programme 0.05 dp slack read that as another target
             // sitting on top of a menu row. Nothing about the row moved -- see
-            // docs/accessibility-internal-audit.md 3.7, which records it because
+            // engineering/docs/accessibility-internal-audit.md 3.7, which records it because
             // it is an Int UI **Compact** census change.
             PinnedGeometry {
                 densities: AT_COMPACT,
@@ -525,7 +525,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
         ],
         owner: Owner::Named(
             "whoever owns `RecipeMenuItemStyle`'s vertical padding, jointly \
-                with docs/density-inventory.md \u{a7}0",
+                with engineering/docs/density-inventory.md \u{a7}0",
         ),
         exception: None,
         why: "A menu row, which is the target itself -- no SC 2.5.8 exception \

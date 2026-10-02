@@ -5,7 +5,7 @@
 
 **Scope:** the contract a widget has to satisfy to be correct under a finger and
 a stylus as well as under a mouse. One numbered clause per obligation, each with
-the rule, how to satisfy it, and **what checks it** — because a clause nothing
+the rule, how to satisfy it, and **what checks it**, because a clause nothing
 checks is a suggestion.
 
 **Who this is for:** anyone writing a widget that handles a pointer at all, in
@@ -43,7 +43,7 @@ ScrollableBehavior::new(axes).axes(PanAxes::BOTH).install(handlers) // teksilo-w
 
 [`TouchAction`](../crates/teksilo-core/src/pointer/touch_action.rs) is
 intersected root-to-target and **frozen at the press**; a mouse never consults
-it at all. `PanClaim` is what enrols your node as a pan competitor — only for
+it at all. `PanClaim` is what enrols your node as a pan competitor, only for
 the pointer kinds its `devices` mask admits, which by default is direct pointers
 only, so a mouse never pans.
 
@@ -53,7 +53,7 @@ Two mistakes the shipped code has already made, both worth stating:
   increments on a wheel notch, `TabBar` remaps a vertical notch to horizontal,
   `SceneView` zooms on Ctrl-wheel. None is a pan, and none may absorb a finger
   that is trying to scroll the container around it. This is why pannability is
-  declared and never inferred — and why the claimant walk visits only the frozen
+  declared and never inferred, and why the claimant walk visits only the frozen
   claimant list and never the ordinary bubble.
 * **A narrower action than you need is a silent bug.** `TouchAction::NONE` on a
   control that only wants to stop a *pan* also forbids a pinch and every delayed
@@ -63,9 +63,9 @@ Two mistakes the shipped code has already made, both worth stating:
 Declarers of `NONE` in the shipped catalogue: `Slider`, the `ColorPicker` hue
 strip, alpha strip and HSV canvas, the `Splitter` handle, the `DockingLayout`
 resize handle, the `TitleBar` resize strip, `WebView` (an engine subview owns
-its own gestures) — and, outside the catalogue, the Inspector's Pointers tab. Pan claimants:
+its own gestures), and, outside the catalogue, the Inspector's Pointers tab. Pan claimants:
 `ScrollArea` plus, through `ScrollableBehavior`, the five data views and the three
-text surfaces — nine surfaces from one implementation; `Terminal` and `SceneView`
+text surfaces, nine surfaces from one implementation; `Terminal` and `SceneView`
 declare their own claims directly, because neither scrolls a pixel offset in
 `[0, max]` (a terminal's is a ring position quantised to lines, a scene's is a
 camera).
@@ -95,8 +95,8 @@ that opened it:
 ```
 
 `EventContext::press_is_inside` is the whole predicate. It is false once the
-pointer has left the press's tap boundary — the same predicate that fails the
-tap and fires `cancel_taps` — and false once a peer has claimed the sequence, so
+pointer has left the press's tap boundary, the same predicate that fails the
+tap and fires `cancel_taps`, and false once a peer has claimed the sequence, so
 a press that turned into a scroll commits nothing. It stays **true** through a
 press-feedback delay: a finger that lands and lifts inside 100 ms has still
 clicked; the delay withholds the *visual*, not the press.
@@ -106,12 +106,12 @@ That is the whole reason the write moves rather than being guarded.
 
 **Three things stay on the press, and the boundary is worth knowing** so you can
 tell which side of it your widget is on. A **continuous manipulator** whose
-output *is* the press position — a splitter divider, a scroll-bar thumb, a
-slider, a text-selection anchor — has nothing to defer, because deferring would
+output *is* the press position, a splitter divider, a scroll-bar thumb, a
+slider, a text-selection anchor, has nothing to defer, because deferring would
 make it jump rather than drag. An **auto-repeat** needs a press to start
-counting from. And an interaction the **OS** takes over from the press onward —
+counting from. And an interaction the **OS** takes over from the press onward,
 `begin_resize` hands the window to the compositor's own resize loop, which never
-returns a release — has no release to move to. Everything else defers. The full
+returns a release, has no release to move to. Everything else defers. The full
 census, entry by entry, is in
 [touch-and-pen.md §7.3](touch-and-pen.md).
 
@@ -130,7 +130,7 @@ census, entry by entry, is in
 No `PointerUp` follows a cancel for that pointer, and one that arrives anyway is
 swallowed. A widget that only unwinds on `PointerUp` leaks its interaction state
 the first time a modal opens, a window loses focus, an OS drag starts, or a peer
-claims the sequence. The reasons are enumerated —
+claims the sequence. The reasons are enumerated,
 [`CancelReason`](../crates/teksilo-core/src/pointer.rs) has fifteen variants and
 is `#[non_exhaustive]`, so match with a `_` arm.
 
@@ -139,7 +139,7 @@ finished, so a drag drops and a tap fires; a cancel means the interaction is
 being taken away, so state is unwound and **nothing may activate**.
 
 You do not have to release capture, clear the press visual, stop a fling you
-started, or drop the sequence — the funnel
+started, or drop the sequence, the funnel
 ([`WidgetTree::cancel_pointer`](../crates/teksilo-core/src/widget_tree/pointer_cancel.rs))
 does all of that before your handler runs. What is yours is the state the
 framework cannot see: a half-built preview, an anchor, a pending edit.
@@ -172,8 +172,8 @@ flag cannot answer all three.
 Two dispatches carry a pointer without carrying a sample, and both report a
 truthful one: a gesture the timer recognised reports the **contact that held**,
 and a drag-and-drop handler reports the pointer **that started the drag**.
-Outside any pointer, scroll, gesture or drag dispatch — an assistive-technology
-action, a hand-built test context — `pointer()` is the mouse at the tree epoch,
+Outside any pointer, scroll, gesture or drag dispatch, an assistive-technology
+action, a hand-built test context, `pointer()` is the mouse at the tree epoch,
 which is the answer every such handler got before pointers were
 distinguishable.
 
@@ -192,7 +192,7 @@ WidgetEvent::PointerMove { position, .. } => {
 ```
 
 Capture is **per pointer** and it is also an arbitration act: capturing from an
-undecided sequence enrols you as a `RawDrag` member, and you can lose — to a
+undecided sequence enrols you as a `RawDrag` member, and you can lose, to a
 peer that claims, to a drag-capable ancestor, to a cancel. Your own `dragging`
 flag records that you *started*; `owns_pointer()` is the only thing that says
 you still own the gesture. A second contact arriving elsewhere in the tree also
@@ -206,23 +206,23 @@ Shipped captors, all four gated: `splitter/handle.rs`,
 ## 6. Expect no hover, ever, for a contact
 
 `on_hover`, `hover_within`, `PointerEnter` / `PointerLeave`, the cursor, and
-tooltip dwell all follow the **hover owner** — the most recent pointer that can
+tooltip dwell all follow the **hover owner**, the most recent pointer that can
 hover, which is a mouse or a pen in proximity. A contact is never the hover
 owner and writes no hover state at all.
 
 So an affordance that only appears on hover is **unreachable** with a finger.
 Every such affordance needs a second route, and the framework provides three:
 
-* a **hold** — `long_press_role(LongPressRole::Tooltip | ContextMenu)` selects
+* a **hold**, `long_press_role(LongPressRole::Tooltip | ContextMenu)` selects
   what the tree-owned long-press route does with your subtree, and your own
   `on_long_press` always takes precedence over it;
-* **always-visible** at coarse densities — `InputTokens::reveal` is
+* **always-visible** at coarse densities, `InputTokens::reveal` is
   `RevealPolicy::Always` at `Touch` for exactly this reason;
 * an **overflow affordance** with a keyboard and an assistive-technology route,
   which is what a row's `⋮` is.
 
 The census of every hover-gated affordance in the framework, with the route each
-one took, is [hover-affordance-census.md](hover-affordance-census.md).
+one took, is [hover-affordance-census.md](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/hover-affordance-census.md).
 
 ## 7. Route dimensions through `dp`, `density_min_size` and `spacing`
 
@@ -242,13 +242,13 @@ from `build`.
 dimension whose Compact value is *below* 24 dp through it **raises that
 dimension at Compact** and breaks the invariant this whole document is written
 under. The rule, enforced by a test that parses
-[density-inventory.md](density-inventory.md):
+[density-inventory.md](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/density-inventory.md):
 
 > A `Target` dimension routes through `dp` only if its Compact value already
 > clears 24 dp. Everything below that keeps its paint at every density and takes
 > its conformance from the hit mechanisms in clause 8.
 
-A `TargetRole::Decoration` — a rule, an icon, a badge — is returned unchanged
+A `TargetRole::Decoration`, a rule, an icon, a badge, is returned unchanged
 and must never be routed as a target.
 
 Two further consequences of the floor, both of which have already cost a package
@@ -259,7 +259,7 @@ a rewrite:
   not a fallback for one the projection has already grown.
 * A density assertion must be an **equality**, or must say why a bound is
   enough. `>=` passes for the wrong reason more often than it fails for the
-  right one — a root row handed the whole viewport satisfies any floor at every
+  right one, a root row handed the whole viewport satisfies any floor at every
   density.
 
 ## 8. Implement the hit hooks your shape actually needs
@@ -269,10 +269,10 @@ none of the others.
 
 | Hook | Answers | Implement when |
 | --- | --- | --- |
-| `hit_shape(local, bounds) -> bool` | is this point inside my silhouette? | your paint is not your rectangle — a disc, a wedge, a rounded handle |
+| `hit_shape(local, bounds) -> bool` | is this point inside my silhouette? | your paint is not your rectangle, a disc, a wedge, a rounded handle |
 | `hit_distance(local, bounds) -> Option<f32>` | how far outside am I? | same, *and* you want near-misses measured to the shape rather than to the box |
-| `hit_outset(kind, tokens) -> EdgeInsets` | how far beyond my bounds do I still take a press? | you are a thin **grip** — a gutter, a divider, a resize edge |
-| `target_regions(bounds) -> Vec<TargetRegion>` | which targets do I paint inside my one node? | you draw several controls on one canvas — a thumb in a lane, a knob on a track, a label beside a filter |
+| `hit_outset(kind, tokens) -> EdgeInsets` | how far beyond my bounds do I still take a press? | you are a thin **grip**, a gutter, a divider, a resize edge |
+| `target_regions(bounds) -> Vec<TargetRegion>` | which targets do I paint inside my one node? | you draw several controls on one canvas, a thumb in a lane, a knob on a track, a label beside a filter |
 
 Three things about them that are easy to get wrong:
 
@@ -281,10 +281,10 @@ Three things about them that are easy to get wrong:
   targets steals clicks from neighbours. Check `kind.is_direct()`.
 * **`hit_outset` never escapes its parent.** It is consulted among a node's
   direct children, inside a recursion that has already tested the parent's own
-  bounds — so a grip whose wrapper hugs it claims nothing at all. If the outset
+  bounds, so a grip whose wrapper hugs it claims nothing at all. If the outset
   has to reach, the parent must be big enough to lend the space.
 * **`target_regions` is reporting only, and its one consumer today is the
-  audit.** Implementing it changes no layout and no hit test — the router does
+  audit.** Implementing it changes no layout and no hit test, the router does
   not route by it. What it buys is that the conformance audit can *see* the
   targets a widget paints inside its own node; without it those targets do not
   exist as far as any gate is concerned, and a 12 dp thumb inside a 200 dp lane
@@ -299,12 +299,12 @@ both deliver a near-miss press, and a subject sitting in a bare stack has no
 eligible handler on its bubble path, so the slop pass catches the press whether
 or not your outset exists. When P24 first measured this, most of the
 `hit_outset` implementations in the tree at the time passed their own deletion
-for exactly this reason — the count is not restated because the tree carries a
+for exactly this reason, the count is not restated because the tree carries a
 different number of them now and the rule is about the geometry, not the
 population. The
-discriminating fixture puts an **eligible bubble owner** on the path — a
+discriminating fixture puts an **eligible bubble owner** on the path, a
 tappable row containing the control, which is what a swatch in a picker row or a
-chevron in a tree row actually is — because the rule then requires a slop
+chevron in a tree row actually is, because the rule then requires a slop
 candidate to be *strictly closer* than the row, which a mere near-miss is not.
 
 **Checked by** `crates/teksilo-core/src/widget_tree/hit_targeting_tests.rs`, and
@@ -314,8 +314,8 @@ by three fixture-driven gates: the stock widget catalog's in
 and four crates that own targets have none (`teksilo-inspector`,
 `teksilo-terminal`, `teksilo-preview-ui`, `teksilo-webview`). The widget list
 sweeps all four shipped presets; charts and scene sweep Int UI alone. A green
-gate says the named fixtures conform — not that the framework does. The table is
-in [accessibility-internal-audit.md §3.7](accessibility-internal-audit.md).
+gate says the named fixtures conform, not that the framework does. The table is
+in [accessibility-internal-audit.md §3.7](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/accessibility-internal-audit.md).
 
 ## 9. Never read the wall clock in a recognizer
 
@@ -339,8 +339,8 @@ the tree for one rather than sampling a clock, so
 
 ## 10. Two positional fields are window-space, and their names say so
 
-Every position a handler receives is **widget-local** — the router localises on
-delivery — with exactly two exceptions, both named for it:
+Every position a handler receives is **widget-local**, the router localises on
+delivery, with exactly two exceptions, both named for it:
 
 * `WidgetEvent::Scroll::window_position`
 * `WidgetEvent::PointerCancel::window_position`
@@ -350,7 +350,7 @@ coordinates rather than content coordinates. The router routes by the first, and
 routing is necessarily window-space. And a pan's samples feed a velocity tracker
 that follows the *pointer*: localisation resolves against the captor's
 **current** bounds on every event, so a localised position would credit that
-tracker with the motion of the very widget being measured — reachable on a
+tracker with the motion of the very widget being measured, reachable on a
 chained pan, where the inner claimant is offered every sample while the outer
 absorbs and translates it.
 
@@ -362,28 +362,28 @@ name is checked by the compiler at every read and a paragraph like this one is
 checked by nobody.
 
 Note the asymmetry at the door: `ScrollSample::position`, the *ingress* type, is
-plain `position` — at the door there is only one frame it could be in. The
+plain `position`, at the door there is only one frame it could be in. The
 rename is on the delivered event, where a handler could mistake it for a local
 point.
 
 **Checked by** `scroll_and_cancel_stay_in_window_space_while_a_press_is_localised`
 (in [`pointer_state.rs`](../crates/teksilo-core/src/widget_tree/pointer_state.rs)),
 so a later "consistency fix" goes red instead of quiet. Its two assertions are
-guarded by two *different* mechanisms — `Scroll` by `localize_event` having no arm
+guarded by two *different* mechanisms, `Scroll` by `localize_event` having no arm
 for it, `PointerCancel` by the cancel funnel recording the table's own position
-verbatim on a route that never localises at all — and the test's own doc says
+verbatim on a route that never localises at all, and the test's own doc says
 which is which, because neither can stand in for the other.
 
 ## 11. One contact by default; a hold has a tree-owned meaning
 
 `MultiContact::First` is the default and is what every widget written before the
 pointer model assumes: your node serves its first contact, and an **extra**
-contact is terminated at your node — not delivered to you, and not bubbled to an
+contact is terminated at your node, not delivered to you, and not bubbled to an
 ancestor either. Two fingers on one button fire one tap.
 
 What that does *not* do is silence the second contact. Capture, arbitration and
 press ownership are per pointer, so the refused contact still opens a sequence
-of its own and can still win an enclosing pan claim — a second finger inside a
+of its own and can still win an enclosing pan claim, a second finger inside a
 scroll area scrolls it while the first goes on holding the button. Opt into
 `MultiContact::All` only for a genuine multi-touch surface (a pinch canvas, a
 keyboard of keys).
@@ -391,7 +391,7 @@ keyboard of keys).
 A **hold** that you do not handle is not wasted: the tree's own long-press route
 opens a context menu or shows a tooltip, resolved from what your subtree offers.
 `long_press_role(..)` picks; `LongPressRole::DragHandle` says the hold *is* your
-grab, and suppresses long-press recognition on your subtree — declare it when
+grab, and suppresses long-press recognition on your subtree, declare it when
 your grab is one the framework's own deferral cannot see, i.e. an explicit
 `capture_pointer` rather than a drag recognizer. It binds **direct pointers
 only**: a mouse latches a drag on travel and spends no hold, so a control inside
@@ -402,14 +402,14 @@ your subtree still hears its own hold under one, and you must not rely on
 
 `WidgetWithHandlers<W>` and the `TeksiBranch` family forward the `Widget` trait
 method by method. A hook missing from those lists is **silently inert** the
-moment any builder method touches the widget — which is every widget that takes
+moment any builder method touches the widget, which is every widget that takes
 an attached handler. This was a real defect twice: `hit_shape` was missing from
 the list, and later both `hit_shape` and `hit_distance` could be *deleted* from
 it with thousands of tests green, because every test called the hooks on a bare
 struct.
 
 All four impls now `#[deny(clippy::missing_trait_methods)]`, so an
-unforwarded method fails the lint rather than passing the suite — including a
+unforwarded method fails the lint rather than passing the suite, including a
 method that does not exist yet. A new hook still owes a test that reaches it
 **through** a builder method, because the lint proves the forward exists and not
 that it forwards to the right place.
@@ -419,7 +419,7 @@ that it forwards to the right place.
 ## Checking a port
 
 The test API ([`widget_tree/test_api.rs`](../crates/teksilo-core/src/widget_tree/test_api.rs))
-drives every kind of pointer headlessly on a manual clock — no display server,
+drives every kind of pointer headlessly on a manual clock, no display server,
 no GPU, no sleeps:
 
 ```rust
@@ -435,7 +435,7 @@ tree.touch_up(finger, Point::new(50.0, 90.0));
 tree.assert_no_leaked_pointer_state();
 ```
 
-`new_contact()` mints a fresh `PointerId` the way the platform allocator does —
+`new_contact()` mints a fresh `PointerId` the way the platform allocator does,
 one per press, because a backend reuses its own contact ids the moment a finger
 lifts. Reusing one across two presses is not a shortcut; it is a different
 scenario.
@@ -458,14 +458,14 @@ Two habits that decide whether your test is worth having:
 
 ## See also
 
-- [Touch & pen](touch-and-pen.md) — the pointer model, the clock, the platform
+- [Touch & pen](touch-and-pen.md), the pointer model, the clock, the platform
   seam, the press.
-- [Events & gestures](events-and-gestures.md) — dispatch, recognizers, the
+- [Events & gestures](events-and-gestures.md), dispatch, recognizers, the
   sequence and the ordered decision procedure.
-- [Density & targets](density-and-targets.md) — the three ladders, the three hit
+- [Density & targets](density-and-targets.md), the three ladders, the three hit
   mechanisms, the conformance audit.
-- [Kinetic scrolling](kinetic-scrolling.md) — adopting `ScrollableBehavior`.
-- [Touch text editing](text-touch-editing.md) — the host checklist for a text
+- [Kinetic scrolling](kinetic-scrolling.md), adopting `ScrollableBehavior`.
+- [Touch text editing](text-touch-editing.md), the host checklist for a text
   surface.
-- [Single-pointer alternatives to dragging](a11y/non-drag-alternatives.md) — the
+- [Single-pointer alternatives to dragging](a11y/non-drag-alternatives.md), the
   obligation a draggable widget carries.

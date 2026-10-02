@@ -3,14 +3,14 @@
 
 # SegmentedControl
 
-A row of mutually exclusive segments — view mode, time period, document
+A row of mutually exclusive segments, view mode, time period, document
 view. Source: [crates/teksilo-widgets/src/segmented_control.rs](../crates/teksilo-widgets/src/segmented_control.rs).
 
 Two things distinguish it from the rest of the radio family
 ([`RadioButton`](../crates/teksilo-widgets/src/radio_button.rs),
 [`RadioTileGroup`](../crates/teksilo-widgets/src/radio_tile_group.rs)):
 selection is **keyed**, not positional, and the control has a real
-**width story** — segments that do not fit move into a chevron menu
+**width story**, segments that do not fit move into a chevron menu
 rather than all of them compressing into ellipsised stubs.
 
 ```rust
@@ -44,11 +44,11 @@ when a segment can be **contributed** by another crate.
 Why keyed at all? Because the positional alternative fails silently. Bind
 a `Signal<usize>` to a control and a `Switcher`, let a plugin insert a
 segment at position 1, and every index below it now points at the wrong
-pane — with no error, no panic, and nothing in the type system to catch
+pane, with no error, no panic, and nothing in the type system to catch
 it. `TabWidget` learned this already; this is the same fix.
 
-Framework-allocated ids start at 2^48, so a small app constant —
-`from_u64(1)`, the first thing anyone writes — can never collide with a
+Framework-allocated ids start at 2^48, so a small app constant,
+`from_u64(1)`, the first thing anyone writes, can never collide with a
 `fresh()` id.
 
 ### Pairing with a `Switcher`
@@ -75,7 +75,7 @@ SegmentedControl::indexed(bucket_idx.clone())
 
 Reach for it only when the segment list is **closed and local**. A
 persisted selection, or segments another crate can contribute to, belong
-on `new` — an index stops meaning the same thing the moment a segment is
+on `new`, an index stops meaning the same thing the moment a segment is
 inserted ahead of it, which is the whole reason selection is keyed.
 Positions address the *declared* list, so hiding a segment does not
 renumber the others.
@@ -90,7 +90,7 @@ a trailing chevron menu, and the rest keep a legible width.
 Declaration order is stable, with exactly one exception: **the selected
 segment is always visible.** If it would have been pushed into the menu
 it takes the *last* slot, and it stays there until something else is
-chosen from the menu — so the strip does not reshuffle under the pointer.
+chosen from the menu, so the strip does not reshuffle under the pointer.
 The promotion is forgotten once the control is wide enough for
 everything, so a later unrelated narrowing starts from clean declaration
 order instead of resurrecting a minutes-old pick.
@@ -106,7 +106,7 @@ widen to full fit     [A][B][C][D][E][F][G]
 ```
 
 This is deliberately *not* MRU. A bar whose items reorder by recency is
-harder to use than one that does not — adaptive menus in Office are the
+harder to use than one that does not, adaptive menus in Office are the
 cautionary case. Only one slot ever moves, and only when you reach into
 the menu.
 
@@ -119,12 +119,12 @@ segments that will never realistically overflow.
 | Method | Effect |
 | --- | --- |
 | `.overflow(SegmentOverflow)` | `Menu` (default) or `Compress`. |
-| `.sizing(SegmentSizing)` | `Uniform` (default — every visible segment the same width, measured against the widest) or `Fit` (each its own width, leftover shared). |
+| `.sizing(SegmentSizing)` | `Uniform` (default, every visible segment the same width, measured against the widest) or `Fit` (each its own width, leftover shared). |
 | `.display(SegmentDisplay)` | `Auto` (default) / `Text` / `Icon` / `IconText`. Icon-only fits far more segments, so it is worth reaching for *before* overflow engages; the label becomes the tooltip, and a segment with no icon falls back to its label so the mode is never a silent no-op. |
 | `.fill_width(bool)` | `true` (default) claims the offered width; `false` hugs the segments and makes the control shrinkable, so an over-constrained stack compresses it instead of letting it spill. |
 
 `is_overflowing() -> Signal<bool>` reports whether anything is currently
-in the menu — republished from `place_children` behind an equality guard,
+in the menu, republished from `place_children` behind an equality guard,
 like [`Toolbar::is_overflowing`](widgets/toolbar.md). Safe for `RepaintOnly` /
 `AccessibilityOnly` consumers, and for `Relayout` consumers that do not
 feed back into this control's own width (a caption beside it is fine; a
@@ -132,7 +132,7 @@ container that resizes the control from it is not).
 
 Widths come from real measurement
 ([`LayoutContext::measure_intrinsic`](../crates/teksilo-core/src/widget/layout_context.rs)),
-including for segments currently in the menu — that is how the control
+including for segments currently in the menu, that is how the control
 knows when they fit again. The height follows the measured content with
 the 24 dp design constant as a **floor**, so a raised global text scale
 grows the control rather than clipping it.
@@ -149,7 +149,7 @@ grows the control rather than clipping it.
 
 *Hidden* and *overflowed* are different states: an overflowed segment is
 still reachable from the chevron menu, a hidden one is not there at all.
-Hiding is structural — it renumbers the live list — so it triggers a
+Hiding is structural, it renumbers the live list, so it triggers a
 rebuild; the keyed selection survives that, which is again why it is
 keyed.
 
@@ -159,8 +159,8 @@ keyed.
 .on_change(|id, ctx| ctx.set_locale(locale_for(id)))
 ```
 
-Fires for user-driven changes — click, arrow key, assistive technology,
-overflow menu — and hands over an `EventContext`, so the control can do
+Fires for user-driven changes, click, arrow key, assistive technology,
+overflow menu, and hands over an `EventContext`, so the control can do
 things a bare `Signal` write cannot. Programmatic writes to the bound
 signal do not fire it: there is no event in flight to carry. Observe the
 signal for those.
@@ -174,7 +174,7 @@ the selected segment and `Increment` / `Decrement` AT actions.
 `Role::RadioButton` per segment. The selected segment is checked: it
 carries `toggled`, the field every adapter reads as a radio button's
 state, and no segment carries `selected`. Each carries "N of M" over the **whole**
-segment list — segments in the overflow menu are still part of the set,
+segment list, segments in the overflow menu are still part of the set,
 so the count deliberately exceeds the number of rendered radios on a
 narrow control. `push_to_radio_group` lists only the segments actually on
 the strip: a segment in the menu publishes no AccessKit node, and
@@ -190,7 +190,7 @@ overflow menu **promotes it into view**, so the keyboard reaches every
 segment without opening the menu.
 
 Name the group with `.label(...)`, matching `RadioGroup::label` /
-`RadioTileGroup::label`. `.access_label(...)` also works — the control
+`RadioTileGroup::label`. `.access_label(...)` also works, the control
 itself is the semantic node.
 
 ### Tab stops
@@ -215,7 +215,7 @@ theme-wide. Default:
 [`RecipeSegmentedControlStyle`](../crates/teksilo-widgets/src/styles/recipe_segmented_control_style.rs).
 
 The chrome paints the frame, hover tint, selected-segment surface,
-overflow divider and focus ring — never text or icons, which stay
+overflow divider and focus ring, never text or icons, which stay
 composed widgets so they remain locale- and theme-reactive.
 
 Because a control can overflow, the chrome cannot derive segment
@@ -232,7 +232,7 @@ pub struct SegmentSlotGeometry {
 ```
 
 `order` is what maps a *segment* to a *slot*; the two coincide until a
-segment is promoted. `overflow` is paint-only — the trigger is a real
+segment is promoted. `overflow` is paint-only, the trigger is a real
 widget whose bounds come from the layout pass, so never hit-test against
 that rect.
 
@@ -240,8 +240,8 @@ that rect.
 
 ## Testing
 
-Anything asserting **structural** state — which segments are active,
-node counts, geometry — needs two `layout()` calls. A `Signal::set` from
+Anything asserting **structural** state, which segments are active,
+node counts, geometry, needs two `layout()` calls. A `Signal::set` from
 `place_children` dirties the binding registry, but `process_state_changes`
 only turns that into dormancy transitions at the top of the *next*
 layout. A real app never notices (the window manager re-lays out whenever
@@ -256,11 +256,11 @@ fn settle(tree: &mut WidgetTree, width: f32, height: f32) {
 ```
 
 Note that `MockTextBackend` ignores the `TextStyle` it is handed (fixed
-8 px per char, 16 px line height), so headless text never changes size —
+8 px per char, 16 px line height), so headless text never changes size,
 a text-scale assertion there proves nothing about this widget.
 
 Demo: `cargo run -p widget-catalog` (Inputs tab). The seven-segment
-showcase sits in a slider-driven fixed-width box — the same shape as the
-`collapsible_menu_bar` example's responsive bar — so the overflow
+showcase sits in a slider-driven fixed-width box, the same shape as the
+`collapsible_menu_bar` example's responsive bar, so the overflow
 behaviour can be watched without resizing the window, with a caption
 bound to `is_overflowing()` narrating the current state.

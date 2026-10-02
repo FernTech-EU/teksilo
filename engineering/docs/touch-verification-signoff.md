@@ -261,7 +261,7 @@ in.
 | Verdict | (correct / inverted) |
 | If inverted: fix applied at the seam, with the pinning test | |
 
-Until this table is filled in, [Touch & pen](touch-and-pen.md) §10 continues to
+Until this table is filled in, [Touch & pen](../../docs/touch-and-pen.md) §10 continues to
 carry the trackpad rotation sign as an open finding.
 
 ---

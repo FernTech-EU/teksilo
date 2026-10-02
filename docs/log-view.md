@@ -1,41 +1,11 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# LogView — a scalable streaming log
+# LogView
 
-[`LogView`](../crates/teksilo-widgets/src/code_editor/log_view.rs) is the code
-editor's core turned inside out: instead of a bounded document a person edits,
-it is an unbounded one the *program* appends to and the person only reads,
-scrolls, selects, and copies. It reuses
-[`CodeEditorState`](../crates/teksilo-widgets/src/code_editor/state.rs), so
-selection, the clipboard, theming, accessibility, pointer dispatch, the
-right-click menu and the touch selection chrome are the editors' own code rather
-than a second copy of it — but it owns its own frame step
-([`log_stream.rs`](../crates/teksilo-widgets/src/code_editor/log_stream.rs)) and
-paint body, because content arrives faster than a person types, forever, and
-neither the editor's full relayout nor its event handling can carry that load.
-What it does *not* share is anything the caret drives: the caret is hidden by
-policy, and the two places that matter are called out below.
-
-```rust
-use teksilo::widgets::{LogView, LogViewHandle};
-use teksilo::tokens::Color;
-
-let log = LogView::new()
-    .scrollback_limit(50_000)                 // bound the retained lines
-    .severity_highlighter(|line| {            // colour a line by what it is
-        if line.contains(" ERROR ") { Some(Color::new(0.92, 0.36, 0.36, 1.0)) }
-        else if line.contains(" WARN ") { Some(Color::new(0.92, 0.72, 0.28, 1.0)) }
-        else { None }
-    })
-    .font_family("monospace");
-let handle: LogViewHandle = log.handle();     // append from anywhere on the UI thread
-```
-
-Feed it through the handle: `append("line")`, `append_line`, `append_lines(iter)`
-(splitting on `\n`; a single trailing newline is a terminator, not a blank line),
-`clear()`, and `scroll_to_bottom()`. `handle.line_count()` is a reactive
-`Signal<usize>` of the retained count for a status bar.
+Use `LogView` for an append-only text stream with selection, copying, scrollback,
+and optional tail following. It shares text-editing infrastructure with
+`CodeEditor` but manages incoming data and painting separately.
 
 ## Two costs, bounded
 
@@ -48,7 +18,7 @@ bound. `LogView` answers each; the numbers below are from
 
 Because a block-count change invalidates a full layout, a consumer with no
 tail-append entry point is forced to re-lay-out the whole document on every
-appended line — O(N):
+appended line, O(N):
 
 | Lines | Full relayout (per line) | Windowed append (per line) | speedup |
 |---:|---:|---:|---:|
@@ -76,18 +46,18 @@ real memory sink:
 placing each row arithmetically at `y = index × row_height`; the scrollbar spans
 the whole document even though almost none of it is shaped. Render already culls
 to the viewport, so shaping the rest only ever cost memory. The document's raw
-text (a rope, ≈ 65 B a line) is cheap by comparison — ~6.5 MB at 100 k.
+text (a rope, ≈ 65 B a line) is cheap by comparison, ~6.5 MB at 100 k.
 
 ### The text-stack additions
 
 The windowed path is additive to the sibling crates, so `RichTextEditor`'s paths
 are byte-for-byte unchanged:
 
-- **text-typeset** — `DocumentFlow::{layout_window, set_uniform_extent, add_block,
+- **text-typeset**, `DocumentFlow::{layout_window, set_uniform_extent, add_block,
   remove_leading, block_params_for}`.
-- **teksilo-text** — `RichTextEngine::{layout_window, layout_window_from_snapshots,
+- **teksilo-text**, `RichTextEngine::{layout_window, layout_window_from_snapshots,
   set_uniform_extent, append_block, remove_leading, block_visual_info}`.
-- **text-document** — `TextDocument::{append_line, append_lines, truncate_front}`
+- **text-document**, `TextDocument::{append_line, append_lines, truncate_front}`
   (undoable-false, all-or-nothing), whose events now also reach `on_change`
   subscribers, not only the poll path.
 
@@ -97,22 +67,22 @@ The visible window `(first, count)` is computed from the scroll offset and a
 learned uniform row height (all three of the render window, the a11y window, and
 the a11y-change check share one `window_bounds` helper so they cannot disagree).
 Rows are located by **chaining character positions through the rope**
-(`snapshot_block_at_position`) — each row is one O(log n) snapshot, not the O(n)
-block walk `TextBlock::next` would be — forward from a cached `(row, position)`
+(`snapshot_block_at_position`), each row is one O(log n) snapshot, not the O(n)
+block walk `TextBlock::next` would be, forward from a cached `(row, position)`
 anchor that the tail-following hot path advances a few rows at a time. Windowing
 is therefore O(window · log n) in steady state, with a cold O(n) locate only on a
 far scrollbar jump or after an eviction drops the anchor.
 
 The document's `block_count` stat does not count its initial empty block, so the
 view keeps an authoritative line count instead and fills that initial block with
-the first line — a fresh log opens on real content, not a blank line.
+the first line, a fresh log opens on real content, not a blank line.
 
 ## Following the tail
 
 Following is **derived from scroll position**, not a mode flag that fights the
 user: the view sticks to the bottom only while it is already at the bottom
 (`scroll_y ≥ max_scroll_y − ε`). Scroll up to read history and it pauses; scroll
-back (or `scroll_to_bottom()`) and it resumes — the behaviour of every terminal,
+back (or `scroll_to_bottom()`) and it resumes, the behaviour of every terminal,
 and the one that composes correctly with a stray key or click nudging the
 viewport. Set `follow_tail(false)` to hold position as the buffer grows.
 
@@ -124,7 +94,7 @@ still honoured tightly), and `truncate_front` shifts the cursors automatically, 
 a live selection stays glued to surviving text. Unset (the default) keeps every
 line: memory stays flat in the line count (only the window is shaped), but the
 raw text accumulates in the rope and each append stays linear in the document
-size — so a genuinely unbounded, sustained high-rate producer should set a cap.
+size, so a genuinely unbounded, sustained high-rate producer should set a cap.
 
 ## Reading it: pointer, menu, and a finger
 
@@ -135,15 +105,15 @@ policy applied. What that comes to here:
 * A **right-click** opens a menu of Copy and Select All. Cut and Paste are absent
   because the surface's own `Ctrl+X` and `Ctrl+V` are refused by the same filter
   the menu asks. Before this there was no menu at all, so `Ctrl+C` was the only
-  way to get a line out of a log — and on a touch device there is no `Ctrl`.
+  way to get a line out of a log, and on a touch device there is no `Ctrl`.
 * A **hold** selects the word under the finger, raises the two selection handles
-  that adjust the range, and puts up a toolbar of **Copy** — Select All is offered
+  that adjust the range, and puts up a toolbar of **Copy**, Select All is offered
   only while nothing is selected, and a hold has just selected something.
   Dragging a handle into the viewport's edge band auto-scrolls, so a selection can
-  grow past the visible rows — which, in a windowed log, means past the rows that
+  grow past the visible rows, which, in a windowed log, means past the rows that
   are currently *shaped*: freshly scrolled rows shape as they arrive and the
   hit-test resolves them.
-* A **tap** places the caret. It is invisible — the caret policy is `Hidden` — but
+* A **tap** places the caret. It is invisible, the caret policy is `Hidden`, but
   it is not inert: with no selection this surface's Copy takes the caret's whole
   line, so a tap is what aims it. A tap raises **no** handle: the caret handle is
   the one that *moves* a caret, and the controller offers it only on a surface that
@@ -160,23 +130,23 @@ fight its own follow-tail rule, which is *derived* from that offset, so a
 
 ## Accessibility
 
-`Role::Document` (not `Role::Log` — that role is excluded from `accesskit`'s
+`Role::Document` (not `Role::Log`, that role is excluded from `accesskit`'s
 text-range support, so a reader could not track a caret through it), read-only,
 with the same paragraph/run walk as the editor
-([`a11y.rs`](../crates/teksilo-widgets/src/code_editor/a11y.rs)) — but **windowed**:
+([`a11y.rs`](../crates/teksilo-widgets/src/code_editor/a11y.rs)), but **windowed**:
 only the visible lines are emitted as paragraphs (numbered by global line, "line
 41 002 of 128 449"), so an append re-walks O(window), not O(document). The tree
 re-walks on the log's own `a11y_version`, bumped only when the visible window
-changes — a scroll crossing a row, a following-tail append, an eviction — not on a
+changes, a scroll crossing a row, a following-tail append, an eviction, not on a
 sub-row pixel scroll or a tail append arriving while the reader is scrolled away.
-Opt into a `Live::Polite` region for new lines with `announce_appends(true)` — off
+Opt into a `Live::Polite` region for new lines with `announce_appends(true)`, off
 by default, because a live region is right for a handful of meaningful events and
 hostile for a build log at fifty lines a second.
 
 ## Threading
 
 The handle is UI-thread (`Rc`). Feeding a log from a background thread (a PTY
-reader, a tracing layer) means marshalling the lines to the UI thread first —
+reader, a tracing layer) means marshalling the lines to the UI thread first,
 through the app's async executor, or a channel drained in a handler. Each append
 wakes the view, which otherwise stops asking for frames when idle.
 

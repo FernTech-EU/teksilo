@@ -858,7 +858,7 @@ impl ScrollSimulation for BouncingSimulation {
 ///   rather than a NaN; an infinite `offset` yields the curve's limit,
 ///   `±extent`. (A NaN here would propagate straight into a layout offset;
 ///   the workspace has two recorded bugs of exactly that shape, see
-///   `docs/property-testing.md`.)
+///   `engineering/docs/property-testing.md`.)
 pub fn rubber_band(offset: f32, extent: f32) -> f32 {
     rubber_band_with(
         offset,

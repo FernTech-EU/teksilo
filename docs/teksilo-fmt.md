@@ -1,14 +1,14 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# `cargo teksilo-fmt` — formatter for `teksu!` blocks
+# `cargo teksilo-fmt`: formatter for `teksu!` blocks
 
 `rustfmt` treats macro bodies as opaque token streams and won't descend
 into a `teksu!(...)` invocation, so the DSL inside is hand-formatted by
 default. `cargo teksilo-fmt` fills the gap: it walks Rust source files,
 finds every `teksu!` invocation, reformats the body, and writes the
 file back in place. Source outside `teksu!` blocks is byte-for-byte
-unchanged — `cargo fmt` still owns Rust formatting.
+unchanged, `cargo fmt` still owns Rust formatting.
 
 For the surface language the formatter normalizes, see
 [teksu-macro-reference.md](teksu-macro-reference.md).
@@ -63,7 +63,7 @@ cargo teksilo-fmt examples/widget_catalog      # format one example
 cargo teksilo-fmt src/main.rs src/build.rs     # format specific files
 ```
 
-Files containing no `teksu!` token are skipped before parsing — there's
+Files containing no `teksu!` token are skipped before parsing, there's
 no measurable cost on a workspace where most modules don't use the DSL.
 
 Writes are atomic: the formatted output goes into a sibling
@@ -76,7 +76,7 @@ leaves a truncated source file on disk.
 
 The formatter rewrites the **shape** of `teksu!` bodies. Rust
 expressions inside (property values, positional args, closure bodies,
-escape exprs, `rust { … }` blocks) are spliced verbatim from source —
+escape exprs, `rust { … }` blocks) are spliced verbatim from source,
 the formatter does not reformat Rust.
 
 Layout rules (v1):
@@ -95,7 +95,7 @@ Layout rules (v1):
   same line: `teksu!(ctx =>\n    VStack { … })` becomes
   `teksu!(ctx => VStack { … })`.
 - Continuation lines are aligned to where the user already had the
-  body's outermost `}` in source — the closing brace of the
+  body's outermost `}` in source, the closing brace of the
   reformatted output lands at the same column.
 
 ---
@@ -116,7 +116,7 @@ teksu!(ctx =>
     }
 )
 
-// after — unchanged
+// after, unchanged
 teksu!(ctx =>
     VStack {
         spacing: 12.0
@@ -139,7 +139,7 @@ Multiple consecutive blank lines collapse to a single blank line.
 
 Comments **inside** Rust expressions (e.g. `Button(/* note */ lit!("ok"))`)
 are preserved automatically because expression values are sliced
-verbatim from source — they ride along with the rest of the slice.
+verbatim from source, they ride along with the rest of the slice.
 
 ---
 
@@ -187,7 +187,7 @@ There's no I/O at the library level. `format_file` detects the host
 file's line ending convention (LF or CRLF) and applies it to every
 newline the formatter emits, so a CRLF file round-trips as CRLF.
 
-`FmtConfig` is empty in v1 — every invocation produces canonical
+`FmtConfig` is empty in v1, every invocation produces canonical
 output. Style knobs may be added later; defaults will not change for
 existing invocations.
 
@@ -222,7 +222,7 @@ language-servers = [{ name = "rust-analyzer" }, { name = "teksilo-fmt-lsp" }]
 ### VS Code
 
 VS Code needs an extension to register an LSP server. See the
-dedicated walkthrough in [teksilo-fmt-vscode.md](teksilo-fmt-vscode.md) —
+dedicated walkthrough in [teksilo-fmt-vscode.md](teksilo-fmt-vscode.md),
 it covers two paths: a five-minute *Run on Save* hook (no LSP) and a
 small custom extension that registers `teksilo-fmt-lsp` for Rust
 documents.
@@ -249,7 +249,7 @@ require('lspconfig').teksilo_fmt_lsp.setup{}
   empty edit list (already canonical) or a single full-document
   `TextEdit` (entire buffer replaced with formatted output).
 - A parse error in the host file or in any `teksu!` body is treated as
-  "leave it alone" — the server returns empty edits, mirroring how
+  "leave it alone", the server returns empty edits, mirroring how
   `rustfmt` behaves on save when Rust source is mid-edit.
 - Document sync is full (mode 1): every change resends the whole
   text. Cheaper than maintaining incremental-diff state for a
@@ -261,21 +261,21 @@ require('lspconfig').teksilo_fmt_lsp.setup{}
 
 Four crates, layered:
 
-- **[teksilo-parse](../crates/teksilo-parse/)** — parser and IR for the
+- **[teksilo-parse](../crates/teksilo-parse/)**, parser and IR for the
   `teksu!` DSL. Extracted from `teksilo-macros` so non-proc-macro
   consumers (the formatter, future linters, editor tooling) can build
   on the same grammar without depending on a `proc-macro = true`
   crate. The proc-macro crate now depends on it.
-- **[teksilo-fmt](../crates/teksilo-fmt/)** — pure formatter library.
+- **[teksilo-fmt](../crates/teksilo-fmt/)**, pure formatter library.
   Pretty-printer, byte-range trivia scanner, host-file `teksu!`-macro
   visitor, LF/CRLF detection.
-- **[cargo-teksilo-fmt](../crates/cargo-teksilo-fmt/)** — CLI binary. File
+- **[cargo-teksilo-fmt](../crates/cargo-teksilo-fmt/)**, CLI binary. File
   walker, in-place rewriter with atomic writes, `--check` mode.
-- **[teksilo-fmt-lsp](../crates/teksilo-fmt-lsp/)** — LSP server binary.
+- **[teksilo-fmt-lsp](../crates/teksilo-fmt-lsp/)**, LSP server binary.
   Hand-rolled JSON-RPC over stdio (no tokio); thin wrapper around
   `format_file`.
 
-The CLI and LSP have no `teksu!` grammar knowledge — all parsing and
+The CLI and LSP have no `teksu!` grammar knowledge, all parsing and
 printing happens in the library crates.
 
 ---
@@ -302,11 +302,11 @@ printing happens in the library crates.
 
 ## Related
 
-- [teksu-macro-reference.md](teksu-macro-reference.md) — surface
+- [teksu-macro-reference.md](teksu-macro-reference.md), surface
   language for the DSL the formatter operates on.
-- [teksu-language-spec-v3.md](teksu-language-spec-v3.md) — design
+- [teksu-language-spec-v3.md](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/teksu-language-spec-v3.md), design
   rationale, with worked translations of widget-catalog examples. The
   reference above is normative for behaviour.
 - [crates/teksilo/tests/teksi/pass/](../crates/teksilo/tests/teksi/pass/)
-  — trybuild fixtures that double as canonical examples of well-
+, trybuild fixtures that double as canonical examples of well-
   formatted `teksu!` blocks.

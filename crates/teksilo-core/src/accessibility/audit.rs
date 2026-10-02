@@ -225,7 +225,7 @@ pub fn text_range_divergences(update: &TreeUpdate) -> Vec<TextRangeDivergence> {
         // over fields reading "09:30").
         // Those two are different things by design; comparing them is a
         // category error, and the residual inconsistency is recorded in
-        // `docs/accessibility-internal-audit.md` rather than flagged here.
+        // `engineering/docs/accessibility-internal-audit.md` rather than flagged here.
         let owns_its_text = node
             .data()
             .children()

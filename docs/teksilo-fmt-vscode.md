@@ -8,9 +8,9 @@ into VS Code so `teksu!` blocks reformat on save alongside `rust-analyzer`.
 
 There are two practical paths:
 
-- **Path A — no LSP, run-on-save:** invoke `cargo teksilo-fmt` from a
+- **Path A, no LSP, run-on-save:** invoke `cargo teksilo-fmt` from a
   shell hook on every save. Simplest setup, no extension authoring.
-- **Path B — LSP via a tiny custom extension:** install `teksilo-fmt-lsp`
+- **Path B, LSP via a tiny custom extension:** install `teksilo-fmt-lsp`
   and a ~30-line VS Code extension that registers it for Rust files.
   More moving parts, but you get the LSP capability surface (so it
   composes with rust-analyzer cleanly and obeys VS Code's standard
@@ -22,7 +22,7 @@ the editor's normal formatter chain, do Path B.
 
 ---
 
-## Path A — run-on-save
+## Path A: run-on-save
 
 ### 1. Install the CLI
 
@@ -67,17 +67,17 @@ just that file. Files without `teksu!` are skipped before parsing
 ### Notes
 
 - The hook runs *after* VS Code's own formatter (rust-analyzer /
-  rustfmt). That's the right ordering — rustfmt formats Rust, then
+  rustfmt). That's the right ordering, rustfmt formats Rust, then
   teksilo-fmt formats teksu! bodies, then the buffer is saved-then-
   reloaded by VS Code if the on-disk file changed.
 - The async write is safe with `cargo teksilo-fmt`'s atomic-rename
-  strategy — VS Code reloads the buffer when it sees the inode change.
+  strategy, VS Code reloads the buffer when it sees the inode change.
 - Use `${workspaceFolder}` instead of `${file}` if you want every
   save to format the entire workspace (slower; usually overkill).
 
 ---
 
-## Path B — LSP via a custom extension
+## Path B: LSP via a custom extension
 
 Use this if you want the formatter to participate in VS Code's normal
 **Format Document** / **Format Document With…** UI, or if you're
@@ -96,7 +96,7 @@ which teksilo-fmt-lsp
 teksilo-fmt-lsp --help 2>&1 | head -3 || true
 ```
 
-(`teksilo-fmt-lsp` doesn't print help — it just speaks JSON-RPC on
+(`teksilo-fmt-lsp` doesn't print help, it just speaks JSON-RPC on
 stdio. The `which` check is enough.)
 
 ### 2. Scaffold the extension
@@ -268,7 +268,7 @@ echo '' | teksilo-fmt-lsp
 (It should sit waiting for input. Press `Ctrl+C` to exit.)
 
 If that works, open VS Code's *Output* panel and select the
-*teksilo-fmt LSP* channel — initialization errors and JSON-RPC traffic
+*teksilo-fmt LSP* channel, initialization errors and JSON-RPC traffic
 land there.
 
 **Format on save reformats things I didn't expect.**
@@ -281,7 +281,7 @@ apply it.
 With both formatters wired and `formatOnSave` true, VS Code runs only
 the *default formatter*. To run both, either:
 
-- Use Path A (run-on-save shell command) instead of the LSP — that
+- Use Path A (run-on-save shell command) instead of the LSP, that
   runs *after* VS Code's own format pass.
 - Add a code action that invokes both (`source.formatDocument` for
   rust-analyzer, then a custom command for teksilo-fmt). See VS Code's
@@ -296,14 +296,14 @@ Set `teksiloFmt.serverPath` explicitly in settings (step 6) or add
 
 ## Why two paths?
 
-Path A is a five-minute setup with no maintenance burden — `cargo
+Path A is a five-minute setup with no maintenance burden, `cargo
 teksilo-fmt` is a self-contained tool, the *Run on Save* extension is
 maintained by someone else, and there's nothing for you to keep
 working as VS Code or LSP versions drift.
 
 Path B integrates with VS Code's first-class formatter chain, but you
-own a TypeScript extension. For most users — including a single
-developer working on a personal project — Path A is the right
+own a TypeScript extension. For most users, including a single
+developer working on a personal project, Path A is the right
 trade-off. Path B is worth it when you have multiple developers and
 want the formatter discoverable through VS Code's standard UI rather
 than needing every dev to install a third-party extension and edit
@@ -317,7 +317,7 @@ loaded, for example).
 
 ## Related
 
-- [teksilo-fmt.md](teksilo-fmt.md) — full reference for the formatter,
+- [teksilo-fmt.md](teksilo-fmt.md), full reference for the formatter,
   including library API, normalization rules, and architecture.
-- [crates/teksilo-fmt-lsp/](../crates/teksilo-fmt-lsp/) — server source.
-- [crates/cargo-teksilo-fmt/](../crates/cargo-teksilo-fmt/) — CLI source.
+- [crates/teksilo-fmt-lsp/](../crates/teksilo-fmt-lsp/), server source.
+- [crates/cargo-teksilo-fmt/](../crates/cargo-teksilo-fmt/), CLI source.

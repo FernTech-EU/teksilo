@@ -22,7 +22,7 @@
 //! The velocity cap is neither: it is a rate, not a dimension, and the same
 //! 12 dp per tick reads correctly under every pointer and every density.
 //!
-//! Reference: `docs/density-inventory.md` §3b, and the touch design's
+//! Reference: `engineering/docs/density-inventory.md` §3b, and the touch design's
 //! Constants table ("DnD edge auto-scroll band / max velocity").
 //!
 //! [`TargetDensity`]: teksilo_tokens::TargetDensity

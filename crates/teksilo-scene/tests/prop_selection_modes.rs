@@ -37,7 +37,7 @@
 //! the containment the modes depend on holds for every item.
 //!
 //! Run deeper: `PROPTEST_CASES=4096 cargo test -p teksilo-scene --test prop_selection_modes`.
-//! Per [docs/property-testing.md](../../../docs/property-testing.md), build
+//! Per [engineering/docs/property-testing.md](../../../engineering/docs/property-testing.md), build
 //! with `--no-run` and run the binary under `ulimit -v`/`-t` rather than
 //! executing a suite directly.
 
@@ -58,7 +58,7 @@ use teksilo_scene::{
 // 6 x (6 x 6) segment pairs per mode, four modes, per case. Microseconds. Every
 // coordinate is bounded to +/-200 and every extent to 200, so no generated
 // value can reach the spatial index's oversized-item path (the incident
-// documented in docs/property-testing.md) or produce a non-finite rectangle.
+// documented in engineering/docs/property-testing.md) or produce a non-finite rectangle.
 
 fn arb_coord() -> impl Strategy<Value = f32> {
     (-200i32..=200i32).prop_map(|v| v as f32 * 0.5)

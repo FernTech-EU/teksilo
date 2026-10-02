@@ -16,7 +16,7 @@ however green the suite is.
 Three things this page is not. It is not a list of suspected bugs — each check
 exists because the *host* cannot answer it, not because the answer is doubted. It
 is not a substitute for the automated suite, which is broader and runs on every
-commit. And it is not optional: §9 of [Touch & pen](touch-and-pen.md) enumerates
+commit. And it is not optional: §9 of [Touch & pen](../../docs/touch-and-pen.md) enumerates
 call sites carrying a platform answer that is a constant on Linux, so a green
 suite there cannot tell a right answer from a missing one.
 
@@ -169,7 +169,7 @@ of row 1 and restart the app — scale is read at window creation.
 path at all. Note the compositor and its version: tablet support varies. Window
 *position* is not part of the protocol, so nothing on this page asks you to check
 it. **A finger cannot drag a window on Wayland** — that is a protocol fact, not a
-defect, and is recorded as such in [Touch & pen](touch-and-pen.md) §5.4.
+defect, and is recorded as such in [Touch & pen](../../docs/touch-and-pen.md) §5.4.
 
 **Linux / X11.** Needs a window manager implementing `_NET_WM_MOVERESIZE` for
 custom chrome; the probe runs before window creation and falls back to native
@@ -244,7 +244,7 @@ both a mouse and a touchscreen. Move the mouse over the pad, then touch it with
 one finger without moving the mouse. Both rows can read `primary` at once —
 that is the W3C per-kind flag, and it is correct. Do not report it as a bug.
 (What is at most one is the pointer *table's* elected primary, which no widget
-can read; see the ledger in [Touch & pen](touch-and-pen.md) §10.)
+can read; see the ledger in [Touch & pen](../../docs/touch-and-pen.md) §10.)
 
 **B4 — no phantom cursor.** Rows 3 and 4. Touch the pad and watch for
 `cursor move suppressed (emulated)`. On X11 that line is expected before the
@@ -637,7 +637,7 @@ modes you tested.
 
 ## 18. N — The reviewed-rather-than-tested call sites
 
-These are the six call sites [Touch & pen](touch-and-pen.md) §9 lists as carrying
+These are the six call sites [Touch & pen](../../docs/touch-and-pen.md) §9 lists as carrying
 a platform answer no Linux host can vary, plus the external-drag ones. They are
 the reason a sign-off exists at all. Each is a *yes/no* observation rather than a
 gesture.
@@ -703,12 +703,12 @@ information; a guessed pass is not.
 
 ## See also
 
-- [Touch & pen](touch-and-pen.md) — the pointer model, the platform matrix, and
+- [Touch & pen](../../docs/touch-and-pen.md) — the pointer model, the platform matrix, and
   §10's ledger of open findings.
-- [Events & gestures](events-and-gestures.md) — the arbitration procedure and the
+- [Events & gestures](../../docs/events-and-gestures.md) — the arbitration procedure and the
   generated fixture matrix behind §7.
-- [Density & targets](density-and-targets.md) — the ladder behind §8.
-- [Text touch editing](text-touch-editing.md) — the contract behind §10.
-- [Kinetic scrolling](kinetic-scrolling.md) — the simulations behind §9.
+- [Density & targets](../../docs/density-and-targets.md) — the ladder behind §8.
+- [Text touch editing](../../docs/text-touch-editing.md) — the contract behind §10.
+- [Kinetic scrolling](../../docs/kinetic-scrolling.md) — the simulations behind §9.
 - [`touch-verification-signoff.md`](touch-verification-signoff.md) — where the
   results go.

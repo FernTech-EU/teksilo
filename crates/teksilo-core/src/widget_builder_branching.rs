@@ -297,7 +297,7 @@ impl IntoTeksiChild for WidgetId {
 /// must be a `bool` and a `Signal<bool>` there is a type error. The
 /// reactive form that does work is the `visible_when:` property. The
 /// trait stays public for hand-written builder chains — see
-/// `docs/teksu-language-spec-v3.md` §5.1.
+/// `engineering/docs/teksu-language-spec-v3.md` §5.1.
 ///
 /// - `bool`: static — the element is built only when the flag is true.
 ///   Returns `Some(id)` if built, `None` if skipped.

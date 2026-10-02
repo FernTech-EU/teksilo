@@ -1342,7 +1342,7 @@ mod tests {
     // ── The readout: who raises it, and who retires it ────────────────────
     //
     // These are the tests for census rows 8-10 in
-    // `docs/hover-affordance-census.md`. The defect they close is not that a
+    // `engineering/docs/hover-affordance-census.md`. The defect they close is not that a
     // finger cannot raise the readout — a contact's `PointerMove` always
     // could — but that nothing retired it: a contact never receives a
     // `PointerLeave`, so a readout a finger raised stayed up for the rest of

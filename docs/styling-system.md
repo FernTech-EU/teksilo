@@ -3,25 +3,24 @@
 
 # Styling System
 
-Teksilo's theming is a four-tier ladder. Each tier is independently
-opt-in: an app that only needs dark mode never sees the higher tiers;
-an app shipping a brutalist redesign uses every rung.
+Use theme tokens for application-wide values, variants for standard appearances,
+and style traits for custom widget chrome.
 
 ```
 Tier 0:  Tokens          (colors, shapes, motion, typography, layout)
 Tier 1:  Variants         (per-widget closed enums: Filled / Plain / …)
-Tier 2:  Recipes          (paint vocabulary — shape, fill, border, shadow)
+Tier 2:  Recipes          (paint vocabulary, shape, fill, border, shadow)
 Tier 3:  Style protocols  (`trait FooStyle { fn make_body(...) -> WidgetId }`)
 ```
 
 The default implementations of Tier 3 (the `Recipe*Style` types
 shipped in `teksilo-widgets/src/styles/`) read Tier 2 recipes; the
 default recipes read Tier 0 tokens. So Tier 3 *contains* Tiers 0-2 for
-the IntUI preset — but the trait protocol at Tier 3 is the escape
+the IntUI preset, but the trait protocol at Tier 3 is the escape
 hatch that lets apps replace the entire chrome of any widget without
 touching the widget source.
 
-## Mental model — which tier do I use for X?
+## Mental model: which tier do I use for X?
 
 | Task | Tier | API |
 | --- | --- | --- |
@@ -32,11 +31,9 @@ touching the widget source.
 | Replace Button chrome entirely (glassmorphism / brutalist / Material-3) | 3 | `impl ButtonStyle for MyGlassButton` then `theme.style_slots.button = Some(Rc::new(MyGlassButton))` |
 | Reskin from designer-exported SVGs | 3 | An image-backed `impl ButtonStyle` (a built-in `ImageBackedButtonStyle` + manifest loader is planned, not shipped) |
 
-The cardinal rule: **never edit widget source to change a look**. If
-the existing API doesn't get you there, write an `impl FooStyle` block
-and install it.
+Implement and install a style trait when token and variant changes are insufficient.
 
-## Tier 0 — Tokens
+## Tier 0: Tokens
 
 The five token groups (`ColorTokens`, `ShapeTokens`, `LayoutTokens`,
 `TypographyTokens`, `MotionTokens`) live in
@@ -49,7 +46,7 @@ input/density tokens, and the typed style-slot bag:
 ```rust
 pub struct Theme {
     pub id: ThemeId,                        // "intui.light", "custom", …
-    pub appearance: ThemeAppearance,        // Light | Dark — required
+    pub appearance: ThemeAppearance,        // Light | Dark, required
     pub colors: ColorTokens,
     pub layout: LayoutTokens,
     pub typography: TypographyTokens,
@@ -69,10 +66,10 @@ let theme = intui::light();   // or intui::dark()
 ```
 
 Other presets ship as opt-in Cargo features (Material 3, macOS,
-Fluent) — only IntUI is bundled by default.
+Fluent), only IntUI is bundled by default.
 
 **Reactive.** `Theme` lives behind a `Signal<Theme>` on
-`WidgetTree` — `set_theme(...)` dirty-marks every widget for relayout
+`WidgetTree`, `set_theme(...)` dirty-marks every widget for relayout
 and repaint without rebuilding the tree. Focus, scroll offsets, and animation
 state survive theme swaps. See
 [`docs/reactive-theme.md`](reactive-theme.md).
@@ -85,12 +82,12 @@ type.
 ### How a widget goes grey when disabled
 
 A widget is disabled when its own `enabled` prop is false **or any ancestor's
-is** — a control inside a disabled form is disabled. Its chrome greys by one
+is**, a control inside a disabled form is disabled. Its chrome greys by one
 of two routes, and there is a trap in each.
 
 **Role-driven chrome dims for free.** `ColorProp::resolve(theme,
-effective_enabled)` — which every role-driven leaf (`TextWidget`,
-`IconWidget`, `RectWidget`) calls at paint time — substitutes the disabled
+effective_enabled)`, which every role-driven leaf (`TextWidget`,
+`IconWidget`, `RectWidget`) calls at paint time, substitutes the disabled
 counterpart of a role in a disabled subtree: any `TextRole` →
 `TextRole::Disabled`; the *accent* family (`SurfaceRole::Accent` /
 `AccentHover` / `AccentPressed`, `BorderRole::Accent`) → their
@@ -98,14 +95,14 @@ counterpart of a role in a disabled subtree: any `TextRole` →
 `SurfaceRole::Field` / `BorderRole::Field` → their `Disabled` counterpart.
 This is why most recipes never mention `is_disabled`.
 
-⚠️ The substitution only reaches roles. `ColorProp::Bound(Signal<Color>)`
-resolves to `s.get()` and ignores `enabled` entirely — so a recipe that folds
+Note:️ The substitution only reaches roles. `ColorProp::Bound(Signal<Color>)`
+resolves to `s.get()` and ignores `enabled` entirely, so a recipe that folds
 per-state colours into a flat reactive colour (as `RecipeButtonStyle` does via
 `PerStateRecipe` + `bind_fill`) gets **no** paint-time safety net, and must
 select its `WidgetState::Disabled` from `cfg.is_disabled`.
 
 **Neutral controls must opt into a `Field` role.** The substitution
-deliberately leaves passive surfaces alone — a disabled `Panel` keeps its
+deliberately leaves passive surfaces alone, a disabled `Panel` keeps its
 surface. It has to: a text field's frame and a passive `Panel` both painted
 `SurfaceRole::Content`, so the hook could not tell them apart, and dimmed
 neither. That is what `Field` is for. It resolves **identically to `Content`
@@ -113,7 +110,7 @@ while enabled** and substitutes to `Disabled` when not, so a field dims and a
 panel does not:
 
 ```rust
-// A field's frame. No `is_disabled` needed for the resting case — the role
+// A field's frame. No `is_disabled` needed for the resting case, the role
 // dims itself at paint, from the live arena.
 let bg = RectWidget::new().background(SurfaceRole::Field);
 
@@ -136,8 +133,8 @@ signal that the framework refreshes from the live arena each state-change pass,
 so it may be bound to a prop *and* passed to `ctx.effect`.
 
 It is deliberately not a signal derived by walking ancestors at call time. A
-widget's `parent` is still `None` while its own `build()` runs — `insert_widget`
-inserts the node parentless and wires the parent only after `build()` returns —
+widget's `parent` is still `None` while its own `build()` runs, `insert_widget`
+inserts the node parentless and wires the parent only after `build()` returns,
 so such a walk sees an empty chain and captures the widget's *own* `enabled` prop
 as the whole answer, permanently. Prefer a `Field` role over the signal where you
 can: the paint-time route reads the live tree and cannot go stale.
@@ -150,19 +147,19 @@ in `paint` instead.
 ### `Color::mix` and non-finite factors
 
 `darken`, `lighten`, `desaturated`, and `ColorTokens::for_inactive_window`
-(the window-deactivation accent projection — see
+(the window-deactivation accent projection, see
 [window-activation.md](window-activation.md)) all bottom out in
 `Color::mix(other, t)`. `t` is clamped to `[0, 1]` before use, but a bare
 `t.clamp(0.0, 1.0)` is not enough on its own: `f32::clamp` returns `NaN` for
 a `NaN` input rather than saturating it, so a `NaN` factor used to poison
 every channel and produce an unrenderable colour. `Color::mix` now maps a
-`NaN` factor to `0.0` (returning `self` unchanged) before clamping — the
+`NaN` factor to `0.0` (returning `self` unchanged) before clamping, the
 safest reading of an undefined mix. `±inf` needs no such special case: the
 clamp already maps them to `1.0` / `0.0` correctly. A caller deriving `t`
 from a ratio that can legitimately divide by zero no longer needs to guard
 it before calling `mix`.
 
-## Tier 1 — Variants
+## Tier 1: Variants
 
 Each themable widget exposes a closed `*Variant` enum naming its
 design-language presentations. The variant is **a hint**: the active
@@ -187,7 +184,7 @@ DropTargetVariant { Default, Prominent, Subtle, None }        // border weight
 // SplitButton reuses ButtonVariant
 ```
 
-`Card` defaults to `Elevated` (shadow + surface_main) — the "just
+`Card` defaults to `Elevated` (shadow + surface_main), the "just
 works" Card that matches pre-refactor behaviour. Use
 `.variant(CardVariant::Plain)` for a flat surface.
 
@@ -197,7 +194,7 @@ The remaining themable widgets are variant-free: `MenuItem`,
 `Link`, `Badge`, `SearchField`, `SpinBox`, `DateEdit`, `ColorPicker`,
 `Calendar`, `RichTextEditor`, `ListView` / `TreeView` (via
 `ListContainerStyle`), `TableView` / `TreeTableView` (via `TableStyle`).
-Their style traits take a `*StyleConfig` with no `variant` field —
+Their style traits take a `*StyleConfig` with no `variant` field,
 the design language has a single canonical shape, or the variant
 distinction lives elsewhere (e.g. `ProgressBarKind` for determinate
 vs indeterminate).
@@ -208,7 +205,7 @@ since orientation changes layout, not just paint.
 
 Several widgets have multi-method style traits where chrome
 decomposes into named slots (e.g. `TabStyle::make_body` +
-`make_bar`). See [Multi-method styles](#multi-method-styles) below
+`make_bar`). See [Multi-method styles](#tier-3-style-protocols) below
 for the full list.
 
 Set per-call: `Button::new(lit!("Save")).variant(ButtonVariant::Outlined)`.
@@ -216,14 +213,14 @@ Set per-app via a custom Tier-3 style that *defaults* a variant for
 unspecified callers.
 
 **IntUI variant policy.** Int UI is intentionally minimalist about
-button styling — destructive actions live in confirmation dialogs
+button styling, destructive actions live in confirmation dialogs
 where the body carries the warning, not the button. So the IntUI
 `RecipeButtonStyle` collapses several variants:
 `Destructive` → Filled, `Tinted`/`Outlined` → Plain, `Link` → Ghost.
 Other design languages (Material 3, Fluent, macOS) honour them
 distinctly.
 
-## Tier 2 — Recipes
+## Tier 2: Recipes
 
 Recipes are pure data describing paint vocabulary. They live in
 [`teksilo-core/src/styles/recipe.rs`](../crates/teksilo-core/src/styles/recipe.rs).
@@ -253,7 +250,7 @@ pub struct BorderRecipe {
     pub position: BorderPosition,     // Inside | Center | Outside (now honoured)
     pub sides: Option<BorderSides>,   // None = uniform; Some = per-side widths
 }
-// BorderSides { top, trailing, bottom, leading: f32 } — e.g.
+// BorderSides { top, trailing, bottom, leading: f32 }, e.g.
 // BorderRecipe::underline(w, color) for an M3/Fluent filled-field underline.
 
 pub struct ShadowRecipe {
@@ -266,7 +263,7 @@ pub struct ShadowRecipe {
 
 **Per-state cascades.** Most widgets need different recipes for hover
 / pressed / focused / disabled. The answer is
-`PerStateRecipe<T>` with an explicit fallback chain — Teksilo's
+`PerStateRecipe<T>` with an explicit fallback chain, Teksilo's
 take on Flutter's `WidgetStateProperty<T>`:
 
 ```rust
@@ -283,8 +280,8 @@ pub struct PerStateRecipe<T> {
 closures, fully Serde-serialisable, theme-file-friendly.
 
 **Colors in recipes.** Recipes hold a `RecipeColor` enum (not
-`ColorProp`) — `Static | Surface(SurfaceRole) | Border(BorderRole)
-| Text(TextRole)` — so the full theme cascade still applies but the
+`ColorProp`), `Static | Surface(SurfaceRole) | Border(BorderRole)
+| Text(TextRole)`, so the full theme cascade still applies but the
 recipe stays plain data (serializes cleanly for inspector JSON Export
 and TOML image-theme manifests).
 
@@ -314,7 +311,7 @@ flat recipe each (`TabRecipe`, `DialogRecipe`, `TableRecipe`,
 `CalendarRecipe`). A handful with no tunable dimensions (SpinBox,
 SplitButton, GridView, ListContainer, RichTextEditor) stay unit structs.
 
-## Tier 3 — Style protocols
+## Tier 3: Style protocols
 
 The escape hatch. Each themable widget exposes a trait:
 
@@ -335,26 +332,26 @@ pub struct ButtonStyleConfig {
 
 The widget builds the parts (label, optional icon, four state
 signals), hands the bag to the active style, and uses the returned
-`WidgetId` as its root child. Everything else — background, border,
-focus ring, padding, min size — is the style's responsibility.
+`WidgetId` as its root child. Everything else, background, border,
+focus ring, padding, min size, is the style's responsibility.
 
 The trait is `'static` only (not `Send + Sync`) because all Teksilo
 trees are single-threaded by construction; `Rc<dyn FooStyle>` is the
 public alias (`SharedButtonStyle` and friends).
 
-**Same shape across widgets.** All 42 style traits live in
+**Same shape across widgets.** The style traits live in
 [`teksilo-core/src/styles/`](../crates/teksilo-core/src/styles/), one per
 `ComponentStyleSlots` slot. All but three return `WidgetId` from their
 `make_*` methods and take a `*StyleConfig` describing the inputs that
 vary by widget; the exceptions are all-recipe traits that hand back
-paint data instead — `ChartStyle` (`bar_fill` / `area_fill` /
+paint data instead, `ChartStyle` (`bar_fill` / `area_fill` /
 `donut_fill` / `gridline`), `GridViewStyle` (`focus_ring` / `marquee` /
 `insertion` / `pinned_header_surface`) and `TextSelectionStyle`
 (`handle` / `magnifier`). The trait
 is the public API; everything below it is implementation. The full
-list lives in the [migration status table](#migration-status-as-of-this-branch).
+list lives in the [migration status table](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/styling-migration.md).
 
-### Worked example — a Material-3-flavoured Button
+### Worked example: a Material-3-flavoured Button
 
 ```rust
 use std::rc::Rc;
@@ -421,10 +418,10 @@ under `theme_slot_supplies_button_style_when_no_override` /
 
 | Preset | Where | Status |
 | --- | --- | --- |
-| `intui::light` / `intui::dark` | `teksilo_core::presets::intui` | shipped — the default look |
-| `material3::light` / `material3::dark` | `teksilo-theme-material3` crate | shipped — Material 3 |
-| `fluent::light` / `fluent::dark` | `teksilo-theme-fluent` crate | shipped — Windows 11 / WinUI 3 |
-| `macos::light` / `macos::dark` | `teksilo-theme-macos` crate | shipped — macOS Aqua / Dark Aqua |
+| `intui::light` / `intui::dark` | `teksilo_core::presets::intui` | shipped, the default look |
+| `material3::light` / `material3::dark` | `teksilo-theme-material3` crate | shipped, Material 3 |
+| `fluent::light` / `fluent::dark` | `teksilo-theme-fluent` crate | shipped, Windows 11 / WinUI 3 |
+| `macos::light` / `macos::dark` | `teksilo-theme-macos` crate | shipped, macOS Aqua / Dark Aqua |
 | Image-backed themes | `teksilo-image-theme` crate | not yet shipped |
 
 Each preset is just a function returning `Theme`. Apps can write their
@@ -441,308 +438,6 @@ pub fn brutalist_light() -> Theme {
 }
 ```
 
-## Migration status (as of this branch)
-
-Every themable widget is on the Tier-3 trait + recipe-default +
-slot lookup. No themable widget self-paints anymore. **47 widgets
-across 42 style traits, spanning seven families** (a "trait" can cover
-more than one widget — e.g. `ListContainerStyle` styles both
-`ListView` and `TreeView`; `ChartStyle` styles `BarChart`, `LineChart`,
-and `PieChart`):
-
-**Controls**
-
-| Widget | Trait | Default impl | Slot |
-| --- | --- | --- | --- |
-| `Toggle` | `ToggleStyle` | `RecipeToggleStyle` | `style_slots.toggle` |
-| `Button` | `ButtonStyle` | `RecipeButtonStyle` | `style_slots.button` |
-| `SplitButton` | `SplitButtonStyle` | `RecipeSplitButtonStyle` | `style_slots.split_button` |
-| `Checkbox` | `CheckboxStyle` | `RecipeCheckboxStyle` | `style_slots.checkbox` |
-| `RadioButton` | `RadioStyle` | `RecipeRadioStyle` | `style_slots.radio` |
-| `RadioTile` | `RadioTileStyle` | `RecipeRadioTileStyle` | `style_slots.radio_tile` |
-| `IconButton` | `IconButtonStyle` | `RecipeIconButtonStyle` | `style_slots.icon_button` |
-| `Slider` | `SliderStyle` | `RecipeSliderStyle` | `style_slots.slider` |
-| `SegmentedControl` | `SegmentedControlStyle` | `RecipeSegmentedControlStyle` | `style_slots.segmented_control` |
-| `ProgressBar` | `ProgressBarStyle` | `RecipeProgressBarStyle` | `style_slots.progress_bar` |
-| `Link` | `LinkStyle` | `RecipeLinkStyle` | `style_slots.link` |
-| `Avatar` | `AvatarStyle` | `RecipeAvatarStyle` | `style_slots.avatar` |
-| `Badge` | `BadgeStyle` | `RecipeBadgeStyle` | `style_slots.badge` |
-
-**Inputs**
-
-| Widget | Trait | Default impl | Slot |
-| --- | --- | --- | --- |
-| `TextInput` | `TextInputStyle` | `RecipeTextInputStyle` | `style_slots.text_input` |
-| `SearchField` | `SearchFieldStyle` | `RecipeSearchFieldStyle` | `style_slots.search_field` |
-| `ComboBox` | `ComboBoxStyle` | `RecipeComboBoxStyle` | `style_slots.combo_box` |
-| `SpinBox` | `SpinBoxStyle` | `RecipeSpinBoxStyle` | `style_slots.spin_box` |
-| `DateEdit` | `DateEditStyle` | `RecipeDateEditStyle` | `style_slots.date_edit` |
-| `ColorPicker` | `ColorPickerStyle` | `RecipeColorPickerStyle` | `style_slots.color_picker` |
-| `Calendar` | `CalendarStyle` ¹ | `RecipeCalendarStyle` | `style_slots.calendar` |
-| `RichTextEditor` | `RichTextEditorStyle` | `RecipeRichTextEditorStyle` | `style_slots.rich_text_editor` |
-
-**Containers**
-
-| Widget | Trait | Default impl | Slot |
-| --- | --- | --- | --- |
-| `Panel` | `PanelStyle` | `RecipePanelStyle` | `style_slots.panel` |
-| `Card` | `CardStyle` | `RecipeCardStyle` | `style_slots.card` |
-| `TabBar` | `TabStyle` ¹ | `RecipeTabStyle` | `style_slots.tab` |
-| `ListView` / `TreeView` (container chrome) | `ListContainerStyle` | `RecipeListContainerStyle` | `style_slots.list_container` |
-| `TableView` / `TreeTableView` (header + sort + row chrome) | `TableStyle` ¹ | `RecipeTableStyle` | `style_slots.table` |
-| `DropZone` | `DropZoneStyle` | `RecipeDropZoneStyle` | `style_slots.drop_zone` |
-| `DropTarget` | `DropTargetStyle` | `RecipeDropTargetStyle` | `style_slots.drop_target` |
-| `Splitter` (divider handles) | `SplitterStyle` | `RecipeSplitterStyle` | `style_slots.splitter` |
-| `GridView` (focus ring, marquee, insertion bar, pinned header) | `GridViewStyle` ² | `RecipeGridViewStyle` | `style_slots.grid_view` |
-| `WebView` (overlay chrome, `teksilo-webview`) | `WebViewStyle` | `RecipeWebViewStyle` (in `teksilo-webview`) | `style_slots.web_view` |
-
-**Overlays**
-
-| Widget | Trait | Default impl | Slot |
-| --- | --- | --- | --- |
-| `TooltipWidget` | `TooltipStyle` | `RecipeTooltipStyle` | `style_slots.tooltip` |
-| `Popover` | `PopoverStyle` | `RecipePopoverStyle` | `style_slots.popover` |
-| `Dialog` (in-tree modal) | `DialogStyle` ¹ | `RecipeDialogStyle` | `style_slots.dialog` |
-| `Snackbar` | `SnackbarStyle` | `RecipeSnackbarStyle` | `style_slots.snackbar` |
-| `Toast` | `ToastStyle` | `RecipeToastStyle` | `style_slots.toast` |
-| `Banner` | `BannerStyle` | `RecipeBannerStyle` | `style_slots.banner` |
-
-**Rows / Items**
-
-| Widget | Trait | Default impl | Slot |
-| --- | --- | --- | --- |
-| `MenuItem` | `MenuItemStyle` ³ | `RecipeMenuItemStyle` | `style_slots.menu_item` |
-| `StandardListItem` / `StandardTreeItem` | `StandardItemStyle` ³ | `RecipeStandardItemStyle` | `style_slots.standard_item` |
-
-**Chrome**
-
-| Widget | Trait | Default impl | Slot |
-| --- | --- | --- | --- |
-| `ScrollBar` | `ScrollBarStyle` | `RecipeScrollBarStyle` | `style_slots.scroll_bar` |
-| Touch text-selection handles + magnifier | `TextSelectionStyle` ² | `RecipeTextSelectionStyle` | `style_slots.text_selection` |
-
-**Data Visualization**
-
-| Widget | Trait | Default impl | Slot |
-| --- | --- | --- | --- |
-| `BarChart` / `LineChart` / `PieChart` (`teksilo-charts`) | `ChartStyle` ² | `RecipeChartStyle` (in `teksilo-charts`, not `teksilo-widgets`) | `style_slots.chart` |
-
-¹ Multi-method trait — see [Multi-method styles](#multi-method-styles)
-below.
-
-² All-recipe trait, no `make_*` methods (for `ChartStyle`, see
-[Data-visualization styling](#data-visualization-styling) below).
-`RecipeChartStyle` and `RecipeWebViewStyle` are the two entries in this
-table whose `Recipe*Style` does **not** live under
-`teksilo-widgets/src/styles/*` — `teksilo-charts` and `teksilo-webview`
-deliberately have no dependency on `teksilo-widgets`, so each default
-style has to live where its own dependencies already reach. See
-[charts.md §11](charts.md) for the
-full reference.
-
-³ Carries a **defaulted label-role hook** —
-`StandardItemStyle::selected_label_role` and
-`MenuItemStyle::highlighted_label_role`, both `-> Option<TextRole>`,
-both `None` by default.
-
-A row builds its label *before* any style's `make_body` runs, so a
-style cannot recolour the text it is about to paint behind. That is
-fine for a design language whose selection is a pale wash — IntUI and
-Fluent both keep `TextRole::Primary` on top of theirs — and impossible
-for one whose selection is a **solid fill**: macOS's accent capsule
-would leave `labelColor` at roughly 3.5:1. The hook lets the style
-declare the role and the widget compose it into the label's colour
-signal (and, for a menu row, its shortcut's), gated on the row actually
-being emphasised so an unemphasised or window-inactive row keeps its
-normal label.
-
-Same shape as `ButtonStyle::label_text_role`, and defaulted for the
-same reason: every existing style is unchanged.
-
-```rust
-impl StandardItemStyle for MyStyle {
-    fn make_body(&self, cfg: &StandardItemStyleConfig, ctx: &mut BuildContext) -> WidgetId { … }
-
-    // Only needed when `make_body` fills the selection with a colour
-    // the default label cannot read on.
-    fn selected_label_role(&self) -> Option<TextRole> {
-        Some(TextRole::OnAccent)
-    }
-}
-```
-
-The legacy per-widget dimension structs are gone: the 17
-old `teksilo-tokens::components::*Style` structs were deleted and their
-IntUI constants folded into the matching
-`teksilo-widgets/src/styles/recipe_*_style.rs` modules.
-The `ComponentStyles` struct has been fully removed from `Theme`.
-Migrated widgets read entirely from `theme.style_slots.*` plus their
-`Recipe*Style` defaults. Dimension data for any remaining non-themable
-widgets (toolbar, status bar, accordion, …) lives directly in their
-`Recipe*Style` modules as `pub const` blocks.
-
-The **`teksilo-theme-material3`** sibling preset is now a real Material 3
-theme (baseline `#6750A4` scheme, M3 shape/typography, pill 40 dp
-buttons with state-layer hover, the M3 switch, 12 dp cards) and the
-proving ground for the recipe-vocabulary additions above. Its optional
-`bundled-fonts` feature embeds Roboto. The framework primitives it
-needed — `FillRecipe::StateLayer`, per-side `BorderRecipe` +
-`BorderPosition`, gradient `PaintProp`, the configurable `FooRecipe`
-sweep, the cross-design-language color roles
-(`TextRole::OnError`, `SurfaceRole::{ErrorContainer, Container,
-ContainerRaised, ContainerSunken}`), `Easing::CubicBezier`,
-`ToggleStyleConfig::is_pressed`, and `TeksiloAppBuilder::register_fonts`
-— are all in place, so the `-fluent` and `-macos` presets below and a
-future GTK4-Adwaita one follow the same path.
-
-The **`teksilo-theme-fluent`** sibling preset is a full Windows 11 /
-WinUI 3 theme, transcribed from WinUI's own `Common_themeresources_any.xaml`
-and the control theme-resource dictionaries: the light and dark colour
-dictionaries (exposed in full through the `FluentPalette` theme
-extension), the two-radius geometry (`ControlCornerRadius` 4 dp /
-`OverlayCornerRadius` 8 dp), the WinUI type ramp at zero tracking, and
-the four `Control*AnimationDuration` steps on
-`ControlFastOutSlowInKeySpline`. It installs Tier-3 chrome for 25 style
-slots: eight are real `impl FooStyle` blocks where the WinUI control is
-structurally its own thing — the button's **elevation edge** (a heavier
-stroke on the bottom edge in light, the top edge in dark, dropped on
-press), the two-tone high-contrast focus ring, the `ToggleSwitch`'s
-off-state outline and morphing knob, the filled unchecked checkbox and
-radio, the field's **accent focus underline**, the slider's two-circle
-thumb, the menu row's neutral hover, and the list row's **selection
-pill** — while the rest are the shipped `Recipe*Style` constructed with
-Fluent metrics. `light_with_accent` / `dark_with_accent` rebuild the
-whole accent family around a caller-supplied seed, the substitution
-Windows performs when the user picks an accent colour. Mica and Acrylic
-resolve to the opaque fallbacks WinUI itself uses when the compositor
-material is unavailable; Segoe UI Variable cannot be redistributed, so
-the optional `system-fonts` feature names it for the text engine to
-resolve rather than bundling it.
-
-The **`teksilo-theme-macos`** sibling preset is a full macOS **Aqua /
-Dark Aqua** theme. It is the one preset whose source publishes almost
-nothing: Apple attaches a standing disclaimer to every colour value it
-prints, and states no corner radii, no control heights, no focus-ring
-geometry and exactly one animation duration. Every literal in the crate
-is therefore tagged at its definition as `[HIG]` (published — the
-13-hue system-colour table and the whole typography ramp), `[measured]`
-(a capture of the private `NSColor` enumeration, or a screen
-measurement) or `[derived]` (computed, with the rule given). AppKit's
-wider vocabulary — four label grades, two independent selection
-families, the control bezel, the eight System Settings accents — is
-exposed through the `MacOsPalette` theme extension.
-
-Geometry is 6 dp in-page / 10 dp floating (menus at their own measured
-9 dp) on a **22 dp** control height, a third under Fluent's 32.
-Typography is the published SF ramp — Body 13/16, Callout 12/15,
-Subheadline 11/14 — carrying Apple's **signed** tracking: −0.08 pt at
-13, exactly 0 at 12, +0.06 at 11. It is the only Teksilo preset that
-tracks non-uniformly and the only one whose tracking changes sign.
-Motion is Core Animation's default 0.25 s on
-`kCAMediaTimingFunctionEaseInEaseOut` — `cubic-bezier(0.42, 0, 0.58, 1)`,
-symmetric where Fluent's is decelerate-only.
-
-It installs Tier-3 chrome for 28 style slots; eight are real
-`impl FooStyle` blocks: the push button's **bezel** (shadow, face
-gradient, hairline, Dark-Aqua catch-light — dropped on press, and
-deliberately absent from the accent-filled *default* button), a focus
-ring that **is the accent** rather than Fluent's neutral outline, the
-`NSSwitch`'s 18 dp knob in a 22 dp track, the 14 dp bezelled checkbox
-and radio, the field's **accent focus halo**, the slider's plain round
-knob, the menu row's **accent fill with a white label**, and the list
-row's **selection capsule**. `light_with_accent` / `dark_with_accent`
-and the `SystemAccent` enum rebuild the accent family; `linkColor`
-deliberately does not follow, as on macOS.
-
-Four places deviate from Apple's own numbers to clear WCAG, each
-documented at its assignment with the measurement that forced it and
-each pinned by a test that also asserts the *premise* — so if Apple's
-value ever starts passing, the deviation can be reverted rather than
-inherited. Two framework additions came out of it: the defaulted
-label-role hooks described above, without which a solid-accent
-selection cannot recolour the text on top of it.
-
-Known limitations are stated rather than deferred: the OS accent is not
-read (Teksilo's platform layer returns only the light/dark preference
-on macOS), vibrancy resolves to each material's opaque fallback, the
-`TableView` / `GridView` selection band is an accent wash rather than
-the capsule (those views paint the shared `surface_selected` token
-behind app-supplied cells this preset cannot retint), and San Francisco
-is named under the optional `system-fonts` feature rather than bundled.
-
-Still ahead on the styling roadmap: image-backed styles, the
-`ImageTheme` TOML manifest loader, and a GTK4-Adwaita sibling preset
-crate.
-
-### Multi-method styles
-
-Most style traits have a single `make_body(cfg, ctx) -> WidgetId`
-method. Four widgets need finer granularity — the trait splits chrome
-into multiple slots so a custom impl can replace one piece without
-re-implementing the others:
-
-- **`TabStyle`** — `make_body` themes a single tab header (accent
-  indicator + focus ring + label slot composition); `make_bar` themes
-  the whole strip (optional backdrop fill, content-pane separator,
-  drag-reorder drop indicator). `TabStyleConfig` carries
-  `indicator_position` (`TabIndicatorPosition::{OuterEdge, InnerEdge}`)
-  so the active-tab highlight can hug either edge; the default
-  `RecipeTabStyle` honours all four edges (outer/inner × horizontal/
-  vertical, RTL-correct). Per-tab backgrounds, the bar backdrop, inter-tab
-  dividers, and text-colour roles are widget-level `TabBar`/`TabWidget`
-  builders rather than part of the trait — see
-  [tab-widget.md](tab-widget.md) "Appearance".
-- **`DialogStyle`** — `make_panel` themes the modal surface (shadow +
-  corner radius + padding + container chrome); `make_scrim` themes
-  the full-viewport overlay backdrop (the click-outside-to-dismiss
-  layer). Wired into the in-tree modal pipeline so the scrim is a
-  proper child of the dialog overlay, not a hand-rolled rect.
-- **`TableStyle`** — `make_header_cell` (column header chrome: hover
-  tint, resize-handle band, raised background), `make_sort_indicator`
-  (the up/down arrow), `make_row_background` (per-row surface, with
-  selection + hover + zebra states). The body cell stays
-  app-controlled — same delegate that produces the cell's content
-  also owns its paint.
-- **`CalendarStyle`** — `make_day_cell`, `make_zoom_cell` (month /
-  year picker grid), `make_header` (month-year label + nav buttons).
-  Calendar is unusually paint-heavy and the three slots match the
-  three distinct visual modes (day grid, zoom grid, header).
-
-For these traits, a custom `impl` must implement every method (no
-default impls beyond the trait's own — the recipe defaults compose
-the four slots into the IntUI look). Apps that only want to tweak
-one slot typically forward the others to `Recipe*Style::default()`.
-
-### Data-visualization styling
-
-`ChartStyle` (`BarChart` / `LineChart` / `PieChart`, `teksilo-charts`)
-is a third trait *shape*, distinct from both the single-method
-`make_body` traits and the multi-method traits above:
-
-```rust
-pub trait ChartStyle: 'static {
-    fn bar_fill(&self, cfg: &ChartFillContext) -> FillRecipe;
-    fn area_fill(&self, cfg: &ChartFillContext, opacity: f32) -> FillRecipe;
-    fn donut_fill(&self, cfg: &ChartFillContext) -> FillRecipe;
-    fn gridline(&self, theme: &Theme) -> BorderRecipe;
-}
-```
-
-Every method returns a Tier-2 recipe (`FillRecipe` / `BorderRecipe`)
-directly — **none returns a `WidgetId`**. Charts paint through `Canvas`
-calls inside their own `paint()` instead of composing a child widget
-subtree, so there is no `make_*(cfg, ctx) -> WidgetId` step for a
-custom impl to hook: the widget resolves the active `ChartStyle`,
-asks it for a recipe, and paints that recipe's fill/stroke directly.
-Where `TabStyle`/`DialogStyle`/`TableStyle`/`CalendarStyle` split
-chrome into *named `WidgetId`-returning slots* because each slot is a
-distinct sub-tree, `ChartStyle` splits into named *recipe-returning*
-methods because each is a distinct paint operation (bar fill vs. area
-fill vs. donut fill vs. gridline stroke) inside one widget's own paint
-pass. Resolution precedence is identical to every other trait:
-per-call `.style(impl ChartStyle)` > `theme.style_slots.chart` >
-`RecipeChartStyle::default()`. Full reference:
-[charts.md §11](charts.md).
 
 ## Custom widgets and the styling system
 
@@ -758,7 +453,7 @@ Writing your own composing widget? Three steps to make it themable:
    your own slot-bag struct (or attach via `theme.extensions` if you
    only need app-internal use).
 
-The trait pattern doesn't require buying into Teksilo's slot bag —
+The trait pattern doesn't require buying into Teksilo's slot bag,
 you can ship the trait + default impl and let users override via
 `MyWidget::style(...)` per call. The slot bag is for theme-wide
 installation; it's optional, but it's how the framework's themable
@@ -766,11 +461,11 @@ widgets get reskinned across an app.
 
 ## See also
 
-- [docs/reactive-theme.md](reactive-theme.md) — Signal-backed Theme,
+- [docs/reactive-theme.md](reactive-theme.md), Signal-backed Theme,
   color signals, theme swaps without rebuild.
-- [docs/widgets-overview.md](widgets-overview.md) — per-widget
+- [docs/widgets-overview.md](widgets-overview.md), per-widget
   variant + style trait references.
-- [docs/accessibility-overrides.md](accessibility-overrides.md) —
+- [docs/accessibility-overrides.md](accessibility-overrides.md),
   style trait impls do **not** participate in accessibility; the
   widget owns its `accessibility(builder)` regardless of which style
   is installed.

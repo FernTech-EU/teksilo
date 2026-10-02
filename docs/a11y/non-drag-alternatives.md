@@ -14,7 +14,7 @@ by drag also offers the same operation as a command. This page is the enumeratio
 of those commands, the vocabulary they share, and the rule for adding one.
 
 The exhaustive list of dragging operations in the workspace, with the state of
-each, is [the drag census](../drag-operation-census.md). This page is what
+each, is [the drag census](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/drag-operation-census.md). This page is what
 discharges it.
 
 ## Four obligations, not one
@@ -190,7 +190,7 @@ These are open, with what each needs. The census carries the full reasoning.
 
 ## See also
 
-- [The drag census](../drag-operation-census.md) — every dragging operation in the
+- [The drag census](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/drag-operation-census.md) — every dragging operation in the
   workspace, and the state of each.
 - [Porting a widget to the pointer model](../porting-widgets-to-the-pointer-model.md)
   — clause 11 on what a hold means, and the obligation a draggable widget carries.

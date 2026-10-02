@@ -13,6 +13,13 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Changed
+
+- Expanded onboarding and shortened user guides.
+- Moved engineering records out of the published docs and search corpus.
+- Removed obsolete chapters and corrected documentation claims.
+- Added README synchronization and documentation checks.
+
 ## [0.14.2] - 2026-09-28
 
 ### Changed

@@ -5,7 +5,7 @@
 
 ## Overview
 
-Teksilo supports three icon formats — SVG, PNG, and WebP — embedded at compile time via the `res!()` macro. Icons are tintable by default: their color follows the theme and interaction state (hover, pressed, disabled) automatically.
+Teksilo supports three icon formats, SVG, PNG, and WebP, embedded at compile time via the `res!()` macro. Icons are tintable by default: their color follows the theme and interaction state (hover, pressed, disabled) automatically.
 
 ## Supported Formats
 
@@ -37,32 +37,32 @@ my-app/
 Embed and use them:
 
 ```rust
-// SVG — returns &'static SvgIcon, compile-time validated
+// SVG, returns &'static SvgIcon, compile-time validated
 let save = teksilo::res!("resources/icons/save.svg");
 
-// PNG — returns &'static RasterIcon, compile-time validated
+// PNG, returns &'static RasterIcon, compile-time validated
 let star = teksilo::res!("resources/icons/star.png");
 
-// WebP — returns &'static RasterIcon (static) or &'static AnimatedIcon (animated)
+// WebP, returns &'static RasterIcon (static) or &'static AnimatedIcon (animated)
 let clock = teksilo::res!("resources/icons/clock.webp");
 
-// Unknown extensions — returns &'static [u8], existence checked only
+// Unknown extensions, returns &'static [u8], existence checked only
 let font = teksilo::res!("resources/fonts/custom.ttf");
 ```
 
-The macro validates known formats at compile time: SVG is parsed with the real `SvgIcon` parser and rejected if it contains no drawable geometry (an `<image>`/embedded-bitmap-only SVG fails, since the icon renderer skips `<image>` and `<text>`); PNG and WebP are checked by magic bytes (PNG's 8-byte signature + IHDR chunk; WebP's RIFF/WEBP signature). Unknown extensions are embedded as raw bytes without validation — only file existence is checked.
+The macro validates known formats at compile time: SVG is parsed with the real `SvgIcon` parser and rejected if it contains no drawable geometry (an `<image>`/embedded-bitmap-only SVG fails, since the icon renderer skips `<image>` and `<text>`); PNG and WebP are checked by magic bytes (PNG's 8-byte signature + IHDR chunk; WebP's RIFF/WEBP signature). Unknown extensions are embedded as raw bytes without validation, only file existence is checked.
 
 ### Using icons in buttons
 
 ```rust
 let save = teksilo::res!("resources/icons/save.svg");
 
-// Leading icon — most common
+// Leading icon, most common
 Button::new(lit!("Save"))
     .icon(IconWidget::from_svg_icon(save), IconLocation::Leading)
     .variant(ButtonVariant::Plain)
 
-// Icon only — toolbars
+// Icon only, toolbars
 Button::new(lit!("Save"))
     .icon(IconWidget::from_svg_icon(save), IconLocation::IconOnly)
     .variant(ButtonVariant::Ghost)
@@ -73,7 +73,7 @@ Button::new(lit!("Favorite"))
     .icon(IconWidget::from_raster(star, 24.0), IconLocation::Leading)
 ```
 
-The button controls the icon's display size via the `BUTTON_ICON_SIZE` constant (default 16dp) in `teksilo-widgets`. The icon's color is bound to the button's text color signal — it follows hover, pressed, disabled, and theme changes automatically.
+The button controls the icon's display size via the `BUTTON_ICON_SIZE` constant (default 16dp) in `teksilo-widgets`. The icon's color is bound to the button's text color signal, it follows hover, pressed, disabled, and theme changes automatically.
 
 ### Icon locations
 
@@ -89,10 +89,10 @@ The button controls the icon's display size via the `BUTTON_ICON_SIZE` constant 
 ### Standalone icons (outside buttons)
 
 ```rust
-// SVG — size defaults to viewBox, override with icon_size()
+// SVG, size defaults to viewBox, override with icon_size()
 IconWidget::from_svg_icon(icon).icon_size(32.0).color(Color::RED)
 
-// Programmatic — built-in shapes
+// Programmatic, built-in shapes
 IconWidget::checkmark(24.0)
 IconWidget::chevron_down(16.0)
 IconWidget::chevron_right(16.0)
@@ -117,7 +117,7 @@ In full-color mode, the icon's RGB is rendered directly; the widget color only c
 
 ### SVG icons
 
-Use any SVG editor. Icons should be single-color paths on a transparent background. Fill and stroke colors in the SVG are ignored — the rendering color comes from the theme.
+Use any SVG editor. Icons should be single-color paths on a transparent background. Fill and stroke colors in the SVG are ignored, the rendering color comes from the theme.
 
 Standard viewBox: `0 0 24 24` (Material Design convention).
 

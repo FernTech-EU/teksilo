@@ -33,25 +33,25 @@ never by convenience:
 
 - **`tests/*.rs` integration test** when the target is `pub` and reachable
   from outside the crate. Example:
-  [`crates/teksilo-tokens/tests/prop_color.rs`](../crates/teksilo-tokens/tests/prop_color.rs)
+  [`crates/teksilo-tokens/tests/prop_color.rs`](../../crates/teksilo-tokens/tests/prop_color.rs)
   tests `Color`, a public type re-exported at the crate root.
 - **Inline `#[cfg(test)] mod proptests`**, placed as a sibling of the
   existing `#[cfg(test)] mod tests` in the same file, when the target is
   `pub(crate)` or otherwise unreachable from `tests/`. The module doc must
   say *why* it lives inline rather than assume the reader can tell. Three
   worked examples, each stating a different reason:
-  - [`crates/teksilo-widgets/src/splitter/distribute.rs`](../crates/teksilo-widgets/src/splitter/distribute.rs):
+  - [`crates/teksilo-widgets/src/splitter/distribute.rs`](../../crates/teksilo-widgets/src/splitter/distribute.rs):
     `distribute` is `pub fn`, but its declaring module (`mod distribute;` in
     `splitter.rs`) is private and not re-exported, so the function is
     unreachable from an external test crate even though the fn signature
     itself says `pub`.
-  - [`crates/teksilo-scene/src/index.rs`](../crates/teksilo-scene/src/index.rs):
+  - [`crates/teksilo-scene/src/index.rs`](../../crates/teksilo-scene/src/index.rs):
     `GridHashIndex` is declared `pub struct`, but it lives inside
     `pub(crate) mod index;` in `lib.rs` — the module's visibility caps the
     struct's, regardless of the `pub` on the struct itself. Reading a `pub`
     keyword on the item is not sufficient to decide placement; check the
     declaring module's visibility too.
-  - [`crates/teksilo-widgets/src/primitives/column_flow.rs`](../crates/teksilo-widgets/src/primitives/column_flow.rs):
+  - [`crates/teksilo-widgets/src/primitives/column_flow.rs`](../../crates/teksilo-widgets/src/primitives/column_flow.rs):
     `ColumnFlow` itself is public, but `balance_columns` — the pure function
     the suite actually targets — is `pub(crate)`.
 
@@ -84,8 +84,8 @@ hand from `proptest::prelude` combinators (`prop_oneof!`, `.prop_map`,
 one set per file.** There is no shared generator module, and that is a
 deliberate choice, not an oversight: `arb_parent_sel`/`arb_insert_ops`
 appear near-verbatim in both
-[`prop_tree_slice.rs`](../crates/teksilo-data/tests/prop_tree_slice.rs) and
-[`prop_tree_checked.rs`](../crates/teksilo-data/tests/prop_tree_checked.rs)
+[`prop_tree_slice.rs`](../../crates/teksilo-data/tests/prop_tree_slice.rs) and
+[`prop_tree_checked.rs`](../../crates/teksilo-data/tests/prop_tree_checked.rs)
 rather than being factored out — per-file duplication is the accepted cost
 of keeping each suite's generators legible and independently auditable
 without chasing a shared abstraction across files.
@@ -103,7 +103,7 @@ panic-freedom sweep over malformed input) opt into 512 or 1024 explicitly,
 with the reason stated next to the override — see
 `from_hex_never_panics_and_stays_in_range` (1024, attacker-adjacent hex
 parsing) or the oracle properties in
-[`prop_sort_filter.rs`](../crates/teksilo-data/tests/prop_sort_filter.rs)
+[`prop_sort_filter.rs`](../../crates/teksilo-data/tests/prop_sort_filter.rs)
 (512, cheap per-case). The manual override for a one-off deeper run is
 `PROPTEST_CASES=N cargo test -p <crate> ...` — every suite's module doc
 states the exact invocation.
@@ -137,10 +137,10 @@ counterexample stays a permanent regression check once found. Two on-disk
 shapes, matching the two file-placement shapes above:
 
 - `tests/*.rs` suites: the regressions file sits next to the test file,
-  e.g. [`crates/teksilo-data/tests/prop_sort_filter.proptest-regressions`](../crates/teksilo-data/tests/prop_sort_filter.proptest-regressions).
+  e.g. [`crates/teksilo-data/tests/prop_sort_filter.proptest-regressions`](../../crates/teksilo-data/tests/prop_sort_filter.proptest-regressions).
 - Inline `mod proptests` suites: proptest names the file after the module
   path and roots it at the crate, e.g.
-  [`crates/teksilo-widgets/proptest-regressions/splitter/distribute.txt`](../crates/teksilo-widgets/proptest-regressions/splitter/distribute.txt)
+  [`crates/teksilo-widgets/proptest-regressions/splitter/distribute.txt`](../../crates/teksilo-widgets/proptest-regressions/splitter/distribute.txt)
   and `.../proptest-regressions/common/row_offsets.txt`.
 
 A suite with no regressions file (`prop_tree_slice.rs`, `column_flow.rs`,
@@ -205,9 +205,9 @@ considered reachable.
 **Cost the most expensive combination before writing the generator**, and
 record that reasoning in a comment next to it. Every generator in this
 workspace carries one; see the cost comment on `arb_list_op` in
-[`prop_list_and_selection.rs`](../crates/teksilo-data/tests/prop_list_and_selection.rs)
+[`prop_list_and_selection.rs`](../../crates/teksilo-data/tests/prop_list_and_selection.rs)
 or on `arb_pane_with_wild_bounds` in
-[`distribute.rs`](../crates/teksilo-widgets/src/splitter/distribute.rs) —
+[`distribute.rs`](../../crates/teksilo-widgets/src/splitter/distribute.rs) —
 each states the worst-case element count and the worst-case per-op cost
 before the strategy is defined, not after a failure.
 
@@ -231,7 +231,7 @@ diagnosed as a generator bug compounding a real one.
 The fix is `prop_flat_map`, so the dependent quantity is *derived* from the
 one it depends on rather than drawn independently. The worked example is
 `arb_grid_and_two_rects` in
-[`crates/teksilo-scene/src/index.rs`](../crates/teksilo-scene/src/index.rs):
+[`crates/teksilo-scene/src/index.rs`](../../crates/teksilo-scene/src/index.rs):
 
 ```rust
 fn arb_grid_and_two_rects() -> impl Strategy<Value = (f32, Rect, Rect)> {
@@ -304,7 +304,7 @@ Instead: record the shrunk counterexample verbatim (proptest already does
 this in the `.proptest-regressions` file — e.g.
 `cc 48dc58d1... # shrinks to ops = [InsertRoot(0, 0), InsertRoot(1, 3), SetSort(Some(Descending)), Update(7, 3)], mode = HideNonMatching`
 in
-[`prop_sort_filter.proptest-regressions`](../crates/teksilo-data/tests/prop_sort_filter.proptest-regressions)),
+[`prop_sort_filter.proptest-regressions`](../../crates/teksilo-data/tests/prop_sort_filter.proptest-regressions)),
 read the implementation the property targets, and decide honestly which of
 the following applies.
 
@@ -327,7 +327,7 @@ property's business, not this one's." Property 5 turned out to state the
 real contract; property 7 was fixed to stop overreaching into it.
 
 The same shape recurs in
-[`prop_sort_filter.rs`](../crates/teksilo-data/tests/prop_sort_filter.rs)'s
+[`prop_sort_filter.rs`](../../crates/teksilo-data/tests/prop_sort_filter.rs)'s
 property 6: a brute-force "matches ∪ descendants" oracle agrees with
 `SortFilterTreeModel` for `HideNonMatching` and `KeepAncestors`, but not for
 `KeepDescendants` — traced by hand (not by running anything) to
@@ -365,7 +365,7 @@ Both comments, while parked, state outright: *"Do NOT weaken this assertion."*
 **Pin a shrunk counterexample as a named `#[test]` when it represents a bug
 worth remembering permanently**, alongside — not instead of — the
 `proptest!` property that found it:
-[`oversized_1e6_extent_at_cell_size_one_never_allocates_the_pathological_cell_count`](../crates/teksilo-scene/src/index.rs)
+[`oversized_1e6_extent_at_cell_size_one_never_allocates_the_pathological_cell_count`](../../crates/teksilo-scene/src/index.rs)
 is the literal incident input (`Rect::new(0.0, 0.0, 1_000_000.0,
 1_000_000.0)` at `cell_size: 1.0`) pinned as a plain, deterministic
 `#[test]` in `mod tests` — so the exact input that took a workstation down
@@ -409,11 +409,11 @@ being wrong.
 
 | Crate | File(s) |
 |---|---|
-| `teksilo-core` | [`tests/pointer_invariants.rs`](../crates/teksilo-core/tests/pointer_invariants.rs), [`tests/prop_kinetic.rs`](../crates/teksilo-core/tests/prop_kinetic.rs), [`tests/text_run_invariants.rs`](../crates/teksilo-core/tests/text_run_invariants.rs) |
-| `teksilo-tokens` | [`tests/prop_color.rs`](../crates/teksilo-tokens/tests/prop_color.rs) |
-| `teksilo-data` | [`tests/prop_list_and_selection.rs`](../crates/teksilo-data/tests/prop_list_and_selection.rs), [`tests/prop_tree_slice.rs`](../crates/teksilo-data/tests/prop_tree_slice.rs), [`tests/prop_tree_checked.rs`](../crates/teksilo-data/tests/prop_tree_checked.rs), [`tests/prop_sort_filter.rs`](../crates/teksilo-data/tests/prop_sort_filter.rs) |
-| `teksilo-scene` | [`src/index.rs`](../crates/teksilo-scene/src/index.rs) (`mod proptests`, inline), [`tests/prop_selection_modes.rs`](../crates/teksilo-scene/tests/prop_selection_modes.rs) |
-| `teksilo-widgets` | [`src/common/row_offsets.rs`](../crates/teksilo-widgets/src/common/row_offsets.rs), [`src/common/row_metrics.rs`](../crates/teksilo-widgets/src/common/row_metrics.rs), [`src/primitives/column_flow.rs`](../crates/teksilo-widgets/src/primitives/column_flow.rs), [`src/common/column_geometry.rs`](../crates/teksilo-widgets/src/common/column_geometry.rs), [`src/splitter/distribute.rs`](../crates/teksilo-widgets/src/splitter/distribute.rs) (all `mod proptests`, inline) |
+| `teksilo-core` | [`tests/pointer_invariants.rs`](../../crates/teksilo-core/tests/pointer_invariants.rs), [`tests/prop_kinetic.rs`](../../crates/teksilo-core/tests/prop_kinetic.rs), [`tests/text_run_invariants.rs`](../../crates/teksilo-core/tests/text_run_invariants.rs) |
+| `teksilo-tokens` | [`tests/prop_color.rs`](../../crates/teksilo-tokens/tests/prop_color.rs) |
+| `teksilo-data` | [`tests/prop_list_and_selection.rs`](../../crates/teksilo-data/tests/prop_list_and_selection.rs), [`tests/prop_tree_slice.rs`](../../crates/teksilo-data/tests/prop_tree_slice.rs), [`tests/prop_tree_checked.rs`](../../crates/teksilo-data/tests/prop_tree_checked.rs), [`tests/prop_sort_filter.rs`](../../crates/teksilo-data/tests/prop_sort_filter.rs) |
+| `teksilo-scene` | [`src/index.rs`](../../crates/teksilo-scene/src/index.rs) (`mod proptests`, inline), [`tests/prop_selection_modes.rs`](../../crates/teksilo-scene/tests/prop_selection_modes.rs) |
+| `teksilo-widgets` | [`src/common/row_offsets.rs`](../../crates/teksilo-widgets/src/common/row_offsets.rs), [`src/common/row_metrics.rs`](../../crates/teksilo-widgets/src/common/row_metrics.rs), [`src/primitives/column_flow.rs`](../../crates/teksilo-widgets/src/primitives/column_flow.rs), [`src/common/column_geometry.rs`](../../crates/teksilo-widgets/src/common/column_geometry.rs), [`src/splitter/distribute.rs`](../../crates/teksilo-widgets/src/splitter/distribute.rs) (all `mod proptests`, inline) |
 
 Each file's own module doc states its case-count defaults, its
 `PROPTEST_CASES` override invocation, and — where relevant — the specific

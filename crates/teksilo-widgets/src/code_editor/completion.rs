@@ -795,7 +795,7 @@ impl Widget for CompletionPanel {
         // and a stack of adjacent rows is the one shape the hit mechanisms
         // cannot serve — an outset on each row only moves the boundaries
         // between them, because the neighbour it would borrow from is another
-        // row. See `docs/density-inventory.md` §0.
+        // row. See `engineering/docs/density-inventory.md` §0.
         let row_height = teksilo_core::styles::density::density_min_size(
             teksilo_canvas::Size::new(0.0, 0.0),
             teksilo_tokens::TargetAxes::HEIGHT,

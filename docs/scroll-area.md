@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# Scrolling — making content scrollable
+# Scrolling: making content scrollable
 
 Wrap the content in a [`ScrollArea`](../crates/teksilo-widgets/src/scroll_area.rs).
-That is the whole answer for ordinary content — a settings page, a form, a long
+That is the whole answer for ordinary content, a settings page, a form, a long
 `VStack`, a `Panel` of cards:
 
 ```rust
@@ -27,7 +27,7 @@ up.
 
 **But do not reach for it reflexively.** The five virtualized data views and the
 three text surfaces scroll themselves, and wrapping one is a bug with three
-symptoms — see [§2](#2-widgets-that-scroll-themselves) before you wrap anything
+symptoms, see [§2](#2-widgets-that-scroll-themselves) before you wrap anything
 that shows a list.
 
 Verified against teksilo 0.13.1. Sources: [`scroll_area.rs`](../crates/teksilo-widgets/src/scroll_area.rs),
@@ -55,7 +55,7 @@ scroller at the boundary, and a `Role::ScrollView` accessibility node with the
 scroll actions the axes actually support.
 
 The one thing the area cannot supply for itself is **height**. A scroll area
-takes its height from its parent on purpose — if it sized to its content it
+takes its height from its parent on purpose, if it sized to its content it
 would grow to fit everything and there would be nothing to scroll. In a `VStack`
 that means giving it the leftover space:
 
@@ -97,7 +97,7 @@ containers.
 
 `Repeater` is the one that catches people out in the other direction: it is
 data-driven like `ListView`, but it is explicitly **not** virtualized (every
-item has a live widget at all times — that is what lets its children stay
+item has a live widget at all times, that is what lets its children stay
 stateful editors) and it does no scrolling. A `Repeater` over a long model
 belongs inside a `ScrollArea`.
 
@@ -108,7 +108,7 @@ Three things, and only the third is obvious:
 1. **The list collapses to its fallback size.** A `ScrollArea` proposes
    `SizeProposal { width: Some(viewport_width), height: None }` to its content.
    For a virtualizing widget an unbounded height is a *measurement* question,
-   not an allocation, so it answers its fallback — 300 × 200 for
+   not an allocation, so it answers its fallback, 300 × 200 for
    `ListView`/`TreeView`, 400 × 300 for the tables, 400 × 400 for `GridView`
    ([`common/viewport.rs`](../crates/teksilo-widgets/src/common/viewport.rs)).
    The list is then 200 dp tall no matter how much room the page has, and the
@@ -118,14 +118,14 @@ Three things, and only the third is obvious:
    an allocation is allowed to write. The module docs on `common/viewport.rs`
    record what happens when a measurement's fallback reaches that cache: `build`
    realizes rows for the fallback, `place_children` sees the real rect, bumps the
-   rebuild version, and `build` reads the fallback again — a rebuild every frame,
+   rebuild version, and `build` reads the fallback again, a rebuild every frame,
    rendering an empty hole while burning a core.
 3. **Two scroll bars.** The inner view's own bar plus the outer area's, one
    inside the other, each scrolling a different thing.
 
 ### Sizing a data view instead
 
-Give it real space rather than an unbounded proposal — the same `Expand` you
+Give it real space rather than an unbounded proposal, the same `Expand` you
 would give a `ScrollArea`:
 
 ```rust
@@ -142,7 +142,7 @@ the window root all allocate a definite height too. What does not is a bare
 
 ### The one legitimate nesting
 
-A text surface deliberately sized to its content inside a scrolling page — the
+A text surface deliberately sized to its content inside a scrolling page, the
 long-form document editor, the messenger composer. `RichTextEditor` and
 `CodeEditor` take a per-axis
 [`ScrollPolicy`](../crates/teksilo-widgets/src/rich_text.rs) whose `AlwaysOff`
@@ -167,21 +167,21 @@ editor's bottom. See [§5](#5-programmatic-scrolling-and-the-reveal-walk).
 Both axes are always live. A `ScrollArea` claims a pan on `PanAxes::BOTH` and
 publishes a `max_scroll` per axis from layout; an axis whose content fits has
 `max_scroll == 0`, declines everything, and chains outward. There is no
-"direction" knob — you constrain an axis by constraining the content (a child
+"direction" knob, you constrain an axis by constraining the content (a child
 that sizes to the proposed width never overflows horizontally), and you hide a
 bar with its policy.
 
-**Display mode** — `ScrollBarMode`, set with `.scroll_bar_style(..)`:
+**Display mode**, `ScrollBarMode`, set with `.scroll_bar_style(..)`:
 
 | Mode | Behaviour |
 | --- | --- |
 | `Overlay` (default) | Floats over the content: thin indicator at rest, full interactive track on pointer proximity. Does not reduce the viewport. |
-| `Permanent` | A layout sibling of the viewport, reserving its full thickness at all times — the classic Windows/GTK gutter. The viewport is narrower and stays a constant width. |
+| `Permanent` | A layout sibling of the viewport, reserving its full thickness at all times, the classic Windows/GTK gutter. The viewport is narrower and stays a constant width. |
 | `Thin` | Floats like `Overlay` but never expands past the thin indicator. Drag and track-click still work against the full slot. |
 
-**Per-axis visibility** — `ScrollBarPolicy`, set with
+**Per-axis visibility**, `ScrollBarPolicy`, set with
 `.vertical_scroll_bar_policy(..)` / `.horizontal_scroll_bar_policy(..)`:
-`AsNeeded` (default — shown when the axis overflows), `AlwaysOn`, `AlwaysOff`.
+`AsNeeded` (default, shown when the axis overflows), `AlwaysOn`, `AlwaysOff`.
 `AlwaysOff` hides the bar; it does not stop the content scrolling on a wheel, on
 a pan, or from the AT scroll actions.
 
@@ -197,7 +197,7 @@ ScrollArea::new()
 assume away: `ScrollArea` installs no key handler, and `ScrollBar`'s
 arrow / `Home` / `End` / `Page` arms sit on a node built `focusable(false)` and
 hidden from AT, so no keyboard user reaches them. A keyboard user scrolls a
-`ScrollArea` by moving focus — the reveal walk scrolls the container to whatever
+`ScrollArea` by moving focus, the reveal walk scrolls the container to whatever
 they Tab to. Content with no focusable descendants is, today, keyboard-
 unreachable inside a `ScrollArea`; the data views bind their own `PageUp` /
 `PageDown` / `Home` / `End` and are unaffected (see
@@ -207,23 +207,23 @@ unreachable inside a `ScrollArea`; the data views bind their own `PageUp` /
 **Other knobs worth knowing:**
 
 - `.smooth_scrolling(bool)` (default on) and `.smooth_scroll_duration(Duration)`
-  (default 150 ms) — applies to both `ScrollDelta::Lines` and
+  (default 150 ms), applies to both `ScrollDelta::Lines` and
   `ScrollDelta::Pixels`, because a high-resolution wheel on Wayland delivers
   notches as pixels and animating only one path makes a fast flick jump.
-- `.line_height(f32)` (default 20 dp) — pixels per line for line-based wheels.
-- `.widget_resizable(bool)` — stretch content smaller than the viewport to fill
+- `.line_height(f32)` (default 20 dp), pixels per line for line-based wheels.
+- `.widget_resizable(bool)`, stretch content smaller than the viewport to fill
   it (Qt's `QScrollArea::setWidgetResizable`).
-- `.overscroll_behavior(OverscrollBehavior::{Chain, Contain})` — the CSS
+- `.overscroll_behavior(OverscrollBehavior::{Chain, Contain})`, the CSS
   `overscroll-behavior` model. `Chain` (default) declines at the boundary so the
   event reaches an ancestor scroller; `Contain` absorbs it. Note that a scroller
   whose content fits entirely is *always* at its boundary, so under `Chain` it
-  passes the wheel through — set `Contain` on a fit-to-content panel that should
+  passes the wheel through, set `Contain` on a fit-to-content panel that should
   swallow it regardless.
-- `.scroll_past_end(fraction)` — extends the scroll **range** by `fraction` of a
+- `.scroll_past_end(fraction)`, extends the scroll **range** by `fraction` of a
   viewport without adding any widget, padding, or layout. The typewriter-scroll
   case: to pin a caret at mid-viewport the view must be able to travel half a
   viewport past the last line, or the pin quietly stops working over the final
-  page. Takes an `impl Into<Prop<f32>>` — a plain value, or a `Signal<f32>` so it
+  page. Takes an `impl Into<Prop<f32>>`, a plain value, or a `Signal<f32>` so it
   can follow a setting live.
 
 ## 4. Layout: the unbounded proposal
@@ -244,7 +244,7 @@ never need to scroll; an area that took its width from its viewport would
 collapse inside a width-hugging parent (a menu, a popover) and clip every row.
 So when the parent proposes no width the area measures the content's natural
 width and reports that. `preferred_size(w, h)` overrides *both* axes and a `0.0`
-width there means zero, not "no preference" — use `preferred_height(h)` when you
+width there means zero, not "no preference", use `preferred_height(h)` when you
 want to cap the height and let the width keep hugging, which is what a scrolling
 menu needs.
 
@@ -252,7 +252,7 @@ menu needs.
 proposal, not a constraint: the child answers with the size it wants and may
 exceed the proposed width (which is how horizontal overflow is detected at all).
 But a child that *branches* on `proposal.height.is_none()` sees a different
-question inside a `ScrollArea` than it does anywhere else — which is precisely
+question inside a `ScrollArea` than it does anywhere else, which is precisely
 why the virtualized views must not be wrapped ([§2](#2-widgets-that-scroll-themselves)),
 and why height-for-width content (wrapped text, aspect-ratio images) works
 correctly here: it is measured at its final width, and the height it reports
@@ -303,8 +303,8 @@ ctx.ensure_visible_aligned(caret, 0.5, ScrollMotion::Instant);  // pin at mid-vi
 ```
 
 `ensure_visible` is `ScrollAlign::Minimal`: it does nothing when the rect is
-already fully visible. `ensure_visible_aligned` is `ScrollAlign::Fraction(f)` —
-`0.0` flush top, `0.5` centred, `1.0` flush bottom — and scrolls **whether or not
+already fully visible. `ensure_visible_aligned` is `ScrollAlign::Fraction(f)`,
+`0.0` flush top, `0.5` centred, `1.0` flush bottom, and scrolls **whether or not
 the target is already visible**, which is what makes typewriter scrolling
 possible; a caret that only moved the view once it fell off the edge would not be
 pinned to anything. Alignment applies to the **innermost** scroll container
@@ -323,7 +323,7 @@ as polish. A container with `smooth_scrolling(false)` jumps either way.
 
 The `_from` variants (`ensure_visible_from(owner, rect)`,
 `ensure_visible_aligned_from`) walk **another widget's** ancestors. Use them when
-the handler is not inside the thing being revealed — a find banner's Next button
+the handler is not inside the thing being revealed, a find banner's Next button
 sits beside the scrolling page, so a reveal walked from the button climbs out
 through the banner and never meets the scroll container the match is in. It fails
 silently: the match is selected, the counter moves, and the viewport does not
@@ -340,17 +340,17 @@ gets no re-targeting, which is exact for the ordinary single-container case.
 
 - **To be scrolled into view at a useful granularity**, override
   `Widget::focus_reveal_rect(&self, bounds) -> Option<Rect>` and return the
-  sub-rectangle that matters — the caret line, the selected row. The default
+  sub-rectangle that matters, the caret line, the selected row. The default
   `None` reveals the whole box, which for a page-tall widget scrolls its
   container to the bottom on a click that only meant to place a caret.
   `RichTextEditor` is the shipped example.
 - **To be a scroll container**, set `clips_children` and install an `on_scroll`
-  handler that matches `WidgetEvent::ScrollIntoView` — the router delivers
+  handler that matches `WidgetEvent::ScrollIntoView`, the router delivers
   `Scroll` and `ScrollIntoView` to the same handler slot. `ScrollArea` does this;
   so does `teksilo-scene`'s `SceneView`, which clips and answers the reveal by
   panning its camera, so a caret moving inside a `RichTextEditor` embedded on a
   scene card moves the camera with no app wiring. Clipping without handling is
-  legal and common (`MaxSize`, `Accordion`, `Splitter`) — those nodes are visited
+  legal and common (`MaxSize`, `Accordion`, `Splitter`), those nodes are visited
   and simply do not move.
 
 **Direct APIs.** The data views expose their own imperatives, which is the right
@@ -367,7 +367,7 @@ chrome and `viewport_ratio_y_signal()` for a custom position indicator.
 `max_scroll_y` is zero until the content has been measured, so an offset written
 before that is clamped to zero and the page paints at the top for a frame before
 jumping. `restore_scroll_y` stores it and applies it inside layout as soon as the
-range is long enough to hold it — it is a one-shot, it stands down the moment
+range is long enough to hold it, it is a one-shot, it stands down the moment
 anything else moves the scroll, and it never yanks a reader back after a later
 reflow.
 
@@ -375,7 +375,7 @@ reflow.
 
 A finger scrolls a `ScrollArea` because the area **declares** itself a pan
 surface, not because it handles `on_scroll`. `ScrollableBehavior::install`
-attaches both halves — the handler and the `PanClaim` — and a surface that
+attaches both halves, the handler and the `PanClaim`, and a surface that
 installs one without the other scrolls on a wheel and ignores a finger entirely.
 The declaration is never inferred from an `on_scroll` handler, deliberately:
 `SpinBox` increments on a wheel, `TabBar` remaps a notch sideways, `SceneView`
@@ -410,9 +410,9 @@ Two behaviours are worth knowing at the app level:
   overlay bar would otherwise stay hidden under the very gesture moving it; the
   area raises a reveal signal for as long as the pan is in flight.
 
-Everything about the physics — the two curves, the constants, the fling
+Everything about the physics, the two curves, the constants, the fling
 hand-off, the macOS momentum rule, reduced motion, and the four rules for
-adopting `ScrollableBehavior` in a custom surface — lives in
+adopting `ScrollableBehavior` in a custom surface, lives in
 [`kinetic-scrolling.md`](kinetic-scrolling.md). Data views under a finger
 (when a press commits, reorder vs. scroll, the column-header strip) are in
 [`data-view-touch.md`](data-view-touch.md).
@@ -428,7 +428,7 @@ one of them is visible to AT.
 
 **`ScrollArea` → `Role::ScrollView`**, carrying `scroll_x` / `scroll_y` with
 their min and max, `clips_children`, and `Action::ScrollUp` / `ScrollDown` /
-`ScrollLeft` / `ScrollRight` — advertised **only for the directions that can
+`ScrollLeft` / `ScrollRight`, advertised **only for the directions that can
 actually move**, so a screen reader knows which way there is content. Each action
 scrolls 90 % of a viewport. Rows that are not realized do not exist in the arena
 and so do not appear in the AT tree; a virtualized view carries
@@ -451,7 +451,7 @@ AT and by pointer but not by the keyboard. For a long read-only region, prefer a
 widget that owns its own keyboard scrolling (`LogView`, a read-only
 `RichTextEditor`) over a `ScrollArea` full of `TextWidget`s.
 
-For a finger, the bar stays 8–12 dp wide at every density — growing it would move
+For a finger, the bar stays 8–12 dp wide at every density, growing it would move
 the content beside it, and a scroll bar is chrome. The thumb is reached instead
 through `Widget::hit_outset`, which widens the node to the 48 dp Android reserves
 for a scrollbar touch target without moving or repainting anything, and the
@@ -470,7 +470,7 @@ pub trait ScrollBarStyle: 'static {
 }
 ```
 
-`ScrollBarStyleConfig` hands the style everything reactive it needs —
+`ScrollBarStyleConfig` hands the style everything reactive it needs,
 `scroll_ratio`, `viewport_ratio`, `is_hovered`, `is_dragging`, `is_idle`, plus
 `orientation`, `variant`, `min_thumb_length` and an optional `thumb_color`
 override. The default `RecipeScrollBarStyle`
@@ -485,7 +485,7 @@ theme.style_slots.scroll_bar = Some(Rc::new(MyScrollBarStyle));
 
 `ScrollArea` has no per-call `.style(..)` for its bars; per-instance overrides go
 on a `ScrollBar` you construct yourself (the custom-scroll-host path). What
-`ScrollArea` does forward is a thumb tint —
+`ScrollArea` does forward is a thumb tint,
 `.scroll_bar_thumb_color(impl Into<ColorProp>)`, accepting a `Color`, a theme
 role, or a `Signal`, resolved against the live theme at paint. Use it where the
 area sits on a surface the surface-relative tokens do not suit: a tooltip's
@@ -493,7 +493,7 @@ inverse chip, a branded panel.
 
 **One obligation if you write a style.** A horizontal bar's `scroll_ratio == 0.0`
 is the **start** of the content, which in a right-to-left window is the
-right-hand edge — `ScrollArea` places its content that way and the bar mirrors
+right-hand edge, `ScrollArea` places its content that way and the bar mirrors
 its hit-test and drag to match. A style that offsets the thumb from `bounds.x`
 unconditionally paints it at the far end of the track while the content shows its
 beginning, and grabbing it jumps. Read `PaintContext::layout_direction` at
@@ -512,7 +512,7 @@ proposed width can never overflow horizontally, so the horizontal bar never
 appears.
 
 **Two scroll bars, or scrolling that fights itself.** You wrapped a widget that
-already scrolls — see [§2](#2-widgets-that-scroll-themselves). Remove the
+already scrolls, see [§2](#2-widgets-that-scroll-themselves). Remove the
 `ScrollArea` and give the inner view a height instead.
 
 **A virtualized list renders nothing, or renders an empty hole while the CPU
@@ -523,7 +523,7 @@ an enclosing `ScrollArea`; occasionally a hand-written parent that proposes
 `height: None` in `place_children`.
 
 **A wheel over one panel scrolls the page behind it.** `OverscrollBehavior::Chain`
-is the default, and a scroller whose content fits is always at its boundary — so
+is the default, and a scroller whose content fits is always at its boundary, so
 it declines and the event chains outward. Set
 `.overscroll_behavior(OverscrollBehavior::Contain)` on the panel that should
 absorb it.
@@ -532,11 +532,11 @@ absorb it.
 was destroyed and rebuilt. A `ScrollArea` owns its offset signals in
 `ScrollArea::new()`, so a parent whose `build()` re-runs and calls
 `ctx.add(ScrollArea::new()...)` again gets a fresh widget at offset zero. A theme
-or locale change does **not** do this (both are relayout/repaint, not rebuild) —
+or locale change does **not** do this (both are relayout/repaint, not rebuild),
 look for a `BindingLevel::Rebuild` binding on the parent. Fix it the way the
 framework's own memoizing containers do: have the parent return `true` from
 `Widget::preserves_children_on_rebuild()` and re-attach the cached `WidgetId`, so
-the child subtree — focus, scroll offset, text contents, subscriptions — survives
+the child subtree, focus, scroll offset, text contents, subscriptions, survives
 ([`architecture.md`](architecture.md) §8).
 
 **A restored scroll position paints at the top for one frame, then jumps.** Use
@@ -550,7 +550,7 @@ taller than the viewport and reveals its whole box. Override
 ([§5](#5-programmatic-scrolling-and-the-reveal-walk)).
 
 **A typewriter pin stops working on the last page.** The view has run out of
-range. Buy some with `.scroll_past_end(1.0 - fraction)` — it extends the range
+range. Buy some with `.scroll_past_end(1.0 - fraction)`, it extends the range
 without adding padding or layout.
 
 **`PageUp` / `PageDown` do nothing.** `ScrollArea` has no keyboard handler; this

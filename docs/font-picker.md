@@ -3,8 +3,7 @@
 
 # FontPicker
 
-A drop-in font-family selector, in the tradition of Qt's `QFontComboBox`,
-GTK's `FontChooser`, and UIKit's `UIFontPickerViewController`. It lists every
+A font-family selector. It lists every
 installed font family, previews each one, and binds the choice to a
 `Signal<Option<String>>` (the family name) that plugs straight into
 `TextStyle.family` / `RichTextEditor::set_font_family`.
@@ -28,7 +27,7 @@ Demo: `cargo run -p font-picker`. Also on the widget catalog's **Rich text** tab
 
 ## What it does
 
-- **Self-populates** from the app's shared typesetter — no font list is
+- **Self-populates** from the app's shared typesetter, no font list is
   passed in. (Reads `ctx.app_state::<SharedTypesetter>()` at build time, the
   same path `SpinBox` uses for text measurement.)
 - **Previews each font.** By default every row shows the family name in a
@@ -81,7 +80,7 @@ signal is the source of truth.
 
 Like Qt / GTK / UIKit, the spacing and writing-system filters are set in code,
 not exposed as in-widget chrome. Bind them to `Signal`s and drive them from
-your own controls next to the picker — the demo pairs the picker with a
+your own controls next to the picker, the demo pairs the picker with a
 "Monospace only" checkbox and a writing-system dropdown. The in-dropdown search
 field (type-to-filter) is the one filter that lives inside the widget.
 
@@ -96,19 +95,19 @@ filter change never silently clears your choice.
 A font's writing systems (Latin, Cyrillic, CJK, …) are read from its OS/2
 table's `ulUnicodeRange` (script coverage) and `ulCodePageRange` (the
 CJK-language + Vietnamese distinction, which shares codepoints and so can't be
-told apart from Unicode coverage alone — the same heuristic Qt uses), with a
+told apart from Unicode coverage alone, the same heuristic Qt uses), with a
 cmap sample-codepoint cross-check for fonts whose OS/2 ranges are absent or
 wrong. This lives in `text-typeset`
 (`text_typeset::font::writing_system::writing_systems_for_face`, built on
 `ttf-parser`).
 
 Classifying a font means reading its bytes, so doing it for a whole system is
-hundreds of file reads — far too much for the UI thread. The picker therefore
+hundreds of file reads, far too much for the UI thread. The picker therefore
 builds the coverage index on a **background thread** the first time it mounts
 and polls readiness on the frame tick. Until the index is ready the
 writing-system filter shows the unfiltered list and samples fall back to a
 Latin default; the list narrows (and samples upgrade to their real scripts)
-once it completes. **The UI never blocks.** Spacing filtering is instant — it
+once it completes. **The UI never blocks.** Spacing filtering is instant, it
 uses only font metadata, no bytes.
 
 `WritingSystem` mirrors Qt's `QFontDatabase::WritingSystem` set (Latin, Greek,
@@ -131,7 +130,7 @@ arrows reach it. Typing in the search field drops the highlight and hands the
 reader's focus back to the field. The count belongs on the container, not the row: AccessKit
 resolves an item's set size by walking *up* from it, so a `size_of_set` written
 on the option is read by no adapter. The in-font sample on each row
-is decorative and hidden from assistive technology — the row's accessible name
+is decorative and hidden from assistive technology, the row's accessible name
 is the plain family string, so a screen reader reads "DejaVu Sans", never the
 sample text or a tofu glyph.
 
@@ -146,7 +145,7 @@ predicates are exercised deterministically. See the tests in
 ## Scope
 
 Family selection only, exactly like Qt's `QFontComboBox`. Face / weight / style
-/ size selection is a larger control — Qt splits it into `QFontDialog` — and is
+/ size selection is a larger control, Qt splits it into `QFontDialog`, and is
 out of scope here. Simplified vs Traditional Chinese is a best-effort heuristic
 from OS/2 code-page bits (the codepoints are shared; the difference is
 glyph-variant, undecidable from coverage alone).
@@ -156,9 +155,9 @@ glyph-variant, undecidable from coverage alone).
 The picker needed two capabilities surfaced from the external `text-typeset`
 crate (both cheap plumbing over data the font stack already had):
 
-- **Enumeration** — `TextFontService::families()` / `family_names()` /
+- **Enumeration**, `TextFontService::families()` / `family_names()` /
   `family_is_monospaced()` (fontdb metadata; no bytes loaded).
-- **Writing-system coverage** — `TextFontService::writing_system_index_builder()`
+- **Writing-system coverage**, `TextFontService::writing_system_index_builder()`
   returns a `Send` snapshot whose `build()` computes the per-family coverage
   map off-thread, plus the `WritingSystem` / `WritingSystemSet` types. Reads
   OS/2 via a new `ttf-parser` dependency (already present transitively through

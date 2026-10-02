@@ -4,7 +4,7 @@
 # Async Runtime Reference
 
 **Scope:** the optional, opt-in `teksilo-async` crate (plus the `teksilo-tokio`
-/ `teksilo-async-std` reactor adapters) — a **main-thread async executor** for
+/ `teksilo-async-std` reactor adapters), a **main-thread async executor** for
 *imperative* async inside UI handlers.
 
 Mental model in one line:
@@ -15,8 +15,8 @@ TeksiloAppBuilder::install_async()  →  ctx.spawn_local(async move { … })  �
 
 Teksilo keeps the view layer synchronous: **async is the backend's concern.**
 This crate is the escape hatch for the cases where a *handler* wants to write
-linear `async` / `.await` — sequencing or branching several awaits in one place
-— instead of restructuring into callbacks. It is **off by default**; nothing in
+linear `async` / `.await`, sequencing or branching several awaits in one place
+,  instead of restructuring into callbacks. It is **off by default**; nothing in
 `teksilo-core` or `teksilo-app` gains an async dependency unless you opt in.
 
 ## When to use it (and when not to)
@@ -29,7 +29,7 @@ linear `async` / `.await` — sequencing or branching several awaits in one plac
 | `.await` a native `tokio` / `async-std` future (timer, socket, `reqwest`) | `teksilo-tokio` / `teksilo-async-std`. |
 
 For the common "kick off work, update the UI when it lands" case the reactive
-data path is simpler and needs no executor — reach for `spawn_local` only when
+data path is simpler and needs no executor, reach for `spawn_local` only when
 the *imperative* shape genuinely reads better. (Teksilo apps backed by a separate
 data layer generally keep async in that layer entirely.)
 
@@ -82,18 +82,18 @@ Demo: `cargo run -p async-demo`.
 ## The owned-handles model
 
 A `spawn_local` future is single-threaded (`!Send`) and runs on the UI thread.
-It captures `Rc`-based `Signal` handles and mutates them **on resume** — that is
+It captures `Rc`-based `Signal` handles and mutates them **on resume**, that is
 how an async result reaches the UI. There is **no `EventContext` after `.await`**
-(it is borrow-transient — it exists only during a synchronous event dispatch),
+(it is borrow-transient, it exists only during a synchronous event dispatch),
 so UI updates flow through owned handles, exactly matching the reactive model.
-`spawn_local` is fire-and-forget — its future's output is `()`; surface results
+`spawn_local` is fire-and-forget, its future's output is `()`; surface results
 by setting a `Signal`, or use `spawn_local_with` (below) for a one-shot callback
 that runs with a context.
 
 This is deliberately the same shape as Slint's `spawn_local`: capture
 component/state handles, set them on resume.
 
-### `spawn_local_with` — a fresh context for one-shot ambient ops
+### `spawn_local_with`: a fresh context for one-shot ambient ops
 
 When the *result* needs an ambient op that requires an `EventContext`
 (`open_window`, `send_intent`, `set_theme`, …), use `spawn_local_with`. The
@@ -107,12 +107,12 @@ ctx.spawn_local_with(
         ctx.open_window(WindowConfig::new().title("Report").root(/* report */));
     },
 )
-.detach();                                       // keep it alive — dropping the handle cancels
+.detach();                                       // keep it alive, dropping the handle cancels
 ```
 
 For a multi-step sequence of ambient ops, chain: the completion callback can
 itself spawn the next future. There is intentionally **no** re-entrant
-"current context" available mid-future — that would couple the executor to
+"current context" available mid-future, that would couple the executor to
 window internals and reopen the `RefCell` double-borrow class. (It could be
 added later as a separate, additive API if a real need appears.)
 
@@ -124,11 +124,11 @@ let result = teksilo_async::spawn_blocking(move || expensive_sync_call()).await;
 ```
 
 Runs the closure on a dedicated `std::thread` and resolves to
-`Result<T, BlockingError>` through a one-shot channel. Needs no async runtime —
+`Result<T, BlockingError>` through a one-shot channel. Needs no async runtime,
 the channel's waker nudges the executor when the worker finishes. The closure
 and its result must be `Send`; the awaiting task stays on the UI thread. A panic
 in the closure is **caught** on the worker and surfaced as
-`BlockingError::Panicked` — it does not unwind through the UI thread.
+`BlockingError::Panicked`, it does not unwind through the UI thread.
 
 ## Threading & the loop hook (zero idle cost)
 
@@ -139,7 +139,7 @@ in `teksilo-app`:
 TeksiloAppBuilder::on_loop_tick(poll_source: Rc<Cell<bool>>, tick: impl FnMut() -> bool)
 ```
 
-`teksilo-app` only ever sees `FnMut` + `Rc<Cell<bool>>` — it has no async
+`teksilo-app` only ever sees `FnMut` + `Rc<Cell<bool>>`, it has no async
 dependency. Each turn (`about_to_wait`) the hook polls the executor; a `true`
 return triggers a repaint of the open windows (a task may have mutated a
 `Signal`). While idle the loop sleeps in `ControlFlow::Wait` (zero CPU) until a
@@ -147,8 +147,8 @@ task is woken.
 
 The wake path is the crux of the cross-thread story. Every task's leaf futures
 are polled with **one shared `Waker`** (`Arc<ExecWaker>`, `Send + Sync`). On
-wake — possibly from a `spawn_blocking` worker thread or a runtime's reactor
-thread — it sets an atomic flag and nudges the winit event loop through the
+wake, possibly from a `spawn_blocking` worker thread or a runtime's reactor
+thread, it sets an atomic flag and nudges the winit event loop through the
 (`Send + Sync`) `AppEventPoster`. It never touches the `!Send` task queue; the
 main thread re-polls live tasks on the next tick. Tasks are dropped on
 completion; dropping a `TaskHandle` cancels (the future is dropped on the next
@@ -163,7 +163,7 @@ tick), and `.detach()` lets it run independently.
   as its wake target. When the timer/socket is ready, the background driver
   wakes the executor and the loop ticks again. `TokioHandle` (in app-state)
   exposes `.spawn()` for `Send` tasks and `.handle()`.
-- **`teksilo-async-std`** needs no per-tick guard — async-std's reactor is
+- **`teksilo-async-std`** needs no per-tick guard, async-std's reactor is
   global and auto-starting, so `install_async_async_std()` is just
   `install_async()` plus the async-std dependency.
 
@@ -191,7 +191,7 @@ Both deliver their effects on the UI thread and both update the UI through
   `Signal` an `Action` watches.
 - A `spawn_blocking` closure panic is caught and returned as
   `BlockingError::Panicked`. A panic in a `spawn_local` *body* (your own async
-  code) still propagates on the UI thread — keep those panic-free.
+  code) still propagates on the UI thread, keep those panic-free.
 - The adapters bring their runtime as a normal dependency; enabling both `tokio`
   and `async-std` in one binary pulls both runtimes (rarely desirable).
 - Task progress repaints all open windows (not just the one whose `Signal`

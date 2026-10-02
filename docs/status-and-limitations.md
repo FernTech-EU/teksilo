@@ -24,8 +24,8 @@ Project. Architecture, design reviews, code review and final acceptance were hum
 
 - **CJK IME composition.** Latin and BiDi input compose correctly; Chinese, Japanese, and Korean input methods need to be tested by actual users.
 - **X11 verification breadth.** The X11 custom title bar and drag-and-drop backends ship and are covered by protocol tests, but live verification has been done against KWin (via XWayland) and, in CI, Openbox. Other window managers are untested, and there is no run against a standalone Xorg server. A window manager without `_NET_WM_MOVERESIZE` is detected up front and keeps native decorations rather than producing an immovable window.
-- **Mobile and web.** Linux, Windows and macOS are the primary targets. No mobile or web targets.
-- **API stability.** Pre-1.0; breaking changes are expected between minor versions.
+- **Mobile and web.** Linux, Windows and macOS are the primary targets. No mobile or web targets. Web support is technically possible, but would lose accessibility, which is a core goal of the framework.
+- **API stability.** Pre-1.0; breaking changes are expected between minor versions. Yet, the biggest architecture changes of v0 are mostly settled, and the core concepts are unlikely to change drastically.
 <!-- END README: Known gaps -->
 
 ## WebView prototype

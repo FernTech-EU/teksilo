@@ -147,7 +147,6 @@ jobs:
           ### Architecture & roadmap
 
           - [Architecture](${BASE_URL}/architecture.html): Framework internals reference
-          - [Property-based testing](${BASE_URL}/property-testing.html): proptest conventions and safe-run protocol
 
           ### Authoring widgets
 
@@ -167,7 +166,6 @@ jobs:
           ### teksu! DSL & formatting
 
           - [teksu! macro reference](${BASE_URL}/teksu-macro-reference.html): Surface language and desugaring cheat sheet
-          - [teksu! language spec](${BASE_URL}/teksu-language-spec-v3.html): Design spec with worked translations
           - [teksilo-fmt](${BASE_URL}/teksilo-fmt.html): teksu! source formatter
           - [teksilo-fmt in VS Code](${BASE_URL}/teksilo-fmt-vscode.html): Editor integration
 

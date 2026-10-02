@@ -12,7 +12,7 @@
 //! moved thing is called.
 //!
 //! The consumers today are the five data views' rows and tiles and a tab in a
-//! `TabBar`. `docs/drag-operation-census.md` lists the reordering drags that
+//! `TabBar`. `engineering/docs/drag-operation-census.md` lists the reordering drags that
 //! still have no command, each with what it needs; adding one is meant to be
 //! this module plus a chord, not a new implementation.
 //!

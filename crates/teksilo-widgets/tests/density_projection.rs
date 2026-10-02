@@ -13,7 +13,7 @@
 //!    the tree's density is switched at runtime — which is the only thing that
 //!    proves `WidgetTree::set_input_density`'s `Rebuild` binding re-bakes a
 //!    dimension decided in `build()`, rather than merely relayouting.
-//! 3. **The inventory is true.** `docs/density-inventory.md` is the audit
+//! 3. **The inventory is true.** `engineering/docs/density-inventory.md` is the audit
 //!    artifact; this parses it and holds it to its own rules, so a row that
 //!    claims a treatment the code does not implement fails here rather than in
 //!    a reader's head.
@@ -23,7 +23,7 @@
 //!    accessor. `teksilo-core` cannot name a `teksilo-widgets` constant, so
 //!    each default restates one as a literal; this holds the two equal.
 //!
-//! Reference: `docs/density-inventory.md`, and the touch design's A11.
+//! Reference: `engineering/docs/density-inventory.md`, and the touch design's A11.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -347,7 +347,7 @@ struct Row {
 }
 
 fn inventory_rows() -> Vec<Row> {
-    let path = repo_root().join("docs/density-inventory.md");
+    let path = repo_root().join("engineering/docs/density-inventory.md");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{} is missing or unreadable: {e}", path.display()));
     let mut rows = Vec::new();
@@ -415,7 +415,7 @@ fn every_inventory_row_carries_a_known_class() {
 /// The named exceptions are the `MinSize` rows: a `MinSize` *is* a hit box, so
 /// `density_min_size` enforces the floor there, and the files listed below
 /// change at Compact by design. The count is deliberately not written here —
-/// `docs/density-inventory.md` §0 enumerates the Compact-visible exceptions and
+/// `engineering/docs/density-inventory.md` §0 enumerates the Compact-visible exceptions and
 /// is the only place it lives, because a count repeated in a second place is a
 /// count that drifts. It drifted here: this sentence said "three" while the
 /// list under it named four.

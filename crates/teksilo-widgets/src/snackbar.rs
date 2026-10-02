@@ -180,7 +180,7 @@ impl Widget for SnackbarSurface {
         //
         // There is deliberately **no** pause-while-pointed-at: the snackbar has
         // never had one for any input kind, so there is nothing here for touch
-        // to reach parity with. See `docs/hover-affordance-census.md`.
+        // to reach parity with. See `engineering/docs/hover-affordance-census.md`.
         //
         // Dismissed by *chain*, not by content id: the overlay's content is the
         // deferred host `Snackbar::build` registered, and this widget is the

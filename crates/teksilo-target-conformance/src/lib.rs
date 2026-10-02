@@ -16,10 +16,10 @@
 //! 1. every widget that implements one of the two hit-widening hooks
 //!    (`Widget::hit_outset`, `Widget::target_regions`) — the controls that
 //!    *declare* they are undersized and rely on a mechanism;
-//! 2. every widget `docs/density-inventory.md` records as a sub-24 dp
+//! 2. every widget `engineering/docs/density-inventory.md` records as a sub-24 dp
 //!    visual-fixed `Target` or `Grab` with a named mechanism — the 27 rows the
 //!    floor rule pushed off `dp`;
-//! 3. one representative of each family in `docs/widget-pointer-inventory.md`
+//! 3. one representative of each family in `engineering/docs/widget-pointer-inventory.md`
 //!    that the programme touched: the controls sweep, the composites, the five
 //!    data views, the menus, the overlays, the chrome, the editors.
 //!
@@ -53,7 +53,7 @@
 //! --workspace` does. No stub is left behind in teksilo-widgets to stand in for
 //! the gate — a test that passes by containing nothing is worse than an absent
 //! one. The same boundary is written out in
-//! `docs/accessibility-internal-audit.md` §3.7.
+//! `engineering/docs/accessibility-internal-audit.md` §3.7.
 //!
 //! # A widget author can redden three other crates' tests
 //!
@@ -64,7 +64,7 @@
 //!
 //! [`AllowedViolation`]: teksilo_core::accessibility::target_audit::AllowedViolation
 //!
-//! Reference: `docs/density-and-targets.md`, `docs/accessibility-internal-audit.md`.
+//! Reference: `docs/density-and-targets.md`, `engineering/docs/accessibility-internal-audit.md`.
 
 use std::rc::Rc;
 

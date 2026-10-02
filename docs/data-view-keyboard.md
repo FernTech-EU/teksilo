@@ -3,11 +3,11 @@
 
 # Data-view keyboard navigation
 
-The five data views — [`ListView`](../crates/teksilo-widgets/src/list_view.rs),
+The five data views, [`ListView`](../crates/teksilo-widgets/src/list_view.rs),
 [`TreeView`](../crates/teksilo-widgets/src/tree_view.rs),
 [`TableView`](../crates/teksilo-widgets/src/table_view.rs),
 [`TreeTableView`](../crates/teksilo-widgets/src/tree_table_view.rs) and
-[`GridView`](../crates/teksilo-widgets/src/grid_view.rs) — answer one keyboard
+[`GridView`](../crates/teksilo-widgets/src/grid_view.rs), answer one keyboard
 contract. This page is that contract, plus the three places Teksilo knowingly
 departs from a platform, a toolkit or an ARIA pattern, and why.
 
@@ -33,12 +33,12 @@ as `Linear`.
 | `Ctrl`+`↑`/`↓` | move the cursor only¹ | move the cursor only¹ | move the cursor only¹ |
 | `Space` | **check the row** if it has a checkbox, else toggle (Multi) / select (Single) | **check the tile** if it has a checkbox, else toggle (Multi) / select (Single) | **check the cell** if it has a checkbox, else toggle its selection |
 | `Ctrl`+`Space` | toggle the focused row | toggle the focused tile | **select the column** (`MultiCell`) |
-| `Shift`+`Space` | — | — | **select the row** (`MultiCell`) |
+| `Shift`+`Space` |, |, | **select the row** (`MultiCell`) |
 | `Enter` | activate | activate | activate the row |
 | `Ctrl`+`A` / `Ctrl`+`Shift`+`A` | select all / deselect all (Multi only) | " | " |
-| `Escape` | — | clear the focus ring | end the edit, else clear the ring |
-| `F2` | — | — | begin editing |
-| `*` / `+` / `-` | tree only: expand the subtree / one level / collapse | — | tree table: the same |
+| `Escape` |, | clear the focus ring | end the edit, else clear the ring |
+| `F2` |, |, | begin editing |
+| `*` / `+` / `-` | tree only: expand the subtree / one level / collapse |, | tree table: the same |
 | `←` / `→` | tree only: collapse-or-ascend / expand-then-descend | ±1 tile | ±1 cell (tree column: expand / collapse) |
 
 ¹ In a multiple selection. A single selection moves with the cursor on every
@@ -47,8 +47,8 @@ navigation key; see the next section.
 ### The modifier rules, stated once
 
 **In a multiple selection, `Ctrl` (⌘ on macOS) on a navigation key never
-changes the selection.** It may still change the *destination* — in a cell
-grid `Ctrl+Home` escalates from the row's start to the table's corner — but it
+changes the selection.** It may still change the *destination*, in a cell
+grid `Ctrl+Home` escalates from the row's start to the table's corner, but it
 suppresses the selection update. GTK4's `GtkListBase` registers every
 navigation key with a `(select, modify, extend)` triple, and its Control
 variant clears `select`, which skips the selection call; Qt's
@@ -71,8 +71,8 @@ cursor-only move. It applies wherever the selection holds one entry: a
 is itself single. GTK4 reads it differently; see the deviations below.
 
 **And the cursor moves with the selection.** A selection the application sets
-— a list landing on today's entry each time it takes focus, a model shifting
-the selected row past an insert — moves the cursor onto it, in the same views.
+,  a list landing on today's entry each time it takes focus, a model shifting
+the selected row past an insert, moves the cursor onto it, in the same views.
 Otherwise the row the user last reached would stay the one announced, and the
 next arrow key would start from it. A multiple selection keeps its cursor where
 the user left it, and so does a selection with no row the view shows (emptied,
@@ -80,7 +80,7 @@ or keyed on a row this view filters out). A grid or a table with no cursor yet
 gets none this way; its cursor appears with the first key or click.
 
 A `TreeView` over an index `SelectionModel` gets no delta from a structural
-change — an insert above, an expand — to shift the selection by. Its cursor
+change, an insert above, an expand, to shift the selection by. Its cursor
 follows the row by identity, and in a single selection it takes the selection
 along, so the row selected stays the row the user was on, as it would in a
 `ListView` or under `keyed_selection`. A multiple selection keeps its indices.
@@ -88,7 +88,7 @@ A selected row that disappears leaves the selection where it was.
 
 ## A row's own controls
 
-A row, cell or tile is not a focus target — the container is — and all five
+A row, cell or tile is not a focus target, the container is, and all five
 views take those subtrees **out of the Tab order**. A listbox is one Tab
 stop with a cursor moving inside it, and a per-row stop would be worse than
 merely non-conforming: only realized rows exist, so the number of Tab stops, and
@@ -97,7 +97,7 @@ which rows they belong to, would follow the scroll position.
 That leaves anything interactive inside a row with no keyboard route, so a row
 publishes one: `BuildContext::set_keyboard_toggle` names what `Space` should do
 when the row holds the cursor. `Checkbox` publishes its own, so a checkbox
-anywhere in a row, cell or tile is reachable with no wiring at all — whether it
+anywhere in a row, cell or tile is reachable with no wiring at all, whether it
 came from `StandardListItem` or from a hand-written cell delegate. Any other
 control calls `set_keyboard_toggle` to opt in.
 
@@ -106,9 +106,9 @@ focused **row**, `TableView` and `TreeTableView` in the focused **cell** (a
 table can carry more than one checkbox column, so "the row's checkbox" would be
 arbitrary), and `GridView` in the focused **tile**.
 
-`Space` therefore means "check this" on a row that has a checkbox — what Windows
+`Space` therefore means "check this" on a row that has a checkbox, what Windows
 does for a checkbox list view, and what a visible checkbox looks like it should
-answer to — and `Ctrl`+`Space` keeps meaning "toggle the selection". A row
+answer to, and `Ctrl`+`Space` keeps meaning "toggle the selection". A row
 without a checkbox publishes nothing, so `Space` still moves the selection there.
 A tristate row goes Checked ↔ Unchecked and never *sets* Indeterminate, which
 belongs to the model's descendant aggregation rather than to a keystroke.
@@ -123,7 +123,7 @@ it is what leaves ⌘↑/⌘↓ free for the macOS aliases below.
 the gesture shrinks it: `Shift+End` then `Shift+Home` leaves one range, not the
 whole collection. `Ctrl+Shift` keeps whatever the previous gesture selected, so
 a second disjoint range can be built without losing the first. The anchor moves
-on a plain click or arrow and on `Ctrl+Space` — in **either** direction, which
+on a plain click or arrow and on `Ctrl+Space`, in **either** direction, which
 is the clause that makes *`Ctrl`+arrow away → `Ctrl+Space` → `Shift`+arrow*
 extend from the row just picked. See
 [`SelectionModel`](../crates/teksilo-data/src/selection_model.rs).
@@ -133,14 +133,14 @@ extend from the row just picked. See
 A row is a `Home` target **iff `←`/`→` move a cell cursor**. That is the
 discriminator every stack uses, and it is not the widget's name:
 
-- Lists and trees have no column cursor, so `Home` is the first item — the ARIA
+- Lists and trees have no column cursor, so `Home` is the first item, the ARIA
   listbox and tree patterns, Qt's `QListView`/`QTreeView`, GTK's `GtkListBase`.
 - A `TableView` in a **row**-selection mode has no column cursor either, so its
   `Home` is the first *row*. This is what Explorer's details view does. Before
   this, `Home` moved the column in every mode, which made `Shift+Home` an
   effective no-op in the default `MultiRow`.
 - A `TableView` in a **cell** mode does have one, so `Home` is the row's start
-  and `Ctrl+Home` the corner — the ARIA grid pattern and Qt's `QTableView`.
+  and `Ctrl+Home` the corner, the ARIA grid pattern and Qt's `QTableView`.
   A `TreeTableView` in a cell mode keeps the *column* on `Ctrl+Home`: the ARIA
   treegrid pattern says "the cell in the first row in the same column as the
   cell that had focus", where the grid pattern says the corner. The two
@@ -234,8 +234,8 @@ patterns and every desktop implementation do. Case folding is full Unicode, so
 an accented label is reachable.
 
 The 500 ms reset (`.type_ahead_timeout`) sits between Qt's 400 ms and Dolphin's
-1000 ms. Windows derives its own from the double-click time — 4× natively,
-2× in WPF — so there is no single number to match.
+1000 ms. Windows derives its own from the double-click time, 4× natively,
+2× in WPF, so there is no single number to match.
 
 In a **table**, a printable key opens the cell editor instead where the column
 declares `EditTriggers::ANY_KEY`. A grid cannot have both type-to-search and
@@ -262,7 +262,7 @@ type-to-edit on bare letters, and the editor wins; the WinForms default
   half: each adapter gates its scroll pattern on the node *supporting* the
   action, so a handler installed without one is invisible to a real screen
   reader. The tree views answer `Action::Expand` and `Action::Collapse`, on
-  branch rows only — a leaf that advertised them would be the same
+  branch rows only, a leaf that advertised them would be the same
   advertised-and-inert bug one level down.
 
 **Known upstream limitations.** A selected *row* does not report `IsSelected`
@@ -274,7 +274,7 @@ hierarchy reads flat under VoiceOver while a `TreeView`'s does not.
 ## Testing both platforms from one host
 
 `ListNavConvention::CURRENT` is a `cfg!` constant, so a Linux test run would
-otherwise only ever see half of the rule — and the half it could not see is the
+otherwise only ever see half of the rule, and the half it could not see is the
 one the rule exists for. Every convention-dependent function therefore has a
 `_for` twin taking the convention explicitly, the same split
 [`common/text_nav.rs`](../crates/teksilo-widgets/src/common/text_nav.rs) and

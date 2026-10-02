@@ -3,7 +3,7 @@
 
 //! Rot guard for the two file-keyed touch-migration inventories.
 //!
-//! `docs/density-inventory.md` and `docs/widget-pointer-inventory.md` are the
+//! `engineering/docs/density-inventory.md` and `engineering/docs/widget-pointer-inventory.md` are the
 //! artifacts the density sweep (P20) and the control sweeps (P22–P31) size
 //! themselves from. Both are keyed by repo-relative source path, so a rename or a
 //! module split silently invalidates them. This test parses every path out of the
@@ -55,7 +55,7 @@ fn quoted_source_paths(markdown: &str) -> BTreeSet<String> {
 }
 
 fn read_doc(name: &str) -> (PathBuf, String) {
-    let path = repo_root().join("docs").join(name);
+    let path = repo_root().join("engineering/docs").join(name);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("inventory {} is missing or unreadable: {e}", path.display()));
     (path, text)
@@ -115,11 +115,10 @@ fn widget_pointer_inventory_paths_resolve() {
     );
 }
 
-/// Both inventories must stay reachable from the book's table of contents —
-/// mdBook renders only what `SUMMARY.md` links.
+/// Engineering inventories remain available without becoming book chapters.
 #[test]
-fn inventories_are_linked_from_summary() {
-    let (_, summary) = read_doc("SUMMARY.md");
+fn inventories_are_kept_out_of_the_book() {
+    let summary = std::fs::read_to_string(repo_root().join("docs/SUMMARY.md")).unwrap();
     for doc in [
         "density-inventory.md",
         "widget-pointer-inventory.md",
@@ -127,12 +126,9 @@ fn inventories_are_linked_from_summary() {
         "drag-operation-census.md",
     ] {
         assert!(
-            summary.contains(doc),
-            "docs/SUMMARY.md does not link {doc}; mdBook will not render it"
+            !summary.contains(doc),
+            "engineering record {doc} is in the book"
         );
-        assert!(
-            repo_root().join("docs").join(doc).is_file(),
-            "docs/{doc} is linked from SUMMARY.md but does not exist"
-        );
+        assert!(repo_root().join("engineering/docs").join(doc).is_file());
     }
 }

@@ -70,14 +70,14 @@
 //! crates the touch programme changed own pointer targets and carry none
 //! (teksilo-inspector, teksilo-terminal, teksilo-preview-ui, and
 //! teksilo-webview, which has nothing this walker can see into), and of the three
-//! Compact-visible exceptions `docs/density-inventory.md` §0 enumerates the lists
+//! Compact-visible exceptions `engineering/docs/density-inventory.md` §0 enumerates the lists
 //! reach none. The widget list sweeps all four shipped presets; charts and scene
 //! sweep Int UI alone, each for a written reason. So a green gate says *these
 //! fixtures conform*, never *the framework conforms* — the boundary is written
 //! out, crate by crate and with the feasibility of each missing list, in
-//! `docs/accessibility-internal-audit.md` §3.7.
+//! `engineering/docs/accessibility-internal-audit.md` §3.7.
 //!
-//! Reference: `docs/density-and-targets.md`, `docs/accessibility-internal-audit.md`.
+//! Reference: `docs/density-and-targets.md`, `engineering/docs/accessibility-internal-audit.md`.
 //!
 //! [`Widget::hit_outset`]: crate::widget::Widget::hit_outset
 //! [`Widget::target_regions`]: crate::widget::Widget::target_regions
@@ -151,7 +151,7 @@ const PROBE_REFINE: u32 = 4;
 /// their own 16 dp paint; three are Int UI Compact menu rows, 0.05 dp under
 /// their 21.8. Each is the geometry its allow-list entry already names, and no
 /// control moved to produce them. The Int UI three are recorded in
-/// `docs/accessibility-internal-audit.md` §3.7 as well, because they move an Int
+/// `engineering/docs/accessibility-internal-audit.md` §3.7 as well, because they move an Int
 /// UI **Compact** census and the programme's invariant is about that rung.
 ///
 /// Pinned from **both sides** by

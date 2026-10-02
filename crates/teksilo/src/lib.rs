@@ -15,7 +15,7 @@ pub use teksilo_tokens as tokens;
 // directly.
 pub use teksilo_core::presets;
 
-/// The `teksu!` DSL macro. See `docs/teksu-language-spec-v3.md` for the
+/// The `teksu!` DSL macro. See `engineering/docs/teksu-language-spec-v3.md` for the
 /// surface language. Re-exported from `teksilo-macros` so consuming
 /// crates only need `teksilo` in `[dependencies]`.
 pub use teksilo_macros::teksu;

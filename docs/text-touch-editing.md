@@ -7,8 +7,8 @@ A mouse edits text with a cursor that is one pixel wide, hovers before it
 commits, and has a second button for a menu. A finger has none of that. It
 covers the character it is aiming at, it cannot hover, it has no second button,
 and the caret it just placed is under the fingertip that placed it. Every
-platform answers with the same three pieces of chrome — **selection handles**, a
-**magnifier**, and a **selection toolbar** — and Teksilo's version of them lives
+platform answers with the same three pieces of chrome, **selection handles**, a
+**magnifier**, and a **selection toolbar**, and Teksilo's version of them lives
 in [`teksilo_core::text_touch`](../crates/teksilo-core/src/text_touch.rs).
 
 The mouse path is untouched. Every **pointer** entry point begins by asking
@@ -16,19 +16,19 @@ The mouse path is untouched. Every **pointer** entry point begins by asking
 state when the answer is no, so an editor that installs the controller edits
 byte for byte as it did before. `on_long_press` asks the same question of the
 **gesture** rather than of the context, because a hold is recognised by a timer
-and not by a sample — see checklist step 3. A **stylus is direct** and gets the
+and not by a sample, see checklist step 3. A **stylus is direct** and gets the
 whole affordance set: a pen selects text the way a finger does.
 
 ## Where the pieces live
 
 | Piece | Crate | Why there |
 | --- | --- | --- |
-| `TextHitSource`, `TouchSelection`, `TextAffordances` | `teksilo-core` | The terminal selects text (read-only) and deliberately does not depend on `teksilo-widgets`. An embedded `WebView` is *not* a consumer — its engine owns the page's selection and paints its own handles. |
-| `TextAffordanceLayer`, `SelectionHandle`, `TextMagnifier` | `teksilo-core` | Same reason, and they are single-node batched paint — nothing about them needs the widget catalogue. |
+| `TextHitSource`, `TouchSelection`, `TextAffordances` | `teksilo-core` | The terminal selects text (read-only) and deliberately does not depend on `teksilo-widgets`. An embedded `WebView` is *not* a consumer, its engine owns the page's selection and paints its own handles. |
+| `TextAffordanceLayer`, `SelectionHandle`, `TextMagnifier` | `teksilo-core` | Same reason, and they are single-node batched paint, nothing about them needs the widget catalogue. |
 | `PaintContext::replay` | `teksilo-core` | The magnifier's mechanism; see below. |
 | `TextSelectionStyle`, `TextSelectionHandleRecipe`, `TextMagnifierRecipe` | `teksilo-core` | The Tier-3 protocol, alongside every other style trait. |
 | `RecipeTextSelectionStyle` | `teksilo-widgets` | The shipped IntUI look, like every other `Recipe*Style`. |
-| The selection toolbar | the host's own menu rows | It *is* a context menu: same commands, same rows, one implementation of each. The controller decides which commands to offer and where to hang them; it does not paint a second menu widget. A host that raises it through `show_overlay_in_band` keeps the caret in the editor, at the cost of the menu's keyboard route — see checklist step 5. |
+| The selection toolbar | the host's own menu rows | It *is* a context menu: same commands, same rows, one implementation of each. The controller decides which commands to offer and where to hang them; it does not paint a second menu widget. A host that raises it through `show_overlay_in_band` keeps the caret in the editor, at the cost of the menu's keyboard route, see checklist step 5. |
 
 ## The controller contract
 
@@ -49,7 +49,7 @@ trait TextHitSource {
 }
 ```
 
-Every point and rectangle is in **window** logical coordinates — the space an
+Every point and rectangle is in **window** logical coordinates, the space an
 overlay is positioned in, and the space a `PointerDown` arrives in *at the tree*.
 It is not the space a handler receives one in: the router localizes before
 dispatch, so a host converts on the way in and on the way out. See
@@ -63,12 +63,12 @@ first; Select All is offered only while nothing is selected. A read-only surface
 therefore ends up with a **Copy-only** toolbar, and a password field with neither
 Cut nor Copy while it is masked, without either case being special-cased
 anywhere. That second answer depends on the host resolving `allows_copy` from the
-predicate its own Cut and Copy consult rather than from a developer opt-in flag —
+predicate its own Cut and Copy consult rather than from a developer opt-in flag,
 see checklist step 1.
 
 ### What it does not answer
 
-`TextHitSource` is geometry. *Performing* a command — cut, paste, undo — is
+`TextHitSource` is geometry. *Performing* a command, cut, paste, undo, is
 [`TextSurface`](../crates/teksilo-core/src/text_surface.rs), which every text
 widget already registers. The two meet only at `clipboard_actions`, which says
 which commands to **offer**, so there is exactly one implementation of each.
@@ -87,18 +87,18 @@ the text it marks. Two conversions, and they are not interchangeable:
   stays correct for the affordance widgets: those are placed on the handle
   geometry, so they move while they are being dragged, and a
   local-plus-origin conversion would have to guess which placement the router
-  localized against — the published geometry can already be a sample ahead of
+  localized against, the published geometry can already be a sample ahead of
   the arena bounds when two moves land in one frame.
   `tree_pointer_position` is **not** a substitute: it reports the pointer
   table's elected primary, which prefers the mouse, so on a machine with both it
   answers for the wrong device.
-* **A long press** has no sample — it is recognised by a timer, and
-  `pointer_position` is `None` there — so it converts `local + viewport_origin`.
+* **A long press** has no sample, it is recognised by a timer, and
+  `pointer_position` is `None` there, so it converts `local + viewport_origin`.
   That is exact, because the *editor* does not move mid-press.
 
 ## Host checklist
 
-Written before any host existed, then corrected in place twice — first by the
+Written before any host existed, then corrected in place twice, first by the
 single-line family, which was the first host
 (`teksilo-widgets/src/primitives/text_input_field/touch.rs`), and then by the core
 work that followed it, which is where the intro, step 3, step 4's placement rule
@@ -113,13 +113,13 @@ what it used to prescribe.
    `TextHitSource` is a short-lived wrapper around a borrow of it.
 
    `allows_copy` is the predicate the surface's **own** Cut and Copy consult at
-   the moment they run — not a developer opt-in flag that a reveal toggle
+   the moment they run, not a developer opt-in flag that a reveal toggle
    overrides. Otherwise the touch toolbar refuses a Copy the same surface's
    keyboard and context menu allow.
 
    A one-line surface should **pin the vertical coordinate** to its line in
-   `offset_at`. Affordances hang deliberately off the line — a handle's disc sits
-   a dozen dp below the descender — so hit-testing a point at its own `y` misses
+   `offset_at`. Affordances hang deliberately off the line, a handle's disc sits
+   a dozen dp below the descender, so hit-testing a point at its own `y` misses
    the glyph row for every `x` and lands at the document end for all of them.
 
 2. **Own a `TouchSelection`.** Build it in `build()`, not in a handler:
@@ -146,7 +146,7 @@ what it used to prescribe.
    A host that mounts the affordance layer (step 4) wires two things, and
    `handle_pointer` is neither of them:
 
-   * **`on_long_press`**, forwarded from the editor's own — passing the gesture's
+   * **`on_long_press`**, forwarded from the editor's own, passing the gesture's
      own `event.pointer` and a **window** point, since `TapEvent::position` is
      widget-local (see *Coordinates* above). It needs no pointer-kind guard of its
      own: `TouchSelection::on_long_press` reads the gesture's device off its
@@ -156,7 +156,7 @@ what it used to prescribe.
      host's because a finger's press must be able to end as a *scroll*, which the
      controller cannot see: a direct pointer places no caret on the press, and
      places one on a release that still belongs to it. A hold **spends** the
-     press — it fires before the finger lifts — so record which contact the hold
+     press, it fires before the finger lifts, so record which contact the hold
      answered for and skip that release, or every hold ends as a tap over the word
      it just selected.
 
@@ -168,30 +168,30 @@ what it used to prescribe.
    hit-tests the published handle geometry itself. Its `PointerDown` arm is
    unreachable for a layer-mounting host, and its release arm raises
    unconditionally for a direct pointer, which a host that must let a press end as
-   a scroll cannot use — so no shipped host calls it. This step used to prescribe
+   a scroll cannot use, so no shipped host calls it. This step used to prescribe
    it as the way in for every host, alongside `on_long_press`.
 
    That `pointer` argument on `on_long_press` is why the signature is shaped that
    way. A hold is recognised by the gesture timer, not by a pointer sample, and
    the tree's in-flight input snapshot is saved and restored around every dispatch
-   — so an entry point reading `EventContext::pointer_kind` there was told **the
+, so an entry point reading `EventContext::pointer_kind` there was told **the
    mouse whatever the device was**, and refused every finger. Two fixes, and a
    host should know both: the tree now installs the holding contact for the length
    of a timer dispatch (`InputSnapshot::for_recognized_gesture`), so anything a
-   hold handler asks the context about — the device, the pointer id, the captor,
-   the frozen `TouchAction` — is now answered for the contact that held; and the
+   hold handler asks the context about, the device, the pointer id, the captor,
+   the frozen `TouchAction`, is now answered for the contact that held; and the
    controller's guard reads the gesture, so it holds for a host driving it from
    somewhere with no snapshot behind it at all (an assistive-technology action, its
    own timer).
 
-   **The release predicate.** `ctx.press_is_inside()` — the predicate the data
-   views' release-time commits ask — is the framework's tap boundary, and for a
+   **The release predicate.** `ctx.press_is_inside()`, the predicate the data
+   views' release-time commits ask, is the framework's tap boundary, and for a
    coarse pointer that boundary is the pressed node's whole *rectangle*. That is
    the right rule for a control, where the node is one target and a finger covers
    it, and the wrong one here, where the target is a **character**: a finger can
    pan a tall document a long way without ever leaving it, so the release would
    place a caret wherever the finger happened to stop. Any multi-line surface
-   therefore needs a **second** gate as well — the release's travel from where the
+   therefore needs a **second** gate as well, the release's travel from where the
    press landed, against that pointer's own `tap_slop`. The shipped one is
    `EditorTouch::press_is_still_a_tap` (`rich_text/touch_mount.rs`), which records
    the press's window position on `PointerDown` and refuses a release that
@@ -204,8 +204,8 @@ what it used to prescribe.
 
    **The grab offset**, which a multi-line host owes on every drag sample.
    `TouchSelection::update_drag` hit-tests the **raw** contact position, and a
-   handle's disc hangs deliberately off the line — above it for a `Start`, below it
-   for an `End` or a caret — so the fingertip does not cover the character the
+   handle's disc hangs deliberately off the line, above it for a `Start`, below it
+   for an `End` or a caret, so the fingertip does not cover the character the
    handle points at. Hand the controller the raw sample and it asks the surface for
    the offset at a point a disc's rise away from the glyph row: on a multi-line
    document that resolves onto a neighbouring line, and on a one-line one it falls
@@ -226,7 +226,7 @@ what it used to prescribe.
 
 4. **Mount a `TextAffordanceLayer`** in the `OverlayBand::TextAffordance` band
    via `EventContext::show_overlay_in_band`, built with
-   `BuildContext::add_detached` — never a bare `add`, which hands back a node
+   `BuildContext::add_detached`, never a bare `add`, which hands back a node
    nothing owns and strands another copy on every rebuild.
 
    Place it with **`FullViewport`**, which is the placement this band was written
@@ -237,8 +237,8 @@ what it used to prescribe.
 
    This is the step that was wrong, and the shape of the correction matters
    because it is what the router now guarantees. An overlay is chosen by its
-   *bounds* — `OverlayManager::hit_test` picks the topmost overlay whose rectangle
-   contains the press — and `hit_test_with` used to return whatever that overlay's
+   *bounds*, `OverlayManager::hit_test` picks the topmost overlay whose rectangle
+   contains the press, and `hit_test_with` used to return whatever that overlay's
    content answered, `None` included. A viewport-sized affordance overlay
    therefore made the editor under it stop taking presses altogether, which is why
    this step used to prescribe a content root sized to the union of the handles'
@@ -250,7 +250,7 @@ what it used to prescribe.
 
    One press still belongs to the wrapper, and it is the reason to keep one at
    all: a **cursor's** click on a handle. The handle refuses an indirect pointer,
-   and the editor never sees the press because a handle is a different root — so
+   and the editor never sees the press because a handle is a different root, so
    without a wrapper that click is swallowed and the touch chrome stands with
    nothing able to remove it. `event_pass_through` removes a node from
    hit-testing, not from the **bubble path** of a descendant that was hit, so a
@@ -268,9 +268,9 @@ what it used to prescribe.
    with `EventContext::update_overlay_placement_by_content`.
 
    Two corrections. First, **not `ClickOutside`**: a direct pointer's outside
-   press is *armed* rather than dismissed — the framework withholds both the down
+   press is *armed* rather than dismissed, the framework withholds both the down
    and the up from the tree, on the grounds that a finger covers what it is about
-   to actuate — so with a click-outside toolbar up, the next touch anywhere,
+   to actuate, so with a click-outside toolbar up, the next touch anywhere,
    including on a selection handle, is spent closing the menu and every gesture
    needs doing twice. `EscapeKey` is skipped by that rule entirely, which leaves
    Escape working and the host owning every other way down. Second, the toolbar
@@ -281,7 +281,7 @@ what it used to prescribe.
    chrome that only a direct pointer raises.
 
    The controller offers a toolbar for any state with a command worth offering,
-   including a bare caret — where it is Paste and Select All. Whether to *raise*
+   including a bare caret, where it is Paste and Select All. Whether to *raise*
    one is the host's: a menu opening on every tap in a text field is not what any
    platform does, and the toolbar belongs to a deliberate selection (a hold, a
    multi-tap, the end of a handle drag).
@@ -296,7 +296,7 @@ what it used to prescribe.
    Report on **every** route that moves the caret, not only the press. A press is
    the obvious one; the two that get missed are the **caret-handle drag** and the
    assistive-technology `SetValue` on a caret handle, both of which move the caret
-   inside the controller — `update_drag` writes `set_selection(moving..moving)` —
+   inside the controller, `update_drag` writes `set_selection(moving..moving)`,
    where nothing downstream can see it. Ask
    `text_touch::drag_moves_the_caret(kind, phase)` rather than deciding for
    yourself: it excludes a `Start` / `End` drag, which chooses a range rather than
@@ -308,21 +308,21 @@ what it used to prescribe.
    preedit.
 
 7. **Dismiss it yourself.** The affordance band is exempt from outside-press
-   dismissal — every tap that moves a caret is "outside" a handle — so call
+   dismissal, every tap that moves a caret is "outside" a handle, so call
    `TouchSelection::dismiss()` when focus leaves, the content changes, the
    surface becomes read-only, or the window deactivates. The last two of those
    are the ones only the host can serve: the effects that watch window
    activation and the bound text have no `EventContext`, so they cannot dismiss
    an overlay at all, which is why retirement is the controller publishing empty
    geometry rather than an overlay teardown. Call `TouchSelection::refresh(..)`
-   after any selection change the controller did not make — a keystroke, an undo,
+   after any selection change the controller did not make, a keystroke, an undo,
    an assistive client's `SetTextSelection`, the editor's own multi-tap.
 
    Gate every affordance node on the controller's published state with
    `visible_when`, and give each overlay an `OverlayRequest::on_dismiss` that
    clears whatever the gate reads. The framework takes overlays down on paths the
-   host does not drive — a right-click clears the transient overlays before
-   mounting its menu, Escape closes the top one, a modal clears the stack — and a
+   host does not drive, a right-click clears the transient overlays before
+   mounting its menu, Escape closes the top one, a modal clears the stack, and a
    `visible_when(true)` node that no overlay hosts any more is an ordinary root
    that paints wherever layout puts it.
 
@@ -330,7 +330,7 @@ what it used to prescribe.
 
 A lens 96 dp wide and 44 dp tall, raised 40 dp above the contact, magnifying
 1.25×. It appears only while a handle is being dragged, and not at all under
-`prefers-reduced-motion` — a lens that appears unbidden and then chases the
+`prefers-reduced-motion`, a lens that appears unbidden and then chases the
 finger is precisely the movement that preference is about, and the selection
 works without it.
 
@@ -353,21 +353,21 @@ Three consequences, all of them contracts:
 
 * **The closure is re-entered during the same frame.** Anything it mutates
   happens twice per frame. Anything it *borrows* must already have been released
-  by the host's own `paint` — that half is checkable, because a closure that
+  by the host's own `paint`, that half is checkable, because a closure that
   re-borrows a `RefCell` the host still holds panics deterministically (overlay
   content is painted in a separate walk, after the main tree's paint has
   returned). The mutation half is not checkable at all: a counter advanced twice
   or a cache keyed by "the last paint" is invisible to the framework and shows
   up only as wrong content in the lens. A host that cannot meet this calls
   `TouchSelection::magnifier(false)` and mounts no lens.
-* **Only the text layer.** A closure that draws the editor's own chrome —
-  border, focus ring, scroll bars — puts a magnified copy of the frame over the
+* **Only the text layer.** A closure that draws the editor's own chrome,
+  border, focus ring, scroll bars, puts a magnified copy of the frame over the
   document.
 * **The lens is a rectangle.** `DrawCommand::SetClip` takes a `Rect` and the
   renderer realises it as a scissor rectangle; the pipeline has no path clip, no
   stencil and no mask pass, so a rounded clip is not expressible today. A frame
   drawn with corner radius `r` therefore leaves `r × (√2 − 1)` dp of magnified
-  content standing outside each of its corners — 4 dp at a 10 dp radius, which a
+  content standing outside each of its corners, 4 dp at a 10 dp radius, which a
   1 dp frame does not begin to cover. The shipped style answers this by drawing
   a **rectangular** frame, which is exactly the clip, so nothing escapes; a
   style may raise `magnifier_corner_radius` and accept the corners. A genuinely
@@ -377,15 +377,15 @@ Three consequences, all of them contracts:
 ## Handles
 
 24 dp of painted disc inside a 44 dp square target. The disc is a *decoration*
-and is the same at every density — it is already sized for a fingertip — while
+and is the same at every density, it is already sized for a fingertip, while
 the target is a `TargetRole::Target`, so it can never come out below the
-density's own `target_size`. On the shipped ladder that floor never bites — 44 dp
-is already at or above every rung — so the handle's target is a **constant** 44 dp
+density's own `target_size`. On the shipped ladder that floor never bites, 44 dp
+is already at or above every rung, so the handle's target is a **constant** 44 dp
 at all three densities. Target
 conformance is measured on the rectangle the pointer meets, which is the rule
 `docs/density-and-targets.md` states for any affordance whose hit area is
-widened rather than its ink. The `grab_size` ladder — 6 / 10 / 16 dp across
-Compact / Comfortable / Touch — is deliberately **not** used: it tops out at
+widened rather than its ink. The `grab_size` ladder, 6 / 10 / 16 dp across
+Compact / Comfortable / Touch, is deliberately **not** used: it tops out at
 16 dp, so it is below the 24 dp WCAG 2.2 floor at *every* rung, Touch included.
 
 Placement rules, all of them driven by reachability rather than by taste:
@@ -396,7 +396,7 @@ Placement rules, all of them driven by reachability rather than by taste:
 * When the preferred side does not fit in the surface's viewport the handle takes
   the other one. A handle under the last line of an editor whose bottom is the
   window's would otherwise be off screen entirely.
-* A target that hangs off the edge is nudged back — but only as far as it can go
+* A target that hangs off the edge is nudged back, but only as far as it can go
   without losing the disc it belongs to. What remains on screen still clears the
   24 dp floor, which is what the nudge is for.
 * A caret scrolled out of the viewport has **no** handle. Leaving one behind
@@ -423,10 +423,10 @@ with `0..document_len` as its range and a step of one character, and it accepts
 paired with `Action::Focus`: handles are **not** focusable. The affordance band
 is anchor-independent, so the framework never moves focus into it, and a Tab stop
 appearing in the middle of a sentence the instant a finger touched it would be
-worse than useless to a keyboard user — who has arrow keys and Shift for the
+worse than useless to a keyboard user, who has arrow keys and Shift for the
 same job.
 
-The magnifier's node is marked hidden — `aria-hidden`, so it is out of
+The magnifier's node is marked hidden, `aria-hidden`, so it is out of
 navigation and out of hit-testing: the lens shows what is already in the tree,
 and announcing it would read the same sentence twice. The affordance
 layer itself is a bare `GenericContainer`, which the accessibility walker prunes,
@@ -449,11 +449,11 @@ one primitive, so one adoption inside
 composed from them. Two properties of a one-line editor shape that adoption:
 
 * **The vertical coordinate carries no information**, so `offset_at` pins it to
-  the line. Without that, every press on the strip a handle occupies — which is
-  *below* the text by construction — resolves to the end of the document.
+  the line. Without that, every press on the strip a handle occupies, which is
+  *below* the text by construction, resolves to the end of the document.
 * **A handle's target is larger than the field at every density but one.** The
   target is a constant 44 dp square (Apple's HIG minimum and WCAG 2.2 SC 2.5.5
-  AAA, not the 24 dp AA conformance floor — see `docs/density-and-targets.md`);
+  AAA, not the 24 dp AA conformance floor, see `docs/density-and-targets.md`);
   the field's own height is whichever is
   larger of its recipe constant and the density's `target_size`, so it climbs the
   ladder and only reaches 44 dp at `TargetDensity::Touch`. Below that the two
@@ -467,7 +467,7 @@ composed from them. Two properties of a one-line editor shape that adoption:
 A secure field gets **no magnifier**, revealed or not, and both switches are set:
 the controller stops computing a request and the layer builds no lens node.
 Either alone would leave the other able to reintroduce it. The reason is the
-revealed case rather than the masked one — masking already keeps plaintext out of
+revealed case rather than the masked one, masking already keeps plaintext out of
 the shaper, the atlas and the accessibility value, so a lens over a masked field
 would show nothing but larger bullets, while a lens over a *revealed* one shows
 the password magnified and raised 40 dp clear of the fingertip that asked for it.
@@ -475,7 +475,7 @@ the password magnified and raised 40 dp clear of the fingertip that asked for it
 The toolbar needs no exception, because `clipboard_actions` derives Cut and Copy
 from `allows_copy` and the field answers that with the same predicate its own
 `Ctrl+C` uses: masked, neither is offered; revealed, both are. Paste and Select
-All stay on offer throughout — neither reveals anything.
+All stay on offer throughout, neither reveals anything.
 
 Handles and the toolbar are suppressed entirely in one further state:
 `EchoMode::NoEcho` while masked lays out an **empty** source, so every offset
@@ -485,8 +485,8 @@ empty line would be visible nonsense.
 
 ## Multi-line surfaces
 
-`RichTextEditor`, `CodeEditor`, `PlainTextEditor` and `LogView` — four widgets
-over two state types — share one mount,
+`RichTextEditor`, `CodeEditor`, `PlainTextEditor` and `LogView`, four widgets
+over two state types, share one mount,
 `teksilo-widgets/src/rich_text/touch_mount.rs`. It owns the controller, the two
 overlays (a `FullViewport` pass-through one for the handles and the lens, a
 standard-band one for the toolbar) and the pass-through content root that lets a
@@ -498,14 +498,14 @@ order.
 What the mount cannot do for a host is the **coordinate conversion**: everything
 in `teksilo_core::text_touch` is stated in window coordinates and the router hands
 a handler widget-local ones, so each stack converts on the way in and on the way
-out — where the editor's body sits inside its wrapper is a per-stack fact. That is
+out, where the editor's body sits inside its wrapper is a per-stack fact. That is
 the same pair of conversions the section above describes; the mount just makes
 them the host's only obligation.
 
 Three properties of these surfaces that the single-line family does not have:
 
 * **A read-only surface still selects.** `LogView` has no caret, so its
-  affordance set is the two selection handles and a Copy-only toolbar — which is
+  affordance set is the two selection handles and a Copy-only toolbar, which is
   the state `clipboard_actions` derives rather than a mode anything declares.
 * **A hold is the selection gesture, and the press commits nothing.** The caret
   lands on a release that still belongs to its press; a hold selects the word
@@ -521,21 +521,21 @@ Three properties of these surfaces that the single-line family does not have:
   the disc is drawn at, so the contract hands every host a sample that is off the
   glyph row by design. A one-line surface absorbs it by pinning `offset_at`'s
   vertical coordinate; every other host owes the grab-offset translation in
-  checklist step 3. Retiring it means changing the contract — `update_drag` taking
-  the caret the handle marks, or the drag phase carrying the offset — so no host
+  checklist step 3. Retiring it means changing the contract, `update_drag` taking
+  the caret the handle marks, or the drag phase carrying the offset, so no host
   can do it.
 * **A pass-through overlay falls through; nothing else does.** `hit_test_with`
   continues to the tree only when the chosen overlay's content root declares
   `event_pass_through` and its subtree claimed nothing. An overlay content root
-  marked `hit_transparent` — stronger, and claiming nothing by construction — is
+  marked `hit_transparent`, stronger, and claiming nothing by construction, is
   deliberately **not** included: the one overlay that needs to be seen past
   regardless is the drag preview, and the hit-test already takes an explicit
   exclusion for it, so widening two flags at once would be one behaviour tested
   and one merely hoped for.
 * The two coordinate conversions carry **no transform term**, so an editor under
   a scene or zoom transform reports affordance geometry in the untransformed
-  space. The shipped single-line stack's two existing window-space paths — the OS
-  IME candidate area and the context-menu caret — already share that limitation.
+  space. The shipped single-line stack's two existing window-space paths, the OS
+  IME candidate area and the context-menu caret, already share that limitation.
 * `selection_bounds()` is one rectangle, not a list of per-line rectangles: the
   only consumer is the toolbar's placement, and the engines behind the shipped
   editors expose a union box. A surface with per-line geometry returns its union.
@@ -546,10 +546,10 @@ Three properties of these surfaces that the single-line family does not have:
 ## See also
 
 - [Porting a widget to the pointer model](porting-widgets-to-the-pointer-model.md)
-  — the general contract; this page is the text-surface specialisation of it.
-- [Soft keyboard](soft-keyboard.md) — the request nobody makes yet, and the IME
+, the general contract; this page is the text-surface specialisation of it.
+- [Soft keyboard](soft-keyboard.md), the request nobody makes yet, and the IME
   candidate area.
-- [Touch & pen](touch-and-pen.md) §7 — the press, and why a caret lands on the
+- [Touch & pen](touch-and-pen.md) §7, the press, and why a caret lands on the
   release.
-- [Density & targets](density-and-targets.md) — where a handle's 44 dp target
+- [Density & targets](density-and-targets.md), where a handle's 44 dp target
   comes from and why it is not the 24 dp floor.

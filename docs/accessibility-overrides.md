@@ -3,7 +3,7 @@
 
 # Accessibility Overrides Reference
 
-Teksilo widgets declare their own a11y info via `Widget::accessibility(&self, builder: &mut AccessNodeBuilder)`: Button emits `Role::Button` + label, Slider emits `Role::Slider` + numeric range, a Panel that is `a11y_presentational` publishes a bare `Role::GenericContainer` the adapters drop, etc. That covers ~95% of cases. The remaining 5% (when an icon-only Button needs an accessible label, when a card composite should read as one AT element, when a status region needs `aria-live`, when a custom action should appear in VoiceOver's Actions rotor) is where **builder-level accessibility overrides** come in.
+Teksilo widgets declare their own a11y info via `Widget::accessibility(&self, builder: &mut AccessNodeBuilder)`: Button emits `Role::Button` + label, Slider emits `Role::Slider` + numeric range, a Panel that is `a11y_presentational` publishes a bare `Role::GenericContainer` the adapters drop, etc. Use builder-level overrides for icon-only labels, composite reading order, live regions, and custom actions.
 
 The override layer is a one-method-per-concern surface (`.access_label`, `.access_role`, `.access_merge_subtree`, …) on `WidgetBuilder` and `WidgetWithHandlers`, analogous to SwiftUI's `.accessibility*` modifiers and Flutter's `Semantics(...)`. App authors annotate widgets from the outside without touching widget internals.
 
@@ -27,13 +27,13 @@ No shipped example exercises this surface end to end; the in-crate tests (see [T
 
 ## Where overrides live
 
-The override surface piggy-backs on the existing handler-extraction plumbing — the same path that already mirrors `cursor`, `clips_children`, `focus_within_signal` from `HandlerSet` onto `WidgetNode`.
+The override surface piggy-backs on the existing handler-extraction plumbing, the same path that already mirrors `cursor`, `clips_children`, `focus_within_signal` from `HandlerSet` onto `WidgetNode`.
 
-1. **Builder chain** — `Widget::new(...).access_label(...).access_role(...)` each return a `WidgetWithHandlers<W>` whose `HandlerSet` carries an `Option<Box<AccessibilityOverrides>>`. The first `access_*` call lazily allocates the box; subsequent calls extend it. (The subtree mode is the one exception: `access_subtree` / `access_exclude_subtree` / `access_merge_subtree` set a separate `HandlerSet::access_subtree` field, mirrored onto `WidgetNode::access_subtree`.)
-2. **Insertion** — `WidgetTree::add(...)` calls `take_handler_set()` on the wrapper and `apply_handler_set` ([crates/teksilo-core/src/arena.rs](../crates/teksilo-core/src/arena.rs)) mirrors the box onto the persistent `WidgetNode::access_overrides` field — merging it into any block the node already carries (later scalars win, lists append, two `customize` closures chain) rather than replacing it. After this point, the wrapper has no override state — the source of truth is on the node.
-3. **AT tree build** — when the framework calls `WidgetTree::sync_accessibility()`, the walker (`build_accessibility_recursive` in [crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs)) runs `node.widget.accessibility(builder)` first (so the inner widget emits its defaults), then calls `node.access_overrides.apply(builder)` to layer the overrides on top.
+1. **Builder chain**, `Widget::new(...).access_label(...).access_role(...)` each return a `WidgetWithHandlers<W>` whose `HandlerSet` carries an `Option<Box<AccessibilityOverrides>>`. The first `access_*` call lazily allocates the box; subsequent calls extend it. (The subtree mode is the one exception: `access_subtree` / `access_exclude_subtree` / `access_merge_subtree` set a separate `HandlerSet::access_subtree` field, mirrored onto `WidgetNode::access_subtree`.)
+2. **Insertion**, `WidgetTree::add(...)` calls `take_handler_set()` on the wrapper and `apply_handler_set` ([crates/teksilo-core/src/arena.rs](../crates/teksilo-core/src/arena.rs)) mirrors the box onto the persistent `WidgetNode::access_overrides` field, merging it into any block the node already carries (later scalars win, lists append, two `customize` closures chain) rather than replacing it. After this point, the wrapper has no override state, the source of truth is on the node.
+3. **AT tree build**, when the framework calls `WidgetTree::sync_accessibility()`, the walker (`build_accessibility_recursive` in [crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs)) runs `node.widget.accessibility(builder)` first (so the inner widget emits its defaults), then calls `node.access_overrides.apply(builder)` to layer the overrides on top.
 
-Subsequent `sync_accessibility()` calls re-run the walker if the AT cache is dirty — which also dirties on `ShortcutRegistry::version()` bumps so `access_shortcut_id` tracks rebinds (see [Shortcuts](#shortcuts) below), and on a locale switch so `tr!(...)` overrides re-resolve.
+Subsequent `sync_accessibility()` calls re-run the walker if the AT cache is dirty, which also dirties on `ShortcutRegistry::version()` bumps so `access_shortcut_id` tracks rebinds (see [Shortcuts](#shortcuts) below), and on a locale switch so `tr!(...)` overrides re-resolve.
 
 ---
 
@@ -41,23 +41,23 @@ Subsequent `sync_accessibility()` calls re-run the walker if the AT cache is dir
 
 Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 
-### Tier 1 — labeling and state
+### Tier 1: labeling and state
 
 | Method | Sets | Notes |
 |---|---|---|
 | `.access_label(s)` | `Node::label` | What screen readers announce. Replaces widget-emitted name. |
-| `.access_label(lit!(s))` | same | Explicitly untranslated string — `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
+| `.access_label(lit!(s))` | same | Explicitly untranslated string, `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
 | `.access_description(s)` | `Node::description` | Long-form context. |
-| `.access_description(lit!(s))` | same | Explicitly untranslated string — `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
-| `.access_hint(s)` | `Node::description` | Alias for `access_description` (SwiftUI parity — AccessKit has no separate hint slot). |
-| `.access_hint(lit!(s))` | same | Explicitly untranslated string — `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
+| `.access_description(lit!(s))` | same | Explicitly untranslated string, `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
+| `.access_hint(s)` | `Node::description` | Alias for `access_description` (SwiftUI parity, AccessKit has no separate hint slot). |
+| `.access_hint(lit!(s))` | same | Explicitly untranslated string, `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
 | `.access_value(s)` | `Node::value` | Current value (sliders, spin boxes, text input). |
-| `.access_value(lit!(s))` | same | Explicitly untranslated string — `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
+| `.access_value(lit!(s))` | same | Explicitly untranslated string, `lit!` is the grep marker (convention; see [Internationalization](#internationalization)). |
 | `.access_role(role)` | `Node::role` | Replace widget-emitted role. |
 | `.access_hidden(b)` | `Node::hidden` flag | `impl Into<Prop<bool>>`: a `bool` or a `Signal<bool>` (bound at `AccessibilityOnly`, so the node appears / disappears reactively). `true` hides the node **and its whole subtree** from AT (to drop only the node's own role and keep its content, use `access_role(Role::GenericContainer)`); `false` un-hides (clears even widget-emitted hidden on this node, but cannot reveal a node under a hidden ancestor). |
-| `.access_disabled(bool)` | `Node::disabled` flag | `true` marks disabled, `false` clears even arena-driven disabled. A plain `bool` — unlike `access_hidden`, not reactive. |
+| `.access_disabled(bool)` | `Node::disabled` flag | `true` marks disabled, `false` clears even arena-driven disabled. A plain `bool`, unlike `access_hidden`, not reactive. |
 
-### Tier 2 — relationships, live regions, identity
+### Tier 2: relationships, live regions, identity
 
 | Method | Sets | Notes |
 |---|---|---|
@@ -67,14 +67,14 @@ Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 | `.access_labelled_by(target_id)` | `Node::labelled_by` | Append. |
 | `.access_live(mode)` | `Node::live` | Politeness for status regions (`Polite`, `Assertive`). Inherited by every descendant that sets none, and the adapters announce each named one; `Off` stops it (see [Hidden is for decoration, never for a wrapper](#hidden-is-for-decoration-never-for-a-wrapper)). |
 | `.access_current(c)` | `Node::aria_current` | Mark this as the current item in its container (`aria-current`). |
-| `.access_has_popup(kind)` | `Node::has_popup` | Disclosure flag — `Menu`, `Listbox`, `Dialog`, … |
+| `.access_has_popup(kind)` | `Node::has_popup` | Disclosure flag, `Menu`, `Listbox`, `Dialog`, … |
 | `.access_orientation(o)` | `Node::orientation` | Sliders, scrollbars, separators. |
 
 #### Naming a container from its visible title
 
 A container that copies its title into its own name says the same string
 twice: once as the container's name, once as the label under it. Point at
-the label instead — `accesskit_consumer` builds the container's name by
+the label instead, `accesskit_consumer` builds the container's name by
 concatenating its `labelled_by` targets' values, so the title is announced
 once and stays a label a reader can still find, review by character, and
 route a braille cell to.
@@ -90,8 +90,8 @@ Two rules the framework enforces, and one it cannot:
 - **A container named through the relation must not also set a name.** The
   consumer prefers a node's own label, so setting both silently drops the
   relation and announces a copy that no longer tracks the title.
-- A relation target absent from the emitted tree — a dormant tab panel, a
-  pruned stack — used to panic the consumer's relation walk. The walker now
+- A relation target absent from the emitted tree, a dormant tab panel, a
+  pruned stack, used to panic the consumer's relation walk. The walker now
   strips such a target; the relation simply goes quiet.
 - **Live regions are the exception.** `Banner`, `Toast` and `MessageBox`
   keep their own `set_name` and hide their title label instead. The adapters
@@ -102,7 +102,7 @@ Two rules the framework enforces, and one it cannot:
 
 A composite whose content carries the title implements
 [`Widget::accessible_title_node`](https://docs.rs/teksilo-core/latest/teksilo_core/widget/trait.Widget.html)
-and the shell wires the relation for it — that is how `Dialog` and
+and the shell wires the relation for it, that is how `Dialog` and
 `InputDialog` are named. It supersedes `accessible_title_hint`, which
 returns a copy of the string; the hint remains for content that has no
 label node to point at.
@@ -147,7 +147,7 @@ way the walk emits. Only a live, strict descendant counts, and only while
 the walk reaches it: the composite and every widget between the two walked
 normally (`Inherit`). Otherwise the overrides stay where they were attached.
 
-### Tier 3 — subtree modes, numeric, actions, escape hatch
+### Tier 3: subtree modes, numeric, actions, escape hatch
 
 | Method | Effect |
 |---|---|
@@ -159,23 +159,23 @@ normally (`Inherit`). Otherwise the overrides stay where they were attached.
 | `.access_numeric_step(s)` | `Node::numeric_value_step`. |
 | `.access_action(action, handler)` | Advertise an AT action AND register a callback. |
 | `.access_remove_action(action)` | Suppress an action the widget emitted. |
-| `.access_custom_action(label, handler)` | SwiftUI `accessibilityAction(named:)` — appears in VoiceOver's Actions rotor. Also advertises `Action::CustomAction`, without which adapters don't expose the list. |
+| `.access_custom_action(label, handler)` | SwiftUI `accessibilityAction(named:)`, appears in VoiceOver's Actions rotor. Also advertises `Action::CustomAction`, without which adapters don't expose the list. |
 | `.access_custom_action(lit!(label), handler)` | Explicitly untranslated label (`lit!` grep marker). |
 | `.access_shortcut_literal(s)` | Pre-formatted chord string (`"Ctrl+S"`). |
 | `.access_shortcut_id(id)` | Bind to a registered `Shortcut` id; tracks user rebinds. |
-| `.access_customize(\|builder\| ...)` | Final escape hatch — runs last, full `&mut AccessNodeBuilder` access. |
+| `.access_customize(\|builder\| ...)` | Final escape hatch, runs last, full `&mut AccessNodeBuilder` access. |
 
 ---
 
 ## Subtree modes
 
-By default the AT tree mirrors the widget tree one-to-one — every widget emits one AT node, descendants are visible to AT. `access_subtree` controls how the walker handles descendants of the annotated node.
+By default the AT tree mirrors the widget tree one-to-one, every widget emits one AT node, descendants are visible to AT. `access_subtree` controls how the walker handles descendants of the annotated node.
 
 ### `Inherit` (default)
 
 Normal walk. Descendants emit their own nodes. Used implicitly everywhere.
 
-### `Exclude` — `access_exclude_subtree()`
+### `Exclude`: `access_exclude_subtree()`
 
 Keep the parent in the AT tree, prune all descendants. Equivalent to Flutter's `excludeSemantics: true`.
 
@@ -192,7 +192,7 @@ Without `access_exclude_subtree`, a screen reader would walk all three children 
 
 Use for purely decorative composites: animated logos, icon clusters, splash content.
 
-### `Merge` — `access_merge_subtree()`
+### `Merge`: `access_merge_subtree()`
 
 Keep the parent, but **lift descendants' a11y info into the parent** before pruning. The whole composite reads as one AT element. Equivalent to Flutter's `mergeAllDescendants: true` and SwiftUI's `.accessibilityElement(children: .combine)`.
 
@@ -207,41 +207,41 @@ Card::new()
     .access_merge_subtree();
 ```
 
-VoiceOver announces the card as one element: "New message From Alice Hey, are we still on for…" (names are joined with a single space). Screen-reader navigation stops collapse, so an AT user moves card-by-card instead of line-by-line within the card. Keyboard Tab order is not affected — merge prunes the AT tree only, so a focusable descendant is still a Tab stop, and the AT focus resolves to the merged parent while it holds focus.
+VoiceOver announces the card as one element: "New message From Alice Hey, are we still on for…" (names are joined with a single space). Screen-reader navigation stops collapse, so an AT user moves card-by-card instead of line-by-line within the card. Keyboard Tab order is not affected, merge prunes the AT tree only, so a focusable descendant is still a Tab stop, and the AT focus resolves to the merged parent while it holds focus.
 
 **Merge accumulator rules:**
 
 | Source | Merged into parent | Rule |
 |---|---|---|
 | descendant `name` | parent `name` | Append with single space; existing parent name kept first if any. |
-| descendant `value` | parent `value` | First non-empty wins — and only if the parent has no value of its own. |
+| descendant `value` | parent `value` | First non-empty wins, and only if the parent has no value of its own. |
 | descendant supported actions | parent action set | Union, deduplicated. |
-| descendant `role` | — | Discarded. Parent's role wins. |
-| descendant `numeric_value` / range / step | — | Discarded. |
-| descendant `hidden` / `disabled` | — | Discarded — except that a hidden descendant (`access_hidden(true)` or widget-emitted `set_hidden()`) contributes nothing at all to the merge. Parent's state governs the merged element. |
-| descendant `description` / `controls` / `described_by` / `labelled_by` | — | Currently dropped (no `AccessNodeBuilder` getters); use `access_customize` on the parent if you need them. |
+| descendant `role` |, | Discarded. Parent's role wins. |
+| descendant `numeric_value` / range / step |, | Discarded. |
+| descendant `hidden` / `disabled` |, | Discarded, except that a hidden descendant (`access_hidden(true)` or widget-emitted `set_hidden()`) contributes nothing at all to the merge. Parent's state governs the merged element. |
+| descendant `description` / `controls` / `described_by` / `labelled_by` |, | Currently dropped (no `AccessNodeBuilder` getters); use `access_customize` on the parent if you need them. |
 
 A hidden descendant keeps its whole subtree out of the merge, not only its own name: the adapters treat everything under a hidden node as hidden, so text merged from there would be read aloud on the merged node after the widget hid it.
 
 **Nested subtree modes:**
 
-- `Merge` containing `Exclude` somewhere — Exclude wins for that subtree (descendants of the excluded node contribute nothing to the merge).
-- `Merge` containing `Merge` — the inner merge runs first into a temp builder, the outer merge then absorbs the inner's already-merged label as one element.
-- `Exclude` containing anything — outer Exclude prunes everything; inner modes never run.
+- `Merge` containing `Exclude` somewhere, Exclude wins for that subtree (descendants of the excluded node contribute nothing to the merge).
+- `Merge` containing `Merge`, the inner merge runs first into a temp builder, the outer merge then absorbs the inner's already-merged label as one element.
+- `Exclude` containing anything, outer Exclude prunes everything; inner modes never run.
 
 **What merge can't reach.** Widgets that don't expose their internals to the arena (e.g. a hand-rolled `paint()`-only widget that draws its own icon + label without inserting child `WidgetNode`s) have no descendants for the merge walker to find. Those widgets' authors should set `accessibility()` correctly internally; consumers can still use `.access_label(...)` to override the parent. This is an inherent property of the arena-based tree, not a deferred feature.
 
 ### Automatic presentational collapse (no opt-in)
 
-Layout primitives (`HStack`, `VStack`, `ZStack`, `Center`, `Grid`, `Wrap`, `Padding`, `Expand`, `FixedSize`, …) emit empty `Role::GenericContainer` / `Role::Unknown` AT nodes purely to carry visual structure. VoiceOver announces a bare `GenericContainer` as **"group"**, so a composing control whose chrome is built from these primitives (a `Button`, a `Checkbox`, …) would otherwise read as "*Save, button, group*". To prevent that, the walker runs a final pass that **collapses semantically-empty container nodes and promotes their children to the parent** — the same "ignored / presentational node" pruning browsers do. Chains of nested empty containers collapse in one pass, so a `Button → Padding → Center → HStack → (hidden label)` subtree becomes a single childless `Role::Button` leaf.
+Layout primitives (`HStack`, `VStack`, `ZStack`, `Center`, `Grid`, `Wrap`, `Padding`, `Expand`, `FixedSize`, …) emit empty `Role::GenericContainer` / `Role::Unknown` AT nodes purely to carry visual structure. VoiceOver announces a bare `GenericContainer` as **"group"**, so a composing control whose chrome is built from these primitives (a `Button`, a `Checkbox`, …) would otherwise read as "*Save, button, group*". To prevent that, the walker runs a final pass that **collapses semantically-empty container nodes and promotes their children to the parent**, the same "ignored / presentational node" pruning browsers do. Chains of nested empty containers collapse in one pass, so a `Button → Padding → Center → HStack → (hidden label)` subtree becomes a single childless `Role::Button` leaf.
 
-This is automatic and requires no annotation. A node is collapsed only when, after the framework's structural additions (children, bounds, arena-driven `disabled`) are set aside, it is a bare node of its role — i.e. role is `GenericContainer` or `Unknown` **and** it carries no name, value, description, live region, popup, relationship, identifier, action, or any other author/widget property. The moment a container gains semantic content it is kept:
+This is automatic and requires no annotation. A node is collapsed only when, after the framework's structural additions (children, bounds, arena-driven `disabled`) are set aside, it is a bare node of its role, i.e. role is `GenericContainer` or `Unknown` **and** it carries no name, value, description, live region, popup, relationship, identifier, action, or any other author/widget property. The moment a container gains semantic content it is kept:
 
 - An `HStack` with `.access_label(lit!("Toolbar"))` → `Role::GenericContainer` **with a name** → kept in the update. The platform adapters still drop a `GenericContainer` from the tree they expose, name or no name (`accesskit_consumer`'s `common_filter` answers the role with `ExcludeNode`), so the name is not heard; add `access_role(Role::Group)` for a named group.
 - A `Panel` (`Role::Group`) or `GroupBox` → non-presentational role → kept.
 - The Window root, the currently-focused node, and any node referenced by another node's `controls` / `described_by` / `labelled_by` → always kept.
 
-So you rarely need `Exclude` just to silence layout scaffolding — that happens for free. Reach for `Exclude` / `Merge` only when you want to prune or combine descendants that *do* carry semantics (decorative icon clusters with labels, multi-line cards, …).
+So you rarely need `Exclude` just to silence layout scaffolding, that happens for free. Reach for `Exclude` / `Merge` only when you want to prune or combine descendants that *do* carry semantics (decorative icon clusters with labels, multi-line cards, …).
 
 ---
 
@@ -249,7 +249,7 @@ So you rarely need `Exclude` just to silence layout scaffolding — that happens
 
 AT-invoked actions arrive as `WidgetEvent::AccessAction { action, target, target_node, data }` on the widget's `on_access_action` handler. The override system layers an additional callback path on top of any user-installed handler.
 
-### Standard actions — `access_action`
+### Standard actions: `access_action`
 
 ```rust
 use teksilo::core::accesskit::Action;
@@ -265,9 +265,9 @@ let widget = my_widget
 
 Both calls advertise the action on the AT node AND register the callback. Multiple `access_action` calls register separate callbacks for distinct actions; the dispatcher routes each invoked action to the matching callback.
 
-**Layering with `on_access_action`.** If the developer also calls `.on_access_action(|action, ctx| …)` (or `.on_access_action_request(…)`) directly, both fire for the same dispatched event — the user-installed handlers first, then the override-registered callback; the event counts as handled if either handles it. Builder ordering doesn't matter; the dispatcher (`pointer_router.rs`) reads `node.access_overrides.actions` directly.
+**Layering with `on_access_action`.** If the developer also calls `.on_access_action(|action, ctx| …)` (or `.on_access_action_request(…)`) directly, both fire for the same dispatched event, the user-installed handlers first, then the override-registered callback; the event counts as handled if either handles it. Builder ordering doesn't matter; the dispatcher (`pointer_router.rs`) reads `node.access_overrides.actions` directly.
 
-### Action suppression — `access_remove_action`
+### Action suppression: `access_remove_action`
 
 A widget like Button emits `Action::Click` and `Action::Focus` unconditionally (and the walker adds `Focus` to any focusable node and `ShowContextMenu` to any node with a context menu, before overrides apply). To neutralize one (e.g. a Button used purely as a layout shim that shouldn't appear clickable to AT):
 
@@ -275,9 +275,9 @@ A widget like Button emits `Action::Click` and `Action::Focus` unconditionally (
 my_button.access_remove_action(Action::Click);
 ```
 
-Applied after the widget's `accessibility()` runs but before override-advertised actions are added — so a subsequent `.access_action(Action::Click, …)` call re-advertises Click with the override's callback.
+Applied after the widget's `accessibility()` runs but before override-advertised actions are added, so a subsequent `.access_action(Action::Click, …)` call re-advertises Click with the override's callback.
 
-### Custom-named actions — `access_custom_action`
+### Custom-named actions: `access_custom_action`
 
 SwiftUI's `accessibilityAction(named:)` parity. The label is exposed verbatim by AT software (e.g. VoiceOver's Actions rotor reads "Reply to message").
 
@@ -297,11 +297,11 @@ Each entry is assigned a stable `i32` id in declaration order. AT triggers a cus
 
 ## Shortcuts
 
-Two variants for announcing a chord on the AT node — pick by where the binding lives.
+Two variants for announcing a chord on the AT node, pick by where the binding lives.
 
-### `.access_shortcut_id("app.save")` — the production path
+### `.access_shortcut_id("app.save")`: the production path
 
-Bind to a `Shortcut` registered in [`ShortcutRegistry`](../crates/teksilo-core/src/shortcut.rs). The walker resolves the current effective primary keystroke at AT-build time and writes it via `KeyStroke::Display` (`"Ctrl+S"`; `"Cmd+S"` on macOS, where a declared `Ctrl` resolves to ⌘). On a user rebind via `ShortcutSettings`, the registry's `version()` signal bumps and `sync_accessibility` dirties the AT cache automatically — the announcement updates without any explicit signaling from the settings UI.
+Bind to a `Shortcut` registered in [`ShortcutRegistry`](../crates/teksilo-core/src/shortcut.rs). The walker resolves the current effective primary keystroke at AT-build time and writes it via `KeyStroke::Display` (`"Ctrl+S"`; `"Cmd+S"` on macOS, where a declared `Ctrl` resolves to ⌘). On a user rebind via `ShortcutSettings`, the registry's `version()` signal bumps and `sync_accessibility` dirties the AT cache automatically, the announcement updates without any explicit signaling from the settings UI.
 
 ```rust
 // Somewhere in your root widget's build(), register the Shortcut.
@@ -318,9 +318,9 @@ Button::new(tr!(save()))
     .access_shortcut_id("app.save");
 ```
 
-If the registry has no entry for `id` yet (registration hasn't happened, or the app spelled the id wrong), the announcement is silently omitted — same fallback as `MenuItem::for_shortcut(...)` and `TooltipContent::for_shortcut(...)`.
+If the registry has no entry for `id` yet (registration hasn't happened, or the app spelled the id wrong), the announcement is silently omitted, same fallback as `MenuItem::for_shortcut(...)` and `TooltipContent::for_shortcut(...)`.
 
-### `.access_shortcut_literal("Ctrl+S")` — the explicit-string path
+### `.access_shortcut_literal("Ctrl+S")`: the explicit-string path
 
 Frozen pre-formatted string. Use for chords NOT going through the `Shortcut` system: platform-native keys (Tab, Esc), app-internal hotkeys not exposed to user rebinding, or stand-alone demos.
 
@@ -328,7 +328,7 @@ Frozen pre-formatted string. Use for chords NOT going through the `Shortcut` sys
 my_button.access_shortcut_literal("Ctrl+Shift+P");
 ```
 
-Does NOT track rebinds — that's the literal variant's tradeoff. For chords routed through `Shortcut`, prefer `access_shortcut_id` or the announcement and the actual binding will drift.
+Does NOT track rebinds, that's the literal variant's tradeoff. For chords routed through `Shortcut`, prefer `access_shortcut_id` or the announcement and the actual binding will drift.
 
 See [shortcut-intent-action.md](shortcut-intent-action.md) for the full Shortcut/Intent/Action pipeline.
 
@@ -345,7 +345,7 @@ button
     .access_custom_action(tr!(publish_now()), |ctx| ctx.send_intent(AppIntent::Publish));
 ```
 
-flows through unchanged. The user-visible string overrides (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) take `impl Into<Prop<String>>` and store a `Prop<String>`, so `tr!(...)` stays **locale-reactive**: the accessibility tree re-walks on a locale change and re-resolves the announced value — no composite rebuild required. (`AccessibilityOverrides` lives in `teksilo-core`, which can't name `LocalizedString`; the bridge is `From<LocalizedString> for Prop<String>`.)
+flows through unchanged. The user-visible string overrides (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) take `impl Into<Prop<String>>` and store a `Prop<String>`, so `tr!(...)` stays **locale-reactive**: the accessibility tree re-walks on a locale change and re-resolves the announced value, no composite rebuild required. (`AccessibilityOverrides` lives in `teksilo-core`, which can't name `LocalizedString`; the bridge is `From<LocalizedString> for Prop<String>`.)
 
 For explicitly-untranslated AT strings, wrap with `lit!(...)`: `access_label(lit!("Debug"))`. A bare `&str` still compiles, because [`impl From<&str> for Prop<String>`](../crates/teksilo-core/src/signal.rs) exists so that call sites written against the older `impl Into<String>` setters kept working when the setters widened. `lit!` is therefore a convention, not a compiler-enforced requirement. Use it anyway: it is what makes an untranslated AT string greppable in a one-pass audit, and it records the omission as a decision rather than an oversight. The `#[doc(hidden)]` `_literal` twins (`access_label_literal`, etc.) remain only as the literal path reachable from inside `teksilo-core` itself (where `lit!` isn't available); application code uses `lit!`.
 
@@ -374,15 +374,15 @@ Under a live region the wrapper has one more thing to say. A node's politeness i
 
 ---
 
-## Synthetic children — `access_customize`
+## Synthetic children: `access_customize`
 
-Widgets like `RichTextEditor` emit synthetic AT children (paragraphs, text-runs) via `push_paragraph_child` / `push_text_run_child` — these live inside the parent's emitted Node, not as separate `WidgetNode`s in the arena. The override system can't reach them through `.access_*` modifiers (which target whole widgets, not sub-nodes).
+Widgets like `RichTextEditor` emit synthetic AT children (paragraphs, text-runs) via `push_paragraph_child` / `push_text_run_child`, these live inside the parent's emitted Node, not as separate `WidgetNode`s in the arena. The override system can't reach them through `.access_*` modifiers (which target whole widgets, not sub-nodes).
 
 The supported path is `access_customize`, which runs **last** in the apply pipeline with full `&mut AccessNodeBuilder` access:
 
 ```rust
 my_widget.access_customize(|builder| {
-    // builder.inner_mut() exposes the underlying accesskit::Node — any
+    // builder.inner_mut() exposes the underlying accesskit::Node, any
     // AccessKit field the typed surface doesn't cover is reachable.
     builder.inner_mut().set_class_name("custom-widget");
     builder.inner_mut().set_role_description("special panel");
@@ -393,11 +393,11 @@ Same escape-hatch model AccessKit itself uses internally. The closure runs every
 
 ---
 
-## Apply order — the full pipeline
+## Apply order: the full pipeline
 
 For each widget the AT walker visits, the sequence is:
 
-1. **`node.widget.accessibility(&mut builder)`** — inner widget emits role, name, value, actions, hidden/disabled, etc. The walker then adds `ShowContextMenu` (node has a context-menu factory) and `Focus` (node is focusable) if not already present.
+1. **`node.widget.accessibility(&mut builder)`**, inner widget emits role, name, value, actions, hidden/disabled, etc. The walker then adds `ShowContextMenu` (node has a context-menu factory) and `Focus` (node is focusable) if not already present.
 2. **`overrides.apply(&mut builder)`** in this order:
     1. Scalars: `label`, `description`, `value`, `role` (replace if `Some`).
     2. State flags: `hidden`/`disabled` set or clear based on `Some(true)`/`Some(false)`.
@@ -546,17 +546,17 @@ Navigate to the control you annotated and confirm the announced name, the keyboa
 
 ## Styling never touches accessibility
 
-The Tier-3 styling system (see [styling-system.md](styling-system.md)) lets an app swap a widget's entire chrome — `Button::style(MyGlassButton)`, `theme.style_slots.toggle = Some(...)`, an image-backed theme — but **style trait impls do not participate in the accessibility tree**. A `*Style::make_body` return is decoration only; the widget owns its `accessibility(builder)` output and all `.access_*` overrides regardless of which style is installed. A glassmorphism button and the default `RecipeButtonStyle` button announce identically. This keeps AT identity stable across theme swaps and reskins — switching themes at runtime never disturbs a screen-reader's cursor or the AccessKit node ids.
+The Tier-3 styling system (see [styling-system.md](styling-system.md)) lets an app swap a widget's entire chrome, `Button::style(MyGlassButton)`, `theme.style_slots.toggle = Some(...)`, an image-backed theme, but **style trait impls do not participate in the accessibility tree**. A `*Style::make_body` return is decoration only; the widget owns its `accessibility(builder)` output and all `.access_*` overrides regardless of which style is installed. A glassmorphism button and the default `RecipeButtonStyle` button announce identically. This keeps AT identity stable across theme swaps and reskins, switching themes at runtime never disturbs a screen-reader's cursor or the AccessKit node ids.
 
 ## Related references
 
-- [styling-system.md](styling-system.md) — the four-tier styling ladder; style traits decorate, they do not annotate.
-- [shortcut-intent-action.md](shortcut-intent-action.md) — the `Shortcut` / `Intent` / `Action` pipeline that `.access_shortcut_id` binds to.
-- [events-and-gestures.md](events-and-gestures.md) — `on_access_action` and `on_access_action_request` event handlers (what `.access_action` layers on top of).
-- [reactive-theme.md](reactive-theme.md) — how locale and theme changes propagate without a composite rebuild (on the AT side, a locale switch dirties the cache and the re-walk keeps `.access_label(tr!(...))` translations current).
-- [teksu-macro-reference.md](teksu-macro-reference.md) — `teksu!` DSL syntax for `name: value` body items (how `access_*` overrides are written inside `teksu!`).
-- [crates/teksilo-core/src/widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs) — `AccessibilityOverrides` struct, `AccessSubtreeMode` enum, every `access_*` method definition.
-- [crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs) — walker integration, the tree-wide passes, `merge_descendants_into` helper.
-- [crates/teksilo-core/src/widget_tree/accessibility_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_impl.rs) — `sync_accessibility`, the test accessors, and the unit tests.
+- [styling-system.md](styling-system.md), the four-tier styling ladder; style traits decorate, they do not annotate.
+- [shortcut-intent-action.md](shortcut-intent-action.md), the `Shortcut` / `Intent` / `Action` pipeline that `.access_shortcut_id` binds to.
+- [events-and-gestures.md](events-and-gestures.md), `on_access_action` and `on_access_action_request` event handlers (what `.access_action` layers on top of).
+- [reactive-theme.md](reactive-theme.md), how locale and theme changes propagate without a composite rebuild (on the AT side, a locale switch dirties the cache and the re-walk keeps `.access_label(tr!(...))` translations current).
+- [teksu-macro-reference.md](teksu-macro-reference.md), `teksu!` DSL syntax for `name: value` body items (how `access_*` overrides are written inside `teksu!`).
+- [crates/teksilo-core/src/widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs), `AccessibilityOverrides` struct, `AccessSubtreeMode` enum, every `access_*` method definition.
+- [crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_emit_impl.rs), walker integration, the tree-wide passes, `merge_descendants_into` helper.
+- [crates/teksilo-core/src/widget_tree/accessibility_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_impl.rs), `sync_accessibility`, the test accessors, and the unit tests.
 - [crates/teksilo-core/src/widget_tree/accessibility_description_impl.rs](../crates/teksilo-core/src/widget_tree/accessibility_description_impl.rs): the description written from `described_by`, and the platform sources its rules rest on.
-- [automation-mcp.md](automation-mcp.md) — the in-process AT tree + AT-action channel exposed as a Model Context Protocol server, so an agent can observe and drive the same accessibility surface these overrides shape.
+- [automation-mcp.md](automation-mcp.md), the in-process AT tree + AT-action channel exposed as a Model Context Protocol server, so an agent can observe and drive the same accessibility surface these overrides shape.

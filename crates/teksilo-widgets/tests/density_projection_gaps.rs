@@ -10,7 +10,7 @@
 //! nothing on screen, and the density ladder never reaches that dimension. Four
 //! such fields were shipped configured by a preset before anyone noticed.
 //!
-//! [`docs/density-projection-gaps.md`] is the audit artifact — every unread
+//! [`engineering/docs/density-projection-gaps.md`] is the audit artifact — every unread
 //! field, its raw-const use site, what it would become at Comfortable and
 //! Touch, and a verdict. This re-derives the set from the source and holds the
 //! document to it, so that:
@@ -23,7 +23,7 @@
 //!   file. That is the whole point of the page, and it must not cost the person
 //!   who does it a test edit.
 //!
-//! [`docs/density-projection-gaps.md`]: https://github.com/ferntech-eu/teksilo/blob/main/docs/density-projection-gaps.md
+//! [`engineering/docs/density-projection-gaps.md`]: https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/density-projection-gaps.md
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -278,7 +278,7 @@ fn derive() -> (Vec<Projected>, Vec<Projected>) {
 
 /// Every `` `Recipe` | `field` `` pair named in the audit page's tables.
 fn documented() -> BTreeSet<String> {
-    let path = repo_root().join("docs/density-projection-gaps.md");
+    let path = repo_root().join("engineering/docs/density-projection-gaps.md");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{} is missing or unreadable: {e}", path.display()));
     let mut out = BTreeSet::new();
@@ -389,7 +389,7 @@ fn every_unread_projected_field_is_documented() {
     assert!(
         missing.is_empty(),
         "these density-projected recipe fields have no reader and are not in \
-         docs/density-projection-gaps.md:\n{}\n\nEither route the widget \
+         engineering/docs/density-projection-gaps.md:\n{}\n\nEither route the widget \
          through the field — see the four worked examples on that page — or \
          add a row for it with its raw-const use site, its ladder and a \
          verdict. A projected field nothing reads is a number a preset writes \
@@ -431,7 +431,7 @@ fn every_documented_row_still_names_a_projected_field() {
     }
     assert!(
         stale.is_empty(),
-        "docs/density-projection-gaps.md names fields that are no longer \
+        "engineering/docs/density-projection-gaps.md names fields that are no longer \
          density-projected recipe fields at all:\n{}\n\nThey were renamed, \
          moved or deleted; update the page.",
         stale
@@ -454,7 +454,7 @@ fn every_documented_row_still_names_a_projected_field() {
 #[test]
 fn the_documented_projected_total_matches_the_derivation() {
     let (all, _) = derive();
-    let path = repo_root().join("docs/density-projection-gaps.md");
+    let path = repo_root().join("engineering/docs/density-projection-gaps.md");
     let text = std::fs::read_to_string(&path).expect("readable");
 
     const LABEL: &str = "projected fields in scope";
