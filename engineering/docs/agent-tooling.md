@@ -27,7 +27,7 @@ matched to the Teksilo version *that app* resolved.
 
 ```bash
 cargo install cargo-teksilo
-cargo teksilo setup        # in the app: harness + a brief for every agent it finds
+cargo teksilo init        # in the app: harness + a brief for every agent it finds
 ```
 
 First released at **0.13.0** — it tracks Teksilo's version, so an app on teksilo
@@ -43,10 +43,12 @@ Last checked against the source at teksilo 0.13.1.
 cargo teksilo symbol <Name>...   # exact public API of a type
 cargo teksilo search "<query>"   # the guides and worked examples
 cargo teksilo show <path>        # one of them in full, offline
-cargo teksilo probe [--force]    # write the automation harness into the project
-cargo teksilo setup [-y] [--user] # probe + brief every agent configured here
-cargo teksilo status             # what is installed — both scopes, and the model
-cargo teksilo version            # this tool, and the app's resolved Teksilo
+cargo teksilo probe install [--force]    # write the automation harness into the project
+cargo teksilo init [-y]          # harness + detected agent instructions
+cargo teksilo status             # project tooling and resolved Teksilo
+cargo teksilo --version          # tool version
+cargo teksilo agent list --user  # user instructions
+cargo teksilo model fetch        # explicit model download
 ```
 
 `cargo teksilo build-vectors` also exists and is **maintainer-only** — see §6.
@@ -93,16 +95,9 @@ Hybrid by default: BM25 fused with vector similarity by reciprocal-rank fusion.
 The header line always says which mode ran, so lexical results are never
 presented as semantic.
 
-A hit cites a path — `docs/scroll-area.md` — and that path does not exist in the
-consumer's project, which is the whole reason the corpus ships. Left bare it
-invites the two wrong moves: opening it locally, where it is absent, or fetching
-it from `blob/main/` or the published book, both of which track `main` rather
-than the version the app pinned. So a non-empty result ends with one footer line
-naming the door that is offline *and* version-matched:
-
-```
-Read any of these in full: cargo teksilo show <path>   (offline, teksilo 0.13.1 — not GitHub, which tracks main)
-```
+Read a hit's corpus path with `cargo teksilo show <path>`. The document need
+not exist in the consumer project. `--verbose` includes this reminder; normal
+output contains only the mode and hits. `--json` returns structured results.
 
 ### `show`
 
@@ -142,184 +137,51 @@ basename or a trailing fragment that names exactly one document is accepted
 candidates, a directory lists what is under it, and a typo gets its near
 spellings plus the two commands that always work.
 
-### `probe`
+### `probe install`
 
 Writes the automation harness into `scripts/teksilo_probe/`, so an agent can
 drive the running app and assert on it. See §4.
 
-### `setup`
+### `init` and agent installation
 
-The harness, plus the teksilo briefing for **every coding agent this project
-already configures** — each in that agent's own format — plus a one-off fetch of
-the search encoder so the first `search` does not stall on a 129 MB download.
+`init` installs the probe harness and instructions for detected agents. It prints
+a compact plan and asks for confirmation; use `-y` in scripts. Explicit targets
+bypass detection and create their directories:
 
-```bash
-cargo teksilo setup              # plan, confirm, install
-cargo teksilo setup -y           # skip the confirmation (required in CI)
-cargo teksilo setup --no-model   # …and leave the encoder to download lazily
-cargo teksilo setup --user       # install into $HOME instead of this project
+```sh
+cargo teksilo init --agent codex --agent claude -y
+cargo teksilo agent install cursor cline
+cargo teksilo agent install claude --user
+cargo teksilo agent list
+cargo teksilo agent list --user --json
 ```
 
-**Per agent, in that agent's format.** These tools share no format, so copying
-one directory into all of them accomplishes nothing:
-
-| Agent | Detected by | Written |
-| --- | --- | --- |
-| Claude Code | `.claude/` | `.claude/skills/teksilo/` — the full four-file skill |
-| Cursor | `.cursor/` | `.cursor/rules/teksilo.mdc` — MDC frontmatter (`description` / `globs` / `alwaysApply`) + brief |
-| Windsurf | `.windsurf/` | `.windsurf/rules/teksilo.md` — `trigger: glob` frontmatter + brief |
-| Cline | `.clinerules/`, `.clinerules` or `.cline/` | whichever the project has — see below |
-| GitHub Copilot | `.github/` | `.github/copilot-instructions.md` — a delimited section |
-| Codex and the rest | `AGENTS.md` | `AGENTS.md` — a delimited section |
-
-**Cline is the one vendor whose path is read off the disk rather than fixed.**
-It has three project layouts, tried in this order:
-
-| On disk | Written |
+| Agent ID | Project destination |
 | --- | --- |
-| `.clinerules/` | `.clinerules/teksilo.md` |
-| `.clinerules` (a file) | a delimited section inside it |
-| `.cline/` | `.cline/rules/teksilo.md` |
+| `claude` | `.claude/skills/teksilo/` (full skill) |
+| `cursor` | `.cursor/rules/teksilo.mdc` |
+| `windsurf` | `.windsurf/rules/teksilo.md` |
+| `cline` | Existing Cline layout, or `.clinerules/teksilo.md` |
+| `copilot` | `.github/copilot-instructions.md` |
+| `codex`, `vibe`, `opencode` | A managed region in `AGENTS.md` |
 
-**That order is deliberately not newest-first**, which is the one thing worth
-knowing here. In Cline's own source `.cline` is `CLINE_CONFIG_DIR` and
-`.clinerules` is bound to a constant named `DEPRECATED_CONFIG_DIR` — so the
-newer path looks like the obvious choice. It is not: the VS Code extension was
-hardcoded to `.clinerules` and ignored `.cline/rules/` outright
-([cline/cline#14186](https://github.com/cline/cline/issues/14186)), the
-cross-surface fix reached `main` only in September 2026 and is in no released
-build, and Cline's own documentation still says its Rules panel *creates* new
-workspace rules in `.clinerules/`.
+`agent install` writes only instructions, without a confirmation prompt. User
+scope supports `claude`, `vibe`, and `opencode`; it does not install a harness.
+Vibe respects `$VIBE_HOME`, and opencode respects `$XDG_CONFIG_HOME`.
+Shared files preserve text outside the managed region. Differing whole files
+and skills require `--force` to replace; probe installation also protects edits.
 
-Preferring the modern path would therefore install, in the most widely used
-Cline surface, a file that nothing reads — which this tool holds to be worse
-than installing nothing, because it reports success. Reachability beats
-recency. A project where `.cline/` is the *only* layout has clearly chosen it
-and is honoured rather than handed a top-level directory it never asked for;
-that is the case to revisit once the extension fix ships.
+### Output and model download
 
-The legacy form may be a plain *file*, which has nowhere to put a file of our
-own — so it gets a marker region, exactly as `AGENTS.md` does, and for the same
-reason: the file is the project's. Cline reads such a file in place.
+`status` shows a compact project summary. `status --json` and `search --json`
+produce structured output. `--verbose` shows paths and diagnostics; `--quiet`
+suppresses informational messages, never result payloads or errors.
 
-No frontmatter, deliberately. Cline's rules are plain markdown and its docs
-state that a rule *without* frontmatter is always active; adding one would make
-the brief conditional for no gain. Cline also reads a project's `AGENTS.md`, so
-a project with one is already served before any of these exist.
-
-The **brief** is a self-contained ~60 lines: what Teksilo is, the five commands,
-that every answer is pinned to the version this app resolved, and the rule that
-matters most — *read a search hit with `cargo teksilo show <path>`, never from
-GitHub, because `blob/main` tracks `main` and not what this app pinned*. It
-never refers to the skill, which on most of those machines is not installed.
-
-Four properties worth relying on:
-
-- **Detection is marker-already-exists.** `.cursor/` is never created on the
-  chance you might use Cursor. Instructions written where nothing reads them are
-  indistinguishable from none, except that they report success. Whatever was
-  *not* found is listed at the end, with the marker that would have found it.
-- **The shared files are edited through a region.** `AGENTS.md` and
-  `copilot-instructions.md` belong to the project; `setup` owns only what lies
-  between `<!-- BEGIN teksilo -->` and `<!-- END teksilo -->`. A second run is a
-  byte-for-byte no-op, and your own text above or below is never touched.
-- **Nothing is written before you see the plan.** Every path, every vendor, and
-  the download with its size, then a confirmation. `-y` skips the question; with
-  **no terminal on stdin the prompt is an error naming the flag that would have
-  skipped it**, never a blocking read — CI and agents run this, and a hang is
-  worse than a failure.
-- **`--user` is the only mode that writes `$HOME`.** Project scope never falls
-  back to it. Three agents keep a user-level file this can write:
-
-  | Agent | Detected by | Written |
-  | --- | --- | --- |
-  | Claude Code | `~/.claude/` | `~/.claude/skills/teksilo/` — the full skill |
-  | Mistral Vibe | `~/.vibe/` (or `$VIBE_HOME`) | `AGENTS.md` — a delimited section |
-  | opencode | `~/.config/opencode/` (or `$XDG_CONFIG_HOME`) | `AGENTS.md` — a delimited section |
-
-  Both env vars are honoured, because Vibe relocates its whole state directory
-  through `VIBE_HOME` and opencode follows the XDG base directories — writing
-  `~/.vibe/AGENTS.md` for someone who moved theirs is a file nothing reads.
-  Each is gated on **the directory already existing**: this does not create a
-  config directory in your home for a tool you may never have run, and it says
-  which path it checked rather than only that it found nothing. The rest have
-  nowhere to go, which is a finding rather than an omission: Cursor's user
-  rules are edited in its settings UI, Copilot's personal instructions live in
-  your github.com account, Windsurf's global rules are one file at
-  `~/.codeium/windsurf/memories/global_rules.md`, and a repository-root
-  `AGENTS.md` is per-repository by definition. `setup --user` prints that list
-  rather than silently installing three of seven.
-
-If the encoder fetch fails — offline, proxy, unsupported target — that is a
-**warning** and setup still succeeds: `search` degrades to BM25 by design (§5).
-Under `--no-default-features` there is no encoder to fetch and it says so.
-
-### `status`
-
-What is installed, in **both** scopes, plus the search model. Reads only, and
-its exit code never depends on what it finds.
-
-```console
-$ cargo teksilo status
-cargo-teksilo 0.13.1
-app resolved teksilo 0.13.1
-
-Project  /Users/me/myapp
-  Claude Code        here      .claude/skills/teksilo/
-  Cursor             not here  no .cursor/
-  GitHub Copilot     not here  .github/ is here, brief is not
-  Codex / AGENTS.md  here      AGENTS.md — from another release, re-run setup
-
-User  /Users/me
-  Claude Code        here      .claude/skills/teksilo/
-  Mistral Vibe       not here  no .vibe/
-  Cursor             n/a       user rules are edited in Customize → Rules, not stored as a file
-
-Search encoder  BAAI/bge-small-en-v1.5 (384 dimensions)
-  model              here      /Users/me/Library/Caches/teksilo/fastembed (127.6 MB on disk)
-
-Symbol extractor  Python 3
-  interpreter        here      /usr/bin/python3
-
-These are files on disk. An agent picks them up on its own terms —
-some ask you to trust the folder first, and a gitignored instruction
-file is skipped silently.
-```
-
-Three things it is built to get right:
-
-- **It is the dry run of `setup`, not a second opinion.** Every agent row comes
-  from `setup::inspect`, the read-only twin of the function that decides whether
-  a write is needed; they share their content computation, and a test pins the
-  equivalence *`inspect` says current ⟺ `setup` would report `unchanged`* for
-  every form. A status that computed "installed" its own way would eventually
-  disagree with the command it claims to predict.
-- **The state is one column and the reason is another.** Three words cannot
-  carry the difference between *Cursor is not used in this project* and *Cursor
-  is used here and has no brief* — and that difference is the whole of what to
-  do next. So `not here` is followed by either `no .cursor/` or `.cursor/ is
-  here, brief is not`. For the same reason an install from an older release
-  still reads **`here`**: it is being read right now. It just is not what this
-  build writes, and the detail column says so.
-- **`n/a` always says why.** A bare `n/a` beside Windsurf would read as
-  "Windsurf has nothing", which is false — it keeps a global file this tool
-  declines to write, and the row says that. The reasons come from the same
-  table `setup --user` prints its closing note from, so the two can never come
-  to list different agents.
-
-"Reads only" is enforced, not asserted: it asks cargo for the resolved version
-with `--locked`, because plain `cargo metadata` *resolves*, and resolving
-writes — it creates a missing `Cargo.lock` and rewrites a stale one. A project
-without an up-to-date lockfile gets an honest `unknown` instead.
-
-It is its own command rather than `setup --status` because it reports on both
-scopes at once while `setup` is scope-*selected* (`--user` xor the project) —
-a flag that changed which scopes the command considers would be a second
-command wearing the first one's name. Keeping the read-only thing out of a
-writing command's flag space also means there is no `--status -y` to reason
-about, and no way for a mistyped status invocation to edit `$HOME`.
-
----
+The model is downloaded only by `cargo teksilo model fetch`. Until it is
+cached, search uses BM25. Neither initialization nor search starts a download.
+`cargo teksilo --version` prints the tool version; `status` reports the app's
+resolved version. The old `setup`, bare `probe`, and `version` commands and
+`--no-model` flag are removed.
 
 ## 2. Version binding is the design constraint
 
@@ -344,85 +206,19 @@ A patch difference warns rather than refuses because refusing `0.12.0`-vs-`0.12.
 would break the tool the day after any point release without preventing a single
 wrong answer.
 
-### The floor
+### Version errors
 
-This tool did not exist before teksilo 0.13.0, and its first release *is*
-0.13.0. So the version binding has a floor as well as a rule: for an app on
-teksilo **0.12 or older there is no matching tool**, because no such version of
-it was ever published: asking the registry for that version cannot resolve, and
-neither can a `--path` install from a checkout at `v0.12.1`, since that tag
-contains no `crates/cargo-teksilo`. The only route to a served answer is to
-move the app to teksilo 0.13.
+The first tool release is 0.13.0. For older apps, the diagnostic directs the
+reader to resolved sources or a framework upgrade. For supported versions, the
+error gives the matching installation command:
 
-(`cargo-teksilo-fmt` is a different crate with a different history: it *is*
-published at every teksilo version from 0.9.0, so `--version <pinned>` is
-correct advice there and should not be "fixed" to match this.)
-
-A refusal therefore has two regimes, and the message distinguishes them (a
-third, for a resolved version that is not a semver triple at all, offers only
-the checkout routes). Inside
-the tool's own version range it names the fix and, because a model is one of its
-two readers, tells it not to fall back on memory:
-
-```
-cargo-teksilo 0.14.0 cannot serve symbol lookup for an app on teksilo 0.13.0.
-
-The public API changed between these versions, so answering would mean
-guessing. Install the matching tool:
-
-    cargo install cargo-teksilo --version 0.13.0 --locked
-
-If that version was never published — the app pins teksilo by `path` or
-`git`, which is normal for an app developed alongside the framework —
-install from the checkout the app resolves instead:
-
-    cargo install --path <teksilo checkout>/crates/cargo-teksilo --locked
-
-Both routes install ONE binary per machine, so switching between two
-apps on different minors means reinstalling. To keep both, install the
-second with `--root <dir>` and put that `<dir>/bin` first on PATH for
-that tree, or skip installing and run the tool straight out of the
-framework checkout with `cargo run -p cargo-teksilo -- teksilo <args>`.
-
-DO NOT answer teksilo API questions from prior knowledge — the surface
-differs between these versions. Read the teksilo source this app
-resolved instead, or ask the user which version they intend.
+```text
+error: tool 0.14.2 cannot serve documentation search for Teksilo 0.13.0
+help: cargo install cargo-teksilo --version 0.13.0 --locked
 ```
 
-Below the floor there is no such command to name, so the message says so
-outright and closes the three routes a model would otherwise try in turn:
-
-```
-cargo-teksilo 0.13.0 cannot serve symbol lookup for an app on teksilo 0.12.1.
-
-The public API changed between these versions, so answering would mean
-guessing. There is no matching tool to install, and there will not be one.
-cargo-teksilo was first released as 0.13.0; no cargo-teksilo 0.12.1
-was ever published, and crates.io is append-only, so asking the registry
-for one cannot succeed now or later.
-
-The two checkout routes are dead at that tag for the same reason: a
-teksilo 0.12.1 checkout has no `crates/cargo-teksilo` directory in it,
-so neither `--path` nor `-p cargo-teksilo` has anything to build.
-Do not try them.
-
-A version-matched tool exists only for teksilo 0.13.0 and later.
-
-DO NOT answer teksilo API questions from prior knowledge — the surface
-differs between these versions. Read the teksilo source this app
-resolved instead, or ask the user which version they intend.
-```
-
-Three dead remedies would be worse than none: a model runs all three, loses the
-turn, and falls back on memory anyway — the exact outcome the refusal exists to
-prevent. The message closes with what *does* work — reading the resolved source,
-whose path it prints when it can find it.
-
-The same reasoning governs empty results: `search` prints
-`no match in the 0.13.1 corpus`, never "no results", so the absence is scoped to
-the index rather than read as a fact about the framework.
-
----
+`--verbose` adds available source paths and the checkout installation command
+for unpublished versions. Patch mismatches produce one compatibility note.
 
 ## 3. How `symbol` works with no checkout
 
@@ -453,7 +249,7 @@ The automation bridge lets an agent drive a running app
 knowledge required to drive it without losing a day.
 
 ```bash
-cargo teksilo probe
+cargo teksilo probe install
 ```
 
 writes a Python package (stdlib only — no pip, no venv) to
@@ -523,7 +319,7 @@ other C/C++ `sys` crates. That is a heavy dependency for a tool whose other
 commands need none of it, so it is contained at both ends:
 
 - **Compile time.** `semantic` is default-on, but `--no-default-features` yields a
-  fully working tool — `symbol`, `probe`, `setup` and BM25 `search` — with no
+  fully working tool — `symbol`, `probe install`, `init` and BM25 `search` — with no
   native dependency at all. CI builds *both* configurations on Linux, macOS and
   Windows, so the escape hatch is proven rather than hoped for.
 - **Run time.** If the encoder cannot initialise (offline first run, model fetch
@@ -540,9 +336,8 @@ path — documented up front rather than discovered on failure.
 The encoder weights (~129 MB) download once, into a per-user cache
 (`~/Library/Caches/teksilo/fastembed`, `$XDG_CACHE_HOME` on Linux,
 `%LOCALAPPDATA%` on Windows), overridable with `FASTEMBED_CACHE_DIR`. They are
-never written into your project. `cargo teksilo setup` pulls them **eagerly**,
-so the cost lands on the command that announced it rather than on whichever
-`search` happens to be first; `--no-model` opts out and leaves it lazy.
+never written into your project. Download them explicitly with
+`cargo teksilo model fetch`; initialization and search do not download weights.
 
 **Encoder identity is checked on every query.** Two different encoders at the
 same dimension produce numerically valid, semantically meaningless similarities —

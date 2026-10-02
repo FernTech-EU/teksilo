@@ -605,8 +605,8 @@ pub enum Mode {
 impl Mode {
     fn label(self) -> &'static str {
         match self {
-            Mode::Hybrid => "hybrid (BM25 + vectors, reciprocal-rank fusion)",
-            Mode::Lexical => "lexical (BM25)",
+            Mode::Hybrid => "hybrid",
+            Mode::Lexical => "lexical",
         }
     }
 }
@@ -629,7 +629,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
         )));
     }
     if let Some(note) = verdict.note() {
-        eprintln!("{note}");
+        crate::output::note(note);
     }
 
     let index = teksilo_corpus::index()?;
@@ -669,6 +669,14 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
 /// Every `None` here is a degradation, never an error: the caller answers from
 /// BM25 and says so.
 fn semantic_ranking(index: &Index, query: &str, kind: KindFilter) -> Option<Vec<(usize, f64)>> {
+    if !crate::vectors::encoder_is_cached() {
+        if crate::output::verbose() {
+            eprintln!(
+                "Search model unavailable; using lexical search. Run cargo teksilo model fetch."
+            );
+        }
+        return None;
+    }
     match vector_availability(index) {
         VectorAvailability::Usable => {}
         VectorAvailability::NoVectors => {
@@ -684,17 +692,21 @@ fn semantic_ranking(index: &Index, query: &str, kind: KindFilter) -> Option<Vec<
         }
     }
 
-    let mut encoder = match Encoder::load(false) {
+    let mut encoder = match Encoder::load_cached() {
         Ok(encoder) => encoder,
         Err(e) => {
-            eprintln!("note: {e}\nFalling back to lexical.");
+            if crate::output::verbose() {
+                eprintln!("Semantic search: {e}; using BM25.");
+            }
             return None;
         }
     };
     match encoder.embed_query(query) {
         Ok(vector) => Some(vector_scores(index, &vector, kind)),
         Err(e) => {
-            eprintln!("note: {e}\nFalling back to lexical.");
+            if crate::output::verbose() {
+                eprintln!("Semantic search: {e}; using BM25.");
+            }
             None
         }
     }
@@ -707,14 +719,19 @@ fn print_results(
     mode: Mode,
     lexical_empty: bool,
 ) {
-    // The version is printed on every search, hit or miss: a result read out
-    // of context is a claim about a particular teksilo, and an absence is
-    // only ever an absence *from this corpus*.
-    println!(
-        "teksilo {} corpus · {}",
-        index.teksilo_version,
-        mode.label()
-    );
+    if crate::output::json() {
+        let results: Vec<_> = ranked.iter().take(args.limit).enumerate().filter_map(|(rank, (id, _))| {
+            index.chunk(*id).map(|c| serde_json::json!({"rank":rank+1,"path":c.path,"heading":c.heading_path,"line_start":c.line_start+1,"line_end":c.line_end+1,"snippet":snippet(c.text())}))
+        }).collect();
+        println!(
+            "{}",
+            serde_json::json!({"teksilo_version":index.teksilo_version,"query":args.query,"mode":mode.label(),"vector_only":lexical_empty && mode == Mode::Hybrid,"results":results})
+        );
+        return;
+    }
+    if !crate::output::quiet() {
+        println!("Teksilo {} · {}", index.teksilo_version, mode.label());
+    }
 
     if ranked.is_empty() {
         // Deliberately not "no results": that reads as a fact about the
@@ -728,11 +745,7 @@ fn print_results(
     }
 
     if lexical_empty && mode == Mode::Hybrid {
-        println!(
-            "note: no word of {:?} appears in any chunk searched, so these are \
-             nearest-vector matches only — read them as leads, not as answers.",
-            args.query
-        );
+        crate::output::note("Note: semantic matches only; no lexical matches.");
     }
 
     // The rank ordinal is printed; the score is NOT. The bracketed float this
@@ -774,8 +787,9 @@ fn print_results(
         println!("    {}", snippet(chunk.text()));
     }
 
-    println!();
-    println!("{}", read_in_full_footer(&index.teksilo_version));
+    if crate::output::verbose() {
+        eprintln!("{}", read_in_full_footer(&index.teksilo_version));
+    }
 }
 
 /// The line printed under a non-empty result list.

@@ -1,7 +1,6 @@
 ---
 name: teksilo
 description: Build, modify, or debug a Rust desktop GUI app that DEPENDS ON the `teksilo` crate (FernTech's pure-Rust GUI framework) — questions about teksilo widgets, layout, Signal/Prop reactivity, events, theming, settings, i18n, animations, reactive data models, accessibility overrides, the `teksu!` DSL (writing a widget tree in it, translating to or from builder calls, or debugging a `teksu!` compile error), and driving or testing the running app through the automation bridge / MCP server / probe harness. Use any time a Cargo.toml in scope lists `teksilo` as a dependency, or the user types `/teksilo`. SKIP when editing the teksilo framework itself (a workspace that DEFINES teksilo-core / teksilo-widgets — use that repo's CLAUDE.md and its in-repo skills instead).
-user_invocable: true
 ---
 
 # teksilo
@@ -59,8 +58,8 @@ cargo teksilo search "virtualized table with sortable columns"
 cargo teksilo search "how do I persist window size"
 cargo teksilo show docs/scroll-area.md      # read a search result in full, offline
 cargo teksilo show docs/scroll-area.md --lines 166-172
-cargo teksilo probe                         # materialise the Python automation harness
-cargo teksilo setup                         # the harness, plus a teksilo brief for every agent here
+cargo teksilo probe install                         # materialise the Python automation harness
+cargo teksilo init                         # the harness, plus a teksilo brief for every agent here
 ```
 
 - **`symbol`** replaces reading the widget source by hand. It emits the type's
@@ -82,17 +81,23 @@ cargo teksilo setup                         # the harness, plus a teksilo brief 
   `main`, which is a different Teksilo from the one this app pinned — which is
   the exact confusion this tool exists to prevent. `show` is offline and
   version-matched. `cargo teksilo show --list` prints every available path.
-- **`probe`** writes a Python automation harness into `scripts/teksilo_probe/`
-  for driving and asserting on the running GUI. See `reference/automation.md`.
-- **`setup`** is `probe` plus the teksilo briefing for every coding agent this
-  project already configures — this skill where Claude Code looks for one, and a
-  self-contained condensed brief in `.cursor/rules/`, `.windsurf/rules/`,
-  `.github/copilot-instructions.md` or `AGENTS.md` where the format is not a
-  skill — plus a one-off fetch of the search encoder. It prints a plan and asks
-  first; `-y` skips the question (needed in CI, where a prompt is an error rather
-  than a wait), `--no-model` skips the download, and `--user` is the only mode
-  that writes `$HOME`. It only writes where a marker already exists, and lists
-  what it skipped.
+- **`probe install`** writes the Python automation harness into
+  `scripts/teksilo_probe/`. See `reference/automation.md`.
+- **`init`** installs the harness and instructions for detected agents. Use
+  `--agent codex --agent claude` to select targets even without existing markers,
+  and `-y` for non-interactive execution. It never downloads the search model.
+- **`agent install <agents...>`** installs only the selected instructions,
+  creating directories as needed. Example: `cargo teksilo agent install claude
+  cursor`. Claude receives this full skill; other project targets receive a
+  self-contained brief in their native rules format or `AGENTS.md`.
+  `--user` supports `claude`, `vibe`, and `opencode`; it writes no project harness.
+  `--force` replaces conflicting generated files. Shared-file text outside the
+  managed region is preserved. `agent list` reports supported targets and state.
+- **`model fetch`** explicitly downloads the semantic search model. Search uses
+  BM25 until it is cached; a lookup never starts a download.
+- **`status --json`** reports the resolved version and installed tooling.
+  `search --json` returns structured hits with paths and 1-based line ranges.
+  `--quiet` suppresses informational output; `--verbose` adds diagnostics.
 
 `cargo teksilo --help` and `cargo teksilo <command> --help` are authoritative for
 flags; this file names the commands, not their whole flag surface.
@@ -220,7 +225,7 @@ heads, the 4-arm cap) exist because each of them was got wrong.
 Teksilo ships an automation layer that observes (accessibility tree, full
 layout tree with bounds, screenshots) and drives (AT actions, synthetic pointer /
 key / IME input) a live app in-process, with no OS accessibility layer — plus a
-Python probe harness (`cargo teksilo probe`) to make any of it repeatable. Two
+Python probe harness (`cargo teksilo probe install`) to make any of it repeatable. Two
 rules that cost the most time when missed: a **structural rebuild invalidates
 every node id**, so re-find after one; and for an accelerator chord inject
 **`command: true`, not `ctrl`** — on macOS `ctrl` injects a key that matches no

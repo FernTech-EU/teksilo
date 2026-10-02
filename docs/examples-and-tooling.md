@@ -17,24 +17,27 @@ version **your** `Cargo.lock` resolved:
 
 ```sh
 cargo install cargo-teksilo
-cargo teksilo setup             # run inside your app
+cargo teksilo init             # run inside your app
 ```
 
 ```sh
 cargo teksilo symbol Button                  # exact public API, for your version
 cargo teksilo symbol --crate data ListModel  # 32 crates are queryable
 cargo teksilo search "make a list scrollable"
-cargo teksilo probe                          # automation harness -> scripts/
+cargo teksilo probe install                  # automation harness -> scripts/
 ```
 
-`setup` writes the probe harness into `scripts/teksilo_probe/` and installs the
-skill (or a condensed brief, in that agent's own format) for every coding agent
-already configured in the project; `--user` installs the skill into your home
-directory instead (the harness, being project code, still goes into the
-project). It never edits your own content (a shared file such as `AGENTS.md` gets
-a marked region of its own), and it refuses outright rather than answering for a
-version you do not have, a wrong answer about a framework reads exactly like a
-right one.
+`init` installs the probe harness and instructions for detected agents. Use
+`cargo teksilo init --agent codex --agent claude -y` to select agents explicitly,
+even without existing configuration. `cargo teksilo agent install cursor` installs
+instructions only; `agent list` shows supported targets. User installation is
+`cargo teksilo agent install claude --user` (also supported for Vibe and opencode).
+Shared-file text outside the managed region is preserved; `--force` replaces
+conflicting generated files.
+
+Search uses BM25 until you run `cargo teksilo model fetch`. No lookup command
+starts a model download. `status --json` and `search --json` provide structured
+output; `--verbose` adds diagnostics and `--quiet` suppresses informational text.
 
 If ONNX Runtime will not build on your platform, `cargo install cargo-teksilo
 --no-default-features` gives the same tool with lexical search instead of hybrid;

@@ -15,7 +15,7 @@ Two ways in, and they are complements:
 | Shape | What it is | Use it for |
 |---|---|---|
 | **MCP server** — `teksilo-automation-mcp` | An MCP server an agent talks to directly, tool by tool | Exploring, diagnosing, one-off "what does the app actually do here" questions |
-| **Python probe** — `cargo teksilo probe` | A script that launches the app, attaches, drives it and asserts | Anything you want to re-run: a regression test, a de-risking experiment, a CI gate |
+| **Python probe** — `cargo teksilo probe install` | A script that launches the app, attaches, drives it and asserts | Anything you want to re-run: a regression test, a de-risking experiment, a CI gate |
 
 Verified against **teksilo 0.12.1**.
 
@@ -193,8 +193,8 @@ below that are easy to get wrong and silent when you do.
 Materialise it into your app:
 
 ```bash
-cargo teksilo probe    # writes the harness (and worked example probes) into scripts/teksilo_probe/
-cargo teksilo setup    # the same, plus the rest of the per-app agent scaffolding
+cargo teksilo probe install    # writes the harness (and worked example probes) into scripts/teksilo_probe/
+cargo teksilo init    # the same, plus the rest of the per-app agent scaffolding
 ```
 
 Then **read what it wrote** — `ls scripts/teksilo_probe/` — and copy the example

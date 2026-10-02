@@ -400,7 +400,7 @@ jobs:
           cargo run -p automation_bridge_smoke
 
       # The curated probe examples drive real teksilo demo apps end to end
-      # through the harness (`cargo teksilo probe`'s worked examples), so —
+      # through the harness (`cargo teksilo probe install`'s worked examples), so —
       # like the Live-bridge smoke step above — they need a live display.
       # Unlike that step, some of what they exercise depends on window-manager
       # behaviour (e.g. modal-window focus return), so this mirrors test-x11's

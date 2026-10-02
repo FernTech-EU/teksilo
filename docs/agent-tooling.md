@@ -3,73 +3,103 @@
 
 # Agent tooling
 
-`cargo teksilo` provides version-aware API lookup, documentation search, and an
-application automation harness. Run it inside the application's Cargo project.
+`cargo teksilo` provides API lookup, documentation search, and an automation
+harness for the Teksilo version resolved by your application.
 
-## Setup
+## Install and initialize
+
+Install the tool version matching the app (0.13.0 or later), then run inside
+its Cargo project:
 
 ```sh
-cargo install cargo-teksilo
-cargo teksilo setup
+cargo install cargo-teksilo --version <version> --locked
+cargo teksilo init
 ```
 
-Setup installs the probe harness under `scripts/teksilo_probe/` and configures
-supported coding agents already present in the project. `--user` installs agent
-instructions at user scope; the harness remains project-local.
+`init` installs the harness and instructions for detected agents after a short
+confirmation. Use `-y` in scripts. To select agents explicitly, including ones
+with no existing configuration:
 
-## Common operations
+```sh
+cargo teksilo init --agent codex --agent claude -y
+cargo teksilo agent install cursor cline
+cargo teksilo agent list
+```
+
+Explicit selection creates directories as needed. Agent IDs are `claude`,
+`cursor`, `windsurf`, `cline`, `copilot`, `codex`, `vibe`, and `opencode`.
+Claude receives the full skill; other targets receive instructions in their
+rules format or a managed `AGENTS.md` section. Surrounding shared-file text is
+preserved. Use `--force` to replace conflicting generated files.
+
+`agent install` installs instructions only. User installation supports Claude,
+Vibe, and opencode, with no project harness:
+
+```sh
+cargo teksilo agent install claude --user
+cargo teksilo agent list --user
+```
+
+## Commands
 
 ```sh
 cargo teksilo symbol Button
 cargo teksilo symbol --crate data ListModel
 cargo teksilo search "make a list scrollable"
-cargo teksilo show docs/scroll-area.md
+cargo teksilo search "make a list scrollable" --json
 cargo teksilo show docs/scroll-area.md --lines 166-172
-cargo teksilo probe
+cargo teksilo probe install
 cargo teksilo status
-cargo teksilo version
+cargo teksilo status --json
+cargo teksilo --version
 ```
 
-| Command | Purpose |
-| --- | --- |
-| `symbol` | Extract public API signatures from crate source |
-| `search` | Find guides and worked examples in the bundled corpus |
-| `show` | Read a corpus document without a checkout or network request |
-| `probe` | Install the automation harness |
-| `setup` | Install the harness and supported agent instructions |
-| `status` | Inspect installed instructions, harness, and search model |
-| `version` | Compare tool and resolved framework versions |
+Search paths refer to the bundled corpus. Read them with `show`, even when
+those files are absent from your application. `show --list` lists the corpus.
+`symbol` requires Python 3; other commands do not.
 
-A search result's `docs/...` path belongs to the bundled corpus. Use `show` to
-read it; it need not exist in the application's directory.
+`status` reports the resolved app version and installed tooling without
+changing the lockfile. `--verbose` adds paths and diagnostics. `--quiet`
+suppresses informational output while preserving results and errors.
 
-## Version requirements
+## Semantic search
 
-The tool reads the framework version resolved by Cargo. An exact match is
-accepted; a patch-version difference produces a note; a major or minor
-mismatch is refused. The tool was introduced in Teksilo 0.13.0.
+Download the model explicitly:
 
-Use the tool version matching the application. Online documentation follows
-the repository and can describe a newer API than the application has installed.
+```sh
+cargo teksilo model fetch
+```
 
-## Search without ONNX Runtime
-
-If the default installation cannot build ONNX Runtime, install lexical search:
+Until the model is cached, search uses BM25. Initialization and lookup commands
+do not download weights. `search --lexical` always uses BM25. To build without
+ONNX Runtime:
 
 ```sh
 cargo install cargo-teksilo --no-default-features
 ```
 
-API lookup, document retrieval, and harness setup remain available.
+## Version matching
+
+Patch differences produce a short note. Major and minor mismatches are refused.
+Within a workspace, resolution follows the selected app. Conflicting framework
+versions at a virtual workspace root are rejected; run from the intended app.
+For unpublished versions, install from the matching framework checkout with
+`cargo install --path <checkout>/crates/cargo-teksilo --locked`.
+
+## CLI migration
+
+The previous interface has been removed:
+
+| Previous | Replacement |
+| --- | --- |
+| `setup` | `init` |
+| `setup --user` | `agent install <agents...> --user` |
+| `probe` | `probe install` |
+| `version` | `--version` for the tool; `status` for the app |
+| Automatic model download / `--no-model` | Explicit `model fetch` |
 
 ## Reference
 
 - [Command source](../crates/cargo-teksilo/src/)
 - [Automation MCP](automation-mcp.md)
-- [Corpus build tool](../tools/build_corpus.py)
-
-
-## Engineering reference
-
-[Implementation details and review history](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/agent-tooling.md)
-are retained in the repository.
+- [Engineering reference](https://github.com/ferntech-eu/teksilo/blob/main/engineering/docs/agent-tooling.md)

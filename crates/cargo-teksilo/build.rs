@@ -12,7 +12,7 @@
 //!
 //! The symptom is quiet and expensive: `cargo build -p cargo-teksilo` reports
 //! "0 crates compiled" after a real change, the binary keeps the previous
-//! payload, and `cargo teksilo probe` materialises a harness that no longer
+//! payload, and `cargo teksilo probe install` materialises a harness that no longer
 //! matches what is on disk. It then only corrects itself when something
 //! unrelated happens to dirty the crate. This was observed, not theorised —
 //! a run after adding the curated examples compiled nothing.

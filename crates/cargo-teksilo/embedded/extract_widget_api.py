@@ -120,6 +120,7 @@ import difflib
 import json
 import re
 import sys
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -2917,7 +2918,12 @@ def main(argv: list[str]) -> int:
         return rc
 
     SPEC = CRATE_SPECS[args.crate]
-    reg = build_registry()
+    # A staged consumer tree may contain only non-widget crates. Named
+    # lookups can still sweep those crates without the default widget source.
+    if args.widgets and not SPEC.src.exists() and not (args.all or args.list or args.md_dir):
+        reg = Registry([], {}, {}, {}, {}, {})
+    else:
+        reg = build_registry()
 
     if args.list:
         return cmd_list(reg)
@@ -2976,7 +2982,8 @@ def main(argv: list[str]) -> int:
                     note += " Also defined in: " + ", ".join(
                         f"{CRATE_SPECS[k].crate} (--crate {k})" for k in others
                     ) + "."
-                print(note, file=sys.stderr)
+                if not os.environ.get("TEKSILO_EXTRACTOR_QUIET"):
+                    print(note, file=sys.stderr)
             if fp not in seen:
                 seen.add(fp)
                 target_files.append(fp)

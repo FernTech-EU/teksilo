@@ -15,10 +15,43 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+- **Breaking: cargo-teksilo CLI.** Removed `setup`, bare `probe`, and `version`.
+  Use `init`, `probe install`, and `--version` (tool version) or `status`
+  (resolved app version). User installation is now
+  `agent install <agents...> --user`, which installs instructions only.
+- **Explicit agent selection.** `agent install <agents...>` and repeated
+  `init --agent` options create the selected agents' configuration even when
+  no detection marker exists. Without explicit targets, `init` uses detection.
+  `agent list` reports supported targets and installation state.
+- **Explicit model download.** `model fetch` replaces automatic downloads and
+  the `--no-model` flag. Initialization never downloads weights; search loads
+  complete local model files or falls back to BM25.
+- **Concise CLI output.** Short summaries and actionable errors replace lengthy
+  explanations. `--verbose` adds diagnostics; `--quiet` suppresses informational
+  messages without truncating API or document contents. Search, status, and
+  agent listings support `--json`.
+- Updated command examples, migration documentation, the repository skill,
+  and the embedded skill and agent instructions installed by cargo-teksilo.
+
 - Expanded onboarding and shortened user guides.
 - Moved engineering records out of the published docs and search corpus.
 - Removed obsolete chapters and corrected documentation claims.
 - Added README synchronization and documentation checks.
+
+### Fixed
+
+#### cargo-teksilo
+
+- Resolve the selected app's dependency graph instead of selecting another
+  workspace member's Teksilo version. Reject ambiguous framework dependencies.
+- Store probe provenance in workspace metadata for virtual workspaces, avoiding
+  an invalid, incomplete `[package]` table.
+- Preserve conflicting probe files on first installation, even without a
+  checksum manifest. Replacing modified generated instructions or harness
+  files requires `--force`; shared-file text outside managed regions is retained.
+- Allow symbol lookup in applications depending only on non-widget crates,
+  including the extractor's cross-crate lookup without `teksilo-widgets`.
+- Refresh the bundled documentation corpus and its semantic embeddings.
 
 ## [0.14.2] - 2026-09-28
 

@@ -145,109 +145,34 @@ pub fn readable_sources(resolution: &crate::resolve::Resolution) -> Option<PathB
 /// `sources` is a teksilo source tree on disk, if the caller found one — see
 /// [`readable_sources`].
 ///
-/// Three regimes, decided by the app's version:
-///
-/// 1. below [`FIRST_PUBLISHED`] — no install command at all, because all three
-///    routes are dead at those tags;
-/// 2. at or above it — both routes, unconditionally, because publication is
-///    not observable offline (a `path` or `git` dep resolves a version that is
-///    in no registry, and a private registry breaks the branch the other way);
-/// 3. unparseable — no `--version` can be built from it, so only the checkout
-///    routes are offered.
+/// Default output is a diagnosis and one remedy. Verbose output adds source
+/// paths and a checkout install option for unpublished versions.
 pub fn refusal_text(app: &str, tool: &str, what: &str, sources: Option<&Path>) -> String {
-    let (f_major, f_minor, f_patch) = FIRST_PUBLISHED;
-    let floor = format!("{f_major}.{f_minor}.{f_patch}");
-
-    let head = format!(
-        "cargo-teksilo {tool} cannot serve {what} for an app on teksilo {app}.\n\
-         \n\
-         The public API changed between these versions, so answering would mean\n\
-         guessing."
-    );
-
-    let body = match semver_parts(app) {
-        Some(parts) if parts < FIRST_PUBLISHED => format!(
-            "There is no matching tool to install, and there will not be one.\n\
-             cargo-teksilo was first released as {floor}; no cargo-teksilo {app}\n\
-             was ever published, and crates.io is append-only, so asking the registry\n\
-             for one cannot succeed now or later.\n\
-             \n\
-             The two checkout routes are dead at that tag for the same reason: a\n\
-             teksilo {app} checkout has no `crates/cargo-teksilo` directory in it,\n\
-             so neither `--path` nor `-p cargo-teksilo` has anything to build.\n\
-             Do not try them.\n\
-             \n\
-             A version-matched tool exists only for teksilo {floor} and later."
-        ),
-        Some(_) => format!(
-            "Install the matching tool:\n\
-             \n\
-             \x20   cargo install cargo-teksilo --version {app} --locked\n\
-             \n\
-             If that version was never published — the app pins teksilo by `path` or\n\
-             `git`, which is normal for an app developed alongside the framework —\n\
-             install from the checkout the app resolves instead:\n\
-             \n\
-             \x20   cargo install --path <teksilo checkout>/crates/cargo-teksilo --locked\n\
-             \n\
-             Both routes install ONE binary per machine, so switching between two\n\
-             apps on different minors means reinstalling. To keep both, install the\n\
-             second with `--root <dir>` and put that `<dir>/bin` first on PATH for\n\
-             that tree, or skip installing and run the tool straight out of the\n\
-             framework checkout with `cargo run -p cargo-teksilo -- teksilo <args>`."
-        ),
-        None => format!(
-            "`{app}` is not a semver triple, so there is no number to pin an\n\
-             install to. Install from the teksilo checkout this app resolves\n\
-             instead:\n\
-             \n\
-             \x20   cargo install --path <teksilo checkout>/crates/cargo-teksilo --locked\n\
-             \n\
-             or run the tool straight out of that checkout, without installing:\n\
-             \n\
-             \x20   cargo run -p cargo-teksilo -- teksilo <args>\n\
-             \n\
-             Either way the checkout has to be one whose teksilo is what this app\n\
-             resolves, and it has to be at {floor} or later — cargo-teksilo does not\n\
-             exist in a checkout older than that."
-        ),
+    let help = match semver_parts(app) {
+        Some(parts) if parts < FIRST_PUBLISHED => {
+            "use the resolved crate sources, or upgrade to Teksilo 0.13.0 or later".to_string()
+        }
+        Some(_) => format!("cargo install cargo-teksilo --version {app} --locked"),
+        None => "install cargo-teksilo from the matching framework checkout".to_string(),
     };
-
-    // The address goes in a paragraph of its own rather than inside the
-    // sentence: a resolved registry path is long enough to wreck the wrap, and
-    // the instruction has to stay readable when there is no address at all.
-    let where_ = match sources {
-        Some(dir) => format!("\n\nIt is on disk at:\n\n\x20   {}", dir.display()),
-        None => String::new(),
-    };
-
-    format!(
-        "{head} {body}\n\
-         \n\
-         DO NOT answer teksilo API questions from prior knowledge — the surface\n\
-         differs between these versions. Read the teksilo source this app\n\
-         resolved instead, or ask the user which version they intend.{where_}"
-    )
+    let mut message = format!("tool {tool} cannot serve {what} for Teksilo {app}\nhelp: {help}");
+    if crate::output::verbose() {
+        if let Some(path) = sources {
+            message.push_str(&format!("\nSources: {}", path.display()));
+        }
+        message.push_str("\nFor unpublished versions: cargo install --path <checkout>/crates/cargo-teksilo --locked");
+    }
+    message
 }
 
 /// The note printed when a command answers across a patch-level difference.
 pub fn degraded_text(app: &str, tool: &str) -> String {
-    format!(
-        "note: this app resolved teksilo {app}, this tool is {tool}. \
-         Answering anyway (same minor series); install \
-         `cargo-teksilo --version {app}` for an exact match."
-    )
+    format!("note: app uses Teksilo {app}; tool uses {tool} (compatible patch versions)")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A sample of the teksilo releases that predate this crate — the recent
-    /// ones, which are the versions still in real lockfiles. Every one must
-    /// reach the no-install regime. The full set runs back to 0.2.0; these are
-    /// the ones an app is plausibly still pinning.
-    const PRE_FLOOR_RELEASES: &[&str] = &["0.9.0", "0.9.5", "0.10.0", "0.11.0", "0.12.0", "0.12.1"];
 
     fn refusal(app: &str, tool: &str, what: &str) -> String {
         refusal_text(app, tool, what, None)
@@ -305,80 +230,14 @@ mod tests {
     }
 
     #[test]
-    fn the_refusal_tells_a_model_not_to_guess() {
-        // This instruction is the point of the message: a model that reads a
-        // bare "not found" falls back on its own memory of the API.
-        let t = refusal("0.9.2", "0.12.1", "symbol lookup");
-        assert!(t.contains("DO NOT answer teksilo API questions from prior knowledge"));
-        // ...and 0.9.2 predates this crate, so the install line that used to
-        // be asserted here was a command nobody could run. A model that tries
-        // it spends its turn and falls back on memory anyway, which is worse
-        // than a bare refusal.
-        assert!(!t.contains("cargo install"));
-        assert!(!t.contains("--version 0.9.2"));
-    }
-
-    #[test]
-    fn the_refusal_offers_a_route_for_an_unpublished_version() {
-        // The crates.io line is the remedy for an app that resolved teksilo
-        // from the registry. An app pinning the framework by `path` or `git`
-        // — the normal shape for one developed alongside it — resolves a
-        // version that was never published, so `cargo install --version` for
-        // it fails with "could not find `cargo-teksilo` in registry". A model
-        // reading a remedy that cannot work is back to guessing, which is the
-        // one thing this message exists to prevent. Publication is not
-        // observable offline, so above the floor both routes are printed
-        // unconditionally rather than branched on the resolved source: a path
-        // dep on a published tag and a private-registry dep each break the
-        // branch in opposite directions.
-        let t = refusal("0.14.0", "0.12.1", "search");
-        // 0.14.0 is above the floor, so the version line must still be there:
-        // the floor is not licence to withhold a command that could work.
-        assert!(t.contains("cargo install cargo-teksilo --version 0.14.0 --locked"));
-        assert!(t.contains("cargo install --path"));
-        assert!(t.contains("crates/cargo-teksilo"));
-        // And a way to keep two trees working without reinstalling per tree.
-        assert!(t.contains("cargo run -p cargo-teksilo"));
-    }
-
-    #[test]
-    fn a_pre_floor_app_is_offered_no_install_command_at_all() {
-        // The reviewer's case, and the reason this regime exists: Skribisto
-        // pins 0.12.1, and all three remedies the message used to print are
-        // impossible for it.
-        let t = refusal("0.12.1", TOOL_VERSION, "symbol lookup");
-        assert!(!t.contains("cargo install"), "{t}");
-        assert!(!t.contains("cargo run -p cargo-teksilo -- teksilo"), "{t}");
-        // It names the floor, so the reader learns WHY rather than just being
-        // told no, and knows what a working setup would look like.
-        assert!(t.contains("0.13.0"), "{t}");
-        // And it says the checkout routes are dead too, so the model does not
-        // reach for the obvious next idea on its own.
-        assert!(t.contains("crates/cargo-teksilo"), "{t}");
-        assert!(t.contains("Do not try them"), "{t}");
-    }
-
-    #[test]
-    fn every_published_pre_floor_teksilo_reaches_that_regime() {
-        for app in PRE_FLOOR_RELEASES {
-            let t = refusal(app, TOOL_VERSION, "search");
-            assert!(!t.contains("cargo install"), "{app}: {t}");
-            assert!(
-                t.contains("DO NOT answer teksilo API questions from prior knowledge"),
-                "{app}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_unparseable_version_yields_no_version_flag() {
-        for app in ["not-a-version", "", "1.2.3.4", "main"] {
-            let t = refusal(app, TOOL_VERSION, "search");
-            assert!(!t.contains("--version"), "{app}: {t}");
-            // But it is not a dead end: the checkout routes need no version.
-            assert!(t.contains("cargo install --path"), "{app}: {t}");
-            assert!(t.contains("cargo run -p cargo-teksilo"), "{app}: {t}");
-        }
+    fn refusals_give_one_usable_remedy() {
+        let old = refusal("0.12.1", TOOL_VERSION, "search");
+        assert!(!old.contains("cargo install"));
+        assert!(old.contains("0.13.0"));
+        let published = refusal("0.14.0", "0.13.0", "search");
+        assert!(published.contains("cargo install cargo-teksilo --version 0.14.0 --locked"));
+        assert_eq!(published.lines().count(), 2);
+        assert!(!refusal("unknown", TOOL_VERSION, "search").contains("--version"));
     }
 
     #[test]
@@ -392,17 +251,6 @@ mod tests {
             tool >= FIRST_PUBLISHED,
             "TOOL_VERSION {TOOL_VERSION} is below FIRST_PUBLISHED {FIRST_PUBLISHED:?}"
         );
-    }
-
-    #[test]
-    fn a_confirmed_source_directory_is_named() {
-        let dir = Path::new("/home/dev/teksilo");
-        let t = refusal_text("0.12.1", TOOL_VERSION, "search", Some(dir));
-        assert!(t.contains("/home/dev/teksilo"), "{t}");
-        // Without one the sentence still reads, it just has no address.
-        let bare = refusal("0.12.1", TOOL_VERSION, "search");
-        assert!(bare.contains("Read the teksilo source this app"), "{bare}");
-        assert!(!bare.contains("It is on disk at"), "{bare}");
     }
 
     #[test]

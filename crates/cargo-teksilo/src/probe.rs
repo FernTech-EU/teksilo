@@ -90,8 +90,19 @@ pub fn materialise(project: &Path, force: bool) -> Result<Written, ProbeError> {
     // Refuse as a set rather than one file at a time: a consumer who edited
     // three files wants to hear about three, not to re-run and be stopped
     // again by the next one.
-    if !force && !previous.is_empty() {
-        let modified = locally_modified(&dest, &previous);
+    if !force {
+        let mut modified = locally_modified(&dest, &previous);
+        for file in walk(&PROBE) {
+            let rel = shipped_path(file.path());
+            if !previous.contains_key(&rel)
+                && dest.join(&rel).exists()
+                && std::fs::read(dest.join(&rel))? != file.contents()
+            {
+                modified.push(rel);
+            }
+        }
+        modified.sort();
+        modified.dedup();
         if !modified.is_empty() {
             return Err(ProbeError::LocallyModified {
                 count: modified.len(),
@@ -156,14 +167,18 @@ pub fn record_provenance(project: &Path, version: &str) -> Result<(), ProbeError
         .parse::<toml_edit::DocumentMut>()
         .map_err(|e| ProbeError::Manifest(manifest_path.clone(), e.to_string()))?;
 
-    // `package.metadata` is the documented place for third-party tool state,
-    // and cargo ignores everything under it.
+    // Virtual workspaces have no package: adding one would invalidate them.
+    let owner = if doc.contains_key("package") {
+        "package"
+    } else {
+        "workspace"
+    };
     let meta = doc
-        .entry("package")
+        .entry(owner)
         .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
         .as_table_mut()
         .ok_or_else(|| {
-            ProbeError::Manifest(manifest_path.clone(), "[package] is not a table".into())
+            ProbeError::Manifest(manifest_path.clone(), format!("[{owner}] is not a table"))
         })?
         .entry("metadata")
         .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
@@ -171,7 +186,7 @@ pub fn record_provenance(project: &Path, version: &str) -> Result<(), ProbeError
         .ok_or_else(|| {
             ProbeError::Manifest(
                 manifest_path.clone(),
-                "[package.metadata] is not a table".into(),
+                format!("[{owner}.metadata] is not a table"),
             )
         })?
         .entry("teksilo")
@@ -180,7 +195,7 @@ pub fn record_provenance(project: &Path, version: &str) -> Result<(), ProbeError
         .ok_or_else(|| {
             ProbeError::Manifest(
                 manifest_path.clone(),
-                "[package.metadata.teksilo] is not a table".into(),
+                format!("[{owner}.metadata.teksilo] is not a table"),
             )
         })?;
 
@@ -193,7 +208,8 @@ pub fn record_provenance(project: &Path, version: &str) -> Result<(), ProbeError
 pub fn recorded_provenance(project: &Path) -> Option<String> {
     let text = std::fs::read_to_string(project.join("Cargo.toml")).ok()?;
     let doc = text.parse::<toml_edit::DocumentMut>().ok()?;
-    doc.get("package")?
+    doc.get("package")
+        .or_else(|| doc.get("workspace"))?
         .get("metadata")?
         .get("teksilo")?
         .get("probe")?
@@ -260,7 +276,7 @@ fn read_manifest(dest: &Path) -> BTreeMap<String, String> {
 
 fn write_manifest(dest: &Path, manifest: &BTreeMap<String, String>) -> Result<(), ProbeError> {
     let mut out = String::from(
-        "# Written by `cargo teksilo probe`. Do not edit.\n\
+        "# Written by `cargo teksilo probe install`. Do not edit.\n\
          # Lists what this tool generated, so a later run can tell its own\n\
          # output from your edits. Your own probes belong in scripts/, not here.\n",
     );
@@ -298,6 +314,47 @@ mod tests {
         )
         .unwrap();
         t
+    }
+
+    #[test]
+    fn virtual_workspace_provenance_does_not_create_a_package() {
+        let p = tempfile::tempdir().unwrap();
+        std::fs::write(p.path().join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+        record_provenance(p.path(), "0.14.2").unwrap();
+        let text = std::fs::read_to_string(p.path().join("Cargo.toml")).unwrap();
+        let doc = text.parse::<toml_edit::DocumentMut>().unwrap();
+        assert!(doc.get("package").is_none());
+        assert_eq!(recorded_provenance(p.path()).as_deref(), Some("0.14.2"));
+    }
+
+    #[test]
+    fn untracked_destination_requires_force_even_with_an_existing_manifest() {
+        for installed in [false, true] {
+            let p = project();
+            if installed {
+                materialise(p.path(), false).unwrap();
+                let manifest = p.path().join(DEST).join(MANIFEST);
+                let text = std::fs::read_to_string(&manifest).unwrap();
+                std::fs::write(
+                    manifest,
+                    text.lines()
+                        .filter(|l| !l.ends_with("  session.py"))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+                .unwrap();
+            }
+            let file = p.path().join(DEST).join("session.py");
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "# user code\n").unwrap();
+            assert!(matches!(
+                materialise(p.path(), false),
+                Err(ProbeError::LocallyModified { .. })
+            ));
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), "# user code\n");
+            materialise(p.path(), true).unwrap();
+            assert_ne!(std::fs::read_to_string(file).unwrap(), "# user code\n");
+        }
     }
 
     #[test]

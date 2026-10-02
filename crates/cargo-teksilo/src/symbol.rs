@@ -81,7 +81,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SymbolError> {
         )));
     }
     if let Some(note) = verdict.note() {
-        eprintln!("{note}");
+        crate::output::note(note);
     }
 
     let python = find_python().ok_or(SymbolError::NoPython)?;
@@ -168,11 +168,13 @@ fn exec_extractor(
     args: &[String],
     cwd: &Path,
 ) -> Result<i32, SymbolError> {
-    let status = Command::new(python)
-        .arg(tool)
-        .args(args)
-        .current_dir(cwd)
-        .status()?;
+    let mut command = Command::new(python);
+    command.arg(tool).args(args).current_dir(cwd);
+    // Extractor notes are diagnostics; errors must remain visible in quiet mode.
+    if !crate::output::verbose() {
+        command.env("TEKSILO_EXTRACTOR_QUIET", "1");
+    }
+    let status = command.status()?;
     Ok(status.code().unwrap_or(1))
 }
 
@@ -257,6 +259,41 @@ mod tests {
         Resolution {
             crates: map,
             version: "0.12.1".into(),
+        }
+    }
+
+    #[test]
+    fn named_lookup_works_in_a_stage_without_widgets() {
+        let Some(python) = find_python() else {
+            return;
+        };
+        let source = tempfile::tempdir().unwrap();
+        std::fs::create_dir(source.path().join("src")).unwrap();
+        std::fs::write(source.path().join("src/lib.rs"), "pub mod example;").unwrap();
+        std::fs::write(source.path().join("src/example.rs"), "pub struct Example;").unwrap();
+        let c = ResolvedCrate {
+            name: "teksilo-data".into(),
+            version: guard::TOOL_VERSION.into(),
+            dir: source.path().to_path_buf(),
+        };
+        let resolution = Resolution {
+            crates: [(c.name.clone(), c)].into_iter().collect(),
+            version: guard::TOOL_VERSION.into(),
+        };
+        let stage = tempfile::tempdir().unwrap();
+        let tool = stage_monorepo(stage.path(), &resolution).unwrap();
+        for args in [vec!["Example"], vec!["--crate", "data", "Example"]] {
+            let output = Command::new(&python)
+                .arg(&tool)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("Example"));
         }
     }
 

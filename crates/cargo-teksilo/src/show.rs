@@ -414,7 +414,7 @@ pub fn run(dir: &Path, request: &ShowRequest) -> Result<i32, ShowError> {
         )));
     }
     if let Some(note) = verdict.note() {
-        eprintln!("{note}");
+        crate::output::note(note);
     }
 
     let index = teksilo_corpus::index()?;
@@ -435,7 +435,9 @@ pub fn run(dir: &Path, request: &ShowRequest) -> Result<i32, ShowError> {
     let path = match resolve_path(index, raw) {
         Resolved::Exact(p) => p,
         Resolved::Rewritten(p) => {
-            eprintln!("note: `{raw}` → {p}");
+            if crate::output::verbose() {
+                eprintln!("Resolved: {raw} → {p}");
+            }
             p
         }
         Resolved::Unknown(help) => return Err(ShowError::NotFound(help)),
@@ -446,21 +448,25 @@ pub fn run(dir: &Path, request: &ShowRequest) -> Result<i32, ShowError> {
 
     let shown = match request.lines.as_deref() {
         None => {
-            eprintln!(
-                "teksilo {} corpus · {path} ({total} lines)",
-                index.teksilo_version
-            );
+            if crate::output::verbose() {
+                eprintln!(
+                    "teksilo {} corpus · {path} ({total} lines)",
+                    index.teksilo_version
+                );
+            }
             &lines[..]
         }
         Some(spec) => {
             let range = parse_line_range(spec)?;
             let shown = slice(&lines, range)?;
-            eprintln!(
-                "teksilo {} corpus · {path} lines {}-{} of {total}",
-                index.teksilo_version,
-                range.first,
-                range.first + shown.len().saturating_sub(1),
-            );
+            if crate::output::verbose() {
+                eprintln!(
+                    "teksilo {} corpus · {path} lines {}-{} of {total}",
+                    index.teksilo_version,
+                    range.first,
+                    range.first + shown.len().saturating_sub(1),
+                );
+            }
             shown
         }
     };
@@ -481,12 +487,14 @@ pub fn run(dir: &Path, request: &ShowRequest) -> Result<i32, ShowError> {
 fn print_list(index: &Index) -> Result<i32, ShowError> {
     let docs = documents(index);
     let guides = docs.iter().filter(|(kind, _)| *kind == "guide").count();
-    eprintln!(
-        "teksilo {} corpus · {} documents ({guides} guides, then {} example sources)",
-        index.teksilo_version,
-        docs.len(),
-        docs.len() - guides,
-    );
+    if crate::output::verbose() {
+        eprintln!(
+            "teksilo {} corpus · {} documents ({guides} guides, then {} example sources)",
+            index.teksilo_version,
+            docs.len(),
+            docs.len() - guides,
+        );
+    }
     for (_, path) in docs {
         println!("{path}");
     }

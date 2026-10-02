@@ -272,6 +272,41 @@ impl Encoder {
         Err(EncoderError::NotCompiledIn)
     }
 
+    /// Load only local bytes. Search cannot invoke the Hub download client.
+    #[cfg(feature = "semantic")]
+    pub fn load_cached() -> Result<Self, EncoderError> {
+        use fastembed::{
+            EmbeddingModel, InitOptionsUserDefined, TextEmbedding, TokenizerFiles,
+            UserDefinedEmbeddingModel,
+        };
+        let dir = cached_model_dir(&model_cache_dir()).ok_or_else(|| {
+            EncoderError::Init("model not cached; run cargo teksilo model fetch".into())
+        })?;
+        let read = |file: &str| {
+            std::fs::read(dir.join(file)).map_err(|e| EncoderError::Init(e.to_string()))
+        };
+        let info = TextEmbedding::get_model_info(&EmbeddingModel::BGESmallENV15)
+            .map_err(|e| EncoderError::Init(e.to_string()))?;
+        let mut model = UserDefinedEmbeddingModel::new(
+            read(&info.model_file)?,
+            TokenizerFiles {
+                tokenizer_file: read("tokenizer.json")?,
+                config_file: read("config.json")?,
+                special_tokens_map_file: read("special_tokens_map.json")?,
+                tokenizer_config_file: read("tokenizer_config.json")?,
+            },
+        );
+        model.pooling = TextEmbedding::get_default_pooling_method(&EmbeddingModel::BGESmallENV15);
+        let inner =
+            TextEmbedding::try_new_from_user_defined(model, InitOptionsUserDefined::default())
+                .map_err(|e| EncoderError::Init(e.to_string()))?;
+        Ok(Self { inner })
+    }
+    #[cfg(not(feature = "semantic"))]
+    pub fn load_cached() -> Result<Self, EncoderError> {
+        Err(EncoderError::NotCompiledIn)
+    }
+
     /// Encode passages — corpus chunks — with no instruction prefix.
     #[cfg(feature = "semantic")]
     pub fn embed_documents(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>, EncoderError> {
@@ -345,29 +380,41 @@ pub fn encoder_cache_dir() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Whether the weights are already on disk.
-///
-/// A plan must not offer to download 129 MB that is already there. The probe
-/// is "any `.onnx` under the cache directory" rather than a guess at
-/// fastembed's internal directory layout, which is its own to change: a false
-/// negative costs one no-op re-check, a false positive would be a lie in a
-/// plan.
-pub fn encoder_is_cached() -> bool {
-    fn has_onnx(dir: &std::path::Path) -> bool {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return false;
-        };
-        entries.flatten().any(|entry| {
-            let path = entry.path();
-            if path.is_dir() {
-                has_onnx(&path)
-            } else {
-                path.extension().is_some_and(|ext| ext == "onnx")
-            }
-        })
+/// Locate the selected model's complete Hugging Face cache snapshot.
+/// Checking every input prevents a partial cache from triggering a download.
+#[cfg(feature = "semantic")]
+fn cached_model_dir(cache: &Path) -> Option<PathBuf> {
+    let info =
+        fastembed::TextEmbedding::get_model_info(&fastembed::EmbeddingModel::BGESmallENV15).ok()?;
+    let repo = cache.join(format!("models--{}", info.model_code.replace('/', "--")));
+    let revision = std::fs::read_to_string(repo.join("refs/main")).ok()?;
+    let revision = revision.trim();
+    if revision.is_empty() || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
     }
+    let snapshot = repo.join("snapshots").join(revision);
+    let files = [
+        info.model_file.as_str(),
+        "tokenizer.json",
+        "config.json",
+        "special_tokens_map.json",
+        "tokenizer_config.json",
+    ];
+    files
+        .iter()
+        .all(|file| snapshot.join(file).is_file())
+        .then_some(snapshot)
+}
 
-    encoder_cache_dir().is_some_and(|dir| has_onnx(&dir))
+pub fn encoder_is_cached() -> bool {
+    #[cfg(feature = "semantic")]
+    {
+        cached_model_dir(&model_cache_dir()).is_some()
+    }
+    #[cfg(not(feature = "semantic"))]
+    {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -570,7 +617,7 @@ pub fn build(dir: &Path, args: &[String]) -> Result<i32, BuildError> {
 
     let texts = chunk_texts(&index);
 
-    let mut encoder = Encoder::load(true)?;
+    let mut encoder = Encoder::load(!crate::output::quiet())?;
     let mut vectors = Vec::with_capacity(texts.len());
     for (batch_no, batch) in texts.chunks(ENCODE_BATCH).enumerate() {
         vectors.extend(encoder.embed_documents(batch)?);
@@ -641,6 +688,38 @@ mod tests {
             *v /= norm;
         }
         values
+    }
+
+    #[cfg(feature = "semantic")]
+    #[test]
+    fn only_a_complete_selected_model_snapshot_counts_as_cached() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("unrelated.onnx"), "other model").unwrap();
+        assert!(cached_model_dir(dir.path()).is_none());
+        let info =
+            fastembed::TextEmbedding::get_model_info(&fastembed::EmbeddingModel::BGESmallENV15)
+                .unwrap();
+        let repo = dir
+            .path()
+            .join(format!("models--{}", info.model_code.replace('/', "--")));
+        std::fs::create_dir_all(repo.join("refs")).unwrap();
+        std::fs::write(repo.join("refs/main"), "abc123").unwrap();
+        let snapshot = repo.join("snapshots/abc123");
+        let files = [
+            info.model_file.as_str(),
+            "tokenizer.json",
+            "config.json",
+            "special_tokens_map.json",
+            "tokenizer_config.json",
+        ];
+        for file in &files[..4] {
+            let path = snapshot.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "data").unwrap();
+        }
+        assert!(cached_model_dir(dir.path()).is_none());
+        std::fs::write(snapshot.join(files[4]), "data").unwrap();
+        assert_eq!(cached_model_dir(dir.path()), Some(snapshot));
     }
 
     #[test]

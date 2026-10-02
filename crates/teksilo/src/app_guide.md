@@ -902,7 +902,7 @@ and invalidates every node id**.
 On connect the server hands the client a "how to drive this app" briefing plus a JSON
 schema per tool, so a capable agent self-guides through the snapshot → act → settle →
 assert loop. **`reference/automation.md` in this skill** carries the tool catalog by job, the
-error codes worth branching on, and the probe-harness workflow (`cargo teksilo probe`); the
+error codes worth branching on, and the probe-harness workflow (`cargo teksilo probe install`); the
 framework's `automation-mcp` guide is reachable with `cargo teksilo search "automation mcp"`.
 
 ## Breaking changes 0.9 → 0.13

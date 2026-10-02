@@ -21,7 +21,7 @@
 //! patches, renames, path-vs-registry-vs-git — so there is no manifest shape
 //! left to mis-parse.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -105,16 +105,11 @@ pub enum ResolveError {
     NotADependency,
 
     #[error(
-        "`teksilo` is in the dependency tree but `teksilo-widgets` is not, so the \
-         widget API is unavailable.\n\
-         Enable it:  teksilo = {{ version = \"…\", features = [\"widgets\"] }}"
+        "multiple resolved packages named {0}; run from a single app and remove ambiguous framework dependencies"
     )]
-    WidgetsDisabled,
+    Ambiguous(String),
 
-    #[error(
-        "teksilo-widgets source is not on disk at {0}.\n\
-         Run `cargo fetch` in your app and try again."
-    )]
+    #[error("teksilo source is not on disk at {0}.\nRun `cargo fetch` in your app and try again.")]
     SourceMissing(PathBuf),
 }
 
@@ -169,8 +164,49 @@ pub fn resolution_from_metadata(meta: &serde_json::Value) -> Result<Resolution, 
         .and_then(|p| p.as_array())
         .ok_or(ResolveError::NotADependency)?;
 
+    // Metadata includes every workspace member, even when invoked in one app.
+    // Restrict to the selected root's transitive dependencies; virtual roots
+    // cover all members and reject conflicting versions instead of guessing.
+    let reachable = meta.get("resolve").map(|graph| {
+        let mut pending: Vec<&str> = match graph.get("root").and_then(|v| v.as_str()) {
+            Some(root) => vec![root],
+            None => meta["workspace_members"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+                .collect(),
+        };
+        let mut seen = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(node) = graph["nodes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|node| node["id"].as_str() == Some(id))
+            {
+                pending.extend(
+                    node["dependencies"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|v| v.as_str()),
+                );
+            }
+        }
+        seen
+    });
     let mut crates = BTreeMap::new();
     for pkg in packages {
+        if reachable
+            .as_ref()
+            .is_some_and(|ids| pkg["id"].as_str().is_none_or(|id| !ids.contains(id)))
+        {
+            continue;
+        }
         let Some(name) = pkg.get("name").and_then(|n| n.as_str()) else {
             continue;
         };
@@ -187,6 +223,9 @@ pub fn resolution_from_metadata(meta: &serde_json::Value) -> Result<Resolution, 
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_default();
+        if crates.contains_key(name) {
+            return Err(ResolveError::Ambiguous(name.to_string()));
+        }
         crates.insert(
             name.to_string(),
             ResolvedCrate {
@@ -239,17 +278,19 @@ fn framework_version(crates: &BTreeMap<String, ResolvedCrate>) -> Option<String>
             return Some(c.version.clone());
         }
     }
-    crates.values().next().map(|c| c.version.clone())
+    crates
+        .values()
+        .find(|c| c.name.starts_with("teksilo-"))
+        .map(|c| c.version.clone())
 }
 
-/// Resolve, and make sure `teksilo-widgets` sources are readable.
+/// Resolve, and make sure all resolved API sources are readable.
 ///
 /// Runs `cargo fetch` once if the sources are absent, which is the ordinary
 /// state of a checkout that has never been built.
 pub fn resolve_with_sources(dir: &Path) -> Result<Resolution, ResolveError> {
     let resolution = resolve(dir)?;
-    let widgets = resolution.widgets().ok_or(ResolveError::WidgetsDisabled)?;
-    if widgets.has_src() {
+    if resolution.crates.values().all(ResolvedCrate::has_src) {
         return Ok(resolution);
     }
 
@@ -260,9 +301,8 @@ pub fn resolve_with_sources(dir: &Path) -> Result<Resolution, ResolveError> {
     // but it can also populate a registry directory that did not exist when the
     // first metadata call ran.
     let resolution = resolve(dir)?;
-    let widgets = resolution.widgets().ok_or(ResolveError::WidgetsDisabled)?;
-    if !widgets.has_src() {
-        return Err(ResolveError::SourceMissing(widgets.src()));
+    if let Some(missing) = resolution.crates.values().find(|c| !c.has_src()) {
+        return Err(ResolveError::SourceMissing(missing.src()));
     }
     Ok(resolution)
 }
@@ -279,6 +319,69 @@ mod tests {
         serde_json::json!({
             "name": name, "version": version, "manifest_path": manifest
         })
+    }
+
+    fn workspace_graph(root: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "packages": [
+                {"id":"old", "name":"teksilo", "version":"0.13.0", "manifest_path":"/old/Cargo.toml"},
+                {"id":"new", "name":"teksilo", "version":"0.14.2", "manifest_path":"/new/Cargo.toml"}
+            ],
+            "workspace_members": ["app-old", "app-new"],
+            "resolve": {"root":root, "nodes":[
+                {"id":"app-old", "dependencies":["old"]},
+                {"id":"app-new", "dependencies":["new"]},
+                {"id":"old", "dependencies":[]},
+                {"id":"new", "dependencies":[]}
+            ]}
+        })
+    }
+
+    #[test]
+    fn selected_app_excludes_other_workspace_dependencies() {
+        let r = resolution_from_metadata(&workspace_graph(serde_json::json!("app-old"))).unwrap();
+        assert_eq!(r.version, "0.13.0");
+        assert_eq!(r.get("teksilo").unwrap().dir, Path::new("/old"));
+    }
+
+    #[test]
+    fn conflicting_versions_are_reported_at_virtual_root_or_within_one_app() {
+        let mut meta = workspace_graph(serde_json::Value::Null);
+        assert!(matches!(
+            resolution_from_metadata(&meta),
+            Err(ResolveError::Ambiguous(_))
+        ));
+        meta["resolve"]["root"] = serde_json::json!("app-old");
+        meta["resolve"]["nodes"][0]["dependencies"] = serde_json::json!(["old", "new"]);
+        assert!(matches!(
+            resolution_from_metadata(&meta),
+            Err(ResolveError::Ambiguous(_))
+        ));
+    }
+
+    #[test]
+    fn external_sibling_alone_is_not_a_framework_dependency() {
+        let m = meta(serde_json::json!([pkg(
+            "text-document",
+            "1.0.0",
+            "/text/Cargo.toml"
+        )]));
+        assert!(matches!(
+            resolution_from_metadata(&m),
+            Err(ResolveError::NotADependency)
+        ));
+    }
+
+    #[test]
+    fn member_only_sources_resolve_without_widgets() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir(t.path().join("src")).unwrap();
+        std::fs::write(t.path().join("src/lib.rs"), "pub struct Example;").unwrap();
+        std::fs::write(t.path().join("Cargo.toml"),
+            "[package]\nname = \"teksilo-data\"\nversion = \"0.14.2\"\nedition = \"2021\"\n[workspace]\n").unwrap();
+        let r = resolve_with_sources(t.path()).unwrap();
+        assert!(r.get("teksilo-data").unwrap().has_src());
+        assert!(r.widgets().is_none());
     }
 
     #[test]

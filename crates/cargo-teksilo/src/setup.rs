@@ -1,34 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! One command that makes the agents configured in an app effective in it.
+//! Agent instruction formats, detection, explicit selection, and installation.
 //!
-//! Writes the probe harness, hands every detected agent the teksilo briefing
-//! in **that agent's own format**, and warms the search encoder's cache so the
-//! first `search` does not stall on a download.
-//!
-//! ## Three rules this module exists to keep
-//!
-//! **A project-scoped command does not write `$HOME`.** The previous version
-//! did: run in an app with no `.claude/`, it silently installed into
-//! `~/.claude/skills/teksilo` — a machine-wide change nobody asked for, from a
-//! command whose name says "set this project up". Only [`Scope::User`], which
-//! is only ever reached through `--user` or an explicit answer to an explicit
-//! question, resolves paths under the home directory.
-//!
-//! **Detection is conservative.** Only directories that already exist count as
-//! evidence that an agent is configured here. Creating `.cursor/` on the
-//! chance that someone might use Cursor litters a repository with guesses, and
-//! instructions installed where nothing reads them are indistinguishable from
-//! no instructions at all — except that they report success.
-//!
-//! **These tools do not share a format.** The skill is four Markdown files
-//! under a directory with YAML frontmatter Claude Code's loader understands;
-//! copying that tree into `.cursor/` accomplishes exactly nothing. So: the
-//! full skill where it is native, and a self-contained condensed brief
-//! everywhere else, wearing whatever frontmatter that vendor documents. The
-//! brief never refers to the skill, because on a machine with no Claude Code
-//! the skill is not there to refer to.
+//! Detection is used only when no targets are named. Explicit selection creates
+//! missing directories. User scope is available only through `agent install
+//! --user`; project initialization never falls back to the home directory.
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -82,15 +59,23 @@ Teksilo, and warns when only the patch differs. That is deliberate:
 `SplitView` was deleted outright in favour of `Splitter` between two minors,
 and a wrong answer reads exactly like a right one.
 
-## The five commands
+## Commands
 
-| Command | What it gives you |
-| --- | --- |
-| `cargo teksilo symbol <Name>` | The exact public API of a type — its module header, its `pub` items with their `///` docs, and the builder methods from its inherent `impl` blocks. Run it **before** writing against a type; never invent builder methods. |
-| `cargo teksilo search "<question>"` | Retrieval over Teksilo's hand-written guides and worked example crates. Neither reaches this app any other way: the guides ship in no crate, and every example is `publish = false`. Reach for it when the question is conceptual. |
-| `cargo teksilo show <path>` | One of those documents in full, offline — or just the lines a hit cited (`--lines 166-172`, 1-based and inclusive). `--list` prints every available path. |
-| `cargo teksilo probe` | Writes a Python automation harness into `scripts/teksilo_probe/`, for driving the running app through its automation bridge and asserting on what is on screen. |
-| `cargo teksilo setup` | The harness, plus this briefing re-installed for every agent configured here. |
+- `cargo teksilo symbol <Name>`: public API from resolved crate sources.
+- `cargo teksilo search "<query>"`: guides and examples; `--json` for structured hits.
+- `cargo teksilo show <path>`: full document; `--lines A-B` for a 1-based range.
+- `cargo teksilo init --agent codex --agent claude -y`: install the harness and
+  selected instructions, creating directories without detection markers.
+- `cargo teksilo agent install <agents...>`: instructions only. `--user` supports
+  claude, vibe, and opencode. `agent list` shows targets and installation state.
+- `cargo teksilo probe install`: install the automation harness in scripts/teksilo_probe/.
+- `cargo teksilo model fetch`: explicitly download the search model. Search uses
+  BM25 until cached; init and search never download weights.
+- `cargo teksilo status --json`: project version and tooling state.
+
+Use `--force` to replace conflicting generated files, `--quiet` to suppress
+informational output, and `--verbose` for diagnostics. Shared instructions
+outside the managed region are preserved.
 
 ## The rule that matters most
 
@@ -196,15 +181,6 @@ pub enum SetupError {
     NotUtf8(PathBuf),
 }
 
-/// Whose configuration is being written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
-    /// This repository. Never touches `$HOME`.
-    Project,
-    /// This user's own agent configuration, under the home directory.
-    User,
-}
-
 /// How one agent's instructions are shaped on disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Form {
@@ -214,17 +190,6 @@ pub enum Form {
     OwnFile { frontmatter: &'static str },
     /// A delimited region inside a file the project also writes.
     Region,
-}
-
-impl Form {
-    /// One phrase for a plan line.
-    pub fn describe(&self) -> &'static str {
-        match self {
-            Form::Skill => "the full skill (4 files)",
-            Form::OwnFile { .. } => "a rules file (brief)",
-            Form::Region => "a `teksilo` section (brief)",
-        }
-    }
 }
 
 /// One agent, detected, with the single path setup will write for it.
@@ -485,6 +450,7 @@ pub fn project_targets(root: &Path) -> Vec<Target> {
 }
 
 /// The project-scope agents that were *not* found, for the closing report.
+#[cfg(test)]
 pub fn project_undetected(root: &Path) -> Vec<(&'static str, &'static str)> {
     project_candidates(root)
         .into_iter()
@@ -603,11 +569,7 @@ pub fn user_targets_in(home: &Path, vibe: &Path, opencode: &Path) -> Vec<Target>
 /// The path is returned rather than the marker label because for two of the
 /// three it is env-dependent: told "no ~/.vibe/", a user with `VIBE_HOME` set
 /// would go and look in the wrong place.
-pub fn user_undetected(home: &Path) -> Vec<(&'static str, PathBuf)> {
-    user_undetected_in(home, &vibe_home(home), &opencode_config(home))
-}
-
-/// [`user_undetected`] against explicitly given directories.
+#[cfg(test)]
 pub fn user_undetected_in(
     home: &Path,
     vibe: &Path,
@@ -630,6 +592,7 @@ pub fn user_undetected_in(
 /// global file, and this tool still does not write it — one shared file with
 /// no delimiter convention is not somewhere to append unasked. Saying "n/a"
 /// without the reason would read as "Windsurf has nothing", which is false.
+#[cfg(test)]
 pub const USER_NOT_APPLICABLE: &[(&str, &str)] = &[
     (
         "Cursor",
@@ -654,6 +617,7 @@ pub const USER_NOT_APPLICABLE: &[(&str, &str)] = &[
 /// Printed rather than silently skipped, because "Cursor was not installed for
 /// you" and "Cursor has nowhere for this to go" are different facts and a user
 /// with Cursor open deserves the second one.
+#[cfg(test)]
 pub fn user_scope_note() -> String {
     let mut out = String::from("The rest keep no user-level file this tool can write:\n");
     for (agent, why) in USER_NOT_APPLICABLE {
@@ -662,7 +626,7 @@ pub fn user_scope_note() -> String {
     // Counted, not spelled: the last time a number in prose was typed by hand
     // here it went stale the moment the list grew.
     out.push_str(&format!(
-        "Run `cargo teksilo setup` inside each project for those {}.",
+        "Run `cargo teksilo init` inside each project for those {}.",
         USER_NOT_APPLICABLE.len()
     ));
     out
@@ -675,12 +639,6 @@ pub fn user_scope_note() -> String {
 /// whether an agent then reads it is that agent's decision, and at least one
 /// will not straight away — Grok Build wants the folder trusted first, and any
 /// of them skips a gitignored instruction file without saying so.
-pub const ACTIVATION_CAVEAT: &str = "\
-These are files on disk. An agent picks them up on its own terms —\n\
-some ask you to trust the folder first, and a gitignored instruction\n\
-file is skipped silently.";
-
-/// Where the home directory is, if the platform will say.
 pub fn home_dir() -> Result<PathBuf, SetupError> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
@@ -1740,8 +1698,8 @@ mod tests {
         assert!(BRIEF.contains("cargo teksilo symbol"));
         assert!(BRIEF.contains("cargo teksilo search"));
         assert!(BRIEF.contains("cargo teksilo show"));
-        assert!(BRIEF.contains("cargo teksilo probe"));
-        assert!(BRIEF.contains("cargo teksilo setup"));
+        assert!(BRIEF.contains("cargo teksilo probe install"));
+        assert!(BRIEF.contains("cargo teksilo init"));
         assert!(
             BRIEF.contains("blob/main"),
             "the GitHub warning is the point"
@@ -1755,7 +1713,120 @@ mod tests {
             .expect("SKILL.md must be embedded");
         let text = std::str::from_utf8(skill.contents()).unwrap();
         assert!(text.contains("name: teksilo"));
-        assert!(text.contains("user_invocable: true"));
+        assert!(text.starts_with("---\nname: teksilo\n"));
         assert!(text.len() > 5_000, "suspiciously small skill");
     }
+}
+
+/// Stable CLI identifiers, independent of display labels and detection markers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Agent {
+    Claude,
+    Cursor,
+    Windsurf,
+    Cline,
+    Copilot,
+    Codex,
+    Vibe,
+    Opencode,
+}
+impl Agent {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Cursor => "Cursor",
+            Self::Windsurf => "Windsurf",
+            Self::Cline => "Cline",
+            Self::Copilot => "GitHub Copilot",
+            Self::Codex => "Codex / AGENTS.md",
+            Self::Vibe => "Mistral Vibe",
+            Self::Opencode => "opencode",
+        }
+    }
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Cursor => "cursor",
+            Self::Windsurf => "windsurf",
+            Self::Cline => "cline",
+            Self::Copilot => "copilot",
+            Self::Codex => "codex",
+            Self::Vibe => "vibe",
+            Self::Opencode => "opencode",
+        }
+    }
+}
+pub const AGENTS: &[Agent] = &[
+    Agent::Claude,
+    Agent::Cursor,
+    Agent::Windsurf,
+    Agent::Cline,
+    Agent::Copilot,
+    Agent::Codex,
+    Agent::Vibe,
+    Agent::Opencode,
+];
+
+pub fn selected_targets(
+    root: &Path,
+    selected: &[Agent],
+    user: bool,
+) -> Result<Vec<Target>, String> {
+    if selected.is_empty() {
+        return Ok(if user {
+            user_targets(root)
+        } else {
+            project_targets(root)
+        });
+    }
+    let candidates: Vec<Target> = if user {
+        user_candidates(root, &vibe_home(root), &opencode_config(root))
+            .into_iter()
+            .map(|c| c.target)
+            .collect()
+    } else {
+        project_candidates(root)
+            .into_iter()
+            .map(|c| c.target)
+            .collect()
+    };
+    let mut targets = Vec::new();
+    for agent in selected {
+        let label = if !user && matches!(agent, Agent::Vibe | Agent::Opencode) {
+            Agent::Codex.label()
+        } else {
+            agent.label()
+        };
+        let target = candidates
+            .iter()
+            .find(|t| t.agent == label)
+            .ok_or_else(|| {
+                format!(
+                    "{} does not support user installation\nhelp: install without --user",
+                    agent.id()
+                )
+            })?;
+        if !targets.iter().any(|t: &Target| t.path == target.path) {
+            targets.push(target.clone());
+        }
+    }
+    Ok(targets)
+}
+
+/// Shared instruction regions preserve surrounding text. Whole files and skills
+/// need explicit permission before replacing unknown or changed content.
+pub fn check_conflict(target: &Target, force: bool) -> Result<(), String> {
+    let state = inspect(target);
+    if let Presence::Blocked(reason) = state {
+        return Err(format!("{}: {reason}", target.path.display()));
+    }
+    let differs = state == Presence::Stale
+        || (target.form != Form::Region && target.path.exists() && state == Presence::Absent);
+    if !force && differs {
+        return Err(format!(
+            "{} contains different instructions\nhelp: use --force to replace them",
+            target.path.display()
+        ));
+    }
+    Ok(())
 }
