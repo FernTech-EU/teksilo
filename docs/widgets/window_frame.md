@@ -125,7 +125,7 @@ The same 6 dp gutter the `Splitter` and the dock resize handle use. It is
 the window's own edge, so widening it would eat into the content rather
 than into empty space. A coarse pointer reaches it through
 `Widget::hit_outset` (24 dp, 44 at Touch) over an unchanged 6 dp visual —
-see `docs/density-inventory.md` and the touch design's Constants table.
+see `engineering/docs/density-inventory.md` and the touch design's Constants table.
 
 ```rust
 pub const WINDOW_FRAME_RESIZE_THICKNESS: f32 = 6.0;

@@ -5,7 +5,7 @@
 
 Every public widget in `teksilo-widgets`, grouped by category. Each page links to its full rustdoc API reference.
 
-## Layout primitives
+## Layout primitives: `crates/teksilo-widgets/src/primitives/`
 
 - [AspectRatio](aspect_ratio.md) — AspectRatio — a single-child wrapper that constrains layout to a fixed
 - [Center](center.md) — Center — a single-child wrapper that centers its child within the available
@@ -147,7 +147,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [TreeTableView](tree_table_view.md) — `TreeTableView<T>` — hierarchical multi-column data table with expand/collapse
 - [TreeView](tree_view.md) — TreeView — a virtualized, expandable/collapsible hierarchical list widget
 
-## Animation wrappers
+## Animation wrappers: `crates/teksilo-widgets/src/animations/`
 
 - [Blur](blur.md) — `Blur` — a wrapper widget that applies a Gaussian-equivalent blur
 - [Collapse](collapse.md) — `Collapse` — a wrapper widget that animates its child between
