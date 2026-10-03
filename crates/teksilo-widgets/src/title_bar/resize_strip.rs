@@ -184,7 +184,13 @@ impl Widget for ResizeStrip {
                     if !ctx.pointer().primary {
                         return EventResponse::Ignored;
                     }
-                    let _ = host.begin_resize(edge);
+                    if host.begin_resize(edge).is_ok() {
+                        // The compositor may consume the release, so finish
+                        // the local press when handing off the interaction.
+                        ctx.cancel_pointer_sequence(
+                            teksilo_core::pointer::CancelReason::OsDragStarted,
+                        );
+                    }
                     return EventResponse::Handled;
                 }
                 EventResponse::Ignored

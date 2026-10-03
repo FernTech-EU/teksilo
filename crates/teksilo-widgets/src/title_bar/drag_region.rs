@@ -165,7 +165,7 @@ impl Widget for DragRegion {
         let host_long_press = self.host.clone();
 
         let mut handlers = HandlerSet::new()
-            .on_drag(move |phase, _ctx| {
+            .on_drag(move |phase, ctx| {
                 if let DragPhase::Started {
                     button: PointerButton::Primary,
                     pointer,
@@ -181,7 +181,14 @@ impl Widget for DragRegion {
                     if pointer.kind.is_direct() {
                         return;
                     }
-                    let _ = host_drag.begin_drag();
+                    if host_drag.begin_drag().is_ok() {
+                        // The window manager owns the rest of this press and
+                        // may consume its release. Retaining our capture would
+                        // prevent later hover moves from reaching resize grips.
+                        ctx.cancel_pointer_sequence(
+                            teksilo_core::pointer::CancelReason::OsDragStarted,
+                        );
+                    }
                 }
             })
             .on_long_press(move |event, ctx| {
@@ -408,6 +415,40 @@ mod tests {
         tree.pointer_down_button(at, PointerButton::Primary);
         tree.pointer_move(Point::new(at.x + 40.0, at.y));
         assert_eq!(host.drags.get(), 1, "a mouse drag moves the window");
+    }
+
+    #[test]
+    fn resize_cursors_survive_window_moves_without_a_button_release() {
+        use crate::HStack;
+        use crate::title_bar::ResizeStrip;
+        use teksilo_core::widget::CursorIcon;
+
+        let host = Rc::new(TestHost::with_os_menu());
+        let mut tree = WidgetTree::new();
+        let drag = tree.add(DragRegion::new(host.clone()));
+        let grip = tree.add(ResizeStrip::vertical(host.clone(), ResizeEdge::Right, 6.0));
+        tree.add(HStack::new().spacing(0.0).child(drag).child(grip));
+        tree.layout(SizeProposal::exact(400.0, 32.0));
+        let at = tree.bounds(drag).center();
+        let edge = tree.bounds(grip).center();
+
+        for expected_drags in 1..=2 {
+            tree.pointer_move(at);
+            tree.pointer_down_button(at, PointerButton::Primary);
+            tree.pointer_move(Point::new(at.x + 40.0, at.y));
+            assert_eq!(host.drags.get(), expected_drags);
+            assert_eq!(tree.pointer_captured_by(), None);
+
+            // The WM consumes PointerUp. The next client motion must still
+            // hit-test the frame and adopt its declared resize cursor.
+            tree.pointer_move(edge);
+            assert_eq!(tree.hovered(), Some(grip));
+            assert_eq!(tree.current_cursor(), CursorIcon::ColResize);
+            tree.pointer_down_button(edge, PointerButton::Primary);
+            tree.pointer_move(at);
+            assert_eq!(tree.hovered(), Some(drag));
+            assert_eq!(tree.current_cursor(), CursorIcon::Default);
+        }
     }
 
     /// A finger drag does **not**, and that is a platform fact rather than an
