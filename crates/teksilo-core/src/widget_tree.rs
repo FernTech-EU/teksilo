@@ -1106,8 +1106,8 @@ impl WidgetTree {
 
     /// Run a closure with a fresh [`EventContext`] anchored at this
     /// tree, then collect any pending operations queued through the
-    /// context (intents, modal requests, frame requests, idle
-    /// callbacks…) so they take effect on the next event-loop tick.
+    /// context. Intents are dispatched before returning; modal requests,
+    /// frame requests and idle callbacks are collected for the event loop.
     ///
     /// Used by the `teksilo-app` event-loop dispatcher to deliver
     /// async-result callbacks (file dialogs, future background
@@ -1124,6 +1124,10 @@ impl WidgetTree {
         let anchor = self.arena.roots().first().copied();
         if let Some(anchor_id) = anchor {
             self.collect_from_ctx(ctx, anchor_id);
+            // App callbacks (including close guards) have no enclosing input
+            // dispatch to drain this queue. Waiting for another key or pointer
+            // event can leave a vetoed close with no confirmation dialog.
+            self.drain_pending_intents(ops);
         } else {
             // Empty tree — nothing to anchor intents on. Drop ctx;
             // its only side effects (frame requests, cursor) are
@@ -5564,5 +5568,79 @@ mod density_tests {
 
         assert_eq!(tree.density_policy(), policy);
         assert_eq!(tree.input_density(), TargetDensity::Compact);
+    }
+}
+
+#[cfg(test)]
+mod app_callback_intent_tests {
+    use super::*;
+    use crate::{Action, BuildContext, Intent, LayoutContext, LayoutResponse, Widget};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use teksilo_canvas::{Size, SizeProposal};
+
+    #[derive(Debug)]
+    struct QuitActions {
+        callback_returned: Rc<Cell<bool>>,
+        calls: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl Widget for QuitActions {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let returned = self.callback_returned.clone();
+            let calls = self.calls.clone();
+            ctx.register_action_global(Action::new("test.quit").on_invoke(move |_, ctx| {
+                assert!(
+                    returned.get(),
+                    "dispatch must wait until the callback returns"
+                );
+                calls.borrow_mut().push("quit");
+                ctx.send_intent(Intent::new("test.confirm"));
+            }));
+            let calls = self.calls.clone();
+            ctx.register_action_global(Action::new("test.confirm").on_invoke(move |_, _| {
+                calls.borrow_mut().push("confirm");
+            }));
+            vec![]
+        }
+
+        fn layout_response(&self, _: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            Size::new(0.0, 0.0).into()
+        }
+    }
+
+    #[test]
+    fn app_callback_dispatches_quit_and_followup_without_an_input_event() {
+        let mut tree = WidgetTree::new();
+        let returned = Rc::new(Cell::new(false));
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        tree.add(QuitActions {
+            callback_returned: returned.clone(),
+            calls: calls.clone(),
+        });
+        let mut ops = crate::window::NoopWindowOps;
+        // This is the entry point WindowManager uses to evaluate a close guard.
+        tree.run_with_event_context(&mut ops, |ctx| {
+            ctx.send_intent(Intent::new("test.quit"));
+            assert!(calls.borrow().is_empty());
+            returned.set(true);
+        });
+        assert_eq!(&*calls.borrow(), &["quit", "confirm"]);
+        assert!(tree.pending_intents.is_empty());
+        tree.run_with_event_context(&mut ops, |_| {});
+        assert_eq!(
+            &*calls.borrow(),
+            &["quit", "confirm"],
+            "dispatch exactly once"
+        );
+    }
+
+    #[test]
+    fn callback_on_empty_tree_does_not_leave_an_unanchored_intent() {
+        let mut tree = WidgetTree::new();
+        tree.run_with_event_context(&mut crate::window::NoopWindowOps, |ctx| {
+            ctx.send_intent(Intent::new("test.quit"));
+        });
+        assert!(tree.pending_intents.is_empty());
     }
 }

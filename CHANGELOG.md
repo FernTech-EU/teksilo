@@ -15,6 +15,10 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Dispatch intents emitted by app callbacks, including window close guards,
+  before returning to the event loop. A vetoed close that requests a confirmation
+  dialog no longer waits for another key or pointer event to show that dialog.
+
 - Restored the generated gesture arbitration table and refreshed the search
   corpus after documentation edits changed its no-winner markers.
 - Removed an unnecessary borrow flagged by Clippy on Rust 1.99.
