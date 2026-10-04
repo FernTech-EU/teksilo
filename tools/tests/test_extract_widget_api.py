@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
 
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('extract_widget_api', ROOT / 'tools/extract_widget_api.py')
@@ -16,6 +19,32 @@ spec.loader.exec_module(api)
 
 
 class TraitExtractionTests(unittest.TestCase):
+    def test_unsafe_trait_lookup_by_name_through_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / 'crates/teksilo-core/src'
+            src.mkdir(parents=True)
+            (src / 'lib.rs').write_text('pub mod source;\npub use source::PacketSource;\n')
+            (src / 'source.rs').write_text('''
+pub unsafe trait PacketSource {
+    type Event;
+    fn read(&self) -> Self::Event;
+}
+''')
+            for crate_args in [[], ['--crate', 'core']]:
+                with self.subTest(crate_args=crate_args):
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    with (patch.object(api, 'REPO_ROOT', root),
+                          patch.object(api, 'SPEC', api.SPEC),
+                          patch.object(api, '_registry_cache', {}),
+                          redirect_stdout(stdout), redirect_stderr(stderr)):
+                        result = api.main(['PacketSource', *crate_args, '--format', 'json'])
+                    self.assertEqual(result, 0, stderr.getvalue())
+                    trait, = json.loads(stdout.getvalue())[0]['items']
+                    self.assertEqual(trait['name'], 'PacketSource')
+                    self.assertEqual(trait['kind'], 'trait')
+                    self.assertEqual([m['name'] for m in trait['methods']], ['Event', 'read'])
+
     def test_public_trait_contract_and_default_body(self):
         source = '''
 /// Source contract.

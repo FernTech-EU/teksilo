@@ -1542,7 +1542,10 @@ def build_registry() -> Registry:
     module_to_file: dict[str, Path] = {}
     type_display: dict[Path, list[str]] = {}
     widget_display: dict[Path, list[str]] = {}
-    type_re = re.compile(r"^\s*pub\s+(?:struct|enum|type|trait)\s+([A-Za-z_]\w*)", re.MULTILINE)
+    type_re = re.compile(
+        r"^\s*pub\s+(?:struct|enum|type|(?:unsafe\s+)?trait)\s+([A-Za-z_]\w*)",
+        re.MULTILINE,
+    )
 
     for fp in files:
         module_to_file.setdefault(fp.stem.lower(), fp)

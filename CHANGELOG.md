@@ -15,6 +15,9 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Resolve public unsafe traits by name in `cargo teksilo symbol`, including
+  cross-crate lookup when the module name differs from the trait name.
+
 - Limit named-type heading boosts in documentation search so results relevant
   to the full query can outrank basic examples that only name the type.
 
