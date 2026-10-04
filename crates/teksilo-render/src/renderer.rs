@@ -355,6 +355,17 @@ impl Renderer {
         // Reset blur intermediate-texture pool — marks every texture
         // available, evicts ones unused for too long.
         self.blur_pool.begin_frame();
+        let blur_scopes = frame
+            .draw_order
+            .iter()
+            .filter(|c| matches!(c, teksilo_canvas::DrawCommand::BeginBlurredSubtree { .. }))
+            .count();
+        self.blur_pipelines.params.begin_frame(
+            &self.device,
+            u32::try_from(blur_scopes)
+                .unwrap_or(u32::MAX)
+                .saturating_mul(crate::blur::PARAM_SLOTS_PER_SCOPE),
+        );
 
         // Process pending images: upload textures for newly embedded resources
         for pending in &frame.pending_images {
@@ -1743,7 +1754,7 @@ impl Renderer {
                             &self.queue,
                             &mut encoder,
                             &mut self.blur_pool,
-                            &self.blur_pipelines,
+                            &mut self.blur_pipelines,
                             intermediate,
                             used_w,
                             used_h,
@@ -2211,7 +2222,7 @@ fn run_kawase_chain(
     queue: &wgpu::Queue,
     encoder: &mut wgpu::CommandEncoder,
     pool: &mut crate::blur::BlurPool,
-    pipelines: &crate::blur::BlurPipelines,
+    pipelines: &mut crate::blur::BlurPipelines,
     source: crate::blur::AcquiredTexture,
     used_w: u32,
     used_h: u32,
@@ -2251,13 +2262,14 @@ fn run_kawase_chain(
         let params = crate::blur::BlurParams {
             offset: crate::blur::kawase_offset(src_bucket_w, src_bucket_h, KERNEL_OFFSET),
         };
-        queue.write_buffer(&pipelines.params_buffer, 0, bytemuck::bytes_of(&params));
-        let bind_group = pool.make_bind_group(device, src_handle, &pipelines.params_buffer);
+        let params_offset = pipelines.params.push(queue, &params);
+        let bind_group = pool.make_bind_group(device, src_handle, pipelines.params.buffer());
 
         run_kawase_pass(
             encoder,
             &pipelines.down,
             &bind_group,
+            params_offset,
             pool.view(dst),
             dst_used_w,
             dst_used_h,
@@ -2282,13 +2294,14 @@ fn run_kawase_chain(
         let params = crate::blur::BlurParams {
             offset: crate::blur::kawase_offset(src_bucket_w, src_bucket_h, KERNEL_OFFSET),
         };
-        queue.write_buffer(&pipelines.params_buffer, 0, bytemuck::bytes_of(&params));
-        let bind_group = pool.make_bind_group(device, src_handle, &pipelines.params_buffer);
+        let params_offset = pipelines.params.push(queue, &params);
+        let bind_group = pool.make_bind_group(device, src_handle, pipelines.params.buffer());
 
         run_kawase_pass(
             encoder,
             &pipelines.up,
             &bind_group,
+            params_offset,
             pool.view(dst),
             dst_used_w,
             dst_used_h,
@@ -2311,10 +2324,12 @@ fn run_kawase_chain(
 /// `(used_w, used_h)` — the destination bucket may be larger but we
 /// only write the upper-left sub-rect that the next pass will sample
 /// from.
+#[allow(clippy::too_many_arguments)]
 fn run_kawase_pass(
     encoder: &mut wgpu::CommandEncoder,
     pipeline: &wgpu::RenderPipeline,
     bind_group: &wgpu::BindGroup,
+    params_offset: u32,
     target_view: &wgpu::TextureView,
     used_w: u32,
     used_h: u32,
@@ -2337,7 +2352,7 @@ fn run_kawase_pass(
         multiview_mask: None,
     });
     pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, bind_group, &[]);
+    pass.set_bind_group(0, bind_group, &[params_offset]);
     // Full-screen triangle covers the whole viewport — restricting the
     // viewport to the used sub-rect keeps the over-allocated bucket
     // clean and (more importantly) limits the fragment work.
@@ -3680,6 +3695,160 @@ mod tests {
                      into its neighbours is the blur this snap removes"
                 );
             }
+        }
+    }
+
+    /// Render `frame` into a fresh 64×32 `Rgba8UnormSrgb` target cleared to
+    /// transparent and read it back.
+    fn render_to_pixels(
+        renderer: &mut Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &RenderFrame,
+    ) -> Vec<u8> {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("teksilo_render_blur_isolation_target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render(frame, &view, 1.0, 64, 32, [0.0, 0.0, 0.0, 0.0]);
+        crate::test_support::read_texture_rgba(device, queue, &texture, 64, 32)
+    }
+
+    /// Append a blur scope over `bounds` holding one opaque white square.
+    fn push_blurred_square(
+        frame: &mut RenderFrame,
+        bounds: teksilo_canvas::Rect,
+        radius: f32,
+        square: teksilo_canvas::Rect,
+    ) {
+        frame
+            .draw_order
+            .push(DrawCommand::BeginBlurredSubtree { bounds, radius });
+        let idx = frame.decorations.len();
+        frame.decorations.push(teksilo_canvas::DecorationRect {
+            rect: square.to_array(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: teksilo_canvas::DecorationKind::WidgetBackground,
+        });
+        frame.draw_order.push(DrawCommand::Decoration(idx));
+        frame.draw_order.push(DrawCommand::EndBlurredSubtree);
+    }
+
+    #[test]
+    fn a_blur_scope_does_not_take_the_kernel_of_a_later_one() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("teksilo_render_blur_isolation_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+
+        // Scope A: 32 px wide, radius 6 → a 3-level chain.
+        let a_bounds = Rect::new(0.0, 0.0, 32.0, 32.0);
+        let a_square = Rect::new(12.0, 12.0, 8.0, 8.0);
+        let mut alone = RenderFrame::new();
+        push_blurred_square(&mut alone, a_bounds, 6.0, a_square);
+
+        // The same scope followed by B: 16 px wide, radius 2 → a 1-level
+        // chain whose passes sample a smaller texture, so a shared uniform
+        // would hand A a kernel offset twice as wide.
+        let mut followed = RenderFrame::new();
+        push_blurred_square(&mut followed, a_bounds, 6.0, a_square);
+        push_blurred_square(
+            &mut followed,
+            Rect::new(40.0, 8.0, 16.0, 16.0),
+            2.0,
+            Rect::new(44.0, 12.0, 8.0, 8.0),
+        );
+
+        let a_alone = render_to_pixels(&mut renderer, &device, &queue, &alone);
+        let a_followed = render_to_pixels(&mut renderer, &device, &queue, &followed);
+        let region = |pixels: &[u8]| -> Vec<u8> {
+            (0..32)
+                .flat_map(|y| pixels[y * 64 * 4..(y * 64 + 32) * 4].to_vec())
+                .collect()
+        };
+        assert!(
+            region(&a_alone).iter().any(|&b| b != 0),
+            "scope A must have drawn something"
+        );
+        assert_eq!(
+            region(&a_alone),
+            region(&a_followed),
+            "scope A must blur the same whatever blur scope follows it in the frame"
+        );
+    }
+
+    #[test]
+    fn each_kawase_pass_gets_its_own_parameter_slot() {
+        let Some((_renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("teksilo_render_blur_slots_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        let mut arena = crate::blur::KawaseParamArena::new(&device);
+        // More passes than the initial capacity, so the buffer grows.
+        let passes = crate::blur::PARAM_SLOTS_PER_SCOPE + 3;
+        arena.begin_frame(&device, passes);
+        let offsets: Vec<u32> = (0..passes)
+            .map(|i| {
+                let v = i as f32;
+                arena.push(
+                    &queue,
+                    &crate::blur::BlurParams {
+                        offset: [v, v + 0.5, 0.0, 0.0],
+                    },
+                )
+            })
+            .collect();
+        let stride = arena.slot_stride();
+        for (i, offset) in offsets.iter().enumerate() {
+            assert_eq!(u64::from(*offset), stride * i as u64);
+            assert_eq!(
+                u64::from(*offset) % u64::from(device.limits().min_uniform_buffer_offset_alignment),
+                0,
+                "dynamic offsets must respect the device alignment"
+            );
+        }
+
+        let size = arena.buffer().size();
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("blur_params_readback"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_buffer_to_buffer(arena.buffer(), 0, &readback, 0, size);
+        queue.submit(Some(encoder.finish()));
+        readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .expect("poll");
+        let bytes = readback
+            .slice(..)
+            .get_mapped_range()
+            .expect("mapped readback")
+            .to_vec();
+        for (i, offset) in offsets.iter().enumerate() {
+            let at = *offset as usize;
+            let slot: &[f32] = bytemuck::cast_slice(&bytes[at..at + 16]);
+            assert_eq!(slot, &[i as f32, i as f32 + 0.5, 0.0, 0.0], "slot {i}");
         }
     }
 }

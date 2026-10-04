@@ -47,6 +47,90 @@ pub(crate) struct BlurParams {
 /// matters as a defensive upper bound.
 const MAX_KAWASE_LEVELS: u32 = 6;
 
+/// Uniform slots one blur scope can use: a downsample and an upsample
+/// pass per chain level.
+pub(crate) const PARAM_SLOTS_PER_SCOPE: u32 = 2 * MAX_KAWASE_LEVELS;
+
+/// Per-pass Kawase parameters for one frame, one uniform slot per pass.
+///
+/// `Queue::write_buffer` is not ordered against the passes of the
+/// encoder it precedes: every write of a frame lands in the queue's
+/// pending writes, which execute before the frame's command buffer. So a
+/// single buffer rewritten before each pass is read by *every* pass as
+/// its last value. Giving each pass its own slot, bound with a dynamic
+/// offset, makes each pass read what was written for it.
+pub(crate) struct KawaseParamArena {
+    buffer: wgpu::Buffer,
+    /// Bytes between slots: `BlurParams` rounded up to the device's
+    /// `min_uniform_buffer_offset_alignment`.
+    slot_stride: u64,
+    capacity: u32,
+    next: u32,
+}
+
+impl KawaseParamArena {
+    pub(crate) fn new(device: &wgpu::Device) -> Self {
+        let align = u64::from(device.limits().min_uniform_buffer_offset_alignment);
+        let slot_stride = (std::mem::size_of::<BlurParams>() as u64).next_multiple_of(align);
+        let capacity = PARAM_SLOTS_PER_SCOPE;
+        Self {
+            buffer: Self::allocate(device, slot_stride, capacity),
+            slot_stride,
+            capacity,
+            next: 0,
+        }
+    }
+
+    fn allocate(device: &wgpu::Device, slot_stride: u64, capacity: u32) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("blur_params"),
+            size: slot_stride * u64::from(capacity),
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_DST
+                | if cfg!(test) {
+                    wgpu::BufferUsages::COPY_SRC
+                } else {
+                    wgpu::BufferUsages::empty()
+                },
+            mapped_at_creation: false,
+        })
+    }
+
+    /// Start a frame that will run at most `slots` passes. Grows the buffer
+    /// before any pass binds it, so every bind group of the frame refers to
+    /// the same buffer.
+    pub(crate) fn begin_frame(&mut self, device: &wgpu::Device, slots: u32) {
+        if slots > self.capacity {
+            self.capacity = slots.next_power_of_two();
+            self.buffer = Self::allocate(device, self.slot_stride, self.capacity);
+        }
+        self.next = 0;
+    }
+
+    /// Write `params` into the next free slot and return its dynamic offset.
+    pub(crate) fn push(&mut self, queue: &wgpu::Queue, params: &BlurParams) -> u32 {
+        assert!(
+            self.next < self.capacity,
+            "blur pass {} exceeds the {} slots reserved for this frame",
+            self.next,
+            self.capacity
+        );
+        let offset = self.slot_stride * u64::from(self.next);
+        self.next += 1;
+        queue.write_buffer(&self.buffer, offset, bytemuck::bytes_of(params));
+        u32::try_from(offset).expect("blur param offsets fit in u32")
+    }
+
+    pub(crate) fn buffer(&self) -> &wgpu::Buffer {
+        &self.buffer
+    }
+
+    #[cfg(test)]
+    pub(crate) fn slot_stride(&self) -> u64 {
+        self.slot_stride
+    }
+}
+
 // Intermediate format is the surface format, threaded through from
 // Renderer construction. Same format means the existing rect/sdf/quad
 // pipelines (built against `surface_format`) accept the intermediate
@@ -140,8 +224,10 @@ impl BlurPool {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(
+                            std::mem::size_of::<BlurParams>() as u64
+                        ),
                     },
                     count: None,
                 },
@@ -264,7 +350,11 @@ impl BlurPool {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: params_buffer.as_entire_binding(),
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: params_buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(std::mem::size_of::<BlurParams>() as u64),
+                    }),
                 },
             ],
         })
@@ -285,7 +375,7 @@ pub(crate) struct AcquiredTexture {
 pub(crate) struct BlurPipelines {
     pub down: wgpu::RenderPipeline,
     pub up: wgpu::RenderPipeline,
-    pub params_buffer: wgpu::Buffer,
+    pub params: KawaseParamArena,
 }
 
 impl BlurPipelines {
@@ -324,20 +414,10 @@ impl BlurPipelines {
             target_format,
         );
 
-        // Per-pass params live in a single uniform buffer that we
-        // rewrite immediately before each Kawase pass. The buffer is
-        // 16 bytes (one vec4) — well below any uniform-buffer minimum.
-        let params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("blur_params"),
-            size: std::mem::size_of::<BlurParams>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
         Self {
             down,
             up,
-            params_buffer,
+            params: KawaseParamArena::new(device),
         }
     }
 }

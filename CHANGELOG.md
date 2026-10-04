@@ -61,6 +61,16 @@ by crate for clarity, not because crates version independently.
   starts when the window gets it, rather than later by however long the
   window had been without focus before the loop existed.
 
+#### Render
+
+- **Blur used the wrong kernel width.** Every pass of every blur in a frame
+  read the kernel offset written for the frame's last blur pass, because
+  the per-pass parameters were rewritten into one buffer that the GPU reads
+  only once the whole frame runs. A blur therefore came out softer or
+  sharper than its radius asked for, and changed when another blur of a
+  different size appeared on screen. Each pass now reads its own
+  parameters.
+
 #### Widgets
 
 - **An image or raster icon could show another image's pixels.**
