@@ -291,7 +291,7 @@ pub use tree_view::{TreeRowContext, TreeView};
 /// `I18nConfig::framework_locales(teksilo_widgets::framework_locales())`
 /// at startup.
 ///
-/// teksilo-widgets ships `en-US` (the source language) plus 22
+/// teksilo-widgets ships `en-US` (the source language) plus 23
 /// translations. Keys missing from a locale's bundle fall back to the en-US
 /// source via `I18nManager::resolve_widget`'s fallback chain, so a partial
 /// translation degrades key-by-key rather than wholesale. Applications that
@@ -314,6 +314,7 @@ pub fn framework_locales() -> &'static [(&'static str, &'static [&'static str])]
         ("da-DK", &[include_str!("../locales/da-DK.ftl")]), // Danish
         ("de-DE", &[include_str!("../locales/de-DE.ftl")]), // German
         ("el-GR", &[include_str!("../locales/el-GR.ftl")]), // Greek
+        ("eo", &[include_str!("../locales/eo.ftl")]),       // Esperanto
         ("es-ES", &[include_str!("../locales/es-ES.ftl")]), // Spanish
         ("fi-FI", &[include_str!("../locales/fi-FI.ftl")]), // Finnish
         ("fr-FR", &[include_str!("../locales/fr-FR.ftl")]), // French

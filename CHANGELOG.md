@@ -17,6 +17,8 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- Esperanto (`eo`) translations for all 313 framework messages, available
+  through `teksilo_widgets::framework_locales()`.
 - `NotificationArchiveModel::push_update`, which archives an in-place update
   of a notice still on screen, beside `push`, which archives a notice raised.
   `UPDATE_HISTORY_LIMIT` is how many update records a row keeps.
