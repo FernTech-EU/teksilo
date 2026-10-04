@@ -483,17 +483,19 @@ mod tests {
         let idx = index().unwrap();
         let root = repo_root();
         for chunk in &idx.chunks {
-            let expected_prefix = match chunk.kind.as_str() {
-                "guide" | "footer" => "docs/",
-                "example" => "examples/",
+            let valid_source = match chunk.kind.as_str() {
+                "guide" => {
+                    chunk.path.starts_with("docs/")
+                        || chunk.path == "crates/teksilo/src/app_guide.md"
+                }
+                "footer" => chunk.path.starts_with("docs/"),
+                "example" => chunk.path.starts_with("examples/"),
                 other => panic!("chunk {} has an unknown kind {other:?}", chunk.id),
             };
             assert!(
-                chunk.path.starts_with(expected_prefix),
+                valid_source,
                 "chunk {} is a {} but its path is {:?}",
-                chunk.id,
-                chunk.kind,
-                chunk.path
+                chunk.id, chunk.kind, chunk.path
             );
             assert!(
                 !chunk.path.contains("..") && !chunk.path.starts_with('/'),

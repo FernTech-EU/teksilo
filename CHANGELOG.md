@@ -15,6 +15,9 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Accept the application guide's source path in corpus validation while retaining
+  checks for relative paths and existing source files.
+
 - Scope documentation search with `--path` before lexical/semantic fusion and
   prefer headings for explicitly named Rust types. Index the application guide,
   refresh corpus vectors and cover common chart and scrolling queries.
