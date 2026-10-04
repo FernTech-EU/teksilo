@@ -64,11 +64,15 @@ scheduler that consults the same helpers.
 
 2. **Per-window active flag.** `WindowEvent::Focused(false)` (and
    on macOS, `Occluded(true)`) calls `tree.set_window_active(false)`,
-   which makes `AnimationScheduler::tick` a no-op and
-   `next_deadline` return `None`. The event loop falls through to
-   `ControlFlow::Wait`. On resume, each animation's `start_time` is
-   rebased by the paused duration so phase is continuous, a
-   half-swept sweep resumes at 50%, not snapped forward.
+   which makes `AnimationScheduler::tick` skip every *looping*
+   animation and `next_deadline` leave them out. Once the last
+   one-shot tween has finished, the event loop falls through to
+   `ControlFlow::Wait`. On resume, each loop's `start_time` is
+   rebased by the time it spent paused so phase is continuous, a
+   half-swept sweep resumes at 50%, not snapped forward. One-shot
+   tweens are not paused, for the reason gate 3 exempts them: a
+   `Collapse` opened in a window without focus would otherwise keep
+   its body at no height until the window was focused again.
    ([app.rs](../crates/teksilo-app/src/app.rs),
    [window_manager.rs](../crates/teksilo-app/src/window_manager.rs))
 

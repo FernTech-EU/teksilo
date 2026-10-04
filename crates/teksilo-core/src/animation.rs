@@ -108,18 +108,19 @@ const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 /// Manages active animations and advances them each frame.
 pub struct AnimationScheduler {
     animations: Vec<ActiveAnimation>,
-    /// `false` pauses every entry: `tick` is a no-op and `next_deadline`
-    /// returns `None`, so the scheduler stops contributing to
-    /// `ControlFlow::WaitUntil`. Used to suspend animations while the
-    /// owning window is unfocused or occluded.
+    /// `false` pauses every **looping** entry: `tick` skips it and
+    /// `next_deadline` leaves it out, so a spinner in a window nobody is
+    /// looking at stops contributing to `ControlFlow::WaitUntil`. Used while
+    /// the owning window is unfocused or occluded. One-shot tweens are not
+    /// paused: see [`set_window_active`](Self::set_window_active).
     window_active: bool,
     /// When the scheduler last went inactive, on whichever clock the tree
-    /// measures animations against. Used on resume to rebase each animation's
-    /// `start_time` so `t` is phase-continuous across the pause (no snap, no
-    /// skipped frames). `rebase` moves this mark too: a pause that spans a
-    /// hand-back would otherwise resume the animation *backwards*, the resume
-    /// offset being the whole gap between the two axes rather than the time
-    /// spent paused.
+    /// measures animations against. Used on resume to rebase each looping
+    /// animation's `start_time` so `t` is phase-continuous across the pause
+    /// (no snap, no skipped frames). `rebase` moves this mark too: a pause
+    /// that spans a hand-back would otherwise resume the animation
+    /// *backwards*, the resume offset being the whole gap between the two
+    /// axes rather than the time spent paused.
     paused_at: Option<Instant>,
 }
 
@@ -278,19 +279,34 @@ impl AnimationScheduler {
 
     /// Mark the owning window as active (focused-and-visible) or not.
     ///
-    /// Inactive: `tick` is a no-op; `next_deadline` returns `None`. On
-    /// transition back to active, each animation's `start_time` is
-    /// rebased by the paused duration so the eased phase `t` is
-    /// continuous — a 50%-through sweep resumes at 50%, not snapped to
-    /// some other spot on the curve.
+    /// Inactive: `tick` skips every **looping** animation and
+    /// `next_deadline` leaves them out. On transition back to active, each
+    /// looping animation's `start_time` is rebased by the time it spent
+    /// paused so the eased phase `t` is continuous: a 50%-through sweep
+    /// resumes at 50%, not snapped to some other spot on the curve.
+    ///
+    /// **One-shot tweens run on.** They are the same exception the
+    /// visibility gate in [`tick`](Self::tick) makes, for the same reason: a
+    /// tween is bounded by its own duration, so letting it finish costs a
+    /// handful of frames, while pausing it holds whatever it drives at an
+    /// arbitrary point. A `Collapse` opened while its window has no focus
+    /// (by an assistive technology, an automation client, or the app itself
+    /// in a window behind another) would otherwise keep its height at zero
+    /// until the window is focused again, with the disclosure already
+    /// reporting itself expanded.
     pub fn set_window_active(&mut self, active: bool, now: Instant) {
         if self.window_active == active {
             return;
         }
         if active {
             if let Some(paused_at) = self.paused_at.take() {
-                let offset = now.saturating_duration_since(paused_at);
-                for anim in &mut self.animations {
+                for anim in self.animations.iter_mut().filter(|anim| anim.looping) {
+                    // Paused since the window went inactive, or since the
+                    // loop started if that came later: a loop started in an
+                    // inactive window has not run at all, and shifting it by
+                    // the whole pause would hold it back by the time the
+                    // window was inactive before it existed.
+                    let offset = now.saturating_duration_since(paused_at.max(anim.start_time));
                     anim.start_time += offset;
                     anim.next_tick = now;
                 }
@@ -357,11 +373,11 @@ impl AnimationScheduler {
     /// the very tick that would make it visible, locking it in the
     /// invisible state forever. Pass `paint_epoch == 0` to disable the
     /// gate entirely (headless tests that never call `render()`).
+    ///
+    /// The window-inactive pause is gated the same way: it holds looping
+    /// animations only (see [`set_window_active`](Self::set_window_active)).
     pub fn tick(&mut self, now: Instant, arena: &WidgetArena, paint_epoch: u64) -> bool {
-        if !self.window_active {
-            return !self.animations.is_empty();
-        }
-
+        let window_active = self.window_active;
         self.animations.retain_mut(|anim| {
             if !anim_widget_alive(arena, anim.widget_id) {
                 anim.signal.clear_animation_target();
@@ -374,6 +390,13 @@ impl AnimationScheduler {
                 anim.signal.set(anim.start_value);
                 anim.signal.clear_animation_target();
                 return false;
+            }
+
+            if anim.looping && !window_active {
+                // Paused with its window. `set_window_active` rebases the
+                // start on resume, and `next_deadline` leaves the entry out
+                // meanwhile, so nothing wakes the loop for it.
+                return true;
             }
 
             if anim.looping && !anim_widget_visible(arena, anim.widget_id, paint_epoch) {
@@ -423,7 +446,7 @@ impl AnimationScheduler {
             }
         });
 
-        !self.animations.is_empty()
+        self.has_running()
     }
 
     /// Whether any animation is currently stored in the scheduler
@@ -433,32 +456,35 @@ impl AnimationScheduler {
     }
 
     /// Whether any animation is *eligible to advance* on the next tick:
-    /// stored AND the window is active. Used by the idle-work predicates
-    /// so a window-paused scheduler doesn't keep the event loop in
-    /// `ControlFlow::WaitUntil`.
+    /// any one-shot tween, or any looping animation while the window is
+    /// active. Used by the idle-work predicates so a window-paused
+    /// scheduler doesn't keep the event loop in `ControlFlow::WaitUntil`
+    /// for its loops, while a tween started in that window still finishes.
     ///
     /// This does NOT check per-widget visibility (we'd need the arena
     /// and the current paint epoch). An animation whose widget is
     /// offscreen is still reported here; the per-widget gate lives in
     /// `next_deadline` and `tick` directly.
     pub fn has_running(&self) -> bool {
-        self.window_active && !self.animations.is_empty()
+        self.animations
+            .iter()
+            .any(|anim| self.window_active || !anim.looping)
     }
 
     /// Earliest deadline at which a not-paused animation wants to
-    /// tick. Returns `None` when the scheduler is window-paused, all
-    /// (looping) animations are hidden, or there are no animations at
-    /// all. One-shot tweens are NOT visibility-gated — see the
-    /// matching note on [`tick`](Self::tick).
+    /// tick. Returns `None` when there are no animations at all, or when
+    /// every one left is a looping animation that is window-paused or
+    /// hidden. One-shot tweens are gated by neither: see the matching
+    /// notes on [`tick`](Self::tick) and
+    /// [`set_window_active`](Self::set_window_active).
     pub fn next_deadline(&self, arena: &WidgetArena, paint_epoch: u64) -> Option<Instant> {
-        if !self.window_active {
-            return None;
-        }
         self.animations
             .iter()
             .filter(|anim| {
                 anim_widget_alive(arena, anim.widget_id)
-                    && (!anim.looping || anim_widget_visible(arena, anim.widget_id, paint_epoch))
+                    && (!anim.looping
+                        || (self.window_active
+                            && anim_widget_visible(arena, anim.widget_id, paint_epoch)))
             })
             .map(|anim| anim.next_tick)
             .min()
@@ -750,8 +776,95 @@ mod tests {
         let _ = arena;
     }
 
+    /// Start a 200 ms linear loop from 0 to 100 on `signal`, at `start`.
+    fn start_loop(
+        scheduler: &mut AnimationScheduler,
+        signal: &Signal<f32>,
+        id: WidgetId,
+        start: Instant,
+    ) {
+        scheduler.animate_looping(
+            signal,
+            id,
+            0.0,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            None,
+            0.0,
+            None,
+            start,
+        );
+    }
+
     #[test]
-    fn window_inactive_pauses_tick() {
+    fn window_inactive_pauses_a_looping_tick() {
+        let signal = Signal::<f32>::new_animated(0.0);
+        let mut scheduler = AnimationScheduler::new();
+        let (arena, id) = test_arena_with_widget();
+        let start = Instant::now();
+
+        start_loop(&mut scheduler, &signal, id, start);
+        scheduler.set_window_active(false, start);
+
+        scheduler.tick(start + Duration::from_millis(100), &arena, 0);
+        assert!(
+            signal.get() < 1.0,
+            "paused scheduler must not advance a loop"
+        );
+        assert!(scheduler.next_deadline(&arena, 0).is_none());
+        assert!(
+            !scheduler.has_running(),
+            "a paused loop must not keep the event loop awake"
+        );
+    }
+
+    /// A one-shot tween is not paused with its window: it finishes on time.
+    ///
+    /// Pausing it held whatever it drives at its start value, which for a
+    /// `Collapse` is a body of no height: an accordion opened in a window
+    /// without focus showed nothing until the window was focused.
+    #[test]
+    fn a_one_shot_tween_runs_on_in_an_inactive_window() {
+        let signal = Signal::<f32>::new_animated(0.0);
+        let mut scheduler = AnimationScheduler::new();
+        let (arena, id) = test_arena_with_widget();
+        let start = Instant::now();
+
+        scheduler.set_window_active(false, start);
+        scheduler.animate(
+            &signal,
+            id,
+            100.0,
+            Duration::from_millis(200),
+            Easing::Linear,
+            start,
+        );
+        assert!(
+            scheduler.has_running(),
+            "the tween must keep the event loop awake"
+        );
+        assert_eq!(
+            scheduler.next_deadline(&arena, 0),
+            Some(start),
+            "the tween must ask for its first frame"
+        );
+
+        scheduler.tick(start + Duration::from_millis(100), &arena, 0);
+        assert!(
+            (signal.get() - 50.0).abs() < 1.0,
+            "half way after 100 ms of 200, got {}",
+            signal.get()
+        );
+        let more = scheduler.tick(start + Duration::from_millis(200), &arena, 0);
+        assert!((signal.get() - 100.0).abs() < 0.01, "lands on its target");
+        assert!(!more, "and leaves the scheduler");
+    }
+
+    /// A tween in flight when its window loses focus is neither held nor
+    /// rewound when the window gets it back.
+    #[test]
+    fn a_one_shot_tween_keeps_its_phase_across_a_focus_change() {
         let signal = Signal::<f32>::new_animated(0.0);
         let mut scheduler = AnimationScheduler::new();
         let (arena, id) = test_arena_with_widget();
@@ -761,18 +874,47 @@ mod tests {
             &signal,
             id,
             100.0,
-            Duration::from_millis(200),
+            Duration::from_millis(400),
             Easing::Linear,
             start,
         );
-        scheduler.set_window_active(false, start);
-
         scheduler.tick(start + Duration::from_millis(100), &arena, 0);
+        scheduler.set_window_active(false, start + Duration::from_millis(100));
+        scheduler.tick(start + Duration::from_millis(200), &arena, 0);
         assert!(
-            signal.get() < 1.0,
-            "paused scheduler must not advance the signal"
+            (signal.get() - 50.0).abs() < 1.0,
+            "still moving without focus, got {}",
+            signal.get()
         );
-        assert!(scheduler.next_deadline(&arena, 0).is_none());
+        scheduler.set_window_active(true, start + Duration::from_millis(250));
+        scheduler.tick(start + Duration::from_millis(300), &arena, 0);
+        assert!(
+            (signal.get() - 75.0).abs() < 1.0,
+            "on the same schedule once focused again, got {}",
+            signal.get()
+        );
+    }
+
+    /// A loop started while its window has no focus starts when the window
+    /// gets it, not later by however long the window had been inactive
+    /// before the loop existed.
+    #[test]
+    fn a_loop_started_in_an_inactive_window_starts_on_resume() {
+        let signal = Signal::<f32>::new_animated(0.0);
+        let mut scheduler = AnimationScheduler::new();
+        let (arena, id) = test_arena_with_widget();
+        let start = Instant::now();
+
+        scheduler.set_window_active(false, start);
+        start_loop(&mut scheduler, &signal, id, start + Duration::from_secs(5));
+        let resume_at = start + Duration::from_secs(10);
+        scheduler.set_window_active(true, resume_at);
+        scheduler.tick(resume_at + Duration::from_millis(50), &arena, 0);
+        assert!(
+            (signal.get() - 25.0).abs() < 1.0,
+            "a quarter through 50 ms after the window got focus, got {}",
+            signal.get()
+        );
     }
 
     #[test]
@@ -782,14 +924,7 @@ mod tests {
         let (arena, id) = test_arena_with_widget();
         let start = Instant::now();
 
-        scheduler.animate(
-            &signal,
-            id,
-            100.0,
-            Duration::from_millis(200),
-            Easing::Linear,
-            start,
-        );
+        start_loop(&mut scheduler, &signal, id, start);
 
         // Advance halfway (t=0.5 → value≈50).
         scheduler.tick(start + Duration::from_millis(100), &arena, 0);

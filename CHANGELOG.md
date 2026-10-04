@@ -13,6 +13,21 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Core
+
+- **An accordion opened in a window without focus stayed closed.** The
+  animation scheduler paused every animation of a window that was unfocused
+  or occluded, one-shot tweens included, so a `Collapse` opened there (by an
+  assistive technology, an automation client, or the app itself in a window
+  behind another) held its body at no height while its header already said
+  it was expanded, in a scrolling dialog as anywhere else. Only looping
+  animations are paused now; a tween runs to its end, as it already did for
+  a widget off screen. A loop started while its window had no focus also
+  starts when the window gets it, rather than later by however long the
+  window had been without focus before the loop existed.
+
 ## [0.15.0] - 2026-10-04
 
 ### Added

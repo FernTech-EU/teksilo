@@ -2073,18 +2073,6 @@ impl WidgetTree {
         }
     }
 
-    /// Mark the owning window as active (focused AND not occluded) or
-    /// inactive. Propagates to the animation scheduler AND the
-    /// animated-quad registry so both pause-resume in lockstep — no
-    /// ticks, no frame wakes, no GPU submits.
-    ///
-    /// On an actual state change it also fires `window_active_signal`
-    /// (so build-time binders and `DimWhenInactive` react) and issues a
-    /// global paint-only dirty mark, so every widget that reads
-    /// `PaintContext::window_active` (caret gates, selection bands) repaints
-    /// once. This is a repaint, not a relayout — geometry never changes when
-    /// the window's active state flips (the caret keeps its space). Window
-    /// focus changes are rare and user-driven, so the O(n) mark is cheap and
     /// Mark every node paint-dirty (no relayout, no rebuild) so the next
     /// render re-runs their `paint()`. This is the paint-cache invalidation an
     /// off-thread source needs after posting a [`RepaintWindowRequest`](crate::RepaintWindowRequest):
@@ -2095,6 +2083,27 @@ impl WidgetTree {
         self.arena.mark_all_needs_paint_only();
     }
 
+    /// Mark the owning window as active (focused AND not occluded) or
+    /// inactive. Propagates to the animation scheduler and to the
+    /// animated-quad registry, which do not pause the same things:
+    ///
+    /// - The scheduler pauses only its **looping** animations: they stop
+    ///   ticking and stop waking frames, and resume where they were when the
+    ///   window is active again. A one-shot tween keeps running to its end,
+    ///   and keeps the frame clock awake until it does, so whatever it
+    ///   drives (a `Collapse` opened by an assistive technology, say) does
+    ///   not stop partway. See
+    ///   [`AnimationScheduler::set_window_active`](crate::animation::AnimationScheduler::set_window_active).
+    /// - The animated-quad registry pauses all of its shader loops: no ticks,
+    ///   no frame wakes and no GPU submits until the window is active again.
+    ///
+    /// On an actual state change it also fires `window_active_signal`
+    /// (so build-time binders and `DimWhenInactive` react) and issues a
+    /// global paint-only dirty mark, so every widget that reads
+    /// `PaintContext::window_active` (caret gates, selection bands) repaints
+    /// once. This is a repaint, not a relayout: geometry never changes when
+    /// the window's active state flips (the caret keeps its space). Window
+    /// focus changes are rare and user-driven, so the O(n) mark is cheap and
     /// strictly lighter than `set_theme`'s `mark_all_dirty` (layout + paint).
     pub fn set_window_active(&mut self, active: bool) {
         let mut noop = crate::window::NoopWindowOps;

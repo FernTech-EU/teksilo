@@ -1384,4 +1384,102 @@ mod tests {
             "horizontal accordion builds"
         );
     }
+
+    /// An accordion opened in a window without focus opens.
+    ///
+    /// The dialog is the shape that showed it: an in-tree modal holding a
+    /// scrolling column, with the accordion's body somewhere in the column,
+    /// driven the way a window drives it (laid out and painted, then a frame
+    /// at a time). Nothing about that shape matters, though: what kept the
+    /// body at no height was the window not having focus. The scheduler
+    /// paused every animation of an inactive window, the body's height tween
+    /// among them, so a disclosure opened by an assistive technology, an
+    /// automation client or the app itself in a window behind another
+    /// announced itself expanded and showed nothing until the window was
+    /// focused again. A headless tree is active unless told otherwise, which
+    /// is why every other test here passed.
+    #[test]
+    fn an_accordion_opened_in_an_unfocused_window_opens() {
+        use crate::primitives::{Expand, FixedSize, Padding, TextWidget, VStack};
+        use crate::scroll_area::ScrollArea;
+        use std::time::Duration;
+        use teksilo_core::overlay::{
+            DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest,
+        };
+
+        let expanded = Signal::new(false);
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        let window = SizeProposal::exact(800.0, 600.0);
+        let source = tree.add(TextWidget::new(lit!("Show the report")));
+        tree.layout(window);
+        let _ = tree.render();
+
+        let items = VStack::new()
+            .spacing(6.0)
+            .child(TextWidget::new(lit!("Draft / Arrival")))
+            .child(TextWidget::new(lit!("Draft / Storm")));
+        let column = VStack::new()
+            .spacing(10.0)
+            .child(TextWidget::new(lit!("What came across")))
+            .child(Accordion::new(lit!("2 items"), expanded.clone()).content(items))
+            .child(TextWidget::new(lit!("Next finding")));
+        // The way `present_modal` mounts in-tree content: built, parked,
+        // then woken as the overlay that shows it.
+        let dialog =
+            tree.add(FixedSize::new().width(400.0).height(300.0).child(
+                VStack::new().child(Expand::vertical().child(
+                    ScrollArea::new().child(Padding::new(8.0, 8.0, 8.0, 8.0).child(column)),
+                )),
+            ));
+        tree.set_dormant(dialog);
+        tree.activate(dialog);
+        tree.show_overlay(OverlayRequest {
+            content_id: dialog,
+            anchor: source,
+            placement: OverlayPlacement::Centered,
+            dismiss: DismissBehavior::Manual,
+            layer: OverlayLayer::InTree,
+            parent_overlay: None,
+            on_dismiss: None,
+            fade_duration: None,
+        });
+        tree.layout(window);
+        let _ = tree.render();
+
+        let header = tree
+            .find_by_label("2 items")
+            .expect("the accordion's header");
+        let next = tree
+            .find_by_label("Next finding")
+            .expect("the line below it");
+        let before = tree.bounds(next).y;
+
+        // Another window takes the focus.
+        tree.set_window_active(false);
+        tree.click(header);
+        assert!(expanded.get(), "the click opens the accordion");
+        for _ in 0..30 {
+            tree.advance_time(Duration::from_millis(16));
+            tree.layout(window);
+            let _ = tree.render();
+        }
+
+        let after = tree.bounds(next).y;
+        assert!(
+            after > before + 20.0,
+            "the accordion's body must take room in a window without focus: \
+             the line below it went from {before} to {after}"
+        );
+        let item = tree
+            .find_by_label("Draft / Storm")
+            .expect("the body's last item");
+        assert!(
+            tree.bounds(item).y < after,
+            "the body's items sit above the line that follows them"
+        );
+    }
 }

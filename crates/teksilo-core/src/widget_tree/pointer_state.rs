@@ -2473,6 +2473,9 @@ mod clock_tests {
     /// An animation paused across a hand-back resumes from where it was
     /// paused, rather than being driven backwards by the gap between the axes.
     ///
+    /// A loop, because only loops are paused with their window: a one-shot
+    /// tween runs on without focus and never reads the pause mark.
+    ///
     /// The pause mark is the scheduler's one instant that is not per-animation,
     /// and until this test nothing asserted that the rebase shifts it: on
     /// reactivate the scheduler moves each `start_time` forward by
@@ -2498,10 +2501,11 @@ mod clock_tests {
 
         let value = Signal::<f32>::new_animated(0.0);
         tree.register_animated_signal(&value, owner);
-        value.animate_to(
+        value.animate_looping(
             1.0,
             Duration::from_millis(1000),
             teksilo_tokens::Easing::Linear,
+            None,
         );
 
         tree.advance_time(Duration::from_millis(100));
@@ -2559,10 +2563,11 @@ mod clock_tests {
 
         let value = Signal::<f32>::new_animated(0.0);
         tree.register_animated_signal(&value, owner);
-        value.animate_to(
+        value.animate_looping(
             1.0,
             Duration::from_millis(5000),
             teksilo_tokens::Easing::Linear,
+            None,
         );
 
         // A second of simulated time on a tree milliseconds old: the advance,
