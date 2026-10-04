@@ -1851,10 +1851,10 @@ mod tests {
 
         // The node's own opacity scope stamps it as visited before the
         // sub-perceptual early return, so only the paint stamp tells the
-        // clear loop that `paint()` never ran. The opacity binding would
-        // repaint the node on fade-in anyway; what must hold regardless is
-        // that no stale cache survives, since a cached paint is what later
-        // decides whether a skipped node gets re-marked.
+        // clear loop that `paint()` never ran. Nothing visible depends on it
+        // here: the opacity binding re-marks the node on fade-in, so it
+        // repaints either way. This pins the cache itself, which must not
+        // outlive the change that dirtied it.
         opacity.set(0.0);
         tree.layout(SizeProposal::exact(100.0, 50.0));
         color.set(Color::BLUE);
@@ -1871,8 +1871,12 @@ mod tests {
         assert_eq!(colors, vec![Color::BLUE.to_array()]);
     }
 
+    /// A guard, not a test of the stale-cache fix: dormant nodes never reach
+    /// the end-of-render clear, and activation marks a node for repaint on
+    /// its own. It keeps that path covered beside the cases the fix does
+    /// change.
     #[test]
-    fn node_dirtied_while_dormant_repaints_on_activation() {
+    fn a_node_changed_while_dormant_repaints_when_activated() {
         let probe = ColorProbe::new(Color::RED);
         let color = probe.color.clone();
         let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
