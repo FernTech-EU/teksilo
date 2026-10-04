@@ -15,6 +15,9 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Include public trait contracts, associated types and constants, and required
+  and default methods in `cargo teksilo symbol` output.
+
 - Dispatch intents emitted by app callbacks, including window close guards,
   before returning to the event loop. A vetoed close that requests a confirmation
   dialog no longer waits for another key or pointer event to show that dialog.

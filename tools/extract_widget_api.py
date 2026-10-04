@@ -597,7 +597,7 @@ class EnumVariant:
 
 @dataclass
 class Item:
-    kind: str  # 'struct' | 'enum' | 'type' | 'const' | 'fn' | 'external'
+    kind: str  # 'struct' | 'enum' | 'trait' | 'type' | 'const' | 'fn' | 'external'
     name: str
     signature: str
     doc: str
@@ -714,6 +714,7 @@ DOC_OUTER = re.compile(r"^\s*///(.*)$")
 DOC_INNER = re.compile(r"^\s*//!(.*)$")
 ATTR_PREFIX = re.compile(r"^\s*#\[")
 IMPL_PREFIX = re.compile(r"^\s*impl\b")
+PUB_TRAIT = re.compile(r"^\s*pub\s+(?:unsafe\s+)?trait\s+([A-Za-z_]\w*)")
 PUB_STRUCT = re.compile(r"^\s*pub\s+struct\s+([A-Za-z_]\w*)")
 PUB_ENUM = re.compile(r"^\s*pub\s+enum\s+([A-Za-z_]\w*)")
 PUB_TYPE = re.compile(r"^\s*pub\s+type\s+([A-Za-z_]\w*)")
@@ -1019,10 +1020,13 @@ def _parse_enum_variants(
 
 
 def _parse_impl_body(
-    raw: list[str], cleaned: list[str], start: int, end: int
+    raw: list[str], cleaned: list[str], start: int, end: int, *, trait: bool = False
 ) -> list[Item]:
     """Parse inside an inherent impl block body (between `{` and `}`). Emit
     only public associated items: `pub fn`, `pub const`, `pub type`."""
+    fn_pattern = re.compile(PUB_FN.pattern.replace(r"pub", r"(?:pub\s+)?", 1).replace(r"\s+fn", r"\s*fn", 1)) if trait else PUB_FN
+    const_pattern = re.compile(r"^\s*(?:const|static)\s+([A-Za-z_]\w*)") if trait else PUB_CONST
+    type_pattern = re.compile(r"^\s*type\s+([A-Za-z_]\w*)") if trait else PUB_TYPE
     methods: list[Item] = []
     doc_buf: list[str] = []
     attr_buf: list[str] = []
@@ -1065,9 +1069,11 @@ def _parse_impl_body(
             i += 1
             continue
 
-        if PUB_FN.match(line):
-            name = PUB_FN.match(line).group(1)  # type: ignore[union-attr]
+        if fn_pattern.match(line):
+            name = fn_pattern.match(line).group(1)  # type: ignore[union-attr]
             sig, end_line, had_body = consume_fn_signature(raw, cleaned, i)
+            if trait:
+                sig += " { /* default implementation */ }" if had_body else ";"
             methods.append(
                 Item(
                     kind="fn",
@@ -1082,8 +1088,8 @@ def _parse_impl_body(
             i = end_line + 1
             continue
 
-        if PUB_CONST.match(line):
-            name = PUB_CONST.match(line).group(1)  # type: ignore[union-attr]
+        if const_pattern.match(line):
+            name = const_pattern.match(line).group(1)  # type: ignore[union-attr]
             sig, end_line = consume_stmt(raw, cleaned, i)
             methods.append(
                 Item(
@@ -1099,8 +1105,8 @@ def _parse_impl_body(
             i = end_line + 1
             continue
 
-        if PUB_TYPE.match(line):
-            name = PUB_TYPE.match(line).group(1)  # type: ignore[union-attr]
+        if type_pattern.match(line):
+            name = type_pattern.match(line).group(1)  # type: ignore[union-attr]
             sig, end_line = consume_stmt(raw, cleaned, i)
             methods.append(
                 Item(
@@ -1243,6 +1249,23 @@ def parse_file(path: Path, module_name: str, cfg: list[str]) -> ParsedFile:
                 parent.methods.extend(methods)
             clear()
             i = close_line + 1
+            continue
+
+        if PUB_TRAIT.match(line):
+            name = PUB_TRAIT.match(line).group(1)
+            sig, end_line, open_pos = consume_item_signature(raw, cleaned, i)
+            members = []
+            if open_pos is not None:
+                members = _parse_impl_body(raw, cleaned, open_pos[0] + 1, end_line - 1, trait=True)
+            item = Item(
+                kind="trait", name=name, signature=sig.strip(),
+                doc="\n".join(doc_buf).rstrip(), hidden=_is_hidden(attr_buf),
+                cfg=_extract_cfgs(attr_buf), methods=members,
+            )
+            items.append(item)
+            item_by_name[name] = item
+            clear()
+            i = end_line + 1
             continue
 
         if PUB_STRUCT.match(line):
@@ -1762,6 +1785,8 @@ def _emit_items_md(items: list[Item], out: list[str]) -> None:
             out.append(f"## `pub struct {it.name}`{flags_str}")
         elif it.kind == "enum":
             out.append(f"## `pub enum {it.name}`{flags_str}")
+        elif it.kind == "trait":
+            out.append(f"## `pub trait {it.name}`{flags_str}")
         elif it.kind == "type":
             out.append(f"## `pub type {it.name}`{flags_str}")
         elif it.kind == "const":
@@ -1781,6 +1806,8 @@ def _emit_items_md(items: list[Item], out: list[str]) -> None:
                        else it.signature)
             out.append("```")
             out.append("")
+        elif it.kind == "trait":
+            out.extend(["```rust", f"{it.signature} {{ /* associated items below */ }}", "```", ""])
         elif it.kind == "enum":
             out.append("```rust")
             out.append(f"{it.signature} {{ /* variants */ }}")
@@ -1811,7 +1838,7 @@ def _emit_items_md(items: list[Item], out: list[str]) -> None:
 
 
 def _emit_methods_md(it: Item, out: list[str]) -> None:
-    out.append("### Methods")
+    out.append("### Associated items" if it.kind == "trait" else "### Methods")
     out.append("")
     for m in it.methods:
         flags: list[str] = []

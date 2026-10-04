@@ -641,6 +641,10 @@ jobs:
       # display and no running app needed. The three curated examples that DO
       # drive a real app live in test-automation (Linux only, which already
       # has a display set up).
+      - name: API extractor unit tests
+        if: matrix.name == 'debug'
+        run: python3 -m unittest discover -s tools/tests
+
       - name: Probe harness unit tests
         if: matrix.name == 'debug'
         run: |
