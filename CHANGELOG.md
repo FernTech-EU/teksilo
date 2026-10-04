@@ -38,6 +38,11 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **A drag preview's resources outlived the drag.** When a drag ended, the
+  preview widget was removed from the tree without the teardown every other
+  removal goes through, so whatever it had registered (animations, animated
+  indicators, bindings, subscriptions, shortcuts) stayed registered until
+  the window closed. The preview is now torn down like any other widget.
 - **A widget changed while out of view could come back showing its old
   content.** A widget marked for repaint while it was clipped out of a
   scroll area or under a fully transparent ancestor (or itself fully

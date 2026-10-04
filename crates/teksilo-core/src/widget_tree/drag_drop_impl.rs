@@ -174,14 +174,24 @@ impl WidgetTree {
     }
 
     /// Clean up drag preview overlay (if any).
+    ///
+    /// The preview content is a built widget subtree, so it goes through
+    /// `destroy_subtree` like every other teardown: a bare `arena.destroy`
+    /// would leave its animations, animated-quad slots, bindings,
+    /// subscriptions and shortcuts registered until the tree drops.
     pub(super) fn cleanup_drag_preview(&mut self) {
-        if let Some(ref drag) = self.active_drag {
-            if let Some(overlay_id) = drag.preview_overlay_id {
-                self.overlay_manager.dismiss(overlay_id);
-            }
-            if let Some(content_id) = drag.preview_content_id {
-                self.arena.destroy(content_id);
-            }
+        let Some((overlay_id, content_id)) = self
+            .active_drag
+            .as_ref()
+            .map(|drag| (drag.preview_overlay_id, drag.preview_content_id))
+        else {
+            return;
+        };
+        if let Some(overlay_id) = overlay_id {
+            self.overlay_manager.dismiss(overlay_id);
+        }
+        if let Some(content_id) = content_id {
+            self.destroy_subtree(content_id);
         }
     }
 
@@ -1739,6 +1749,54 @@ mod tests {
             tree.overlay_manager().len(),
             overlay_count_before,
             "preview overlay should be dismissed on drop"
+        );
+    }
+
+    #[test]
+    fn drag_preview_teardown_releases_what_its_content_registered() {
+        #[derive(Debug)]
+        struct SpinningPreview;
+        impl Widget for SpinningPreview {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                let _ = ctx.animated_quad(crate::animated_quad::AnimatedQuadKind::SpinnerArc {
+                    period: std::time::Duration::from_secs(1),
+                    arc_fraction: 0.25,
+                    stroke_fraction: 0.12,
+                    color: teksilo_tokens::Color::RED.into(),
+                });
+                Vec::new()
+            }
+            fn layout_response(
+                &self,
+                _: SizeProposal,
+                _: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                teksilo_canvas::Size::new(20.0, 20.0).into()
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let source = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag_with_preview(
+            source,
+            crate::drag_payload::DragPayload::typed(0_u32),
+            Box::new(SpinningPreview),
+        );
+        tree.collect_from_ctx(ctx, source);
+        assert_eq!(tree.animated_quad_count(), 1, "the preview's build ran");
+
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            Point::new(999.0, 999.0),
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        assert!(tree.active_drag.is_none());
+        assert_eq!(
+            tree.animated_quad_count(),
+            0,
+            "tearing the preview down must release its animated-quad slot"
         );
     }
 
