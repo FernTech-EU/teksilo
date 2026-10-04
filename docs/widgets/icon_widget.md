@@ -153,10 +153,19 @@ If decoding fails, logs the error in debug mode and produces an empty icon.
 Create an icon from a pre-decoded `RasterIcon`.
 Accepts a reference — pixel data is copied internally.
 
+The texture is named after the icon's identity, so every widget
+showing this icon (or a clone of it) in one mode shares one texture.
+Like every static image texture it lives as long as the window: an
+icon decoded afresh for each widget gets a texture of its own each
+time.
+
 #### `pub fn from_animated(icon: &AnimatedIcon, size: f32) -> Self`
 
 Create an icon from a pre-decoded `AnimatedIcon`.
 Accepts a reference — frame data is copied internally.
+
+Named after its first frame's identity, with the same sharing and
+lifetime as `from_raster`.
 
 #### `pub fn mode(mut self, mode: IconMode) -> Self`
 

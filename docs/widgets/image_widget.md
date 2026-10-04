@@ -93,6 +93,12 @@ pub struct ImageWidget { /* fields */ }
 
 Create from a decoded `RasterIcon` (e.g., from `res!()`).
 
+The texture is named after the icon's identity, so every
+`ImageWidget` showing this icon (or a clone of it) in a window shares
+one texture, uploaded once. That texture lives as long as the window:
+an icon decoded afresh for each widget gets a texture of its own each
+time. Pixels that change belong on `from_raw`.
+
 #### `pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self`
 
 Create from raw RGBA pixel data.
