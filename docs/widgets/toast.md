@@ -449,6 +449,38 @@ programmatic control. If `install_toast` was not called the
 returned handle is in the "dropped" state (`is_alive` returns
 `false`) and a one-shot stderr warning fires explaining the omission.
 
+## `pub trait EventContextToastExt`
+
+Convenience methods on `EventContext` for the toast system. The
+registry is looked up via `EventContext::app_state` — the
+`install_toast` extension trait registers `ToastRegistry` there
+at app boot.
+
+All methods are no-ops (returning a dropped `ToastHandle` where
+applicable) when `install_toast` was not called — a one-shot
+`log::warn!` fires the first time the missing registration is
+detected, so missing installs surface in logs without crashing
+app code that defensively calls `show_toast`.
+
+```rust
+pub trait EventContextToastExt { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn show_toast(&mut self, toast: Toast) -> ToastHandle;`
+
+Present a `Toast` through the installed
+`ToastHost`. Returns a
+`ToastHandle` for programmatic control.
+
+#### `fn dismiss_toast(&mut self, handle: &ToastHandle);`
+
+Programmatically dismiss a toast by handle, with cause
+`ToastDismissCause::Programmatic`. Equivalent to
+`handle.dismiss(ctx)`. No-op if the toast has already been
+dismissed.
+
 ## `pub struct ToastRegistry`
 
 Cheap to clone (`Rc<RefCell<…>>`). All public methods take `&self`

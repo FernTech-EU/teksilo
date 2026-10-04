@@ -45,11 +45,38 @@ let migrator: Migrator<Recents> = Migrator::new()
 
 ## Builder methods at a glance
 
-`step`, `run`
+`CURRENT_VERSION`, `version`, `set_version`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+## `pub trait Versioned`
+
+A persisted struct whose schema is versioned.
+
+`CURRENT_VERSION` is the version this build of the code reads and
+writes. Files on disk may be older — `Migrator` walks them up.
+
+```rust
+pub trait Versioned { /* associated items below */ }
+```
+
+### Associated items
+
+#### `const CURRENT_VERSION: u32;`
+
+The version this build understands. Bump when the schema changes
+in a way that requires migration.
+
+#### `fn version(&self) -> u32;`
+
+The version embedded in this instance.
+
+#### `fn set_version(&mut self, v: u32);`
+
+Write a new version into this instance. Used by the migrator
+after a successful chain of steps.
 
 ## `pub enum MigrationError`
 

@@ -30,6 +30,48 @@ every `WindowConfig` carrying an `id(...)` is automatically
 restored on creation and recorded on every change by `teksilo-app`'s
 window manager. No widget-side wiring needed.
 
+## Builder methods at a glance
+
+`settings`, `window_state`, `mru`, `try_settings`, `try_window_state`, `try_mru`
+
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+## `pub trait SettingsExt`
+
+Convenience accessors for settings services attached to the app's
+`app_state` registry.
+
+```rust
+pub trait SettingsExt { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn settings(&self) -> &SettingsStore { /* default implementation */ }`
+
+The K/V settings store. Panics if `TeksiloAppBuilder::settings(...)`
+was not called.
+
+#### `fn window_state(&self) -> &WindowStateService { /* default implementation */ }`
+
+The window-state service. Panics if not registered.
+
+#### `fn mru<T: MruEntry>(&self) -> &MruList<T> { /* default implementation */ }`
+
+An app-defined MRU list. Panics if no `MruList<T>` was
+registered for that exact `T` via
+`TeksiloAppBuilder::app_state(mru_handle.clone())`.
+
+#### `fn try_settings(&self) -> Option<&SettingsStore>;`
+
+Returns the K/V settings store, or `None` if not registered.
+
+#### `fn try_window_state(&self) -> Option<&WindowStateService>;`
+
+Returns the window-state service, or `None` if not registered.
+
+#### `fn try_mru<T: MruEntry>(&self) -> Option<&MruList<T>>;`
+
+Returns the MRU list for `T`, or `None` if no `MruList<T>` was registered.

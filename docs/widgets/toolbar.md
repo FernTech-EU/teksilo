@@ -226,6 +226,29 @@ the menu first (NSToolbar semantics). Default `0`.
 
 Always live in the overflow menu, never inline (WinUI secondary command).
 
+## `pub trait ToolbarOverflow`
+
+A widget that knows how to represent itself in a `Toolbar`'s overflow menu
+when it is collapsed (NSToolbar `menuFormRepresentation` / Qt
+`QWidgetAction`). Implement this on a widget and add it with
+`ToolbarItem::collapsible` to make it overflow into the chevron menu as
+the returned `ToolbarAction` (a menu row), instead of staying pinned.
+
+For widgets that are best represented in the menu *as themselves* (a
+`ComboBox`, a slider) rather than as a one-shot menu row, use
+`ToolbarItem::overflow_widget` instead — it embeds a live widget in the
+menu.
+
+```rust
+pub trait ToolbarOverflow { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn toolbar_menu_form(&self) -> ToolbarAction;`
+
+The menu-form representation shown when this widget overflows.
+
 ## `pub struct ToolbarItem`
 
 One slot in a `Toolbar`.

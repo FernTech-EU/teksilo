@@ -403,3 +403,19 @@ shortcut), a press outside, or a programmatic dismissal.
 Present the MessageBox as a modal on top of `ctx`'s current
 tree. Consumes `self`; callers who need to present multiple
 dialogs with shared config should build a factory closure.
+
+## `pub trait EventContextMessageBoxExt`
+
+Extension trait on `EventContext` for ergonomic MessageBox
+presentation. Mirrors `ctx.present_modal(...)` for the general
+case.
+
+```rust
+pub trait EventContextMessageBoxExt { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn present_message_box(&mut self, mb: MessageBox);`
+
+Present `mb` as a modal. Equivalent to `mb.present(self)`.

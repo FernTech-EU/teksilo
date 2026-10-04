@@ -65,6 +65,66 @@ everything else is shared by the generic.
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/popover_widget/index.html)
 
+## `pub trait PopoverTrigger`
+
+A trigger widget usable with `PopoverWidget`. Implemented for
+`Button`, `IconButton` and `OverlayTrigger`. Captures the few
+points where the triggers differ; everything else is handled by the
+generic wrapper.
+
+```rust
+pub trait PopoverTrigger: Widget + Sized + 'static { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn default_has_popup() -> HasPopup;`
+
+The `has_popup` kind announced by AT when the caller doesn't
+override it. `Button` → `HasPopup::Dialog`; `IconButton` →
+`HasPopup::Menu`.
+
+#### `fn default_show_caret() -> bool;`
+
+Whether the disclosure caret is painted by default. `Button` →
+`false` (text buttons advertise via an inline trailing chevron);
+`IconButton` → `true` (icon-only triggers have no label slot).
+
+#### `fn suppress_caret(&self) -> bool { /* default implementation */ }`
+
+Whether the caret must be suppressed for this trigger regardless
+of the flag (e.g. `IconButton` at `Compact` has no room).
+Default: never suppressed.
+
+#### `fn caret_role(&self, interaction: &Signal<InteractionState>) -> Signal<TextRole>;`
+
+The `TextRole` the disclosure caret tints with, derived from the
+shared interaction signal so the caret and trigger tint together
+across hover / press / focus / disabled. Only called when a caret
+is shown.
+
+#### `fn with_shared_interaction(self, signal: Signal<InteractionState>) -> Self;`
+
+Share an externally-allocated interaction signal so the caret colour
+tracks the trigger's state (hover / press / focus / disabled) exactly.
+
+#### `fn with_has_popup(self, kind: HasPopup) -> Self;`
+
+Annotate the trigger with the given `has_popup` kind for AT.
+
+#### `fn with_expanded_when(self, open: Signal<bool>) -> Self;`
+
+Bind the trigger's `set_expanded` disclosure state to `open`.
+
+#### `fn with_on_activate(self, f: impl Fn(&mut EventContext) + 'static) -> Self;`
+
+Install the popover's open/close handler as the trigger's activate callback.
+
+#### `fn has_on_activate(&self) -> bool;`
+
+Return `true` if the trigger already has an activate handler set by
+the caller — the wrapper replaces it and will warn at build time.
+
 ## `pub type PopoverCustom`
 
 A popover whose trigger is an arbitrary widget, wrapped in

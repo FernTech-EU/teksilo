@@ -39,6 +39,20 @@ fn can_accept(&self, query: &teksilo_data::DropQuery<'_, usize>) -> teksilo_data
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-data/latest/teksilo_data/dnd_types/index.html)
 
+## `pub trait ItemKey`
+
+A stable, hashable identity for a row/node. Blanket-implemented for every
+`Clone + Eq + Hash + Debug + 'static` type, so `usize`, `NodeId`, `i64`,
+`String`, `Uuid`, … all qualify with no extra work.
+
+In-memory models use positional keys (`usize` for `ListModel`, `NodeId` for
+`TreeModel`); external sources use their own domain key (an entity id), which
+is exactly what removes the need to mirror them into a built-in model.
+
+```rust
+pub trait ItemKey: Clone + Eq + std::hash::Hash + std::fmt::Debug + 'static { /* associated items below */ }
+```
+
 ## `pub enum RowState`
 
 Whether a realized row's data is resident yet. A windowed/lazy source returns

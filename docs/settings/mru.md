@@ -70,11 +70,38 @@ assert_eq!(recents.model().len(), 1);
 
 ## Builder methods at a glance
 
-`open`, `open_with_delay`, `open_at`, `model`, `max_items`, `add`, `remove`, `touch`, `set_pinned`, `is_pinned`, `clear`, `flush_now`, `path`
+`is_pinned`, `set_pinned`, `touch`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+## `pub trait MruEntry`
+
+An item that can live in an `MruList`. Requires `Keyed` for its
+stable merge identity; adds the pin / touch vocabulary an MRU list
+specifically needs on top.
+
+```rust
+pub trait MruEntry: Keyed + Clone + Serialize + DeserializeOwned + Send + 'static { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn is_pinned(&self) -> bool { /* default implementation */ }`
+
+Whether this entry should resist eviction by `cap_to_max`.
+Default: never pinned.
+
+#### `fn set_pinned(&mut self, _pinned: bool) { /* default implementation */ }`
+
+Set the pinned flag. Default: ignore.
+
+#### `fn touch(&mut self) { /* default implementation */ }`
+
+Hook called by `MruList::add` and `MruList::touch` to mark
+this entry as freshly used. Apps that track a `last_opened`
+timestamp update it here. Default: no-op.
 
 ## `pub struct MruList`
 

@@ -26,8 +26,8 @@ pub enum ChartSource<T: 'static> { /* variants */ }
 
 ### Variants
 
-- **`Model`**: All points in the model.
-- **`Window`**: The last configured number of points in each series.
+- **`Model`** — All points in the model.
+- **`Window`** — The last configured number of points in each series.
 
 ### Methods
 

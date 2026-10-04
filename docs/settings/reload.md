@@ -45,6 +45,44 @@ Every implementation therefore layers two checks, cheapest first:
 Implementors: `crate::SettingsFile`, `crate::SettingsStore`,
 `crate::PersistedListModel`, `crate::WindowStateService`.
 
+## Builder methods at a glance
+
+`path`, `reload_from_disk`
+
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+## `pub trait Reloadable`
+
+A persisted type that can be told "the file may have changed on disk —
+go look," and will push any genuinely new content into its live
+signals/models.
+
+This is the hook a file-system watcher calls when it observes a write to
+one of this crate's managed files. It is deliberately decoupled from any
+particular watcher implementation (inotify, kqueue, ReadDirectoryChangesW)
+— this crate only defines the contract; wiring an actual watcher onto it
+is a separate concern (a file-watcher module built on top of this trait).
+
+```rust
+pub trait Reloadable { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn path(&self) -> &Path;`
+
+The file this instance reads from and writes to. A watcher uses this
+to know which path to associate with which `Reloadable` handle.
+
+#### `fn reload_from_disk(&self) -> Result<bool, SettingsFileError>;`
+
+Re-read the file from disk and push any genuinely new content into
+live signals/models.
+
+Returns `Ok(true)` if the in-memory state changed as a result,
+`Ok(false)` if nothing needed to change (including the common
+self-write-notification case — see the module docs' "self-write
+suppression contract"). `Ok(false)` is a hard guarantee that nothing
+was touched: no signal fired, no model mutated.

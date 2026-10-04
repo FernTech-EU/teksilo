@@ -562,3 +562,87 @@ tree. Mutually exclusive with `tooltip`,
 #### `pub fn value(&self) -> Signal<T>`
 
 The bound numeric value signal.
+
+## `pub trait SpinValue`
+
+Numeric primitive that a `SpinBox` can hold.
+
+Sealed: only the primitive integer and floating-point types
+implement this. See the module docs for the rationale.
+
+Implementations must provide lossless parsing and round-trip
+formatting (`parse(format(v, d)) == Some(v)` for any finite value
+`v` and decimals `d`). Arithmetic is saturating so clamping into
+`[min, max]` after a step cannot overflow.
+
+```rust
+pub trait SpinValue: sealed::Sealed + Copy + PartialOrd + Debug + 'static { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn to_f64(self) -> f64;`
+
+Lossless widening to `f64`. Used for AccessKit's numeric
+value / min / max / step properties and for
+`StepType::Adaptive` decimal
+analysis.
+
+#### `fn from_f64_saturating(v: f64) -> Self;`
+
+Narrowing from `f64` with saturation at the type's full
+range. For integers the conversion truncates toward zero,
+matching Rust's `as` conversion semantics.
+
+#### `fn parse(s: &str) -> Option<Self>;`
+
+Parse a user-entered string. Leading/trailing whitespace is
+ignored. Returns `None` for syntactically invalid input
+(but NOT for out-of-range values — the SpinBox clamps
+separately so users can type past the bound and see the
+reformatted clamped result after blur).
+
+#### `fn format(self, decimals: u8) -> String;`
+
+Format for display.
+
+For integer types, `decimals` is ignored. For floats, the
+value is rendered with exactly `decimals` digits after the
+decimal point — no scientific notation, no thousands
+separator. Formatter closures on `SpinBox`
+(`text_from_value`)
+override this.
+
+#### `fn saturating_add(self, rhs: Self) -> Self;`
+
+Saturating addition. Out-of-type-range results clamp at
+`MAX` (or `MIN` for negative overflow on signed types).
+
+#### `fn saturating_sub(self, rhs: Self) -> Self;`
+
+Saturating subtraction. See `saturating_add`.
+
+#### `fn saturating_mul_u32(self, rhs: u32) -> Self;`
+
+Saturating multiplication by a positive integer. Used for
+`page_step = multiplier × single_step` when the caller
+omits a page step.
+
+#### `fn is_integer() -> bool;`
+
+Whether this type has integer semantics (no fractional
+component, no decimal separator in the default
+`format` path). Controls the default
+character filter and whether `decimals` has any effect.
+
+#### `fn is_valid_input_char(c: char) -> bool;`
+
+Default per-character input filter for the editable field.
+Admits digits and, for signed types, `-`; float types also
+admit `.`, `+`, `e`, `E`. Callers can override the whole
+filter on the `SpinBox` builder.
+
+#### `fn clamp_value(self, min: Self, max: Self) -> Self { /* default implementation */ }`
+
+Clamp into an inclusive range. Falls through to
+`PartialOrd`.

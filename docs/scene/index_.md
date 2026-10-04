@@ -79,11 +79,55 @@ assert!(index.is_empty());
 
 ## Builder methods at a glance
 
-`cell_size`, `cell_count`
+`insert`, `remove`, `query`, `contains`, `len`, `is_empty`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
+
+## `pub trait SpatialIndex`
+
+A spatial index over `ItemId`s keyed by axis-aligned scene
+rectangles. Used by `Scene` for `items_in_rect`
+queries and by `SceneView` for viewport
+culling.
+
+```rust
+pub trait SpatialIndex: Send + std::fmt::Debug { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn insert(&mut self, id: ItemId, bounds: Rect);`
+
+Insert or update an item's bounds. Calling `insert` again with
+the same id replaces the previous bounds (re-buckets the
+item). Equivalent to `remove(id); insert(id, bounds);` on
+implementations that need an explicit update path.
+
+#### `fn remove(&mut self, id: ItemId);`
+
+Remove an item. No-op if `id` is not present.
+
+#### `fn query(&self, scene_rect: Rect) -> Vec<ItemId>;`
+
+Items whose bounds intersect `scene_rect`, in implementation-
+defined order. The result is deduplicated. May include false
+positives (items in cells the rect overlaps but whose bounds
+don't actually intersect) — callers that need exact
+intersection narrow with a per-item check.
+
+#### `fn contains(&self, id: ItemId) -> bool;`
+
+Whether `id` is currently in the index.
+
+#### `fn len(&self) -> usize;`
+
+Total number of items in the index.
+
+#### `fn is_empty(&self) -> bool { /* default implementation */ }`
+
+Whether the index is empty.
 
 ## `pub const DEFAULT_CELL_SIZE`
 

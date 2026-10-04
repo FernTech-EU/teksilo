@@ -70,11 +70,37 @@ plm.flush_now().expect("flush");
 
 ## Builder methods at a glance
 
-`open`, `model`, `upsert_front`, `update_in_place`, `remove`, `clear`, `flush_now`, `path`
+`Key`, `key`
 
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-settings/latest/teksilo_settings/index.html)
+
+## `pub trait Keyed`
+
+An item with a stable, owned identity — the merge key
+`PersistedListModel` dedupes and diffs by.
+
+`Key` is owned (not borrowed, unlike the old `MruEntry::Key: ?Sized`
+shape) because it must be captured into a `Patch` (`crate::flush::Patch`)
+closure that crosses to the shared I/O worker thread — a borrow into
+`T` cannot outlive the mutation call that produced it.
+
+```rust
+pub trait Keyed { /* associated items below */ }
+```
+
+### Associated items
+
+#### `type Key: Eq + Hash + Clone + Send + 'static;`
+
+The key type. Typically `String` / `PathBuf` / a small `Copy` id.
+
+#### `fn key(&self) -> Self::Key;`
+
+This item's identity. Returned by value: cheap for the small key
+types this is meant for (clone a `String`/`PathBuf`/id), and it
+sidesteps borrow-lifetime issues entirely.
 
 ## `pub enum ListOp`
 

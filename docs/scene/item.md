@@ -242,3 +242,236 @@ The overwritten slot contents, or `None` when the write was refused.
 
 The outer `Option` is "did anything happen"; the inner one is "was the
 slot occupied".
+
+## `pub trait SceneItem`
+
+A lightweight, paint-only scene-graph item.
+
+Implementations carry their own bounds (in local coords, anchored
+at the origin) and provide a `paint` method that draws into a
+`Canvas`. The Scene takes care of positioning, transform-chain
+composition, hit-test, accessibility, and repaint scheduling.
+
+# Required methods
+
+* `SceneItem::local_bounds` — AABB in local item coords.
+* `SceneItem::set_local_bounds` — write back the bounds field
+  when the Scene mutates it.
+* `SceneItem::paint` — draw the item into the canvas. The canvas
+  already has the item's `scene_transform` pushed, so coordinates
+  are in local item space.
+
+# Optional methods
+
+* `SceneItem::shape` — the item's geometry in local coords, used
+  for hit-test, marquee, collision and path queries alike. Default
+  is the local AABB.
+* `SceneItem::label` — human-readable label for AT and debug.
+* `SceneItem::register_bindings` — bind reactive signals to the
+  SceneView's repaint machinery.
+* `SceneItem::accessibility` — populate the AccessKit node.
+
+```rust
+pub trait SceneItem: std::fmt::Debug + 'static { /* associated items below */ }
+```
+
+### Associated items
+
+#### `fn local_bounds(&self) -> Rect;`
+
+AABB in **local item coordinates** (origin at the item's
+anchor). The Scene composes this with the item's
+`scene_transform` to compute its scene-space AABB for the
+spatial index.
+
+#### `fn set_local_bounds(&mut self, bounds: Rect);`
+
+Write back new bounds. Called by `Scene::set_local_bounds`
+when the bounds change. Implementations update their stored
+bounds field; geometry-bearing items (e.g. `crate::PathItem`)
+must keep their geometry consistent with the new bounds.
+
+Two obligations, because the Scene reads
+`local_bounds` back afterwards and stores
+*that* as the rectangle the spatial index buckets on:
+
+* **Be idempotent.** Calling twice with the same rectangle must leave
+  the item where the first call left it. An item that only ever
+  converges towards the request turns a setter driven per frame into
+  an endless stream of `ItemChange::LocalBoundsChanged`.
+* **Be honest about what you cannot do.** An item that fits geometry
+  to the box rather than adopting the box may be unable to honour an
+  axis (a perfectly horizontal stroke has no height to stretch). Leave
+  `local_bounds` reporting what you settled on rather than what was
+  asked for, and say so in your own documentation — the Scene stores
+  the answer, so a lie here is a lie in the index.
+
+#### `fn paint(&self, canvas: &mut Canvas, ctx: &SceneItemPaintContext<'_>);`
+
+Paint the item into the canvas. The canvas already has this
+item's `scene_transform` (parent chain × view) pushed, so
+coordinates are in **local** item space — `(0, 0)` is the
+item's anchor.
+
+`ctx` carries the active `Theme`,
+`window_active`, and per-item `enabled` state, so colour-bearing items
+resolve their `ColorProp` fills/strokes with
+`prop.resolve(ctx.theme, ctx.enabled)`.
+
+#### `fn set_fill(&mut self, fill: Option<ColorProp>) -> AppearanceWrite<ColorProp> { /* default implementation */ }`
+
+Replace the primary fill colour, returning what was there before. Backs
+`SceneModel::set_item_fill` /
+`clear_item_fill`. Rectangles,
+paths, and groups set their fill; text items map it onto their
+foreground colour (so a `None` is rejected — text always has a colour);
+image items have no fill. Default:
+`AppearanceWrite::Refused`.
+
+**An implementation that writes the slot must return the value it
+overwrote.** That value is what
+`ItemChange::AppearanceChanged`'s `old` carries, and
+therefore what a data layer reverses the edit from; see
+`AppearanceWrite` for why it rides out of the setter instead of coming
+from a getter.
+
+#### `fn set_stroke( &mut self, stroke: Option<(ColorProp, StrokeStyle)>, ) -> AppearanceWrite<(ColorProp, StrokeStyle)> { /* default implementation */ }`
+
+Replace the stroke (colour + `StrokeStyle`), returning what was there
+before. Backs
+`SceneModel::set_item_stroke` /
+`clear_item_stroke`. Rectangles,
+paths, and groups accept it; text and image items refuse. Default:
+`AppearanceWrite::Refused`.
+
+Same obligation as `set_fill`: an implementation
+that writes the slot returns what it overwrote.
+
+#### `fn shape(&self) -> crate::shape::ItemShape { /* default implementation */ }`
+
+This item's geometry in **local** coordinates — the single source of
+truth for hit-test, marquee selection, collision and path queries.
+
+Default: `ItemShape::bounds` of
+`SceneItem::local_bounds`, which
+allocates nothing and is exact for a rectangle. Override it when the
+item's silhouette is not its box: a stroke-only connector whose
+bounding box is mostly empty (`PathItem`), a rounded
+card whose corners are transparent (`RectItem`), a
+logical-only container that must let clicks fall through
+(`GroupItem` returns
+`ItemShape::none`).
+
+# Stay inside your own bounds
+
+The shape must lie within `local_bounds` —
+that rectangle is what the spatial index buckets on and what every
+query broad-phases against, so a silhouette poking out of it is a
+silhouette that is sometimes never asked. It is also what makes the
+four `ItemSelectionMode`s consistent:
+because the shape is inside the box, anything an `…ItemShape` query
+picks an `…ItemBoundingRect` query picks too. Both built-ins that
+narrow their shape stay inside by construction (a rounded rect is
+inside its rect; a `PathItem` *derives* its bounds from its geometry),
+and an item that widens its clickable area should widen its bounds to
+match — as `PathItem::hit_stroke_width` does.
+
+# Called once per layout pass
+
+The `SceneView` refreshes a dispatch snapshot from
+this on every layout pass, so **return a cheap clone of state you
+already own** — an `Rc<ShapeGeometry>` built in your constructor —
+rather than building geometry here. Every `ItemShape` is O(1) to clone
+by construction; the only way to make this expensive is to flatten a
+path inside it.
+
+# One value, not two predicates
+
+This returns a *value*, not a closure, and that is the point. Because
+the value is `Clone + 'static` and carries everything a test needs —
+outline, fill rule, stroke band and its
+`StrokeSpace` — the view's
+snapshot stores the shape itself and every query reads the same one.
+The pair this replaced (a `&self` predicate for the eager path, a
+boxed closure for the snapshot) had to be kept in agreement by hand.
+
+#### `fn thumbnail_color(&self) -> teksilo_tokens::Color { /* default implementation */ }`
+
+Dominant color to draw as the item's representation in
+minimap-style thumbnails. Default: an opaque mid-grey,
+which gives a recognisable but neutral marker for any item.
+Built-in items override: `RectItem`
+returns its fill, `PathItem`
+returns stroke or fill, `GroupItem`
+returns fill or stroke and paints a logical group fully
+transparent. `ImageItem` does not
+override — it keeps the neutral grey.
+
+Consumed by `Scene::item_thumbnails`
+— the typical minimap input. Apps with non-standard items
+can override on their own `SceneItem` impls.
+
+#### `fn initial_flags(&self) -> ItemFlags { /* default implementation */ }`
+
+The flags this item should carry into the Scene at insert
+time. Default: `ItemFlags::default()` — visible, enabled,
+selectable. Built-ins read their accumulated builder state
+(e.g. `.draggable(true)` flips `IS_DRAGGABLE`); custom items
+override this to opt into hover acceptance, focus, clipping,
+or `IGNORES_TRANSFORMATIONS`.
+
+Read once by `Scene::add_item` and
+stored on the entry. Subsequent flag changes go through
+`Scene::set_flag` /
+`Scene::set_flags`.
+
+#### `fn label(&self) -> Option<String> { /* default implementation */ }`
+
+Optional human-readable label, surfaced in debug introspection
+and used by the default `SceneItem::accessibility` impl as
+the AT name when an item author hasn't overridden it via the
+per-item `.access_label(...)` chain.
+
+#### `fn access_subtree_mode(&self) -> crate::items::AccessSubtreeMode { /* default implementation */ }`
+
+AT subtree treatment for descendants.
+
+`Inherit` (default) — descendants emit AT nodes normally.
+`Exclude` — descendants are pruned from the AT tree.
+`Merge` — descendants' labels concatenate into this item's
+AT name and they're pruned from individual emission, so the
+subtree reads as a single AT element. Built-ins read this
+from their per-item `.access_subtree(...)` chain.
+
+#### `fn cache_mode(&self) -> crate::cache::CacheMode { /* default implementation */ }`
+
+Per-item paint caching strategy. Default
+`CacheMode::None`: the
+item's `paint` runs every frame.
+
+Returning `CacheMode::ItemCoordinate`
+asks the `SceneView` to record the
+item's paint output in **local item coordinates** as a
+`RenderFrame` and replay it on
+subsequent frames instead of re-running `paint`. Only
+suitable for items whose visual depends solely on data the
+Scene knows about (geometry, flags, opacity) — not on
+arbitrary signal state outside `local_bounds`. The cache
+for an id is evicted on
+`ItemChange::LocalBoundsChanged` for
+that id.
+
+#### `fn register_bindings(&self, _ctx: &mut BuildContext, _view_id: WidgetId) { /* default implementation */ }`
+
+Register reactive bindings the item depends on. Called once
+per `SceneView::build` for every item in
+the scene, with the SceneView's `WidgetId` as `view_id`. Items
+with signal-bound state bind their signals here at the
+appropriate `BindingLevel`.
+
+#### `fn accessibility(&self, builder: &mut AccessNodeBuilder, _ctx: &SceneItemA11yContext) { /* default implementation */ }`
+
+Populate the AccessKit node for this item. Default: role
+`Role::GraphicsObject` plus the `SceneItem::label` as the
+AT name if set. The per-item `.access_*` builder chain layers
+overrides on top of whatever this method writes.

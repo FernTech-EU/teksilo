@@ -11,7 +11,7 @@ Every public type in `teksilo-data`, grouped by category. Each page links to its
 - [ChartChange](chart_change.md) — ChartChange — change notifications and stable series identifiers for chart collections
 - [ChartModel](chart_model.md) — `ChartModel<T>` — concrete reactive multi-series chart data model
 - [ChartSelection](chart_selection.md) — `ChartSelection` — point-level selection state for chart widgets
-- [ChartSource](chart_source.md): Shared chart input for a complete model or a live tail projection
+- [ChartSource](chart_source.md) — Shared chart input for a complete model or a live tail projection
 - [ChartWindow](chart_window.md) — `ChartWindow<T>` — a "last N points per series" streaming projection over
 - [CheckedModel](checked_model.md) — `CheckedModel` — per-row checkbox state for flat collection widgets
 - [CheckState](check_state.md) — `CheckState` — tri-state checkbox value shared by the data layer and widgets
