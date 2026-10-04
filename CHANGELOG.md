@@ -63,6 +63,14 @@ by crate for clarity, not because crates version independently.
 
 #### Render
 
+- **Clipping was misplaced at fractional scales and lost around blurs.** A
+  clip inside a translated scope (a panned scene, a moved transform
+  wrapper) landed at the wrong place whenever the display scale was not 1,
+  because the translation was scaled twice. Content drawn after a blur
+  inside a clipped region (a scroll area, for instance) was not clipped at
+  all, since the blur restarted drawing without restoring the clip. Both
+  now clip where the content is, and a clip opened outside a blur no
+  longer reaches the blur's own offscreen drawing.
 - **Blur used the wrong kernel width.** Every pass of every blur in a frame
   read the kernel offset written for the frame's last blur pass, because
   the per-pass parameters were rewritten into one buffer that the GPU reads

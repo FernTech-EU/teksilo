@@ -113,6 +113,13 @@ struct ActiveTarget {
     /// compositing into THIS target on its next segment open. Drained
     /// at the top of each segment.
     pending_composites: Vec<PendingComposite>,
+    /// Scissor rects of the clips opened on THIS target, in its own device
+    /// pixels; the top is the effective clip (each entry is already the
+    /// intersection with the one below). Kept per target because an
+    /// intermediate draws its subtree at its own origin: a clip opened on
+    /// the surface is in the wrong space there, and still applies to the
+    /// composite of the blurred result once the surface pass reopens.
+    clip_stack: Vec<[u32; 4]>,
     /// Intermediate-only metadata, populated when `intermediate.is_some()`.
     /// Carried here (rather than in a separate `BlurScope` stack)
     /// because End needs to look these up after popping the target.
@@ -132,6 +139,7 @@ impl ActiveTarget {
             viewport_h,
             opened: false,
             pending_composites: Vec::new(),
+            clip_stack: Vec::new(),
             blur_bounds: None,
             blur_radius_logical: None,
             used_w: None,
@@ -567,11 +575,6 @@ impl Renderer {
             let mut target_stack: Vec<ActiveTarget> =
                 vec![ActiveTarget::surface(viewport_width, viewport_height)];
 
-            // Clip rect stack for nested scroll areas.
-            // Each SetClip pushes a rect; the effective clip is the intersection.
-            // ClearClip pops the top and restores the previous intersection.
-            let mut clip_stack: Vec<[u32; 4]> = Vec::new(); // [x, y, w, h]
-
             // Opacity stack for nested opacity groups
             let mut opacity_stack: Vec<f32> = vec![1.0];
             let mut current_opacity: f32 = 1.0;
@@ -796,6 +799,20 @@ impl Renderer {
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
+
+                    // A new pass starts unscissored. Re-apply this
+                    // target's open clip, which a blur boundary may have
+                    // interrupted, before anything draws, the composites
+                    // included: they belong to the clip they were opened
+                    // under.
+                    if let Some(&[x, y, w, h]) = target_stack
+                        .last()
+                        .expect("target_stack always has the surface target")
+                        .clip_stack
+                        .last()
+                    {
+                        pass.set_scissor_rect(x, y, w, h);
+                    }
 
                     // Composite pending blurred sub-trees first.
                     for pc in &composites_to_draw {
@@ -1273,33 +1290,40 @@ impl Renderer {
                                 // transforms we take the AABB of the four
                                 // corners, which over-clips slightly but
                                 // remains correct for visibility.
-                                let p_tl =
-                                    apply_transform_pixel([rect.x, rect.y], &current_transform);
-                                let p_tr = apply_transform_pixel(
-                                    [rect.x + rect.width, rect.y],
-                                    &current_transform,
-                                );
-                                let p_bl = apply_transform_pixel(
-                                    [rect.x, rect.y + rect.height],
-                                    &current_transform,
-                                );
-                                let p_br = apply_transform_pixel(
-                                    [rect.x + rect.width, rect.y + rect.height],
-                                    &current_transform,
-                                );
+                                //
+                                // `current_transform` maps device pixels
+                                // (its translation is already scaled), as
+                                // for vertices: scale the rect first, then
+                                // transform. Transforming the logical rect
+                                // and scaling afterwards would scale the
+                                // translation twice.
+                                let device = |x: f32, y: f32| {
+                                    apply_transform_pixel(
+                                        [x * scale_factor, y * scale_factor],
+                                        &current_transform,
+                                    )
+                                };
+                                let p_tl = device(rect.x, rect.y);
+                                let p_tr = device(rect.x + rect.width, rect.y);
+                                let p_bl = device(rect.x, rect.y + rect.height);
+                                let p_br = device(rect.x + rect.width, rect.y + rect.height);
                                 let min_x = p_tl[0].min(p_tr[0]).min(p_bl[0]).min(p_br[0]);
                                 let min_y = p_tl[1].min(p_tr[1]).min(p_bl[1]).min(p_br[1]);
                                 let max_x = p_tl[0].max(p_tr[0]).max(p_bl[0]).max(p_br[0]);
                                 let max_y = p_tl[1].max(p_tr[1]).max(p_bl[1]).max(p_br[1]);
-                                let x = (min_x * scale_factor).max(0.0) as u32;
-                                let y = (min_y * scale_factor).max(0.0) as u32;
-                                let w = ((max_x - min_x) * scale_factor).ceil().max(0.0) as u32;
-                                let h = ((max_y - min_y) * scale_factor).ceil().max(0.0) as u32;
+                                let x = min_x.max(0.0) as u32;
+                                let y = min_y.max(0.0) as u32;
+                                let w = (max_x - min_x).ceil().max(0.0) as u32;
+                                let h = (max_y - min_y).ceil().max(0.0) as u32;
                                 // Clamp to viewport — wgpu requires x+w <= width, y+h <= height.
                                 let x = x.min(viewport_width);
                                 let y = y.min(viewport_height);
                                 let w = w.min(viewport_width.saturating_sub(x));
                                 let h = h.min(viewport_height.saturating_sub(y));
+                                let clip_stack = &mut target_stack
+                                    .last_mut()
+                                    .expect("target_stack always has the surface target")
+                                    .clip_stack;
                                 let clipped = if let Some(&[cx, cy, cw, ch]) = clip_stack.last() {
                                     let ix = x.max(cx);
                                     let iy = y.max(cy);
@@ -1335,6 +1359,10 @@ impl Renderer {
                                     index_binding
                                 );
                                 quad_source = None;
+                                let clip_stack = &mut target_stack
+                                    .last_mut()
+                                    .expect("target_stack always has the surface target")
+                                    .clip_stack;
                                 clip_stack.pop();
                                 if let Some(&[x, y, w, h]) = clip_stack.last() {
                                     pass.set_scissor_rect(x, y, w, h);
@@ -1699,6 +1727,7 @@ impl Renderer {
                             viewport_h: bucket_h,
                             opened: false,
                             pending_composites: Vec::new(),
+                            clip_stack: Vec::new(),
                             blur_bounds: Some(*bounds),
                             blur_radius_logical: Some(*radius),
                             used_w: Some(device_w),
@@ -3850,5 +3879,145 @@ mod tests {
             let slot: &[f32] = bytemuck::cast_slice(&bytes[at..at + 16]);
             assert_eq!(slot, &[i as f32, i as f32 + 0.5, 0.0, 0.0], "slot {i}");
         }
+    }
+
+    /// Render `frame` at `scale` into a `w`×`h` target cleared to
+    /// transparent, returning a pixel reader.
+    fn render_scaled(
+        renderer: &mut Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &RenderFrame,
+        scale: f32,
+        (w, h): (u32, u32),
+    ) -> impl Fn(u32, u32) -> [u8; 4] {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("teksilo_render_clip_target"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render(frame, &view, scale, w, h, [0.0, 0.0, 0.0, 0.0]);
+        let pixels = crate::test_support::read_texture_rgba(device, queue, &texture, w, h);
+        move |x, y| {
+            let i = ((y * w + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        }
+    }
+
+    fn push_white_rect(frame: &mut RenderFrame, rect: teksilo_canvas::Rect) {
+        let idx = frame.decorations.len();
+        frame.decorations.push(teksilo_canvas::DecorationRect {
+            rect: rect.to_array(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            kind: teksilo_canvas::DecorationKind::WidgetBackground,
+        });
+        frame.draw_order.push(DrawCommand::Decoration(idx));
+    }
+
+    #[test]
+    fn a_clip_under_a_translation_lands_where_the_content_does_at_fractional_scale() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("teksilo_render_clip_translate_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        // A scope translated by 10 logical px clips a 40 px wide white rect to
+        // its first 20 px. At scale 1.5 the content starts at device x = 15,
+        // so the visible band is device x 15..45.
+        let mut frame = RenderFrame::new();
+        frame
+            .draw_order
+            .push(DrawCommand::PushTransform(Transform2D::translate(
+                10.0, 0.0,
+            )));
+        frame
+            .draw_order
+            .push(DrawCommand::SetClip(Rect::new(0.0, 0.0, 20.0, 20.0)));
+        push_white_rect(&mut frame, Rect::new(0.0, 0.0, 40.0, 20.0));
+        frame.draw_order.push(DrawCommand::ClearClip);
+        frame.draw_order.push(DrawCommand::PopTransform);
+
+        let px = render_scaled(&mut renderer, &device, &queue, &frame, 1.5, (96, 40));
+        assert_eq!(px(17, 10)[3], 255, "inside the clip, near its leading edge");
+        assert_eq!(
+            px(43, 10)[3],
+            255,
+            "inside the clip, near its trailing edge"
+        );
+        assert_eq!(px(47, 10)[3], 0, "past the clip's trailing edge");
+        assert_eq!(px(12, 10)[3], 0, "before the content starts");
+    }
+
+    #[test]
+    fn a_clip_still_applies_after_a_blur_scope_reopens_the_pass() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("teksilo_render_clip_after_blur_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        // A clip to x < 20 holds a blur scope and, after it, a full-width
+        // white rect. The rect must stay clipped although the blur scope
+        // ended the pass the clip was set on.
+        let mut frame = RenderFrame::new();
+        frame
+            .draw_order
+            .push(DrawCommand::SetClip(Rect::new(0.0, 0.0, 20.0, 32.0)));
+        push_blurred_square(
+            &mut frame,
+            Rect::new(0.0, 0.0, 16.0, 16.0),
+            2.0,
+            Rect::new(4.0, 4.0, 8.0, 8.0),
+        );
+        push_white_rect(&mut frame, Rect::new(0.0, 20.0, 64.0, 12.0));
+        frame.draw_order.push(DrawCommand::ClearClip);
+
+        let px = render_scaled(&mut renderer, &device, &queue, &frame, 1.0, (64, 32));
+        assert_eq!(px(10, 26)[3], 255, "inside the clip");
+        assert_eq!(px(40, 26)[3], 0, "outside the clip");
+    }
+
+    #[test]
+    fn a_clip_set_before_a_blur_scope_does_not_clip_inside_its_intermediate() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::create_test_renderer("teksilo_render_clip_into_blur_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        // The clip (x 30..64) covers the right half of a blur scope placed at
+        // x 30. Inside the intermediate the scope draws at its own origin, so
+        // the surface-space clip rect (x >= 30) must not be applied there: it
+        // would cut away everything left of intermediate x 30, here the whole
+        // white square at intermediate x 2..14.
+        let mut frame = RenderFrame::new();
+        frame
+            .draw_order
+            .push(DrawCommand::SetClip(Rect::new(30.0, 0.0, 34.0, 32.0)));
+        push_blurred_square(
+            &mut frame,
+            Rect::new(30.0, 0.0, 16.0, 16.0),
+            2.0,
+            Rect::new(32.0, 2.0, 12.0, 12.0),
+        );
+        frame.draw_order.push(DrawCommand::ClearClip);
+
+        let px = render_scaled(&mut renderer, &device, &queue, &frame, 1.0, (64, 32));
+        assert!(
+            px(38, 8)[3] > 128,
+            "the blurred square shows at the centre of the scope, got {:?}",
+            px(38, 8)
+        );
     }
 }
