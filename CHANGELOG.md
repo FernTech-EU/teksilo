@@ -60,6 +60,13 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+#### Render
+
+- **A clip starting before the window edge reached too far.** A clipping
+  widget scrolled partly off the leading or top edge of the window (or of a
+  blur's offscreen drawing) clipped its content as far past its trailing
+  edge as it reached before the leading one. It now ends where it should.
+
 #### App
 
 - **Automation screenshots could show text as blank.** A screenshot renders

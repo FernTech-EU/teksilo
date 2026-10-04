@@ -1311,10 +1311,18 @@ impl Renderer {
                                 let min_y = p_tl[1].min(p_tr[1]).min(p_bl[1]).min(p_br[1]);
                                 let max_x = p_tl[0].max(p_tr[0]).max(p_bl[0]).max(p_br[0]);
                                 let max_y = p_tl[1].max(p_tr[1]).max(p_bl[1]).max(p_br[1]);
-                                let x = min_x.max(0.0) as u32;
-                                let y = min_y.max(0.0) as u32;
-                                let w = (max_x - min_x).ceil().max(0.0) as u32;
-                                let h = (max_y - min_y).ceil().max(0.0) as u32;
+                                // From the edges, not origin plus size: a
+                                // clip that starts left of or above the
+                                // target loses that part, and its far edge
+                                // must stay where it is.
+                                let x0 = min_x.floor().max(0.0);
+                                let y0 = min_y.floor().max(0.0);
+                                let x1 = max_x.ceil().max(x0);
+                                let y1 = max_y.ceil().max(y0);
+                                let x = x0 as u32;
+                                let y = y0 as u32;
+                                let w = (x1 - x0) as u32;
+                                let h = (y1 - y0) as u32;
                                 // Clamp to viewport — wgpu requires x+w <= width, y+h <= height.
                                 let x = x.min(viewport_width);
                                 let y = y.min(viewport_height);
@@ -4019,5 +4027,66 @@ mod tests {
             "the blurred square shows at the centre of the scope, got {:?}",
             px(38, 8)
         );
+    }
+
+    #[test]
+    fn a_clip_opened_inside_a_blur_scope_stays_in_the_intermediates_space() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::require_test_renderer("teksilo_render_clip_inside_blur_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        // The surface clip (x 30..64) is open when the scope at x 30 begins.
+        // Inside the scope a clip covering the whole scope is opened and
+        // closed around the square, then the square is drawn again. With a
+        // single clip stack the inner clip would be intersected with the
+        // surface rect (x >= 30, which in the intermediate's own coordinates
+        // cuts away everything), and closing it would restore that surface
+        // rect onto the intermediate pass.
+        let mut frame = RenderFrame::new();
+        frame
+            .draw_order
+            .push(DrawCommand::SetClip(Rect::new(30.0, 0.0, 34.0, 32.0)));
+        let scope = Rect::new(30.0, 0.0, 16.0, 16.0);
+        frame.draw_order.push(DrawCommand::BeginBlurredSubtree {
+            bounds: scope,
+            radius: 2.0,
+        });
+        frame.draw_order.push(DrawCommand::SetClip(scope));
+        push_white_rect(&mut frame, Rect::new(32.0, 2.0, 12.0, 12.0));
+        frame.draw_order.push(DrawCommand::ClearClip);
+        push_white_rect(&mut frame, Rect::new(32.0, 2.0, 12.0, 12.0));
+        frame.draw_order.push(DrawCommand::EndBlurredSubtree);
+        frame.draw_order.push(DrawCommand::ClearClip);
+
+        let px = render_scaled(&mut renderer, &device, &queue, &frame, 1.0, (64, 32));
+        assert!(
+            px(38, 8)[3] > 128,
+            "the square drawn inside the scope shows, got {:?}",
+            px(38, 8)
+        );
+    }
+
+    #[test]
+    fn a_clip_that_starts_before_the_target_keeps_its_far_edge() {
+        use teksilo_canvas::Rect;
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::require_test_renderer("teksilo_render_clip_negative_device"),
+        ) else {
+            return; // no GPU adapter (headless CI) — skip.
+        };
+        // A clip spanning x -10..20, as a clipping widget scrolled partly
+        // off the leading edge has. Its visible part is 0..20.
+        let mut frame = RenderFrame::new();
+        frame
+            .draw_order
+            .push(DrawCommand::SetClip(Rect::new(-10.0, 0.0, 30.0, 20.0)));
+        push_white_rect(&mut frame, Rect::new(0.0, 0.0, 64.0, 20.0));
+        frame.draw_order.push(DrawCommand::ClearClip);
+
+        let px = render_scaled(&mut renderer, &device, &queue, &frame, 1.0, (64, 32));
+        assert_eq!(px(18, 10)[3], 255, "inside the clip");
+        assert_eq!(px(24, 10)[3], 0, "past the clip's far edge");
     }
 }
