@@ -255,6 +255,7 @@
 - [ChartChange](data-collections/chart_change.md)
 - [ChartModel](data-collections/chart_model.md)
 - [ChartSelection](data-collections/chart_selection.md)
+- [ChartSource](data-collections/chart_source.md)
 - [ChartWindow](data-collections/chart_window.md)
 - [CheckedModel](data-collections/checked_model.md)
 - [CheckState](data-collections/check_state.md)

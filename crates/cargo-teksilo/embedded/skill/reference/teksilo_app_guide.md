@@ -27,7 +27,7 @@ directly.
 
 ```toml
 [dependencies]
-teksilo = "0.13"
+teksilo = "=0.14.3"
 ```
 
 Then in code:
@@ -66,7 +66,7 @@ and opt-outs:
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
-For a Latin-only minimal build: `teksilo = { version = "0.13", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
+For a Latin-only minimal build: `teksilo = { version = "=0.14.3", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
 
 ## App entry point
 
@@ -400,7 +400,7 @@ Augment any widget's accessibility from the outside with builder-level `.access_
 methods (analogous to SwiftUI's `.accessibility*`):
 
 ```rust,ignore
-use accesskit::{Role, Live};   // import accesskit::Action *qualified* — the prelude also exports an `Action`
+use teksilo::core::accesskit::{self, Live, Role}; // qualify accesskit::Action to avoid the prelude Action
 
 Button::new(tr!(save_icon()))
     .access_label(tr!(save()))                 // user-visible strings take impl Into<Prop<String>>
@@ -909,6 +909,67 @@ assert loop. **`reference/automation.md` in this skill** carries the tool catalo
 error codes worth branching on, and the probe-harness workflow (`cargo teksilo probe install`); the
 framework's `automation-mcp` guide is reachable with `cargo teksilo search "automation mcp"`.
 
+## Live dashboards and background work
+
+Use `teksilo::core::{EventSource, SubscriptionHandle}` for a worker that publishes
+samples. These types are outside the prelude. Implement the source's subscription
+contract, register it with `.event_source(source.clone())`, and keep a shared
+handle in `.app_state(source)`. A subscription handle must unregister its callback
+on drop, including when a widget rebuilds. Publish outside the subscriber lock.
+
+`ctx.subscribe_event(topic, callback)` delivers the sample on the UI thread.
+Keep blocking I/O on the worker. Keep `Signal` and `ChartModel` updates in the
+UI callback. The worker should send plain data, not try to share the UI objects.
+
+One mutable signal can hold the complete sample. Derive labels and fractions
+instead of passing a growing argument list of independent signals:
+
+```rust
+use teksilo::prelude::*;
+use teksilo::widgets::{ProgressBar, TextWidget};
+
+#[derive(Clone)]
+struct Sample { gpu_fraction: f32 }
+let sample = Signal::new(Sample { gpu_fraction: 0.0 });
+let label = TextWidget::new(lit!("")).text(
+    sample.map(|s| format!("GPU: {:.0}%", s.gpu_fraction * 100.0)),
+);
+let meter = ProgressBar::new(0.0).value(sample.map(|s| s.gpu_fraction));
+sample.set(Sample { gpu_fraction: 0.42 });
+```
+
+`map` reads the parent sample and derived bindings track its changes. A single
+sample signal is simple and consistent; all its dependents are invalidated on
+an update. For large or independently updated data, group smaller signals or
+models into a view-model struct instead. Do not create a separate mutable signal
+for every formatted copy of the same value.
+
+The runnable `examples/chart_demo/src/bin/live_dashboard.rs` dashboard
+combines five meters, a shared history model, a worker with shutdown handling,
+and a cleanup-aware event source. In a checkout, run:
+
+```sh
+cargo run -p chart-demo --bin live_dashboard
+cargo test -p chart-demo --bin live_dashboard
+```
+
+Its deterministic tests inspect the actual accessible meter values and displayed
+texts after a sample update. Mapping a window or observing a live process alone
+does not verify bindings. The example also enables the debug automation bridge
+for inspecting the running app. It uses the new direct `ChartWindow` input on
+`dev`; this constructor support is not in published 0.14.3.
+
+Keep the model in app state so rebuilds preserve history. Choose both a retention
+limit for stored samples and a visible window for readability. See the
+charts guide (`cargo teksilo show docs/charts.md`) for categorical time labels, scrolling
+limits and the distinction between storage and display windows.
+
+For live regions, use `teksilo::core::accesskit::Live`; no direct AccessKit
+dependency is needed. Announce action results with `Live::Polite`, but avoid
+announcing every polling tick. The example disables live announcements on meters.
+Literal labels via `lit!` need no translation catalog. Settings, toast hosts and
+`teksu!` are optional for this application shape.
+
 ## Breaking changes 0.9 → 0.13
 
 Each of these fails to resolve at the call site, so the compiler names them — this list is
@@ -963,8 +1024,9 @@ All three are about *why* an overlay closed, which the old API could not report.
 ---
 
 *This guide is abridged from Teksilo's internal `CLAUDE.md` and targets app developers
-consuming `teksilo`. It was verified against **teksilo 0.13.0** and is a map, not the
-territory: where it disagrees with `cargo check` or with `cargo teksilo symbol`, they win.
+consuming the **teksilo 0.14 API line**. The runnable dashboard example is compiled
+and its visible bindings are tested in the workspace. Use `cargo check` and
+`cargo teksilo symbol` for exact signatures in the version your app resolves.
 For framework internals, source layout and implementation status, search the version-matched
-guides with `cargo teksilo search` and read a hit in full with `cargo teksilo show <path>` —
+guides with `cargo teksilo search` and read a hit in full with `cargo teksilo show <path>`;
 both answer for the version this app resolved, and neither needs a framework checkout.*

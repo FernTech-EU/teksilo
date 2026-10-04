@@ -44,7 +44,7 @@ assert_eq!(window.point_count(s), 10); // last 10 points only
 
 ## Builder methods at a glance
 
-`window_size`, `set_window_size`, `series_count`, `series_ids`, `point_count`, `with_series`, `with_point`, `observe_changes`, `first_changed_index`
+`window_size`, `set_window_size`, `source`, `structure_version`, `style_version`, `with_all_series`, `with_series_view`, `series_count`, `series_ids`, `point_count`, `with_series`, `with_point`, `observe_changes`, `first_changed_index`
 
 ## API reference
 
@@ -75,6 +75,27 @@ The configured window size.
 
 Change the window size, rebuilding every series and emitting
 `ChartChange::Reset`.
+
+#### `pub fn source(&self) -> ChartModel<T>`
+
+Access the source model. Visibility changes made by a legend are shared
+with every other view of this model.
+
+#### `pub fn structure_version(&self) -> Signal<u64>`
+
+Reactive version for changes to the visible data or window size.
+
+#### `pub fn style_version(&self) -> Signal<u64>`
+
+Reactive version for source colors and patterns.
+
+#### `pub fn with_all_series<R>(&self, f: impl FnOnce(&[SeriesView<'_, T>]) -> R) -> R`
+
+Read windowed series as borrowed slices, without copying point data.
+
+#### `pub fn with_series_view<R>( &self, series: SeriesId, f: impl FnOnce(SeriesView<'_, T>) -> R, ) -> Option<R>`
+
+Read a single windowed series. Indices are relative to the window.
 
 #### `pub fn series_count(&self) -> usize`
 

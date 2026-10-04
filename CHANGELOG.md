@@ -15,6 +15,10 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Update the app guide and bundled skill reference for the 0.14 API, including
+  AccessKit re-exports and derived sample signals. Add a runnable live dashboard
+  with a worker event source, bounded history and tests of visible bindings.
+
 - Accept `ChartWindow` directly in line, bar and pie charts and their legends
   through `ChartSource`, borrowing visible points and tracking window changes.
   Document categorical axes, history retention and scrolling limits.
