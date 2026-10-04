@@ -78,6 +78,15 @@ jobs:
     # which is every tag's first run) compiles the workspace twice over — once
     # for the tests and once for the trybuild fixtures — and overran 30.
     timeout-minutes: 60
+    env:
+      # The offscreen renderer builds its instance from the environment, so
+      # this makes every GPU test open lavapipe or nothing, never a silent
+      # fall back to GL.
+      WGPU_BACKEND: vulkan
+      # A missing adapter, or one that is not lavapipe, fails the GPU tests
+      # that check the requirement instead of letting them return early and
+      # pass. The panic message names the adapter found.
+      TEKSILO_TEST_REQUIRE_ADAPTER: lavapipe
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -90,6 +99,23 @@ jobs:
 
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
+
+      # The runner has no GPU and no Vulkan ICD. lavapipe, Mesa's Vulkan
+      # rasteriser on the CPU, gives every test that renders through
+      # `teksilo_render::test_support` the backend a Linux window uses. The
+      # apt index is fresh from the step above. The manifest's name varies
+      # with the Mesa version and packaging (`lvp_icd.json`,
+      # `lvp_icd.<arch>.json`), hence the glob.
+      - name: Install a software Vulkan device (lavapipe)
+        run: |
+          sudo apt-get install --no-install-recommends -y mesa-vulkan-drivers
+          shopt -s nullglob
+          icds=(/usr/share/vulkan/icd.d/lvp_icd*.json)
+          if [ "${#icds[@]}" -ne 1 ]; then
+            echo "::error::expected one lavapipe ICD manifest, found ${#icds[@]}: ${icds[*]}"
+            exit 1
+          fi
+          echo "VK_DRIVER_FILES=${icds[0]}" >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -252,6 +278,10 @@ jobs:
             os: macos-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      # WARP on Windows, Metal on macOS. A GPU test fails if neither opens,
+      # instead of returning early and counting as a pass.
+      TEKSILO_TEST_REQUIRE_ADAPTER: any
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

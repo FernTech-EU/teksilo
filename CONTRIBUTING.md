@@ -51,6 +51,28 @@ Teksilo is built under the following seven rules. They apply to your contributio
 5. Test your changes
 6. Submit a pull request
 
+### Running the GPU tests
+
+GPU tests need an adapter and return early without one. CI runs them on
+lavapipe, Mesa's Vulkan rasteriser on the CPU, and fails one that cannot open
+it: the tests that call `test_support::require_test_renderer`, and the
+automation screenshot tests, which check `test_support::adapter_required`.
+To run them the same way on a machine with a GPU (Debian and Ubuntu ship
+lavapipe in `mesa-vulkan-drivers`; the manifest's name may carry an
+architecture suffix):
+
+```bash
+VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json) \
+WGPU_BACKEND=vulkan \
+TEKSILO_TEST_REQUIRE_ADAPTER=lavapipe \
+  cargo test -p teksilo-render
+```
+
+`WGPU_BACKEND=vulkan` keeps the tests off GL, which would otherwise win on
+a machine with a GPU. `TEKSILO_TEST_REQUIRE_ADAPTER` takes `lavapipe` or
+`any`; when the adapter does not match, the test fails and names the adapter
+it found.
+
 ## Developer Certificate of Origin
 
 This project uses the [Developer Certificate of Origin (DCO)](DCO.md).
