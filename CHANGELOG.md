@@ -13,6 +13,30 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+- `ChartSource` and direct `ChartWindow` support in line, bar and pie charts
+  and their legends, borrowing visible points and tracking window changes.
+- `cargo teksilo search --path PREFIX` to restrict documentation search before
+  lexical and semantic results are combined.
+- The application guide in the bundled documentation search index.
+- A runnable live dashboard example with a worker event source, bounded history
+  and tests of visible bindings.
+
+### Changed
+
+- Chart constructors (`LineChart::new`, `BarChart::new`, `PieChart::new` and
+  `ChartLegend::new`) now accept `impl Into<ChartSource<T>>` instead of
+  `ChartModel<T>`. Explicit `ChartModel` arguments continue to work. Calls that
+  rely on the constructor to infer the argument type may need an explicit type:
+
+  ```rust
+  // Before
+  LineChart::<String>::new(Default::default());
+  // After
+  LineChart::<String>::new(ChartModel::<String>::default());
+  ```
+
 ### Fixed
 
 - Stop dispatching the key presses winit makes up for keys held as a window
@@ -29,17 +53,10 @@ by crate for clarity, not because crates version independently.
 - Accept the application guide's source path in corpus validation while retaining
   checks for relative paths and existing source files.
 
-- Scope documentation search with `--path` before lexical/semantic fusion and
-  prefer headings for explicitly named Rust types. Index the application guide,
-  refresh corpus vectors and cover common chart and scrolling queries.
-
 - Update the app guide and bundled skill reference for the 0.14 API, including
-  AccessKit re-exports and derived sample signals. Add a runnable live dashboard
-  with a worker event source, bounded history and tests of visible bindings.
-
-- Accept `ChartWindow` directly in line, bar and pie charts and their legends
-  through `ChartSource`, borrowing visible points and tracking window changes.
-  Document categorical axes, history retention and scrolling limits.
+  AccessKit re-exports and derived sample signals. Document categorical chart
+  axes, history retention and scrolling limits. Refresh corpus vectors and
+  cover common chart and scrolling queries.
 
 - Include public trait contracts, associated types and constants, and required
   and default methods in `cargo teksilo symbol` output.
