@@ -566,6 +566,14 @@ impl Toast {
     /// a new toast — see `ToastRegistry::enqueue`'s update-in-place
     /// merge for the exact behaviour.
     ///
+    /// The id also names the notice's row in the notification log. An
+    /// update of the live toast updates that row where it is. A toast raised
+    /// under the id once the earlier one has left the screen is a new
+    /// occurrence: the row comes back to the top, unread, dated when it came
+    /// back, even if it says the same as before. See
+    /// [`NotificationArchiveModel::push`](crate::notification::NotificationArchiveModel::push)
+    /// and [`push_update`](crate::notification::NotificationArchiveModel::push_update).
+    ///
     /// # Hazard: this id must be unique per logical operation, not just per call site
     ///
     /// The merge matches on `id` ALONE — no route/window/audience
@@ -1191,6 +1199,117 @@ mod tests {
         let merged = archive.entries().with_item(0, |e| e.clone()).unwrap();
         assert_eq!(merged.title, "Uploading 4 of 7");
         assert_eq!(merged.updates.len(), 1);
+    }
+
+    /// A progress notice updated in place into its result is archived as the
+    /// result: its severity, and the actions it offers, with the replay name
+    /// that lets the log offer one again once the notice is gone. The row used
+    /// to keep the progress notice's Cancel for good.
+    #[test]
+    fn registry_archives_the_actions_a_notice_was_updated_to() {
+        use crate::notification::{ArchivedActionStyle, NotificationArchiveModel};
+        use teksilo_core::styles::BannerSeverity;
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let registry =
+            ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
+        let (_progress, _) = registry.enqueue(
+            Toast::loading(lit!("Importing"))
+                .id("import")
+                .action(ToastAction::destructive(lit!("Cancel"), |_| {})),
+        );
+        let (_result, _) = registry.enqueue(
+            Toast::success(lit!("Imported"))
+                .id("import")
+                .action(ToastAction::primary(lit!("Open now"), |_| {}))
+                .action(
+                    ToastAction::new(lit!("See report"), |_| {})
+                        .closes_toast(false)
+                        .shortcut_id("app.import.report"),
+                ),
+        );
+        assert_eq!(archive.entries().len(), 1);
+        let row = archive.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.severity, BannerSeverity::Success);
+        let offered: Vec<_> = row
+            .actions
+            .iter()
+            .map(|a| {
+                (
+                    a.label.as_str(),
+                    a.intent_name.as_deref(),
+                    a.style,
+                    a.closes_on_invoke,
+                )
+            })
+            .collect();
+        assert_eq!(
+            offered,
+            vec![
+                ("Open now", None, ArchivedActionStyle::PrimaryButton, true),
+                (
+                    "See report",
+                    Some("app.import.report"),
+                    ArchivedActionStyle::Link,
+                    false,
+                ),
+            ]
+        );
+
+        // And a last update offering nothing leaves the row offering nothing.
+        let (_cancelled, _) = registry.enqueue(Toast::info(lit!("Import cancelled")).id("import"));
+        let row = archive.entries().with_item(0, |e| e.clone()).unwrap();
+        assert!(row.actions.is_empty(), "kept {:?}", row.actions);
+        assert_eq!(row.severity, BannerSeverity::Info);
+    }
+
+    /// A notice raised again under the id of one that has left the screen is
+    /// a new occurrence, not a tick of the old one: the log shows it unread,
+    /// at the top, under the time it came back, even when its wording is the
+    /// same as before. A sync that fails at 09:00 and again at 15:00 used to
+    /// leave one read row dated 09:00, with nothing in the bell.
+    #[test]
+    fn registry_archives_a_notice_raised_again_after_it_was_read() {
+        use crate::notification::NotificationArchiveModel;
+        let archive = std::rc::Rc::new(NotificationArchiveModel::in_memory());
+        let registry =
+            ToastRegistry::with_archive(host::ToastInstallOptions::default(), archive.clone());
+        let (first, _) = registry.enqueue(
+            Toast::error(lit!("Sync failed"))
+                .id("sync")
+                .body(lit!("The server did not answer.")),
+        );
+        let (_other, _) = registry.enqueue(Toast::info(lit!("Saved")));
+        let raised = archive.entries().with_item(1, |e| e.clone()).unwrap();
+        assert_eq!(raised.dedup_id.as_deref(), Some("sync"));
+        archive.mark_all_read();
+        registry.dismiss_entry_deferred(first.entry_id(), ToastDismissCause::Timeout);
+        assert_eq!(registry.live_count(), 1, "the sync notice has left");
+
+        let (_again, _) = registry.enqueue(
+            Toast::error(lit!("Sync failed"))
+                .id("sync")
+                .body(lit!("The server did not answer.")),
+        );
+        assert_eq!(archive.entries().len(), 2, "still one row per id");
+        let row = archive.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.dedup_id.as_deref(), Some("sync"), "back at the top");
+        assert_eq!(row.id, raised.id, "the same row");
+        assert!(!row.read, "unread again");
+        assert_eq!(archive.unread_count().get(), 1);
+        assert_eq!(row.updates.len(), 1, "the second occurrence is recorded");
+        assert_eq!(
+            row.timestamp, row.updates[0].timestamp,
+            "dated when it came back"
+        );
+
+        // While it stays on screen, the same words again are not news.
+        let (_tick, _) = registry.enqueue(
+            Toast::error(lit!("Sync failed"))
+                .id("sync")
+                .body(lit!("The server did not answer.")),
+        );
+        let row = archive.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.updates.len(), 1, "a live repeat records nothing");
     }
 
     #[test]

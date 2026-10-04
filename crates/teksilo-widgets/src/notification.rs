@@ -46,7 +46,7 @@ use crate::toast::ToastRoute;
 
 pub use archive::{
     ARCHIVE_FILE_NAME, DEFAULT_ARCHIVE_LIMIT, NotificationArchive, NotificationArchiveError,
-    NotificationArchiveModel,
+    NotificationArchiveModel, UPDATE_HISTORY_LIMIT,
 };
 pub use center_button::NotificationCenterButton;
 pub use log::NotificationLog;
@@ -61,16 +61,22 @@ pub struct NotificationEntry {
     /// dedup key — that one lives in `dedup_id` below). Assigned by
     /// the archive on first push; never reused.
     pub id: u64,
-    /// Severity at the time of the original push. Drives the log's
-    /// row glyph + severity-chip filter.
+    /// Severity of the notice as it now stands: the latest in-place
+    /// update's, else the original push's. Drives the log's row glyph +
+    /// severity-chip filter.
     pub severity: BannerSeverity,
     pub priority: ToastPriority,
     /// Resolved title (`LocalizedString::resolve_now()` snapshot).
     pub title: String,
     pub body: Option<String>,
+    /// The actions the notice offers as it now stands. An in-place update
+    /// replaces them; one that offers none leaves none.
     pub actions: Vec<ArchivedAction>,
-    /// Wall-clock timestamp at first push. The log's day-bucket
-    /// computation runs against this in the user's local timezone.
+    /// Wall-clock time the notice was last raised: its first push, or the
+    /// latest time a notice with the same `dedup_id` was raised again after
+    /// the first had left the screen. In-place updates of a notice still on
+    /// screen leave it alone. The log's day-bucket computation runs against
+    /// this in the user's local timezone.
     pub timestamp: jiff::Timestamp,
     /// Optional grouping key for the log's visual section headers.
     pub group: Option<String>,
@@ -81,12 +87,16 @@ pub struct NotificationEntry {
     /// badge's `unread_count` signal.
     pub read: bool,
     /// `Toast::id(...)` value, if any — used for update-in-place
-    /// merge logic. New entries with a matching `dedup_id` append
-    /// to the existing entry's `updates` list rather than creating
-    /// a separate row.
+    /// merge logic. New entries with a matching `dedup_id` merge into
+    /// the existing row rather than creating a separate one (see
+    /// [`NotificationArchiveModel::push`](archive::NotificationArchiveModel::push)
+    /// and [`push_update`](archive::NotificationArchiveModel::push_update)).
     pub dedup_id: Option<String>,
-    /// In-place updates from subsequent `Toast::id(...)` presents.
-    /// Empty on a freshly-pushed entry.
+    /// Later presents of the same `Toast::id(...)`: one per in-place
+    /// update that changed what the row shows, and one per time the
+    /// notice was raised again. Holds the most recent
+    /// [`UPDATE_HISTORY_LIMIT`]. Empty on a
+    /// freshly-pushed entry.
     pub updates: Vec<NotificationUpdate>,
     /// Mirrored from the originating `LiveEntry::route` (see
     /// `ToastRegistry::entry_to_archive`) — drives which bell(s) show

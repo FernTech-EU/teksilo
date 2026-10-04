@@ -414,8 +414,11 @@ impl ToastRegistry {
                 None
             };
             drop(inner);
+            // An update of a toast still on screen, not a notice raised
+            // again: the archive records it only if it changes what the row
+            // shows, and leaves the row where it is.
             if let (Some(archive), Some(entry)) = (self.archive.as_ref(), archive_entry) {
-                archive.push(entry);
+                archive.push_update(entry);
             }
             revision.set(revision.get().wrapping_add(1));
             self.bump_version();
@@ -518,6 +521,11 @@ impl ToastRegistry {
         // archive record is populated even if a subsequent
         // priority-eviction immediately knocks it out of the live set
         // (the user still saw it; the log row is what survives).
+        //
+        // No live toast has this id, so this is a notice raised, even when
+        // an earlier one under the same id is still in the archive: `push`
+        // brings that row back to the top as unread rather than treating the
+        // arrival as a tick of a notice already gone.
         if let Some(archive) = self.archive.as_ref() {
             if entry.archive {
                 archive.push(Self::entry_to_archive(&entry));

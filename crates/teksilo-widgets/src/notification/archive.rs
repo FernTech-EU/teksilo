@@ -40,6 +40,23 @@ pub const DEFAULT_ARCHIVE_LIMIT: usize = 200;
 /// `<config_dir>/<app>/notifications.toml`.
 pub const ARCHIVE_FILE_NAME: &str = "notifications";
 
+/// How many [`NotificationUpdate`](crate::notification::NotificationUpdate)
+/// records one row keeps. A progress notice that reports each step in its
+/// wording records one update per step, and an id an app reuses for every
+/// run of an operation gathers them from every run, so a row keeps the most
+/// recent ones and drops the oldest. The row itself always shows the notice
+/// as it now stands, whatever the history kept.
+pub const UPDATE_HISTORY_LIMIT: usize = 20;
+
+/// How an entry reaches [`NotificationArchiveModel`]: raised as a notice, or
+/// as an in-place update of a notice still on screen. The two differ only
+/// when the entry merges into an existing row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Arrival {
+    Raised,
+    LiveUpdate,
+}
+
 /// Storage mode for the notification archive. Passed inside
 /// `ToastInstallOptions::archive` to the install helper.
 #[derive(Debug, Clone)]
@@ -143,12 +160,18 @@ impl ArchiveBackend {
         })
     }
 
-    /// Insert `entry` at the front. `entry.id` is always freshly
-    /// stamped and therefore unique, so this never actually collides
-    /// with (and removes) an existing row — it's a plain prepend.
+    /// Insert `entry` at the front, first removing the row that has the
+    /// same `id` if there is one, so a row raised again moves to the top
+    /// rather than appearing twice. A freshly stamped id matches no row, and
+    /// this is then a plain prepend.
     fn upsert_front(&self, entry: NotificationEntry) {
         match self {
-            Self::InMemory(m) => m.insert(0, entry),
+            Self::InMemory(m) => {
+                if let Some((idx, _)) = self.find_by_id(entry.id) {
+                    m.remove(idx);
+                }
+                m.insert(0, entry);
+            }
             Self::Persistent(p) => p.upsert_front(entry),
         }
     }
@@ -326,63 +349,76 @@ impl NotificationArchiveModel {
         self.backend.flush_now()
     }
 
-    /// Push a new entry. Inserts at index 0 (newest first), evicts
-    /// the oldest if the resulting length exceeds `limit`. Stamps
-    /// the entry's `id` field from `next_id`. Bumps `unread_count`
-    /// when the entry is unread (which is the typical case from a
-    /// toast push).
+    /// Push a notice that has just been raised. Inserts at index 0
+    /// (newest first), evicts the oldest if the resulting length exceeds
+    /// `limit`. Stamps the entry's `id` field from `next_id`. Bumps
+    /// `unread_count` when the entry is unread (which is the typical case
+    /// from a toast push).
     ///
-    /// If `entry.dedup_id` matches an existing entry, the existing
-    /// entry is updated in place (title / body collapsed into a
-    /// `NotificationUpdate` appended to `updates`) and no
-    /// new row is inserted. Unread count increments either way (an
-    /// in-place update IS new information for the user).
-    pub fn push(&self, mut entry: NotificationEntry) {
+    /// If `entry.dedup_id` matches an existing row, the notice is that row
+    /// raised again: an operation that failed this morning and fails again
+    /// now, under the same [`Toast::id`](crate::toast::Toast::id). No new row
+    /// is inserted. The row moves to the front, takes the entry's
+    /// `timestamp`, records a
+    /// [`NotificationUpdate`](crate::notification::NotificationUpdate) and
+    /// takes the entry's read state, which makes it unread again, even when
+    /// the notice says exactly what it said before: the log and the bell show
+    /// that it happened again. Every other field is merged as
+    /// [`push_update`](Self::push_update) describes.
+    pub fn push(&self, entry: NotificationEntry) {
+        self.arrive(entry, Arrival::Raised);
+    }
+
+    /// Push an in-place update of a notice that is still on screen: a
+    /// progress notice's next step, or its result. This is what the toast
+    /// registry calls when a `Toast::id` matches a live toast.
+    ///
+    /// If `entry.dedup_id` matches an existing row, that row is updated in
+    /// place: same position, and it keeps the time the notice was raised.
+    /// The row then shows the notice **as it now stands**, the way the live
+    /// toast it mirrors does:
+    ///
+    /// - `title`, `body`, `severity`, `priority`, `actions` and `route`
+    ///   are the update's. An update offering no actions leaves the row
+    ///   offering none: a progress notice's Cancel must not outlive the
+    ///   notice that said the work was cancelled, nor stand in for the
+    ///   Open and See report a finished one offers.
+    /// - `group` and `source` are the update's when it names them, and
+    ///   stay as they were when it does not.
+    /// - `id`, `timestamp` (when the notice was raised, which places the row
+    ///   in the log) and `dedup_id` stay.
+    /// - A [`NotificationUpdate`](crate::notification::NotificationUpdate)
+    ///   is appended when the update changes what the row shows (its
+    ///   wording, severity or actions), carrying the update's timestamp and
+    ///   whichever of title and body changed. A row keeps the most recent
+    ///   [`UPDATE_HISTORY_LIMIT`] of them. An update that repeats the row
+    ///   exactly records nothing and leaves its read state alone.
+    /// - A change gives the row the update's read state, which for a toast
+    ///   is unread. `unread_count` counts rows, so it grows only when the
+    ///   row had been read.
+    ///
+    /// With no matching row (the user cleared it, or it was evicted), the
+    /// update is pushed as a new row, like [`push`](Self::push).
+    pub fn push_update(&self, entry: NotificationEntry) {
+        self.arrive(entry, Arrival::LiveUpdate);
+    }
+
+    fn arrive(&self, mut entry: NotificationEntry, arrival: Arrival) {
         self.bump_version();
         let model = self.backend.model();
 
-        // Update-in-place merge: scan for a matching `dedup_id`.
+        // Merge: scan for a matching `dedup_id`.
         if let Some(ref new_dedup) = entry.dedup_id {
             let merge_idx = (0..model.len()).find(|&i| {
                 model
                     .with_item(i, |e| e.dedup_id.as_deref() == Some(new_dedup.as_str()))
                     .unwrap_or(false)
             });
-            if let Some(idx) = merge_idx {
-                // Read the existing entry, append an update, and write
-                // it back **in place** (same id, no reordering) — this
-                // is exactly `PersistedListModel::update_in_place`'s
-                // contract, and matches it identically for the
-                // in-memory backend too. We preserve the original `id`
-                // + `timestamp` and append a `NotificationUpdate`
-                // describing the mutation.
-                if let Some(mut existing) = model.with_item(idx, |e| e.clone()) {
-                    let now = entry.timestamp;
-                    let title_changed = existing.title != entry.title;
-                    let body_changed = existing.body != entry.body;
-                    existing
-                        .updates
-                        .push(crate::notification::NotificationUpdate {
-                            timestamp: now,
-                            title: if title_changed {
-                                Some(entry.title.clone())
-                            } else {
-                                None
-                            },
-                            body: if body_changed {
-                                entry.body.clone()
-                            } else {
-                                None
-                            },
-                            progress: None,
-                        });
-                    existing.title = entry.title;
-                    existing.body = entry.body;
-                    existing.read = false;
-                    self.backend.update_in_place(existing);
-                    self.bump_unread();
-                    return;
-                }
+            if let Some(idx) = merge_idx
+                && let Some(existing) = model.with_item(idx, |e| e.clone())
+            {
+                self.merge(existing, entry, arrival);
+                return;
             }
         }
 
@@ -411,6 +447,68 @@ impl NotificationArchiveModel {
         }
         if is_unread {
             self.bump_unread();
+        }
+    }
+
+    /// Bring `existing` up to `entry` and write it back: in place for a live
+    /// update, at the front for a notice raised again. See
+    /// [`push`](Self::push) and [`push_update`](Self::push_update) for what
+    /// each field becomes.
+    fn merge(&self, mut existing: NotificationEntry, entry: NotificationEntry, arrival: Arrival) {
+        let title_changed = existing.title != entry.title;
+        let body_changed = existing.body != entry.body;
+        let changed = title_changed
+            || body_changed
+            || existing.severity != entry.severity
+            || existing.actions != entry.actions;
+        let raised = arrival == Arrival::Raised;
+        let recorded = changed || raised;
+        if recorded {
+            existing
+                .updates
+                .push(crate::notification::NotificationUpdate {
+                    timestamp: entry.timestamp,
+                    title: title_changed.then(|| entry.title.clone()),
+                    body: if body_changed {
+                        entry.body.clone()
+                    } else {
+                        None
+                    },
+                    progress: None,
+                });
+            let excess = existing.updates.len().saturating_sub(UPDATE_HISTORY_LIMIT);
+            existing.updates.drain(..excess);
+        }
+        let was_unread = !existing.read;
+        existing.title = entry.title;
+        existing.body = entry.body;
+        existing.severity = entry.severity;
+        existing.priority = entry.priority;
+        existing.actions = entry.actions;
+        existing.route = entry.route;
+        if entry.group.is_some() {
+            existing.group = entry.group;
+        }
+        if entry.source.is_some() {
+            existing.source = entry.source;
+        }
+        if recorded {
+            existing.read = entry.read;
+        }
+        let is_unread = !existing.read;
+        if raised {
+            existing.timestamp = entry.timestamp;
+            self.backend.upsert_front(existing);
+        } else {
+            self.backend.update_in_place(existing);
+        }
+        match (was_unread, is_unread) {
+            (false, true) => self.bump_unread(),
+            (true, false) => {
+                let n = self.unread_count.get();
+                self.unread_count.set(n.saturating_sub(1));
+            }
+            _ => {}
         }
     }
 
@@ -579,7 +677,7 @@ impl std::fmt::Debug for NotificationArchiveModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notification::ArchivedActionStyle;
+    use crate::notification::{ArchivedAction, ArchivedActionStyle};
     use crate::toast::ToastRoute;
     use teksilo_core::styles::{BannerSeverity, ToastPriority};
 
@@ -812,7 +910,7 @@ mod tests {
 
         let mut second = entry("Uploading 4 of 7");
         second.dedup_id = Some("upload".to_string());
-        m.push(second);
+        m.push_update(second);
         assert_eq!(m.entries().len(), 1, "update merges into existing row");
         assert_eq!(
             m.unread_count().get(),
@@ -840,6 +938,296 @@ mod tests {
         // Third entry with NO dedup_id never merges.
         m.push(entry("third"));
         assert_eq!(m.entries().len(), 3);
+    }
+
+    fn action(label: &str, intent: Option<&str>, style: ArchivedActionStyle) -> ArchivedAction {
+        ArchivedAction {
+            label: label.to_string(),
+            intent_name: intent.map(str::to_string),
+            style,
+            closes_on_invoke: true,
+        }
+    }
+
+    fn notice(
+        title: &str,
+        severity: BannerSeverity,
+        actions: Vec<ArchivedAction>,
+    ) -> NotificationEntry {
+        let mut e = entry(title);
+        e.dedup_id = Some("import".to_string());
+        e.severity = severity;
+        e.actions = actions;
+        e
+    }
+
+    /// A notice updated in place is archived as it now stands: the latest
+    /// update's actions, severity, priority and audience, not the first
+    /// notice's. A progress notice offering Cancel that became a result
+    /// offering Open now and See report used to stay a Cancel row in the
+    /// log, which could then never open the report.
+    #[test]
+    fn a_merged_row_carries_the_latest_notice() {
+        let m = NotificationArchiveModel::in_memory();
+        let mut progress = notice(
+            "Importing",
+            BannerSeverity::Info,
+            vec![action("Cancel", None, ArchivedActionStyle::Destructive)],
+        );
+        progress.priority = ToastPriority::Normal;
+        m.push(progress);
+        let first = m.entries().with_item(0, |e| e.clone()).unwrap();
+
+        let mut result = notice(
+            "Imported",
+            BannerSeverity::Success,
+            vec![
+                action("Open now", None, ArchivedActionStyle::PrimaryButton),
+                action(
+                    "See report",
+                    Some("app.import.report"),
+                    ArchivedActionStyle::SecondaryButton,
+                ),
+            ],
+        );
+        result.priority = ToastPriority::High;
+        result.route = ToastRoute::Audience(crate::toast::ToastAudience::new(3));
+        result.timestamp = jiff::Timestamp::from_second(60).unwrap();
+        m.push_update(result.clone());
+
+        assert_eq!(m.entries().len(), 1, "an update stays one row");
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.actions, result.actions, "the result's actions");
+        assert_eq!(row.severity, BannerSeverity::Success);
+        assert_eq!(row.priority, ToastPriority::High);
+        assert_eq!(row.route, result.route, "the audience it was retargeted to");
+        assert_eq!(row.title, "Imported");
+        // What identifies the row and places it in the log does not move.
+        assert_eq!(row.id, first.id);
+        assert_eq!(row.timestamp, first.timestamp, "first raised at");
+        assert_eq!(
+            row.updates.last().map(|u| u.timestamp),
+            Some(result.timestamp),
+            "the update records when it came"
+        );
+    }
+
+    /// An update that offers no actions leaves the row offering none, as the
+    /// live notice it mirrors does: a Cancel kept from a notice that has since
+    /// said the import was cancelled would offer to stop something already
+    /// stopped.
+    #[test]
+    fn an_update_without_actions_leaves_the_row_without_them() {
+        let m = NotificationArchiveModel::in_memory();
+        m.push(notice(
+            "Importing",
+            BannerSeverity::Info,
+            vec![action("Cancel", None, ArchivedActionStyle::Destructive)],
+        ));
+        m.push_update(notice("Import cancelled", BannerSeverity::Info, Vec::new()));
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert!(row.actions.is_empty(), "kept {:?}", row.actions);
+    }
+
+    /// An update names its group and source only when it has one: a row
+    /// stays where it was filed rather than being moved out of it by an
+    /// update that does not say.
+    #[test]
+    fn an_update_keeps_the_group_and_source_it_does_not_name() {
+        let m = NotificationArchiveModel::in_memory();
+        let mut first = notice("Importing", BannerSeverity::Info, Vec::new());
+        first.group = Some("imports".to_string());
+        first.source = Some("scrivener".to_string());
+        m.push(first);
+        m.push_update(notice("Imported", BannerSeverity::Success, Vec::new()));
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.group.as_deref(), Some("imports"));
+        assert_eq!(row.source.as_deref(), Some("scrivener"));
+
+        let mut moved = notice("Imported", BannerSeverity::Success, Vec::new());
+        moved.group = Some("done".to_string());
+        m.push_update(moved);
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(
+            row.group.as_deref(),
+            Some("done"),
+            "one that does, moves it"
+        );
+    }
+
+    /// The unread count counts rows. Updating a row nobody has read yet adds
+    /// nothing to it: a progress notice ticked fifty times is one unread row,
+    /// and marking it read must bring the badge back to zero.
+    #[test]
+    fn updating_an_unread_row_counts_it_once() {
+        let m = NotificationArchiveModel::in_memory();
+        m.push(notice("Importing 1%", BannerSeverity::Info, Vec::new()));
+        for percent in 2..=50 {
+            m.push_update(notice(
+                &format!("Importing {percent}%"),
+                BannerSeverity::Info,
+                Vec::new(),
+            ));
+        }
+        assert_eq!(m.unread_count().get(), 1, "one unread row");
+        m.mark_read_where(|_| true);
+        assert_eq!(m.unread_count().get(), 0, "read, the badge is clear");
+
+        // Read, then updated: unread again, once.
+        m.push_update(notice("Imported", BannerSeverity::Success, Vec::new()));
+        assert_eq!(m.unread_count().get(), 1);
+    }
+
+    /// An update that changes nothing the row shows is not recorded: a
+    /// progress notice re-raised with the same words on every tick would
+    /// otherwise grow its row, and the archive file, by one record a tick.
+    #[test]
+    fn a_repeated_notice_records_no_update() {
+        let m = NotificationArchiveModel::in_memory();
+        let cancel = vec![action("Cancel", None, ArchivedActionStyle::Destructive)];
+        m.push(notice("Importing", BannerSeverity::Info, cancel.clone()));
+        for _ in 0..20 {
+            m.push_update(notice("Importing", BannerSeverity::Info, cancel.clone()));
+        }
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert!(row.updates.is_empty(), "{} records", row.updates.len());
+
+        // A change of severity alone is a change, recorded without wording.
+        m.push_update(notice("Importing", BannerSeverity::Warning, cancel));
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.updates.len(), 1);
+        assert_eq!(row.updates[0].title, None);
+        assert_eq!(row.updates[0].body, None);
+    }
+
+    /// The same notice raised again after the first had left the screen is a
+    /// second occurrence: the row comes back to the top, unread, dated when
+    /// it came back, with a record of it, even though nothing it says has
+    /// changed. Treated as a live tick, it stayed read, under its first date,
+    /// below every notice raised since.
+    #[test]
+    fn a_notice_raised_again_comes_back_unread_at_the_top() {
+        let m = NotificationArchiveModel::in_memory();
+        let mut first = notice("Sync failed", BannerSeverity::Error, Vec::new());
+        first.timestamp = jiff::Timestamp::from_second(9 * 3600).unwrap();
+        m.push(first);
+        let mut later = entry("Saved");
+        later.timestamp = jiff::Timestamp::from_second(10 * 3600).unwrap();
+        m.push(later);
+        m.mark_all_read();
+        let before = m.entries().with_item(1, |e| e.clone()).unwrap();
+
+        let mut again = notice("Sync failed", BannerSeverity::Error, Vec::new());
+        again.timestamp = jiff::Timestamp::from_second(15 * 3600).unwrap();
+        m.push(again.clone());
+
+        assert_eq!(m.entries().len(), 2, "still one row for the id");
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.id, before.id, "the same row, at the top");
+        assert!(!row.read, "unread again");
+        assert_eq!(m.unread_count().get(), 1);
+        assert_eq!(row.timestamp, again.timestamp, "dated when it came back");
+        assert_eq!(row.updates.len(), 1, "the second occurrence is recorded");
+        assert_eq!(row.updates[0].timestamp, again.timestamp);
+        assert_eq!(row.updates[0].title, None, "the wording did not change");
+
+        // Raised again while still unread: recorded, but counted once.
+        m.push(notice("Sync failed", BannerSeverity::Error, Vec::new()));
+        assert_eq!(m.unread_count().get(), 1);
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.updates.len(), 2);
+    }
+
+    /// An entry raised as already read merges as read, and leaves the unread
+    /// count where the row's own state puts it.
+    #[test]
+    fn a_notice_raised_again_takes_its_read_state() {
+        let m = NotificationArchiveModel::in_memory();
+        m.push(notice("Sync failed", BannerSeverity::Error, Vec::new()));
+        assert_eq!(m.unread_count().get(), 1);
+        let mut seen = notice("Sync failed", BannerSeverity::Error, Vec::new());
+        seen.read = true;
+        m.push(seen);
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert!(row.read);
+        assert_eq!(m.unread_count().get(), 0);
+    }
+
+    /// A row keeps a bounded history: a progress notice that words each step
+    /// differently records one update a step, and an id reused for every run
+    /// of an operation gathers them from every run.
+    #[test]
+    fn a_rows_update_history_is_bounded() {
+        let m = NotificationArchiveModel::in_memory();
+        m.push(notice("Importing 0%", BannerSeverity::Info, Vec::new()));
+        for percent in 1..=100 {
+            m.push_update(notice(
+                &format!("Importing {percent}%"),
+                BannerSeverity::Info,
+                Vec::new(),
+            ));
+        }
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.updates.len(), UPDATE_HISTORY_LIMIT);
+        assert_eq!(
+            row.updates.last().and_then(|u| u.title.as_deref()),
+            Some("Importing 100%"),
+            "the newest records are the ones kept"
+        );
+        assert_eq!(
+            row.updates.first().and_then(|u| u.title.as_deref()),
+            Some(format!("Importing {}%", 101 - UPDATE_HISTORY_LIMIT).as_str())
+        );
+
+        // A notice raised again under the same id is bounded the same way.
+        for _ in 0..5 {
+            m.push(notice("Importing 0%", BannerSeverity::Info, Vec::new()));
+        }
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.updates.len(), UPDATE_HISTORY_LIMIT);
+    }
+
+    /// An update whose row is gone (cleared by the user, or evicted) is not
+    /// lost: it becomes a row of its own.
+    #[test]
+    fn an_update_with_no_row_is_pushed_as_one() {
+        let m = NotificationArchiveModel::in_memory();
+        m.push(notice("Importing", BannerSeverity::Info, Vec::new()));
+        m.clear();
+        m.push_update(notice("Imported", BannerSeverity::Success, Vec::new()));
+        assert_eq!(m.entries().len(), 1);
+        let row = m.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.title, "Imported");
+        assert!(!row.read);
+        assert_eq!(m.unread_count().get(), 1);
+    }
+
+    /// The row a notice was raised again into reaches disk at the top, under
+    /// its new date: the persistent backend moves it like the in-memory one.
+    #[test]
+    fn a_notice_raised_again_persists_at_the_top() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let archive = NotificationArchive::persistent("raised_again_test");
+        let again = jiff::Timestamp::from_second(15 * 3600).unwrap();
+        {
+            let m = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+            m.push(notice("Sync failed", BannerSeverity::Error, Vec::new()));
+            m.push(entry("Saved"));
+            m.mark_all_read();
+            let mut raised = notice("Sync failed", BannerSeverity::Error, Vec::new());
+            raised.timestamp = again;
+            m.push(raised);
+            m.flush_now().unwrap();
+        }
+        let reopened = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+        assert_eq!(reopened.entries().len(), 2);
+        let row = reopened.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.dedup_id.as_deref(), Some("import"));
+        assert_eq!(row.timestamp, again);
+        assert!(!row.read);
+        assert_eq!(reopened.unread_count().get(), 1);
     }
 
     #[test]
@@ -961,7 +1349,7 @@ mod tests {
             m.push(first);
             let mut second = entry("Uploading 4 of 7");
             second.dedup_id = Some("upload".to_string());
-            m.push(second);
+            m.push_update(second);
             m.flush_now().unwrap();
             assert_eq!(m.entries().len(), 1, "merged into one row");
         }
@@ -978,6 +1366,35 @@ mod tests {
             1,
             "the appended NotificationUpdate must have persisted"
         );
+    }
+
+    /// The row a notice was updated into is the row that reaches disk: its
+    /// actions, replay names included, and its severity survive a restart.
+    #[test]
+    fn a_merged_rows_actions_persist_across_reopen() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let archive = NotificationArchive::persistent("merged_actions_test");
+        let report = vec![action(
+            "See report",
+            Some("app.import.report"),
+            ArchivedActionStyle::Link,
+        )];
+        {
+            let m = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+            m.push(notice(
+                "Importing",
+                BannerSeverity::Info,
+                vec![action("Cancel", None, ArchivedActionStyle::Destructive)],
+            ));
+            m.push_update(notice("Imported", BannerSeverity::Success, report.clone()));
+            m.flush_now().unwrap();
+        }
+        let reopened = NotificationArchiveModel::open(&archive, &paths, Duration::ZERO).unwrap();
+        let row = reopened.entries().with_item(0, |e| e.clone()).unwrap();
+        assert_eq!(row.actions, report);
+        assert_eq!(row.severity, BannerSeverity::Success);
     }
 
     #[test]

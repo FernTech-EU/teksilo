@@ -209,7 +209,7 @@ pub use message_box::{
 pub use notification::{
     ARCHIVE_FILE_NAME, ArchivedAction, ArchivedActionStyle, DEFAULT_ARCHIVE_LIMIT,
     NotificationArchive, NotificationArchiveModel, NotificationCenterButton, NotificationEntry,
-    NotificationLog, NotificationLogDialog, NotificationUpdate,
+    NotificationLog, NotificationLogDialog, NotificationUpdate, UPDATE_HISTORY_LIMIT,
 };
 pub use overlay_trigger::OverlayTrigger;
 pub use panel::Panel;

@@ -171,7 +171,7 @@ fn the_log_keeps_focus_on_clear_all_while_a_job_archives_its_progress() {
     let mut reader = Listener::attach(&mut tree);
 
     for step in 1..=5 {
-        archive.push(job_step(step));
+        archive.push_update(job_step(step));
         tree.layout(WINDOW);
     }
     assert_eq!(tree.focused(), Some(clear), "focus stays on Clear all");
@@ -216,7 +216,7 @@ fn the_log_keeps_focus_on_an_unchanged_row_while_a_job_archives_its_progress() {
     );
 
     for step in 1..=3 {
-        archive.push(job_step(step));
+        archive.push_update(job_step(step));
         tree.layout(WINDOW);
     }
     assert_eq!(tree.focused(), Some(row), "focus stays on the info row");

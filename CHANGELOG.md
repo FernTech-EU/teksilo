@@ -13,6 +13,25 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Widgets
+
+- `NotificationArchiveModel::push_update`, which archives an in-place update
+  of a notice still on screen, beside `push`, which archives a notice raised.
+  `UPDATE_HISTORY_LIMIT` is how many update records a row keeps.
+
+### Changed
+
+#### Widgets
+
+- `NotificationArchiveModel::push` with the `dedup_id` of an archived row now
+  takes the entry as that notice raised again: the row moves to the top,
+  takes the entry's time and read state, and records the occurrence even
+  when nothing it says has changed. An app that pushed to the archive itself
+  to update a notice still on screen calls `push_update` instead, which
+  updates the row where it is.
+
 ### Fixed
 
 #### Core
@@ -27,6 +46,35 @@ by crate for clarity, not because crates version independently.
   a widget off screen. A loop started while its window had no focus also
   starts when the window gets it, rather than later by however long the
   window had been without focus before the loop existed.
+
+#### Widgets
+
+- **The notification log kept the first notice's actions for a notice
+  updated in place.** An archived row merged from a later notice with the
+  same id took only its title and body, so a progress notice offering Cancel
+  that became a result offering Open now and See report stayed a Cancel row,
+  under its first severity, and the log never offered the report. The row
+  now takes the latest notice's actions, replay names included, its
+  severity, priority and audience; an update offering no actions leaves the
+  row with none, as it leaves the live notice. The row keeps its id, its
+  place in the log and the time the notice was raised, and its group and
+  source unless the update names them. Updating a row nobody had read no
+  longer adds to the unread count, which grew by one per update and stayed
+  up under a bell scoped to a window or an audience.
+- **A notice raised again was filed under the first one.** A toast raised
+  with the id of an archived notice that had already left the screen merged
+  into that row like an update of a live toast: the row stayed where it
+  was, dated when the first notice was raised, below every notice raised
+  since. An import run on Friday under the same id as Monday's showed its
+  result in the log under Monday. The row now comes back to the top, unread,
+  dated when the notice came back, with a record of the occurrence even when
+  it says the same as before.
+- **A progress notice grew its archive row without bound.** Every in-place
+  update appended a record to the row, written to the archive file, so a
+  notice reporting each step of a long import gathered thousands, and an id
+  reused for every run of an operation gathered them from every run. An
+  update that repeats the row exactly now records nothing, and a row keeps
+  only its 20 most recent records.
 
 ## [0.15.0] - 2026-10-04
 

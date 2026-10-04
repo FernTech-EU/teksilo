@@ -107,6 +107,19 @@ Resolved through `AppPaths::config_file` into
 pub const ARCHIVE_FILE_NAME: &str = "notifications";
 ```
 
+## `pub const UPDATE_HISTORY_LIMIT`
+
+How many `NotificationUpdate`
+records one row keeps. A progress notice that reports each step in its
+wording records one update per step, and an id an app reuses for every
+run of an operation gathers them from every run, so a row keeps the most
+recent ones and drops the oldest. The row itself always shows the notice
+as it now stands, whatever the history kept.
+
+```rust
+pub const UPDATE_HISTORY_LIMIT: usize = 20;
+```
+
 ## `pub enum NotificationArchive`
 
 Storage mode for the notification archive. Passed inside
@@ -199,19 +212,57 @@ Force the persistent backing file to disk synchronously.
 No-op for `InMemory`. Tests call this between mutations and
 re-opening the file to verify persistence.
 
-#### `pub fn push(&self, mut entry: NotificationEntry)`
+#### `pub fn push(&self, entry: NotificationEntry)`
 
-Push a new entry. Inserts at index 0 (newest first), evicts
-the oldest if the resulting length exceeds `limit`. Stamps
-the entry's `id` field from `next_id`. Bumps `unread_count`
-when the entry is unread (which is the typical case from a
-toast push).
+Push a notice that has just been raised. Inserts at index 0
+(newest first), evicts the oldest if the resulting length exceeds
+`limit`. Stamps the entry's `id` field from `next_id`. Bumps
+`unread_count` when the entry is unread (which is the typical case
+from a toast push).
 
-If `entry.dedup_id` matches an existing entry, the existing
-entry is updated in place (title / body collapsed into a
-`NotificationUpdate` appended to `updates`) and no
-new row is inserted. Unread count increments either way (an
-in-place update IS new information for the user).
+If `entry.dedup_id` matches an existing row, the notice is that row
+raised again: an operation that failed this morning and fails again
+now, under the same `Toast::id`. No new row
+is inserted. The row moves to the front, takes the entry's
+`timestamp`, records a
+`NotificationUpdate` and
+takes the entry's read state, which makes it unread again, even when
+the notice says exactly what it said before: the log and the bell show
+that it happened again. Every other field is merged as
+`push_update` describes.
+
+#### `pub fn push_update(&self, entry: NotificationEntry)`
+
+Push an in-place update of a notice that is still on screen: a
+progress notice's next step, or its result. This is what the toast
+registry calls when a `Toast::id` matches a live toast.
+
+If `entry.dedup_id` matches an existing row, that row is updated in
+place: same position, and it keeps the time the notice was raised.
+The row then shows the notice **as it now stands**, the way the live
+toast it mirrors does:
+
+- `title`, `body`, `severity`, `priority`, `actions` and `route`
+  are the update's. An update offering no actions leaves the row
+  offering none: a progress notice's Cancel must not outlive the
+  notice that said the work was cancelled, nor stand in for the
+  Open and See report a finished one offers.
+- `group` and `source` are the update's when it names them, and
+  stay as they were when it does not.
+- `id`, `timestamp` (when the notice was raised, which places the row
+  in the log) and `dedup_id` stay.
+- A `NotificationUpdate`
+  is appended when the update changes what the row shows (its
+  wording, severity or actions), carrying the update's timestamp and
+  whichever of title and body changed. A row keeps the most recent
+  `UPDATE_HISTORY_LIMIT` of them. An update that repeats the row
+  exactly records nothing and leaves its read state alone.
+- A change gives the row the update's read state, which for a toast
+  is unread. `unread_count` counts rows, so it grows only when the
+  row had been read.
+
+With no matching row (the user cleared it, or it was evicted), the
+update is pushed as a new row, like `push`.
 
 #### `pub fn mark_read_where(&self, mut predicate: impl FnMut(&NotificationEntry) -> bool)`
 

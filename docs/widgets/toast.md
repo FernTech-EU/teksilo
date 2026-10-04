@@ -359,6 +359,14 @@ pattern. A subsequent `enqueue` whose `Toast` carries the same
 a new toast — see `ToastRegistry::enqueue`'s update-in-place
 merge for the exact behaviour.
 
+The id also names the notice's row in the notification log. An
+update of the live toast updates that row where it is. A toast raised
+under the id once the earlier one has left the screen is a new
+occurrence: the row comes back to the top, unread, dated when it came
+back, even if it says the same as before. See
+`NotificationArchiveModel::push`
+and `push_update`.
+
 # Hazard: this id must be unique per logical operation, not just per call site
 
 The merge matches on `id` ALONE — no route/window/audience
