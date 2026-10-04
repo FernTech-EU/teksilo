@@ -194,9 +194,10 @@ fn parse_path_prefix(value: &str) -> Result<String, SearchError> {
     Ok(value.to_string())
 }
 
-/// Scope candidates before fusion truncates them. Explicit Rust type names
-/// prefer headings about that type while retaining the original rank within
-/// each group. Ordinary prose queries keep their existing ordering.
+/// Scope candidates before fusion truncates them. A heading naming a queried
+/// Rust type receives at most 10% extra score, so it can break near ties without
+/// displacing a substantially more relevant result. Ordinary prose queries
+/// keep their existing ordering.
 fn scope_ranking(
     index: &Index,
     args: &SearchArgs,
@@ -220,16 +221,16 @@ fn scope_ranking(
         .map(str::to_lowercase)
         .collect();
     if !symbols.is_empty() {
-        ranked.sort_by_key(|(id, _)| {
-            let count = index.chunk(*id).map_or(0, |chunk| {
+        for (id, score) in &mut ranked {
+            let matches_heading = index.chunk(*id).is_some_and(|chunk| {
                 let heading = tokenize(&chunk.heading_path.join(" "));
-                symbols
-                    .iter()
-                    .filter(|symbol| heading.contains(symbol))
-                    .count()
+                symbols.iter().any(|symbol| heading.contains(symbol))
             });
-            std::cmp::Reverse(count)
-        });
+            if matches_heading && *score > 0.0 {
+                *score *= 1.1;
+            }
+        }
+        sort_by_score(&mut ranked);
     }
     ranked
 }
@@ -942,15 +943,41 @@ mod tests {
     }
 
     #[test]
-    fn named_types_prefer_their_heading_without_reordering_prose_queries() {
+    fn named_types_only_promote_headings_with_comparable_scores() {
         let mut index = toy_index(None, None);
         index.chunks[0].heading_path = vec!["Other scrolling".into()];
         index.chunks[1].heading_path = vec!["ScrollArea".into()];
-        let ranked = vec![(0, 9.0), (1, 1.0)];
         let args = parse_args(&arg(&["ScrollArea scrolling"])).unwrap();
-        assert_eq!(scope_ranking(&index, &args, ranked.clone())[0].0, 1);
+        // Cover both BM25 and cosine score ranges, including unrelated vectors.
+        for (scores, first) in [
+            ([9.0, 1.0], 0),
+            ([9.0, 8.5], 1),
+            ([0.9, 0.5], 0),
+            ([0.9, 0.85], 1),
+            ([-0.1, -0.2], 0),
+        ] {
+            let ranked = vec![(0, scores[0]), (1, scores[1])];
+            let scoped = scope_ranking(&index, &args, ranked);
+            assert_eq!(scoped[0].0, first, "{scores:?}");
+            assert!(scoped[0].1 >= scoped[1].1);
+        }
+        let ranked = vec![(0, 9.0), (1, 8.5)];
         let args = parse_args(&arg(&["chart scrolling"])).unwrap();
         assert_eq!(scope_ranking(&index, &args, ranked.clone()), ranked);
+    }
+
+    #[test]
+    fn chart_history_query_ranks_the_answer_above_basic_examples() {
+        let index = teksilo_corpus::index().unwrap();
+        let query = "LineChart history retention";
+        let args = parse_args(&arg(&[query])).unwrap();
+        let ranked = scope_ranking(index, &args, bm25(index, query, args.kind));
+        let first = index.chunk(ranked[0].0).unwrap();
+        assert_eq!(first.path, "docs/charts.md");
+        assert_eq!(
+            first.heading_path.last().unwrap(),
+            "Streaming history and scrolling"
+        );
     }
 
     #[test]

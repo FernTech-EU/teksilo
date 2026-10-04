@@ -15,6 +15,9 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Limit named-type heading boosts in documentation search so results relevant
+  to the full query can outrank basic examples that only name the type.
+
 - Accept the application guide's source path in corpus validation while retaining
   checks for relative paths and existing source files.
 

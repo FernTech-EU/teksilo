@@ -65,9 +65,10 @@ cargo install cargo-teksilo --no-default-features
 
 ## Focused search
 
-Use an exact type name when you know it: headings about `LineChart` are preferred
-for `cargo teksilo search "LineChart scrolling"`. Ordinary prose queries retain
-the usual ranking. To exclude unrelated domains, restrict the corpus path:
+Use an exact type name when you know it. Matching headings receive a score bonus
+of at most 10%, keeping relevance to the full query primary. Ordinary prose
+queries retain the usual ranking. To exclude unrelated domains, restrict the
+corpus path:
 
 ```sh
 cargo teksilo search "scrolling history" --path docs/charts.md
