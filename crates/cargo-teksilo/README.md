@@ -63,6 +63,22 @@ To build without semantic search:
 cargo install cargo-teksilo --no-default-features
 ```
 
+## Focused search
+
+Use an exact type name when you know it: headings about `LineChart` are preferred
+for `cargo teksilo search "LineChart scrolling"`. Ordinary prose queries retain
+the usual ranking. To exclude unrelated domains, restrict the corpus path:
+
+```sh
+cargo teksilo search "scrolling history" --path docs/charts.md
+cargo teksilo search "worker samples" --path examples/chart_demo/ --kind example
+```
+
+`--path` is a case-sensitive prefix over bundled paths, applied to both lexical
+and semantic candidates before fusion. It does not search your filesystem.
+An unmatched prefix returns no results. Use `show --list` to find available paths.
+The app guide is also searchable at `crates/teksilo/src/app_guide.md`.
+
 ## Version matching
 
 The tool follows the selected app's resolved dependency graph. Patch differences

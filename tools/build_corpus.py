@@ -4,7 +4,8 @@
 """Build the teksilo-corpus retrieval corpus.
 
 Reads the hand-written guides under ``docs/`` (top-level ``*.md`` plus
-``docs/a11y/*.md``) and the runnable demos under ``examples/*/src/**/*.rs``,
+``docs/a11y/*.md``), the application guide in ``crates/teksilo/src/app_guide.md``,
+and the runnable demos under ``examples/*/src/**/*.rs``,
 chunks them, and writes a single BM25-ready ``index.json`` into
 ``crates/teksilo-corpus/corpus/``.
 
@@ -770,7 +771,7 @@ def build_corpus(out_dir: Path) -> Tuple[Dict, int]:
     # search result cites, so it has to be a path that exists.
 
     # --- guides ---
-    for src in discover_guides(DOCS_DIR):
+    for src in [*discover_guides(DOCS_DIR), REPO_ROOT / "crates/teksilo/src/app_guide.md"]:
         add_chunks(
             chunk_markdown(read_source(src)),
             kind="guide",

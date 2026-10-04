@@ -107,6 +107,11 @@ to `cargo doc -p teksilo-widgets --no-deps --open` (or docs.rs at the pinned
 version) for signatures, and to the `reference/` files for concepts. Both are
 slower and the second is version-approximate — say so rather than guessing.
 
+For broad search results, name the type explicitly or scope the corpus path,
+for example `cargo teksilo search "scrolling history" --path docs/charts.md`.
+Use `show --list` to discover paths. Public trait lookups include associated
+types and required methods, so inspect `EventSource` before implementing it.
+
 ## Workflow
 
 1. **Orient.** `reference/teksilo_app_guide.md` is the app-author surface — entry

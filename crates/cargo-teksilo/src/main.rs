@@ -56,6 +56,9 @@ enum Command {
         limit: usize,
         #[arg(long)]
         kind: Option<SearchKind>,
+        /// Restrict results to this corpus path prefix.
+        #[arg(long)]
+        path: Option<String>,
         /// Use lexical search only.
         #[arg(long)]
         lexical: bool,
@@ -252,6 +255,7 @@ fn run(dir: &Path, command: Command) -> Result<(), String> {
             query,
             limit,
             kind,
+            path,
             lexical,
             ..
         } => {
@@ -266,6 +270,9 @@ fn run(dir: &Path, command: Command) -> Result<(), String> {
                     }
                     .into(),
                 ]);
+            }
+            if let Some(path) = path {
+                args.extend(["--path".into(), path]);
             }
             if lexical {
                 args.push("--lexical".into());

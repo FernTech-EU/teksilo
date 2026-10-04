@@ -15,6 +15,10 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Scope documentation search with `--path` before lexical/semantic fusion and
+  prefer headings for explicitly named Rust types. Index the application guide,
+  refresh corpus vectors and cover common chart and scrolling queries.
+
 - Update the app guide and bundled skill reference for the 0.14 API, including
   AccessKit re-exports and derived sample signals. Add a runnable live dashboard
   with a worker event source, bounded history and tests of visible bindings.

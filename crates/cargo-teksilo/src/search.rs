@@ -118,13 +118,15 @@ pub struct SearchArgs {
     pub limit: usize,
     pub kind: KindFilter,
     pub lexical_only: bool,
+    pub path_prefix: Option<String>,
 }
 
 const USAGE: &str = "\
-USAGE: cargo teksilo search <QUERY> [--limit N] [--kind guide|example] [--lexical]
+USAGE: cargo teksilo search <QUERY> [--limit N] [--kind guide|example] [--path PREFIX] [--lexical]
 
     --limit N              how many hits to print (default 8)
     --kind guide|example   restrict to the guides or to the worked examples
+    --path PREFIX          restrict to matching corpus paths
     --lexical              BM25 only; skip the vector path even if available";
 
 /// Parse `search`'s arguments.
@@ -137,11 +139,19 @@ pub fn parse_args(args: &[String]) -> Result<SearchArgs, SearchError> {
     let mut limit = 8usize;
     let mut kind = KindFilter::Any;
     let mut lexical_only = false;
+    let mut path_prefix = None;
 
     let mut it = args.iter().peekable();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--lexical" => lexical_only = true,
+            "--path" => {
+                let value = it.next().ok_or_else(|| usage("--path needs a prefix"))?;
+                path_prefix = Some(parse_path_prefix(value)?);
+            }
+            other if other.starts_with("--path=") => {
+                path_prefix = Some(parse_path_prefix(&other["--path=".len()..])?);
+            }
             "--limit" => {
                 let value = it.next().ok_or_else(|| usage("--limit needs a number"))?;
                 limit = parse_limit(value)?;
@@ -173,7 +183,55 @@ pub fn parse_args(args: &[String]) -> Result<SearchArgs, SearchError> {
         limit,
         kind,
         lexical_only,
+        path_prefix,
     })
+}
+
+fn parse_path_prefix(value: &str) -> Result<String, SearchError> {
+    if value.trim().is_empty() {
+        return Err(usage("--path needs a nonempty prefix"));
+    }
+    Ok(value.to_string())
+}
+
+/// Scope candidates before fusion truncates them. Explicit Rust type names
+/// prefer headings about that type while retaining the original rank within
+/// each group. Ordinary prose queries keep their existing ordering.
+fn scope_ranking(
+    index: &Index,
+    args: &SearchArgs,
+    mut ranked: Vec<(usize, f64)>,
+) -> Vec<(usize, f64)> {
+    if let Some(prefix) = &args.path_prefix {
+        ranked.retain(|(id, _)| {
+            index
+                .chunk(*id)
+                .is_some_and(|chunk| chunk.path.starts_with(prefix))
+        });
+    }
+    let symbols: Vec<_> = args
+        .query
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|word| {
+            word.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                && word.chars().filter(|c| c.is_ascii_uppercase()).count() > 1
+                && word.chars().any(|c| c.is_ascii_lowercase())
+        })
+        .map(str::to_lowercase)
+        .collect();
+    if !symbols.is_empty() {
+        ranked.sort_by_key(|(id, _)| {
+            let count = index.chunk(*id).map_or(0, |chunk| {
+                let heading = tokenize(&chunk.heading_path.join(" "));
+                symbols
+                    .iter()
+                    .filter(|symbol| heading.contains(symbol))
+                    .count()
+            });
+            std::cmp::Reverse(count)
+        });
+    }
+    ranked
 }
 
 fn usage(problem: &str) -> SearchError {
@@ -633,7 +691,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
     }
 
     let index = teksilo_corpus::index()?;
-    let lexical = bm25(index, &parsed.query, parsed.kind);
+    let lexical = scope_ranking(index, &parsed, bm25(index, &parsed.query, parsed.kind));
     let lexical_empty = lexical.is_empty();
 
     let (ranked, mode) = if parsed.lexical_only {
@@ -641,6 +699,7 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
     } else {
         match semantic_ranking(index, &parsed.query, parsed.kind) {
             Some(dense) => {
+                let dense = scope_ranking(index, &parsed, dense);
                 let lexical_ids: Vec<usize> = lexical
                     .iter()
                     .take(FUSION_DEPTH)
@@ -655,11 +714,10 @@ pub fn run(dir: &Path, args: &[String]) -> Result<i32, SearchError> {
         }
     };
 
-    // A hybrid search can never come back empty: the dense ranker cosines the
+    // Before path filtering, a hybrid search always has candidates: the dense ranker cosines the
     // query against every chunk and always has a nearest one, however far
-    // away. So the "no match" branch below is unreachable in hybrid mode, and
-    // the honest thing is to say when the evidence is vector-only rather than
-    // to invent a cosine floor and call the difference a threshold.
+    // away. A path filter can leave no candidates. Report vector-only
+    // evidence explicitly instead of inventing a cosine confidence threshold.
     print_results(index, &parsed, &ranked, mode, lexical_empty);
     Ok(0)
 }
@@ -725,7 +783,7 @@ fn print_results(
         }).collect();
         println!(
             "{}",
-            serde_json::json!({"teksilo_version":index.teksilo_version,"query":args.query,"mode":mode.label(),"vector_only":lexical_empty && mode == Mode::Hybrid,"results":results})
+            serde_json::json!({"teksilo_version":index.teksilo_version,"query":args.query,"path_prefix":args.path_prefix,"mode":mode.label(),"vector_only":lexical_empty && mode == Mode::Hybrid && !ranked.is_empty(),"results":results})
         );
         return;
     }
@@ -737,10 +795,14 @@ fn print_results(
         // Deliberately not "no results": that reads as a fact about the
         // framework, and a model that reads it concludes the feature does not
         // exist. This scopes the absence to the index.
-        println!(
-            "no match in the {} corpus for {:?}",
-            index.teksilo_version, args.query
-        );
+        if let Some(prefix) = &args.path_prefix {
+            println!("No match under {prefix:?} for {:?}", args.query);
+        } else {
+            println!(
+                "No match in the {} corpus for {:?}",
+                index.teksilo_version, args.query
+            );
+        }
         return;
     }
 
@@ -845,6 +907,78 @@ mod tests {
 
     fn arg(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn path_filter_scopes_both_rankers_before_fusion() {
+        let index = toy_index(Some(ENCODER_ID), Some(3));
+        for spelling in [
+            vec!["scroll", "--path", "docs/1.md"],
+            vec!["scroll", "--path=docs/1.md"],
+        ] {
+            let args = parse_args(&arg(&spelling)).unwrap();
+            for ranking in [
+                bm25(&index, "scroll", KindFilter::Any),
+                vector_scores(&index, &[0.0, 1.0, 0.0], KindFilter::Any),
+            ] {
+                let scoped = scope_ranking(&index, &args, ranking);
+                assert!(!scoped.is_empty());
+                assert!(
+                    scoped
+                        .iter()
+                        .all(|(id, _)| index.chunk(*id).unwrap().path == "docs/1.md")
+                );
+            }
+        }
+        let args = parse_args(&arg(&["scroll", "--path=missing/"])).unwrap();
+        assert!(scope_ranking(&index, &args, vec![(0, 1.0), (1, 0.5)]).is_empty());
+        for bad in [
+            vec!["scroll", "--path"],
+            vec!["scroll", "--path="],
+            vec!["scroll", "--path", " "],
+        ] {
+            assert!(parse_args(&arg(&bad)).is_err());
+        }
+    }
+
+    #[test]
+    fn named_types_prefer_their_heading_without_reordering_prose_queries() {
+        let mut index = toy_index(None, None);
+        index.chunks[0].heading_path = vec!["Other scrolling".into()];
+        index.chunks[1].heading_path = vec!["ScrollArea".into()];
+        let ranked = vec![(0, 9.0), (1, 1.0)];
+        let args = parse_args(&arg(&["ScrollArea scrolling"])).unwrap();
+        assert_eq!(scope_ranking(&index, &args, ranked.clone())[0].0, 1);
+        let args = parse_args(&arg(&["chart scrolling"])).unwrap();
+        assert_eq!(scope_ranking(&index, &args, ranked.clone()), ranked);
+    }
+
+    #[test]
+    fn reference_queries_reach_the_expected_guide() {
+        let index = teksilo_corpus::index().unwrap();
+        for (query, path) in [
+            ("LineChart scrolling", "docs/charts.md"),
+            ("chart scrolling history", "docs/charts.md"),
+            ("ScrollArea horizontal", "docs/scroll-area.md"),
+        ] {
+            let args = parse_args(&arg(&[query])).unwrap();
+            let baseline = bm25(index, query, KindFilter::Guide);
+            let scoped = scope_ranking(index, &args, baseline.clone());
+            let position = |ranking: &[(usize, f64)]| {
+                ranking
+                    .iter()
+                    .position(|(id, _)| index.chunk(*id).unwrap().path == path)
+            };
+            eprintln!(
+                "{query}: guide rank before {:?}, after {:?}",
+                position(&baseline),
+                position(&scoped)
+            );
+            assert!(
+                position(&scoped).is_some_and(|rank| rank < 5),
+                "{query}: {path} absent from top five"
+            );
+        }
     }
 
     #[test]
