@@ -385,6 +385,13 @@ pub struct WidgetNode {
     /// waived wholesale while `tree.paint_epoch` is itself `0`, which keeps
     /// headless tests (no `render()` call) from regressing.
     pub last_painted_epoch: u64,
+    /// The `WidgetTree::paint_epoch` of the last full render that ran this
+    /// widget's `paint()`. Unlike `last_painted_epoch`, which is stamped as
+    /// soon as the walker reaches the node, this one moves only when the
+    /// paint actually ran, so the end-of-render clear can tell a dirty node
+    /// that repainted from one the walker skipped (clipped out, or under a
+    /// sub-perceptual opacity): the skipped one must drop its stale caches.
+    pub(crate) paint_consumed_epoch: u64,
 
     // --- V2 fields ---
     /// Event handlers the widget attached to itself during its own
@@ -528,6 +535,7 @@ impl WidgetNode {
             cached_post_paint: None,
             paint_raster_scale: 1.0,
             last_painted_epoch: 0,
+            paint_consumed_epoch: 0,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
             node_focusable: None,

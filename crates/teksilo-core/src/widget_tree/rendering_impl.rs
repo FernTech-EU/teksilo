@@ -217,10 +217,21 @@ impl WidgetTree {
         // Clear `needs_paint` on every active node. Mutation during
         // iter — fill the reusable scratch first (zero-alloc once
         // warm), then drive the loop from the snapshot.
+        //
+        // A node still dirty whose `paint()` did not run this render was
+        // skipped by the walker: clipped out, or under a sub-perceptual
+        // opacity. Its caches predate the change that dirtied it, so drop
+        // them. Clearing the flag alone would let the node replay that
+        // stale paint once it is visible again without having moved, since
+        // nothing else would mark it.
         self.arena.fill_active_ids(&mut self.active_ids_scratch);
         let ids = std::mem::take(&mut self.active_ids_scratch);
         for &id in &ids {
             if let Some(node) = self.arena.get_mut(id) {
+                if node.dirty.needs_paint && node.paint_consumed_epoch != paint_epoch {
+                    node.cached_paint = None;
+                    node.cached_post_paint = None;
+                }
                 node.dirty.needs_paint = false;
             }
         }
@@ -468,6 +479,7 @@ fn paint_widget_cached(
         if let Some(node) = arena.get_mut(id) {
             node.cached_paint = Some(widget_frame);
             node.paint_raster_scale = this_raster_scale;
+            node.paint_consumed_epoch = paint_epoch;
         }
     } else {
         let node = arena.get(id).expect("node id is active (guarded above)");
@@ -1660,5 +1672,251 @@ mod tests {
         let child_theme = tree.resolved_theme(child);
         assert_eq!(child_theme.colors.accent, Color::RED);
         assert_eq!(child_theme.colors.text_secondary, Color::GREEN);
+    }
+
+    /// Leaf that paints one rect in a colour read at paint time, in its own
+    /// pass and optionally in its foreground pass, and counts its paints.
+    #[derive(Debug)]
+    struct ColorProbe {
+        color: Rc<std::cell::Cell<Color>>,
+        paints: Rc<std::cell::Cell<u32>>,
+        post_paints: Rc<std::cell::Cell<u32>>,
+        foreground: bool,
+    }
+
+    impl ColorProbe {
+        fn new(color: Color) -> Self {
+            Self {
+                color: Rc::new(std::cell::Cell::new(color)),
+                paints: Rc::new(std::cell::Cell::new(0)),
+                post_paints: Rc::new(std::cell::Cell::new(0)),
+                foreground: false,
+            }
+        }
+    }
+
+    impl Widget for ColorProbe {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(40.0, 40.0).into()
+        }
+
+        fn paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+            self.paints.set(self.paints.get() + 1);
+            canvas.fill_rect(bounds, self.color.get());
+        }
+
+        fn wants_post_paint(&self) -> bool {
+            self.foreground
+        }
+
+        fn post_paint(&self, bounds: Rect, canvas: &mut Canvas, _ctx: &PaintContext) {
+            self.post_paints.set(self.post_paints.get() + 1);
+            canvas.fill_rect(bounds, self.color.get());
+        }
+    }
+
+    /// Container that places each child 40×40 at a fixed offset from its own
+    /// origin, whatever its own size, so a child can leave and re-enter the
+    /// container's clip without moving.
+    #[derive(Debug)]
+    struct OffsetContainer {
+        offset: f32,
+    }
+
+    impl Widget for OffsetContainer {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = teksilo_canvas::Point::new(bounds.x + self.offset, bounds.y);
+                child.size = teksilo_canvas::Size::new(40.0, 40.0);
+            }
+        }
+    }
+
+    fn painted_colors(frame: &RenderFrame) -> Vec<[f32; 4]> {
+        frame.decorations.iter().map(|d| d.color).collect()
+    }
+
+    /// A clipping root 200 px wide with a probe at x = 150. Narrowing the
+    /// root to 100 px clips the probe out without moving it.
+    fn clipped_probe_tree(probe: ColorProbe) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let root = tree.add(OffsetContainer { offset: 150.0 });
+        tree.set_clips_children(root, true);
+        let child = tree.add_child(root, probe);
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        (tree, child)
+    }
+
+    #[test]
+    fn clipped_out_dirty_node_repaints_when_it_comes_back_into_view() {
+        let probe = ColorProbe::new(Color::RED);
+        let (color, paints) = (probe.color.clone(), probe.paints.clone());
+        let (mut tree, child) = clipped_probe_tree(probe);
+        assert!(painted_colors(&tree.render()).contains(&Color::RED.to_array()));
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(tree.bounds(child).x, 150.0, "the probe must not move");
+        color.set(Color::BLUE);
+        tree.arena.mark_needs_paint(child);
+        let frame = tree.render();
+        assert!(
+            painted_colors(&frame).is_empty(),
+            "the probe is clipped out"
+        );
+        assert_eq!(paints.get(), 1, "a clipped-out node does not paint");
+
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        let colors = painted_colors(&tree.render());
+        assert_eq!(
+            colors,
+            vec![Color::BLUE.to_array()],
+            "a node dirtied while clipped out must not replay its old paint"
+        );
+        assert_eq!(paints.get(), 2);
+    }
+
+    #[test]
+    fn clipped_out_clean_node_keeps_its_cache() {
+        let probe = ColorProbe::new(Color::RED);
+        let paints = probe.paints.clone();
+        let (mut tree, child) = clipped_probe_tree(probe);
+        let _ = tree.render();
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let _ = tree.render();
+        assert!(
+            tree.arena.get(child).unwrap().cached_paint.is_some(),
+            "a clean node keeps its cache while clipped out"
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        let colors = painted_colors(&tree.render());
+        assert_eq!(colors, vec![Color::RED.to_array()]);
+        assert_eq!(paints.get(), 1, "the clean node replays its cache");
+    }
+
+    #[test]
+    fn node_dirtied_under_a_transparent_ancestor_repaints_when_it_fades_in() {
+        let probe = ColorProbe::new(Color::RED);
+        let (color, paints) = (probe.color.clone(), probe.paints.clone());
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let parent = tree.add(StackWidget::new());
+        let child = tree.add_child(parent, probe);
+        let opacity = crate::signal::Signal::new(1.0_f32);
+        tree.set_opacity(parent, opacity.clone());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let _ = tree.render();
+
+        opacity.set(0.0);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        color.set(Color::BLUE);
+        tree.arena.mark_needs_paint(child);
+        let _ = tree.render();
+        assert_eq!(paints.get(), 1, "a transparent subtree does not paint");
+
+        opacity.set(1.0);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let colors = painted_colors(&tree.render());
+        assert_eq!(colors, vec![Color::BLUE.to_array()]);
+    }
+
+    #[test]
+    fn transparent_dirty_node_repaints_when_it_fades_in() {
+        let probe = ColorProbe::new(Color::RED);
+        let color = probe.color.clone();
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let node = tree.add(probe);
+        let opacity = crate::signal::Signal::new(1.0_f32);
+        tree.set_opacity(node, opacity.clone());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let _ = tree.render();
+
+        // The node's own opacity scope stamps it as visited before the
+        // sub-perceptual early return, so only the paint stamp tells the
+        // clear loop that `paint()` never ran. The opacity binding would
+        // repaint the node on fade-in anyway; what must hold regardless is
+        // that no stale cache survives, since a cached paint is what later
+        // decides whether a skipped node gets re-marked.
+        opacity.set(0.0);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        color.set(Color::BLUE);
+        tree.arena.mark_needs_paint(node);
+        let _ = tree.render();
+        assert!(
+            tree.arena.get(node).unwrap().cached_paint.is_none(),
+            "a node dirtied while transparent drops its stale cache"
+        );
+
+        opacity.set(1.0);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let colors = painted_colors(&tree.render());
+        assert_eq!(colors, vec![Color::BLUE.to_array()]);
+    }
+
+    #[test]
+    fn node_dirtied_while_dormant_repaints_on_activation() {
+        let probe = ColorProbe::new(Color::RED);
+        let color = probe.color.clone();
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let node = tree.add(probe);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let _ = tree.render();
+
+        tree.set_dormant(node);
+        color.set(Color::BLUE);
+        tree.arena.mark_needs_paint(node);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let _ = tree.render();
+
+        tree.activate(node);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let colors = painted_colors(&tree.render());
+        assert_eq!(colors, vec![Color::BLUE.to_array()]);
+    }
+
+    #[test]
+    fn clipped_out_dirty_node_reruns_its_foreground_pass() {
+        let mut probe = ColorProbe::new(Color::RED);
+        probe.foreground = true;
+        let (color, post_paints) = (probe.color.clone(), probe.post_paints.clone());
+        let (mut tree, child) = clipped_probe_tree(probe);
+        let _ = tree.render();
+        assert_eq!(post_paints.get(), 1);
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        color.set(Color::BLUE);
+        tree.arena.mark_needs_paint(child);
+        let _ = tree.render();
+        assert!(
+            tree.arena.get(child).unwrap().cached_post_paint.is_none(),
+            "the stale foreground cache is dropped with the main one"
+        );
+
+        tree.layout(SizeProposal::exact(200.0, 50.0));
+        let colors = painted_colors(&tree.render());
+        assert_eq!(
+            colors,
+            vec![Color::BLUE.to_array(), Color::BLUE.to_array()],
+            "both passes repaint in the new colour"
+        );
+        assert_eq!(post_paints.get(), 2);
     }
 }
