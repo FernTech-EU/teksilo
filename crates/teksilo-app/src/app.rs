@@ -1447,6 +1447,8 @@ impl TeksiloAppHandler {
             current.tree.theme().colors.surface_main.to_array(),
         );
         let frame = current.tree.render();
+        #[cfg(feature = "text")]
+        let frame = self.sync_window_glyph_atlas(&mut current, frame, event_loop);
         // The GPU readback inside `capture_offscreen` can `.expect()`-panic on
         // device loss (compositor restart, driver crash, memory pressure).
         // Catch it so the window is still reinserted (no zombie) and the app
@@ -1473,6 +1475,76 @@ impl TeksiloAppHandler {
             ),
         };
         let _ = payload.reply_tx.send(reply);
+    }
+
+    /// Upload the glyph atlas `frame`'s text samples into `managed`'s
+    /// renderer, and return the frame to draw.
+    ///
+    /// When glyphs were evicted since the last upload, every retained paint
+    /// frame in every window may hold quads whose atlas UVs now point at
+    /// recycled slots, and `invalidate_cache` also kills the `touch_layout`
+    /// keep-alive for frames baked before the clear. So every window is
+    /// invalidated, not just this one (the others re-render at their own
+    /// redraw and pull the current atlas through the version comparison),
+    /// and this one is rendered again before the atlas is uploaded once
+    /// more. Shared by the redraw path and automation screenshots: both draw
+    /// through this window's renderer, and a capture that skipped the upload
+    /// drew any glyph first rasterised by its own render as a blank.
+    #[cfg(feature = "text")]
+    fn sync_window_glyph_atlas(
+        &mut self,
+        managed: &mut crate::window_manager::ManagedWindow,
+        frame: std::rc::Rc<teksilo_canvas::RenderFrame>,
+        event_loop: &ActiveEventLoop,
+    ) -> std::rc::Rc<teksilo_canvas::RenderFrame> {
+        let evicted = sync_glyph_atlas(
+            &self.typesetter,
+            managed.platform_window.renderer_mut(),
+            &mut managed.atlas_uploaded_version,
+        );
+        if !evicted {
+            return frame;
+        }
+        self.typesetter.bridge().borrow_mut().invalidate_cache();
+        managed.tree.invalidate_all_paints();
+        for other in self.wm.iter_mut() {
+            other.tree.invalidate_all_paints();
+            other.platform_window.request_redraw();
+        }
+        // Re-render with a real ops sink so rebuild-triggered handlers on
+        // this recovery path can still open windows.
+        let current_id = managed.teksilo_id;
+        #[cfg(not(target_os = "macos"))]
+        let current_handle = managed
+            .platform_window
+            .window()
+            .window_handle()
+            .ok()
+            .map(|h| h.as_raw());
+        let current_arc = Some(managed.platform_window.window_arc());
+        let mut ops = crate::window_manager::WindowOpsImpl::new(
+            &mut self.wm,
+            event_loop,
+            current_id,
+            #[cfg(not(target_os = "macos"))]
+            current_handle,
+            current_arc,
+        );
+        let frame = managed.tree.render_with_ops(&mut ops);
+        let evicted_again = sync_glyph_atlas(
+            &self.typesetter,
+            managed.platform_window.renderer_mut(),
+            &mut managed.atlas_uploaded_version,
+        );
+        // The recovery re-render cannot legitimately evict again (the
+        // eviction scan's generation-cadence gate just reset), but
+        // atlas_info consumes the epoch delta, so a report here would be
+        // silently lost: check the assumption instead of assuming it.
+        debug_assert!(
+            !evicted_again,
+            "glyph eviction during eviction recovery — epoch delta would be lost"
+        );
+        frame
     }
 
     fn run_in_window(
@@ -2341,79 +2413,7 @@ impl TeksiloAppHandler {
 
         #[cfg(feature = "text")]
         {
-            let atlas = self
-                .typesetter
-                .bridge()
-                .borrow_mut()
-                .atlas_info(managed.atlas_uploaded_version);
-            if atlas.version != managed.atlas_uploaded_version
-                && atlas.width > 0
-                && atlas.height > 0
-            {
-                managed.platform_window.renderer_mut().upload_atlas(
-                    atlas.width,
-                    atlas.height,
-                    &atlas.pixels,
-                );
-                managed.atlas_uploaded_version = atlas.version;
-            }
-
-            if atlas.glyphs_evicted {
-                // Glyphs were evicted since the previous atlas_info call
-                // (any path: snapshot scan, rich-text render scan, or
-                // scale-factor reset). Every retained paint frame in
-                // EVERY window may hold quads whose atlas UVs now point
-                // at recycled slots — and invalidate_cache() below clears
-                // the bridge's layout/glyph caches, which also kills the
-                // touch_layout keep-alive for frames baked before the
-                // clear. Invalidate all windows, not just the current
-                // one; the others re-render at their own requested
-                // redraw with fresh layouts and pull the current atlas
-                // pixels through the version comparison above.
-                self.typesetter.bridge().borrow_mut().invalidate_cache();
-                managed.tree.invalidate_all_paints();
-                for other in self.wm.iter_mut() {
-                    other.tree.invalidate_all_paints();
-                    other.platform_window.request_redraw();
-                }
-                // Re-render after atlas invalidation with a real ops
-                // sink so rebuild-triggered handlers on this recovery
-                // path can still open windows.
-                let mut ops = crate::window_manager::WindowOpsImpl::new(
-                    &mut self.wm,
-                    event_loop,
-                    current_id,
-                    #[cfg(not(target_os = "macos"))]
-                    current_handle,
-                    current_arc.clone(),
-                );
-                frame = managed.tree.render_with_ops(&mut ops);
-                let atlas2 = self
-                    .typesetter
-                    .bridge()
-                    .borrow_mut()
-                    .atlas_info(managed.atlas_uploaded_version);
-                // The recovery re-render cannot legitimately evict again
-                // (the eviction scan's generation-cadence gate just
-                // reset), but atlas_info consumes the epoch delta — a
-                // report here would be silently lost, so check the
-                // assumption instead of assuming it.
-                debug_assert!(
-                    !atlas2.glyphs_evicted,
-                    "glyph eviction during eviction recovery — epoch delta would be lost"
-                );
-                if atlas2.version != managed.atlas_uploaded_version
-                    && atlas2.width > 0
-                    && atlas2.height > 0
-                {
-                    managed.platform_window.renderer_mut().upload_atlas(
-                        atlas2.width,
-                        atlas2.height,
-                        &atlas2.pixels,
-                    );
-                    managed.atlas_uploaded_version = atlas2.version;
-                }
-            }
+            frame = self.sync_window_glyph_atlas(managed, frame, event_loop);
         }
 
         // The wgpu surface is Rgba8UnormSrgb: it expects linear-light color
@@ -4465,6 +4465,71 @@ impl HeadlessApp {
         }
         self.tree.set_locale(locale.to_string());
     }
+
+    /// Render the tree for an offscreen capture through `renderer`, with
+    /// the glyph atlas its text samples uploaded first.
+    ///
+    /// `Renderer::render` does not upload the atlas, so a capture that only
+    /// calls `tree.render()` draws its text blank. `atlas_version` is the
+    /// atlas version `renderer` last received: start it at 0 for a fresh
+    /// renderer, and keep it with that renderer across calls so an
+    /// unchanged atlas is not uploaded again. After an eviction the tree's
+    /// retained paints point at recycled atlas slots, so it is repainted
+    /// before the upload.
+    pub fn render_for_capture(
+        &mut self,
+        renderer: &mut teksilo_render::Renderer,
+        atlas_version: &mut u64,
+    ) -> Rc<teksilo_canvas::RenderFrame> {
+        let frame = self.tree.render();
+        #[cfg(feature = "text")]
+        {
+            let Some(typesetter) = self
+                .tree
+                .app_context()
+                .app_state::<SharedTypesetter>()
+                .cloned()
+            else {
+                return frame;
+            };
+            if sync_glyph_atlas(&typesetter, renderer, atlas_version) {
+                typesetter.bridge().borrow_mut().invalidate_cache();
+                self.tree.invalidate_all_paints();
+                drop(frame);
+                let frame = self.tree.render();
+                let evicted_again = sync_glyph_atlas(&typesetter, renderer, atlas_version);
+                debug_assert!(
+                    !evicted_again,
+                    "glyph eviction during eviction recovery — epoch delta would be lost"
+                );
+                return frame;
+            }
+        }
+        #[cfg(not(feature = "text"))]
+        let _ = (renderer, atlas_version);
+        frame
+    }
+}
+
+/// Upload the typesetter's glyph atlas into `renderer` when it changed since
+/// `uploaded_version`, and report whether glyphs were evicted since the
+/// previous query. The caller owns the eviction recovery: what must be
+/// repainted depends on how many trees share the typesetter.
+#[cfg(feature = "text")]
+pub(crate) fn sync_glyph_atlas(
+    typesetter: &SharedTypesetter,
+    renderer: &mut teksilo_render::Renderer,
+    uploaded_version: &mut u64,
+) -> bool {
+    let atlas = typesetter
+        .bridge()
+        .borrow_mut()
+        .atlas_info(*uploaded_version);
+    if atlas.version != *uploaded_version && atlas.width > 0 && atlas.height > 0 {
+        renderer.upload_atlas(atlas.width, atlas.height, &atlas.pixels);
+        *uploaded_version = atlas.version;
+    }
+    atlas.glyphs_evicted
 }
 
 #[cfg(test)]

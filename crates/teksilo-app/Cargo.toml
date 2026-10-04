@@ -96,6 +96,7 @@ uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+wgpu = { workspace = true }
 serde = { workspace = true }
 
 [package.metadata.docs.rs]

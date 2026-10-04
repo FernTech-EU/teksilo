@@ -11567,6 +11567,7 @@ dependencies = [
  "teksilo-widgets",
  "tempfile",
  "uuid",
+ "wgpu",
  "winit",
 ]
 

@@ -15,6 +15,12 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
+#### App
+
+- `HeadlessApp::render_for_capture`, which renders a headless app for an
+  offscreen capture with the glyph atlas its text needs uploaded into the
+  renderer first.
+
 #### Core
 
 - `WidgetTree::is_behind_modal`, whether an in-tree modal is up and a widget
@@ -33,6 +39,14 @@ by crate for clarity, not because crates version independently.
   (`shortcut-settings-uncategorized`) instead of being English everywhere.
 
 ### Fixed
+
+#### App
+
+- **Automation screenshots could show text as blank.** A screenshot renders
+  the window again through its own renderer, but skipped the glyph-atlas
+  upload a real frame does, so any text first drawn by that render came out
+  blank. The headless automation server never uploaded the atlas at all, so
+  its screenshots had no text. Both now upload it.
 
 #### Menus
 

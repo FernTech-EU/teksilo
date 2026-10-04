@@ -168,20 +168,29 @@ fn handle_job(
 /// `Some(Some(..))` (ready).
 struct RendererCache {
     inner: Option<Option<(Renderer, wgpu::Device, wgpu::Queue)>>,
+    /// Glyph-atlas version the cached renderer last received.
+    atlas_version: u64,
 }
 
 impl RendererCache {
     fn new() -> Self {
-        Self { inner: None }
+        Self {
+            inner: None,
+            atlas_version: 0,
+        }
     }
-    fn get(&mut self) -> Option<&mut (Renderer, wgpu::Device, wgpu::Queue)> {
+    fn get(&mut self) -> Option<(&mut (Renderer, wgpu::Device, wgpu::Queue), &mut u64)> {
         if self.inner.is_none() {
             // No tokio runtime on this thread → `pollster::block_on` is safe.
             self.inner = Some(pollster::block_on(
                 teksilo_render::test_support::create_test_renderer("teksilo-automation-mcp"),
             ));
         }
-        self.inner.as_mut().and_then(|o| o.as_mut())
+        let atlas_version = &mut self.atlas_version;
+        self.inner
+            .as_mut()
+            .and_then(|o| o.as_mut())
+            .map(|r| (r, atlas_version))
     }
 }
 
@@ -204,15 +213,15 @@ fn screenshot(
     });
 
     let warnings = webview_warnings(&mut app.tree);
-    let frame = app.tree.render();
 
     let (w, h) = (HEADLESS_W as u32, HEADLESS_H as u32);
-    let Some((renderer, device, queue)) = cache.get() else {
+    let Some(((renderer, device, queue), atlas_version)) = cache.get() else {
         return HostReply::Reply(AutomationReply::err(
             codes::GPU_UNAVAILABLE,
             "no GPU backend available for offscreen screenshot rendering",
         ));
     };
+    let frame = app.render_for_capture(renderer, atlas_version);
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("teksilo-automation-mcp screenshot"),
