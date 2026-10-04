@@ -39,7 +39,7 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{ChartModel, ChartSelection, ChartSeries, SeriesId};
+use teksilo_data::{ChartModel, ChartSelection, ChartSeries, ChartSource, SeriesId};
 use teksilo_tokens::{TextRole, TextStyle, TextStyleRole};
 
 use crate::hit::{self, MarkGeometry, MarkShape};
@@ -79,7 +79,7 @@ struct PaintSnapshot {
 }
 
 pub struct PieChart<T: Clone + 'static> {
-    model: ChartModel<T>,
+    model: ChartSource<T>,
     /// The series whose points become slices. `None` only for an empty
     /// model (nothing to draw).
     series_id: Option<SeriesId>,
@@ -122,7 +122,8 @@ pub struct PieChart<T: Clone + 'static> {
 }
 
 impl<T: Clone + std::fmt::Display + 'static> PieChart<T> {
-    pub fn new(model: ChartModel<T>) -> Self {
+    pub fn new(model: impl Into<ChartSource<T>>) -> Self {
+        let model = model.into();
         let series_id = model.only_series().or_else(|| model.series_id_at(0));
         Self {
             model,

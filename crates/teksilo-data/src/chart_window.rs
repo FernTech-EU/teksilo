@@ -45,11 +45,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use teksilo_core::ObserverHandle;
 use teksilo_core::color_prop::ColorProp;
+use teksilo_core::{ObserverHandle, Signal};
 
 use crate::chart_change::{ChartChange, SeriesId};
-use crate::chart_model::{ChartDatum, ChartModel};
+use crate::chart_model::{ChartDatum, ChartModel, SeriesView};
 
 type SeriesIdsFn = Rc<dyn Fn() -> Vec<SeriesId>>;
 type PointCountFn = Rc<dyn Fn(SeriesId) -> usize>;
@@ -63,6 +63,8 @@ struct ObserverEntry {
 }
 
 struct ChartWindowInner<T: 'static> {
+    source: ChartModel<T>,
+    structure_version: Signal<u64>,
     series_ids_fn: SeriesIdsFn,
     point_count_fn: PointCountFn,
     with_point_fn: WithPointFn<T>,
@@ -135,11 +137,13 @@ impl<T: 'static> ChartWindow<T> {
             })
         };
         let observe_fn: ObserveChartFn = {
-            let m = source;
+            let m = source.clone();
             Rc::new(move |callback| m.observe_changes(move |change| callback(change)))
         };
 
         let inner = Rc::new(RefCell::new(ChartWindowInner {
+            source,
+            structure_version: Signal::new(0),
             series_ids_fn,
             point_count_fn,
             with_point_fn,
@@ -173,15 +177,65 @@ impl<T: 'static> ChartWindow<T> {
     /// Change the window size, rebuilding every series and emitting
     /// `ChartChange::Reset`.
     pub fn set_window_size(&self, window_size: usize) {
-        let callbacks = {
+        let (callbacks, version) = {
             let mut guard = self.inner.borrow_mut();
             guard.window_size = window_size;
             guard.rebuild_all();
-            guard.snapshot_callbacks()
+            (guard.snapshot_callbacks(), guard.structure_version.clone())
         };
         for cb in &callbacks {
             cb(&ChartChange::Reset);
         }
+        version.set(version.get().wrapping_add(1));
+    }
+
+    /// Access the source model. Visibility changes made by a legend are shared
+    /// with every other view of this model.
+    pub fn source(&self) -> ChartModel<T> {
+        self.inner.borrow().source.clone()
+    }
+
+    /// Reactive version for changes to the visible data or window size.
+    pub fn structure_version(&self) -> Signal<u64> {
+        self.inner.borrow().structure_version.clone()
+    }
+
+    /// Reactive version for source colors and patterns.
+    pub fn style_version(&self) -> Signal<u64> {
+        self.source().style_version()
+    }
+
+    /// Read windowed series as borrowed slices, without copying point data.
+    pub fn with_all_series<R>(&self, f: impl FnOnce(&[SeriesView<'_, T>]) -> R) -> R {
+        let source = self.source();
+        let size = self.window_size();
+        source.with_all_series(|views| {
+            let windowed: Vec<_> = views
+                .iter()
+                .map(|view| SeriesView {
+                    id: view.id,
+                    name: view.name,
+                    color: view.color,
+                    pattern: view.pattern,
+                    visible: view.visible,
+                    points: &view.points[view.points.len().saturating_sub(size)..],
+                })
+                .collect();
+            f(&windowed)
+        })
+    }
+
+    /// Read a single windowed series. Indices are relative to the window.
+    pub fn with_series_view<R>(
+        &self,
+        series: SeriesId,
+        f: impl FnOnce(SeriesView<'_, T>) -> R,
+    ) -> Option<R> {
+        let size = self.window_size();
+        self.source().with_series_view(series, |mut view| {
+            view.points = &view.points[view.points.len().saturating_sub(size)..];
+            f(view)
+        })
     }
 
     /// Number of series (same set as the source).
@@ -479,15 +533,27 @@ fn translate_and_notify<T: 'static>(
     inner: &Rc<RefCell<ChartWindowInner<T>>>,
     change: &ChartChange,
 ) {
-    let (changes, callbacks) = {
+    let (changes, callbacks, version) = {
         let mut guard = inner.borrow_mut();
         let changes = translate(&mut guard, change);
-        (changes, guard.snapshot_callbacks())
+        (
+            changes,
+            guard.snapshot_callbacks(),
+            guard.structure_version.clone(),
+        )
     };
     for c in &changes {
         for cb in &callbacks {
             cb(c);
         }
+    }
+    if changes.iter().any(|change| {
+        !matches!(
+            change,
+            ChartChange::SeriesColorChanged { .. } | ChartChange::SeriesPatternChanged { .. }
+        )
+    }) {
+        version.set(version.get().wrapping_add(1));
     }
 }
 
@@ -822,6 +888,8 @@ mod tests {
         };
 
         let mut inner = ChartWindowInner {
+            source: model.clone(),
+            structure_version: Signal::new(0),
             series_ids_fn,
             point_count_fn,
             with_point_fn,
@@ -907,6 +975,8 @@ mod tests {
         };
 
         let mut inner = ChartWindowInner {
+            source: model.clone(),
+            structure_version: Signal::new(0),
             series_ids_fn,
             point_count_fn,
             with_point_fn,

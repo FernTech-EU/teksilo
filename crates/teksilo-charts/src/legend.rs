@@ -30,7 +30,9 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{ChartModel, SeriesId};
+#[cfg(test)]
+use teksilo_data::ChartModel;
+use teksilo_data::{ChartSource, SeriesId};
 use teksilo_tokens::{InputTokens, TargetDensity, TextRole, TextStyleRole};
 
 use crate::palette::ChartPalette;
@@ -47,7 +49,7 @@ pub enum LegendOrientation {
 /// (and Space-toggleable when focused) to flip that series' visibility.
 /// Private — only reachable through `ChartLegend::interactive(true)`.
 struct LegendRow<T: Clone + 'static> {
-    model: ChartModel<T>,
+    model: ChartSource<T>,
     series_id: SeriesId,
     palette_index: usize,
     palette: Prop<ChartPalette>,
@@ -297,10 +299,10 @@ pub(crate) fn legend_painted_line_height(label_style: &teksilo_tokens::TextStyle
     crate::style::LEGEND_SWATCH_SIZE.max(label_style.size * 1.2)
 }
 
-/// Series swatch + label list. Bound to a [`ChartModel`] shared with the
+/// Series swatch + label list. Bound to a [`teksilo_data::ChartModel`] shared with the
 /// chart that embeds it (or a standalone one for a detached legend).
 pub struct ChartLegend<T: Clone + 'static> {
-    model: ChartModel<T>,
+    model: ChartSource<T>,
     palette: Prop<ChartPalette>,
     orientation: LegendOrientation,
     interactive: bool,
@@ -315,7 +317,8 @@ pub struct ChartLegend<T: Clone + 'static> {
 }
 
 impl<T: Clone + 'static> ChartLegend<T> {
-    pub fn new(model: ChartModel<T>) -> Self {
+    pub fn new(model: impl Into<ChartSource<T>>) -> Self {
+        let model = model.into();
         Self {
             model,
             palette: Prop::Static(ChartPalette::FromTheme),
@@ -660,7 +663,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
 /// will be placed at or they are clipped by their own container.
 pub(crate) fn legend_main_axis_size<T: Clone + 'static>(
     backend: Option<&std::rc::Rc<std::cell::RefCell<dyn teksilo_canvas::TextBackend>>>,
-    model: &ChartModel<T>,
+    model: &ChartSource<T>,
     label_style: &teksilo_tokens::TextStyle,
     orientation: LegendOrientation,
     interactive: bool,

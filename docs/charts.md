@@ -4,7 +4,7 @@
 # Charts
 
 `teksilo-charts` provides bar, line, and pie/donut widgets backed by
-`ChartModel<T>`. Add `teksilo-charts` at the same version as the framework.
+`ChartModel<T>` or a `ChartWindow<T>` tail projection. Add `teksilo-charts` at the same version as the framework.
 
 ## Minimal example
 
@@ -41,10 +41,53 @@ fn main() {
 | Update data | Mutate the shared `ChartModel` |
 | Share a selected datum | Pass a `ChartSelection` to `.selection(...)` |
 | Change chart appearance | Install a `ChartStyle` |
-| Project a streaming series | Compose `ChartWindow` or `ChartAggregate` in application code |
+| Show the last N samples | Pass `ChartWindow::new(model.clone(), n)` to a chart |
+| Aggregate samples | Compute buckets with `ChartAggregate` in application code |
 
 Use patterns as well as color when series must remain distinguishable without
 color perception. Give the chart and its series meaningful labels.
+
+## Streaming history and scrolling
+
+`LineChart` fits all supplied points into its current plot width. It does not
+increase its width as samples arrive and has no built-in history scrollbar,
+panning, or time viewport. Crowded category labels tilt and then use a stride;
+this changes labels, not the number of points drawn.
+
+The x-axis is categorical: samples are spaced by index, even when their labels
+are timestamps. Unequal polling intervals are not represented as unequal gaps.
+
+For a readable live tail, pass a `ChartWindow` directly. This constructor support
+is available on `dev`; published 0.14.3 only accepts `ChartModel`.
+
+```rust
+use teksilo_charts::{AxisConfig, ChartModel, ChartWindow, LineChart};
+
+let history = ChartModel::<String>::new();
+let gpu = history.add_series("GPU");
+let tail = ChartWindow::new(history.clone(), 120);
+let chart = LineChart::new(tail.clone())
+    .axis_y(AxisConfig::new().range(0.0, 100.0))
+    .legend(true);
+history.push_point(gpu, "00:01".into(), 42.0);
+tail.set_window_size(60);
+```
+
+`BarChart`, `PieChart` and `ChartLegend` accept the same `ChartSource` inputs.
+Window slices borrow the source points. Appends, changes to the window size,
+colors, patterns and legend visibility remain reactive. Hover and selection
+indices are relative to the visible window, so a point at index zero changes
+identity when the tail slides. Do not use those indices as persistent sample IDs.
+
+A window bounds rendering, not storage. The source above retains every sample.
+For a long-running dashboard, choose a retention limit and remove old source
+points, archive them, or aggregate them. Keep the model in app state so rebuilding
+the widget tree does not reset history.
+
+A `ScrollArea` can scroll a deliberately wider child, for example a chart wrapped
+in a `FixedSize` with an explicit width. That scrolls widget geometry; it does not
+provide a time-domain viewport or bound rendering work. A chart has no fixed
+360 by 280 minimum: its intrinsic minimum depends on labels and legend layout.
 
 ## BarChart
 

@@ -15,6 +15,10 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Accept `ChartWindow` directly in line, bar and pie charts and their legends
+  through `ChartSource`, borrowing visible points and tracking window changes.
+  Document categorical axes, history retention and scrolling limits.
+
 - Include public trait contracts, associated types and constants, and required
   and default methods in `cargo teksilo symbol` output.
 

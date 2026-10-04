@@ -3,7 +3,7 @@
 
 //! BarChart — vertical or horizontal bars, one or more series.
 //!
-//! Bound to a [`ChartModel`]. Supports grouped multi-series, horizontal
+//! Bound to a [`ChartSource`]. Supports grouped multi-series, horizontal
 //! orientation, value labels, grid lines, axis titles, an embedded
 //! interactive legend, a per-datum readout with a shared tooltip card —
 //! raised by a hover, a held finger, keyboard traversal or an assistive
@@ -29,7 +29,9 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{ChartModel, ChartSelection, SeriesId, SeriesPattern, SeriesView};
+#[cfg(test)]
+use teksilo_data::ChartModel;
+use teksilo_data::{ChartSelection, ChartSource, SeriesId, SeriesPattern, SeriesView};
 use teksilo_tokens::{BorderRole, CornerRadius, TextRole, TextStyle, TextStyleRole};
 
 use crate::axis::AxisConfig;
@@ -75,7 +77,7 @@ struct PaintSnapshot {
 }
 
 pub struct BarChart<T: Clone + 'static> {
-    model: ChartModel<T>,
+    model: ChartSource<T>,
     orientation: BarOrientation,
     grouping: BarGrouping,
     show_value_labels: bool,
@@ -123,7 +125,8 @@ pub struct BarChart<T: Clone + 'static> {
 }
 
 impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
-    pub fn new(model: ChartModel<T>) -> Self {
+    pub fn new(model: impl Into<ChartSource<T>>) -> Self {
+        let model = model.into();
         Self {
             model,
             orientation: BarOrientation::Vertical,

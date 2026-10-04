@@ -28,7 +28,9 @@ use teksilo_core::widget::{
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
-use teksilo_data::{ChartModel, ChartSelection, SeriesId, SeriesPattern, SeriesView};
+#[cfg(test)]
+use teksilo_data::ChartModel;
+use teksilo_data::{ChartSelection, ChartSource, SeriesId, SeriesPattern, SeriesView};
 use teksilo_tokens::{BorderRole, TextRole, TextStyle, TextStyleRole};
 
 use crate::axis::AxisConfig;
@@ -62,7 +64,7 @@ struct PaintSnapshot {
 }
 
 pub struct LineChart<T: Clone + 'static> {
-    model: ChartModel<T>,
+    model: ChartSource<T>,
     show_points: bool,
     show_area_fill: bool,
     area_fill_opacity: f32,
@@ -106,7 +108,8 @@ pub struct LineChart<T: Clone + 'static> {
 }
 
 impl<T: Clone + std::fmt::Display + 'static> LineChart<T> {
-    pub fn new(model: ChartModel<T>) -> Self {
+    pub fn new(model: impl Into<ChartSource<T>>) -> Self {
+        let model = model.into();
         Self {
             model,
             show_points: true,
@@ -1208,6 +1211,46 @@ mod tests {
             panic!("expected a line point")
         };
         (center, (m.series_id, m.point_idx))
+    }
+
+    #[test]
+    fn windowed_chart_updates_geometry_and_hover_after_append_and_resize() {
+        let model = one_series();
+        let sid = model.only_series().unwrap();
+        let window = teksilo_data::ChartWindow::new(model.clone(), 2);
+        let mut f = fixture(LineChart::new(window.clone()).legend(true));
+        assert_eq!(
+            f.marks
+                .borrow()
+                .iter()
+                .map(|m| m.category_label.clone())
+                .collect::<Vec<_>>(),
+            ["C", "D"]
+        );
+        model.push_point(sid, "E".to_string(), 99.0);
+        f.tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = f.tree.render();
+        assert_eq!(
+            f.marks
+                .borrow()
+                .iter()
+                .map(|m| m.category_label.clone())
+                .collect::<Vec<_>>(),
+            ["D", "E"]
+        );
+        let (position, key) = point_at(&f.marks, 1);
+        f.tree.pointer_move(position);
+        assert_eq!(f.hover.get(), Some(key));
+        window.set_window_size(1);
+        f.tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = f.tree.render();
+        assert_eq!(f.marks.borrow().len(), 1);
+        assert_eq!(f.marks.borrow()[0].value, 99.0);
+        window.set_window_size(0);
+        f.tree.layout(SizeProposal::exact(400.0, 200.0));
+        let _ = f.tree.render();
+        assert!(f.marks.borrow().is_empty());
+        let _ = f.tree.sync_accessibility();
     }
 
     #[test]

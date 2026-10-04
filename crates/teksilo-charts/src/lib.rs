@@ -49,5 +49,5 @@ pub use pie_chart::{PieChart, PieLabelMode};
 pub use recipe_style::RecipeChartStyle;
 pub use teksilo_data::{
     ChartAggregate, ChartAggregateFn, ChartDatum, ChartModel, ChartSelection, ChartSeries,
-    ChartWindow, SeriesHatch, SeriesId, SeriesMarker, SeriesPattern, SeriesView,
+    ChartSource, ChartWindow, SeriesHatch, SeriesId, SeriesMarker, SeriesPattern, SeriesView,
 };
