@@ -82,9 +82,38 @@ pub struct RasterIcon {
     pixels: Vec<u8>,
     width: u32,
     height: u32,
+    /// Process-unique identity of these pixels, assigned by every
+    /// constructor and copied by `Clone`. The fields are private and there
+    /// is no mutator, so equal keys always mean equal pixels.
+    texture_key: u64,
 }
 
 impl RasterIcon {
+    /// The one place a `RasterIcon` is assembled, so every constructor
+    /// assigns a fresh texture key.
+    fn with_pixels(pixels: Vec<u8>, width: u32, height: u32) -> Self {
+        static NEXT_TEXTURE_KEY: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(1);
+        Self {
+            pixels,
+            width,
+            height,
+            texture_key: NEXT_TEXTURE_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+
+    /// Process-unique identity of these pixels, for naming the texture they
+    /// are uploaded to.
+    ///
+    /// Two icons decoded from the same bytes get different keys, and a clone
+    /// keeps its original's key. A texture name built from it can therefore
+    /// never show another icon's pixels, which a name built from the icon's
+    /// address could once a new icon was allocated where a dropped one lived.
+    #[doc(hidden)]
+    pub fn texture_key(&self) -> u64 {
+        self.texture_key
+    }
+
     /// Decode an image, identifying the format from its magic bytes.
     ///
     /// This is the entry point for user-supplied data. It never consults a
@@ -164,11 +193,7 @@ impl RasterIcon {
                 ));
             }
         };
-        Ok(Self {
-            pixels: rgba,
-            width,
-            height,
-        })
+        Ok(Self::with_pixels(rgba, width, height))
     }
 
     /// Decode a JPEG image from raw bytes, honouring its EXIF orientation.
@@ -217,11 +242,7 @@ impl RasterIcon {
             .unwrap_or_default();
         let (pixels, width, height) = apply_orientation(pixels, width, height, orientation);
 
-        Ok(Self {
-            pixels,
-            width,
-            height,
-        })
+        Ok(Self::with_pixels(pixels, width, height))
     }
 
     /// Decode a static WebP image from raw bytes.
@@ -255,11 +276,7 @@ impl RasterIcon {
             buf = rgba;
         }
 
-        Ok(Self {
-            pixels: buf,
-            width,
-            height,
-        })
+        Ok(Self::with_pixels(buf, width, height))
     }
 
     /// Convert to an alpha mask for tintable rendering.
@@ -278,11 +295,7 @@ impl RasterIcon {
             let alpha = (lum * a * 255.0) as u8;
             mask.extend_from_slice(&[255, 255, 255, alpha]);
         }
-        Self {
-            pixels: mask,
-            width: self.width,
-            height: self.height,
-        }
+        Self::with_pixels(mask, self.width, self.height)
     }
 
     /// Scale down so neither side exceeds `max_edge`, preserving aspect ratio.
@@ -313,20 +326,12 @@ impl RasterIcon {
             pixels = crate::resample::resample_area(&pixels, w, h, target_w, target_h);
         }
 
-        Some(Self {
-            pixels,
-            width: target_w,
-            height: target_h,
-        })
+        Some(Self::with_pixels(pixels, target_w, target_h))
     }
 
     /// Create from pre-decoded RGBA pixel data.
     pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self {
-        Self {
-            pixels,
-            width,
-            height,
-        }
+        Self::with_pixels(pixels, width, height)
     }
 
     /// Image width in pixels.
@@ -408,11 +413,7 @@ mod tests {
 
     #[test]
     fn to_alpha_mask_white_stays_opaque() {
-        let icon = RasterIcon {
-            pixels: vec![255, 255, 255, 255],
-            width: 1,
-            height: 1,
-        };
+        let icon = RasterIcon::with_pixels(vec![255, 255, 255, 255], 1, 1);
         let mask = icon.to_alpha_mask();
         // White pixel → lum=1.0, alpha=255 → mask alpha=255
         assert_eq!(mask.pixels()[0], 255); // R = white
@@ -421,11 +422,7 @@ mod tests {
 
     #[test]
     fn to_alpha_mask_black_becomes_transparent() {
-        let icon = RasterIcon {
-            pixels: vec![0, 0, 0, 255],
-            width: 1,
-            height: 1,
-        };
+        let icon = RasterIcon::with_pixels(vec![0, 0, 0, 255], 1, 1);
         let mask = icon.to_alpha_mask();
         // Black pixel → lum=0, alpha=0
         assert_eq!(mask.pixels()[3], 0);
@@ -439,5 +436,43 @@ mod tests {
         assert_eq!(mask.width(), 2);
         assert_eq!(mask.height(), 2);
         assert_eq!(mask.pixels().len(), 16);
+    }
+
+    #[test]
+    fn every_constructor_assigns_a_distinct_texture_key() {
+        let data = test_png_2x2();
+        let a = RasterIcon::decode_png(&data).unwrap();
+        let b = RasterIcon::decode_png(&data).unwrap();
+        let raw = RasterIcon::from_raw(vec![0; 4], 1, 1);
+        let mask = a.to_alpha_mask();
+        let keys = [
+            a.texture_key(),
+            b.texture_key(),
+            raw.texture_key(),
+            mask.texture_key(),
+        ];
+        for (i, k) in keys.iter().enumerate() {
+            assert!(
+                keys[i + 1..].iter().all(|other| other != k),
+                "keys must be pairwise distinct: {keys:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_clone_keeps_its_texture_key() {
+        let icon = RasterIcon::from_raw(vec![1, 2, 3, 4], 1, 1);
+        assert_eq!(icon.clone().texture_key(), icon.texture_key());
+    }
+
+    #[test]
+    fn an_icon_allocated_where_a_dropped_one_lived_gets_a_new_key() {
+        // The allocator usually hands the freed slot straight back, which is
+        // exactly the case an address-based name got wrong.
+        let first = Box::new(RasterIcon::from_raw(vec![255; 4], 1, 1));
+        let first_key = first.texture_key();
+        drop(first);
+        let second = Box::new(RasterIcon::from_raw(vec![0; 4], 1, 1));
+        assert_ne!(second.texture_key(), first_key);
     }
 }

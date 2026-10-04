@@ -63,6 +63,15 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **An image or raster icon could show another image's pixels.**
+  `ImageWidget::new` and `IconWidget::from_raster` / `from_animated` named
+  their texture after the icon's memory address, so an icon created where a
+  dropped one had lived reused the old texture. They now name it after the
+  icon's identity, which a clone shares. An `IconWidget` shown in both
+  `Tintable` and `FullColor` mode also shared one texture between the two
+  and drew both from whichever registered first; each mode now has its own.
+  As before, these textures last as long as the window: an icon decoded
+  afresh for every widget gets a new texture each time.
 - **The notification log kept the first notice's actions for a notice
   updated in place.** An archived row merged from a later notice with the
   same id took only its title and body, so a progress notice offering Cancel

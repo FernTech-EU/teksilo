@@ -119,8 +119,14 @@ pub struct ImageWidget {
 
 impl ImageWidget {
     /// Create from a decoded [`RasterIcon`] (e.g., from `res!()`).
+    ///
+    /// The texture is named after the icon's identity, so every
+    /// `ImageWidget` showing this icon (or a clone of it) in a window shares
+    /// one texture, uploaded once. That texture lives as long as the window:
+    /// an icon decoded afresh for each widget gets a texture of its own each
+    /// time. Pixels that change belong on [`from_raw`](Self::from_raw).
     pub fn new(icon: &RasterIcon) -> Self {
-        let name = format!("_img_{:p}", icon as *const RasterIcon);
+        let name = format!("_img_{}", icon.texture_key());
         Self {
             name,
             width: icon.width(),
@@ -482,6 +488,25 @@ mod tests {
             !frame.pending_images.is_empty(),
             "should register pending image"
         );
+    }
+
+    #[test]
+    fn new_names_its_texture_after_the_icon_identity() {
+        let icon = RasterIcon::from_raw(vec![255; 16], 2, 2);
+        let a = ImageWidget::new(&icon);
+        let clone = icon.clone();
+        let b = ImageWidget::new(&clone);
+        assert_eq!(a.name, format!("_img_{}", icon.texture_key()));
+        assert_eq!(a.name, b.name, "a clone shares the original's texture");
+
+        // An icon with the same dimensions allocated after the first one is
+        // dropped (often at the same address) must not reuse its texture.
+        let first_name = {
+            let first = Box::new(RasterIcon::from_raw(vec![255; 16], 2, 2));
+            ImageWidget::new(&first).name
+        };
+        let second = Box::new(RasterIcon::from_raw(vec![0; 16], 2, 2));
+        assert_ne!(ImageWidget::new(&second).name, first_name);
     }
 
     #[test]

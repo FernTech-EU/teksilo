@@ -76,6 +76,10 @@ enum IconSource {
     /// A decoded raster image (PNG or static WebP).
     /// `upload_pixels` holds the ready-to-upload data (alpha mask pre-applied for tintable).
     Raster {
+        /// Identity of the pixels, without the mode.
+        base_name: String,
+        /// Texture name: `base_name` qualified by the mode, because the
+        /// uploaded pixels bake it in (Tintable pre-applies the alpha mask).
         name: String,
         icon: RasterIcon,
         upload_pixels: Vec<u8>,
@@ -89,6 +93,9 @@ enum IconSource {
     /// registry slot returned by `ctx.animated_quad` — set in pair
     /// with `sprite_atlas`, used at paint time.
     Animated {
+        /// Identity of the frames, without the mode.
+        base_name: String,
+        /// `base_name` qualified by the mode, as for `Raster`.
         name: String,
         icon: AnimatedIcon,
         frame_upload_pixels: Vec<Vec<u8>>,
@@ -154,6 +161,15 @@ pub struct IconWidget {
 // Compile-time data from include_bytes! has stable pointer addresses.
 fn auto_name(prefix: &str, ptr: usize) -> String {
     format!("_icon_{prefix}_{ptr:x}")
+}
+
+/// Texture name for `base` in `mode`. The two modes upload different pixels
+/// for the same icon, so they must never share a name.
+fn mode_qualified(base: &str, mode: IconMode) -> String {
+    match mode {
+        IconMode::Tintable => format!("{base}_tint"),
+        IconMode::FullColor => format!("{base}_full"),
+    }
 }
 
 /// Prepare raster pixels for upload: apply alpha mask for tintable mode,
@@ -291,12 +307,13 @@ impl IconWidget {
     pub fn from_png(data: &'static [u8], size: f32) -> Self {
         match RasterIcon::decode_png(data) {
             Ok(icon) => {
-                let name = auto_name("png", data.as_ptr() as usize);
+                let base_name = auto_name("png", data.as_ptr() as usize);
                 let mode = IconMode::Tintable;
                 let upload_pixels = prepare_pixels(&icon, mode);
                 Self {
                     source: IconSource::Raster {
-                        name,
+                        name: mode_qualified(&base_name, mode),
+                        base_name,
                         icon,
                         upload_pixels,
                     },
@@ -322,7 +339,7 @@ impl IconWidget {
         let mode = IconMode::Tintable;
         // Try animated first
         if let Ok(anim) = AnimatedIcon::decode_webp(data) {
-            let name = auto_name("webp", data.as_ptr() as usize);
+            let base_name = auto_name("webp", data.as_ptr() as usize);
             let frame_upload_pixels: Vec<Vec<u8>> = anim
                 .frames()
                 .iter()
@@ -330,7 +347,8 @@ impl IconWidget {
                 .collect();
             return Self {
                 source: IconSource::Animated {
-                    name,
+                    name: mode_qualified(&base_name, mode),
+                    base_name,
                     icon: anim,
                     frame_upload_pixels,
                     frame_signal: None,
@@ -347,11 +365,12 @@ impl IconWidget {
         // Fall back to static
         match RasterIcon::decode_webp(data) {
             Ok(icon) => {
-                let name = auto_name("webp", data.as_ptr() as usize);
+                let base_name = auto_name("webp", data.as_ptr() as usize);
                 let upload_pixels = prepare_pixels(&icon, mode);
                 Self {
                     source: IconSource::Raster {
-                        name,
+                        name: mode_qualified(&base_name, mode),
+                        base_name,
                         icon,
                         upload_pixels,
                     },
@@ -372,13 +391,20 @@ impl IconWidget {
 
     /// Create an icon from a pre-decoded [`RasterIcon`].
     /// Accepts a reference — pixel data is copied internally.
+    ///
+    /// The texture is named after the icon's identity, so every widget
+    /// showing this icon (or a clone of it) in one mode shares one texture.
+    /// Like every static image texture it lives as long as the window: an
+    /// icon decoded afresh for each widget gets a texture of its own each
+    /// time.
     pub fn from_raster(icon: &RasterIcon, size: f32) -> Self {
-        let name = format!("_icon_raster_{:p}", icon as *const RasterIcon);
+        let base_name = format!("_icon_raster_{}", icon.texture_key());
         let mode = IconMode::Tintable;
         let upload_pixels = prepare_pixels(icon, mode);
         Self {
             source: IconSource::Raster {
-                name,
+                name: mode_qualified(&base_name, mode),
+                base_name,
                 icon: icon.clone(),
                 upload_pixels,
             },
@@ -392,8 +418,12 @@ impl IconWidget {
 
     /// Create an icon from a pre-decoded [`AnimatedIcon`].
     /// Accepts a reference — frame data is copied internally.
+    ///
+    /// Named after its first frame's identity, with the same sharing and
+    /// lifetime as [`from_raster`](Self::from_raster).
     pub fn from_animated(icon: &AnimatedIcon, size: f32) -> Self {
-        let name = format!("_icon_anim_{:p}", icon as *const AnimatedIcon);
+        let first_frame_key = icon.frames().first().map_or(0, RasterIcon::texture_key);
+        let base_name = format!("_icon_anim_{first_frame_key}");
         let mode = IconMode::Tintable;
         let frame_upload_pixels: Vec<Vec<u8>> = icon
             .frames()
@@ -402,7 +432,8 @@ impl IconWidget {
             .collect();
         Self {
             source: IconSource::Animated {
-                name,
+                name: mode_qualified(&base_name, mode),
+                base_name,
                 icon: icon.clone(),
                 frame_upload_pixels,
                 frame_signal: None,
@@ -426,19 +457,24 @@ impl IconWidget {
         self.mode = mode;
         match &mut self.source {
             IconSource::Raster {
+                base_name,
+                name,
                 icon,
                 upload_pixels,
-                ..
             } => {
+                *name = mode_qualified(base_name, mode);
                 *upload_pixels = prepare_pixels(icon, mode);
             }
             IconSource::Animated {
+                base_name,
+                name,
                 icon,
                 frame_upload_pixels,
                 sprite_atlas,
                 anim_handle,
                 ..
             } => {
+                *name = mode_qualified(base_name, mode);
                 *frame_upload_pixels = icon
                     .frames()
                     .iter()
@@ -633,6 +669,7 @@ impl Widget for IconWidget {
             frame_signal,
             sprite_atlas,
             anim_handle,
+            ..
         } = &mut self.source
         {
             if ctx.prefers_reduced_motion() {
@@ -769,6 +806,7 @@ impl Widget for IconWidget {
                 name,
                 icon,
                 upload_pixels,
+                ..
             } => {
                 self.paint_raster(
                     bounds,
@@ -787,6 +825,7 @@ impl Widget for IconWidget {
                 frame_signal,
                 sprite_atlas,
                 anim_handle,
+                ..
             } => {
                 // Shader path: one AnimatedQuad — the renderer
                 // samples the packed atlas at the current frame's
@@ -1084,6 +1123,45 @@ mod tests {
             frame.images[0].tint.is_none(),
             "full-color icon should not have tint"
         );
+    }
+
+    #[test]
+    fn one_raster_icon_in_two_modes_registers_two_textures() {
+        // Tintable uploads an alpha mask and FullColor the raw RGBA, so the
+        // two widgets must not share a texture name: the first registration
+        // of a name wins for the whole window.
+        let icon = RasterIcon::from_raw(vec![200, 100, 50, 255], 1, 1);
+        let mut tree = WidgetTree::new();
+        tree.add(IconWidget::from_raster(&icon, 24.0).mode(IconMode::Tintable));
+        tree.add(IconWidget::from_raster(&icon, 24.0).mode(IconMode::FullColor));
+        tree.layout(SizeProposal::exact(24.0, 24.0));
+        let frame = tree.render();
+        let names: std::collections::BTreeSet<&str> =
+            frame.images.iter().map(|q| q.name.as_str()).collect();
+        assert_eq!(names.len(), 2, "one texture per mode: {names:?}");
+        let pending: std::collections::BTreeSet<&str> = frame
+            .pending_images
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(pending, names, "each mode registers its own pixels");
+    }
+
+    #[test]
+    fn switching_mode_renames_the_texture() {
+        let icon = RasterIcon::from_raw(vec![255; 4], 1, 1);
+        let tint = IconWidget::from_raster(&icon, 24.0);
+        let full = IconWidget::from_raster(&icon, 24.0).mode(IconMode::FullColor);
+        let back = IconWidget::from_raster(&icon, 24.0)
+            .mode(IconMode::FullColor)
+            .mode(IconMode::Tintable);
+        let name = |w: &IconWidget| match &w.source {
+            IconSource::Raster { name, .. } => name.clone(),
+            other => panic!("expected a raster source, got {other:?}"),
+        };
+        assert_ne!(name(&tint), name(&full));
+        assert_eq!(name(&tint), name(&back));
+        assert!(name(&tint).contains(&icon.texture_key().to_string()));
     }
 
     // ── Enabled-state-aware role substitution ─────────────────────
