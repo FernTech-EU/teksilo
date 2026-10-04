@@ -199,6 +199,12 @@ fn headless_screenshot_is_a_png_or_a_typed_gpu_error() {
                 || code == teksilo_automation::codes::GPU_READBACK_FAILED,
             "expected an image or a typed GPU error, got: {shot}"
         );
+        // The server inherits the variable, but its screenshot path never
+        // panics, so the requirement is enforced here.
+        assert!(
+            !teksilo_render::test_support::adapter_required(),
+            "an adapter was required, but the server reported a GPU error: {shot}"
+        );
     }
 }
 

@@ -43,7 +43,12 @@ fn covered_pixels(
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     renderer.render(frame, &view, 1.0, W, H, [0.0, 0.0, 0.0, 0.0]);
     let pixels = teksilo_render::test_support::read_texture_rgba(device, queue, &texture, W, H);
-    pixels.as_chunks::<4>().0.iter().filter(|px| px[3] > 0).count()
+    pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|px| px[3] > 0)
+        .count()
 }
 
 fn text_app() -> teksilo_app::HeadlessApp {
@@ -57,7 +62,7 @@ fn text_app() -> teksilo_app::HeadlessApp {
 #[test]
 fn a_capture_draws_text_rasterised_by_its_own_render() {
     let Some((mut renderer, device, queue)) = pollster::block_on(
-        teksilo_render::test_support::create_test_renderer("headless_capture_text"),
+        teksilo_render::test_support::require_test_renderer("headless_capture_text"),
     ) else {
         return; // no GPU adapter — skip.
     };
@@ -93,7 +98,7 @@ fn a_capture_draws_text_rasterised_by_its_own_render() {
 #[test]
 fn a_bare_render_draws_no_text_which_is_why_captures_upload_the_atlas() {
     let Some((mut renderer, device, queue)) = pollster::block_on(
-        teksilo_render::test_support::create_test_renderer("headless_capture_text_bare"),
+        teksilo_render::test_support::require_test_renderer("headless_capture_text_bare"),
     ) else {
         return; // no GPU adapter — skip.
     };

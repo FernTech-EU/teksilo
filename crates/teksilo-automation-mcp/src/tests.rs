@@ -296,8 +296,13 @@ async fn screenshot_decodes_to_png_or_reports_no_gpu() {
             assert_eq!(&png[0..4], &[0x89, b'P', b'N', b'G'], "PNG magic bytes");
         }
         HostReply::Reply(AutomationReply::Err { code, .. }) => {
-            // No GPU in this environment — acceptable, non-fatal.
+            // No GPU in this environment — acceptable, non-fatal, unless the
+            // run asked for an adapter.
             assert_eq!(code, teksilo_automation::dto::codes::GPU_UNAVAILABLE);
+            assert!(
+                !teksilo_render::test_support::adapter_required(),
+                "an adapter was required, but the screenshot reported none"
+            );
         }
         other => panic!("unexpected screenshot reply: {}", debug_reply(&other)),
     }
@@ -316,8 +321,13 @@ async fn screenshot_tool_emits_image_block_when_gpu_present() {
         .await
         .expect("screenshot call");
     if res.is_error == Some(true) {
-        // GPU_UNAVAILABLE — fine in headless CI.
+        // GPU_UNAVAILABLE — fine on a host without a GPU, unless the run
+        // asked for an adapter.
         assert!(text_of(&res).contains("GPU_UNAVAILABLE"));
+        assert!(
+            !teksilo_render::test_support::adapter_required(),
+            "an adapter was required, but the screenshot reported none"
+        );
     } else {
         let b64 = image_of(&res).expect("an image content block");
         use base64::Engine;
@@ -342,6 +352,10 @@ async fn golden_full_window() {
         HostReply::Reply(AutomationReply::Err { code, .. })
             if code == teksilo_automation::dto::codes::GPU_UNAVAILABLE =>
         {
+            assert!(
+                !teksilo_render::test_support::adapter_required(),
+                "an adapter was required, but the screenshot reported none"
+            );
             eprintln!("skipping golden: no GPU");
             return;
         }

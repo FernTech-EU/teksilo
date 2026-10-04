@@ -56,20 +56,29 @@ static SHARED_DEVICE: OnceLock<Option<(wgpu::Device, wgpu::Queue)>> = OnceLock::
 async fn open_shared_device(label: &'static str) -> Option<(wgpu::Device, wgpu::Queue)> {
     #[cfg(test)]
     DEVICE_OPENS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // Built `_from_env`, as the window path's instance is, so wgpu's own
+    // variables apply here too: `WGPU_BACKEND=vulkan` then yields a Vulkan
+    // adapter (lavapipe on a GPU-less CI runner) or none, never a silent fall
+    // back to GL. With it set, the `force_fallback_adapter` retry below can
+    // only find a software adapter of that backend.
+    //
     // Same flags the window path uses — see `crate::instance::instance_flags`.
     // Not a tidiness point: without it this instance keeps
     // `VALIDATION_INDIRECT_CALL`, and on a driver that cannot build wgpu's
     // indirect-validation pipelines `request_device` panics rather than
     // returning the error the search below is written to survive.
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        flags: crate::instance_flags(),
-        ..wgpu::InstanceDescriptor::new_without_display_handle()
-    });
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    descriptor.flags = crate::instance_flags();
+    let instance = wgpu::Instance::new(descriptor);
 
     for force_fallback_adapter in [false, true] {
         let Ok(adapter) = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
+                // `WGPU_POWER_PREF`, as the window path reads it, so a
+                // hybrid-GPU machine renders offscreen on the GPU its windows
+                // use.
+                power_preference: wgpu::PowerPreference::from_env()
+                    .unwrap_or(wgpu::PowerPreference::LowPower),
                 compatible_surface: None,
                 force_fallback_adapter,
                 ..Default::default()
@@ -116,7 +125,12 @@ async fn open_shared_device(label: &'static str) -> Option<(wgpu::Device, wgpu::
 ///
 /// `label` names the device, so it only takes effect on the call that actually
 /// opens it; later callers join a device someone else already named.
-pub async fn create_test_renderer(
+///
+/// This is the entry shipped code uses (the headless automation server's
+/// screenshots, the previewer's PNG export). It never panics: a host without a
+/// GPU gets `None`, whatever the environment says. Tests call
+/// [`require_test_renderer`], which can insist on an adapter.
+pub async fn create_offscreen_renderer(
     label: &'static str,
 ) -> Option<(Renderer, wgpu::Device, wgpu::Queue)> {
     let (device, queue) = shared_device(label)?;
@@ -126,6 +140,87 @@ pub async fn create_test_renderer(
         wgpu::TextureFormat::Rgba8UnormSrgb,
     );
     Some((renderer, device.clone(), queue.clone()))
+}
+
+/// [`create_offscreen_renderer`], under its earlier name.
+pub async fn create_test_renderer(
+    label: &'static str,
+) -> Option<(Renderer, wgpu::Device, wgpu::Queue)> {
+    create_offscreen_renderer(label).await
+}
+
+/// The variable a test run sets to insist on a GPU adapter.
+///
+/// - unset: [`require_test_renderer`] behaves like
+///   [`create_offscreen_renderer`], so a GPU test returns early on a host
+///   without an adapter;
+/// - `any`: a missing adapter fails the test;
+/// - `lavapipe`: a missing adapter, or one that is not Mesa's lavapipe
+///   ([`is_lavapipe`]), fails the test.
+///
+/// CI sets it so that an adapter that stopped loading fails the job instead of
+/// turning every GPU test into an early return counted as a pass.
+pub const REQUIRE_ADAPTER_VAR: &str = "TEKSILO_TEST_REQUIRE_ADAPTER";
+
+/// `true` when [`REQUIRE_ADAPTER_VAR`] asks for an adapter.
+///
+/// For a test that reaches the GPU through a path that must stay panic-free
+/// (the headless automation server) and accepts a "no GPU" reply: under the
+/// requirement, that reply is a failure, not a pass.
+pub fn adapter_required() -> bool {
+    std::env::var_os(REQUIRE_ADAPTER_VAR).is_some_and(|v| !v.is_empty())
+}
+
+/// An offscreen renderer for a GPU test, honouring [`REQUIRE_ADAPTER_VAR`].
+///
+/// Returns `None` only when the variable is unset and the host has no
+/// adapter; a test then returns early. Panics, naming the adapter it found,
+/// when the variable asks for an adapter this host does not provide.
+pub async fn require_test_renderer(
+    label: &'static str,
+) -> Option<(Renderer, wgpu::Device, wgpu::Queue)> {
+    let requirement = std::env::var(REQUIRE_ADAPTER_VAR).ok();
+    let renderer = create_offscreen_renderer(label).await;
+    let found = renderer
+        .as_ref()
+        .map(|(_, device, _)| device.adapter_info());
+    if let Err(message) = check_adapter_requirement(requirement.as_deref(), found.as_ref()) {
+        panic!("{message}");
+    }
+    renderer
+}
+
+/// The decision behind [`require_test_renderer`], separated so it can be
+/// tested without the variable or a device.
+fn check_adapter_requirement(
+    requirement: Option<&str>,
+    found: Option<&wgpu::AdapterInfo>,
+) -> Result<(), String> {
+    match (requirement, found) {
+        (None, _) => Ok(()),
+        (Some("any"), Some(_)) => Ok(()),
+        (Some("lavapipe"), Some(info)) if is_lavapipe(info) => Ok(()),
+        (Some(wanted @ ("any" | "lavapipe")), None) => Err(format!(
+            "{REQUIRE_ADAPTER_VAR}={wanted}, but no GPU adapter could be opened"
+        )),
+        (Some("lavapipe"), Some(info)) => Err(format!(
+            "{REQUIRE_ADAPTER_VAR}=lavapipe, but the adapter opened is not lavapipe: {info:?}"
+        )),
+        (Some(other), _) => Err(format!(
+            "{REQUIRE_ADAPTER_VAR}={other:?} is not one of \"any\" or \"lavapipe\""
+        )),
+    }
+}
+
+/// `true` for Mesa's lavapipe, the Vulkan rasteriser that runs on the CPU.
+///
+/// `device_type == Cpu` alone means any software rasteriser, which also
+/// matches GL llvmpipe and D3D12 WARP; the backend and the driver name tell
+/// lavapipe apart.
+pub fn is_lavapipe(info: &wgpu::AdapterInfo) -> bool {
+    info.backend == wgpu::Backend::Vulkan
+        && info.device_type == wgpu::DeviceType::Cpu
+        && info.driver == "llvmpipe"
 }
 
 /// The shared device, opening it on the first call.
@@ -295,5 +390,54 @@ mod shared_device_tests {
             "the device must be opened exactly once per process, not {opens} times - a second \
              concurrent WARP device is an access violation inside d3d10warp.dll, not a slowdown"
         );
+    }
+
+    fn adapter(
+        backend: wgpu::Backend,
+        device_type: wgpu::DeviceType,
+        driver: &str,
+    ) -> wgpu::AdapterInfo {
+        let mut info = wgpu::AdapterInfo::new(device_type, backend);
+        info.driver = driver.into();
+        info
+    }
+
+    #[test]
+    fn lavapipe_is_told_apart_from_other_software_rasterisers() {
+        use wgpu::{Backend, DeviceType};
+        assert!(is_lavapipe(&adapter(
+            Backend::Vulkan,
+            DeviceType::Cpu,
+            "llvmpipe"
+        )));
+        // GL llvmpipe reports no driver name; WARP is D3D12.
+        assert!(!is_lavapipe(&adapter(Backend::Gl, DeviceType::Cpu, "")));
+        assert!(!is_lavapipe(&adapter(Backend::Dx12, DeviceType::Cpu, "")));
+        assert!(!is_lavapipe(&adapter(
+            Backend::Vulkan,
+            DeviceType::IntegratedGpu,
+            "radv"
+        )));
+    }
+
+    #[test]
+    fn the_adapter_requirement_fails_only_when_it_is_unmet() {
+        use wgpu::{Backend, DeviceType};
+        let lavapipe = adapter(Backend::Vulkan, DeviceType::Cpu, "llvmpipe");
+        let radv = adapter(Backend::Vulkan, DeviceType::IntegratedGpu, "radv");
+
+        assert!(check_adapter_requirement(None, None).is_ok());
+        assert!(check_adapter_requirement(None, Some(&radv)).is_ok());
+        assert!(check_adapter_requirement(Some("any"), Some(&radv)).is_ok());
+        assert!(check_adapter_requirement(Some("lavapipe"), Some(&lavapipe)).is_ok());
+
+        assert!(check_adapter_requirement(Some("any"), None).is_err());
+        assert!(check_adapter_requirement(Some("lavapipe"), None).is_err());
+        let wrong = check_adapter_requirement(Some("lavapipe"), Some(&radv)).unwrap_err();
+        assert!(
+            wrong.contains("radv"),
+            "the message names the adapter found: {wrong}"
+        );
+        assert!(check_adapter_requirement(Some("vulkan"), Some(&lavapipe)).is_err());
     }
 }

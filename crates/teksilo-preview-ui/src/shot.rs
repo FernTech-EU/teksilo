@@ -135,16 +135,17 @@ impl Shooter {
     /// into the typesetter's glyph rasterization, so it belongs to the
     /// shooter rather than to an individual [`ShotOptions`].
     pub fn new(scale: f32) -> Result<Self, String> {
-        let (renderer, device, queue) =
-            match pollster::block_on(test_support::create_test_renderer("teksilo preview shot")) {
-                Some(t) => t,
-                None => {
-                    return Err(
-                        "wgpu adapter unavailable — no GPU backend present for snapshot rendering"
-                            .into(),
-                    );
-                }
-            };
+        let (renderer, device, queue) = match pollster::block_on(
+            test_support::create_offscreen_renderer("teksilo preview shot"),
+        ) {
+            Some(t) => t,
+            None => {
+                return Err(
+                    "wgpu adapter unavailable — no GPU backend present for snapshot rendering"
+                        .into(),
+                );
+            }
+        };
         install_framework_locales();
         let typesetter = SharedTypesetter::new_with_default_font();
         typesetter.set_scale_factor(scale);

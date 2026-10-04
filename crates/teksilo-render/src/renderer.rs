@@ -3332,7 +3332,7 @@ mod tests {
         use teksilo_tokens::Color;
 
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_gradient_path_device"),
+            crate::test_support::require_test_renderer("teksilo_render_gradient_path_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3427,7 +3427,7 @@ mod tests {
         use teksilo_tokens::Color;
 
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_partial_alpha_device"),
+            crate::test_support::require_test_renderer("teksilo_render_partial_alpha_device"),
         ) else {
             return;
         };
@@ -3493,7 +3493,7 @@ mod tests {
     #[test]
     fn glyph_quad_renders_over_shape_in_offscreen_target() {
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_test_device"),
+            crate::test_support::require_test_renderer("teksilo_render_test_device"),
         ) else {
             return;
         };
@@ -3571,7 +3571,7 @@ mod tests {
         // on the integer grid so linear sampling is exact: interior
         // pixels fully opaque, surrounding pixels fully transparent.
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_snap_test_device"),
+            crate::test_support::require_test_renderer("teksilo_render_snap_test_device"),
         ) else {
             return;
         };
@@ -3663,7 +3663,7 @@ mod tests {
     #[test]
     fn fractional_origin_path_renders_pixel_exact() {
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_path_snap_test_device"),
+            crate::test_support::require_test_renderer("teksilo_render_path_snap_test_device"),
         ) else {
             return;
         };
@@ -3778,7 +3778,7 @@ mod tests {
     fn a_blur_scope_does_not_take_the_kernel_of_a_later_one() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_blur_isolation_device"),
+            crate::test_support::require_test_renderer("teksilo_render_blur_isolation_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3822,7 +3822,7 @@ mod tests {
     #[test]
     fn each_kawase_pass_gets_its_own_parameter_slot() {
         let Some((_renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_blur_slots_device"),
+            crate::test_support::require_test_renderer("teksilo_render_blur_slots_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3928,7 +3928,7 @@ mod tests {
     fn a_clip_under_a_translation_lands_where_the_content_does_at_fractional_scale() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_clip_translate_device"),
+            crate::test_support::require_test_renderer("teksilo_render_clip_translate_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3963,7 +3963,7 @@ mod tests {
     fn a_clip_still_applies_after_a_blur_scope_reopens_the_pass() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_clip_after_blur_device"),
+            crate::test_support::require_test_renderer("teksilo_render_clip_after_blur_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };
@@ -3992,7 +3992,7 @@ mod tests {
     fn a_clip_set_before_a_blur_scope_does_not_clip_inside_its_intermediate() {
         use teksilo_canvas::Rect;
         let Some((mut renderer, device, queue)) = pollster::block_on(
-            crate::test_support::create_test_renderer("teksilo_render_clip_into_blur_device"),
+            crate::test_support::require_test_renderer("teksilo_render_clip_into_blur_device"),
         ) else {
             return; // no GPU adapter (headless CI) — skip.
         };

@@ -183,7 +183,7 @@ impl RendererCache {
         if self.inner.is_none() {
             // No tokio runtime on this thread → `pollster::block_on` is safe.
             self.inner = Some(pollster::block_on(
-                teksilo_render::test_support::create_test_renderer("teksilo-automation-mcp"),
+                teksilo_render::test_support::create_offscreen_renderer("teksilo-automation-mcp"),
             ));
         }
         let atlas_version = &mut self.atlas_version;

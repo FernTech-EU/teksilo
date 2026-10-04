@@ -38,6 +38,26 @@ by crate for clarity, not because crates version independently.
   uncategorized shortcuts, "General", is now translated in every catalogue
   (`shortcut-settings-uncategorized`) instead of being English everywhere.
 
+#### Render
+
+- `test_support::create_offscreen_renderer`, the name shipped code now uses
+  for the offscreen renderer (`create_test_renderer` remains as an alias),
+  and `test_support::require_test_renderer` for GPU tests: with
+  `TEKSILO_TEST_REQUIRE_ADAPTER` set to `any` or `lavapipe` it fails the
+  test, naming the adapter found, instead of letting it return early on a
+  host without the adapter. `test_support::adapter_required` tells a test
+  that goes through the panic-free entry whether that variable is set, and
+  `test_support::is_lavapipe` identifies Mesa's lavapipe.
+
+### Changed
+
+#### Render
+
+- The offscreen renderer honours wgpu's environment variables, as windows
+  already do: `WGPU_BACKEND=vulkan` makes it open a Vulkan adapter or none,
+  instead of falling back to another backend, and `WGPU_POWER_PREF` picks
+  the GPU on a machine with two.
+
 ### Fixed
 
 #### App
