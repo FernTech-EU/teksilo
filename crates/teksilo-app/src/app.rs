@@ -2705,28 +2705,22 @@ impl TeksiloAppHandler {
                 }
             }
             WindowEvent::KeyboardInput {
-                event: key_event, ..
+                event: key_event,
+                is_synthetic,
+                ..
             } => {
                 self.note_physical_key(window_id, &key_event);
-                let maybe_evt = if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-                    event_translation::translate_key(&key_event.logical_key).map(|key| {
-                        let modifiers =
-                            event_translation::translate_modifiers(managed.current_modifiers);
-                        let text = key_event.text.as_ref().map(|t| t.to_string());
-                        match key_event.state {
-                            winit::event::ElementState::Pressed => WidgetEvent::KeyDown {
-                                key,
-                                modifiers,
-                                text,
-                            },
-                            winit::event::ElementState::Released => {
-                                WidgetEvent::KeyUp { key, modifiers }
-                            }
-                        }
-                    })
-                } else {
-                    None
-                };
+                // A synthetic press becomes nothing, here and for the
+                // menubar below: see `key_widget_event`.
+                let maybe_evt = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
+                    crate::input_routing::key_widget_event(
+                        &key_event.logical_key,
+                        key_event.text.as_deref(),
+                        key_event.state,
+                        is_synthetic,
+                        event_translation::translate_modifiers(managed.current_modifiers),
+                    )
+                });
                 if let Some(evt) = maybe_evt {
                     // Window-level menubar pre-dispatch (F10 / Alt+letter):
                     // intercepts BEFORE the normal focus-based path so the

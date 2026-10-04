@@ -15,6 +15,11 @@ by crate for clarity, not because crates version independently.
 
 ### Fixed
 
+- Stop dispatching the key presses winit makes up for keys held as a window
+  gains focus on Windows and X11. Enter that answered a native modal on its
+  press reached the parent window a second time once it took focus back, so a
+  list behind a confirmation opened the row the cursor had moved to.
+
 - Resolve public unsafe traits by name in `cargo teksilo symbol`, including
   cross-crate lookup when the module name differs from the trait name.
 

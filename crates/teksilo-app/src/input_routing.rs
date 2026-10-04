@@ -104,6 +104,45 @@ pub(crate) fn bounces_to_modal(event: &WindowEvent) -> bool {
     }
 }
 
+/// The widget event a `KeyboardInput` becomes, or `None` when it must reach
+/// no widget.
+///
+/// Taken apart from winit's `KeyEvent`, which only winit can build, so a test
+/// can drive it.
+///
+/// A key without a Teksilo [`Key`](teksilo_core::event::Key) becomes nothing,
+/// and so does a **synthetic press**. winit makes one up for every key still
+/// held when a window gains focus, on Windows and X11 (`is_synthetic`). It is
+/// a report of the keyboard's state, not a key the user pressed in this
+/// window: the press itself went to whatever window had focus at the time.
+/// Dispatched as a `KeyDown`, it acted twice. Enter on a native modal's button
+/// answered the modal on its press and closed its window, the parent took
+/// focus back with Enter still down, and the made-up press activated whatever
+/// the parent had focused, a list opening its row, for one. A synthetic
+/// *release*, made up for every held key when a window loses focus, is still
+/// delivered: it ends a press the window did see, so nothing stays pressed.
+pub(crate) fn key_widget_event(
+    logical_key: &winit::keyboard::Key,
+    text: Option<&str>,
+    state: winit::event::ElementState,
+    is_synthetic: bool,
+    modifiers: teksilo_core::event::Modifiers,
+) -> Option<teksilo_core::event::WidgetEvent> {
+    use teksilo_core::event::WidgetEvent;
+    if is_synthetic && state.is_pressed() {
+        return None;
+    }
+    let key = teksilo_platform::event_translation::translate_key(logical_key)?;
+    Some(match state {
+        winit::event::ElementState::Pressed => WidgetEvent::KeyDown {
+            key,
+            modifiers,
+            text: text.map(str::to_string),
+        },
+        winit::event::ElementState::Released => WidgetEvent::KeyUp { key, modifiers },
+    })
+}
+
 /// Route one pointer/gesture event into `tree`.
 ///
 /// Returns `true` when the event was one of the arms this module owns —
@@ -901,5 +940,129 @@ pub(crate) mod tests {
         assert!(!bounces_to_modal(&cursor(1.0, 1.0)));
         assert!(!bounces_to_modal(&touch(TouchPhase::Moved, 0, 1.0, 1.0)));
         assert!(!bounces_to_modal(&WindowEvent::RedrawRequested));
+    }
+
+    fn enter() -> winit::keyboard::Key {
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
+    }
+
+    #[test]
+    fn a_key_the_user_pressed_reaches_the_widgets() {
+        use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+        let down = key_widget_event(
+            &enter(),
+            Some("\r"),
+            ElementState::Pressed,
+            false,
+            Modifiers::NONE,
+        );
+        assert!(
+            matches!(
+                &down,
+                Some(WidgetEvent::KeyDown { key: Key::Enter, text: Some(text), .. }) if text == "\r"
+            ),
+            "{down:?}"
+        );
+        let up = key_widget_event(
+            &enter(),
+            None,
+            ElementState::Released,
+            false,
+            Modifiers::NONE,
+        );
+        assert!(
+            matches!(
+                up,
+                Some(WidgetEvent::KeyUp {
+                    key: Key::Enter,
+                    ..
+                })
+            ),
+            "{up:?}"
+        );
+    }
+
+    /// The press winit makes up for a key held as the window gains focus is
+    /// not a key the user pressed here, and reaches nothing; the release it
+    /// makes up as a window loses focus ends a press that window saw, and is
+    /// delivered.
+    #[test]
+    fn a_synthetic_press_reaches_nothing_and_a_synthetic_release_is_delivered() {
+        use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+        let down = key_widget_event(
+            &enter(),
+            Some("\r"),
+            ElementState::Pressed,
+            true,
+            Modifiers::NONE,
+        );
+        assert!(down.is_none(), "{down:?}");
+        let up = key_widget_event(
+            &enter(),
+            None,
+            ElementState::Released,
+            true,
+            Modifiers::NONE,
+        );
+        assert!(
+            matches!(
+                up,
+                Some(WidgetEvent::KeyUp {
+                    key: Key::Enter,
+                    ..
+                })
+            ),
+            "{up:?}"
+        );
+    }
+
+    /// Enter that answered a native modal on its press does not act a second
+    /// time in the window behind it.
+    ///
+    /// What the window behind receives, in order, once the modal's window has
+    /// closed with Enter still held: winit's made-up press as it takes focus
+    /// back, then the user's real release. Its focused widget activates on
+    /// Enter's press, as a list opening its row does, and must not.
+    #[test]
+    fn enter_that_closed_a_modal_does_not_activate_the_window_behind_it() {
+        use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+        let activated = Rc::new(RefCell::new(0_u32));
+        let count = activated.clone();
+        let mut tree = WidgetTree::new();
+        let list = tree.add(Leaf.focusable(true).on_key(move |event, _ctx| {
+            if let WidgetEvent::KeyDown {
+                key: Key::Enter, ..
+            } = event
+            {
+                *count.borrow_mut() += 1;
+                return EventResponse::Handled;
+            }
+            EventResponse::Ignored
+        }));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(list);
+
+        for (state, is_synthetic) in [
+            (ElementState::Pressed, true),
+            (ElementState::Released, false),
+        ] {
+            if let Some(event) =
+                key_widget_event(&enter(), Some("\r"), state, is_synthetic, Modifiers::NONE)
+            {
+                tree.dispatch_event(event);
+            }
+        }
+        assert_eq!(*activated.borrow(), 0, "the list did not open a row");
+
+        // And the same widget does open one for a press the user makes here,
+        // or the zero above would prove nothing.
+        for state in [ElementState::Pressed, ElementState::Released] {
+            if let Some(event) =
+                key_widget_event(&enter(), Some("\r"), state, false, Modifiers::NONE)
+            {
+                tree.dispatch_event(event);
+            }
+        }
+        assert_eq!(*activated.borrow(), 1);
     }
 }
