@@ -78,6 +78,12 @@ by crate for clarity, not because crates version independently.
   that goes through the panic-free entry whether that variable is set, and
   `test_support::is_lavapipe` identifies Mesa's lavapipe.
 
+#### WebView
+
+- `MemoryWebViewRecords::scale_log`: the scale factor each `set_bounds` of a
+  web view was given, for a test of what an engine that positions in device
+  pixels receives.
+
 ### Changed
 
 #### Core
@@ -133,6 +139,13 @@ by crate for clarity, not because crates version independently.
   blank. A dependency that names `features = ["text"]` must drop it.
 
 ### Fixed
+
+#### WebView
+
+- **A web view on a window moved to a display with another scale kept the old
+  scale** until its own bounds changed, which on X11 with WebKitGTK left the
+  page offset or mis-sized. It now repositions its native page at the new
+  scale.
 
 #### Platform
 

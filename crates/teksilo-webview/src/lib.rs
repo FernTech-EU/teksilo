@@ -921,6 +921,16 @@ impl Widget for WebView {
         // direct window-id accessor, but BuildContext::window() does.
         self.window_id.set(ctx.window().map(|w| w.id()));
 
+        // --- Display scale: a scale change → `place_children` → set_bounds ---
+        // A scale change with an unchanged logical size relayouts nothing on
+        // its own, and the engine positions in device pixels on some
+        // toolkits: rerun `place_children` when the window's scale changes.
+        ctx.device_scale_signal().bind_to(
+            self_id,
+            ctx.binding_registry(),
+            teksilo_core::binding::BindingLevel::Relayout,
+        );
+
         // --- Visibility bridge: framework activation → engine set_visible ---
         // The single reason this widget needs the activation signal: a native
         // subview ignores the wgpu paint pass, so a Switcher parking us
@@ -1042,8 +1052,9 @@ impl Widget for WebView {
             child.size = bounds.size();
         }
         // Mirror the new bounds onto the native subview. The bounds are logical;
-        // `ctx.scale_factor` is the host window's HiDPI device scale (a scale
-        // change triggers a relayout, so this runs then too). The backend uses
+        // `ctx.scale_factor` is the host window's HiDPI device scale (`build`
+        // binds `device_scale_signal` at `Relayout`, so a scale change re-runs
+        // this). The backend uses
         // both: engines that position in device pixels (WebKitGTK on X11) need
         // logical × scale. Store the scale so the post-mount open path can apply
         // the first bounds at the right scale.
