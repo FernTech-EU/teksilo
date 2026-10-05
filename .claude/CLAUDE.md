@@ -106,7 +106,7 @@ initialization and search never download it. Search uses BM25 until cached.
 `status` reports the project; `agent list --user` inspects user instructions.
 `status --json` and `search --json` provide structured output.
 
-Three things to know when changing it:
+Four things to know when changing it:
 
 - **The corpus is generated and committed, and it is one file.**
   `tools/build_corpus.py` writes `crates/teksilo-corpus/corpus/index.json` —
@@ -123,6 +123,15 @@ Three things to know when changing it:
   `crates/teksilo-corpus/src/lib.rs` must stay identical — `build-vectors`
   refuses to run (`NotRoundTrippable`) when serde does not reproduce the
   generator's bytes.
+- **The corpus is regenerated at release time, never in a feature commit.**
+  The cargo-release hook in `crates/teksilo-corpus/Cargo.toml` runs both passes
+  in the release commit. After editing an indexed document (`docs/`,
+  `examples/`, the app guide, the skill), leave the corpus stale: do not run
+  `build_corpus.py` or `build-vectors`. Until the release, three checks report
+  the staleness, and their failing is expected: CI's `build_corpus.py --check`,
+  and under `cargo test --workspace` `teksilo-corpus`'s
+  `every_chunk_line_range_reproduces_its_own_text_in_a_checkout` and
+  `cargo-teksilo`'s `every_document_reconstructs_byte_exactly`.
 - **Three payloads are embedded and CI guards their identity**:
   `embedded/extract_widget_api.py` against `tools/`, `embedded/skill/` against
   `.claude/skills/teksilo/`, and `embedded/probe/` (whose `tools.py` is
@@ -1196,7 +1205,11 @@ mdbook build
 tools/relock-crates-io.sh    # last; CI's `lockfile` job runs `cargo metadata --locked`
 ```
 
-Six things about that list that have each cost real time:
+Seven things about that list that have each cost real time:
+
+- **A stale corpus fails three checks between releases, and that is expected.**
+  The corpus is regenerated in the release commit only; see the `cargo teksilo`
+  section for the three checks and why nothing should regenerate it earlier.
 
 - **The doc gate must be the `--document-private-items` form.** The short form
   never documents a `pub(crate)` item, so it structurally cannot see a broken
