@@ -45,6 +45,10 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- `WidgetTree::device_scale_signal` and `BuildContext::device_scale_signal`:
+  the window's device scale as a `Signal`, for widgets whose layout depends on
+  it. Bound at `Relayout`, it relayouts that widget when the window moves to a
+  display with another scale.
 - `WidgetTree::set_redraw_waker`, the waker content updated off the UI thread
   uses to wake the tree's window. teksilo-app installs each window's before its
   root widget is built.

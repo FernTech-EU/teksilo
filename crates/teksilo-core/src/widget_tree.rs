@@ -25,6 +25,8 @@ mod adapter_ids_tests;
 mod announcement_ring_tests;
 #[cfg(test)]
 mod announcer_tests;
+#[cfg(test)]
+mod device_scale_tests;
 mod drag_drop_impl;
 mod focus_impl;
 mod gesture_dispatch_impl;
@@ -575,6 +577,9 @@ pub struct WidgetTree {
     /// the escape hatch for widgets that must size a device-pixel OS resource
     /// (e.g. a `WebView`'s native subview). 1.0 in headless / test contexts.
     device_scale_factor: f32,
+    /// Reactive mirror of `device_scale_factor`, for the widgets whose layout
+    /// reads it: see [`Self::device_scale_signal`].
+    device_scale_signal: crate::signal::Signal<f32>,
     /// How content updated off the UI thread wakes this tree's window. Set by
     /// teksilo-app before the root builder runs; `None` (headless) wakes
     /// nobody.
@@ -1021,6 +1026,7 @@ impl WidgetTree {
             context_menu_announcement: None,
             pending_touch_route: None,
             device_scale_factor: 1.0,
+            device_scale_signal: crate::signal::Signal::new(1.0),
             redraw_waker: None,
             safe_area: teksilo_canvas::EdgeInsets::ZERO,
             occluded_inset: None,
@@ -3122,18 +3128,20 @@ impl WidgetTree {
     /// Set the host window HiDPI device scale (physical px per logical px).
     /// Written by `teksilo-app` when the window is created and again on
     /// `WindowEvent::ScaleFactorChanged`. Surfaced to widgets via
-    /// `LayoutContext::scale_factor`.
+    /// `LayoutContext::scale_factor` and [`Self::device_scale_signal`].
     ///
-    /// Layout needs no dirty-marking here: it rides the layout pass that
-    /// follows, and a scale change already triggers a relayout. The
-    /// accessibility tree does, because the scale is the root node's
-    /// transform (AccessKit wants physical coordinates, the tree emits
-    /// logical ones) and a plain relayout does not invalidate the AT cache —
-    /// so dragging a window between a 1x and a 2x monitor would otherwise
-    /// leave every reported rectangle at the old display's scale.
+    /// A scale change relayouts nothing by itself: the tree is logical, and
+    /// when the window's logical size stays the same the next layout pass
+    /// finds nothing to do. A widget whose layout reads the scale binds
+    /// [`Self::device_scale_signal`] at `Relayout`, which this sets. The
+    /// accessibility tree is marked here, because the scale is the root
+    /// node's transform (AccessKit wants physical coordinates, the tree emits
+    /// logical ones): dragging a window between a 1x and a 2x monitor would
+    /// otherwise leave every reported rectangle at the old display's scale.
     pub fn set_device_scale_factor(&mut self, scale_factor: f32) {
         if self.device_scale_factor != scale_factor {
             self.device_scale_factor = scale_factor;
+            self.device_scale_signal.set(scale_factor);
             self.a11y_dirty = true;
         }
     }
@@ -3141,6 +3149,13 @@ impl WidgetTree {
     /// The host window HiDPI device scale most recently set (1.0 by default).
     pub fn device_scale_factor(&self) -> f32 {
         self.device_scale_factor
+    }
+
+    /// Reactive handle on [`Self::device_scale_factor`]. A scale change
+    /// relayouts nothing by itself; a widget whose layout or placement reads
+    /// `LayoutContext::scale_factor` binds this at `BindingLevel::Relayout`.
+    pub fn device_scale_signal(&self) -> crate::signal::Signal<f32> {
+        self.device_scale_signal.clone()
     }
 
     /// Set the waker content updated off the UI thread uses to wake this

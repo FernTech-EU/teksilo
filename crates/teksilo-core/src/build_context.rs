@@ -466,6 +466,14 @@ impl<'a> BuildContext<'a> {
         self.tree.text_scale_signal()
     }
 
+    /// The window's device scale (physical px per logical px), as a signal.
+    /// Bind it at `Relayout` when `layout_response` or `place_children` reads
+    /// `LayoutContext::scale_factor`: a scale change with an unchanged logical
+    /// size relayouts nothing on its own.
+    pub fn device_scale_signal(&self) -> crate::signal::Signal<f32> {
+        self.tree.device_scale_signal()
+    }
+
     /// Whether the host window is currently active (`focused AND not
     /// occluded`). One-shot read for build-time use; for a value that reacts
     /// to focus changes, bind [`window_active_signal`](Self::window_active_signal).
