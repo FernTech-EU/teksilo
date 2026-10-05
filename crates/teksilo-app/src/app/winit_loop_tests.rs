@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Seven claims, and they do not all carry the same weight. Verified by
+//! Eleven claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -40,7 +40,21 @@
 //!   (`input_loop::wire_translator`);
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
 //!   `Resized`;
-//! - **(d)** a *wrong* soft-keyboard row is caught.
+//! - **(d)** a *wrong* soft-keyboard row is caught;
+//! - **(g)** a window awaiting a redraw it requested does not make
+//!   `update_control_flow` sleep until a deadline already due, so it cannot
+//!   hold the loop awake;
+//! - **(h)** a hidden window renders the one frame it owes on its way to
+//!   hidden and then nothing; a due timer, through the loop's own
+//!   `ResumeTimeReached` and `about_to_wait`, runs a non-visual tick that
+//!   lays out; ticks run no more often than the hidden interval whatever asks
+//!   for them, and a held one is not lost; and a window reported visible is
+//!   shown and asks for a redraw even if it was also read as minimised;
+//! - **(i)** a window whose redraw is withheld is ticked too, a tick ends in
+//!   `post_event`, and the cross-window paint pass does not re-arm a window
+//!   that draws nothing;
+//! - **(j)** the accessibility wake asks a hidden window for a tick and never
+//!   reaches the app's event handler.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -59,7 +73,10 @@
 //! says so where it stands.
 //!
 //! Still unwitnessed by anything, here or elsewhere, and named so a reviewer
-//! knows to read them rather than trust them: the pen pump's per-turn call
+//! knows to read them rather than trust them: the accessibility waker's
+//! installation in `create_window` and the handlers calling it ((j) posts the
+//! wake itself; only a live assistive technology calls a handler), the pen
+//! pump's per-turn call
 //! (X11 has no pen path, so no shim is ever installed on this host), the
 //! on-screen-keyboard poll and its apply (`Explicit` is a Windows-only row),
 //! and the close-path contact release (the identity allocator it protects has
@@ -67,11 +84,12 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use teksilo_core::window::SoftKeyboardSupport;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, StartCause, TouchPhase, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
 use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::raw_window_handle::HasWindowHandle;
@@ -79,6 +97,7 @@ use winit::window::WindowId;
 
 use super::{AppEvent, TeksiloAppBuilder, TeksiloAppHandler};
 use crate::input_routing::tests::{Shared, click, cursor, logging_leaf, touch};
+use crate::redraw_gate::{HIDDEN_TICK_INTERVAL, WITHHELD_AFTER};
 use crate::window_config::WindowConfig;
 
 /// Forwards every winit callback to the real handler, then runs `step` once —
@@ -179,7 +198,14 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     let log: Shared = Rc::new(RefCell::new(Default::default()));
     let recorder = log.clone();
 
-    drive(app_with_recorder(&log), move |app, event_loop| {
+    let app_events_seen = Rc::new(std::cell::Cell::new(0_usize));
+    let counter = app_events_seen.clone();
+    let builder = app_with_recorder(&log).on_app_event(move |event| {
+        if matches!(event, AppEvent::External(_)) {
+            counter.set(counter.get() + 1);
+        }
+    });
+    drive(builder, move |app, event_loop| {
         let window = only_window(app);
 
         // -- (a) a contact handed to the real `window_event` reaches the tree
@@ -382,6 +408,247 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "a window created under a touch-off theme must be born with the \
              switch already thrown"
         );
+
+        // -- (g) a window awaiting its redraw does not hold the loop awake
+        //
+        // A deadline already due, as a tween or tooltip dwell has when its
+        // window stops getting frames, on a window that has asked for a redraw
+        // winit has not delivered yet (on Wayland, a frame callback still to
+        // come). Counting that deadline as is would put the loop to sleep
+        // until a moment already past, which wakes it at once, forever.
+        // Taking the outstanding-request hold out of `RedrawGate::deadline`
+        // reddens the first half. The window's last frame is let age first,
+        // so the hold that rate-limits ticks is not what holds the deadline.
+        {
+            std::thread::sleep(HIDDEN_TICK_INTERVAL);
+            let past = Instant::now() - Duration::from_millis(50);
+            {
+                let managed = app.wm.get_by_winit_mut(window).expect("the window");
+                // Shown, whatever the X server said: a hidden window's
+                // deadlines are held to the hidden tick interval, which is
+                // claim (h), and would mask this one. A rootless Xwayland with
+                // no window manager reports its windows fully obscured.
+                managed.occluded = false;
+                managed.minimized = false;
+                managed.sync_hidden();
+                managed.redraw.delivered();
+                managed.tree.request_wake_at(past);
+                managed.request_redraw();
+            }
+            app.update_control_flow(event_loop);
+            if let ControlFlow::WaitUntil(t) = event_loop.control_flow() {
+                assert!(
+                    t > past,
+                    "a window awaiting its redraw must not put the loop to sleep until \
+                     a deadline that has already passed"
+                );
+            }
+            // Once the redraw arrives the deadline counts again, so the half
+            // above is not passing because the deadline was never there.
+            app.wm
+                .get_by_winit_mut(window)
+                .expect("the window")
+                .redraw
+                .delivered();
+            app.update_control_flow(event_loop);
+            match event_loop.control_flow() {
+                ControlFlow::WaitUntil(t) => assert!(t <= past, "the due wake drives the loop"),
+                other => panic!("expected a WaitUntil for the due wake, got {other:?}"),
+            }
+        }
+
+        // -- (h) a hidden window keeps its state current and draws nothing
+        //
+        // Occlusion is injected as winit would deliver it on X11; a window
+        // manager would be needed to iconify for real, and Xvfb with openbox
+        // has one but a developer's private Xwayland does not. The timer path
+        // is driven as the loop drives it: a `ResumeTimeReached` wake, then
+        // `about_to_wait`.
+        {
+            app.window_event(event_loop, window, WindowEvent::Occluded(true));
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert!(managed.redraw.is_hidden(), "an occluded window is hidden");
+
+            // The first redraw is the frame owed on the way to hidden: it
+            // renders. Every later one runs the non-visual frame only, so a
+            // paint mark survives it.
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            let root = managed.tree.roots()[0];
+            managed.tree.mark_needs_paint(root);
+            let last_frame = Instant::now();
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+            assert!(
+                app.wm.windows_map()[&window].tree.needs_paint(),
+                "a hidden window must not render past its transition frame"
+            );
+
+            // A due timer, and nothing asking for a frame by hand. The window
+            // wakes the loop at the hidden interval after its last frame, no
+            // sooner and no later. (Its own deadline, not the loop's: the
+            // windows (e) and (f) opened are still there, waiting for redraws
+            // this callback never lets winit deliver.)
+            let past = Instant::now() - Duration::from_millis(50);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            managed.tree.request_wake_at(past);
+            let wake = managed
+                .wake_deadline(Instant::now())
+                .expect("a hidden window's due timer must wake the loop");
+            assert!(
+                wake >= last_frame + HIDDEN_TICK_INTERVAL,
+                "a hidden window is ticked no faster than its interval"
+            );
+            assert!(
+                wake <= Instant::now() + HIDDEN_TICK_INTERVAL,
+                "and its hold runs from its last frame, not from each computation"
+            );
+
+            // At that wake the timer is found due and becomes a tick, which
+            // lays out (consuming the wake) and does not render. Testing the
+            // due timer against the held deadline instead of the tree's own
+            // finds the window never due, and reddens this.
+            std::thread::sleep(wake.saturating_duration_since(Instant::now()));
+            app.new_events(
+                event_loop,
+                StartCause::ResumeTimeReached {
+                    start: Instant::now(),
+                    requested_resume: wake,
+                },
+            );
+            app.about_to_wait(event_loop);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert!(
+                managed.tree.next_timer_deadline().is_none_or(|t| t > past),
+                "the hidden window's due timer ran a tick, whose layout consumed it"
+            );
+            assert!(managed.tree.needs_paint(), "the tick drew nothing");
+
+            // A request right after that tick, as any event can make, is held
+            // to the interval: the tick it asks for does not run yet, and the
+            // loop wakes for it when the interval is up.
+            let ticked_at = Instant::now();
+            let past = ticked_at - Duration::from_millis(10);
+            managed.tree.request_wake_at(past);
+            managed.request_redraw();
+            app.about_to_wait(event_loop);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert!(
+                managed
+                    .tree
+                    .next_timer_deadline()
+                    .is_some_and(|t| t <= past),
+                "a hidden window ticks at most once per interval, whatever asks"
+            );
+            let held = managed
+                .wake_deadline(Instant::now())
+                .expect("a held tick must not be lost");
+            assert!(
+                held > ticked_at && held <= Instant::now() + HIDDEN_TICK_INTERVAL,
+                "the held tick wakes the loop when the interval is up"
+            );
+
+            // Shown again, the window asks for a redraw, even if a probe had
+            // also read it as minimised: a restore without focus sends no
+            // `Focused(true)` or `Resized` to clear that.
+            app.wm
+                .get_by_winit_mut(window)
+                .expect("the window")
+                .minimized = true;
+            app.window_event(event_loop, window, WindowEvent::Occluded(false));
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert!(
+                !managed.redraw.is_hidden(),
+                "a window reported visible is shown"
+            );
+            assert!(
+                managed.redraw.awaits_redraw(),
+                "the reveal asks winit for a redraw"
+            );
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+        }
+
+        // -- (i) a window whose redraw is withheld keeps its state current
+        //
+        // What a Wayland compositor does to a window it does not show: the
+        // redraw requested stays undelivered. winit on X11 never withholds
+        // one, so the stamp is made directly, as if the request had been made
+        // long enough ago, and winit is not asked.
+        {
+            std::thread::sleep(HIDDEN_TICK_INTERVAL);
+            let past = Instant::now() - Duration::from_millis(10);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert!(!managed.redraw.is_hidden());
+            // Whatever the reveal frame asked for is let go first, so the
+            // stamp below is the request's first.
+            managed.redraw.delivered();
+            managed
+                .redraw
+                .request_with(Instant::now() - WITHHELD_AFTER, || {});
+            managed.tree.request_wake_at(past);
+            let root = managed.tree.roots()[0];
+            managed.tree.mark_needs_paint(root);
+            // A window command waits for `post_event`, which `about_to_wait`
+            // does not run on its own: only a tick that ran does.
+            managed
+                .state
+                .title()
+                .set("teksilo winit-loop test (ticked)".to_owned());
+            app.about_to_wait(event_loop);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert!(
+                managed.tree.next_timer_deadline().is_none_or(|t| t > past),
+                "a withheld window still runs a tick, whose layout consumed the wake"
+            );
+            // The tick ended in `post_event`, whose cross-window pass skips a
+            // window that draws nothing: asking it again for its paint would
+            // re-arm its tick after every one.
+            assert!(
+                !managed
+                    .redraw
+                    .take_tick(Instant::now() + Duration::from_secs(1)),
+                "a window that draws nothing is not asked again for its paint"
+            );
+            assert!(
+                managed.redraw.awaits_redraw(),
+                "the tick is not the withheld redraw"
+            );
+            assert!(
+                managed.state.drain_os_commands().is_empty(),
+                "a tick ends in `post_event`, which applies what the window queued"
+            );
+            // Its redraw arrives at last and draws.
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+            assert!(!app.wm.windows_map()[&window].tree.needs_paint());
+        }
+
+        // -- (j) an accessibility handler's wake reaches a window that draws
+        // nothing, and is the framework's alone
+        //
+        // Posted as the handlers post it. On a hidden window it asks for a
+        // tick through the gate; no app event handler sees it.
+        {
+            app.window_event(event_loop, window, WindowEvent::Occluded(true));
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+            let seen_before = app_events_seen.get();
+            app.user_event(
+                event_loop,
+                AppEvent::External(Box::new(crate::app::AccessibilityWake { window })),
+            );
+            assert_eq!(
+                app_events_seen.get(),
+                seen_before,
+                "the accessibility wake is not an app event"
+            );
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert!(
+                managed
+                    .redraw
+                    .take_tick(Instant::now() + HIDDEN_TICK_INTERVAL),
+                "it asked the hidden window for a tick"
+            );
+            app.window_event(event_loop, window, WindowEvent::Occluded(false));
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+        }
 
         // -- (b) a window blocked by a modal child
         //

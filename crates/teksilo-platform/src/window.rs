@@ -62,7 +62,11 @@ pub enum FrameOutcome {
     /// after window creation often hits `Occluded` one or more times
     /// before Metal finishes compositing, so the caller should still
     /// request another redraw once — unless it already knows the
-    /// window is occluded via `WindowEvent::Occluded(true)`.
+    /// window is hidden (occluded or minimised).
+    ///
+    /// Wayland does not report a hidden surface this way: acquire keeps
+    /// succeeding there. A hidden Wayland window is throttled by the frame
+    /// callbacks `render_frame` requests, which its compositor withholds.
     Skipped,
     /// Surface became outdated (resize, scale change, device switch).
     /// Caller should reconfigure the surface and try again.
@@ -103,6 +107,9 @@ pub struct PlatformWindow {
     /// The accessibility state the adapter's off-thread handlers share with
     /// the UI thread. See [`AccessibilityBridge`].
     a11y_bridge: Arc<AccessibilityBridge>,
+    /// How the adapter's handlers wake the event loop; `None` without an
+    /// adapter. See [`AccessibilityWake`].
+    a11y_wake: Option<Arc<AccessibilityWake>>,
 }
 
 /// The state an AccessKit adapter's handlers share with the UI thread.
@@ -708,29 +715,30 @@ impl PlatformWindow {
         let a11y_needs_full_tree = Arc::new(AtomicBool::new(true));
         let a11y_bridge = Arc::new(AccessibilityBridge::default());
 
-        // Every handler below runs off the UI thread and ends by asking winit
-        // to redraw this window. That request is the *only* thing that wakes
-        // the event loop: `handle_accessibility_actions` — the sole drain of
-        // the action channel — runs from `window_event`, so without a wakeup an
-        // action issued by Narrator or Orca would sit in the channel until some
-        // unrelated window event happened to arrive. `Window::request_redraw`
-        // is thread-safe, which is why an `Arc<Window>` clone is all a handler
-        // needs.
+        // Every handler below runs off the UI thread and ends by waking the
+        // event loop, which is the *only* thing that gets what it left read:
+        // without a wakeup an action issued by Narrator or Orca would sit in
+        // the channel until some unrelated window event happened to arrive.
+        // See `AccessibilityWake` for how it wakes.
+        let a11y_wake = Arc::new(AccessibilityWake {
+            window: Arc::clone(&window),
+            waker: OnceLock::new(),
+        });
         let a11y_adapter = accesskit_winit::Adapter::with_direct_handlers(
             event_loop,
             &window,
             TeksiloActivationHandler {
                 needs_full_tree: a11y_needs_full_tree.clone(),
                 bridge: Arc::clone(&a11y_bridge),
-                window: Arc::clone(&window),
+                wake: Arc::clone(&a11y_wake),
             },
             TeksiloActionHandler {
                 tx: action_tx,
-                window: Arc::clone(&window),
+                wake: Arc::clone(&a11y_wake),
             },
             TeksiloDeactivationHandler {
                 bridge: Arc::clone(&a11y_bridge),
-                window: Arc::clone(&window),
+                wake: Arc::clone(&a11y_wake),
             },
         );
 
@@ -749,6 +757,7 @@ impl PlatformWindow {
             a11y_action_rx: action_rx,
             a11y_needs_full_tree,
             a11y_bridge,
+            a11y_wake: Some(a11y_wake),
         }
     }
 
@@ -777,6 +786,7 @@ impl PlatformWindow {
             a11y_action_rx: action_rx,
             a11y_needs_full_tree: Arc::new(AtomicBool::new(false)),
             a11y_bridge: Arc::new(AccessibilityBridge::default()),
+            a11y_wake: None,
         }
     }
 
@@ -893,6 +903,14 @@ impl PlatformWindow {
         self.renderer
             .render(frame, &view, self.scale_factor as f32, w, h, clear_color);
 
+        // Wayland: request a frame callback with the commit this present
+        // makes. winit then holds the next `RedrawRequested` back until the
+        // compositor sends it, which it does not for a hidden surface, so a
+        // minimised window stops drawing (a no-op on other platforms). winit
+        // never cancels the request, so every call here MUST be followed by
+        // the present on the next line: an early return in between would
+        // leave the window waiting for a callback that never comes.
+        self.window.pre_present_notify();
         self.renderer.queue().present(output);
         FrameOutcome::Rendered
     }
@@ -1088,6 +1106,19 @@ impl PlatformWindow {
         }
     }
 
+    /// Wake the event loop through `waker`, rather than by requesting a
+    /// redraw, whenever an accessibility handler leaves something for this
+    /// window. teksilo-app's seam: it posts to its event loop, which reaches
+    /// a window whose redraw the compositor withholds. The first call wins;
+    /// a window created without an adapter has no handler to wake from, and
+    /// ignores it.
+    #[doc(hidden)]
+    pub fn set_accessibility_waker(&self, waker: impl Fn() + Send + Sync + 'static) {
+        if let Some(wake) = &self.a11y_wake {
+            let _ = wake.waker.set(Box::new(waker));
+        }
+    }
+
     /// Drain any pending AccessKit action requests from the adapter.
     ///
     /// They name nodes by the ids the adapter was handed; pass each through
@@ -1119,7 +1150,34 @@ impl PlatformWindow {
 struct TeksiloActivationHandler {
     needs_full_tree: Arc<AtomicBool>,
     bridge: Arc<AccessibilityBridge>,
+    wake: Arc<AccessibilityWake>,
+}
+
+/// How an accessibility handler wakes the event loop for its window.
+///
+/// What a handler leaves (an action, an attach, a detach) is read on the UI
+/// thread in a frame or an event of the window, so every handler ends by
+/// waking the loop. A redraw request is not enough on its own: on Wayland,
+/// while a presented frame waits for its compositor callback, winit holds
+/// the redraw back, and a further request does not even wake the loop (it
+/// sets a flag that is already set). A compositor sends no callback to a
+/// window it does not show, so a screen reader acting on a minimised window
+/// would wait until the window is shown. teksilo-app therefore installs a
+/// waker that posts to its event loop
+/// ([`PlatformWindow::set_accessibility_waker`]); until it does, and for a
+/// window used without one, a handler requests a redraw.
+struct AccessibilityWake {
     window: Arc<Window>,
+    waker: OnceLock<Box<dyn Fn() + Send + Sync>>,
+}
+
+impl AccessibilityWake {
+    fn wake(&self) {
+        match self.waker.get() {
+            Some(waker) => waker(),
+            None => self.window.request_redraw(),
+        }
+    }
 }
 
 /// The tree handed to a client that attached before this window ever drew.
@@ -1145,7 +1203,7 @@ impl accesskit::ActivationHandler for TeksiloActivationHandler {
         // Whether or not we could answer with a real tree, ask for a frame: it
         // is what carries the *next* update to the now-active adapter, and it
         // is also how the UI thread learns that a client attached.
-        self.window.request_redraw();
+        self.wake.wake();
         Some(update)
     }
 }
@@ -1154,13 +1212,13 @@ impl accesskit::ActivationHandler for TeksiloActivationHandler {
 /// then wakes the loop so the channel is actually drained.
 struct TeksiloActionHandler {
     tx: mpsc::Sender<ActionRequest>,
-    window: Arc<Window>,
+    wake: Arc<AccessibilityWake>,
 }
 
 impl accesskit::ActionHandler for TeksiloActionHandler {
     fn do_action(&mut self, request: ActionRequest) {
         let _ = self.tx.send(request);
-        self.window.request_redraw();
+        self.wake.wake();
     }
 }
 
@@ -1170,14 +1228,14 @@ impl accesskit::ActionHandler for TeksiloActionHandler {
 /// is attached, none of them is reading the tree either.
 struct TeksiloDeactivationHandler {
     bridge: Arc<AccessibilityBridge>,
-    window: Arc<Window>,
+    wake: Arc<AccessibilityWake>,
 }
 
 impl accesskit::DeactivationHandler for TeksiloDeactivationHandler {
     fn deactivate_accessibility(&mut self) {
         self.bridge.on_deactivate();
         // The UI thread reads the flag once per frame, so it needs a frame.
-        self.window.request_redraw();
+        self.wake.wake();
     }
 }
 

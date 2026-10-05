@@ -183,11 +183,23 @@ pub(crate) struct ManagedWindow {
     /// platform, and parking animations before the user has even seen
     /// the window would be wrong.
     pub focused: bool,
-    /// Tracks `WindowEvent::Occluded`. macOS-only in winit 0.30 —
-    /// stays `false` on every other platform. Combined with `focused`
-    /// to decide whether the widget tree's animation scheduler should
-    /// run: `active = focused && !occluded`.
+    /// Tracks `WindowEvent::Occluded`, which winit 0.30 emits on macOS (from
+    /// the window's occlusion state) and on X11 (from `VisibilityNotify`), and
+    /// never on Wayland or Windows. Combined with `focused` to decide whether
+    /// the widget tree's animation scheduler should run:
+    /// `active = focused && !occluded`.
     pub occluded: bool,
+    /// The window is minimised, as far as teksilo-app knows: from `Resized`
+    /// and its placement, from the initial placement, and on X11, which
+    /// reports an iconify with no event, from a rate-limited query while
+    /// unfocused ([`refresh_minimized`](Self::refresh_minimized)). Always
+    /// `false` on Wayland, where winit cannot tell; there the compositor
+    /// withholds a hidden window's redraws, and the window is ticked as one
+    /// whose redraw is withheld (see [`crate::redraw_gate`]).
+    pub minimized: bool,
+    /// When `minimized` was last read from winit while unfocused; `None`
+    /// since the window last lost focus.
+    pub(crate) minimized_probed_at: Option<std::time::Instant>,
     /// Caps Lock active state, toggled on each `Key::CapsLock` press
     /// (winit 0.30 delivers Caps Lock as a discrete key, not via
     /// `ModifiersState`). Pushed to `state.caps_lock` so password fields
@@ -247,6 +259,72 @@ pub(crate) struct ManagedWindow {
     /// consume-once dirty semantics so several windows all converge on
     /// the same atlas content. `0` = nothing uploaded yet.
     pub atlas_uploaded_version: u64,
+    /// The window's redraw bookkeeping: an undelivered request, whether it
+    /// is hidden, a pending non-visual tick; see [`crate::redraw_gate`].
+    /// Every request goes through [`ManagedWindow::request_redraw`].
+    pub(crate) redraw: crate::redraw_gate::RedrawGate,
+}
+
+/// The shortest interval between two `is_minimized` queries of one unfocused
+/// window.
+pub(crate) const MINIMIZED_PROBE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+impl ManagedWindow {
+    /// Ask winit for a redraw of this window, through the window's
+    /// [`RedrawGate`](crate::redraw_gate::RedrawGate). The only way
+    /// teksilo-app requests one.
+    pub(crate) fn request_redraw(&self) {
+        self.redraw.request_with(std::time::Instant::now(), || {
+            self.platform_window.request_redraw();
+        });
+    }
+
+    /// Minimised or fully occluded: the window draws nothing.
+    pub(crate) fn hidden(&self) -> bool {
+        self.occluded || self.minimized
+    }
+
+    /// Push [`hidden`](Self::hidden) into the redraw gate and act on what
+    /// changed: one last frame on the way to hidden (asked of winit
+    /// directly, since the gate no longer asks while hidden), one redraw on
+    /// the way back.
+    pub(crate) fn sync_hidden(&self) {
+        match self.redraw.set_hidden(self.hidden()) {
+            crate::redraw_gate::HiddenTransition::BecameHidden => {
+                self.platform_window.request_redraw();
+            }
+            crate::redraw_gate::HiddenTransition::BecameVisible => self.request_redraw(),
+            crate::redraw_gate::HiddenTransition::Unchanged => {}
+        }
+    }
+
+    /// Re-read `minimized` from winit while the window is unfocused, at most
+    /// every [`MINIMIZED_PROBE_INTERVAL`]. An X11 iconify sends only
+    /// `Focused(false)`, and `is_minimized` costs a round trip there; on
+    /// Windows and macOS it is a flag read, and on Wayland it answers `None`,
+    /// which reads as not minimised.
+    pub(crate) fn refresh_minimized(&mut self, now: std::time::Instant) {
+        if self.focused {
+            return;
+        }
+        if self
+            .minimized_probed_at
+            .is_some_and(|at| now.saturating_duration_since(at) < MINIMIZED_PROBE_INTERVAL)
+        {
+            return;
+        }
+        self.minimized_probed_at = Some(now);
+        self.minimized = self.platform_window.window().is_minimized() == Some(true);
+    }
+
+    /// When the event loop should next wake for this window: its tree's
+    /// next timer deadline, held back while it awaits a redraw it requested
+    /// and while it draws nothing. See
+    /// [`RedrawGate::deadline`](crate::redraw_gate::RedrawGate::deadline).
+    pub(crate) fn wake_deadline(&self, now: std::time::Instant) -> Option<std::time::Instant> {
+        self.redraw.deadline(now, self.tree.next_timer_deadline())
+    }
 }
 
 /// Manages multiple application windows.
@@ -812,6 +890,15 @@ impl WindowManager {
 
         // Create with AccessKit adapter (shows window after adapter is ready)
         let mut pw = pollster::block_on(PlatformWindow::new_with_a11y(window, target));
+        // An accessibility handler wakes the loop through it rather than by a
+        // redraw request, which a compositor holds back for a window it does
+        // not show. See `TeksiloAppHandler::accessibility_wake`.
+        if let Some(proxy) = self.event_proxy.clone() {
+            let window = pw.window().id();
+            pw.set_accessibility_waker(move || {
+                proxy.send_external(crate::app::AccessibilityWake { window });
+            });
+        }
 
         // Finish wiring the per-window input translator, now that a real
         // surface exists to ask about. What each of the three facts is for is
@@ -1058,6 +1145,8 @@ impl WindowManager {
             title_bar_host,
             focused: true,
             occluded: false,
+            minimized: config.initial_placement.is_minimized(),
+            minimized_probed_at: None,
             caps_lock_active: false,
             ime_allowed: None,
             ime_purpose: None,
@@ -1068,6 +1157,7 @@ impl WindowManager {
             on_close_blocked,
             on_removed,
             atlas_uploaded_version: primed_atlas_version,
+            redraw: crate::redraw_gate::RedrawGate::default(),
         };
 
         let mut managed = managed;
@@ -1076,7 +1166,8 @@ impl WindowManager {
         // been resized, which for a window created full-screen is the only
         // one that matters.
         {
-            let chrome = crate::app::WindowChrome::new(&managed.platform_window, None);
+            let chrome =
+                crate::app::WindowChrome::new(&managed.platform_window, &managed.redraw, None);
             crate::input_loop::refresh_safe_area(&chrome, &mut managed.tree);
         }
 
@@ -1575,7 +1666,7 @@ impl WindowManager {
         // and avoids. The owner / transient-parent relationship already keeps
         // the modal above its parent.
         teksilo_platform::window_activation::raise(child.platform_window.window(), None);
-        child.platform_window.request_redraw();
+        child.request_redraw();
     }
 
     /// Broadcast a theme change to all windows.
@@ -1743,7 +1834,7 @@ impl WindowManager {
     /// Request redraw on all windows.
     pub fn request_redraw_all(&self) {
         for managed in self.windows.values() {
-            managed.platform_window.request_redraw();
+            managed.request_redraw();
         }
     }
 
@@ -1759,6 +1850,10 @@ impl WindowManager {
     /// inactive window flooded with redraws it never wins is starved of its own
     /// pending repaint and freezes on its last active frame (caret stuck,
     /// colours not desaturated). Targeting only due windows removes both.
+    ///
+    /// Due means the tree's own timer deadline. What the request becomes is
+    /// the window's gate's to decide: a redraw for a shown window, a
+    /// non-visual tick, rate-limited, for one that draws nothing.
     pub fn request_redraw_due(&self, now: std::time::Instant) {
         for managed in self.windows.values() {
             if managed
@@ -1766,7 +1861,7 @@ impl WindowManager {
                 .next_timer_deadline()
                 .is_some_and(|deadline| deadline <= now)
             {
-                managed.platform_window.request_redraw();
+                managed.request_redraw();
             }
         }
     }
@@ -1882,6 +1977,7 @@ impl WindowManager {
     /// `request_redraw_due` and reintroducing the exact uncapped
     /// free-running redraw behaviour that pacing was written to remove.
     pub fn request_redraw_needing_render(&mut self) -> usize {
+        let now = std::time::Instant::now();
         let mut poked = 0;
         for managed in self.windows.values_mut() {
             if managed.tree.needs_reconcile() {
@@ -1891,8 +1987,11 @@ impl WindowManager {
                     teksilo_canvas::SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
                 managed.tree.layout(proposal);
             }
-            if managed.tree.needs_render() {
-                managed.platform_window.request_redraw();
+            // A window that draws nothing is skipped: its paint marks wait
+            // for the redraw that shows it again, and a request here after
+            // each of its ticks would re-arm the next one forever.
+            if managed.tree.needs_render() && !managed.redraw.draws_nothing(now) {
+                managed.request_redraw();
                 poked += 1;
             }
         }

@@ -51,6 +51,23 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+#### App
+
+- **A window nobody can see stops drawing.** A minimised window, or one
+  fully covered (reported on macOS and X11), renders one last frame and
+  then nothing until it is shown again, instead of rendering on every
+  redraw. On Wayland, frames are paced by the compositor's frame callbacks,
+  which it stops sending to a window it does not show: minimised, covered
+  or on another workspace. Such a window still runs its idle callbacks,
+  lays out and keeps its accessibility tree delivered, at most ten times a
+  second, and still answers a screen reader's actions, so app state,
+  animations that must finish and what a screen reader hears stay current.
+- Debug builds report on standard error a focused window that has waited
+  more than a second for a redraw it asked for.
+- `TEKSILO_IDLE_TRACE` lines now carry the time since start (`t=`) and
+  count redraws answered by a hidden window (`hidden_redraws`) and the
+  non-visual frames run for windows that draw nothing (`hidden_ticks`).
+
 #### Render
 
 - The offscreen renderer honours wgpu's environment variables, as windows
