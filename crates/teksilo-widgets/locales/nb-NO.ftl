@@ -413,3 +413,5 @@ grid-view-selection-count =
 # Koderedigering. Se en-US.ftl for full kontekst og
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab rykker inn. { $next } går til neste kontroll, { $previous } til forrige.
+
+shortcut-settings-uncategorized = Generelt

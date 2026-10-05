@@ -405,3 +405,5 @@ grid-view-selection-count =
 # Редактор коду. Повний контекст див. у en-US.ftl і
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab додає відступ. { $next } переходить до наступного елемента керування, { $previous } до попереднього.
+
+shortcut-settings-uncategorized = Загальні

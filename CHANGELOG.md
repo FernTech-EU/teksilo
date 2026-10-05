@@ -20,6 +20,17 @@ by crate for clarity, not because crates version independently.
 - `WidgetTree::is_behind_modal`, whether an in-tree modal is up and a widget
   is behind it, public so code outside the tree can apply the rule the
   pointer, the Tab cycle and assistive technology already follow.
+- `ShortcutBuilder::category_label` and `Shortcut::category_text`: a
+  localized display text for a shortcut's category, beside the `category` key
+  that keeps ordering and grouping stable across languages.
+
+#### Widgets
+
+- `CommandPalette` and `ShortcutSettings` show and match a shortcut's
+  category by its label (`PaletteCommand::category_text`), so a French reader
+  sees and types "Fichier", not the key. The header of the group holding
+  uncategorized shortcuts, "General", is now translated in every catalogue
+  (`shortcut-settings-uncategorized`) instead of being English everywhere.
 
 ### Fixed
 

@@ -128,8 +128,12 @@ pub struct PaletteCommand {
     pub id: &'static str,
     /// The localized display name, already resolved for the active locale.
     pub name: String,
-    /// The grouping label, if the command declared one.
+    /// The grouping key, if the command declared one — stable across languages,
+    /// so an [`CommandPalette::include`] filter can match on it.
     pub category: Option<&'static str>,
+    /// The category as the reader sees it, already resolved for the active
+    /// locale: the command's `category_label`, or the key when it gave none.
+    pub category_text: Option<String>,
     /// The longer explanation, if the command declared one.
     pub description: Option<String>,
     /// The effective primary chord — user rebinds merged in — or `None` when the
@@ -144,9 +148,11 @@ pub struct PaletteCommand {
 
 impl PaletteCommand {
     /// The text a query is matched against: category and name together, so
-    /// `file new` finds a New command filed under File.
+    /// `file new` finds a New command filed under File. The displayed category,
+    /// not the key, because the reader types what they read: `fichier nouveau`
+    /// in a French interface.
     fn haystack(&self) -> String {
-        match self.category {
+        match &self.category_text {
             Some(cat) => format!("{cat} {}", self.name),
             None => self.name.clone(),
         }
@@ -425,6 +431,7 @@ impl CommandPalette {
                 id: eff.shortcut.id,
                 name: eff.shortcut.name.get(),
                 category: eff.shortcut.category,
+                category_text: eff.shortcut.category_text(),
                 description: eff.shortcut.description.as_ref().map(|d| d.get()),
                 keystroke: eff.primary,
                 enabled: eff.enabled,
@@ -699,9 +706,9 @@ fn command_row(cmd: &PaletteCommand, selected: bool) -> impl Widget + 'static {
     );
     // The category is the row's disambiguator — two features' "Close" read identically
     // without it — so it shows always, not only while searching.
-    if let Some(cat) = cmd.category {
+    if let Some(cat) = &cmd.category_text {
         left = left.child(
-            TextWidget::new(lit!(cat.to_string()))
+            TextWidget::new(lit!(cat.clone()))
                 .style(TextStyleRole::Small)
                 .color(TextRole::Secondary)
                 .single_line(),

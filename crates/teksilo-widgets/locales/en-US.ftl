@@ -449,3 +449,7 @@ grid-view-selection-count =
 # in German, "⌃⇥" on macOS. See
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab indents. { $next } moves to the next control, { $previous } to the previous one.
+
+# ShortcutSettings: the header of the group holding every shortcut that
+# declared no category. See crates/teksilo-widgets/src/shortcut_settings.rs.
+shortcut-settings-uncategorized = General

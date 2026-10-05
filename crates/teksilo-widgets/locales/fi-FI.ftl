@@ -403,3 +403,5 @@ grid-view-selection-count =
 # Koodieditori. Katso koko konteksti en-US.ftl-tiedostosta ja
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Sarkain sisentää. { $next } siirtyy seuraavaan ohjausobjektiin, { $previous } edelliseen.
+
+shortcut-settings-uncategorized = Yleiset

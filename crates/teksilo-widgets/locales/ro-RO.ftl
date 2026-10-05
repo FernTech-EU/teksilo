@@ -413,3 +413,5 @@ grid-view-selection-count =
 # Editor de cod. Consultați en-US.ftl pentru contextul complet și
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab indentează. { $next } trece la controlul următor, { $previous } la cel anterior.
+
+shortcut-settings-uncategorized = Generale

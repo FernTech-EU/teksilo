@@ -365,3 +365,5 @@ grid-view-selection-count =
     }
 
 code-editor-tab-escape-hint = Tab enŝovas. { $next } movas al la sekva regilo, { $previous } al la antaŭa.
+
+shortcut-settings-uncategorized = Ĝeneralaj

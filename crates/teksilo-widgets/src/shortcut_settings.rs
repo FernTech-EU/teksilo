@@ -38,7 +38,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use teksilo_i18n::lit;
+use teksilo_i18n::{lit, tr_widget};
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -229,9 +229,9 @@ impl Widget for ShortcutSettings {
             hay_lower(&data.name).contains(&filter_needle)
                 || hay_lower(data.id).contains(&filter_needle)
                 || data
-                    .category
-                    .map(|c| hay_lower(c).contains(&filter_needle))
-                    .unwrap_or(false)
+                    .category_text
+                    .as_deref()
+                    .is_some_and(|c| hay_lower(c).contains(&filter_needle))
         };
 
         let mut rows: Vec<ShortcutRowData> = ctx
@@ -244,6 +244,7 @@ impl Widget for ShortcutSettings {
                 secondary: eff.secondary,
                 enabled: eff.enabled,
                 category: eff.shortcut.category,
+                category_text: eff.shortcut.category_text(),
                 has_override: ctx
                     .shortcut_registry()
                     .override_for(eff.shortcut.id)
@@ -261,7 +262,7 @@ impl Widget for ShortcutSettings {
         let mut last_category: Option<Option<&'static str>> = None;
         for row in rows {
             if last_category != Some(row.category) {
-                column = column.child(category_header(row.category));
+                column = column.child(category_header(row.category_text.clone()));
                 last_category = Some(row.category);
             }
             let row_id = self.build_row(ctx, &row, capturing, pending.as_ref());
@@ -386,13 +387,22 @@ struct ShortcutRowData {
     primary: Option<KeyStroke>,
     secondary: Option<KeyStroke>,
     enabled: bool,
+    /// The grouping key: rows are ordered and grouped by it, so the grouping
+    /// does not change with the language.
     category: Option<&'static str>,
+    /// What the group's header says (see `Shortcut::category_text`).
+    category_text: Option<String>,
     has_override: bool,
 }
 
-fn category_header(category: Option<&'static str>) -> impl Widget + 'static {
-    let label = category.unwrap_or("General");
-    TextWidget::new(lit!(label))
+/// A group's header. Shortcuts that declared no category share one group,
+/// named by the widget catalogue so it reads in the interface language.
+fn category_header(category: Option<String>) -> impl Widget + 'static {
+    let label = match category {
+        Some(text) => lit!(text),
+        None => tr_widget!(shortcut_settings_uncategorized()),
+    };
+    TextWidget::new(label)
         .style(TextStyleRole::BodyBold)
         .color(TextRole::Primary)
         .single_line()

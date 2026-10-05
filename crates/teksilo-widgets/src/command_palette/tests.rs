@@ -109,6 +109,7 @@ fn the_category_takes_part_in_matching() {
         id: "work.new",
         name: "New Work".into(),
         category: Some("File"),
+        category_text: Some("File".into()),
         description: None,
         keystroke: None,
         enabled: true,
@@ -119,6 +120,24 @@ fn the_category_takes_part_in_matching() {
         fuzzy_score("filenew", &cmd.haystack()).is_some(),
         "a query naming the category then the command must match the composed haystack"
     );
+}
+
+/// A localized category is matched as the reader reads it, not by its key: a French
+/// interface shows "Fichier", and "fichier" is what gets typed.
+#[test]
+fn the_category_is_matched_by_its_label_not_its_key() {
+    let cmd = PaletteCommand {
+        id: "work.new",
+        name: "Nouveau projet".into(),
+        category: Some("file"),
+        category_text: Some("Fichier".into()),
+        description: None,
+        keystroke: None,
+        enabled: true,
+        intent: "work.new",
+    };
+    assert_eq!(cmd.haystack(), "Fichier Nouveau projet");
+    assert!(fuzzy_score("fichier", &cmd.haystack()).is_some());
 }
 
 // ── The widget ──────────────────────────────────────────────────────────────
@@ -335,6 +354,7 @@ fn revealing_scrolls_only_far_enough_to_show_the_row() {
             id: "x",
             name: format!("Command {i}"),
             category: None,
+            category_text: None,
             description: None,
             keystroke: None,
             enabled: true,

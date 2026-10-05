@@ -406,3 +406,5 @@ grid-view-selection-count =
 # Editor kódu. Viz en-US.ftl pro úplný kontext a
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab odsazuje. { $next } přejde na další ovládací prvek, { $previous } na předchozí.
+
+shortcut-settings-uncategorized = Obecné

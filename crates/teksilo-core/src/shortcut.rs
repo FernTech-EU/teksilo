@@ -264,7 +264,17 @@ pub struct Shortcut {
     pub name: Prop<String>,
     /// Optional settings-UI category, e.g. `"editor.format"`. When
     /// `None`, UIs should derive it from `id` (segment before last `.`).
+    ///
+    /// A **key**, not text for a reader: it orders and groups shortcuts, so it
+    /// must not change with the language. What a UI *shows* for the group is
+    /// [`Self::category_label`], falling back to this key.
     pub category: Option<&'static str>,
+    /// The category as a reader sees it: the group header in a settings UI,
+    /// the line under a command palette row, and part of what a palette
+    /// search matches. A `Prop<String>` like [`Self::name`], so a localized
+    /// label follows a change of language. `None` shows [`Self::category`]
+    /// as it is.
+    pub category_label: Option<Prop<String>>,
     /// Tooltip / detail text for the settings UI.
     pub description: Option<Prop<String>>,
     /// Default primary keystroke. Overridden at lookup time by the
@@ -307,6 +317,7 @@ impl fmt::Debug for Shortcut {
             .field("id", &self.id)
             .field("name", &self.name)
             .field("category", &self.category)
+            .field("category_label", &self.category_label)
             .field("description", &self.description)
             .field("primary", &self.primary)
             .field("secondary", &self.secondary)
@@ -324,6 +335,16 @@ impl fmt::Debug for Shortcut {
 }
 
 impl Shortcut {
+    /// The category as it should be displayed: the label when one was given,
+    /// the key otherwise, `None` when the shortcut declared no category.
+    pub fn category_text(&self) -> Option<String> {
+        match (&self.category_label, self.category) {
+            (Some(label), Some(_)) => Some(label.get()),
+            (_, Some(key)) => Some(key.to_string()),
+            (_, None) => None,
+        }
+    }
+
     /// Start building a shortcut with a stable id.
     #[allow(clippy::new_ret_no_self)]
     pub fn new(id: &'static str) -> ShortcutBuilder {
@@ -332,6 +353,7 @@ impl Shortcut {
                 id,
                 name: Prop::Static(String::new()),
                 category: None,
+                category_label: None,
                 description: None,
                 primary: None,
                 secondary: None,
@@ -429,8 +451,20 @@ impl ShortcutBuilder {
         self
     }
 
+    /// The group key: orders and groups the shortcut in settings UIs and the
+    /// command palette. Shown as it is unless [`Self::category_label`] gives it
+    /// readable text.
     pub fn category(mut self, category: &'static str) -> Self {
         self.inner.category = Some(category);
+        self
+    }
+
+    /// The group's text as a reader sees it — a localized `Prop<String>` (a
+    /// `LocalizedString` from `tr!` converts) — while [`Self::category`]
+    /// stays the stable key the groups are ordered by. Only meaningful beside
+    /// a `category`.
+    pub fn category_label(mut self, label: impl Into<Prop<String>>) -> Self {
+        self.inner.category_label = Some(label.into());
         self
     }
 
@@ -1719,6 +1753,39 @@ mod tests {
             ),
             Some("g.delete"),
             "a scoped binding conflicts with a global on the same chord"
+        );
+    }
+
+    #[test]
+    fn the_category_shows_its_label_but_orders_by_its_key() {
+        let mut reg = ShortcutRegistry::default();
+        // "Aide" would sort before "Fichier"; the keys put file first.
+        reg.register(
+            Shortcut::new("help.topics")
+                .category("z-help")
+                .category_label("Aide")
+                .build(),
+        );
+        reg.register(
+            Shortcut::new("work.new")
+                .category("a-file")
+                .category_label("Fichier")
+                .build(),
+        );
+        reg.register(Shortcut::new("bare").category("raw").build());
+        reg.register(Shortcut::new("loose").build());
+        let shown: Vec<(&str, Option<String>)> = reg
+            .iter_effective()
+            .map(|e| (e.shortcut.id, e.shortcut.category_text()))
+            .collect();
+        assert_eq!(
+            shown,
+            vec![
+                ("loose", None),
+                ("work.new", Some("Fichier".to_string())),
+                ("bare", Some("raw".to_string())),
+                ("help.topics", Some("Aide".to_string())),
+            ]
         );
     }
 

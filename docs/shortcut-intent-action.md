@@ -127,7 +127,8 @@ use teksilo::core::shortcut::{KeyStroke, Shortcut, ShortcutScope};
 
 Shortcut::new("app.save")                  // stable id (dispatch key)
     .name("Save")                          // menu/settings label
-    .category("File")                      // settings-UI grouping
+    .category("file")                      // grouping key (stable, orders groups)
+    .category_label(tr!(menu_file()))      // what the group header says
     .primary(KeyStroke::ctrl(Key::S))      // default primary chord
     .secondary(KeyStroke::new(Key::F12, Modifiers::NONE))
     // .scope(ShortcutScope::Global)        // default

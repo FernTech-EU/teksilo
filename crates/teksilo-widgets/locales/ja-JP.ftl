@@ -404,3 +404,5 @@ grid-view-selection-count =
 # コードエディター。詳しい経緯は en-US.ftl と次のファイルを参照。
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。
+
+shortcut-settings-uncategorized = 一般

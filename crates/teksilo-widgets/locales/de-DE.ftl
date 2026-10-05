@@ -403,3 +403,5 @@ grid-view-selection-count =
 # Code-Editor. Siehe en-US.ftl für den vollständigen Kontext und
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab rückt ein. { $next } wechselt zum nächsten Steuerelement, { $previous } zum vorherigen.
+
+shortcut-settings-uncategorized = Allgemein
