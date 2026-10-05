@@ -26,5 +26,14 @@ thiserror = { workspace = true }
 bytemuck = { workspace = true }
 serde = { workspace = true }
 
+# The concurrency models' primitives, behind `teksilo_canvas::sync`: only a
+# build with `RUSTFLAGS="--cfg teksilo_loom"` compiles it. A consumer's
+# lockfile lists it; no ordinary build fetches or compiles it.
+[target.'cfg(teksilo_loom)'.dependencies]
+loom = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(teksilo_loom)'] }
+
 [package.metadata.docs.rs]
 all-features = true

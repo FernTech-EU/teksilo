@@ -12,6 +12,8 @@ pub mod raster;
 pub mod render_frame;
 pub mod resample;
 pub mod svg;
+#[doc(hidden)]
+pub mod sync;
 pub mod text_backend;
 mod xml;
 

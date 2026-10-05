@@ -51,6 +51,15 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+#### Canvas
+
+- `teksilo-canvas` lists `loom` as a dependency for the `teksilo_loom` cfg,
+  which only its concurrency models set. It adds eight packages to an
+  application's `Cargo.lock` (`loom`, `generator`, `tracing-subscriber`,
+  `tracing-log`, `matchers`, `nu-ansi-term`, `sharded-slab`, `valuable`),
+  which an audit of the lockfile sees; no ordinary build fetches or
+  compiles them.
+
 #### App
 
 - **A window nobody can see stops drawing.** A minimised window, or one

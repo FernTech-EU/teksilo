@@ -73,6 +73,30 @@ a machine with a GPU. `TEKSILO_TEST_REQUIRE_ADAPTER` takes `lavapipe` or
 `any`; when the adapter does not match, the test fails and names the adapter
 it found.
 
+### Running the loom models
+
+The off-thread wake protocols are checked with [loom](https://docs.rs/loom),
+which runs every interleaving of a small model of them. Their atomics and locks
+come from `teksilo_canvas::sync`, which is the standard library's in an
+ordinary build and loom's under the `teksilo_loom` cfg:
+
+```bash
+RUSTFLAGS="--cfg teksilo_loom" CARGO_TARGET_DIR=target/loom \
+  cargo clippy --lib --tests -p teksilo-canvas -- -D warnings -A deprecated
+RUSTFLAGS="--cfg teksilo_loom" LOOM_MAX_PREEMPTIONS=3 \
+CARGO_PROFILE_TEST_OPT_LEVEL=3 CARGO_TARGET_DIR=target/loom \
+  cargo test --lib -p teksilo-canvas loom_
+```
+
+The packages are those the CI job "Concurrency models (loom)" lists; the
+first command lints the code only that cfg compiles, which the ordinary
+Clippy run never sees.
+
+Keep the `loom_` filter: under the cfg, the facade's types panic outside a
+model, so every other test would fail. The cfg is `teksilo_loom`, never a bare
+`loom`, which other crates in the lockfile react to. A separate
+`CARGO_TARGET_DIR` keeps the loom build from invalidating the ordinary one.
+
 ## Developer Certificate of Origin
 
 This project uses the [Developer Certificate of Origin (DCO)](DCO.md).

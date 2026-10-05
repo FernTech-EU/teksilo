@@ -55,5 +55,8 @@ alacritty = ["dep:portable-pty", "dep:alacritty_terminal"]
 # `alacritty` backend end-to-end where a real shell is available.
 teksilo-core = { workspace = true }
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(teksilo_loom)'] }
+
 [package.metadata.docs.rs]
 all-features = true

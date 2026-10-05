@@ -1202,6 +1202,8 @@ python3 tools/extract_widget_api.py --test
 python3 tools/check_spdx_headers.py --check
 mdbook build
 (cd examples/telemetry_codegen && cargo teksilo-telemetry-lint --fail-on-warnings)
+# CI's `loom` job: the cfg-only clippy and the `loom_` models, with the command
+# and package list in CONTRIBUTING.md, "Running the loom models"
 tools/relock-crates-io.sh    # last; CI's `lockfile` job runs `cargo metadata --locked`
 ```
 

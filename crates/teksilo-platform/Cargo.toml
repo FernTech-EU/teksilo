@@ -191,5 +191,8 @@ zbus = { version = "5.19", default-features = false, features = ["async-io"] }
 # against. Already in the tree through winit's xkbcommon.
 xkeysym = "0.2"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(teksilo_loom)'] }
+
 [package.metadata.docs.rs]
 all-features = true
