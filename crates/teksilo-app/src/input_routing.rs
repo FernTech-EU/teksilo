@@ -44,9 +44,10 @@
 //! freeze the clock and a long press stops advancing, exactly as it does for a
 //! mouse.
 
+use teksilo_canvas::SizeProposal;
 use teksilo_core::WidgetTree;
 use teksilo_core::pointer::CancelReason;
-use teksilo_core::window::WindowOps;
+use teksilo_core::window::{MenubarAction, WindowOps};
 use teksilo_platform::pointer_backend::{BackendEvent, InputSample, PointerBackend};
 use winit::event::WindowEvent;
 
@@ -243,6 +244,63 @@ pub(crate) fn set_window_active(
         cancel_all_input(backend, tree, ops, reason);
     }
     tree.set_window_active_with_ops(active, ops);
+}
+
+/// Carry out a window-level menubar dispatcher's decision: F10, Alt+letter or
+/// a bare Alt tap, already matched against the bar's triggers.
+///
+/// - `FocusTrigger` focuses the trigger and stops, the Win32 F10 behaviour
+///   (menubar mode, no menu open).
+/// - `OpenMenu` focuses the trigger and asks it to **expand**, the action its
+///   own `on_access_action` answers with `MenuContext::open_at`.
+/// - `Intercept` does nothing: the chord was swallowed so it would not reach a
+///   focused text field as a character.
+///
+/// For a bar collapsed to its hamburger, either action carries a `reveal`
+/// closure that floats the bar as an overlay. It runs first, followed by a
+/// layout pass at `proposal` so the trigger has bounds to anchor its menu
+/// under.
+///
+/// The menu is opened by its trigger's action, never by a press at the
+/// trigger's centre. The floating bar unrolls out of the hamburger from zero
+/// width, so straight after the reveal every trigger is laid out under a clip
+/// with nothing visible: a press there landed outside the bar, dismissed it as
+/// an outside click, and missed the clipped trigger. The bar rolled back after
+/// a few pixels and no menu opened. An action needs no geometry and cannot
+/// toggle an already-open menu shut.
+///
+/// A bar behind an in-tree modal does nothing at all, and the chord stays
+/// swallowed, as one matching no menu is. The bar's keys reach it wherever
+/// focus is, so nothing else stops them: focusing the trigger first moved the
+/// keyboard behind the box, and a collapsed bar's reveal floats it *above* the
+/// box, where its menu would be in front of the modal and free to act.
+pub(crate) fn apply_menubar_action(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    action: MenubarAction,
+    proposal: SizeProposal,
+) {
+    let (trigger_id, reveal, open) = match action {
+        MenubarAction::Intercept => return,
+        MenubarAction::FocusTrigger { trigger_id, reveal } => (trigger_id, reveal, false),
+        MenubarAction::OpenMenu { trigger_id, reveal } => (trigger_id, reveal, true),
+    };
+    if tree.is_behind_modal(trigger_id) {
+        return;
+    }
+    if let Some(reveal) = reveal {
+        tree.run_with_event_context(ops, |ctx| reveal(ctx));
+        tree.layout_with_ops(proposal, ops);
+    }
+    tree.focus_ops(trigger_id, ops);
+    if open {
+        tree.dispatch_access_action(
+            teksilo_core::accessibility::widget_id_to_node_id(trigger_id),
+            teksilo_core::accesskit::Action::Expand,
+            None,
+            ops,
+        );
+    }
 }
 
 /// Send each sample to the door its shape names.
@@ -1064,5 +1122,218 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(*activated.borrow(), 1);
+    }
+
+    /// A window-sized tree holding `menu_bar`, with the window state a bar
+    /// needs to install its Alt+letter dispatcher. Returns the tree, the bar
+    /// and the layout proposal the event loop would use for this window.
+    fn tree_with(
+        menu_bar: teksilo_widgets::MenuBar,
+    ) -> (WidgetTree, teksilo_core::widget_id::WidgetId, SizeProposal) {
+        use teksilo_core::window::state::WindowStateInit;
+        use teksilo_core::window::{TeksiloWindowId, WindowPlacement, WindowState};
+
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(Rc::new(
+                RefCell::new(teksilo_canvas::MockTextBackend::new()),
+            ));
+        tree.set_window_state(WindowState::new(WindowStateInit {
+            id: TeksiloWindowId::new(1),
+            string_id: Some("test".to_string()),
+            placement: WindowPlacement::Floating,
+            title: "Test".to_string(),
+            size: (800, 600),
+            position: (0, 0),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        }));
+        let menu_bar = tree.add(menu_bar);
+        let proposal = SizeProposal::exact(800.0, 600.0);
+        tree.layout(proposal);
+        tree.layout(proposal);
+        (tree, menu_bar, proposal)
+    }
+
+    /// [`tree_with`] a menu bar holding `&File` and `&Edit`, each with one
+    /// item, laid out in full or collapsed to its hamburger.
+    pub(crate) fn tree_with_menu_bar(
+        collapsed: bool,
+    ) -> (WidgetTree, teksilo_core::widget_id::WidgetId, SizeProposal) {
+        use teksilo_i18n::lit;
+        use teksilo_widgets::{CollapsePolicy, MenuBar, MenuItem, MenuList};
+
+        let menu_bar = MenuBar::new()
+            .menu(lit!("&File"), || {
+                Box::new(MenuList::new().item(MenuItem::new(lit!("New"))))
+            })
+            .menu(lit!("&Edit"), || {
+                Box::new(MenuList::new().item(MenuItem::new(lit!("Cut"))))
+            });
+        tree_with(if collapsed {
+            menu_bar.collapse_policy(CollapsePolicy::Always)
+        } else {
+            menu_bar
+        })
+    }
+
+    /// What the window's menubar dispatcher answers to `key` with
+    /// `modifiers`.
+    pub(crate) fn menubar_answer(
+        tree: &WidgetTree,
+        key: teksilo_core::event::Key,
+        modifiers: teksilo_core::event::Modifiers,
+    ) -> MenubarAction {
+        let dispatcher = tree
+            .window_state()
+            .and_then(|state| state.menubar_dispatcher())
+            .expect("the menu bar installed its dispatcher");
+        dispatcher
+            .try_handle(&teksilo_core::window::MenubarKeyEvent { key, modifiers })
+            .expect("the key is the menu bar's")
+    }
+
+    /// What the window's menubar dispatcher answers to Alt+`letter`.
+    pub(crate) fn alt_letter(tree: &WidgetTree, letter: char) -> MenubarAction {
+        use teksilo_core::event::{Key, Modifiers};
+        menubar_answer(tree, Key::Character(letter), Modifiers::ALT)
+    }
+
+    pub(crate) fn opened_trigger(action: &MenubarAction) -> teksilo_core::widget_id::WidgetId {
+        match action {
+            MenubarAction::OpenMenu { trigger_id, .. } => *trigger_id,
+            other => panic!("an Alt+letter naming a menu opens it, got {other:?}"),
+        }
+    }
+
+    /// Whether focus is in an open menu, which is where opening one puts it,
+    /// and that menu holds the item labelled `item`.
+    ///
+    /// The trigger's `expanded` state alone proves nothing: it follows the
+    /// bar's `open_index`, which a menu closed by choosing an item in a
+    /// submenu leaves set with nothing open.
+    fn focus_is_in_menu_holding(tree: &WidgetTree, item: &str) -> bool {
+        let Some(menu) = tree.focused() else {
+            return false;
+        };
+        tree.accessibility_node(menu).role() == teksilo_core::accesskit::Role::Menu
+            && tree
+                .find_by_label(item)
+                .is_some_and(|item| tree.is_descendant_of(item, menu))
+    }
+
+    /// Alt+E on a bar collapsed to its hamburger opens Edit, and the bar it
+    /// unrolled for that stays up.
+    ///
+    /// The bar unrolls from zero width, so a menu opened by pressing on its
+    /// trigger was opened by a press outside the bar: the press dismissed
+    /// the bar, which rolled back after a few pixels, and the trigger under
+    /// the clip never saw it.
+    #[test]
+    fn alt_letter_opens_its_menu_from_a_collapsed_menu_bar() {
+        let (mut tree, menu_bar, proposal) = tree_with_menu_bar(true);
+        let bar = tree.children(menu_bar)[0];
+        assert!(
+            !tree.is_active(bar),
+            "precondition: only the hamburger shows"
+        );
+
+        let action = alt_letter(&tree, 'e');
+        let edit = opened_trigger(&action);
+        apply_menubar_action(&mut tree, &mut NoopWindowOps, action, proposal);
+        tree.layout(proposal);
+
+        assert!(tree.is_active(bar), "the bar is revealed");
+        assert!(focus_is_in_menu_holding(&tree, "Cut"), "Alt+E opened Edit");
+        assert!(tree.accessibility_node(edit).is_expanded());
+
+        // Once the bar has finished unrolling, nothing has taken it down.
+        tree.advance_time(std::time::Duration::from_secs(1));
+        tree.layout(proposal);
+        assert!(tree.is_active(bar), "the bar is still up");
+        assert!(tree.bounds(bar).width > 0.0, "the bar unrolled");
+        assert!(focus_is_in_menu_holding(&tree, "Cut"), "Edit is still open");
+    }
+
+    /// The same chord on a bar laid out in full, which never needed a reveal.
+    #[test]
+    fn alt_letter_opens_its_menu_from_an_inline_menu_bar() {
+        let (mut tree, _menu_bar, proposal) = tree_with_menu_bar(false);
+        let action = alt_letter(&tree, 'e');
+        apply_menubar_action(&mut tree, &mut NoopWindowOps, action, proposal);
+        tree.layout(proposal);
+
+        assert!(focus_is_in_menu_holding(&tree, "Cut"), "Alt+E opened Edit");
+    }
+
+    /// Alt+F opens File again after an item chosen in its submenu closed it.
+    ///
+    /// Choosing File ▸ Open Recent ▸ document-1.txt closes every menu but
+    /// leaves the bar's `open_index` on File. A menu opened by a press on its
+    /// trigger toggled on that state, so the next Alt+F "closed" a File menu
+    /// that was not open, and only a second one opened it (reader finding
+    /// chrome-v02).
+    #[test]
+    fn alt_letter_opens_its_menu_after_a_submenu_choice() {
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        use teksilo_core::accesskit::Action;
+        use teksilo_i18n::lit;
+        use teksilo_widgets::{MenuBar, MenuItem, MenuList};
+
+        let chosen = Rc::new(RefCell::new(0_u32));
+        let count = chosen.clone();
+        let (mut tree, _menu_bar, proposal) =
+            tree_with(MenuBar::new().menu(lit!("&File"), move || {
+                let count = count.clone();
+                Box::new(
+                    MenuList::new()
+                        .item(MenuItem::new(lit!("Open")).on_activate_fn(|_| {}))
+                        .item(MenuItem::submenu(lit!("Open Recent"), move || {
+                            let count = count.clone();
+                            Box::new(
+                                MenuList::new().item(
+                                    MenuItem::new(lit!("document-1.txt"))
+                                        .on_activate_fn(move |_| *count.borrow_mut() += 1),
+                                ),
+                            )
+                        })),
+                )
+            }));
+        let settle = |tree: &mut WidgetTree| {
+            tree.layout(proposal);
+            tree.advance_time(std::time::Duration::from_secs(1));
+            tree.layout(proposal);
+        };
+        let click = |tree: &mut WidgetTree, label: &str| {
+            let item = tree.find_by_label(label).expect("the item is showing");
+            assert!(tree.dispatch_access_action(
+                widget_id_to_node_id(item),
+                Action::Click,
+                None,
+                &mut NoopWindowOps,
+            ));
+        };
+
+        let action = alt_letter(&tree, 'f');
+        apply_menubar_action(&mut tree, &mut NoopWindowOps, action, proposal);
+        settle(&mut tree);
+        click(&mut tree, "Open Recent");
+        settle(&mut tree);
+        click(&mut tree, "document-1.txt");
+        settle(&mut tree);
+        assert_eq!(*chosen.borrow(), 1, "precondition: the submenu item ran");
+        assert!(
+            tree.active_overlays().is_empty(),
+            "precondition: every menu closed"
+        );
+
+        let action = alt_letter(&tree, 'f');
+        apply_menubar_action(&mut tree, &mut NoopWindowOps, action, proposal);
+        settle(&mut tree);
+        assert!(
+            focus_is_in_menu_holding(&tree, "Open"),
+            "the first Alt+F opens File"
+        );
     }
 }

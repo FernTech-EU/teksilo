@@ -81,13 +81,15 @@ pub struct MenubarKeyEvent {
 /// impl is provided below.
 #[derive(Clone)]
 pub enum MenubarAction {
-    /// Focus the trigger and synthesise a click on it so its menu
-    /// opens. Used for `Alt+<letter>` mnemonic activation.
+    /// Focus the trigger and open its menu, by dispatching
+    /// `accesskit::Action::Expand` to it: the trigger must answer that
+    /// action by opening its menu, never by toggling it. Used for
+    /// `Alt+<letter>` mnemonic activation.
     ///
     /// When `reveal` is `Some` (collapsed/hamburger `MenuBar`),
     /// `teksilo-app` runs the reveal closure (and a synchronous layout
-    /// pass) FIRST, so the trigger has valid bounds before the
-    /// synthesised click.
+    /// pass) FIRST, so the trigger has bounds to anchor its menu under.
+    /// Nothing happens when the trigger is behind a modal.
     OpenMenu {
         trigger_id: WidgetId,
         reveal: Option<MenubarReveal>,

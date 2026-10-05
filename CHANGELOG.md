@@ -13,6 +13,33 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Core
+
+- `WidgetTree::is_behind_modal`, whether an in-tree modal is up and a widget
+  is behind it, public so code outside the tree can apply the rule the
+  pointer, the Tab cycle and assistive technology already follow.
+
+### Fixed
+
+#### Menus
+
+- **Alt+letter on a menu bar collapsed to its hamburger opened no menu.** The
+  bar unrolled a few pixels, rolled back, and the menu stayed shut. The menu
+  was opened by a press at its trigger's centre, but the floating bar unrolls
+  from no width, so the press landed outside the bar and closed it as an
+  outside click. Alt+letter now asks the trigger to open its menu, which
+  needs no position (reader finding chrome-16).
+- **Alt+letter could close a menu instead of opening it.** After an item
+  chosen in a submenu closed every menu, the bar still counted its menu as
+  open, so the next Alt+letter toggled it shut and only a second one opened
+  it. Alt+letter now always opens (reader finding chrome-v02).
+- **F10 and Alt+letter acted on a menu bar behind a modal.** They moved focus
+  out of the box onto the bar behind it, and a bar collapsed to its hamburger
+  floated over the box with focus on it, in front of the modal. Both keys now
+  do nothing while an in-tree modal is up.
+
 ## [0.15.1] - 2026-10-04
 
 ### Added

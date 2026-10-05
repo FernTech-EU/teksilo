@@ -1190,20 +1190,14 @@ impl TeksiloAppHandler {
     /// managed window aside the same way
     /// [`Self::dispatch_in_window`] does so the action runs with
     /// `WindowOps` wired up (focus changes need to repaint, etc.).
-    ///
-    /// - `OpenMenu`: focus the trigger and synthesise a primary click
-    ///   on it. The MenuBarTrigger's `on_tap` handler then runs the
-    ///   normal `MenuContext::open_at` path.
-    /// - `FocusTrigger`: focus the trigger and stop. Matches Win32
-    ///   F10 behaviour (menubar mode, no menu).
-    /// - `Intercept`: do nothing — the key was swallowed.
+    /// What each action does is
+    /// [`input_routing::apply_menubar_action`](crate::input_routing::apply_menubar_action).
     fn apply_menubar_action(
         &mut self,
         window_id: WindowId,
         action: teksilo_core::window::MenubarAction,
         event_loop: &ActiveEventLoop,
     ) {
-        use teksilo_core::window::MenubarAction;
         let Some(mut current) = self.wm.take_managed(window_id) else {
             return;
         };
@@ -1218,12 +1212,10 @@ impl TeksiloAppHandler {
             .map(|h| h.as_raw());
         let current_arc = Some(current.platform_window.window_arc());
 
-        // For a collapsed (hamburger) MenuBar, the action carries a
-        // `reveal` closure. We must run it (it shows the bar as a
-        // floating overlay) and then re-layout synchronously, so the
-        // trigger has valid bounds before we focus / synthesise the
-        // click on it. Compute the same layout proposal the redraw
-        // path uses.
+        // A collapsed (hamburger) MenuBar's action carries a `reveal`
+        // closure, followed by a synchronous layout pass so the trigger
+        // has bounds to anchor its menu under. Lay out at the same
+        // proposal the redraw path uses.
         let proposal = {
             let size = current.platform_window.surface_size();
             let sf = current.platform_window.scale_factor() as f32;
@@ -1239,48 +1231,12 @@ impl TeksiloAppHandler {
                 current_handle,
                 current_arc,
             );
-            match action {
-                MenubarAction::Intercept => {}
-                MenubarAction::FocusTrigger { trigger_id, reveal } => {
-                    if let Some(reveal) = reveal {
-                        current
-                            .tree
-                            .run_with_event_context(&mut ops, |ctx| reveal(ctx));
-                        current.tree.layout_with_ops(proposal, &mut ops);
-                    }
-                    current.tree.focus_ops(trigger_id, &mut ops);
-                }
-                MenubarAction::OpenMenu { trigger_id, reveal } => {
-                    if let Some(reveal) = reveal {
-                        current
-                            .tree
-                            .run_with_event_context(&mut ops, |ctx| reveal(ctx));
-                        current.tree.layout_with_ops(proposal, &mut ops);
-                    }
-                    current.tree.focus_ops(trigger_id, &mut ops);
-                    // A keyboard chord (F10, Alt+letter) opened this menu, so
-                    // there is no pointer to describe: the constructors' mouse
-                    // default is the honest answer, and it is what the trigger
-                    // saw before the press carried a pointer at all.
-                    let at = current.tree.bounds(trigger_id).center();
-                    current.tree.dispatch_event_with_ops(
-                        WidgetEvent::pointer_down(
-                            at,
-                            teksilo_core::event::PointerButton::Primary,
-                            teksilo_core::event::Modifiers::NONE,
-                        ),
-                        &mut ops,
-                    );
-                    current.tree.dispatch_event_with_ops(
-                        WidgetEvent::pointer_up(
-                            at,
-                            teksilo_core::event::PointerButton::Primary,
-                            teksilo_core::event::Modifiers::NONE,
-                        ),
-                        &mut ops,
-                    );
-                }
-            }
+            crate::input_routing::apply_menubar_action(
+                &mut current.tree,
+                &mut ops,
+                action,
+                proposal,
+            );
         }
 
         Self::settle_ime(&mut current);
@@ -5152,6 +5108,62 @@ mod tests {
             in_the_box,
             "focus stays in the box, where the next real key goes"
         );
+    }
+
+    /// The menu bar's window-level keys do nothing behind an in-tree message
+    /// box: Alt+E opens no menu, and neither it nor F10 moves focus out of the
+    /// box. A bar collapsed to its hamburger is the case that needs saying:
+    /// its reveal floats the bar as an overlay *above* the box, where a menu
+    /// would be in front of the modal and free to act.
+    #[test]
+    fn the_menu_bar_keys_do_nothing_behind_an_in_tree_message_box() {
+        use crate::input_routing::apply_menubar_action;
+        use crate::input_routing::tests::{
+            alt_letter, menubar_answer, opened_trigger, tree_with_menu_bar,
+        };
+        use teksilo_core::event::{Key, Modifiers};
+        use teksilo_core::window::NoopWindowOps;
+
+        for collapsed in [false, true] {
+            let (mut tree, menu_bar, proposal) = tree_with_menu_bar(collapsed);
+            tree.run_with_event_context(&mut NoopWindowOps, |ctx| a_question().present(ctx));
+            let queued = tree
+                .drain_pending_modal_requests()
+                .pop()
+                .expect("the message box is queued");
+            present_in_tree_modal_request(&mut tree, queued.source_widget, queued.request);
+            tree.layout(proposal);
+            let in_the_box = tree.focused();
+            assert!(
+                in_the_box.is_some(),
+                "precondition: focus went into the box"
+            );
+
+            let open_edit = alt_letter(&tree, 'e');
+            let edit = opened_trigger(&open_edit);
+            let focus_file = menubar_answer(&tree, Key::F10, Modifiers::NONE);
+            for action in [open_edit, focus_file] {
+                apply_menubar_action(&mut tree, &mut NoopWindowOps, action, proposal);
+                tree.layout(proposal);
+                tree.advance_time(std::time::Duration::from_secs(1));
+                tree.layout(proposal);
+                assert_eq!(
+                    tree.focused(),
+                    in_the_box,
+                    "collapsed: {collapsed}, focus stays in the box"
+                );
+            }
+            assert!(
+                !tree.accessibility_node(edit).is_expanded(),
+                "collapsed: {collapsed}, no menu opens over the box"
+            );
+            if collapsed {
+                assert!(
+                    !tree.is_active(tree.children(menu_bar)[0]),
+                    "the bar is not floated over the box"
+                );
+            }
+        }
     }
 
     /// `InputDialog` is the worse case: `None` *is* its cancellation

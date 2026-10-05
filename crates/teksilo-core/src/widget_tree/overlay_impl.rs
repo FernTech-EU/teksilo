@@ -711,7 +711,11 @@ impl WidgetTree {
     /// a removed node defunct, libatspi keeps that for its path, and
     /// `tools/reader/` measured Orca 46.1 dropping the focus event of the
     /// opener the page came back with ("Ignoring defunct object").
-    pub(super) fn is_behind_modal(&self, widget_id: WidgetId) -> bool {
+    ///
+    /// A menu bar's window-level keys are the other: F10 and Alt+letter reach
+    /// the bar wherever focus is, so `teksilo-app` asks this before acting on
+    /// one.
+    pub fn is_behind_modal(&self, widget_id: WidgetId) -> bool {
         let Some(modal) = self.overlay_manager.topmost_centered() else {
             return false;
         };
