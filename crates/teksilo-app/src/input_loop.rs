@@ -1090,7 +1090,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "text")]
     #[test]
     fn a_soft_keyboard_request_during_a_composition_keeps_the_preedit() {
         use teksilo_canvas::SizeProposal;

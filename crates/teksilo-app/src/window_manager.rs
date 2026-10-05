@@ -245,8 +245,7 @@ pub(crate) struct ManagedWindow {
     /// against the shared bridge's current version on its own redraw
     /// and re-uploads when behind — the version model replaces
     /// consume-once dirty semantics so several windows all converge on
-    /// the same atlas content. `0` = nothing uploaded yet; stays `0`
-    /// (unused) when the `text` feature is off.
+    /// the same atlas content. `0` = nothing uploaded yet.
     pub atlas_uploaded_version: u64,
 }
 
@@ -271,7 +270,6 @@ pub struct WindowManager {
     /// [`PendingClose`].
     pending_closes: Vec<PendingClose>,
     theme: Theme,
-    #[cfg(feature = "text")]
     typesetter: Option<teksilo_text::SharedTypesetter>,
     /// Windows that are blocked by a modal child.
     modal_blocked: HashMap<TeksiloWindowId, TeksiloWindowId>,
@@ -339,7 +337,6 @@ impl WindowManager {
             next_id: 1,
             pending_closes: Vec::new(),
             theme,
-            #[cfg(feature = "text")]
             typesetter: None,
             modal_blocked: HashMap::new(),
             a11y_prefs,
@@ -494,7 +491,6 @@ impl WindowManager {
 
     /// Install the shared typesetter every window's tree will shape text
     /// through (called by `TeksiloAppHandler` during initialization).
-    #[cfg(feature = "text")]
     pub fn set_typesetter(&mut self, typesetter: teksilo_text::SharedTypesetter) {
         self.typesetter = Some(typesetter);
     }
@@ -946,39 +942,35 @@ impl WindowManager {
             tree.set_user_text_scale(self.user_text_scale);
         }
 
-        #[cfg_attr(not(feature = "text"), allow(unused_mut))]
         let mut primed_atlas_version: u64 = 0;
-        #[cfg(feature = "text")]
-        {
-            if let Some(ref typesetter) = self.typesetter {
-                typesetter.set_scale_factor(scale_factor as f32);
-                tree = tree.with_text_backend(typesetter.as_text_backend());
+        if let Some(ref typesetter) = self.typesetter {
+            typesetter.set_scale_factor(scale_factor as f32);
+            tree = tree.with_text_backend(typesetter.as_text_backend());
 
-                // Prime the new window's GPU atlas from the shared
-                // typesetter. The versioned path in
-                // `handle_redraw_requested` only uploads when this
-                // window's `atlas_uploaded_version` lags the bridge; a
-                // window created after the atlas already contains every
-                // glyph it needs (e.g. reopening a modal with the same
-                // labels) would otherwise render text against an empty
-                // per-window atlas texture. Read-only access on purpose:
-                // calling `atlas_info` here would consume the pending
-                // text-activity flag and the eviction-epoch delta that
-                // belong to the creating window's in-flight redraw.
-                let (w, h, pixels, version) = {
-                    let bridge = typesetter.bridge().borrow();
-                    let service = bridge.service();
-                    (
-                        service.atlas_width(),
-                        service.atlas_height(),
-                        service.atlas_pixels().to_vec(),
-                        bridge.atlas_version(),
-                    )
-                };
-                if w > 0 && h > 0 {
-                    pw.renderer_mut().upload_atlas(w, h, &pixels);
-                    primed_atlas_version = version;
-                }
+            // Prime the new window's GPU atlas from the shared
+            // typesetter. The versioned path in
+            // `handle_redraw_requested` only uploads when this
+            // window's `atlas_uploaded_version` lags the bridge; a
+            // window created after the atlas already contains every
+            // glyph it needs (e.g. reopening a modal with the same
+            // labels) would otherwise render text against an empty
+            // per-window atlas texture. Read-only access on purpose:
+            // calling `atlas_info` here would consume the pending
+            // text-activity flag and the eviction-epoch delta that
+            // belong to the creating window's in-flight redraw.
+            let (w, h, pixels, version) = {
+                let bridge = typesetter.bridge().borrow();
+                let service = bridge.service();
+                (
+                    service.atlas_width(),
+                    service.atlas_height(),
+                    service.atlas_pixels().to_vec(),
+                    bridge.atlas_version(),
+                )
+            };
+            if w > 0 && h > 0 {
+                pw.renderer_mut().upload_atlas(w, h, &pixels);
+                primed_atlas_version = version;
             }
         }
 

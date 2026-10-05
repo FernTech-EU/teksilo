@@ -58,6 +58,17 @@ by crate for clarity, not because crates version independently.
   instead of falling back to another backend, and `WGPU_POWER_PREF` picks
   the GPU on a machine with two.
 
+### Removed
+
+**Breaking.**
+
+- **The `text` feature, on `teksilo` and on `teksilo-app`.** The text stack
+  (shaping, the glyph atlas, rich text) was already built into every app:
+  the widgets need it. On `teksilo`, turning the feature off only dropped
+  the `teksilo::text` and `teksilo::text_document` re-exports; on
+  `teksilo-app`, it gave the windows no text backend, so every label was
+  blank. A dependency that names `features = ["text"]` must drop it.
+
 ### Fixed
 
 #### Render
@@ -69,6 +80,14 @@ by crate for clarity, not because crates version independently.
 
 #### App
 
+- **`default-features = false` on `teksilo` still bundled the Arabic and
+  Hebrew fallback fonts.** teksilo-app turned them on through its own
+  dependency on the text backend, as did `teksilo-theme-material3`'s
+  `bundled-fonts` and `teksilo-preview-ui`. Those builds now bundle neither;
+  the `fonts-*` features add them back. An app that depends on `teksilo-app`
+  or `teksilo-preview-ui` directly, without the umbrella, no longer gets
+  them either: it enables `fonts-arabic` / `fonts-hebrew` on its own
+  `teksilo-text` dependency.
 - **Automation screenshots could show text as blank.** A screenshot renders
   the window again through its own renderer, but skipped the glyph-atlas
   upload a real frame does, so any text first drawn by that render came out

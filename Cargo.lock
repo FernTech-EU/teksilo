@@ -12087,6 +12087,7 @@ dependencies = [
  "teksilo-core",
  "teksilo-preview",
  "teksilo-preview-ui",
+ "teksilo-text",
  "teksilo-tokens",
  "teksilo-widgets",
 ]

@@ -7,8 +7,6 @@
 //! renders the tree draws every glyph blank. `HeadlessApp::render_for_capture`
 //! uploads it first. Needs a GPU adapter; returns early without one.
 
-#![cfg(feature = "text")]
-
 use teksilo_app::TeksiloAppBuilder;
 use teksilo_canvas::SizeProposal;
 use teksilo_i18n::lit;

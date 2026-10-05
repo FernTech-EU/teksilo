@@ -37,7 +37,6 @@ pub enum ThemeMode {
     Native,
 }
 
-#[cfg(feature = "text")]
 use teksilo_text::SharedTypesetter;
 
 use crate::window_config::{SizeToContent, TeksiloWindowId, WindowConfig};
@@ -608,7 +607,6 @@ struct TeksiloAppHandler {
     initial_created: bool,
     idle_budget: Duration,
     idle_trace: Option<IdleTrace>,
-    #[cfg(feature = "text")]
     typesetter: SharedTypesetter,
     /// Kept alive for the lifetime of the event loop so that the
     /// `notify::RecommendedWatcher` background thread keeps running.
@@ -653,7 +651,7 @@ impl TeksiloAppHandler {
         app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
         initial_window: WindowConfig,
         app_context_template: Option<std::rc::Rc<TreeAppContext>>,
-        #[cfg(feature = "text")] typesetter: SharedTypesetter,
+        typesetter: SharedTypesetter,
         i18n_watcher: Option<teksilo_i18n::FtlFileWatcher>,
         settings_watcher: Option<teksilo_settings::SettingsWatcher>,
         event_proxy: AppEventProxy,
@@ -672,10 +670,7 @@ impl TeksiloAppHandler {
             wm.set_app_context_template(template);
         }
 
-        #[cfg(feature = "text")]
-        {
-            wm.set_typesetter(typesetter.clone());
-        }
+        wm.set_typesetter(typesetter.clone());
 
         Self {
             wm,
@@ -685,7 +680,6 @@ impl TeksiloAppHandler {
             initial_created: false,
             idle_budget: Duration::from_millis(4),
             idle_trace: IdleTrace::from_env(),
-            #[cfg(feature = "text")]
             typesetter,
             _i18n_watcher: i18n_watcher,
             _settings_watcher: settings_watcher,
@@ -1447,7 +1441,6 @@ impl TeksiloAppHandler {
             current.tree.theme().colors.surface_main.to_array(),
         );
         let frame = current.tree.render();
-        #[cfg(feature = "text")]
         let frame = self.sync_window_glyph_atlas(&mut current, frame, event_loop);
         // The GPU readback inside `capture_offscreen` can `.expect()`-panic on
         // device loss (compositor restart, driver crash, memory pressure).
@@ -1490,7 +1483,6 @@ impl TeksiloAppHandler {
     /// more. Shared by the redraw path and automation screenshots: both draw
     /// through this window's renderer, and a capture that skipped the upload
     /// drew any glyph first rasterised by its own render as a blank.
-    #[cfg(feature = "text")]
     fn sync_window_glyph_atlas(
         &mut self,
         managed: &mut crate::window_manager::ManagedWindow,
@@ -2398,7 +2390,7 @@ impl TeksiloAppHandler {
         // node's descriptor is current. Cheap + deduped, safe every frame.
         Self::settle_ime(&mut current);
 
-        let mut frame = {
+        let frame = {
             let mut ops = crate::window_manager::WindowOpsImpl::new(
                 &mut self.wm,
                 event_loop,
@@ -2411,10 +2403,7 @@ impl TeksiloAppHandler {
         };
         let managed = &mut current;
 
-        #[cfg(feature = "text")]
-        {
-            frame = self.sync_window_glyph_atlas(managed, frame, event_loop);
-        }
+        let frame = self.sync_window_glyph_atlas(managed, frame, event_loop);
 
         // The wgpu surface is Rgba8UnormSrgb: it expects linear-light color
         // values and applies sRGB encoding on write. Our Color stores sRGB-
@@ -2618,10 +2607,7 @@ impl TeksiloAppHandler {
                 {
                     handle.set_scale_factor(teksilo_id, scale_factor);
                 }
-                #[cfg(feature = "text")]
-                {
-                    self.typesetter.set_scale_factor(scale_factor as f32);
-                }
+                self.typesetter.set_scale_factor(scale_factor as f32);
             }
             WindowEvent::ModifiersChanged(mods) => {
                 // Capture state before the alt_down write so we can
@@ -3324,9 +3310,7 @@ pub struct TeksiloAppBuilder {
     theme: Theme,
     theme_mode: ThemeMode,
     pen_batching: teksilo_platform::PenBatching,
-    #[cfg(feature = "text")]
     typesetter: Option<SharedTypesetter>,
-    #[cfg(feature = "text")]
     font_registrars: Vec<Box<dyn teksilo_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     external_ctx_handler: Option<ExternalCtxHandler>,
@@ -3389,9 +3373,7 @@ impl TeksiloAppBuilder {
             theme: teksilo_core::presets::intui::light(),
             theme_mode: ThemeMode::Manual,
             pen_batching: teksilo_platform::PenBatching::default(),
-            #[cfg(feature = "text")]
             typesetter: None,
-            #[cfg(feature = "text")]
             font_registrars: Vec::new(),
             app_event_handler: None,
             external_ctx_handler: None,
@@ -3787,7 +3769,6 @@ impl TeksiloAppBuilder {
         self
     }
 
-    #[cfg(feature = "text")]
     pub fn typesetter(mut self, typesetter: SharedTypesetter) -> Self {
         self.typesetter = Some(typesetter);
         self
@@ -3806,7 +3787,6 @@ impl TeksiloAppBuilder {
     ///     .register_fonts(material3::font_registrar())
     ///     .run();
     /// ```
-    #[cfg(feature = "text")]
     pub fn register_fonts(mut self, registrar: impl teksilo_text::FontRegistrar + 'static) -> Self {
         self.font_registrars.push(Box::new(registrar));
         self
@@ -4038,29 +4018,23 @@ impl TeksiloAppBuilder {
 
         let mut tree = WidgetTree::new().with_theme(self.theme.clone());
 
-        #[cfg(feature = "text")]
-        let typesetter = {
-            let ts = self
-                .typesetter
-                .take()
-                .unwrap_or_else(SharedTypesetter::new_with_default_font);
-            // Install app/theme fonts before any text is shaped, so a
-            // theme's `typography.*.family` resolves instead of falling
-            // back to the bundled default.
-            for registrar in &self.font_registrars {
-                ts.apply_font_registrar(registrar.as_ref());
-            }
-            tree = tree.with_text_backend(ts.as_text_backend());
-            // Auto-register so rich-text widgets can reach the shared
-            // typesetter via `ctx.app_state::<SharedTypesetter>()` in
-            // headless tests too.
-            use std::any::TypeId;
-            self.app_state_registry
-                .insert(TypeId::of::<SharedTypesetter>(), Box::new(ts.clone()));
-            ts
-        };
-        #[cfg(not(feature = "text"))]
-        let _ = &mut self;
+        let typesetter = self
+            .typesetter
+            .take()
+            .unwrap_or_else(SharedTypesetter::new_with_default_font);
+        // Install app/theme fonts before any text is shaped, so a theme's
+        // `typography.*.family` resolves instead of falling back to the
+        // bundled default.
+        for registrar in &self.font_registrars {
+            typesetter.apply_font_registrar(registrar.as_ref());
+        }
+        tree = tree.with_text_backend(typesetter.as_text_backend());
+        // Auto-register so rich-text widgets can reach the shared typesetter
+        // via `ctx.app_state::<SharedTypesetter>()` in headless tests too.
+        self.app_state_registry.insert(
+            std::any::TypeId::of::<SharedTypesetter>(),
+            Box::new(typesetter),
+        );
 
         // Install the i18n manager (if any) and seed the tree with the
         // resolved initial locale and layout direction. Must happen before
@@ -4075,8 +4049,6 @@ impl TeksiloAppBuilder {
             let ctx = TreeAppContext::empty().with_app_state(self.app_state_registry);
             tree.set_app_context(std::rc::Rc::new(ctx));
         }
-        #[cfg(feature = "text")]
-        let _ = &typesetter;
 
         // Build the root from the `initial_window`'s builder if one was
         // provided. Headless apps without an `initial_window` run with an
@@ -4285,25 +4257,19 @@ impl TeksiloAppBuilder {
         // widgets (and anything else that needs direct typesetter
         // access) a reachable handle via `ctx.app_state::<SharedTypesetter>()`
         // without forcing the application author to wire it manually.
-        #[cfg(feature = "text")]
         let typesetter = self
             .typesetter
             .unwrap_or_else(SharedTypesetter::new_with_default_font);
 
-        #[cfg(feature = "text")]
         // Install app/theme fonts before any text is shaped.
         for registrar in &self.font_registrars {
             typesetter.apply_font_registrar(registrar.as_ref());
         }
 
-        #[cfg(feature = "text")]
-        {
-            use std::any::TypeId;
-            self.app_state_registry.insert(
-                TypeId::of::<SharedTypesetter>(),
-                Box::new(typesetter.clone()),
-            );
-        }
+        self.app_state_registry.insert(
+            std::any::TypeId::of::<SharedTypesetter>(),
+            Box::new(typesetter.clone()),
+        );
 
         // Auto-install a system clipboard handle so `RichTextEditor::editor`
         // (and any future clipboard-aware widget) can reach it via
@@ -4354,7 +4320,6 @@ impl TeksiloAppBuilder {
             self.app_event_handler,
             initial_config,
             app_context_template,
-            #[cfg(feature = "text")]
             typesetter,
             i18n_watcher,
             settings_watcher,
@@ -4482,31 +4447,26 @@ impl HeadlessApp {
         atlas_version: &mut u64,
     ) -> Rc<teksilo_canvas::RenderFrame> {
         let frame = self.tree.render();
-        #[cfg(feature = "text")]
-        {
-            let Some(typesetter) = self
-                .tree
-                .app_context()
-                .app_state::<SharedTypesetter>()
-                .cloned()
-            else {
-                return frame;
-            };
-            if sync_glyph_atlas(&typesetter, renderer, atlas_version) {
-                typesetter.bridge().borrow_mut().invalidate_cache();
-                self.tree.invalidate_all_paints();
-                drop(frame);
-                let frame = self.tree.render();
-                let evicted_again = sync_glyph_atlas(&typesetter, renderer, atlas_version);
-                debug_assert!(
-                    !evicted_again,
-                    "glyph eviction during eviction recovery — epoch delta would be lost"
-                );
-                return frame;
-            }
+        let Some(typesetter) = self
+            .tree
+            .app_context()
+            .app_state::<SharedTypesetter>()
+            .cloned()
+        else {
+            return frame;
+        };
+        if sync_glyph_atlas(&typesetter, renderer, atlas_version) {
+            typesetter.bridge().borrow_mut().invalidate_cache();
+            self.tree.invalidate_all_paints();
+            drop(frame);
+            let frame = self.tree.render();
+            let evicted_again = sync_glyph_atlas(&typesetter, renderer, atlas_version);
+            debug_assert!(
+                !evicted_again,
+                "glyph eviction during eviction recovery — epoch delta would be lost"
+            );
+            return frame;
         }
-        #[cfg(not(feature = "text"))]
-        let _ = (renderer, atlas_version);
         frame
     }
 }
@@ -4515,7 +4475,6 @@ impl HeadlessApp {
 /// `uploaded_version`, and report whether glyphs were evicted since the
 /// previous query. The caller owns the eviction recovery: what must be
 /// repainted depends on how many trees share the typesetter.
-#[cfg(feature = "text")]
 pub(crate) fn sync_glyph_atlas(
     typesetter: &SharedTypesetter,
     renderer: &mut teksilo_render::Renderer,

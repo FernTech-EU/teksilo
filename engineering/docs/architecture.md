@@ -555,10 +555,10 @@ teksilo-core ← accesskit
 teksilo-widgets (core, data, settings, telemetry, i18n, text,
                  platform — the file-dialog and native-menu surfaces)
     ↑
-teksilo-app (wires the text backend into Canvas, teksilo-widgets,
-             teksilo-platform, teksilo-i18n, teksilo-settings —
-             auto-restores/saves window geometry; optionally
-             teksilo-text, teksilo-telemetry, teksilo-webview)
+teksilo-app (wires the text backend into Canvas, teksilo-text,
+             teksilo-widgets, teksilo-platform, teksilo-i18n,
+             teksilo-settings — auto-restores/saves window geometry;
+             optionally teksilo-telemetry, teksilo-webview)
     ↑
 teksilo (umbrella, re-exports)
 ```
@@ -571,7 +571,7 @@ Platform-specific code (winit, wgpu, accesskit_winit) is confined to `teksilo-re
 
 ### 25.2 The teksilo Umbrella
 
-The standard application developer depends on a single crate: `teksilo`. It re-exports the public API and controls feature flags. `widgets`, `text` and `i18n` are default features (opt-out, not opt-in) — alongside `inspector`, `toast`, `file-dialog`, `clipboard` and the `fonts-arabic` / `fonts-hebrew` fallback bundles — because the kinds of applications Teksilo targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. Rich text has no feature of its own: `RichTextEditor` ships in `teksilo-widgets`, and `TextInput` itself derives from it. Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
+The standard application developer depends on a single crate: `teksilo`. It re-exports the public API and controls feature flags. `widgets` and `i18n` are default features (opt-out, not opt-in) — alongside `inspector`, `toast`, `file-dialog`, `clipboard` and the `fonts-arabic` / `fonts-hebrew` fallback bundles — because the kinds of applications Teksilo targets — writing tools, editors, IDEs, content managers, long-running desktop apps — routinely need text rendering, translations, and rich text editing. The text stack (`teksilo-text`, `text-typeset`, `text-document`) is not a feature at all: every build has it. Rich text has no feature of its own either: `RichTextEditor` ships in `teksilo-widgets`, and `TextInput` itself derives from it. Sub-crates remain independently publishable for advanced users (custom widget authors, custom renderer implementors).
 
 ---
 

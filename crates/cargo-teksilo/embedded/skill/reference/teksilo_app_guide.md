@@ -49,9 +49,10 @@ import it by module path, `use teksilo::widgets::rich_text::RichTextEditor;`.
 
 ### Feature flags
 
-The default set is sensible for most apps: `widgets`, `text`, `i18n`, `inspector`,
-`toast`, `file-dialog`, `clipboard`, plus Arabic/Hebrew fallback fonts. Notable opt-ins
-and opt-outs:
+The default set is sensible for most apps: `widgets`, `i18n`, `inspector`, `toast`,
+`file-dialog`, `clipboard`, plus Arabic/Hebrew fallback fonts. The text stack (shaping,
+the glyph atlas, rich text) is not a feature: every build has it. Notable opt-ins and
+opt-outs:
 
 | Feature | Effect |
 | --- | --- |
@@ -66,7 +67,7 @@ and opt-outs:
 | `telemetry` | Privacy-respecting analytics wiring + `PrivacySettings` widget |
 | `fonts-cjk-sc` / `fonts-thai` / `fonts-all` / `system-emoji` | Extra bundled script fonts / runtime color-emoji fallback |
 
-For a Latin-only minimal build: `teksilo = { version = "=0.14.3", default-features = false, features = ["widgets", "text", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
+For a Latin-only minimal build: `teksilo = { version = "=0.14.3", default-features = false, features = ["widgets", "i18n", "clipboard"] }`. Keep `i18n` in the list whenever `widgets` is on: every labelled widget constructor takes `impl Into<LocalizedString>`, and `LocalizedString` has no `From<&str>`, so `tr!` / `lit!` / `localized` are the only way to build a label. Drop it and no widget label can be constructed at all. What `default-features = false` still buys you is the rest of the default set: the bundled Arabic and Hebrew fallback fonts, the inspector, the toast host, and the native file dialogs all go away.
 
 ## App entry point
 

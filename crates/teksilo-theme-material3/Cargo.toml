@@ -31,7 +31,9 @@ teksilo-tokens = { workspace = true }
 teksilo-canvas = { workspace = true }
 teksilo-widgets = { workspace = true }
 # Only pulled in under `bundled-fonts` (for the FontRegistrar types).
-teksilo-text = { workspace = true, optional = true }
+# Declared directly, with `default-features = false`, so it does not turn on
+# teksilo-text's Noto fallback fonts: which of those ship is the app's call.
+teksilo-text = { path = "../teksilo-text", version = "0.15.1", optional = true, default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true

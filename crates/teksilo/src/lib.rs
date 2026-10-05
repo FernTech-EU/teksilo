@@ -47,17 +47,13 @@ pub mod app_guide {
 #[cfg(feature = "widgets")]
 pub use teksilo_widgets as widgets;
 
-#[cfg(feature = "text")]
 pub use teksilo_text as text;
 
 /// Re-export of `text_document`, so applications can access the rich
 /// document model through the umbrella crate without adding a second
 /// direct workspace dependency. `teksilo-text` depends on
 /// `text-document` and re-exports it; this line just forwards the
-/// re-export one more level up. Available whenever the `text` feature
-/// is enabled (on by default) — `teksilo_text` is a direct dependency
-/// of the umbrella only under that feature.
-#[cfg(feature = "text")]
+/// re-export one more level up.
 pub use teksilo_text::text_document;
 
 #[cfg(feature = "i18n")]
