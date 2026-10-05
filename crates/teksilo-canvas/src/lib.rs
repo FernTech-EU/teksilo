@@ -15,6 +15,7 @@ pub mod svg;
 #[doc(hidden)]
 pub mod sync;
 pub mod text_backend;
+pub mod wake;
 mod xml;
 
 pub use animated::AnimatedIcon;

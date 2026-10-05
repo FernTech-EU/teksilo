@@ -15,6 +15,15 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
+#### Canvas
+
+- `teksilo_canvas::wake`, for code that changes what a window shows from
+  another thread. `RedrawWaker` wakes one window. `WakeKind` says whether only
+  what the window draws changed (`Draw`, which a window nobody can see may skip
+  until it is shown) or state its layout reads changed (`Layout`, which always
+  reaches it). `CountingWaker` counts the wakes it receives and lets a test
+  wait for one.
+
 #### App
 
 - `HeadlessApp::render_for_capture`, which renders a headless app for an
