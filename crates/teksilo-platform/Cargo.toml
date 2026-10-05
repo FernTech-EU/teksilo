@@ -83,6 +83,11 @@ automation = ["dep:teksilo-automation"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+# The main dispatch queue, for a draw wake made off the main thread with no
+# event-loop route to post through (`wake.rs`): handed over asynchronously,
+# since winit's own off-main redraw request waits for the main thread. The
+# same version winit and wgpu already resolve.
+dispatch2 = "0.3"
 objc2-app-kit = { version = "0.3", features = [
     "NSWorkspace",
     "NSAccessibility",

@@ -2349,6 +2349,12 @@ impl TeksiloAppHandler {
     /// bypass the gate, and on Wayland would not reach a window whose
     /// redraw the compositor withholds.
     fn accessibility_wake(&mut self, window_id: WindowId, event_loop: &ActiveEventLoop) {
+        // Re-arm the coalescing first: a wake made from here on posts again.
+        if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
+            managed
+                .platform_window
+                .take_posted_wake(teksilo_canvas::wake::WakeKind::Layout);
+        }
         self.drain_accessibility_actions(window_id, event_loop);
         if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
             managed.request_redraw();

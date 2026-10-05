@@ -895,9 +895,9 @@ impl WindowManager {
         // not show. See `TeksiloAppHandler::accessibility_wake`.
         if let Some(proxy) = self.event_proxy.clone() {
             let window = pw.window().id();
-            pw.set_accessibility_waker(move || {
+            pw.set_state_wake_route(std::sync::Arc::new(move || {
                 proxy.send_external(crate::app::AccessibilityWake { window });
-            });
+            }));
         }
 
         // Finish wiring the per-window input translator, now that a real

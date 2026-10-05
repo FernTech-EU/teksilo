@@ -30,6 +30,18 @@ by crate for clarity, not because crates version independently.
   offscreen capture with the glyph atlas its text needs uploaded into the
   renderer first.
 
+#### Platform
+
+- `PlatformWindow::redraw_waker`, a waker any thread can call to have the
+  window run a frame. While the window is hidden (`set_hidden`), a wake that
+  only changes what it draws is dropped and one redraw is requested when it is
+  shown again; `is_hidden` and `live_wake_stats` (with `LiveWakeStats`) report
+  it. `disconnect_redraw_waker` turns every such waker into a no-op, and
+  dropping the window does the same. On macOS a wake made off the main
+  thread never waits for it: it posts to the event loop through the route
+  `set_off_main_wake_route` installs, or without one hands the redraw to the
+  main queue.
+
 #### Core
 
 - `WidgetTree::is_behind_modal`, whether an in-tree modal is up and a widget
@@ -105,6 +117,11 @@ by crate for clarity, not because crates version independently.
   blank. A dependency that names `features = ["text"]` must drop it.
 
 ### Fixed
+
+#### Platform
+
+- **An assistive technology acting on a window as the application exited
+  could panic it on X11.** It no longer can.
 
 #### Render
 

@@ -4,11 +4,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
+use teksilo_canvas::wake::{RedrawWaker, WakeKind};
+
 use winit::event::WindowEvent;
 use winit::window::Window;
 
 use accesskit::ActionRequest;
 use teksilo_render::Renderer;
+
+use crate::wake::{LiveWakeStats, RequestRedraw, WindowWakeTarget};
 
 /// Error returned when surface texture acquisition fails during rendering.
 #[derive(Debug, thiserror::Error)]
@@ -107,9 +111,10 @@ pub struct PlatformWindow {
     /// The accessibility state the adapter's off-thread handlers share with
     /// the UI thread. See [`AccessibilityBridge`].
     a11y_bridge: Arc<AccessibilityBridge>,
-    /// How the adapter's handlers wake the event loop; `None` without an
-    /// adapter. See [`AccessibilityWake`].
-    a11y_wake: Option<Arc<AccessibilityWake>>,
+    /// The window's wake target: what [`redraw_waker`](Self::redraw_waker)
+    /// hands out, what the accessibility handlers wake the loop through, and
+    /// what [`request_redraw`](Self::request_redraw) goes through.
+    wake: Arc<WindowWakeTarget>,
 }
 
 /// The state an AccessKit adapter's handlers share with the UI thread.
@@ -719,26 +724,24 @@ impl PlatformWindow {
         // event loop, which is the *only* thing that gets what it left read:
         // without a wakeup an action issued by Narrator or Orca would sit in
         // the channel until some unrelated window event happened to arrive.
-        // See `AccessibilityWake` for how it wakes.
-        let a11y_wake = Arc::new(AccessibilityWake {
-            window: Arc::clone(&window),
-            waker: OnceLock::new(),
-        });
+        // A state wake, since what they leave must reach a window that draws
+        // nothing: see `WindowWakeTarget`.
+        let wake = WindowWakeTarget::new(Arc::clone(&window) as Arc<dyn RequestRedraw>);
         let a11y_adapter = accesskit_winit::Adapter::with_direct_handlers(
             event_loop,
             &window,
             TeksiloActivationHandler {
                 needs_full_tree: a11y_needs_full_tree.clone(),
                 bridge: Arc::clone(&a11y_bridge),
-                wake: Arc::clone(&a11y_wake),
+                wake: Arc::clone(&wake),
             },
             TeksiloActionHandler {
                 tx: action_tx,
-                wake: Arc::clone(&a11y_wake),
+                wake: Arc::clone(&wake),
             },
             TeksiloDeactivationHandler {
                 bridge: Arc::clone(&a11y_bridge),
-                wake: Arc::clone(&a11y_wake),
+                wake: Arc::clone(&wake),
             },
         );
 
@@ -757,7 +760,7 @@ impl PlatformWindow {
             a11y_action_rx: action_rx,
             a11y_needs_full_tree,
             a11y_bridge,
-            a11y_wake: Some(a11y_wake),
+            wake,
         }
     }
 
@@ -773,6 +776,7 @@ impl PlatformWindow {
             display_lost,
         } = Self::surface_and_renderer(&window).await;
         let (_action_tx, action_rx) = mpsc::channel();
+        let wake = WindowWakeTarget::new(Arc::clone(&window) as Arc<dyn RequestRedraw>);
 
         Self {
             window,
@@ -786,7 +790,7 @@ impl PlatformWindow {
             a11y_action_rx: action_rx,
             a11y_needs_full_tree: Arc::new(AtomicBool::new(false)),
             a11y_bridge: Arc::new(AccessibilityBridge::default()),
-            a11y_wake: None,
+            wake,
         }
     }
 
@@ -1020,8 +1024,11 @@ impl PlatformWindow {
         }
     }
 
+    /// Ask winit for a redraw. A no-op once the window's wake target is
+    /// disconnected ([`disconnect_redraw_waker`](Self::disconnect_redraw_waker)),
+    /// which is how a request after the event loop ended stays harmless.
     pub fn request_redraw(&self) {
-        self.window.request_redraw();
+        self.wake.request_on_slot();
     }
 
     /// Push an AccessKit TreeUpdate to the adapter (called after layout).
@@ -1106,17 +1113,88 @@ impl PlatformWindow {
         }
     }
 
-    /// Wake the event loop through `waker`, rather than by requesting a
-    /// redraw, whenever an accessibility handler leaves something for this
-    /// window. teksilo-app's seam: it posts to its event loop, which reaches
-    /// a window whose redraw the compositor withholds. The first call wins;
-    /// a window created without an adapter has no handler to wake from, and
-    /// ignores it.
+    /// This window's wake target, as a waker any thread may call to have the
+    /// window run a frame. See [`teksilo_canvas::wake`] for the two kinds of
+    /// wake and how a burst coalesces.
+    ///
+    /// On macOS, winit runs a redraw requested off the main thread
+    /// synchronously on it, so a draw wake made on another thread never asks
+    /// winit itself there: it posts through the off-main route
+    /// ([`set_off_main_wake_route`](Self::set_off_main_wake_route)), which
+    /// teksilo-app installs, or with none hands the request to the main
+    /// dispatch queue. Either way it returns without waiting for the main
+    /// thread.
+    pub fn redraw_waker(&self) -> Arc<dyn RedrawWaker> {
+        self.wake.clone()
+    }
+
+    /// The route a draw wake made off the main thread posts through, instead
+    /// of asking winit for a redraw from there. Set once, before the first
+    /// wake; later calls are ignored. teksilo-app sets it on macOS, where a
+    /// redraw requested off the main thread waits for it, so that the wake
+    /// reaches the event loop it runs.
+    pub fn set_off_main_wake_route(&self, route: Arc<dyn Fn() + Send + Sync>) {
+        self.wake.set_off_main_route(route);
+    }
+
+    /// The route a state wake posts through: one post per burst, until the
+    /// event loop takes it ([`take_posted_wake`](Self::take_posted_wake)).
+    /// Set once; later calls are ignored. teksilo-app's seam: a posted event
+    /// reaches a window whose redraw the compositor withholds, which a redraw
+    /// request does not.
     #[doc(hidden)]
-    pub fn set_accessibility_waker(&self, waker: impl Fn() + Send + Sync + 'static) {
-        if let Some(wake) = &self.a11y_wake {
-            let _ = wake.waker.set(Box::new(waker));
-        }
+    pub fn set_state_wake_route(&self, route: Arc<dyn Fn() + Send + Sync>) {
+        self.wake.set_state_route(route);
+    }
+
+    /// The event loop received a posted wake of `kind`: re-arm its
+    /// coalescing, before acting on it, so the next wake posts again. Returns
+    /// whether one was pending.
+    #[doc(hidden)]
+    pub fn take_posted_wake(&self, kind: WakeKind) -> bool {
+        self.wake.take_posted(kind)
+    }
+
+    /// `true` while the window is hidden, in which case one redraw is
+    /// requested when it is shown again: for a draw wake the event loop
+    /// received while the window was hidden.
+    #[doc(hidden)]
+    pub fn defer_redraw_until_shown(&self) -> bool {
+        self.wake.defer_until_shown()
+    }
+
+    /// Make every waker [`redraw_waker`](Self::redraw_waker) handed out a
+    /// no-op, and [`request_redraw`](Self::request_redraw) with them. Waits
+    /// for a wake already asking winit; idempotent. Dropping the window does
+    /// it too; teksilo-app does it for every window when the event loop ends.
+    pub fn disconnect_redraw_waker(&self) {
+        self.wake.disconnect();
+    }
+
+    /// Record whether the window is hidden (minimised, fully covered, or
+    /// drawing nothing because its compositor withholds its frames). While it
+    /// is, draw wakes are dropped; showing it requests one redraw if any was.
+    pub fn set_hidden(&self, hidden: bool) {
+        self.wake.set_hidden(hidden);
+    }
+
+    /// The window draws again and a frame is about to run: record it shown,
+    /// without the redraw [`set_hidden`](Self::set_hidden)`(false)` requests
+    /// for draw wakes dropped while it was hidden, which that frame serves.
+    /// teksilo-app's seam for the redraw that ends a withheld one.
+    #[doc(hidden)]
+    pub fn show_for_drawing(&self) {
+        self.wake.show_for_drawing();
+    }
+
+    /// Whether the window is hidden, as last set.
+    pub fn is_hidden(&self) -> bool {
+        self.wake.is_hidden()
+    }
+
+    /// The window's wake counters.
+    pub fn live_wake_stats(&self) -> LiveWakeStats {
+        self.wake.stats()
     }
 
     /// Drain any pending AccessKit action requests from the adapter.
@@ -1150,34 +1228,7 @@ impl PlatformWindow {
 struct TeksiloActivationHandler {
     needs_full_tree: Arc<AtomicBool>,
     bridge: Arc<AccessibilityBridge>,
-    wake: Arc<AccessibilityWake>,
-}
-
-/// How an accessibility handler wakes the event loop for its window.
-///
-/// What a handler leaves (an action, an attach, a detach) is read on the UI
-/// thread in a frame or an event of the window, so every handler ends by
-/// waking the loop. A redraw request is not enough on its own: on Wayland,
-/// while a presented frame waits for its compositor callback, winit holds
-/// the redraw back, and a further request does not even wake the loop (it
-/// sets a flag that is already set). A compositor sends no callback to a
-/// window it does not show, so a screen reader acting on a minimised window
-/// would wait until the window is shown. teksilo-app therefore installs a
-/// waker that posts to its event loop
-/// ([`PlatformWindow::set_accessibility_waker`]); until it does, and for a
-/// window used without one, a handler requests a redraw.
-struct AccessibilityWake {
-    window: Arc<Window>,
-    waker: OnceLock<Box<dyn Fn() + Send + Sync>>,
-}
-
-impl AccessibilityWake {
-    fn wake(&self) {
-        match self.waker.get() {
-            Some(waker) => waker(),
-            None => self.window.request_redraw(),
-        }
-    }
+    wake: Arc<WindowWakeTarget>,
 }
 
 /// The tree handed to a client that attached before this window ever drew.
@@ -1203,7 +1254,7 @@ impl accesskit::ActivationHandler for TeksiloActivationHandler {
         // Whether or not we could answer with a real tree, ask for a frame: it
         // is what carries the *next* update to the now-active adapter, and it
         // is also how the UI thread learns that a client attached.
-        self.wake.wake();
+        self.wake.wake_state();
         Some(update)
     }
 }
@@ -1212,13 +1263,13 @@ impl accesskit::ActivationHandler for TeksiloActivationHandler {
 /// then wakes the loop so the channel is actually drained.
 struct TeksiloActionHandler {
     tx: mpsc::Sender<ActionRequest>,
-    wake: Arc<AccessibilityWake>,
+    wake: Arc<WindowWakeTarget>,
 }
 
 impl accesskit::ActionHandler for TeksiloActionHandler {
     fn do_action(&mut self, request: ActionRequest) {
         let _ = self.tx.send(request);
-        self.wake.wake();
+        self.wake.wake_state();
     }
 }
 
@@ -1228,14 +1279,22 @@ impl accesskit::ActionHandler for TeksiloActionHandler {
 /// is attached, none of them is reading the tree either.
 struct TeksiloDeactivationHandler {
     bridge: Arc<AccessibilityBridge>,
-    wake: Arc<AccessibilityWake>,
+    wake: Arc<WindowWakeTarget>,
 }
 
 impl accesskit::DeactivationHandler for TeksiloDeactivationHandler {
     fn deactivate_accessibility(&mut self) {
         self.bridge.on_deactivate();
         // The UI thread reads the flag once per frame, so it needs a frame.
-        self.wake.wake();
+        self.wake.wake_state();
+    }
+}
+
+impl Drop for PlatformWindow {
+    /// Disconnect the wake target first: a waker another thread still holds
+    /// must not reach a window that is going away.
+    fn drop(&mut self) {
+        self.wake.disconnect();
     }
 }
 
@@ -1472,5 +1531,80 @@ mod device_limits_tests {
 
         assert!(asked.max_color_attachments >= 1);
         assert!(asked.max_uniform_buffer_binding_size >= ANIM_UNIFORM_BYTES);
+    }
+}
+
+#[cfg(all(test, not(teksilo_loom)))]
+mod accessibility_wake_tests {
+    use std::sync::atomic::AtomicUsize;
+
+    use accesskit::{ActionHandler, ActivationHandler, DeactivationHandler};
+
+    use super::*;
+
+    struct NoWindow;
+    impl RequestRedraw for NoWindow {
+        fn request_redraw(&self) {
+            panic!("an accessibility handler asked for a redraw instead of posting");
+        }
+    }
+
+    fn request() -> ActionRequest {
+        ActionRequest {
+            action: accesskit::Action::Click,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: accesskit::NodeId(1),
+            data: None,
+        }
+    }
+
+    /// What a handler leaves must reach a window that draws nothing, so all
+    /// three wake the loop through the state route, never a redraw request;
+    /// after the window's waker is disconnected they still enqueue, and wake
+    /// nothing.
+    #[test]
+    fn accessibility_handlers_wake_through_the_state_route() {
+        let wake = WindowWakeTarget::new(Arc::new(NoWindow));
+        let posted = Arc::new(AtomicUsize::new(0));
+        {
+            let posted = posted.clone();
+            wake.set_state_route(Arc::new(move || {
+                posted.fetch_add(1, Ordering::SeqCst);
+            }));
+        }
+        let bridge = Arc::new(AccessibilityBridge::default());
+        let (tx, rx) = mpsc::channel();
+        let mut action = TeksiloActionHandler {
+            tx,
+            wake: wake.clone(),
+        };
+        let mut activation = TeksiloActivationHandler {
+            needs_full_tree: Arc::new(AtomicBool::new(false)),
+            bridge: bridge.clone(),
+            wake: wake.clone(),
+        };
+        let mut deactivation = TeksiloDeactivationHandler {
+            bridge,
+            wake: wake.clone(),
+        };
+
+        action.do_action(request());
+        assert!(
+            rx.try_recv().is_ok(),
+            "the request is queued for the UI thread"
+        );
+        assert_eq!(posted.load(Ordering::SeqCst), 1);
+        assert!(wake.take_posted(WakeKind::Layout));
+        let _ = activation.request_initial_tree();
+        assert_eq!(posted.load(Ordering::SeqCst), 2);
+        assert!(wake.take_posted(WakeKind::Layout));
+        deactivation.deactivate_accessibility();
+        assert_eq!(posted.load(Ordering::SeqCst), 3);
+
+        wake.disconnect();
+        assert!(wake.take_posted(WakeKind::Layout));
+        action.do_action(request());
+        assert!(rx.try_recv().is_ok(), "still queued after disconnect");
+        assert_eq!(posted.load(Ordering::SeqCst), 3, "but nothing is woken");
     }
 }

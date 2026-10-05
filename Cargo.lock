@@ -11843,6 +11843,7 @@ dependencies = [
  "accesskit_winit",
  "arboard",
  "async-std",
+ "dispatch2",
  "libc",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
