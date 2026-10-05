@@ -516,9 +516,12 @@ teksilo-terminal        Embeddable terminal-emulator (`Terminal` / Console) widg
                      default (umbrella `terminal` feature). Introduced two reusable framework
                      primitives: `WidgetBuilder::keyboard_capture(bool)` (a focused surface receives
                      every KeyDown raw, bypassing shortcut resolution — so Ctrl+C reaches the child)
-                     and `RepaintWindowRequest { window_id }` (a thread-safe, teksilo-app-routed
-                     "repaint this window" for content changed off the UI thread — the PTY reader
-                     thread; the off-thread analogue of `ctx.request_frame()`). See docs/terminal.md.
+                     and `RepaintWindowRequest { window_id }` (a thread-safe "repaint this window",
+                     now deprecated). Output now reaches it through a `RepaintTrigger` (teksilo-core):
+                     the PTY reader thread queues (bounded at 4 MiB) and requests a pull, and the
+                     terminal's pull hook takes it in during the next layout, shown or not, so a
+                     background terminal stays current and its window draws nothing for it. See
+                     docs/terminal.md.
 teksilo              Umbrella crate with re-exports and feature flags
 teksilo-resources       Resource handling and embedding infrastructure
 teksilo-preview         Storybook-equivalent infrastructure for desktop Rust widgets. `WidgetCatalog`

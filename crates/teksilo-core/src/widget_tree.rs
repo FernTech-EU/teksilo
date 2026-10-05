@@ -2089,11 +2089,11 @@ impl WidgetTree {
     }
 
     /// Mark every node paint-dirty (no relayout, no rebuild) so the next
-    /// render re-runs their `paint()`. This is the paint-cache invalidation an
-    /// off-thread source needs after posting a [`RepaintWindowRequest`](crate::RepaintWindowRequest):
-    /// a bare redraw request re-presents the cached frame, so a widget whose
-    /// content changed off the UI thread (a terminal's PTY output) must be
-    /// marked dirty for its `paint()` to run again.
+    /// render re-runs their `paint()`. What teksilo-app does on receiving the
+    /// deprecated [`RepaintWindowRequest`](crate::RepaintWindowRequest); a
+    /// widget whose content changes off the UI thread attaches a
+    /// [`RepaintTrigger`](crate::RepaintTrigger) instead, which repaints that
+    /// widget alone.
     pub fn mark_all_needs_paint_only(&mut self) {
         self.arena.mark_all_needs_paint_only();
     }

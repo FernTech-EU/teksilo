@@ -178,6 +178,16 @@ by crate for clarity, not because crates version independently.
   instead of falling back to another backend, and `WGPU_POWER_PREF` picks
   the GPU on a machine with two.
 
+### Deprecated
+
+#### Core
+
+- `RepaintWindowRequest`: attach a `RepaintTrigger` instead. It repaints only
+  the widgets it is attached to and redraws only their window, where
+  `RepaintWindowRequest` repaints every widget of its window and redraws every
+  window. It still works as before, and will be removed in the next breaking
+  release.
+
 ### Removed
 
 **Breaking.**

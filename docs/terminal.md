@@ -256,9 +256,11 @@ the framework, and the only workable one here, since a screen reader driving a
 handle is a `Role::Slider` over the document's cell offsets, with `SetValue` as
 its whole contract; handles are deliberately outside the Tab ring.
 
-## Two framework primitives this widget introduced
+## Two framework primitives this widget rests on
 
-Both are generally useful and live in `teksilo-core`, not just here:
+Both are generally useful and live in `teksilo-core`, not just here. The
+terminal introduced the first; the second replaced the per-window repaint
+request it introduced:
 
 - **`WidgetBuilder::keyboard_capture(bool)`**, while focused, the node receives
   every `KeyDown` raw, bypassing shortcut → intent → action resolution. Any
@@ -268,13 +270,18 @@ Both are generally useful and live in `teksilo-core`, not just here:
   keyboard trap (WCAG 2.1.2) however greedily its `on_key` behaves. Escape is
   *not* reserved, overlay back-navigation runs ahead of the capture check only
   while an overlay is actually open.
-- **`RepaintWindowRequest { window_id }`**, a thread-safe "repaint this window"
-  request posted via `AppEventPoster::post_external` from a background thread. A
-  bare redraw re-presents cached paint, so content changed **off the UI thread**
-  (the PTY-reader thread) needs its window marked paint-dirty; teksilo-app routes
-  this request to do exactly that. It is the off-thread analogue of
-  `ctx.request_frame()`. Canonical treatment (and the zero-frame-rule contract):
-  [idle-and-animation.md](idle-and-animation.md) "Off-thread repaint".
+- **`RepaintTrigger`**: the PTY-reader thread queues what it read and asks the
+  terminal's trigger for a pull; the terminal's pull hook takes the output
+  in during the next frame's layout, whether or not the terminal is shown, and
+  only the terminal repaints. A terminal in a background tab or a hidden window
+  keeps its screen, title, working directory and exit status current without its
+  window drawing a frame for it. Output not yet taken in is bounded at 4 MiB:
+  past it the child waits on its write until the terminal catches up. A pull
+  parses for at most 8 ms and leaves the rest to the next, so a flood never
+  holds the UI thread. The caret
+  blinks on one-shot wakes, two a second, not sixty, and not at all while no
+  caret is in view. Canonical treatment:
+  [idle-and-animation.md](idle-and-animation.md) "Off-thread content".
 
 ## Limitations (v1)
 
@@ -321,6 +328,7 @@ Both are generally useful and live in `teksilo-core`, not just here:
   [memory.rs](../crates/teksilo-terminal/src/memory.rs).
 - Framework primitives: `keyboard_capture` in
   [widget_builder.rs](../crates/teksilo-core/src/widget_builder.rs);
-  `RepaintWindowRequest` in [app_event.rs](../crates/teksilo-core/src/app_event.rs),
-  routed in [teksilo-app/src/app.rs](../crates/teksilo-app/src/app.rs).
+  `RepaintTrigger` in
+  [off_thread/repaint_trigger.rs](../crates/teksilo-core/src/off_thread/repaint_trigger.rs);
+  the reader queue in [reader.rs](../crates/teksilo-terminal/src/reader.rs).
 - Demo: [examples/terminal_demo/src/main.rs](../examples/terminal_demo/src/main.rs).

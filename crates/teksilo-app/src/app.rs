@@ -3434,18 +3434,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                                     self.dispatch_in_window(winit_id, evt, event_loop);
                                 }
                             }
-                        } else if let Some(req) =
-                            payload.downcast_ref::<teksilo_core::RepaintWindowRequest>()
-                        {
-                            // Off-thread "repaint this window" — e.g. a
-                            // terminal's PTY-reader thread whose bytes changed a
-                            // widget's content outside the UI thread. A bare
-                            // redraw re-presents the cached frame, so mark the
-                            // window's tree paint-dirty; the unconditional
-                            // `request_redraw_all()` below then re-runs the
-                            // changed widget's `paint()`.
-                            let winit_id =
-                                self.wm.teksilo_to_winit_map().get(&req.window_id).copied();
+                        } else if let Some(window_id) = repaint_request_window(&*payload) {
+                            // The deprecated off-thread "repaint this window":
+                            // mark the window's tree paint-dirty; the
+                            // unconditional `request_redraw_all()` below then
+                            // re-runs the changed widget's `paint()`. Routing
+                            // is unchanged until it is removed.
+                            let winit_id = self.wm.teksilo_to_winit_map().get(&window_id).copied();
                             if let Some(winit_id) = winit_id
                                 && let Some(managed) = self.wm.get_by_winit_mut(winit_id)
                             {
@@ -3513,6 +3508,33 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         #[cfg(debug_assertions)]
         self.report_stalled_redraws();
         self.update_control_flow(event_loop);
+    }
+}
+
+/// The window a deprecated `RepaintWindowRequest` payload names, if it is
+/// one. A helper because an `else if let` condition cannot carry the
+/// `#[allow(deprecated)]` the downcast needs.
+#[allow(deprecated)]
+fn repaint_request_window(payload: &dyn std::any::Any) -> Option<TeksiloWindowId> {
+    payload
+        .downcast_ref::<teksilo_core::RepaintWindowRequest>()
+        .map(|request| request.window_id)
+}
+
+#[cfg(test)]
+mod repaint_request_tests {
+    use super::repaint_request_window;
+    use crate::window_config::TeksiloWindowId;
+
+    /// The deprecated payload is still routed to the window it names, and
+    /// nothing else is taken for it.
+    #[test]
+    #[allow(deprecated)]
+    fn a_repaint_window_request_names_its_window() {
+        let id = TeksiloWindowId::new(7);
+        let request = teksilo_core::RepaintWindowRequest { window_id: id };
+        assert_eq!(repaint_request_window(&request), Some(id));
+        assert_eq!(repaint_request_window(&"something else"), None);
     }
 }
 

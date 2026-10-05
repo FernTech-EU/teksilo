@@ -443,7 +443,7 @@ A call from a Teksilo command handler into the application's domain layer execut
 
 ### 20.2 Background Work
 
-Long operations run on background threads owned by the application (or by its data layer). The background thread communicates with the UI thread through winit's `EventLoopProxy` — a unidirectional channel that wakes the event loop and delivers custom events. The UI thread processes these events like any other input, triggering data source refreshes and widget repaints.
+Long operations run on background threads owned by the application (or by its data layer). A background thread reaches the UI thread in one of two ways. It posts a custom event through winit's `EventLoopProxy` (`AppEventPoster::post_external`), a unidirectional channel that wakes the event loop; the UI thread processes the event like any other input, triggering data source refreshes and widget repaints. Or, for content a widget reads, it stores the change and requests through a `RepaintTrigger` attached to that widget: a repaint asks the window for a redraw, a relayout or a pull posts a private wake, and only that widget repaints, relayouts or takes the change in, even in a window nobody can see. See [`idle-and-animation.md`](../../docs/idle-and-animation.md), "Off-thread content".
 
 ### 20.3 Incremental Work
 
