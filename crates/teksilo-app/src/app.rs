@@ -432,9 +432,9 @@ pub(crate) struct IdleTrace {
     last_report: Instant,
     /// `RedrawRequested` events a hidden window answered without drawing.
     hidden_redraws: u64,
-    /// Non-visual frames run from `about_to_wait` for windows that draw
-    /// nothing (hidden, or their redraw withheld).
-    hidden_ticks: u64,
+    /// Non-visual frames run from `about_to_wait`: for windows that draw
+    /// nothing (hidden, or their redraw withheld), and state ticks.
+    ticks: u64,
     resume_time_reached: u64,
     redraw_requested: u64,
     rendered_frames: u64,
@@ -482,7 +482,7 @@ impl IdleTrace {
                 started: Instant::now(),
                 last_report: Instant::now(),
                 hidden_redraws: 0,
-                hidden_ticks: 0,
+                ticks: 0,
                 resume_time_reached: 0,
                 redraw_requested: 0,
                 rendered_frames: 0,
@@ -571,8 +571,8 @@ impl IdleTrace {
         self.maybe_report();
     }
 
-    fn note_hidden_tick(&mut self) {
-        self.hidden_ticks += 1;
+    fn note_tick(&mut self) {
+        self.ticks += 1;
         self.maybe_report();
     }
 
@@ -615,12 +615,12 @@ impl IdleTrace {
         }
 
         eprintln!(
-            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} hidden_ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
             self.started.elapsed().as_secs_f64(),
             self.redraw_requested,
             self.rendered_frames,
             self.hidden_redraws,
-            self.hidden_ticks,
+            self.ticks,
             self.resume_time_reached,
             self.request_redraw_all,
             self.cross_window_redraws,
@@ -648,7 +648,7 @@ impl IdleTrace {
         self.redraw_requested = 0;
         self.rendered_frames = 0;
         self.hidden_redraws = 0;
-        self.hidden_ticks = 0;
+        self.ticks = 0;
         self.request_redraw_all = 0;
         self.cross_window_redraws = 0;
         self.cursor_redraw_requests = 0;
@@ -896,10 +896,12 @@ impl TeksiloAppHandler {
         }
     }
 
-    /// Run the non-visual frame of every window that draws nothing (hidden,
-    /// or its redraw withheld) and whose gate lets a pending tick run now.
-    /// Such a window's requests become these ticks, since it gets no
-    /// `RedrawRequested` to run them in. See [`crate::redraw_gate`].
+    /// Run the non-visual frame of every window whose gate lets a pending
+    /// tick run now: a window that draws nothing (hidden, or its redraw
+    /// withheld), whose requests become these ticks since it gets no
+    /// `RedrawRequested` to run them in, and a window that draws but was
+    /// asked to bring state up to date without redrawing. See
+    /// [`crate::redraw_gate`].
     ///
     /// A tick first hands the window the accessibility actions waiting for
     /// it, which would otherwise wait for a window event that does not come,
@@ -925,7 +927,7 @@ impl TeksiloAppHandler {
                 continue;
             };
             if let Some(trace) = &mut self.idle_trace {
-                trace.note_hidden_tick();
+                trace.note_tick();
             }
             self.run_nonvisual_frame(&mut current, event_loop);
             self.wm.reinsert_managed(window_id, current);
@@ -2412,10 +2414,12 @@ impl TeksiloAppHandler {
     /// A state wake re-arms the target's coalescing *before* anything else,
     /// so a wake made from then on posts again rather than merging into this
     /// one, then dispatches the accessibility actions waiting for the window
-    /// and asks the window for a frame through its redraw gate: a redraw if
-    /// it is shown, a non-visual tick if it draws nothing. That keeps
-    /// geometry and accessibility current on a window whose redraw the
-    /// compositor withholds, which a redraw request does not reach.
+    /// and asks its redraw gate for a non-visual tick, rate-limited, not a
+    /// redraw: what changed is state, which may change nothing on screen,
+    /// and the tick ends in `post_event`, which redraws the window if it did.
+    /// That keeps geometry and accessibility current on a window whose
+    /// redraw the compositor withholds, which a redraw request does not
+    /// reach, and costs a window that draws no new frame for a burst.
     ///
     /// A draw wake (macOS, off the main thread) asks for a redraw unless the
     /// window draws nothing, in which case one is owed for when it draws
@@ -2442,7 +2446,7 @@ impl TeksiloAppHandler {
                 }
                 self.drain_accessibility_actions(wake.window, event_loop);
                 if let Some(managed) = self.wm.get_by_winit_mut(wake.window) {
-                    managed.request_redraw();
+                    managed.redraw.request_tick();
                 }
                 self.post_event(event_loop);
             }

@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Fifteen claims, and they do not all carry the same weight. Verified by
+//! Sixteen claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -64,7 +64,9 @@
 //! - **(n)** `exiting` leaves every window's waker a no-op while the event
 //!   loop still exists (checked on every run, in [`Script`]'s `exiting`), and
 //!   a waker kept past the end of the loop wakes harmlessly (taking out all
-//!   three disconnects reproduces winit's X11 panic).
+//!   three disconnects reproduces winit's X11 panic);
+//! - **(o)** a state wake to a window that draws runs a non-visual tick and
+//!   asks winit for no redraw.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -110,7 +112,7 @@ use teksilo_canvas::wake::{RedrawWaker, WakeKind};
 
 use super::{AppEvent, TeksiloAppBuilder, TeksiloAppHandler, WindowWake};
 use crate::input_routing::tests::{Shared, click, cursor, logging_leaf, touch};
-use crate::redraw_gate::{HIDDEN_TICK_INTERVAL, WITHHELD_AFTER};
+use crate::redraw_gate::{TICK_INTERVAL, WITHHELD_AFTER};
 use crate::window_config::WindowConfig;
 
 /// Forwards every winit callback to the real handler, then runs `step` once —
@@ -467,7 +469,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         // reddens the first half. The window's last frame is let age first,
         // so the hold that rate-limits ticks is not what holds the deadline.
         {
-            std::thread::sleep(HIDDEN_TICK_INTERVAL);
+            std::thread::sleep(TICK_INTERVAL);
             let past = Instant::now() - Duration::from_millis(50);
             {
                 let managed = app.wm.get_by_winit_mut(window).expect("the window");
@@ -542,11 +544,11 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 .wake_deadline(Instant::now())
                 .expect("a hidden window's due timer must wake the loop");
             assert!(
-                wake >= last_frame + HIDDEN_TICK_INTERVAL,
+                wake >= last_frame + TICK_INTERVAL,
                 "a hidden window is ticked no faster than its interval"
             );
             assert!(
-                wake <= Instant::now() + HIDDEN_TICK_INTERVAL,
+                wake <= Instant::now() + TICK_INTERVAL,
                 "and its hold runs from its last frame, not from each computation"
             );
 
@@ -590,7 +592,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 .wake_deadline(Instant::now())
                 .expect("a held tick must not be lost");
             assert!(
-                held > ticked_at && held <= Instant::now() + HIDDEN_TICK_INTERVAL,
+                held > ticked_at && held <= Instant::now() + TICK_INTERVAL,
                 "the held tick wakes the loop when the interval is up"
             );
 
@@ -621,7 +623,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
         // one, so the stamp is made directly, as if the request had been made
         // long enough ago, and winit is not asked.
         {
-            std::thread::sleep(HIDDEN_TICK_INTERVAL);
+            std::thread::sleep(TICK_INTERVAL);
             let past = Instant::now() - Duration::from_millis(10);
             let managed = app.wm.get_by_winit_mut(window).expect("the window");
             assert!(!managed.redraw.is_hidden());
@@ -700,9 +702,7 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             );
             let managed = app.wm.get_by_winit_mut(window).expect("the window");
             assert!(
-                managed
-                    .redraw
-                    .take_tick(Instant::now() + HIDDEN_TICK_INTERVAL),
+                managed.redraw.take_tick(Instant::now() + TICK_INTERVAL),
                 "it asked the hidden window for a tick"
             );
             app.window_event(event_loop, window, WindowEvent::Occluded(false));
@@ -808,6 +808,40 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 !managed.platform_window.take_posted_wake(WakeKind::Layout),
                 "once for the burst"
             );
+        }
+
+        // -- (o) a state wake to a window that draws asks for a tick, not a
+        // redraw
+        //
+        // What it carries may change nothing on screen (a terminal printing in
+        // a background tab); a redraw would draw and present the same frame.
+        // The tick still lays out. Answering with a redraw request reddens the
+        // first assertion.
+        {
+            std::thread::sleep(TICK_INTERVAL);
+            let past = Instant::now() - Duration::from_millis(10);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            managed.redraw.delivered();
+            managed.tree.request_wake_at(past);
+            app.user_event(
+                event_loop,
+                AppEvent::External(Box::new(WindowWake {
+                    window,
+                    kind: WakeKind::Layout,
+                })),
+            );
+            let managed = &app.wm.windows_map()[&window];
+            assert!(
+                !managed.redraw.awaits_redraw(),
+                "a state wake asks winit for no redraw"
+            );
+            app.about_to_wait(event_loop);
+            let managed = &app.wm.windows_map()[&window];
+            assert!(
+                managed.tree.next_timer_deadline().is_none_or(|t| t > past),
+                "the state tick laid out, which consumed the due wake"
+            );
+            assert!(!managed.redraw.awaits_redraw(), "and drew nothing");
         }
 
         // -- (b) a window blocked by a modal child

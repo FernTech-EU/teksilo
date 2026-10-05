@@ -111,11 +111,15 @@ by crate for clarity, not because crates version independently.
   lays out and keeps its accessibility tree delivered, at most ten times a
   second, and still answers a screen reader's actions, so app state,
   animations that must finish and what a screen reader hears stay current.
+- A window woken to bring its state up to date, rather than its pixels (an
+  accessibility client attaching or acting, content a widget takes in from
+  another thread), lays out and delivers it without drawing, at most ten
+  times a second, and redraws only if something visible changed.
 - Debug builds report on standard error a focused window that has waited
   more than a second for a redraw it asked for.
 - `TEKSILO_IDLE_TRACE` lines now carry the time since start (`t=`) and
   count redraws answered by a hidden window (`hidden_redraws`), the
-  non-visual frames run for windows that draw nothing (`hidden_ticks`), app
+  non-visual frames run without drawing (`ticks`), app
   events (`app_events`), wakes windows posted to the event loop
   (`posted_wakes`), and window wakes routed and dropped while a window drew
   nothing (`waker_wakes`, `waker_wakes_dropped`).

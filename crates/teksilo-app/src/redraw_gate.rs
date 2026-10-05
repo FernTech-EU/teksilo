@@ -44,11 +44,23 @@
 //! all; a withheld one's request is already with winit.
 //!
 //! Ticks are rate-limited per window: a tick runs no sooner than
-//! [`HIDDEN_TICK_INTERVAL`] after the window's previous frame, rendered or
+//! [`TICK_INTERVAL`] after the window's previous frame, rendered or
 //! not, whatever asks for it (a timer, an event, the async executor under
 //! `ControlFlow::Poll`). A pending tick held back by the limit is not lost:
 //! the window's deadline is the moment the limit lifts. That bounds what a
 //! window nobody sees can cost at ten non-visual frames a second.
+//!
+//! # State ticks for a window that draws
+//!
+//! A wake that keeps state current (content off the UI thread that a widget
+//! must take in, an accessibility client attaching) may change nothing on
+//! screen: a terminal in a background tab printing, say. Answering it with a
+//! redraw would draw and present a frame identical to the last one, per
+//! burst. [`RedrawGate::request_tick`] asks for a non-visual tick instead,
+//! rate-limited like a hidden window's; the tick ends like an event, so if it
+//! did change something visible, the window is then asked for a redraw. A
+//! tick is not run while a redraw is on its way: that redraw's frame does the
+//! same work.
 //!
 //! Going hidden asks for one last rendered frame (the inactive look a
 //! compositor's thumbnail shows), and coming back asks for one redraw.
@@ -60,11 +72,12 @@ use std::time::{Duration, Instant};
 /// before the debug watchdog reports it.
 pub(crate) const STALL_REPORT_AFTER: Duration = Duration::from_secs(1);
 
-/// The shortest interval between two frames of a window that draws nothing.
-pub(crate) const HIDDEN_TICK_INTERVAL: Duration = Duration::from_millis(100);
+/// The shortest interval between a window's frame and a non-visual tick
+/// after it: what a window that draws nothing, and a state tick, can cost.
+pub(crate) const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// How long a request may stay undelivered before it counts as withheld.
-pub(crate) const WITHHELD_AFTER: Duration = HIDDEN_TICK_INTERVAL;
+pub(crate) const WITHHELD_AFTER: Duration = TICK_INTERVAL;
 
 /// What [`RedrawGate::set_hidden`] changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +128,13 @@ impl RedrawGate {
             self.stall_reported.set(false);
         }
         request();
+    }
+
+    /// Ask for a non-visual tick, not a redraw: state must be brought up to
+    /// date, and nothing says the window's pixels changed. See the module
+    /// docs.
+    pub(crate) fn request_tick(&self) {
+        self.tick_pending.set(true);
     }
 
     /// The redraw arrived: nothing is outstanding, and the frame it runs
@@ -177,11 +197,13 @@ impl RedrawGate {
         self.hidden.get()
     }
 
-    /// Whether a non-visual tick should run at `now`, clearing it if so: the
-    /// window draws nothing, something asked for a frame, and its previous
-    /// frame is at least [`HIDDEN_TICK_INTERVAL`] old.
+    /// Whether a non-visual tick should run at `now`, clearing it if so:
+    /// something asked for a frame, no redraw that would serve it is on its
+    /// way (the window draws nothing, or nothing is outstanding), and its
+    /// previous frame is at least [`TICK_INTERVAL`] old.
     pub(crate) fn take_tick(&self, now: Instant) -> bool {
-        if !self.tick_pending.get() || !self.draws_nothing(now) || !self.tick_allowed(now) {
+        let no_redraw_coming = self.draws_nothing(now) || self.outstanding_since.get().is_none();
+        if !self.tick_pending.get() || !no_redraw_coming || !self.tick_allowed(now) {
             return false;
         }
         self.tick_pending.set(false);
@@ -197,19 +219,25 @@ impl RedrawGate {
     /// When the loop should next wake for this window, given its tree's next
     /// timer deadline `timer`; `None` when nothing is due.
     ///
-    /// A window that is shown and waits for nothing wakes at `timer`. One
-    /// awaiting its redraw wakes no sooner than the moment that redraw counts
-    /// as withheld, and one that draws nothing no sooner than its next tick
-    /// is allowed; at that moment a pending tick or a due `timer` runs one.
+    /// A window that is shown and waits for nothing wakes at `timer`, or for
+    /// a pending state tick once the interval allows it, whichever is first:
+    /// the tick never delays the timer. One awaiting its redraw wakes no
+    /// sooner than the moment that redraw counts as withheld, and one that
+    /// draws nothing no sooner than its next tick is allowed; at that moment
+    /// a pending tick or a due `timer` runs one.
     pub(crate) fn deadline(&self, now: Instant, timer: Option<Instant>) -> Option<Instant> {
+        if !self.hidden.get() && self.outstanding_since.get().is_none() {
+            let tick = self.tick_pending.get().then(|| self.next_tick_at(now));
+            return match (timer, tick) {
+                (Some(timer), Some(tick)) => Some(timer.min(tick)),
+                (timer, tick) => timer.or(tick),
+            };
+        }
         let wanted = match (timer, self.tick_pending.get()) {
             (Some(timer), true) => Some(timer.min(now)),
             (None, true) => Some(now),
             (timer, false) => timer,
         }?;
-        if !self.hidden.get() && self.outstanding_since.get().is_none() {
-            return Some(wanted);
-        }
         let mut earliest = wanted;
         if !self.hidden.get()
             && let Some(since) = self.outstanding_since.get()
@@ -217,7 +245,7 @@ impl RedrawGate {
             earliest = earliest.max(since + WITHHELD_AFTER);
         }
         if let Some(last) = self.last_frame_at.get() {
-            earliest = earliest.max(last + HIDDEN_TICK_INTERVAL);
+            earliest = earliest.max(last + TICK_INTERVAL);
         }
         Some(earliest)
     }
@@ -235,10 +263,17 @@ impl RedrawGate {
         Some(waited)
     }
 
+    /// The first instant at or after `now` a tick is allowed.
+    fn next_tick_at(&self, now: Instant) -> Instant {
+        self.last_frame_at
+            .get()
+            .map_or(now, |last| (last + TICK_INTERVAL).max(now))
+    }
+
     fn tick_allowed(&self, now: Instant) -> bool {
         self.last_frame_at
             .get()
-            .is_none_or(|last| now >= last + HIDDEN_TICK_INTERVAL)
+            .is_none_or(|last| now >= last + TICK_INTERVAL)
     }
 }
 
@@ -359,7 +394,7 @@ mod tests {
         gate.ran_frame(t0 + 120 * MS);
         assert_eq!(
             gate.deadline(t0 + 130 * MS, Some(past)),
-            Some(t0 + 120 * MS + HIDDEN_TICK_INTERVAL),
+            Some(t0 + 120 * MS + TICK_INTERVAL),
             "after a tick, the next waits for the interval"
         );
     }
@@ -446,10 +481,48 @@ mod tests {
         }
         assert_eq!(
             gate.deadline(t0 + 99 * MS, None),
-            Some(t0 + HIDDEN_TICK_INTERVAL),
+            Some(t0 + TICK_INTERVAL),
             "a pending tick held back by the interval wakes the loop when it lifts"
         );
-        assert!(gate.take_tick(t0 + HIDDEN_TICK_INTERVAL));
+        assert!(gate.take_tick(t0 + TICK_INTERVAL));
+    }
+
+    #[test]
+    fn a_shown_window_runs_a_state_tick_without_asking_winit() {
+        let t0 = Instant::now();
+        let gate = RedrawGate::default();
+        gate.ran_frame(t0);
+        gate.request_tick();
+        assert!(!gate.awaits_redraw(), "a state tick asks winit nothing");
+        assert!(!gate.take_tick(t0 + 50 * MS), "rate-limited like any tick");
+        assert_eq!(
+            gate.deadline(t0 + 50 * MS, None),
+            Some(t0 + TICK_INTERVAL),
+            "and wakes the loop when the interval lifts"
+        );
+        let soon = t0 + 60 * MS;
+        assert_eq!(
+            gate.deadline(t0 + 50 * MS, Some(soon)),
+            Some(soon),
+            "it never delays a timer"
+        );
+        assert!(gate.take_tick(t0 + TICK_INTERVAL));
+        assert!(!gate.take_tick(t0 + TICK_INTERVAL), "taken once");
+    }
+
+    #[test]
+    fn a_state_tick_waits_for_a_redraw_already_on_its_way() {
+        let t0 = Instant::now();
+        let gate = RedrawGate::default();
+        gate.ran_frame(t0 - TICK_INTERVAL);
+        gate.request_with(t0, || {});
+        gate.request_tick();
+        assert!(
+            !gate.take_tick(t0 + 10 * MS),
+            "the redraw coming does the tick's work"
+        );
+        gate.delivered();
+        assert!(!gate.take_tick(t0 + 20 * MS), "and it served it");
     }
 
     #[test]
@@ -461,13 +534,13 @@ mod tests {
         let past = t0 - 50 * MS;
         assert_eq!(
             gate.deadline(t0 + 10 * MS, Some(past)),
-            Some(t0 + HIDDEN_TICK_INTERVAL),
+            Some(t0 + TICK_INTERVAL),
             "held from the last frame, not from whenever the loop asks"
         );
         // The hold is not pushed forward by asking again later.
         assert_eq!(
             gate.deadline(t0 + 90 * MS, Some(past)),
-            Some(t0 + HIDDEN_TICK_INTERVAL)
+            Some(t0 + TICK_INTERVAL)
         );
         let far = t0 + Duration::from_secs(5);
         assert_eq!(gate.deadline(t0, Some(far)), Some(far));
