@@ -472,6 +472,11 @@ fn paint_widget_cached(
             Some(tb) => Canvas::with_text_backend(tb.clone()),
             None => Canvas::new(),
         };
+        // The paint about to run serves every repaint requested off the UI
+        // thread so far: take the request before reading the state.
+        if let Some(wake) = &node.repaint_wake {
+            wake.consume_repaint();
+        }
         node.widget.paint(bounds, &mut canvas, &ctx);
         let widget_frame = canvas.into_render_frame();
 

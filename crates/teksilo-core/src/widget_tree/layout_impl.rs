@@ -568,6 +568,11 @@ impl WidgetTree {
         // cursor still at the edge or over a collapsed branch.
         self.process_drag_tick(&mut *ops);
 
+        // What content updated off the UI thread asked for since the last
+        // frame: before the state changes it may cause are processed, and
+        // before the idle early return below, which its marks defeat.
+        self.poll_off_thread();
+
         self.process_state_changes(&mut *ops);
         // A drag owns the pointer. `handle_pointer_move` is short-circuited for
         // the duration, so a dwell armed just before the drag started would sit
@@ -648,6 +653,9 @@ impl WidgetTree {
         // parking goes through the tree-level door and both halves change the
         // AccessKit tree.
         let mut culled = CullTransitions::default();
+        // A widget a culling parent wakes during this walk takes its pending
+        // off-thread relayout in `activate`; see the re-mark after the walk.
+        self.arena.relayout_rewake.clear();
         for root_id in roots {
             if overlay_content_ids.contains(&root_id) {
                 continue;
@@ -839,6 +847,15 @@ impl WidgetTree {
             }
         }
         self.active_ids_scratch = ids;
+        // A widget woken inside the walk with an off-thread relayout pending
+        // was measured before it was woken, so possibly at the size before
+        // the request: lay it out again next pass. One extra pass, only then.
+        for id in std::mem::take(&mut self.arena.relayout_rewake) {
+            if self.arena.is_active(id) {
+                self.arena.mark_needs_layout(id);
+                self.arena.mark_ancestors_need_layout(id);
+            }
+        }
 
         // Post-layout hover refresh. When a rebuild destroyed the
         // hovered widget, `revalidate_interaction_state` cleared

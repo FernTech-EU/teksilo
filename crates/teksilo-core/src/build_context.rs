@@ -255,6 +255,29 @@ impl<'a> BuildContext<'a> {
         )
     }
 
+    /// Attach `trigger` to the widget being built, in this window. Call it in
+    /// every `build()`: a rebuild whose `build()` no longer attaches it
+    /// releases it, as does the widget's destruction, and the tree's drop
+    /// releases the rest. A request pending when the widget is rebuilt is
+    /// still pending after it. Attaching the same trigger to the same widget
+    /// twice is a no-op. See [`crate::RepaintTrigger`].
+    pub fn attach_repaint_trigger(&mut self, trigger: &crate::RepaintTrigger) {
+        let id = self.self_id();
+        self.tree.attach_repaint_trigger(id, trigger);
+    }
+
+    /// Run `hook` on the UI thread in the frame after a `RepaintTrigger`
+    /// attached to the widget being built requests a pull
+    /// ([`crate::RepaintTrigger::request_pull`]), whether or not the widget
+    /// is shown: it takes in what the producer stored and says what changed.
+    /// A widget that is not shown takes it in without its window drawing a
+    /// frame. Set it in every `build()`; it replaces the one an earlier
+    /// build set, and a pull requested before a rebuild runs the new one.
+    pub fn on_trigger_pull(&mut self, hook: impl FnMut() -> crate::PullOutcome + 'static) {
+        let id = self.self_id();
+        self.tree.set_trigger_pull_hook(id, Box::new(hook));
+    }
+
     /// Opt into the shader-driven animated-quad pipeline. The widget
     /// paint() emits ONE `canvas.draw_animated_quad(bounds, handle.slot(),
     /// class)` call; the renderer samples per-slot state from its

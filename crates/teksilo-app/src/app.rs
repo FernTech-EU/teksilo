@@ -2413,13 +2413,16 @@ impl TeksiloAppHandler {
     ///
     /// A state wake re-arms the target's coalescing *before* anything else,
     /// so a wake made from then on posts again rather than merging into this
-    /// one, then dispatches the accessibility actions waiting for the window
-    /// and asks its redraw gate for a non-visual tick, rate-limited, not a
-    /// redraw: what changed is state, which may change nothing on screen,
-    /// and the tick ends in `post_event`, which redraws the window if it did.
-    /// That keeps geometry and accessibility current on a window whose
-    /// redraw the compositor withholds, which a redraw request does not
-    /// reach, and costs a window that draws no new frame for a burst.
+    /// one, then dispatches the accessibility actions waiting for the window.
+    /// If the window draws and a widget it showed in its last frame has a
+    /// relayout or a pull requested off the UI thread pending, it asks for
+    /// a redraw: that frame takes it in and repaints, at once. Otherwise it
+    /// asks the redraw gate for a non-visual tick, rate-limited: what changed
+    /// is state nobody may see, and the tick ends in `post_event`, which
+    /// redraws the window if something visible changed after all. That keeps
+    /// geometry and accessibility current on a window whose redraw the
+    /// compositor withholds, which a redraw request does not reach, and
+    /// costs a window that draws no frame for content nobody sees.
     ///
     /// A draw wake (macOS, off the main thread) asks for a redraw unless the
     /// window draws nothing, in which case one is owed for when it draws
@@ -2446,7 +2449,13 @@ impl TeksiloAppHandler {
                 }
                 self.drain_accessibility_actions(wake.window, event_loop);
                 if let Some(managed) = self.wm.get_by_winit_mut(wake.window) {
-                    managed.redraw.request_tick();
+                    if !managed.redraw.draws_nothing(Instant::now())
+                        && managed.tree.off_thread_needs_frame()
+                    {
+                        managed.request_redraw();
+                    } else {
+                        managed.redraw.request_tick();
+                    }
                 }
                 self.post_event(event_loop);
             }

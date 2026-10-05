@@ -785,14 +785,14 @@ jobs:
 
       # The Clippy job never compiles `cfg(teksilo_loom)` code.
       - name: Lint the loom-only code
-        run: cargo clippy --lib --tests -p teksilo-canvas -p teksilo-platform -- -D warnings -A deprecated
+        run: cargo clippy --lib --tests -p teksilo-canvas -p teksilo-platform -p teksilo-core -- -D warnings -A deprecated
 
       # Every model is named `loom_*`: under the cfg the facade's types are
       # loom's, and they panic outside a model, so nothing else may run. A crate
       # whose models stopped compiling would pass silently without the count.
       - name: Run the loom models
         run: |
-          packages="teksilo-canvas teksilo-platform"
+          packages="teksilo-canvas teksilo-platform teksilo-core"
           for p in $packages; do
             n=$(cargo test --lib -p "$p" loom_ -- --list | grep -c ': test$' || true)
             if [ "$n" -lt 1 ]; then

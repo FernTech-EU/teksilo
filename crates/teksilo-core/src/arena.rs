@@ -392,6 +392,10 @@ pub struct WidgetNode {
     /// that repainted from one the walker skipped (clipped out, or under a
     /// sub-perceptual opacity): the skipped one must drop its stale caches.
     pub(crate) paint_consumed_epoch: u64,
+    /// The off-thread wake state of the `RepaintTrigger`s attached to this
+    /// widget, if any: the paint walker takes its repaint flag right before
+    /// `paint()`, and activation takes its relayout flag.
+    pub(crate) repaint_wake: Option<std::sync::Arc<crate::off_thread::NodeWakeState>>,
 
     // --- V2 fields ---
     /// Event handlers the widget attached to itself during its own
@@ -536,6 +540,7 @@ impl WidgetNode {
             paint_raster_scale: 1.0,
             last_painted_epoch: 0,
             paint_consumed_epoch: 0,
+            repaint_wake: None,
             handlers: EventHandlers::new(),
             external_handlers: EventHandlers::new(),
             node_focusable: None,
@@ -618,6 +623,11 @@ pub struct WidgetArena {
     /// Only nodes with a signal contribute, so the buffer is empty for the
     /// overwhelming majority of trees.
     pending_activation_changes: Vec<(WidgetId, bool)>,
+    /// Widgets whose activation took a relayout a `RepaintTrigger` had
+    /// requested while they slept. One woken inside a layout walk by a
+    /// culling parent was measured before it was woken, possibly at the size
+    /// before the request, so the walk's end marks it for layout again.
+    pub(crate) relayout_rewake: Vec<WidgetId>,
     /// Every node that installed an `effective_enabled_signal`, so the
     /// per-pass refresh visits only opted-in nodes instead of the whole arena.
     /// Unlike `pending_activation_changes` this is NOT a change queue: an
@@ -672,6 +682,7 @@ impl WidgetArena {
             a11y_moved: std::collections::HashMap::new(),
             a11y_resized: false,
             pending_activation_changes: Vec::new(),
+            relayout_rewake: Vec::new(),
             effective_enabled_watchers: Vec::new(),
         }
     }
@@ -1830,6 +1841,13 @@ impl WidgetArena {
             node.self_dormant = false;
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
+            // A relayout requested off the UI thread while it slept: take it
+            // (re-arming the request), since the pre-pass skips sleepers.
+            if let Some(wake) = &node.repaint_wake
+                && wake.take_relayout()
+            {
+                self.relayout_rewake.push(id);
+            }
             if was_dormant && node.activation_signal.is_some() {
                 self.pending_activation_changes.push((id, true));
             }

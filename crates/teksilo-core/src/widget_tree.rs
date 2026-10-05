@@ -44,6 +44,8 @@ mod query_impl;
 #[cfg(test)]
 mod redraw_waker_tests;
 mod rendering_impl;
+#[cfg(test)]
+mod repaint_trigger_tests;
 mod test_api;
 pub mod touch_route;
 #[cfg(test)]
@@ -428,7 +430,7 @@ pub struct WidgetTree {
     /// to detect and pause animations for widgets that have scrolled
     /// off-screen. Starts at `0`, which serves as the "never painted"
     /// sentinel; tests that only call `layout()` see the gate bypass.
-    paint_epoch: u64,
+    pub(crate) paint_epoch: u64,
     /// Cached accessibility tree update, rebuilt only when something that
     /// changes the AT tree has happened, not on every layout.
     cached_a11y: Option<accesskit::TreeUpdate>,
@@ -580,10 +582,10 @@ pub struct WidgetTree {
     /// Reactive mirror of `device_scale_factor`, for the widgets whose layout
     /// reads it: see [`Self::device_scale_signal`].
     device_scale_signal: crate::signal::Signal<f32>,
-    /// How content updated off the UI thread wakes this tree's window. Set by
-    /// teksilo-app before the root builder runs; `None` (headless) wakes
-    /// nobody.
-    redraw_waker: Option<std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>>,
+    /// What the tree's widgets attached for content updated off the UI
+    /// thread (`RepaintTrigger`), and the waker their requests wake. See
+    /// [`crate::off_thread`].
+    pub(crate) off_thread: crate::off_thread::OffThreadRegistry,
     /// Platform safe-area insets for the host window — a notch, a rounded
     /// corner, a home indicator — in logical pixels, fed by `teksilo-app`
     /// after every window resize. Reaches overlay placement through
@@ -1027,7 +1029,7 @@ impl WidgetTree {
             pending_touch_route: None,
             device_scale_factor: 1.0,
             device_scale_signal: crate::signal::Signal::new(1.0),
-            redraw_waker: None,
+            off_thread: crate::off_thread::OffThreadRegistry::default(),
             safe_area: teksilo_canvas::EdgeInsets::ZERO,
             occluded_inset: None,
             soft_keyboard_request: None,
@@ -2678,6 +2680,11 @@ impl WidgetTree {
         // clear it so paint() re-runs and re-emits DrawCommands with
         // the newly-allocated slot.
         self.animated_quads.cancel_by_widget(widget_id);
+        // Its off-thread attachments: `build()` attaches its triggers and
+        // sets its hook again. The wake state stays, with whatever was
+        // requested and not yet taken: a request is posted with nothing that
+        // names the build it was meant for, as a subscription id is above.
+        self.off_thread.begin_rebuild(widget_id);
 
         let drained_subs = if let Some(node) = self.arena.get_mut(widget_id) {
             node.effect_handles.clear();
@@ -2790,7 +2797,10 @@ impl WidgetTree {
 
         let mut widget_box = match self.arena.take_widget(widget_id) {
             Some(widget) => widget,
-            None => return,
+            None => {
+                self.finish_off_thread_rebuild(widget_id);
+                return;
+            }
         };
 
         let mut build_ctx = crate::build_context::BuildContext {
@@ -2805,6 +2815,7 @@ impl WidgetTree {
         let subscription_handles = std::mem::take(&mut build_ctx.subscription_handles);
 
         self.arena.restore_widget(widget_id, widget_box);
+        self.finish_off_thread_rebuild(widget_id);
 
         for &child_id in &new_children {
             if let Some(child_node) = self.arena.get_mut(child_id) {
@@ -2901,6 +2912,8 @@ impl WidgetTree {
         self.animation_scheduler.cancel_by_widget(widget_id);
         // Release the animated-quad slot(s) too.
         self.animated_quads.cancel_by_widget(widget_id);
+        // And what it attached for off-thread content.
+        self.off_thread.cancel_by_widget(widget_id);
         // A tooltip's content widget is parentless (`ctx.add`), so the child
         // walk below never reaches it — reap it explicitly or the entry and
         // its node outlive the anchor for the lifetime of the tree.
@@ -3167,13 +3180,13 @@ impl WidgetTree {
         &mut self,
         waker: Option<std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>>,
     ) {
-        self.redraw_waker = waker;
+        self.off_thread.set_waker(waker);
     }
 
     /// The waker [`set_redraw_waker`](Self::set_redraw_waker) installed.
     #[doc(hidden)]
     pub fn redraw_waker(&self) -> Option<&std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>> {
-        self.redraw_waker.as_ref()
+        self.off_thread.waker()
     }
 
     /// Report the host window's platform safe-area insets — the region the

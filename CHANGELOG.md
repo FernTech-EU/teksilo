@@ -45,6 +45,19 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- `RepaintTrigger`, for a widget whose content changes on another thread: it
+  marks the widgets it is attached to and wakes only their windows.
+  `request_repaint` repaints them, `request_relayout` lays them and their
+  ancestors out again, and `request_pull` runs the pull hook a widget set
+  with `BuildContext::on_trigger_pull`, which takes the content in whether
+  or not the widget is shown and returns a `PullOutcome`: a widget nobody
+  sees takes its content in without its window drawing a frame. Requests
+  coalesce to one wake per window until the widget has taken them, and
+  survive its rebuilds; a widget that is clipped out or dormant costs one
+  wake until it is painted again. Attach it in `build()` with
+  `BuildContext::attach_repaint_trigger`.
+  `RepaintTriggerStats` counts requests, wakes and what consumed them, and
+  `WidgetTree::repaint_trigger_count` counts the widgets with one attached.
 - `WidgetTree::device_scale_signal` and `BuildContext::device_scale_signal`:
   the window's device scale as a `Signal`, for widgets whose layout depends on
   it. Bound at `Relayout`, it relayouts that widget when the window moves to a

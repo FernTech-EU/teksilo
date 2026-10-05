@@ -60,7 +60,9 @@
 //! rate-limited like a hidden window's; the tick ends like an event, so if it
 //! did change something visible, the window is then asked for a redraw. A
 //! tick is not run while a redraw is on its way: that redraw's frame does the
-//! same work.
+//! same work. Content a widget the window showed in its last frame must take
+//! in is the exception: the event loop asks for a redraw for it, which does
+//! the work at once, where a tick would wait for its interval.
 //!
 //! Going hidden asks for one last rendered frame (the inactive look a
 //! compositor's thumbnail shows), and coming back asks for one redraw.

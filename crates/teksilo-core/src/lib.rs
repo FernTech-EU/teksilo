@@ -32,6 +32,7 @@ pub mod kinetic;
 pub mod menu_item_id;
 pub mod modal;
 pub mod motion_visibility;
+mod off_thread;
 pub mod overlay;
 pub mod overscroll;
 pub mod paint_prop;
@@ -103,6 +104,7 @@ pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,
     QueuedModalRequest,
 };
+pub use off_thread::{PullOutcome, RepaintTrigger, RepaintTriggerStats};
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };
