@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Eleven claims, and they do not all carry the same weight. Verified by
+//! Fifteen claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -51,10 +51,20 @@
 //!   for them, and a held one is not lost; and a window reported visible is
 //!   shown and asks for a redraw even if it was also read as minimised;
 //! - **(i)** a window whose redraw is withheld is ticked too, a tick ends in
-//!   `post_event`, and the cross-window paint pass does not re-arm a window
-//!   that draws nothing;
-//! - **(j)** the accessibility wake asks a hidden window for a tick and never
-//!   reaches the app's event handler.
+//!   `post_event`, the cross-window paint pass does not re-arm a window that
+//!   draws nothing, and its wake target is told it draws nothing on the next
+//!   turn and told again once its redraw arrives;
+//! - **(j)** a posted state wake asks a hidden window for a tick and never
+//!   reaches the app's event handler;
+//! - **(k)** no posted window wake reaches `on_app_event`, and a draw wake to a
+//!   window that draws nothing is owed for later rather than ticked;
+//! - **(l)** the window's waker is installed before its root is built;
+//! - **(m)** on X11 a draw wake posts nothing and a burst of state wakes posts
+//!   once;
+//! - **(n)** `exiting` leaves every window's waker a no-op while the event
+//!   loop still exists (checked on every run, in [`Script`]'s `exiting`), and
+//!   a waker kept past the end of the loop wakes harmlessly (taking out all
+//!   three disconnects reproduces winit's X11 panic).
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -82,8 +92,9 @@
 //! and the close-path contact release (the identity allocator it protects has
 //! no observable side to assert on once the window is gone).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use teksilo_core::window::SoftKeyboardSupport;
@@ -95,7 +106,9 @@ use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowId;
 
-use super::{AppEvent, TeksiloAppBuilder, TeksiloAppHandler};
+use teksilo_canvas::wake::{RedrawWaker, WakeKind};
+
+use super::{AppEvent, TeksiloAppBuilder, TeksiloAppHandler, WindowWake};
 use crate::input_routing::tests::{Shared, click, cursor, logging_leaf, touch};
 use crate::redraw_gate::{HIDDEN_TICK_INTERVAL, WITHHELD_AFTER};
 use crate::window_config::WindowConfig;
@@ -106,6 +119,8 @@ use crate::window_config::WindowConfig;
 struct Script<'a, F> {
     app: &'a mut TeksiloAppHandler,
     step: Option<F>,
+    /// `exiting` ran, and claim (n)'s check in it with it.
+    exited: bool,
 }
 
 impl<F> ApplicationHandler<AppEvent> for Script<'_, F>
@@ -126,6 +141,25 @@ where
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         self.app.window_event(event_loop, id, event);
+    }
+
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        self.app.exiting(event_loop);
+        // Claim (n), its first half: `exiting` alone leaves every window's
+        // waker a no-op, while the event loop still exists, before the
+        // driver's backstop and the window's `Drop` run.
+        for managed in self.app.wm.iter() {
+            let before = managed.platform_window.live_wake_stats().wakes;
+            let waker = managed.platform_window.redraw_waker();
+            waker.wake(WakeKind::Draw);
+            waker.wake(WakeKind::Layout);
+            assert_eq!(
+                managed.platform_window.live_wake_stats().wakes,
+                before,
+                "a wake made after `exiting` reached its window"
+            );
+        }
+        self.exited = true;
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -157,10 +191,12 @@ fn drive(builder: TeksiloAppBuilder, step: impl FnOnce(&mut TeksiloAppHandler, &
             let mut script = Script {
                 app,
                 step: Some(step),
+                exited: false,
             };
             event_loop
                 .run_app_on_demand(&mut script)
                 .expect("winit event loop exited with error");
+            assert!(script.exited, "winit never called `exiting`");
         },
     );
 }
@@ -177,17 +213,25 @@ fn only_window(app: &TeksiloAppHandler) -> WindowId {
     ids[0]
 }
 
-/// Everything the four claims need in one loop session: a 400 × 300 window
-/// whose root is the same recording leaf the headless steps use.
-fn app_with_recorder(log: &Shared) -> TeksiloAppBuilder {
+/// Everything the claims need in one loop session: a 400 × 300 window whose
+/// root is the same recording leaf the headless steps use. The root builder
+/// also records the redraw waker its tree already holds, as a thin pointer.
+fn app_with_recorder(log: &Shared, waker_at_build: &Rc<Cell<usize>>) -> TeksiloAppBuilder {
     let log = log.clone();
+    let waker_at_build = waker_at_build.clone();
     TeksiloAppBuilder::new()
         .theme(teksilo_core::presets::intui::light())
         .initial_window(
             WindowConfig::new()
                 .title("teksilo winit-loop test")
                 .size(400, 300)
-                .root(move |tree, _state| tree.add(logging_leaf(&log, false))),
+                .root(move |tree, _state| {
+                    waker_at_build.set(
+                        tree.redraw_waker()
+                            .map_or(0, |waker| Arc::as_ptr(waker) as *const () as usize),
+                    );
+                    tree.add(logging_leaf(&log, false))
+                }),
         )
 }
 
@@ -198,9 +242,12 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     let log: Shared = Rc::new(RefCell::new(Default::default()));
     let recorder = log.clone();
 
-    let app_events_seen = Rc::new(std::cell::Cell::new(0_usize));
+    let app_events_seen = Rc::new(Cell::new(0_usize));
+    let waker_at_build = Rc::new(Cell::new(0_usize));
+    let saved_waker: Rc<RefCell<Option<Arc<dyn RedrawWaker>>>> = Rc::default();
+    let saved = saved_waker.clone();
     let counter = app_events_seen.clone();
-    let builder = app_with_recorder(&log).on_app_event(move |event| {
+    let builder = app_with_recorder(&log, &waker_at_build).on_app_event(move |event| {
         if matches!(event, AppEvent::External(_)) {
             counter.set(counter.get() + 1);
         }
@@ -613,12 +660,21 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 "the tick is not the withheld redraw"
             );
             assert!(
+                managed.platform_window.is_hidden(),
+                "the wake target knows the window draws nothing, so its draw \
+                 wakes are owed rather than lost in a request winit holds"
+            );
+            assert!(
                 managed.state.drain_os_commands().is_empty(),
                 "a tick ends in `post_event`, which applies what the window queued"
             );
             // Its redraw arrives at last and draws.
             app.window_event(event_loop, window, WindowEvent::RedrawRequested);
             assert!(!app.wm.windows_map()[&window].tree.needs_paint());
+            assert!(
+                !app.wm.windows_map()[&window].platform_window.is_hidden(),
+                "drawing again, it takes draw wakes again"
+            );
         }
 
         // -- (j) an accessibility handler's wake reaches a window that draws
@@ -632,7 +688,10 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             let seen_before = app_events_seen.get();
             app.user_event(
                 event_loop,
-                AppEvent::External(Box::new(crate::app::AccessibilityWake { window })),
+                AppEvent::External(Box::new(WindowWake {
+                    window,
+                    kind: WakeKind::Layout,
+                })),
             );
             assert_eq!(
                 app_events_seen.get(),
@@ -648,6 +707,107 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             );
             app.window_event(event_loop, window, WindowEvent::Occluded(false));
             app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+        }
+
+        // -- (k) a posted window wake is the framework's alone, and a draw wake
+        // to a window that draws nothing is owed, not ticked
+        //
+        // Taking the interception below the app's handler, or answering a draw
+        // wake with a gated request instead of deferring it, reddens this.
+        {
+            let seen_before = app_events_seen.get();
+            for kind in [WakeKind::Draw, WakeKind::Layout] {
+                app.user_event(
+                    event_loop,
+                    AppEvent::External(Box::new(WindowWake { window, kind })),
+                );
+            }
+            assert_eq!(
+                app_events_seen.get(),
+                seen_before,
+                "a window wake never reaches on_app_event"
+            );
+            assert!(
+                app.wm.windows_map()[&window].redraw.awaits_redraw(),
+                "a shown window answers with a redraw request"
+            );
+
+            app.window_event(event_loop, window, WindowEvent::Occluded(true));
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+            let far = Instant::now() + Duration::from_secs(60);
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            let _ = managed.redraw.take_tick(far);
+            let dropped = managed.platform_window.live_wake_stats().dropped_hidden;
+            app.user_event(
+                event_loop,
+                AppEvent::External(Box::new(WindowWake {
+                    window,
+                    kind: WakeKind::Draw,
+                })),
+            );
+            let managed = app.wm.get_by_winit_mut(window).expect("the window");
+            assert_eq!(
+                managed.platform_window.live_wake_stats().dropped_hidden,
+                dropped + 1,
+                "a draw wake to a window that draws nothing is owed for later"
+            );
+            assert!(
+                !managed.redraw.take_tick(far),
+                "and asks for no tick: it changes nothing the window keeps current"
+            );
+            app.window_event(event_loop, window, WindowEvent::Occluded(false));
+            app.window_event(event_loop, window, WindowEvent::RedrawRequested);
+        }
+
+        // -- (l) the window's waker is installed before its root is built
+        //
+        // So a source a widget attaches in `build()` already wakes the window.
+        // Installing it after the root builder reddens this.
+        {
+            let managed = &app.wm.windows_map()[&window];
+            let installed = managed.platform_window.redraw_waker();
+            assert_eq!(
+                waker_at_build.get(),
+                Arc::as_ptr(&installed) as *const () as usize,
+                "the root builder saw the window's own waker"
+            );
+            *saved.borrow_mut() = Some(installed);
+        }
+
+        // -- (m) the routes, as the X11 backend gets them: a draw wake asks
+        // winit directly and posts nothing; a burst of state wakes posts once
+        //
+        // Taking the state route out leaves nothing posted.
+        {
+            let managed = &app.wm.windows_map()[&window];
+            let waker = managed.platform_window.redraw_waker();
+            assert!(!waker.is_hidden());
+            let before = managed.platform_window.live_wake_stats().wakes;
+            let _ = managed.platform_window.take_posted_wake(WakeKind::Layout);
+            std::thread::spawn(move || {
+                for _ in 0..100 {
+                    waker.wake(WakeKind::Draw);
+                    waker.wake(WakeKind::Layout);
+                }
+            })
+            .join()
+            .expect("waking a window from another thread");
+            assert_eq!(
+                managed.platform_window.live_wake_stats().wakes,
+                before + 200
+            );
+            assert!(
+                !managed.platform_window.take_posted_wake(WakeKind::Draw),
+                "no draw wake is posted on X11"
+            );
+            assert!(
+                managed.platform_window.take_posted_wake(WakeKind::Layout),
+                "the state wakes posted"
+            );
+            assert!(
+                !managed.platform_window.take_posted_wake(WakeKind::Layout),
+                "once for the burst"
+            );
         }
 
         // -- (b) a window blocked by a modal child
@@ -697,4 +857,21 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
              `BlockedDisposition::Deliver` to a swallow leaves it at {before:?}"
         );
     });
+
+    // -- (n) a waker outlives the event loop harmlessly
+    //
+    // winit's X11 `request_redraw` unwraps a send to the event loop, which
+    // panics once the loop is gone. The window's waker is disconnected three
+    // times over (`exiting`, the driver's backstop, the window's `Drop`);
+    // taking all three out makes this wake panic its thread.
+    let waker = saved_waker
+        .borrow_mut()
+        .take()
+        .expect("claim (l) saved the window's waker");
+    std::thread::spawn(move || {
+        waker.wake(WakeKind::Draw);
+        waker.wake(WakeKind::Layout);
+    })
+    .join()
+    .expect("a wake after the event loop ended must not panic");
 }

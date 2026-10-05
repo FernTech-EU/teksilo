@@ -39,6 +39,8 @@ mod pointer_cancel;
 mod pointer_router;
 mod pointer_state;
 mod query_impl;
+#[cfg(test)]
+mod redraw_waker_tests;
 mod rendering_impl;
 mod test_api;
 pub mod touch_route;
@@ -573,6 +575,10 @@ pub struct WidgetTree {
     /// the escape hatch for widgets that must size a device-pixel OS resource
     /// (e.g. a `WebView`'s native subview). 1.0 in headless / test contexts.
     device_scale_factor: f32,
+    /// How content updated off the UI thread wakes this tree's window. Set by
+    /// teksilo-app before the root builder runs; `None` (headless) wakes
+    /// nobody.
+    redraw_waker: Option<std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>>,
     /// Platform safe-area insets for the host window — a notch, a rounded
     /// corner, a home indicator — in logical pixels, fed by `teksilo-app`
     /// after every window resize. Reaches overlay placement through
@@ -1015,6 +1021,7 @@ impl WidgetTree {
             context_menu_announcement: None,
             pending_touch_route: None,
             device_scale_factor: 1.0,
+            redraw_waker: None,
             safe_area: teksilo_canvas::EdgeInsets::ZERO,
             occluded_inset: None,
             soft_keyboard_request: None,
@@ -3134,6 +3141,24 @@ impl WidgetTree {
     /// The host window HiDPI device scale most recently set (1.0 by default).
     pub fn device_scale_factor(&self) -> f32 {
         self.device_scale_factor
+    }
+
+    /// Set the waker content updated off the UI thread uses to wake this
+    /// tree's window (see [`teksilo_canvas::wake`]). teksilo-app installs each
+    /// window's before its root widget is built, so a source attached in
+    /// `build()` already has it. `None`, the default, wakes nobody: a headless
+    /// tree renders when its owner says so.
+    pub fn set_redraw_waker(
+        &mut self,
+        waker: Option<std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>>,
+    ) {
+        self.redraw_waker = waker;
+    }
+
+    /// The waker [`set_redraw_waker`](Self::set_redraw_waker) installed.
+    #[doc(hidden)]
+    pub fn redraw_waker(&self) -> Option<&std::sync::Arc<dyn teksilo_canvas::wake::RedrawWaker>> {
+        self.redraw_waker.as_ref()
     }
 
     /// Report the host window's platform safe-area insets — the region the

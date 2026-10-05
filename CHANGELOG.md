@@ -37,13 +37,17 @@ by crate for clarity, not because crates version independently.
   only changes what it draws is dropped and one redraw is requested when it is
   shown again; `is_hidden` and `live_wake_stats` (with `LiveWakeStats`) report
   it. `disconnect_redraw_waker` turns every such waker into a no-op, and
-  dropping the window does the same. On macOS a wake made off the main
-  thread never waits for it: it posts to the event loop through the route
+  dropping the window does the same, as does teksilo-app for every window
+  when its event loop ends. On macOS a wake made off the main thread never
+  waits for it: it posts to the event loop through the route
   `set_off_main_wake_route` installs, or without one hands the redraw to the
   main queue.
 
 #### Core
 
+- `WidgetTree::set_redraw_waker`, the waker content updated off the UI thread
+  uses to wake the tree's window. teksilo-app installs each window's before its
+  root widget is built.
 - `WidgetTree::is_behind_modal`, whether an in-tree modal is up and a widget
   is behind it, public so code outside the tree can apply the rule the
   pointer, the Tab cycle and assistive technology already follow.
@@ -72,6 +76,11 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+#### Core
+
+- **Breaking.** `AppEvent` is `#[non_exhaustive]`: a `match` on it outside
+  teksilo-core needs a wildcard arm.
+
 #### Canvas
 
 - `teksilo-canvas` lists `loom` as a dependency for the `teksilo_loom` cfg,
@@ -95,8 +104,11 @@ by crate for clarity, not because crates version independently.
 - Debug builds report on standard error a focused window that has waited
   more than a second for a redraw it asked for.
 - `TEKSILO_IDLE_TRACE` lines now carry the time since start (`t=`) and
-  count redraws answered by a hidden window (`hidden_redraws`) and the
-  non-visual frames run for windows that draw nothing (`hidden_ticks`).
+  count redraws answered by a hidden window (`hidden_redraws`), the
+  non-visual frames run for windows that draw nothing (`hidden_ticks`), app
+  events (`app_events`), wakes windows posted to the event loop
+  (`posted_wakes`), and window wakes routed and dropped while a window drew
+  nothing (`waker_wakes`, `waker_wakes_dropped`).
 
 #### Render
 

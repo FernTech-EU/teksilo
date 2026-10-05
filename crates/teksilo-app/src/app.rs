@@ -455,6 +455,19 @@ pub(crate) struct IdleTrace {
     /// targeted cross-window path actually fires versus the blanket one.
     cross_window_redraws: u64,
     idle_callbacks_run: u64,
+    /// App events that reached the public dispatch (`on_app_event` and the
+    /// framework's arms); a framework-private wake is not one.
+    app_events: u64,
+    /// Wakes a window's wake target posted to the event loop, by kind.
+    posted_draw_wakes: u64,
+    posted_layout_wakes: u64,
+    /// Window wakes routed, and draw wakes dropped because the window drew
+    /// nothing: deltas of every window's `LiveWakeStats`.
+    waker_wakes: u64,
+    waker_wakes_dropped: u64,
+    /// Each open window's `LiveWakeStats` at the last sample, to take
+    /// deltas from.
+    waker_totals: HashMap<WindowId, (u64, u64)>,
     control_flow_wait: u64,
     control_flow_wait_until: u64,
     timer_windows: usize,
@@ -482,6 +495,12 @@ impl IdleTrace {
                 frame_request_redraws: 0,
                 cross_window_redraws: 0,
                 idle_callbacks_run: 0,
+                app_events: 0,
+                posted_draw_wakes: 0,
+                posted_layout_wakes: 0,
+                waker_wakes: 0,
+                waker_wakes_dropped: 0,
+                waker_totals: HashMap::new(),
                 control_flow_wait: 0,
                 control_flow_wait_until: 0,
                 timer_windows: 0,
@@ -562,13 +581,41 @@ impl IdleTrace {
         self.maybe_report();
     }
 
+    fn note_app_event(&mut self) {
+        self.app_events += 1;
+        self.maybe_report();
+    }
+
+    fn note_posted_wake(&mut self, kind: teksilo_canvas::wake::WakeKind) {
+        match kind {
+            teksilo_canvas::wake::WakeKind::Draw => self.posted_draw_wakes += 1,
+            _ => self.posted_layout_wakes += 1,
+        }
+        self.maybe_report();
+    }
+
+    /// Fold in the wake counters of every open window, each against what
+    /// was last seen of that window: they are monotonic per window, and a
+    /// window that closed is forgotten without taking another's counts with
+    /// it.
+    fn note_wake_totals(&mut self, windows: impl Iterator<Item = (WindowId, u64, u64)>) {
+        let mut seen = HashMap::new();
+        for (id, wakes, dropped) in windows {
+            let (last_wakes, last_dropped) = self.waker_totals.get(&id).copied().unwrap_or((0, 0));
+            self.waker_wakes += wakes.saturating_sub(last_wakes);
+            self.waker_wakes_dropped += dropped.saturating_sub(last_dropped);
+            seen.insert(id, (wakes, dropped));
+        }
+        self.waker_totals = seen;
+    }
+
     fn maybe_report(&mut self) {
         if self.last_report.elapsed() < Duration::from_secs(1) {
             return;
         }
 
         eprintln!(
-            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} hidden_ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} hidden_ticks={} resume_time_reached={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
             self.started.elapsed().as_secs_f64(),
             self.redraw_requested,
             self.rendered_frames,
@@ -584,6 +631,11 @@ impl IdleTrace {
             self.resize_redraw_requests,
             self.frame_request_redraws,
             self.idle_callbacks_run,
+            self.app_events,
+            self.posted_draw_wakes,
+            self.posted_layout_wakes,
+            self.waker_wakes,
+            self.waker_wakes_dropped,
             self.control_flow_wait,
             self.control_flow_wait_until,
             self.timer_windows,
@@ -606,6 +658,11 @@ impl IdleTrace {
         self.resize_redraw_requests = 0;
         self.frame_request_redraws = 0;
         self.idle_callbacks_run = 0;
+        self.app_events = 0;
+        self.posted_draw_wakes = 0;
+        self.posted_layout_wakes = 0;
+        self.waker_wakes = 0;
+        self.waker_wakes_dropped = 0;
         self.control_flow_wait = 0;
         self.control_flow_wait_until = 0;
     }
@@ -977,6 +1034,14 @@ impl TeksiloAppHandler {
         }
 
         if let Some(trace) = &mut self.idle_trace {
+            trace.note_wake_totals(self.wm.iter().map(|managed| {
+                let stats = managed.platform_window.live_wake_stats();
+                (
+                    managed.platform_window.window().id(),
+                    stats.wakes,
+                    stats.dropped_hidden,
+                )
+            }));
             trace.note_control_flow(
                 earliest_deadline.is_some(),
                 timer_windows,
@@ -2341,25 +2406,47 @@ impl TeksiloAppHandler {
         }
     }
 
-    /// An accessibility handler left something for `window_id`: an action,
-    /// an attach or a detach. Dispatch the actions now, and ask the window
-    /// for a frame through its gate, which is where the tree learns of an
-    /// attach: a shown window gets a redraw, and one that draws nothing a
-    /// non-visual tick. A redraw requested from the handler itself would
-    /// bypass the gate, and on Wayland would not reach a window whose
-    /// redraw the compositor withholds.
-    fn accessibility_wake(&mut self, window_id: WindowId, event_loop: &ActiveEventLoop) {
-        // Re-arm the coalescing first: a wake made from here on posts again.
-        if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-            managed
-                .platform_window
-                .take_posted_wake(teksilo_canvas::wake::WakeKind::Layout);
+    /// A window's wake target posted a wake (see
+    /// `window_manager::wake_routes`).
+    ///
+    /// A state wake re-arms the target's coalescing *before* anything else,
+    /// so a wake made from then on posts again rather than merging into this
+    /// one, then dispatches the accessibility actions waiting for the window
+    /// and asks the window for a frame through its redraw gate: a redraw if
+    /// it is shown, a non-visual tick if it draws nothing. That keeps
+    /// geometry and accessibility current on a window whose redraw the
+    /// compositor withholds, which a redraw request does not reach.
+    ///
+    /// A draw wake (macOS, off the main thread) asks for a redraw unless the
+    /// window draws nothing, in which case one is owed for when it draws
+    /// again; it changes nothing the UI thread owns, so it ends without
+    /// `post_event`.
+    fn window_wake(&mut self, wake: WindowWake, event_loop: &ActiveEventLoop) {
+        use teksilo_canvas::wake::WakeKind;
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_posted_wake(wake.kind);
         }
-        self.drain_accessibility_actions(window_id, event_loop);
-        if let Some(managed) = self.wm.get_by_winit_mut(window_id) {
-            managed.request_redraw();
+        match wake.kind {
+            WakeKind::Draw => {
+                let Some(managed) = self.wm.get_by_winit_mut(wake.window) else {
+                    return;
+                };
+                managed.platform_window.take_posted_wake(WakeKind::Draw);
+                if !managed.platform_window.defer_redraw_until_shown() {
+                    managed.request_redraw();
+                }
+            }
+            _ => {
+                if let Some(managed) = self.wm.get_by_winit_mut(wake.window) {
+                    managed.platform_window.take_posted_wake(WakeKind::Layout);
+                }
+                self.drain_accessibility_actions(wake.window, event_loop);
+                if let Some(managed) = self.wm.get_by_winit_mut(wake.window) {
+                    managed.request_redraw();
+                }
+                self.post_event(event_loop);
+            }
         }
-        self.post_event(event_loop);
     }
 
     /// Everything a frame does except draw: idle callbacks, layout (which
@@ -2526,7 +2613,7 @@ impl TeksiloAppHandler {
         // X11 reports an iconify with no event of its own: ask winit, which
         // is a round trip there, at most every so often while unfocused.
         current.refresh_minimized(Instant::now());
-        current.sync_hidden();
+        current.sync_hidden_for_frame();
         let current_id = current.teksilo_id;
         #[cfg(not(target_os = "macos"))]
         let current_handle = current
@@ -3109,15 +3196,18 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // Framework-private, so taken before any app handler or observer
         // sees an event.
         let event = match event {
-            AppEvent::External(payload) => match payload.downcast::<AccessibilityWake>() {
+            AppEvent::External(payload) => match payload.downcast::<WindowWake>() {
                 Ok(wake) => {
-                    self.accessibility_wake(wake.window, event_loop);
+                    self.window_wake(*wake, event_loop);
                     return;
                 }
                 Err(payload) => AppEvent::External(payload),
             },
             event => event,
         };
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_app_event();
+        }
         if let Some(handler) = &mut self.app_event_handler {
             handler(&event);
         }
@@ -3375,6 +3465,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         self.handle_window_event_inner(event_loop, window_id, event);
     }
 
+    /// winit asks for no redraw after this, and on X11 panics if one is
+    /// requested: every window's waker becomes a no-op, whoever still holds
+    /// one.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.wm.disconnect_redraw_wakers();
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         // Drive any registered per-turn closure (the async executor poll when
         // `teksilo-async` is installed) before computing the next control
@@ -3392,6 +3489,12 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         self.pump_pen_sources(event_loop);
         self.refresh_occluded_band();
         self.process_pending(event_loop);
+        // A redraw becomes withheld with time alone, so the wake targets learn
+        // it here, before the ticks that serve a window drawing nothing.
+        let now = Instant::now();
+        for managed in self.wm.iter() {
+            managed.sync_draws_nothing(now);
+        }
         self.run_ticks(event_loop);
         self.maybe_exit(event_loop);
         #[cfg(debug_assertions)]
@@ -3400,12 +3503,16 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     }
 }
 
-/// Posted by a window's accessibility handlers, from whatever thread the
-/// platform's accessibility stack runs them on, to wake the loop for what
-/// they left. See [`TeksiloAppHandler::accessibility_wake`].
+/// Posted by a window's wake target, from any thread, through the routes
+/// `window_manager::wake_routes` builds: a state wake (content off the UI
+/// thread changed state layout reads, or an accessibility handler left
+/// something), or on macOS a draw wake made off the main thread. Private to
+/// the framework: taken before any app handler sees an event. See
+/// [`TeksiloAppHandler::window_wake`].
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct AccessibilityWake {
+pub(crate) struct WindowWake {
     pub(crate) window: WindowId,
+    pub(crate) kind: teksilo_canvas::wake::WakeKind,
 }
 
 /// Payload used by `TitleBarHostCallbacks::request_close` to route a
@@ -4546,6 +4653,12 @@ impl TeksiloAppBuilder {
         app.loop_tick_poll = self.loop_tick_poll;
 
         drive(event_loop, &mut app);
+        // `exiting` has disconnected every window's waker: winit calls it
+        // before its loop ends. Again here, idempotently, so that no window
+        // leaves `run_with` connected under a driver that never calls it;
+        // such a driver's windows are exposed from the end of its loop to
+        // this line.
+        app.wm.disconnect_redraw_wakers();
 
         // Flush any pending settings writes synchronously before the
         // process exits. The `DebouncedWriter` background threads also

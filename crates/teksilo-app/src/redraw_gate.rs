@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! The one door every redraw request of a window goes through, and what a
-//! window that draws nothing still runs.
+//! The one door every redraw teksilo-app asks of a window goes through, and
+//! what a window that draws nothing still runs.
 //!
 //! # Withheld redraws
 //!
@@ -22,6 +22,14 @@
 //! loop sooner than [`WITHHELD_AFTER`] after it: a redraw on its way arrives
 //! well before. One still outstanding then is *withheld*, and the window is
 //! ticked like a hidden one until it arrives.
+//!
+//! A draw wake a producer thread makes asks winit for its redraw itself (see
+//! `teksilo_platform`'s wake target), and so is never stamped here. It only
+//! changes pixels: a window that gets nothing else while its compositor
+//! withholds its frames is not counted as withheld, which costs nothing, and
+//! the repaint waits for the frame winit delivers. What must stay current on
+//! a window that draws nothing reaches it as a posted wake instead, and the
+//! event loop asks for that one here.
 //!
 //! # Windows that draw nothing
 //!

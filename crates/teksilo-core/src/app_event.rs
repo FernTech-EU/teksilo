@@ -12,6 +12,9 @@ use std::path::PathBuf;
 use crate::event_source::SubscriptionId;
 
 /// Events posted to the UI thread from background threads or timers.
+///
+/// Non-exhaustive: a `match` on it outside teksilo-core needs a wildcard arm.
+#[non_exhaustive]
 pub enum AppEvent {
     /// A background operation completed.
     BackgroundComplete { operation_id: String },
