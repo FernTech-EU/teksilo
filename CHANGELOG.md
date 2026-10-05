@@ -153,11 +153,11 @@ by crate for clarity, not because crates version independently.
   the window closed. The preview is now torn down like any other widget.
 - **A widget changed while out of view could come back showing its old
   content.** A widget marked for repaint while it was clipped out of a
-  scroll area or under a fully transparent ancestor (or itself fully
-  transparent) lost the mark without repainting, and if it came back into
-  view without moving it replayed the paint it had before the change. Such
-  a widget now drops its stale paint and repaints when it is next visible;
-  a widget that did not change keeps its cached paint as before.
+  scroll area or under a fully transparent ancestor lost the mark without
+  repainting, and if it came back into view without moving it replayed the
+  paint it had before the change. Such a widget now drops its stale paint
+  and repaints when it is next visible; a widget that did not change keeps
+  its cached paint as before.
 - **An accordion opened in a window without focus stayed closed.** The
   animation scheduler paused every animation of a window that was unfocused
   or occluded, one-shot tweens included, so a `Collapse` opened there (by an
@@ -171,7 +171,7 @@ by crate for clarity, not because crates version independently.
 
 #### Render
 
-- **Clipping was misplaced at fractional scales and lost around blurs.** A
+- **Clipping was misplaced on scaled displays and lost around blurs.** A
   clip inside a translated scope (a panned scene, a moved transform
   wrapper) landed at the wrong place whenever the display scale was not 1,
   because the translation was scaled twice. Content drawn after a blur
