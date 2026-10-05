@@ -1,31 +1,22 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! The terminal widget's mutable state, the PTY-reader background thread, and
-//! the per-frame drain that feeds the child's output into the engine.
+//! The terminal widget's mutable state, and the drain that feeds the child's
+//! output into the engine.
 
-use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use teksilo_canvas::sync::Arc;
 use teksilo_canvas::{Point, Rect};
+use teksilo_core::RepaintTrigger;
+use teksilo_core::environment::LayoutDirection;
 use teksilo_core::pointer::PointerId;
-use teksilo_core::window::TeksiloWindowId;
-use teksilo_core::{AppEventPoster, RepaintWindowRequest};
 
 use crate::color_scheme::ColorScheme;
 use crate::engine::{GridSnapshot, PtyGeom, Scroll, TermEvent, TerminalEngine};
+use crate::reader::ReaderQueue;
 use crate::render::CellMetrics;
 use crate::terminal::CursorStyle;
-
-/// Bytes read from the child, shared between the reader thread and the UI
-/// thread behind a `Mutex`.
-#[derive(Default)]
-pub(crate) struct ReaderShared {
-    pub(crate) queue: Vec<u8>,
-    pub(crate) eof: bool,
-}
 
 /// An in-progress selection drag.
 #[derive(Debug, Clone, Copy)]
@@ -40,19 +31,16 @@ pub(crate) struct DragState {
 pub(crate) struct TerminalState {
     /// The engine (PTY + VT model). `None` until the post-mount spawn runs.
     pub(crate) engine: Option<Box<dyn TerminalEngine>>,
-    pub(crate) reader: Arc<Mutex<ReaderShared>>,
-    /// Set on drop / teardown so the reader thread exits promptly.
-    pub(crate) reader_stop: Arc<AtomicBool>,
-    /// Coalescing flag for repaint requests: `true` while a request is already
-    /// outstanding. Set when posting (reader thread or UI mutation), cleared by
-    /// `drain_and_advance` on the UI thread — so a flood of PTY reads posts at
-    /// most one pending repaint instead of one per chunk.
-    pub(crate) repaint_pending: Arc<AtomicBool>,
-    /// Poster for waking the UI loop after a direct engine mutation (clear,
-    /// scroll, …) that produces no child echo.
-    pub(crate) poster: Option<Arc<dyn AppEventPoster>>,
-    /// The window hosting this terminal, so a repaint request can target it.
-    pub(crate) window_id: Option<TeksiloWindowId>,
+    /// The child's output on its way from the reader thread. Shut down when
+    /// the widget goes, which ends the reader thread.
+    pub(crate) reader: Arc<ReaderQueue>,
+    /// Attached to the widget in every build: the reader thread asks it for
+    /// a pull when output arrives, and a direct engine mutation (clear,
+    /// scroll, …) asks it for a repaint.
+    pub(crate) trigger: RepaintTrigger,
+    /// The layout direction of the last layout, for the touch affordances the
+    /// pull hook re-projects when output moves the text.
+    pub(crate) layout_direction: LayoutDirection,
 
     pub(crate) snapshot: GridSnapshot,
     pub(crate) metrics: CellMetrics,
@@ -122,17 +110,18 @@ pub(crate) struct TerminalState {
     /// The owner's frame-request handle (set at build), so the visual bell and
     /// cursor blink can schedule follow-up frames.
     pub(crate) frame_request: Option<std::rc::Rc<std::cell::Cell<bool>>>,
+    /// The tree's one-shot wake slot (set at build), so the caret blink wakes
+    /// the loop for its next toggle instead of pumping frames.
+    pub(crate) wake_at: Option<std::rc::Rc<std::cell::Cell<Option<Instant>>>>,
 }
 
 impl TerminalState {
     pub(crate) fn new(scheme: ColorScheme) -> Self {
         Self {
             engine: None,
-            reader: Arc::new(Mutex::new(ReaderShared::default())),
-            reader_stop: Arc::new(AtomicBool::new(false)),
-            repaint_pending: Arc::new(AtomicBool::new(false)),
-            poster: None,
-            window_id: None,
+            reader: Arc::new(ReaderQueue::new()),
+            trigger: RepaintTrigger::new(),
+            layout_direction: LayoutDirection::default(),
             snapshot: blank_snapshot(80, 24),
             metrics: CellMetrics {
                 width: 8.0,
@@ -165,74 +154,111 @@ impl TerminalState {
             exit_reported: false,
             bell_flash: None,
             frame_request: None,
+            wake_at: None,
         }
     }
 
     /// Rebuild the cached snapshot from the engine (called after any mutation).
     pub(crate) fn refresh_snapshot(&mut self) {
         if let Some(engine) = self.engine.as_ref() {
-            self.snapshot = engine.snapshot();
+            let snapshot = engine.snapshot();
+            self.set_snapshot(snapshot);
         }
     }
 
-    /// Wake the UI loop to repaint after a direct engine mutation (coalesced).
+    /// Replace the cached snapshot. A caret that comes back into view (output
+    /// showing it again, the view scrolled back to it) restarts its blink,
+    /// which stops while no caret is visible: see
+    /// [`frame_step`](crate::terminal::frame_step).
+    pub(crate) fn set_snapshot(&mut self, snapshot: GridSnapshot) {
+        let reappeared = snapshot.cursor.visible && !self.snapshot.cursor.visible;
+        self.snapshot = snapshot;
+        if reappeared && self.blinks() {
+            self.restart_blink(Instant::now());
+        }
+    }
+
+    /// Whether the caret blinks: focused in an active window, blinking
+    /// enabled, and a caret in view to blink.
+    pub(crate) fn blinks(&self) -> bool {
+        self.focused && self.window_active && self.cursor_blink && self.snapshot.cursor.visible
+    }
+
+    /// Start the blink at `now` with the caret on, and wake for its first
+    /// toggle.
+    pub(crate) fn restart_blink(&mut self, now: Instant) {
+        self.blink_on = true;
+        self.blink_last = Some(now);
+        self.schedule_wake(now + crate::terminal::BLINK_INTERVAL);
+    }
+
+    /// Wake the event loop at `at`, unless something already wants it awake
+    /// sooner: never push an earlier pending wake later.
+    pub(crate) fn schedule_wake(&self, at: Instant) {
+        if let Some(slot) = &self.wake_at {
+            let merged = match slot.get() {
+                Some(existing) if existing <= at => existing,
+                _ => at,
+            };
+            slot.set(Some(merged));
+        }
+    }
+
+    /// Repaint the terminal after a direct engine mutation that produces no
+    /// child echo (coalesced; only this widget repaints).
     pub(crate) fn wake(&self) {
-        if let (Some(poster), Some(window_id)) = (&self.poster, self.window_id) {
-            post_repaint(poster, window_id, &self.repaint_pending);
-        }
+        self.trigger.request_repaint();
     }
 }
 
-/// Post a coalesced [`RepaintWindowRequest`]: fire only when one isn't already
-/// outstanding. `pending` is cleared by [`drain_and_advance`] on the UI thread,
-/// so a burst of PTY reads collapses to a single in-flight repaint.
-pub(crate) fn post_repaint(
-    poster: &Arc<dyn AppEventPoster>,
-    window_id: TeksiloWindowId,
-    pending: &AtomicBool,
-) {
-    if !pending.swap(true, Ordering::AcqRel) {
-        poster.post_external(Box::new(RepaintWindowRequest { window_id }));
-    }
-}
+/// How long one pull may spend parsing the child's output: what it may
+/// hold the UI thread for. What is left waits for the next pull.
+pub(crate) const PULL_BUDGET: Duration = Duration::from_millis(8);
+
+/// The output parsed between two looks at [`PULL_BUDGET`].
+pub(crate) const PULL_CHUNK: usize = 64 << 10;
 
 /// The result of draining the child's pending output during a frame.
 pub(crate) struct DrainResult {
     pub(crate) events: Vec<TermEvent>,
     pub(crate) eof: bool,
     pub(crate) content_changed: bool,
+    /// Output is left for the next pull: the budget ran out first.
+    pub(crate) more: bool,
 }
 
 /// Take the child's pending bytes, feed them to the engine, and rebuild the
 /// cached snapshot. Returns the engine events + EOF flag for the widget to act
 /// on (it owns the user callbacks / reactive signals).
+///
+/// Parses [`PULL_CHUNK`] at a time until the queue is empty or
+/// [`PULL_BUDGET`] is spent, and always at least one chunk, so a flood
+/// neither stalls the UI thread nor stops making progress.
 pub(crate) fn drain_and_advance(state: &mut TerminalState) -> DrainResult {
-    // Re-arm coalescing BEFORE reading the queue: any read that appends after
-    // this point re-posts a fresh repaint (rather than being lost because a
-    // request still looked outstanding).
-    state.repaint_pending.store(false, Ordering::Release);
-    let (bytes, eof) = {
-        let mut shared = state
-            .reader
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (std::mem::take(&mut shared.queue), shared.eof)
+    // The trigger's flag was taken before the pull hook ran, so a read that
+    // lands after this take asks for a fresh pull.
+    let started = Instant::now();
+    let mut content_changed = false;
+    let (eof, more) = loop {
+        let taken = state.reader.take_up_to(PULL_CHUNK);
+        if !taken.bytes.is_empty()
+            && let Some(engine) = state.engine.as_mut()
+        {
+            engine.advance(&taken.bytes);
+            content_changed = true;
+        }
+        if !taken.more || started.elapsed() >= PULL_BUDGET {
+            break (taken.eof, taken.more);
+        }
     };
 
     let mut events = Vec::new();
-    let mut content_changed = false;
-
-    if !bytes.is_empty()
-        && let Some(engine) = state.engine.as_mut()
-    {
-        engine.advance(&bytes);
+    if content_changed && let Some(engine) = state.engine.as_mut() {
         events = engine.drain_events();
         if state.scroll_on_output {
             engine.scroll(Scroll::Bottom);
         }
-        content_changed = true;
     }
-
     if content_changed {
         state.refresh_snapshot();
     }
@@ -241,6 +267,7 @@ pub(crate) fn drain_and_advance(state: &mut TerminalState) -> DrainResult {
         events,
         eof,
         content_changed,
+        more,
     }
 }
 
@@ -292,54 +319,4 @@ pub(crate) fn blank_snapshot(cols: usize, rows: usize) -> GridSnapshot {
         display_offset: 0,
         history_len: 0,
     }
-}
-
-/// Spawn the PTY-reader background thread. It blocks on `read`, appends bytes to
-/// the shared queue, and wakes the UI loop after each chunk (and on EOF).
-pub(crate) fn spawn_reader_thread(
-    mut reader: Box<dyn Read + Send>,
-    shared: Arc<Mutex<ReaderShared>>,
-    stop: Arc<AtomicBool>,
-    pending: Arc<AtomicBool>,
-    poster: Arc<dyn AppEventPoster>,
-    window_id: TeksiloWindowId,
-) {
-    let wake = move || post_repaint(&poster, window_id, &pending);
-    let _ = std::thread::Builder::new()
-        .name("teksilo-terminal-pty".into())
-        .spawn(move || {
-            let mut buf = [0u8; 8192];
-            loop {
-                if stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                match reader.read(&mut buf) {
-                    Ok(0) => {
-                        shared
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .eof = true;
-                        wake();
-                        break;
-                    }
-                    Ok(n) => {
-                        shared
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .queue
-                            .extend_from_slice(&buf[..n]);
-                        wake();
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(_) => {
-                        shared
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .eof = true;
-                        wake();
-                        break;
-                    }
-                }
-            }
-        });
 }

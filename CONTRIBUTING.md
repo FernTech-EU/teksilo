@@ -82,10 +82,12 @@ ordinary build and loom's under the `teksilo_loom` cfg:
 
 ```bash
 RUSTFLAGS="--cfg teksilo_loom" CARGO_TARGET_DIR=target/loom \
-  cargo clippy --lib --tests -p teksilo-canvas -p teksilo-platform -p teksilo-core -- -D warnings -A deprecated
+  cargo clippy --lib --tests -p teksilo-canvas -p teksilo-platform -p teksilo-core \
+    -p teksilo-terminal -- -D warnings -A deprecated
 RUSTFLAGS="--cfg teksilo_loom" LOOM_MAX_PREEMPTIONS=3 \
 CARGO_PROFILE_TEST_OPT_LEVEL=3 CARGO_TARGET_DIR=target/loom \
-  cargo test --lib -p teksilo-canvas -p teksilo-platform -p teksilo-core loom_
+  cargo test --lib -p teksilo-canvas -p teksilo-platform -p teksilo-core \
+    -p teksilo-terminal loom_
 ```
 
 The packages are those the CI job "Concurrency models (loom)" lists; the

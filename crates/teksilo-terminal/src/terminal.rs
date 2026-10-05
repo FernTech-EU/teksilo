@@ -10,6 +10,7 @@ use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
+use teksilo_core::PullOutcome;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
@@ -38,7 +39,7 @@ use crate::menu::{self, TerminalMenuCommand};
 use crate::mouse::{self, MouseButton, MouseKind, TouchReporting};
 use crate::render::{self, CellMetrics, RenderParams};
 use crate::state::{
-    self, DragState, DrainResult, TerminalState, blank_snapshot, compute_layout, drain_and_advance,
+    DragState, DrainResult, TerminalState, blank_snapshot, compute_layout, drain_and_advance,
 };
 use crate::style::{RecipeTerminalStyle, TerminalChrome, TerminalStyle};
 use crate::touch::{self, MagnifierPainter, TerminalTouch};
@@ -66,9 +67,12 @@ pub enum TerminalClosePolicy {
     /// Kill the child (`SIGKILL`) when the widget is dropped — the default; a
     /// terminal shouldn't outlive its view.
     KillOnDrop,
-    /// Don't kill the child on drop. It receives `SIGHUP` when its PTY closes
-    /// as the engine drops, so it exits unless it ignores the hangup (e.g.
-    /// `nohup`, a detached `tmux`/`screen`, or `trap '' HUP`).
+    /// Don't kill the child on drop. The terminal's reader thread holds the
+    /// PTY open while it waits for output, so the child gets `SIGHUP` only
+    /// once that read returns: the next time it writes after the terminal is
+    /// gone. It then exits unless it ignores the hangup (e.g. `nohup`, a
+    /// detached `tmux`/`screen`, or `trap '' HUP`); a child that never writes
+    /// again keeps the PTY, and the reader thread, until it exits.
     LeaveRunning,
 }
 
@@ -87,6 +91,9 @@ pub(crate) struct TerminalSignals {
     pub(crate) rows: Signal<usize>,
     pub(crate) last_output_line: Signal<String>,
     pub(crate) exit: Signal<Option<TerminalExit>>,
+    /// Bumped to repaint the terminal from a frame-tick effect (the caret
+    /// blink, the visual bell); bound at `RepaintOnly` in `build`.
+    pub(crate) paint_tick: Signal<u64>,
 }
 
 impl TerminalSignals {
@@ -102,6 +109,7 @@ impl TerminalSignals {
             rows: Signal::new(24),
             last_output_line: Signal::new(String::new()),
             exit: Signal::new(None),
+            paint_tick: Signal::new(0),
         }
     }
 }
@@ -223,8 +231,8 @@ impl TerminalController {
             .and_then(|s| s.borrow().engine.as_ref().and_then(|e| e.selection_text()))
     }
 
-    /// A mutation that produces no child echo — refresh the snapshot and wake
-    /// the UI loop so it repaints.
+    /// A mutation that produces no child echo — refresh the snapshot and
+    /// repaint the terminal through its trigger.
     fn mutate(&self, f: impl FnOnce(&mut TerminalState)) {
         self.with_state(|st| {
             f(st);
@@ -271,7 +279,8 @@ impl TerminalController {
 pub struct Terminal {
     state: Rc<RefCell<TerminalState>>,
     signals: TerminalSignals,
-    callbacks: Callbacks,
+    /// Shared with the pull hook, which fires them as output arrives.
+    callbacks: Rc<Callbacks>,
     style: Rc<dyn TerminalStyle>,
     factory: Option<Box<dyn TerminalEngineFactory>>,
     command: TerminalCommand,
@@ -301,7 +310,7 @@ impl Terminal {
         Self {
             state: Rc::new(RefCell::new(TerminalState::new(ColorScheme::default()))),
             signals: TerminalSignals::new(),
-            callbacks: Callbacks::default(),
+            callbacks: Rc::new(Callbacks::default()),
             style: Rc::new(RecipeTerminalStyle),
             factory: Some(Box::new(factory)),
             command: TerminalCommand::shell(),
@@ -462,26 +471,43 @@ impl Terminal {
 
     /// Called when the child sets the window/tab title (OSC 0/2).
     pub fn on_title_changed(mut self, f: impl Fn(&str) + 'static) -> Self {
-        self.callbacks.on_title = Some(Box::new(f));
+        self.callbacks_mut().on_title = Some(Box::new(f));
         self
     }
     /// Called when the bell rings.
     pub fn on_bell(mut self, f: impl Fn() + 'static) -> Self {
-        self.callbacks.on_bell = Some(Box::new(f));
+        self.callbacks_mut().on_bell = Some(Box::new(f));
         self
     }
     /// Called when the working directory changes (OSC 7).
     pub fn on_cwd_changed(mut self, f: impl Fn(&str) + 'static) -> Self {
-        self.callbacks.on_cwd = Some(Box::new(f));
+        self.callbacks_mut().on_cwd = Some(Box::new(f));
         self
     }
     /// Called when the child process exits.
     pub fn on_child_exited(mut self, f: impl Fn(TerminalExit) + 'static) -> Self {
-        self.callbacks.on_child_exited = Some(Box::new(f));
+        self.callbacks_mut().on_child_exited = Some(Box::new(f));
         self
     }
 
     // --- Internal helpers ---
+
+    /// The callbacks, while the builder still owns them alone.
+    fn callbacks_mut(&mut self) -> &mut Callbacks {
+        Rc::get_mut(&mut self.callbacks).expect("a terminal's callbacks are set before it is built")
+    }
+
+    /// What the pull hook takes the child's output in with.
+    fn output_sink(&self) -> OutputSink {
+        OutputSink {
+            state: self.state.clone(),
+            signals: self.signals.clone(),
+            callbacks: self.callbacks.clone(),
+            label: self.label.clone(),
+            bell: self.bell,
+            touch: self.touch.clone(),
+        }
+    }
 
     fn resolve_font(&self, theme: &Theme, text_scale: f32) -> TextStyle {
         match &self.font {
@@ -544,17 +570,68 @@ impl Terminal {
             );
         })
     }
+}
 
-    /// React to a completed drain: fire callbacks + update reactive signals.
-    /// Runs with no outstanding `state` borrow (touches only `self`).
+/// Everything taking the child's output in reaches. The widget's pull hook
+/// owns one, and runs whether or not the terminal is shown, so a terminal in
+/// a background tab or a hidden window keeps its screen, title, working
+/// directory, exit status and accessibility current, and never makes its
+/// child wait for a paint.
+#[derive(Clone)]
+struct OutputSink {
+    state: Rc<RefCell<TerminalState>>,
+    signals: TerminalSignals,
+    callbacks: Rc<Callbacks>,
+    label: String,
+    bell: BellStyle,
+    touch: Rc<TerminalTouch>,
+}
+
+impl OutputSink {
+    /// The pull hook: take the child's pending output in and say whether
+    /// what the terminal paints changed.
+    fn take_output(&self) -> PullOutcome {
+        let drain = {
+            let mut st = self.state.borrow_mut();
+            drain_and_advance(&mut st)
+        };
+        if drain.more {
+            // The budget ran out with output left: the next pull takes the
+            // rest. Its flag was taken before this hook ran, so this wakes.
+            let trigger = self.state.borrow().trigger.clone();
+            trigger.request_pull();
+        }
+        let content_changed = drain.content_changed;
+        let bell_started = self.apply(drain);
+        if content_changed {
+            // New output keeps the engine's selection (it is in buffer
+            // coordinates) but re-projects it into the viewport, so the
+            // handles move with the text rather than being retired by it. A
+            // pull runs no layout of the terminal, which is why this cannot
+            // be left to `place_children` alone.
+            let mut st = self.state.borrow_mut();
+            let direction = st.layout_direction;
+            self.touch.refresh(&mut st, direction);
+        }
+        if content_changed || bell_started {
+            PullOutcome::Repaint
+        } else {
+            PullOutcome::Unchanged
+        }
+    }
+
+    /// React to a completed drain: fire callbacks and update reactive
+    /// signals. Runs with no outstanding `state` borrow.
     ///
-    /// This is called from `paint()` (the reliable drain point on an off-thread
-    /// repaint), so the user callbacks (`on_title` / `on_bell` / `on_cwd` /
-    /// `on_child_exited`) fire during the render pass. They are deliberately
-    /// plain `Fn` (no `EventContext`) and the events that trigger them are
-    /// infrequent (title/bell/cwd/exit, not per-frame), so a callback can only
-    /// touch captured signals/handles — keep them lightweight.
-    fn apply_drain(&self, drain: DrainResult) {
+    /// It runs in the pull hook, in the layout pass of the frame after the
+    /// output arrived, so the user callbacks (`on_title` / `on_bell` /
+    /// `on_cwd` / `on_child_exited`) fire there, shown or not. They are
+    /// deliberately plain `Fn` (no `EventContext`) and the events that
+    /// trigger them are infrequent (title/bell/cwd/exit, not per-frame), so a
+    /// callback can only touch captured signals/handles — keep them
+    /// lightweight. Returns whether it started the visual bell.
+    fn apply(&self, drain: DrainResult) -> bool {
+        let mut bell_started = false;
         for event in drain.events {
             match event {
                 TermEvent::Title(title) => {
@@ -576,6 +653,7 @@ impl Terminal {
                     if self.bell == BellStyle::Visual {
                         let mut st = self.state.borrow_mut();
                         st.bell_flash = Some(Instant::now());
+                        bell_started = true;
                         if let Some(fr) = &st.frame_request {
                             fr.set(true);
                         }
@@ -598,9 +676,9 @@ impl Terminal {
         if drain.content_changed {
             // Bumping this (bound at `AccessibilityOnly`) re-walks the a11y row
             // tree so a screen reader sees fresh content. It runs at most once
-            // per repaint, and repaints are coalesced (see `post_repaint`), so
-            // under a flood of output the a11y rebuild is bounded to the frame
-            // rate rather than per-read-chunk. (Gating it on an active AT client
+            // per pull, and pulls are coalesced by the trigger, so under a
+            // flood of output the a11y rebuild is bounded to the frame rate
+            // rather than per-read-chunk. (Gating it on an active AT client
             // would avoid the work entirely when no screen reader is attached —
             // a future optimisation once the framework surfaces that state.)
             let v = self.signals.document_version.get();
@@ -646,6 +724,7 @@ impl Terminal {
             });
             self.report_exit(exit);
         }
+        bell_started
     }
 
     fn report_exit(&self, exit: TerminalExit) {
@@ -684,8 +763,28 @@ impl Widget for Terminal {
             BindingLevel::AccessibilityOnly,
         );
 
-        // Store the frame-request handle so the bell / blink can schedule frames.
-        self.state.borrow_mut().frame_request = Some(ctx.frame_request_handle());
+        // The caret blink and the visual bell repaint through this binding.
+        self.signals
+            .paint_tick
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+
+        // The bell schedules frames; the blink, one-shot wakes. The window's
+        // active state is seeded here and followed by the effect below, which
+        // fires on changes only.
+        {
+            let mut st = self.state.borrow_mut();
+            st.frame_request = Some(ctx.frame_request_handle());
+            st.wake_at = Some(ctx.wake_at_handle());
+            st.window_active = ctx.window_active();
+        }
+
+        // The child's output arrives through the trigger, and the pull hook
+        // takes it in whether or not the terminal is shown. Every build: a
+        // rebuild releases both.
+        let trigger = self.state.borrow().trigger.clone();
+        ctx.attach_repaint_trigger(&trigger);
+        let sink = self.output_sink();
+        ctx.on_trigger_pull(move || sink.take_output());
 
         // The live-region announcer child.
         let announcer = ctx.add(LiveAnnouncer {
@@ -732,13 +831,18 @@ impl Widget for Terminal {
 
         let st = self.state.clone();
         let tch = self.touch.clone();
-        handlers = handlers.on_focus(move |gained, _ctx| {
+        let paint_tick = self.signals.paint_tick.clone();
+        handlers = handlers.on_focus(move |gained, ctx| {
             {
                 let mut st = st.borrow_mut();
                 st.focused = gained;
                 st.blink_on = true;
                 st.blink_last = None;
             }
+            // The caret appears or goes, and on focus its blink starts: one
+            // frame runs the frame step, which schedules the next toggle.
+            paint_tick.set(paint_tick.get().wrapping_add(1));
+            ctx.request_frame();
             if !gained {
                 // One of the four retirement paths the host owns; the affordance
                 // band takes nothing down by itself.
@@ -812,17 +916,31 @@ impl Widget for Terminal {
 
         ctx.apply_self_handlers(handlers);
 
-        // Cursor-blink / visual-bell frame effect.
+        // Cursor-blink / visual-bell frame step.
         let st = self.state.clone();
+        let paint_tick = self.signals.paint_tick.clone();
         let tick = ctx.frame_tick();
-        ctx.effect(&tick, move |_delta| tick_frame(&st));
+        ctx.effect(&tick, move |_delta| run_frame_step(&st, &paint_tick));
 
         // Mirror window-active state (drives caret hiding / desaturation).
         let st = self.state.clone();
         let tch = self.touch.clone();
+        let paint_tick = self.signals.paint_tick.clone();
         let wa = ctx.window_active_signal();
         ctx.effect(&wa, move |active| {
-            st.borrow_mut().window_active = *active;
+            let restart_blink = {
+                let mut st = st.borrow_mut();
+                st.window_active = *active;
+                (*active && st.focused)
+                    .then(|| st.frame_request.clone())
+                    .flatten()
+            };
+            // The caret shows or hides; back in an active window with focus,
+            // its blink restarts.
+            paint_tick.set(paint_tick.get().wrapping_add(1));
+            if let Some(frame) = restart_blink {
+                frame.set(true);
+            }
             if !*active {
                 tch.dismiss();
             }
@@ -836,8 +954,8 @@ impl Widget for Terminal {
             let factory = self.factory.take();
             let command = self.command.clone();
             let scrollback = self.scrollback;
-            ctx.run_after_mount(move |ectx| {
-                spawn_engine(&state, &signals, factory, &command, scrollback, ectx);
+            ctx.run_after_mount(move |_ectx| {
+                spawn_engine(&state, &signals, factory, &command, scrollback);
             });
         }
 
@@ -876,17 +994,20 @@ impl Widget for Terminal {
             let mut st = self.state.borrow_mut();
             st.origin = origin;
             st.bounds = bounds;
+            st.layout_direction = ctx.layout_direction;
             dims_changed = (cols, rows) != (st.cols, st.rows);
             if dims_changed {
                 st.cols = cols;
                 st.rows = rows;
                 st.geom = geom;
-                if let Some(engine) = st.engine.as_mut() {
-                    engine.resize(geom);
-                    st.snapshot = engine.snapshot();
-                } else {
-                    st.snapshot = blank_snapshot(cols, rows);
-                }
+                let snapshot = match st.engine.as_mut() {
+                    Some(engine) => {
+                        engine.resize(geom);
+                        engine.snapshot()
+                    }
+                    None => blank_snapshot(cols, rows),
+                };
+                st.set_snapshot(snapshot);
             }
         }
         if dims_changed {
@@ -923,30 +1044,8 @@ impl Widget for Terminal {
         self.style
             .paint_frame(canvas, bounds, ctx.theme, &scheme, &chrome);
 
-        // Drain the child's pending output and advance the engine.
-        let drain = {
-            let mut st = self.state.borrow_mut();
-            st.window_active = ctx.window_active;
-            drain_and_advance(&mut st)
-        };
-        let content_changed = drain.content_changed;
-        self.apply_drain(drain);
-        if content_changed {
-            // New output keeps the engine's selection (it is in buffer
-            // coordinates) but re-projects it into the viewport, so the handles
-            // move with the text rather than being retired by it. A repaint-only
-            // frame runs no layout, which is why this cannot be left to
-            // `place_children` alone.
-            //
-            // **Reviewed, not tested.** `content_changed` is true only when the
-            // PTY reader thread has queued bytes, and the `MemoryEngine`'s reader
-            // is at end-of-file by construction — a headless tree can reach this
-            // branch by no route at all. The `place_children` twin above carries
-            // the same call and is pinned by
-            // `the_handles_follow_a_selection_change_across_a_layout`.
-            let mut st = self.state.borrow_mut();
-            self.touch.refresh(&mut st, ctx.layout_direction);
-        }
+        // The child's output was taken in by the pull hook, before this
+        // frame's layout: paint draws the snapshot and nothing else.
 
         // Render the grid. Hold the state borrow across paint_grid (it only
         // reads the snapshot) rather than cloning the whole grid every frame.
@@ -988,8 +1087,8 @@ impl Widget for Terminal {
         // Visual bell: a brief accent overlay that fades out.
         if let Some(t) = bell_flash {
             let elapsed = t.elapsed();
-            if elapsed < Duration::from_millis(150) {
-                let alpha = 0.25 * (1.0 - elapsed.as_secs_f32() / 0.15);
+            if elapsed < BELL_FLASH {
+                let alpha = 0.25 * (1.0 - elapsed.as_secs_f32() / BELL_FLASH.as_secs_f32());
                 let flash = teksilo_tokens::Color::new(
                     scheme.foreground.r(),
                     scheme.foreground.g(),
@@ -1027,10 +1126,7 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         // Signal the reader thread to stop, and (per policy) kill the child so
         // it can't outlive the view even if a controller keeps the state alive.
-        let st = self.state.borrow();
-        st.reader_stop
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        drop(st);
+        self.state.borrow().reader.shut_down();
         if self.close_policy == TerminalClosePolicy::KillOnDrop
             && let Some(engine) = self.state.borrow_mut().engine.as_mut()
         {
@@ -1047,56 +1143,33 @@ fn spawn_engine(
     factory: Option<Box<dyn TerminalEngineFactory>>,
     command: &TerminalCommand,
     scrollback: usize,
-    ectx: &mut EventContext,
 ) {
     let Some(factory) = factory else {
         return;
     };
     // The widget may have been dropped between build() queuing this mount action
-    // and the action running (a same-tick mount+unmount). `Terminal::Drop` sets
-    // `reader_stop`, so don't spawn a child that nobody is left to kill.
-    if state
-        .borrow()
-        .reader_stop
-        .load(std::sync::atomic::Ordering::Relaxed)
-    {
+    // and the action running (a same-tick mount+unmount). `Terminal::Drop` shuts
+    // the reader queue down, so don't spawn a child that nobody is left to kill.
+    if state.borrow().reader.is_shut_down() {
         return;
     }
     if state.borrow().engine.is_some() {
         return;
     }
-    let poster = ectx.poster().cloned();
-    let window_id = ectx.window().map(|w| w.id());
     let geom = state.borrow().geom;
 
     match factory.spawn(command, geom, scrollback) {
         Ok(spawned) => {
-            let (reader_shared, stop, pending) = {
+            let (queue, trigger) = {
                 let mut st = state.borrow_mut();
                 st.engine = Some(spawned.engine);
-                st.poster = poster.clone();
-                st.window_id = window_id;
                 st.refresh_snapshot();
-                (
-                    st.reader.clone(),
-                    st.reader_stop.clone(),
-                    st.repaint_pending.clone(),
-                )
+                (st.reader.clone(), st.trigger.clone())
             };
             signals.child_running.set(true);
-            // The reader thread needs both a poster and the target window id to
-            // route its repaint requests; a windowless (headless) tree has
-            // neither, so the engine is still usable via the controller.
-            if let (Some(poster), Some(window_id)) = (poster, window_id) {
-                state::spawn_reader_thread(
-                    spawned.reader,
-                    reader_shared,
-                    stop,
-                    pending,
-                    poster,
-                    window_id,
-                );
-            }
+            // Headless or windowed alike: the trigger wakes the tree's window
+            // when it has one, and the next layout takes the output in.
+            crate::reader::spawn_reader_thread(spawned.reader, queue, trigger);
         }
         Err(err) => {
             // The child never started. Surface it: apps observing `exit_signal()`
@@ -1160,39 +1233,89 @@ fn effective_cursor_shape(pref: CursorStyle, reported: TermCursorShape) -> TermC
     }
 }
 
-/// Blink toggle + visual-bell re-arm, run each frame the loop ticks.
-fn tick_frame(state: &Rc<RefCell<TerminalState>>) {
-    const BLINK_INTERVAL: Duration = Duration::from_millis(500);
-    let mut st = state.borrow_mut();
-    let active = st.focused && st.window_active && st.cursor_blink;
-    let mut want_more = false;
+/// How long the caret stays on, and off.
+pub(crate) const BLINK_INTERVAL: Duration = Duration::from_millis(500);
+/// How long the visual bell's overlay fades.
+const BELL_FLASH: Duration = Duration::from_millis(150);
 
-    if active {
-        let now = Instant::now();
-        let toggle = match st.blink_last {
-            Some(last) => now.duration_since(last) >= BLINK_INTERVAL,
-            None => true,
-        };
-        if toggle {
-            st.blink_on = !st.blink_on;
-            st.blink_last = Some(now);
+/// What one frame step asks for.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct FrameStep {
+    /// The caret or the bell's overlay changed: repaint.
+    pub(crate) repaint: bool,
+    /// When the caret next toggles: a one-shot wake, not a frame pump.
+    pub(crate) wake_at: Option<Instant>,
+    /// The bell is still fading: run the next frame too.
+    pub(crate) another_frame: bool,
+}
+
+/// The caret blink and the visual bell at `now`. The blink toggles every
+/// [`BLINK_INTERVAL`] while the terminal is focused in an active window with
+/// a caret in view, and asks to be woken for the next toggle, so a blinking
+/// caret costs two frames a second rather than sixty; with no caret to blink
+/// (hidden by the child, or scrolled out of view) it asks for nothing, and a
+/// caret coming back restarts it (`TerminalState::set_snapshot`). The bell
+/// asks for frames only while it fades, and for one last repaint when it
+/// ends.
+pub(crate) fn frame_step(st: &mut TerminalState, now: Instant) -> FrameStep {
+    let mut step = FrameStep::default();
+    if st.blinks() {
+        match st.blink_last {
+            // The blink starts with the caret on, as it was shown.
+            None => st.blink_last = Some(now),
+            Some(last) if now.saturating_duration_since(last) >= BLINK_INTERVAL => {
+                st.blink_on = !st.blink_on;
+                st.blink_last = Some(now);
+                step.repaint = true;
+            }
+            Some(_) => {}
         }
-        want_more = true;
-    } else if !st.blink_on {
-        st.blink_on = true;
+        step.wake_at = st.blink_last.map(|last| last + BLINK_INTERVAL);
+    } else {
+        st.blink_last = None;
+        if !st.blink_on {
+            st.blink_on = true;
+            step.repaint = true;
+        }
     }
-
-    // Keep the visual bell animating until it fades.
     if let Some(t) = st.bell_flash {
-        if t.elapsed() < Duration::from_millis(160) {
-            want_more = true;
+        if now.saturating_duration_since(t) < BELL_FLASH {
+            step.repaint = true;
+            step.another_frame = true;
         } else {
+            // Without this last repaint the final overlay would stay in the
+            // cached paint.
             st.bell_flash = None;
+            step.repaint = true;
         }
     }
+    step
+}
 
-    if want_more && let Some(fr) = &st.frame_request {
-        fr.set(true);
+/// Run [`frame_step`] from the frame-tick effect and act on it, with the
+/// state borrow released first.
+fn run_frame_step(state: &Rc<RefCell<TerminalState>>, paint_tick: &Signal<u64>) {
+    let (step, wake_at, frame_request) = {
+        let mut st = state.borrow_mut();
+        let step = frame_step(&mut st, Instant::now());
+        (step, st.wake_at.clone(), st.frame_request.clone())
+    };
+    if step.repaint {
+        paint_tick.set(paint_tick.get().wrapping_add(1));
+    }
+    if let (Some(at), Some(slot)) = (step.wake_at, wake_at) {
+        // Never push an earlier pending wake later: another subsystem may need
+        // the loop awake before the next toggle.
+        let merged = match slot.get() {
+            Some(existing) if existing <= at => existing,
+            _ => at,
+        };
+        slot.set(Some(merged));
+    }
+    if step.another_frame
+        && let Some(frame) = frame_request
+    {
+        frame.set(true);
     }
 }
 
@@ -2007,3 +2130,6 @@ fn is_paste_chord(key: Key, mods: Modifiers) -> bool {
         key == Key::V && mods.ctrl() && mods.shift()
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -43,6 +43,12 @@ by crate for clarity, not because crates version independently.
   `set_off_main_wake_route` installs, or without one hands the redraw to the
   main queue.
 
+#### Terminal
+
+- `MemoryOutput`, the child output of a `MemoryEngine`.
+  `MemoryEngineFactory::output()` returns the one the next spawned engine
+  reads; a test writes to it from any thread, or closes it to end the child.
+
 #### Core
 
 - `RepaintTrigger`, for a widget whose content changes on another thread: it
@@ -98,6 +104,34 @@ by crate for clarity, not because crates version independently.
   pixels receives.
 
 ### Changed
+
+#### Terminal
+
+- Output from the child repaints only the terminal and redraws only its own
+  window. Before, each burst repainted every widget of the window and redrew
+  every window of the app.
+- A terminal that is not shown (in a background tab, a hidden window, or
+  scrolled out of view) keeps taking its child's output in: its screen,
+  title, working directory, exit status and what a screen reader reads stay
+  current, and its window draws no frame for it. Before, its output waited,
+  without limit, for the next time it was painted.
+- Output not yet taken in is bounded at 4 MiB: past it the child waits on its
+  write until the terminal catches up. A frame spends at most 8 ms parsing
+  it, and the rest follows in the next frames, so a flood of output never
+  holds up the application's other windows and widgets.
+- A focused terminal no longer draws 60 frames a second to blink its cursor:
+  it wakes twice a second, not at all while no cursor is in view (hidden by
+  the child, or scrolled out), and draws continuously only while the visual
+  bell fades.
+- A terminal in a headless tree that runs mount actions reads its child's
+  output and shows it at the next render.
+- `MemoryEngine`'s child runs until `MemoryOutput::close`, `kill` or the
+  engine's drop, where it used to end at once in a windowed tree; every
+  mounted terminal now runs a reader thread for it, headless included, which
+  a test that leaks its tree leaks too.
+- A `TerminalEngineFactory`'s reader is now read on a thread in every tree,
+  headless included, and that thread stays blocked in a read until it
+  returns, after the terminal is gone too.
 
 #### Core
 
@@ -156,6 +190,11 @@ by crate for clarity, not because crates version independently.
   blank. A dependency that names `features = ["text"]` must drop it.
 
 ### Fixed
+
+#### Terminal
+
+- **The cursor blinked, and the visual bell faded, only when something else
+  repainted the terminal.** Both now repaint it.
 
 #### WebView
 

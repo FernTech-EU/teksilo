@@ -23,6 +23,7 @@ mod input;
 pub mod memory;
 mod menu;
 mod mouse;
+mod reader;
 mod render;
 mod state;
 pub mod style;
@@ -41,7 +42,7 @@ pub use engine::{
     SpawnedEngine, TermCursorShape, TermEvent, TermMode, TerminalCommand, TerminalEngine,
     TerminalEngineFactory, TerminalExit,
 };
-pub use memory::{MemoryEngine, MemoryEngineFactory, MemoryShared};
+pub use memory::{MemoryEngine, MemoryEngineFactory, MemoryOutput, MemoryShared};
 pub use menu::TerminalMenuCommand;
 pub use mouse::TouchReporting;
 pub use render::CellMetrics;

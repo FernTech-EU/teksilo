@@ -1540,6 +1540,75 @@ fn the_handles_follow_the_grid_across_a_layout() {
     }
 }
 
+/// Output that moves the selection (a scrolling line re-projects the
+/// engine's span, which it keeps in buffer coordinates) moves the handles in
+/// the frame that takes the output in. The pull hook re-derives them: a
+/// pull lays the terminal out no more, so `place_children` cannot.
+#[test]
+fn the_handles_follow_the_selection_when_output_moves_it() {
+    let span = |row| teksilo_terminal::SelectionSpan {
+        start: (row, 5),
+        end: (row, 11),
+        block: false,
+    };
+    let mut tree = WidgetTree::new().with_theme(theme());
+    let factory = MemoryEngineFactory::new();
+    let shared = factory.shared();
+    let output = factory.output();
+    let terminal = tree.add(Terminal::with_engine_factory(factory));
+    tree.layout(SizeProposal::exact(480.0, 320.0));
+    {
+        let mut s = shared.borrow_mut();
+        s.selection_text = Some("selected".into());
+        s.snapshot = Some(snapshot_with_selection(span(3)));
+    }
+    tree.run_mount_actions(&mut NoopWindowOps);
+    tree.focus(terminal);
+    let at = Point::new(120.0, 80.0);
+    for _ in 0..2 {
+        let c = tree.new_contact();
+        tree.touch_down(c, at);
+        tree.touch_up(c, at);
+    }
+    tree.layout(SizeProposal::exact(480.0, 320.0));
+    let host = *tree
+        .overlay_manager()
+        .active_content_ids()
+        .last()
+        .expect("a finger's double-tap raises the affordance overlay");
+    let layer = tree.children(host)[0];
+    let before: Vec<f32> = placed_handles(&tree, layer)
+        .iter()
+        .map(|b| b.center().y)
+        .collect();
+    assert_eq!(before.len(), 2, "up to start with");
+
+    // The child prints a line; the engine scrolled the selection up a row.
+    shared.borrow_mut().snapshot = Some(snapshot_with_selection(span(2)));
+    output.write(b"line\n");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while shared.borrow().advanced.is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the output was never taken in"
+        );
+        tree.layout(SizeProposal::exact(480.0, 320.0));
+        std::thread::yield_now();
+    }
+    let after: Vec<f32> = placed_handles(&tree, layer)
+        .iter()
+        .map(|b| b.center().y)
+        .collect();
+    let (_, row_height) = cell_size();
+    assert_eq!(after.len(), 2);
+    for (a, b) in after.iter().zip(before.iter()) {
+        assert!(
+            (b - a - row_height).abs() < 0.01,
+            "each handle moved up a row with the text: {before:?} then {after:?}"
+        );
+    }
+}
+
 /// A keystroke returns the view to the live prompt, which moves the viewport out
 /// from under the handles' cell offsets — so it retires them.
 #[test]
