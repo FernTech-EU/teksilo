@@ -7,10 +7,12 @@
 //! `MenuBarTrigger` widgets. Coordinates opening/closing menus, focus transfer,
 //! and Left/Right arrow navigation between top-level menus.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use teksilo_core::overlay::{DismissBehavior, OverlayLayer, OverlayPlacement, OverlayRequest};
+use teksilo_core::overlay::{
+    DismissBehavior, OverlayDismissCallback, OverlayLayer, OverlayPlacement, OverlayRequest,
+};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::EventContext;
 use teksilo_core::widget_id::WidgetId;
@@ -29,7 +31,17 @@ pub(crate) struct MenuContext {
     inner: Rc<RefCell<MenuContextInner>>,
     /// Which top-level menu index is open (None = all closed).
     /// Used by MenuBarTrigger to derive bg_color / text_color.
+    ///
+    /// Follows the open menu's overlay: set by [`open_at`](Self::open_at),
+    /// cleared by that overlay's dismissal, whatever closed it. A trigger's
+    /// `expanded` state and its press-to-toggle both read it, so it must
+    /// never say a menu is open when none is, or the reverse.
     pub open_index: Signal<Option<usize>>,
+    /// Bumped by every [`open_at`](Self::open_at). An overlay's dismissal
+    /// clears `open_index` only if no menu was opened after it: reopening
+    /// the open menu dismisses its old overlay *after* the new open has
+    /// claimed `open_index`, and must not have it cleared behind it.
+    open_generation: Rc<Cell<u64>>,
 }
 
 impl MenuContext {
@@ -41,6 +53,7 @@ impl MenuContext {
                 focus_ids: Vec::new(),
             })),
             open_index,
+            open_generation: Rc::new(Cell::new(0)),
         }
     }
 
@@ -97,6 +110,22 @@ impl MenuContext {
 
         ctx.dismiss_all_except_hosts();
         self.open_index.set(Some(index));
+        let generation = self.open_generation.get().wrapping_add(1);
+        self.open_generation.set(generation);
+        // Closed by any route (Escape, an outside press, focus leaving, an
+        // item chosen in a submenu, a sibling menu replacing it), the menu
+        // stops being the open one. Focus leaving was the only route that
+        // used to say so, and it missed a menu closed by choosing an item in
+        // its submenu.
+        let on_dismiss: OverlayDismissCallback = {
+            let open_index = self.open_index.clone();
+            let open_generation = self.open_generation.clone();
+            Rc::new(move |_, _| {
+                if open_generation.get() == generation {
+                    open_index.set(None);
+                }
+            })
+        };
         // Build this menu's content if it has never been opened, before the
         // overlay below is measured against it and focus moves into it. Set
         // `open_index` first — that is the signal the deferred host reveals on.
@@ -109,7 +138,7 @@ impl MenuContext {
             dismiss: DismissBehavior::EscapeOrClickOutside,
             layer: OverlayLayer::InTree,
             parent_overlay: None,
-            on_dismiss: None,
+            on_dismiss: Some(on_dismiss),
             fade_duration: None,
         });
         // Focus the inner MenuList (not the host) so it receives key events

@@ -1555,3 +1555,168 @@ fn sideways_navigate_does_not_orphan_focus() {
         "focus must land in the menu that was just opened, not be left behind"
     );
 }
+
+// ── The open state follows the dropdown ──────────────────────────────
+
+const WINDOW: SizeProposal = SizeProposal {
+    width: Some(800.0),
+    height: Some(600.0),
+};
+
+/// Lay out, let every animation and deferred dismissal finish, lay out again.
+fn settle(t: &mut WidgetTree) {
+    t.layout(WINDOW);
+    t.advance_time(std::time::Duration::from_secs(1));
+    t.layout(WINDOW);
+}
+
+/// Activate the menu item labelled `label` the way a screen reader does.
+fn activate_item(t: &mut WidgetTree, label: &str) {
+    let item = t.find_by_label(label).expect("the item is showing");
+    assert!(t.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(item),
+        teksilo_core::accesskit::Action::Click,
+        None,
+        &mut teksilo_core::window::NoopWindowOps,
+    ));
+    settle(t);
+}
+
+/// Whether focus is in an open menu, which is where opening one puts it,
+/// and that menu holds the item labelled `item`. Independent of the
+/// trigger's `expanded` state, which is what these tests are about.
+fn focus_is_in_menu_holding(t: &WidgetTree, item: &str) -> bool {
+    let Some(menu) = t.focused() else {
+        return false;
+    };
+    t.accessibility_node(menu).role() == Role::Menu
+        && t.find_by_label(item)
+            .is_some_and(|item| t.is_descendant_of(item, menu))
+}
+
+/// Choosing an item in a submenu closes every menu, and the trigger stops
+/// reporting its menu open.
+///
+/// The bar's `open_index` was reset only when focus left an open menu, and
+/// this route closes the menus without that happening. File went on saying
+/// it was expanded with nothing open, and since a press on a trigger toggles
+/// on `open_index`, the next click on File "closed" it and only a second one
+/// opened it (reader finding chrome-v02, which saw it with Alt+F).
+#[test]
+fn choosing_a_submenu_item_leaves_the_trigger_collapsed() {
+    let chosen = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let count = chosen.clone();
+    let mut t = tree_with_window();
+    let mb = t.add(MenuBar::new().menu(lit!("&File"), move || {
+        let count = count.clone();
+        Box::new(
+            MenuList::new()
+                .item(MenuItem::new(lit!("Open")).on_activate_fn(|_| {}))
+                .item(MenuItem::submenu(lit!("Open Recent"), move || {
+                    let count = count.clone();
+                    Box::new(
+                        MenuList::new().item(
+                            MenuItem::new(lit!("document-1.txt"))
+                                .on_activate_fn(move |_| count.set(count.get() + 1)),
+                        ),
+                    )
+                })),
+        )
+    }));
+    settle(&mut t);
+    let file = collect_descendants_with_role(&t, mb, Role::MenuItem)[0];
+
+    t.click(file);
+    settle(&mut t);
+    assert!(
+        focus_is_in_menu_holding(&t, "Open"),
+        "precondition: File is open"
+    );
+    activate_item(&mut t, "Open Recent");
+    activate_item(&mut t, "document-1.txt");
+    assert_eq!(chosen.get(), 1, "precondition: the submenu item ran");
+    assert!(
+        t.active_overlays().is_empty(),
+        "precondition: every menu closed"
+    );
+
+    assert!(
+        !t.accessibility_node(file).is_expanded(),
+        "File no longer reports its menu open"
+    );
+    t.click(file);
+    settle(&mut t);
+    assert!(focus_is_in_menu_holding(&t, "Open"), "one click opens File");
+}
+
+/// Opening the menu that is already open keeps it reported open. The
+/// overlay it replaces is dismissed after the new one has claimed
+/// `open_index`, so that dismissal must not clear it. ArrowRight in a bar
+/// with a single menu wraps round to that menu.
+#[test]
+fn reopening_the_open_menu_keeps_it_reported_open() {
+    let mut t = tree_with_window();
+    let mb = t.add(MenuBar::new().menu(lit!("&File"), || {
+        Box::new(MenuList::new().item(MenuItem::new(lit!("Open")).on_activate_fn(|_| {})))
+    }));
+    settle(&mut t);
+    let file = collect_descendants_with_role(&t, mb, Role::MenuItem)[0];
+
+    t.click(file);
+    settle(&mut t);
+    assert!(
+        focus_is_in_menu_holding(&t, "Open"),
+        "precondition: File is open"
+    );
+
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    settle(&mut t);
+    assert!(
+        focus_is_in_menu_holding(&t, "Open"),
+        "File is open after wrapping round to it"
+    );
+    assert!(
+        t.accessibility_node(file).is_expanded(),
+        "and reports itself open"
+    );
+}
+
+/// Moving the keyboard into a submenu leaves its menu open, and the trigger
+/// goes on reporting it open. A submenu's content is detached, never an arena
+/// descendant of the menu that opened it, so focus entering it leaves the
+/// menu's own list while the menu stays on screen: the open state has to
+/// follow the menu's overlay, not where focus is.
+#[test]
+fn entering_a_submenu_keeps_its_menu_reported_open() {
+    let mut t = tree_with_window();
+    let mb = t.add(MenuBar::new().menu(lit!("&File"), || {
+        Box::new(
+            MenuList::new()
+                .item(MenuItem::submenu(lit!("Open Recent"), || {
+                    Box::new(
+                        MenuList::new()
+                            .item(MenuItem::new(lit!("document-1.txt")).on_activate_fn(|_| {})),
+                    )
+                }))
+                .item(MenuItem::new(lit!("Open")).on_activate_fn(|_| {})),
+        )
+    }));
+    settle(&mut t);
+    let file = collect_descendants_with_role(&t, mb, Role::MenuItem)[0];
+
+    t.click(file);
+    settle(&mut t);
+    // ArrowDown highlights the first row, "Open Recent", and ArrowRight
+    // opens its submenu with focus in it.
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    settle(&mut t);
+    assert!(
+        focus_is_in_menu_holding(&t, "document-1.txt"),
+        "precondition: focus is in the submenu"
+    );
+    assert!(
+        t.accessibility_node(file).is_expanded(),
+        "File reports its menu open while its submenu has focus"
+    );
+}

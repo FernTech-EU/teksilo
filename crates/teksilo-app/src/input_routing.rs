@@ -1210,9 +1210,10 @@ pub(crate) mod tests {
     /// Whether focus is in an open menu, which is where opening one puts it,
     /// and that menu holds the item labelled `item`.
     ///
-    /// The trigger's `expanded` state alone proves nothing: it follows the
-    /// bar's `open_index`, which a menu closed by choosing an item in a
-    /// submenu leaves set with nothing open.
+    /// Focus is the proof, not the trigger's `expanded` state: that state is
+    /// the bar's own account of what is open, and the account is what went
+    /// wrong once already (a menu closed by choosing an item in a submenu was
+    /// still reported open).
     fn focus_is_in_menu_holding(tree: &WidgetTree, item: &str) -> bool {
         let Some(menu) = tree.focused() else {
             return false;
@@ -1269,11 +1270,12 @@ pub(crate) mod tests {
 
     /// Alt+F opens File again after an item chosen in its submenu closed it.
     ///
-    /// Choosing File ▸ Open Recent ▸ document-1.txt closes every menu but
-    /// leaves the bar's `open_index` on File. A menu opened by a press on its
-    /// trigger toggled on that state, so the next Alt+F "closed" a File menu
-    /// that was not open, and only a second one opened it (reader finding
-    /// chrome-v02).
+    /// Choosing File ▸ Open Recent ▸ document-1.txt closed every menu but left
+    /// the bar's `open_index` on File. A menu opened by a press on its trigger
+    /// toggled on that state, so the next Alt+F "closed" a File menu that was
+    /// not open, and only a second one opened it (reader finding chrome-v02).
+    /// Both halves are fixed: Alt+letter expands rather than toggles, and the
+    /// state follows the menu's overlay (`menu_bar` tests pin that half).
     #[test]
     fn alt_letter_opens_its_menu_after_a_submenu_choice() {
         use teksilo_core::accessibility::widget_id_to_node_id;

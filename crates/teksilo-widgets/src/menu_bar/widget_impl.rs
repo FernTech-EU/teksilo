@@ -537,67 +537,49 @@ impl Widget for MenuOverlayHost {
         // Register inner widget as the focus target for this menu index
         self.menu_ctx.set_focus_id(self.menu_index, id);
 
+        // No focus handler: the menu stops being the open one when its overlay
+        // is dismissed (`MenuContext::open_at`'s `on_dismiss`), whatever closed
+        // it, and the framework's focus-out rule
+        // (`dismiss_overlays_left_by_focus`) is one such route. Clearing
+        // `open_index` on `FocusLost` instead was wrong both ways: reopening the
+        // open menu hands focus through the trigger, which cleared the state
+        // the reopen had just set, and choosing an item in a submenu closed the
+        // menus with it still set.
         let menu_ctx = self.menu_ctx.clone();
-        let menu_index = self.menu_index;
-        let handler_set = HandlerSet::new()
-            .on_focus({
-                let menu_ctx = menu_ctx.clone();
-                move |gained: bool, _ctx: &mut EventContext| {
-                    // Focus left this menu, so it is on its way out — record
-                    // that, and nothing more. The dismissal itself belongs to
-                    // the framework's focus-out rule
-                    // (`dismiss_overlays_left_by_focus`), and the trigger gets
-                    // its focus back from the overlay's own `focus_restore`.
-                    //
-                    // Doing either of those *here* was a race: this handler
-                    // fires from inside the `FocusLost` dispatch, i.e. before
-                    // `focus_with_origin_ops` has installed the new target, so
-                    // the `request_focus(trigger)` it used to queue resolved
-                    // first and was then silently overwritten by the very
-                    // `set_focused` that was still in flight — a focus flash
-                    // onto the trigger that no `FocusLost` ever accounted for.
-                    // Keeping only the signal write leaves this side idempotent
-                    // and lets every dismissal path (Escape, click-outside,
-                    // Tab) converge on the same a11y state.
-                    if !gained && menu_ctx.open_index.get() == Some(menu_index) {
-                        menu_ctx.open_index.set(None);
+        let handler_set = HandlerSet::new().on_key({
+            let menu_ctx = menu_ctx.clone();
+            move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                // These keys bubble up from the inner MenuList when it
+                // returns Ignored. Under RTL the bar is laid out
+                // right-to-left, so the previous/next arrows swap.
+                let (left_delta, right_delta) = if ctx.is_rtl() { (1, -1) } else { (-1, 1) };
+                match event {
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowLeft,
+                        ..
+                    } => {
+                        menu_ctx.navigate(left_delta, ctx);
+                        EventResponse::Handled
                     }
-                }
-            })
-            .on_key({
-                let menu_ctx = menu_ctx.clone();
-                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
-                    // These keys bubble up from the inner MenuList when it
-                    // returns Ignored. Under RTL the bar is laid out
-                    // right-to-left, so the previous/next arrows swap.
-                    let (left_delta, right_delta) = if ctx.is_rtl() { (1, -1) } else { (-1, 1) };
-                    match event {
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowLeft,
-                            ..
-                        } => {
-                            menu_ctx.navigate(left_delta, ctx);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyDown {
-                            key: Key::ArrowRight,
-                            ..
-                        } => {
-                            menu_ctx.navigate(right_delta, ctx);
-                            EventResponse::Handled
-                        }
-                        WidgetEvent::KeyDown {
-                            key: Key::Escape, ..
-                        } => {
-                            menu_ctx.close(ctx);
-                            EventResponse::Handled
-                        }
-                        _ => EventResponse::Ignored,
+                    WidgetEvent::KeyDown {
+                        key: Key::ArrowRight,
+                        ..
+                    } => {
+                        menu_ctx.navigate(right_delta, ctx);
+                        EventResponse::Handled
                     }
+                    WidgetEvent::KeyDown {
+                        key: Key::Escape, ..
+                    } => {
+                        menu_ctx.close(ctx);
+                        EventResponse::Handled
+                    }
+                    _ => EventResponse::Ignored,
                 }
-            });
+            }
+        });
         // NOT focusable — the inner MenuList receives focus directly.
-        // ArrowLeft/Right and FocusLost bubble from MenuList through here.
+        // ArrowLeft/Right and Escape bubble from MenuList through here.
         ctx.apply_self_handlers(handler_set);
 
         vec![id]

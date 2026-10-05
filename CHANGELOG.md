@@ -46,6 +46,14 @@ by crate for clarity, not because crates version independently.
   chosen in a submenu closed every menu, the bar still counted its menu as
   open, so the next Alt+letter toggled it shut and only a second one opened
   it. Alt+letter now always opens (reader finding chrome-v02).
+- **A menu bar could report a menu open when none was, or closed while it
+  was open.** The bar's record of its open menu, which a trigger reports as
+  expanded and highlights, was cleared only when focus left the menu. Closed
+  by choosing an item in a submenu, a menu stayed recorded as open, so the
+  next click on its trigger only "closed" it. Reopened while open (ArrowRight
+  in a bar with a single menu), it showed while recorded as closed. The
+  record now follows the menu itself and is cleared when the menu closes,
+  whatever closed it.
 - **F10 and Alt+letter acted on a menu bar behind a modal.** They moved focus
   out of the box onto the bar behind it, and a bar collapsed to its hamburger
   floated over the box with focus on it, in front of the modal. Both keys now

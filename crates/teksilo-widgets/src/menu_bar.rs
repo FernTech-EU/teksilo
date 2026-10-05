@@ -600,9 +600,10 @@ struct MenuBarTrigger {
 // MenuOverlayHost — wraps dropdown content, handles focus + cross-menu keys
 // ---------------------------------------------------------------------------
 
-/// Wraps dropdown menu content (typically a MenuList). Responsibilities:
-/// - Resets `open_index` when focus is lost (overlay dismissed)
-/// - Handles ArrowLeft/Right for cross-menu navigation (bubbles up from MenuList)
+/// Wraps dropdown menu content (typically a MenuList). Handles
+/// ArrowLeft/Right for cross-menu navigation and Escape (both bubble up from
+/// the MenuList). Resetting `open_index` when the menu closes is the menu
+/// overlay's `on_dismiss`, set in `MenuContext::open_at`.
 #[derive(Debug)]
 struct MenuOverlayHost {
     inner: Option<Box<dyn Widget>>,
