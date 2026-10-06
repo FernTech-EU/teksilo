@@ -316,7 +316,7 @@ commits, which is AC20's last clause.
 | AC16 | Met on KWin; Windows and macOS by hand | PR-2's F.5; F.3's X11 run for screenshots of a hidden window. |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
-| AC19 | Met | J.6–J.8, the Avatar cache test, D.27. |
+| AC19 | Met | J.6–J.8, the Avatar cache test, D.27; a picture a culling parent parks frees its texture at the next frame (`c15_a_culled_picture_frees_its_texture_at_the_next_frame`). |
 | AC20 | Met | The executor tests, I.6–I.9, F.3 at scale 1.0 (Wayland) and 1.5 (X11). |
 
 ## 12. Open questions
@@ -330,8 +330,3 @@ commits, which is AC20's last clause.
 - **Aiming at a hidden pixel.** `source` aiming refuses a pixel the fit crops
   out, as specified, but not one an ancestor's box or clip hides. Such a press
   reaches whatever is under it.
-- **Culling and the replayed frame.** A culling parent that parks a child in
-  a pass that marks nothing for paint leaves the child in the replayed frame.
-  `WidgetTree::set_dormant` drops `cached_frame`; the placement-dormancy path
-  does not. Real culling widgets repaint when they re-cull, so nothing in the
-  catalog shows it. This behaviour predates LiveImage.

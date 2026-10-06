@@ -573,6 +573,10 @@ by crate for clarity, not because crates version independently.
   repainted its parent. `EventContext::destroy` took it out of the tree but
   not out of the frame the window replayed, and its parent did not lay out
   again without it. Both happen now.
+- **A child a culling container parked could stay on screen**, and a live
+  picture's texture with it, when nothing else in the pass needed a repaint:
+  a scroll the child handled itself, for one. The window replayed the frame
+  it had, parked child included, until something else repainted.
 
 #### Menus
 

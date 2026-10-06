@@ -894,6 +894,86 @@ fn c15_a_destroyed_widget_leaves_no_quad_and_no_texture() {
     assert_eq!(source.stats().attachments, 0, "and its attachment detached");
 }
 
+/// Parks its one child while `park` is set: a culling container whose
+/// decision no binding watches.
+#[derive(Debug)]
+struct Culler {
+    child: Option<Box<dyn Widget>>,
+    id: Option<WidgetId>,
+    park: Rc<Cell<bool>>,
+}
+
+impl Widget for Culler {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let id = ctx.add_boxed(self.child.take().expect("built once"));
+        self.id = Some(id);
+        vec![id]
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        self.id.into_iter().collect()
+    }
+    fn culls_children(&self) -> bool {
+        true
+    }
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for placement in children.iter_mut() {
+            placement.origin = bounds.origin();
+            placement.size = bounds.size();
+            placement.dormant = self.park.get();
+        }
+    }
+}
+
+#[test]
+fn c15_a_culled_picture_frees_its_texture_at_the_next_frame() {
+    // The picture's own scroll handler asks to be parked, so the pass that
+    // parks it marks nothing else: the frame must still be composed again,
+    // or it replays the picture and its texture stays.
+    let (source, _writer) = live(16, 12);
+    let park = Rc::new(Cell::new(false));
+    let asks = park.clone();
+    let image = LiveImage::new(source.clone())
+        .alt("x")
+        .on_scroll(move |_event, _ctx| {
+            asks.set(true);
+            EventResponse::Handled
+        });
+    let mut tree = tree();
+    tree.add(Culler {
+        child: Some(Box::new(image)),
+        id: None,
+        park,
+    });
+    let mut mirror = LiveImageMirror::new();
+    mirror.set_park_budget(0);
+    tree.layout(SizeProposal::exact(100.0, 100.0));
+    mirror.consume(&tree.render());
+    assert_eq!(mirror.texture_count(), 1);
+
+    tree.dispatch_event(WidgetEvent::scroll_at(
+        ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        Modifiers::NONE,
+        Point::new(50.0, 50.0),
+    ));
+    tree.layout(SizeProposal::exact(100.0, 100.0));
+    let frame = tree.render();
+    assert!(
+        frame.live_images.is_empty(),
+        "the parked picture is not drawn"
+    );
+    mirror.consume(&frame);
+    assert_eq!(mirror.texture_count(), 0, "and its texture went with it");
+}
+
 #[test]
 fn c15_switching_sources_frees_the_old_texture_and_keeps_the_handles_signals() {
     let (first, _a) = live(16, 12);

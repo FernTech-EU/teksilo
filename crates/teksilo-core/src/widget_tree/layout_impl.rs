@@ -812,6 +812,13 @@ impl WidgetTree {
         // not.
         if !culled.is_empty() {
             self.a11y_dirty = true;
+            // The composed frame holds what the walk drew, parked children
+            // included, and a render replays it when no active node is marked
+            // for paint. A pass can end that way: a handled scroll marks only
+            // its target, and the parent may park that very target. Dropping
+            // it is what `set_dormant` and `activate` do; the next render
+            // reassembles the frame from the nodes' own caches.
+            self.cached_frame = None;
             // `revalidate_interaction_state` follows the parks immediately:
             // focus must never survive a pass pointing at a node this just
             // parked, because dispatch rejects inactive targets and a
@@ -2260,6 +2267,111 @@ mod tests {
                 "focus must not point into a subtree this pass parked"
             );
             let _ = id;
+        }
+
+        /// Parks the children whose bit is set in a mask no binding watches,
+        /// so what runs its pass is whatever else needed one: here a child's
+        /// own scroll handler, which writes the mask.
+        #[derive(Debug)]
+        struct ScrollCuller {
+            kids: Vec<WidgetId>,
+            park: Rc<Cell<u64>>,
+        }
+
+        impl Widget for ScrollCuller {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                self.kids = (0..3)
+                    .map(|i| {
+                        let park = self.park.clone();
+                        ctx.add(
+                            FillWidget::new()
+                                .background(teksilo_tokens::Color::RED)
+                                .corner_radius(teksilo_tokens::CornerRadius::uniform(2.0))
+                                .on_scroll(move |_event, _ctx| {
+                                    park.set(1 << i);
+                                    crate::event::EventResponse::Handled
+                                }),
+                        )
+                    })
+                    .collect();
+                self.kids.clone()
+            }
+            fn layout_response(
+                &self,
+                _p: SizeProposal,
+                _c: &crate::widget::LayoutContext,
+            ) -> LayoutResponse {
+                teksilo_canvas::Size::new(100.0, 60.0).into()
+            }
+            fn children(&self) -> Vec<WidgetId> {
+                self.kids.clone()
+            }
+            fn culls_children(&self) -> bool {
+                true
+            }
+            fn place_children(
+                &self,
+                bounds: Rect,
+                _proposal: SizeProposal,
+                children: &mut [WidgetPlacement],
+                _ctx: &crate::widget::LayoutContext,
+            ) {
+                let mask = self.park.get();
+                for placement in children.iter_mut() {
+                    let Some(i) = self.kids.iter().position(|&k| k == placement.id) else {
+                        continue;
+                    };
+                    placement.origin = teksilo_canvas::Point::new(0.0, i as f32 * 20.0);
+                    placement.size = teksilo_canvas::Size::new(bounds.width, 20.0);
+                    placement.dormant = mask & (1 << i) != 0;
+                }
+            }
+        }
+
+        /// The rows the frame draws, by their top edge.
+        fn drawn_rows(frame: &teksilo_canvas::RenderFrame) -> Vec<f32> {
+            frame.shapes.iter().map(|shape| shape.screen[1]).collect()
+        }
+
+        #[test]
+        fn a_child_parked_in_a_pass_that_marked_nothing_for_paint_leaves_the_frame() {
+            // A handled scroll marks its target for layout and nothing else.
+            // When the culling parent then parks that target, the pass ends
+            // with no active node marked for paint, which is the condition
+            // under which a render replays the frame it cached: the parked
+            // child's drawing with it, and a live picture's texture kept for
+            // a widget nothing shows.
+            let park = Rc::new(Cell::new(0));
+            let mut tree = WidgetTree::new();
+            let id = tree.add(ScrollCuller {
+                kids: Vec::new(),
+                park: park.clone(),
+            });
+            tree.layout(SizeProposal::exact(100.0, 60.0));
+            assert_eq!(drawn_rows(&tree.render()), vec![0.0, 20.0, 40.0]);
+            let kids = tree.children(id).to_vec();
+
+            let scroll_over = |tree: &mut WidgetTree, y: f32| {
+                tree.dispatch_event(WidgetEvent::scroll_at(
+                    crate::event::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+                    crate::event::Modifiers::NONE,
+                    teksilo_canvas::Point::new(50.0, y),
+                ));
+                tree.layout(SizeProposal::exact(100.0, 60.0));
+            };
+            scroll_over(&mut tree, 30.0);
+            assert!(!tree.is_active(kids[1]), "the culler parked the middle row");
+            assert_eq!(
+                drawn_rows(&tree.render()),
+                vec![0.0, 40.0],
+                "a parked child is not drawn, whatever marked the pass"
+            );
+
+            // And back: the first row's handler clears the middle row's bit
+            // and parks its own.
+            scroll_over(&mut tree, 10.0);
+            assert!(tree.is_active(kids[1]) && !tree.is_active(kids[0]));
+            assert_eq!(drawn_rows(&tree.render()), vec![20.0, 40.0]);
         }
     }
 }
