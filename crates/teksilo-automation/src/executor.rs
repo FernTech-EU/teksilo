@@ -158,6 +158,8 @@ fn execute_op(
             node,
             dx,
             dy,
+            at,
+            lines,
             ctrl,
             shift,
             alt,
@@ -165,10 +167,32 @@ fn execute_op(
             command,
         } => {
             let update = tree.sync_accessibility();
-            let Some(widget) = resolve_widget(tree, &update, *node) else {
-                return AutomationReply::err(codes::NOT_FOUND, format!("no node {node}"));
+            // Where the wheel turns. Named, it is node-local and converted the
+            // way every node-aimed op converts; unnamed, it is the centre of the
+            // node's resolved bounds, where `right_click` and `drag_node` aim —
+            // the centre of its arena box, which this used to take, is not
+            // where the node is drawn under a transform.
+            let c = match at {
+                Some([x, y]) => {
+                    let widget = match aimable_widget(tree, &update, *node) {
+                        Ok(widget) => widget,
+                        Err(reply) => return reply,
+                    };
+                    tree.local_to_window(widget, Point::new(*x, *y))
+                }
+                None => {
+                    let resolved = teksilo_core::accessibility::audit::logical_bounds(&update);
+                    match node_point(tree, &update, &resolved, *node) {
+                        Some(point) => point,
+                        None => {
+                            return AutomationReply::err(
+                                codes::NOT_FOUND,
+                                format!("no node {node}"),
+                            );
+                        }
+                    }
+                }
             };
-            let c = center(tree.bounds(widget));
             // Route the wheel: hover the target first (scroll dispatches to
             // the hovered/focused widget), then deliver the delta.
             let m = modifiers(*ctrl, *shift, *alt, *meta, *command);
@@ -192,9 +216,21 @@ fn execute_op(
             // only `TouchPan` down the pan-claimant chain, so a programmatic
             // scroll bubbles exactly as a wheel notch does and no pan claimant
             // competes for it.
-            let mut sample =
-                ScrollSample::wheel(ScrollDelta::Pixels { x: *dx, y: *dy }, m, tree.input_now());
-            sample.source = ScrollSource::Programmatic;
+            //
+            // A `lines` scroll is the other thing a wheel reports: a delta in
+            // notches, which a widget turns into rows or text lines itself. It
+            // is a wheel's by construction, so it says `Wheel` — a driver that
+            // scrolls itself counts pixels.
+            let (delta, source) = if *lines {
+                (ScrollDelta::Lines { x: *dx, y: *dy }, ScrollSource::Wheel)
+            } else {
+                (
+                    ScrollDelta::Pixels { x: *dx, y: *dy },
+                    ScrollSource::Programmatic,
+                )
+            };
+            let mut sample = ScrollSample::wheel(delta, m, tree.input_now());
+            sample.source = source;
             tree.dispatch_scroll_with_ops(sample, ops);
             finish_settle(tree, ops, settle)
         }
@@ -203,6 +239,7 @@ fn execute_op(
         AutomationOp::InjectPointer {
             x,
             y,
+            node,
             action,
             button,
             kind,
@@ -215,7 +252,10 @@ fn execute_op(
             meta,
             command,
         } => {
-            let p = Point::new(*x, *y);
+            let p = match aim(tree, *node, *x, *y) {
+                Ok(p) => p,
+                Err(reply) => return reply,
+            };
             let m = modifiers(*ctrl, *shift, *alt, *meta, *command);
             let outcome = match kind {
                 // The pre-touch path: a legacy `PointerDown` / `PointerUp`
@@ -289,6 +329,7 @@ fn execute_op(
                     x: a0.x,
                     y: a0.y,
                     advance_ms: 0,
+                    node: None,
                 },
                 TouchStep {
                     contact: 1,
@@ -296,6 +337,7 @@ fn execute_op(
                     x: b0.x,
                     y: b0.y,
                     advance_ms: 0,
+                    node: None,
                 },
             ];
             for step in 1..=steps {
@@ -308,6 +350,7 @@ fn execute_op(
                     x: a.x,
                     y: a.y,
                     advance_ms: 0,
+                    node: None,
                 });
                 plan.push(TouchStep {
                     contact: 1,
@@ -315,6 +358,7 @@ fn execute_op(
                     x: b.x,
                     y: b.y,
                     advance_ms: 0,
+                    node: None,
                 });
             }
             plan.push(TouchStep {
@@ -323,6 +367,7 @@ fn execute_op(
                 x: a1.x,
                 y: a1.y,
                 advance_ms: 0,
+                node: None,
             });
             plan.push(TouchStep {
                 contact: 1,
@@ -330,6 +375,7 @@ fn execute_op(
                 x: b1.x,
                 y: b1.y,
                 advance_ms: 0,
+                node: None,
             });
             match run_touch_sequence(tree, ops, &plan) {
                 Err(reply) => reply,
@@ -401,8 +447,11 @@ fn execute_op(
             );
             finish_settle(tree, ops, settle)
         }
-        AutomationOp::LongPress { x, y, kind } => {
-            let p = Point::new(*x, *y);
+        AutomationOp::LongPress { x, y, node, kind } => {
+            let p = match aim(tree, *node, *x, *y) {
+                Ok(p) => p,
+                Err(reply) => return reply,
+            };
             // The hold is the *device's* threshold, read off the active input
             // profile rather than written here: the recognizer fires at
             // `>= long_press`, so a script that picked its own number would
@@ -1255,14 +1304,34 @@ fn run_touch_sequence(
             "inject_touch_sequence needs at least one step",
         ));
     }
+    // Every named node is resolved before the first sample, so a sequence
+    // naming one that is absent or synthetic dispatches nothing rather than
+    // leaving the fingers before it down.
+    let targets: Vec<Option<WidgetId>> = if steps.iter().any(|step| step.node.is_some()) {
+        let update = tree.sync_accessibility();
+        steps
+            .iter()
+            .map(|step| {
+                step.node
+                    .map(|node| aimable_widget(tree, &update, node))
+                    .transpose()
+            })
+            .collect::<Result<_, _>>()?
+    } else {
+        vec![None; steps.len()]
+    };
     freeze_clock(tree, ops);
     let mut slots: std::collections::BTreeMap<u32, PointerId> = std::collections::BTreeMap::new();
     let mut reports = Vec::with_capacity(steps.len());
-    for step in steps {
+    for (step, target) in steps.iter().zip(targets) {
         if step.advance_ms > 0 {
             tree.advance_time_with_ops(Duration::from_millis(step.advance_ms), ops);
         }
-        let at = Point::new(step.x, step.y);
+        let local = Point::new(step.x, step.y);
+        let at = match target {
+            Some(widget) => tree.local_to_window(widget, local),
+            None => local,
+        };
         let id = match step.phase {
             TouchPhaseDto::Down => {
                 let id = tree.new_contact();
@@ -1626,6 +1695,59 @@ fn resolve_widget(
     let nid = accesskit::NodeId(node);
     teksilo_core::accessibility::node_id_to_widget_id_maybe(nid)
         .or_else(|| tree.widget_for_synthetic(nid))
+}
+
+/// The widget whose handler space a node-local point is in.
+///
+/// A synthetic node (a scene item, a rich-text run) is refused: it has no
+/// handlers of its own, so a point "local" to it would be local to whatever
+/// its owner's handlers receive — a different frame from the one the caller
+/// measured in, silently. The refusal names the owner to aim at instead.
+fn aimable_widget(
+    tree: &WidgetTree,
+    update: &accesskit::TreeUpdate,
+    node: NodeRef,
+) -> Result<WidgetId, AutomationReply> {
+    let Some(widget) = resolve_widget(tree, update, node) else {
+        return Err(AutomationReply::err(
+            codes::NOT_FOUND,
+            format!("no node {node}"),
+        ));
+    };
+    if teksilo_core::accessibility::is_synthetic(accesskit::NodeId(node)) {
+        return Err(AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            format!(
+                "node {node} is a synthetic accessibility node with no handlers of its own; \
+                 aim inside the widget that owns it (node {}), whose handlers receive the press",
+                node_ref_of(widget)
+            ),
+        ));
+    }
+    Ok(widget)
+}
+
+/// The window point an op sends, from its `x`, `y` and optional `node`.
+///
+/// Without a node the point is window-logical, as it always was. With one it
+/// is local to the node's handler space and goes through
+/// `WidgetTree::local_to_window`, the inverse of the conversion the dispatcher
+/// applies before a handler sees a position: the node's handlers receive
+/// exactly `(x, y)` (to rounding under a rotation), where adding the node's
+/// origin is wrong under a `Scale`, a `Rotate` or a `SceneView`.
+fn aim(
+    tree: &mut WidgetTree,
+    node: Option<NodeRef>,
+    x: f32,
+    y: f32,
+) -> Result<Point, AutomationReply> {
+    let local = Point::new(x, y);
+    let Some(node) = node else {
+        return Ok(local);
+    };
+    let update = tree.sync_accessibility();
+    let widget = aimable_widget(tree, &update, node)?;
+    Ok(tree.local_to_window(widget, local))
 }
 
 fn center(r: Rect) -> Point {

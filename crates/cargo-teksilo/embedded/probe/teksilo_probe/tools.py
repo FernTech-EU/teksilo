@@ -302,6 +302,8 @@ def scroll(
     window_id: int | None = None,
     dx: float | None = None,
     dy: float | None = None,
+    at: Sequence[float] | None = None,
+    lines: bool | None = None,
     ctrl: bool | None = None,
     shift: bool | None = None,
     alt: bool | None = None,
@@ -309,7 +311,9 @@ def scroll(
     command: bool | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Scroll the widget under a node by a pixel delta, with optional modifiers
+    """Scroll the widget under a node by a pixel delta, or by lines with `lines`
+    (a wheel notch's delta, source Wheel), at the node's centre or at `at`
+    ([x, y] node-local), with optional modifiers
     (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture,
     e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator
     (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control.
@@ -321,6 +325,8 @@ def scroll(
         "node": node,
         "dx": dx,
         "dy": dy,
+        "at": at,
+        "lines": lines,
         "ctrl": ctrl,
         "shift": shift,
         "alt": alt,
@@ -337,6 +343,7 @@ def inject_pointer(
     y: float,
     *,
     window_id: int | None = None,
+    node: int | None = None,
     action: str | None = None,
     ctrl: bool | None = None,
     shift: bool | None = None,
@@ -350,20 +357,21 @@ def inject_pointer(
     tilt: Sequence[float] | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Inject a pointer event at a point: action = click (default), double_click,
-    down, up or move; button = primary (default), secondary, middle, back,
-    forward; kind = mouse (default), touch or pen; with optional
-    ctrl/shift/alt/meta/command held for the press and release. A touch or pen
-    enters through the tree's pointer door, so the kind reaches the hit test,
-    the slop, the hover rules and the arbitration; pen carries `pressure`
-    (0..1) and `tilt` ([x, y] degrees). Continue a contact a previous call
-    left down with `pointer_id` from query_pointers (on a move or an up; a
-    down and a click mint their own), or drive a whole gesture with
-    inject_touch_sequence. Use `command` for the platform accelerator (Control
-    on Windows/Linux, Command on macOS) — accelerator-click to extend a
-    selection is `command`, not `ctrl`. Unknown names and unknown fields are
-    refused rather than defaulted, and so are pressure/tilt/pointer_id on a
-    mouse.
+    """Inject a pointer event at a point — window-logical px, or local to `node`,
+    the position that node's own handlers receive (exact under a Scale, Rotate
+    or SceneView): action = click (default), double_click, down, up or move;
+    button = primary (default), secondary, middle, back, forward; kind = mouse
+    (default), touch or pen; with optional ctrl/shift/alt/meta/command held
+    for the press and release. A touch or pen enters through the tree's
+    pointer door, so the kind reaches the hit test, the slop, the hover rules
+    and the arbitration; pen carries `pressure` (0..1) and `tilt` ([x, y]
+    degrees). Continue a contact a previous call left down with `pointer_id`
+    from query_pointers (on a move or an up; a down and a click mint their
+    own), or drive a whole gesture with inject_touch_sequence. Use `command`
+    for the platform accelerator (Control on Windows/Linux, Command on macOS)
+    — accelerator-click to extend a selection is `command`, not `ctrl`.
+    Unknown names and unknown fields are refused rather than defaulted, and so
+    are pressure/tilt/pointer_id on a mouse.
 
     Mutating tool.
     """
@@ -371,6 +379,7 @@ def inject_pointer(
         "window_id": window_id,
         "x": x,
         "y": y,
+        "node": node,
         "action": action,
         "ctrl": ctrl,
         "shift": shift,
@@ -529,13 +538,14 @@ def inject_touch_sequence(
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
     """Drive a whole multi-touch gesture in one call — a list of steps, each
-    naming a finger slot, a phase (down/move/up/cancel), a point, and how many
-    simulated milliseconds to advance first — and report the arbitration after
-    every step: the frozen touch_action, every competitor with its role and
-    state, and the winner. Fingers are named by slot, not by id: identities
-    are minted by the framework and the reply says which one each slot got. A
-    sequence that stops short of its `up` leaves the finger down, which is how
-    a live arbitration stays observable.
+    naming a finger slot, a phase (down/move/up/cancel), a point (window-
+    logical, or local to its `node`), and how many simulated milliseconds to
+    advance first — and report the arbitration after every step: the frozen
+    touch_action, every competitor with its role and state, and the winner.
+    Fingers are named by slot, not by id: identities are minted by the
+    framework and the reply says which one each slot got. A sequence that
+    stops short of its `up` leaves the finger down, which is how a live
+    arbitration stays observable.
 
     Mutating tool.
     """
@@ -620,13 +630,14 @@ def long_press(
     y: float,
     *,
     window_id: int | None = None,
+    node: int | None = None,
     kind: str | None = None,
     settle: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Press at a point, hold for exactly the device's long-press threshold,
-    release. The hold is read off the active input profile for the pointer
-    kind, so the call means 'hold long enough' without the script knowing the
-    number.
+    """Press at a point (window-logical, or local to `node`), hold for exactly
+    the device's long-press threshold, release. The hold is read off the
+    active input profile for the pointer kind, so the call means 'hold long
+    enough' without the script knowing the number.
 
     Mutating tool.
     """
@@ -634,6 +645,7 @@ def long_press(
         "window_id": window_id,
         "x": x,
         "y": y,
+        "node": node,
         "kind": kind,
         "settle": settle,
     }

@@ -406,9 +406,14 @@ pub struct TouchStep {
     pub contact: u32,
     /// What that finger does.
     pub phase: TouchPhaseDto,
-    /// Where, in window-logical coordinates.
+    /// Where: window-logical coordinates, or local to `node` when it is given.
     pub x: f32,
     pub y: f32,
+    /// Aim inside a node instead of the window: with `node`, `x` and `y` are
+    /// node-local logical px, the position the node's own handlers receive.
+    /// A synthetic node (a scene item, a text run) is refused.
+    #[serde(default)]
+    pub node: Option<NodeRef>,
     /// Simulated milliseconds to advance **before** this sample. Default `0`.
     #[serde(default)]
     pub advance_ms: u64,
@@ -714,6 +719,17 @@ pub enum AutomationOp {
         dx: f32,
         #[serde(default)]
         dy: f32,
+        /// Where the wheel turns, node-local logical px — the position the
+        /// node's handlers receive. Default: the centre of the node's bounds,
+        /// transforms included, where `right_click` and `drag_node` aim.
+        #[serde(default)]
+        at: Option<[f32; 2]>,
+        /// Scroll by lines (`ScrollDelta::Lines`), the delta a wheel notch
+        /// reports, rather than by pixels. A line scroll is a wheel's, so its
+        /// source is `ScrollSource::Wheel`; a pixel scroll stays
+        /// `ScrollSource::Programmatic`.
+        #[serde(default)]
+        lines: bool,
         // Modifiers held during the wheel, mirroring `InjectKey`'s. They default
         // to none, so every existing caller keeps the plain-wheel behaviour.
         //
@@ -748,6 +764,14 @@ pub enum AutomationOp {
     InjectPointer {
         x: f32,
         y: f32,
+        /// Aim inside a node instead of the window: with `node`, `x` and `y`
+        /// are node-local logical px, the position the node's own handlers
+        /// receive — exact under a `Scale`, a `Rotate` or a `SceneView` above
+        /// it, where adding the node's origin is not. Without it they are
+        /// window-logical px, as before. A synthetic node (a scene item, a
+        /// text run) has no handlers of its own and is refused.
+        #[serde(default)]
+        node: Option<NodeRef>,
         #[serde(default)]
         action: PointerAction,
         #[serde(default)]
@@ -935,6 +959,14 @@ pub enum AutomationOp {
     LongPress {
         x: f32,
         y: f32,
+        /// Aim inside a node instead of the window: with `node`, `x` and `y`
+        /// are node-local logical px, the position the node's own handlers
+        /// receive — exact under a `Scale`, a `Rotate` or a `SceneView` above
+        /// it, where adding the node's origin is not. Without it they are
+        /// window-logical px, as before. A synthetic node (a scene item, a
+        /// text run) has no handlers of its own and is refused.
+        #[serde(default)]
+        node: Option<NodeRef>,
         /// Which device holds. Default `mouse`.
         #[serde(default)]
         kind: PointerKindDto,

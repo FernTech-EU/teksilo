@@ -151,6 +151,13 @@ pub struct ScrollParams {
     pub node: u64,
     pub dx: Option<f32>,
     pub dy: Option<f32>,
+    /// Where the wheel turns, as [x, y] node-local logical px — the position
+    /// the node's handlers receive. Default: the centre of the node's bounds,
+    /// transforms included.
+    pub at: Option<[f32; 2]>,
+    /// Scroll by lines (a wheel notch's delta, source `Wheel`) rather than by
+    /// pixels (a driver's, source `Programmatic`). Default false.
+    pub lines: Option<bool>,
     /// Modifiers held during the wheel, as for `inject_key`. A modifier-held
     /// wheel is its own gesture — Ctrl+wheel to zoom is why
     /// `WidgetEvent::Scroll` carries modifiers at all — so a probe needs to be
@@ -174,6 +181,12 @@ pub struct InjectPointerParams {
     pub window_id: Option<u64>,
     pub x: f32,
     pub y: f32,
+    /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
+    /// the position the node's own handlers receive — exact under a `Scale`, a
+    /// `Rotate` or a `SceneView`, where adding the node's origin is not.
+    /// Without it they are window-logical px. A synthetic node (a scene item, a
+    /// text run) has no handlers of its own and is refused.
+    pub node: Option<u64>,
     /// click (default), double_click, down, up, or move.
     pub action: Option<String>,
     /// Modifiers held for the press and the release. Ctrl-click to extend a
@@ -219,6 +232,10 @@ pub struct TouchStepParams {
     pub phase: String,
     pub x: f32,
     pub y: f32,
+    /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
+    /// the position the node's own handlers receive. A synthetic node is
+    /// refused.
+    pub node: Option<u64>,
     /// Simulated milliseconds to advance BEFORE this sample. Default 0. This is
     /// what separates a hold from a tap and a flick from a drag; it is
     /// simulated time, so the result is the same on every machine.
@@ -273,6 +290,12 @@ pub struct LongPressParams {
     pub window_id: Option<u64>,
     pub x: f32,
     pub y: f32,
+    /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
+    /// the position the node's own handlers receive — exact under a `Scale`, a
+    /// `Rotate` or a `SceneView`, where adding the node's origin is not.
+    /// Without it they are window-logical px. A synthetic node (a scene item, a
+    /// text run) has no handlers of its own and is refused.
+    pub node: Option<u64>,
     /// mouse (default), touch or pen. The hold is that device's own threshold.
     pub kind: Option<String>,
     pub settle: Option<SettleArg>,
@@ -605,10 +628,12 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Scroll the widget under a node by a pixel delta, with optional modifiers \
-                       (ctrl/shift/alt/meta/command). A modifier-held wheel is its own gesture, \
-                       e.g. Ctrl+wheel to zoom. Use `command` for the platform accelerator \
-                       (Control on Windows/Linux, Command on macOS); `ctrl` is literal Control."
+        description = "Scroll the widget under a node by a pixel delta, or by lines with \
+                       `lines` (a wheel notch's delta), at the node's centre or at `at` ([x, y] \
+                       node-local), with optional modifiers (ctrl/shift/alt/meta/command). A \
+                       modifier-held wheel is its own gesture, e.g. Ctrl+wheel to zoom. Use \
+                       `command` for the platform accelerator (Control on Windows/Linux, Command \
+                       on macOS); `ctrl` is literal Control."
     )]
     pub(crate) async fn scroll(
         &self,
@@ -621,6 +646,8 @@ impl AutomationServer {
                 node: p.node,
                 dx: p.dx.unwrap_or(0.0),
                 dy: p.dy.unwrap_or(0.0),
+                at: p.at,
+                lines: p.lines.unwrap_or(false),
                 ctrl: p.ctrl.unwrap_or(false),
                 shift: p.shift.unwrap_or(false),
                 alt: p.alt.unwrap_or(false),
@@ -633,7 +660,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Inject a pointer event at a point: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted."
+        description = "Inject a pointer event at a point — window-logical px, or local to `node` (the position that node's handlers receive): action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted."
     )]
     pub(crate) async fn inject_pointer(
         &self,
@@ -645,6 +672,7 @@ impl AutomationServer {
             AutomationOp::InjectPointer {
                 x: p.x,
                 y: p.y,
+                node: p.node,
                 action: pointer_action(&p.action)?,
                 button: pointer_button(&p.button)?,
                 kind: pointer_kind(&p.kind)?,
@@ -766,10 +794,11 @@ impl AutomationServer {
 
     #[tool(
         description = "Drive a whole multi-touch gesture in one call and report the arbitration \
-                       after every step. `steps` is a list of {contact?, phase, x, y, advance_ms?}: \
-                       phase is down/move/up/cancel, `contact` names a finger by slot (default 0, \
-                       not a pointer id), and `advance_ms` advances the SIMULATED clock before that \
-                       sample — which is what separates a hold from a tap and a flick from a drag. \
+                       after every step. `steps` is a list of {contact?, phase, x, y, node?, \
+                       advance_ms?}: phase is down/move/up/cancel, `contact` names a finger by slot \
+                       (default 0, not a pointer id), `node` makes x, y local to that node, and \
+                       `advance_ms` advances the SIMULATED clock before that sample — which is \
+                       what separates a hold from a tap and a flick from a drag. \
                        The reply gives, per step, the identity that slot got and that pointer's \
                        whole state: the frozen touch_action, every competitor with its role and \
                        state, and the arbitration winner. A sequence that stops short of its `up` \
@@ -789,6 +818,7 @@ impl AutomationServer {
                 x: step.x,
                 y: step.y,
                 advance_ms: step.advance_ms.unwrap_or(0),
+                node: step.node,
             });
         }
         self.run(
@@ -856,10 +886,10 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Press at a point, hold for exactly the device's long-press threshold, \
-                       release. The hold is read off the active input profile for `kind` \
-                       (mouse/touch/pen), so the call means 'hold long enough' without the script \
-                       knowing the number."
+        description = "Press at a point (window-logical, or local to `node`), hold for exactly \
+                       the device's long-press threshold, release. The hold is read off the active \
+                       input profile for `kind` (mouse/touch/pen), so the call means 'hold long \
+                       enough' without the script knowing the number."
     )]
     pub(crate) async fn long_press(
         &self,
@@ -871,6 +901,7 @@ impl AutomationServer {
             AutomationOp::LongPress {
                 x: p.x,
                 y: p.y,
+                node: p.node,
                 kind: pointer_kind(&p.kind)?,
             },
             settle,
@@ -1094,7 +1125,7 @@ value, toggled/expanded/selected, bounds, and the `actions` it supports. \
 focus, expand, collapse, set_value, increment, decrement, show_context_menu; \
 or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
 `collapse` / `scroll`; or raw input `inject_pointer \
-{x,y,action?,button?,ctrl?,shift?,alt?,meta?,command?}` / `right_click {node}` \
+{x,y,node?,action?,button?,ctrl?,shift?,alt?,meta?,command?}` / `right_click {node}` \
 (opens the node's context menu — the coordinate-free form of a secondary \
 click) / `inject_key {key, text?, phase?, ctrl?,shift?,alt?,meta?,command?}` / \
 `type_ime` / `drag_node`. `type_text` types as a keyboard does — each character \
@@ -1110,6 +1141,13 @@ Windows and Linux and Command on macOS, which is what a shortcut *declared* \
 binding and still reports success, because the key really was injected. `ctrl` \
 stays literal Control, for the chords that genuinely are Control everywhere \
 (Ctrl+Tab).
+
+Aiming. Coordinates are window-logical px, like node bounds. Pass `node` to \
+`inject_pointer`, `long_press` or a touch step and `x`, `y` become local to that \
+node — the position its own handlers receive, exact under a Scale, Rotate or \
+SceneView where bounds.x + x is not. `scroll` turns the wheel at the node's \
+centre or at `at: [x, y]` (node-local), by pixels or, with `lines: true`, by \
+lines as a wheel notch does.
 
 Touch and pen. `inject_pointer` takes `kind` = mouse (default), touch or pen; a \
 touch or pen enters through the tree's pointer door, so the kind reaches the \

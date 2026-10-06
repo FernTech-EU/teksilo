@@ -34,6 +34,8 @@ mod gesture_dispatch_impl;
 mod hit_targeting_tests;
 mod layout_impl;
 #[cfg(test)]
+mod local_frame_tests;
+#[cfg(test)]
 mod modal_tests;
 mod overlay_impl;
 pub mod pan_arbiter;

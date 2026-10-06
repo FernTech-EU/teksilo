@@ -274,15 +274,21 @@ from a plain one, `WidgetEvent::Scroll` carries modifiers precisely so an app
 can implement Ctrl-wheel-to-zoom, so a probe for such a feature must be able
 to send one, not merely a bare wheel.
 
-The sample it injects reports `ScrollSource::Programmatic`, the app scrolled
-itself. A handler that branches on the source (one notch per item for a wheel,
-follow-exactly for a driver) therefore sees a driven scroll for what it is;
-it used to be told `Wheel`, because that is what a source-less legacy scroll
-event lowers to. The *route* is unchanged: only a `TouchPan` walks the pan
-claimants, so a programmatic scroll bubbles from the hovered widget exactly as
-a wheel notch does and no pan claimant competes for it. A probe that wants the
-wheel's own source should turn one, hover the target and inject a real one,
-rather than expect this tool to impersonate hardware.
+The wheel turns at the centre of the node as drawn (the centre of its resolved
+bounds, transforms included, where `right_click` and `drag_node` aim), or at
+`at: [x, y]`, a node-local point: the tool hovers that point first, so the
+widget under it is the one scrolled.
+
+By default the delta is pixels and the sample reports
+`ScrollSource::Programmatic`, the app scrolled itself. A handler that branches
+on the source (one notch per item for a wheel, follow-exactly for a driver)
+therefore sees a driven scroll for what it is; it used to be told `Wheel`,
+because that is what a source-less legacy scroll event lowers to. The *route*
+is the wheel's: only a `TouchPan` walks the pan claimants, so a programmatic
+scroll bubbles from the hovered widget exactly as a wheel notch does and no
+pan claimant competes for it. `lines: true` sends what a wheel notch sends
+instead: a `ScrollDelta::Lines` delta, which the widget turns into rows or text
+lines itself, reported as `ScrollSource::Wheel`.
 
 **Synthetic input**, `inject_pointer`, `right_click`, `inject_key`,
 `type_text`, `type_ime`, `drag_node`, `inject_touch_sequence`, `pinch`,
@@ -299,6 +305,21 @@ because the key really was injected, it just bound to nothing, while
 `command: true` is the same script on all three platforms. `ctrl` stays literal
 Control everywhere, for the chords that genuinely are Control on macOS too
 (Ctrl+Tab, a terminal's Ctrl+C).
+
+**Aiming inside a node.** Every coordinate is window-logical px, like node
+`bounds`. `inject_pointer`, `long_press` and each `inject_touch_sequence` step
+also take `node`: then `x` and `y` are local to that node, the position its
+own handlers receive. The tool sends the press at
+`WidgetTree::local_to_window(node, (x, y))`, the inverse of the conversion the
+dispatcher applies before a handler sees a position, so the handler receives
+exactly `(x, y)`, to rounding under a rotation. Adding the node's
+`bounds.x`/`bounds.y` gives the same point only when no transform sits above the
+node: under a `Scale`, a `Rotate` or inside a `SceneView` it lands somewhere
+else. A synthetic node (a scene item, a text run) has no handlers of its own,
+so a point local to it would be local to its owner's frame instead; it is
+refused with `BAD_ARGUMENT`, naming the owner to aim at. A touch sequence
+resolves every node it names before its first step, so one that is missing
+dispatches nothing.
 
 **`type_text` types as a keyboard does.** Each character is one key pressed and
 released, the press carrying the character as its text:

@@ -178,6 +178,7 @@ fn touch_drag(
     release: bool,
 ) -> Vec<TouchStep> {
     let mut out = vec![TouchStep {
+        node: None,
         contact: 0,
         phase: TouchPhaseDto::Down,
         x: from.0,
@@ -188,6 +189,7 @@ fn touch_drag(
         // A still sample at the press point after the hold: the deadline is
         // reached by the clock, and this is the sample that observes it.
         out.push(TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
             x: from.0,
@@ -198,6 +200,7 @@ fn touch_drag(
     for step in 1..=steps {
         let t = step as f32 / steps as f32;
         out.push(TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
             x: from.0 + by.0 * t,
@@ -210,6 +213,7 @@ fn touch_drag(
     if release {
         let last = out.last().expect("the sequence has a down");
         out.push(TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Up,
             x: last.x,
@@ -244,6 +248,7 @@ fn touch_hold_drag(
 ) -> Vec<TouchStep> {
     let mut out = vec![
         TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Down,
             x: from.0,
@@ -251,6 +256,7 @@ fn touch_hold_drag(
             advance_ms: 0,
         },
         TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
             x: from.0,
@@ -258,6 +264,7 @@ fn touch_hold_drag(
             advance_ms: hold_ms(),
         },
         TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
             x: from.0,
@@ -268,6 +275,7 @@ fn touch_hold_drag(
     for step in 1..=steps {
         let t = step as f32 / steps as f32;
         out.push(TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
             x: from.0,
@@ -277,6 +285,7 @@ fn touch_hold_drag(
     }
     let last = out.last().expect("the sequence has a down");
     out.push(TouchStep {
+        node: None,
         contact: 0,
         phase: TouchPhaseDto::Up,
         x: last.x,
@@ -338,6 +347,7 @@ fn two_fingers_on_the_pad_are_both_reported() {
     let (x, y) = h.centre_of("PointerPad");
     let steps = vec![
         TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Down,
             x: x - 30.0,
@@ -345,6 +355,7 @@ fn two_fingers_on_the_pad_are_both_reported() {
             advance_ms: 0,
         },
         TouchStep {
+            node: None,
             contact: 1,
             phase: TouchPhaseDto::Down,
             x: x + 30.0,

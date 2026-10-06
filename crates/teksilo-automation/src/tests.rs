@@ -12,7 +12,7 @@ use teksilo_core::WidgetTree;
 use teksilo_core::accesskit;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::event::{EventResponse, Key, ScrollDelta, WidgetEvent};
 use teksilo_core::gesture::TapEvent;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
@@ -990,6 +990,7 @@ fn inject_pointer_double_click_is_seen_as_a_double_tap() {
         &mut tree,
         &mut ops,
         &AutomationOp::InjectPointer {
+            node: None,
             x: bounds.x + bounds.width * 0.5,
             y: bounds.y + bounds.height * 0.5,
             action: PointerAction::DoubleClick,
@@ -1029,6 +1030,7 @@ fn inject_pointer_carries_its_modifiers() {
         &mut tree,
         &mut ops,
         &AutomationOp::InjectPointer {
+            node: None,
             x: bounds.x + bounds.width * 0.5,
             y: bounds.y + bounds.height * 0.5,
             action: PointerAction::Click,
@@ -1068,6 +1070,7 @@ fn inject_pointer_click_taps_widget() {
         &mut tree,
         &mut ops,
         &AutomationOp::InjectPointer {
+            node: None,
             x: cx,
             y: cy,
             action: PointerAction::Click,
@@ -1164,6 +1167,8 @@ fn scroll_carries_the_modifiers_it_was_given() {
     let node = node_ref(id);
 
     let mk = |ctrl, shift, alt, meta| AutomationOp::Scroll {
+        at: None,
+        lines: false,
         node,
         dx: 0.0,
         dy: -48.0,
@@ -1223,6 +1228,8 @@ fn command_modifier_is_the_platform_accelerator_and_ctrl_stays_literal() {
     let node = node_ref(id);
 
     let mk = |ctrl, command| AutomationOp::Scroll {
+        at: None,
+        lines: false,
         node,
         dx: 0.0,
         dy: -1.0,
@@ -1280,6 +1287,8 @@ fn scroll_without_modifiers_is_still_a_plain_wheel() {
         &mut tree,
         &mut ops,
         &AutomationOp::Scroll {
+            at: None,
+            lines: false,
             node,
             dx: 0.0,
             dy: 120.0,
@@ -2057,6 +2066,7 @@ fn an_injected_click_reaches_the_callers_window_ops() {
         &mut tree,
         &mut ops,
         &AutomationOp::InjectPointer {
+            node: None,
             x: bounds.center().x,
             y: bounds.center().y,
             action: PointerAction::Click,
@@ -2467,13 +2477,19 @@ impl Widget for InputProbe {
                     teksilo_tokens::PointerKind::Pen(_) => "pen",
                     _ => "mouse",
                 };
-                // `phase:kind:id:pressure:tilt:buttons:primary:stamp`, in that
-                // order and with the timestamp last, so a reader that only
-                // wants the first three fields can split on ':' and index.
+                // `phase:kind:id:pressure:tilt:buttons:primary:position:stamp`,
+                // in that order and with the timestamp last, so a reader that
+                // only wants the first three fields can split on ':' and index.
+                let position = match event {
+                    WidgetEvent::PointerDown { position, .. }
+                    | WidgetEvent::PointerMove { position, .. }
+                    | WidgetEvent::PointerUp { position, .. } => *position,
+                    _ => unreachable!("filtered above"),
+                };
                 record(
                     &pointer_log,
                     format!(
-                        "{phase}:{kind}:id{}:p{}:t{}:b{}:{}:n{}",
+                        "{phase}:{kind}:id{}:p{}:t{}:b{}:{}:at{},{}:n{}",
                         p.id.get(),
                         p.axes
                             .pressure
@@ -2485,13 +2501,26 @@ impl Widget for InputProbe {
                             .unwrap_or_else(|| "-".into()),
                         buttons_tag(p.buttons),
                         if p.primary { "primary" } else { "secondary" },
+                        position.x,
+                        position.y,
                         p.time.as_duration().as_nanos(),
                     ),
                 );
                 EventResponse::Ignored
             })
-            .on_scroll(move |_event, ctx| {
-                record(&scroll_log, format!("scroll:{:?}", ctx.scroll_source()));
+            .on_scroll(move |event, ctx| {
+                // `scroll:source:delta`, the delta as `lines` or `pixels`.
+                let delta = match event {
+                    WidgetEvent::Scroll {
+                        delta: ScrollDelta::Lines { .. },
+                        ..
+                    } => "lines",
+                    _ => "pixels",
+                };
+                record(
+                    &scroll_log,
+                    format!("scroll:{:?}:{delta}", ctx.scroll_source()),
+                );
                 EventResponse::Handled
             })
             .on_pointer_cancel(move |_pointer, reason, _ctx| {
@@ -2607,6 +2636,8 @@ fn scroll_injects_a_programmatic_sample() {
     let reply = run(
         &mut tree,
         &AutomationOp::Scroll {
+            at: None,
+            lines: false,
             node: node_ref(id),
             dx: 0.0,
             dy: -40.0,
@@ -2619,7 +2650,7 @@ fn scroll_injects_a_programmatic_sample() {
     );
     assert!(reply.is_ok(), "scroll ok: {reply:?}");
     assert!(
-        log.get().iter().any(|l| l == "scroll:Programmatic"),
+        log.get().iter().any(|l| l == "scroll:Programmatic:pixels"),
         "an automation scroll must reach the handler as Programmatic: {:?}",
         log.get()
     );
@@ -2651,6 +2682,8 @@ fn a_programmatic_scroll_bubbles_and_no_pan_claimant_competes_for_it() {
     let reply = run(
         &mut tree,
         &AutomationOp::Scroll {
+            at: None,
+            lines: false,
             node: node_ref(inner),
             dx: 0.0,
             dy: -40.0,
@@ -2872,6 +2905,7 @@ fn a_scripted_touch_sequence_reproduces_the_documented_arbitration_row() {
 
     let press = tree.bounds(scroller).center();
     let mut steps = vec![TouchStep {
+        node: None,
         contact: 0,
         phase: TouchPhaseDto::Down,
         x: press.x,
@@ -2880,6 +2914,7 @@ fn a_scripted_touch_sequence_reproduces_the_documented_arbitration_row() {
     }];
     for (dx, dy, _) in &row.steps {
         steps.push(TouchStep {
+            node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
             x: press.x + dx,
@@ -2955,6 +2990,7 @@ fn a_scripted_touch_sequence_reproduces_the_documented_arbitration_row() {
 fn fingers_down(tree: &mut WidgetTree, n: u32) -> TouchSequenceReport {
     let steps: Vec<TouchStep> = (0..n)
         .map(|i| TouchStep {
+            node: None,
             contact: i,
             phase: TouchPhaseDto::Down,
             x: 60.0 + i as f32 * 40.0,
@@ -3065,6 +3101,7 @@ fn a_long_press_holds_for_exactly_the_profiles_threshold() {
     let reply = run(
         &mut tree,
         &AutomationOp::LongPress {
+            node: None,
             x: 200.0,
             y: 150.0,
             kind: PointerKindDto::Touch,
@@ -3099,6 +3136,7 @@ fn an_injected_touch_reaches_the_callers_window_ops() {
         &mut tree,
         &mut ops,
         &AutomationOp::LongPress {
+            node: None,
             x: 200.0,
             y: 150.0,
             kind: PointerKindDto::Touch,
@@ -3207,6 +3245,7 @@ fn inject_pointer_touch_enters_as_a_finger_and_pen_carries_its_axes() {
     let reply = run(
         &mut tree,
         &AutomationOp::InjectPointer {
+            node: None,
             x: 200.0,
             y: 150.0,
             action: PointerAction::Click,
@@ -3233,6 +3272,7 @@ fn inject_pointer_touch_enters_as_a_finger_and_pen_carries_its_axes() {
     let reply = run(
         &mut tree,
         &AutomationOp::InjectPointer {
+            node: None,
             x: 200.0,
             y: 150.0,
             action: PointerAction::Down,
@@ -3265,6 +3305,7 @@ fn pointer_op(
     x: f32,
 ) -> AutomationOp {
     AutomationOp::InjectPointer {
+        node: None,
         x,
         y: 150.0,
         action,
@@ -3382,6 +3423,7 @@ fn an_injected_contact_is_primary_when_the_translator_would_say_so() {
     // contact once both are gone.
     let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe").taking_every_contact());
     let step = |contact, phase, x| TouchStep {
+        node: None,
         contact,
         phase,
         x,
@@ -3487,6 +3529,7 @@ fn a_mouse_refuses_the_three_fields_it_cannot_carry() {
     // who wrote it believed they had said something.
     let (mut tree, _id, _log) = laid_out_probe(InputProbe::new("probe"));
     let base = |pointer_id, pressure, tilt| AutomationOp::InjectPointer {
+        node: None,
         x: 200.0,
         y: 150.0,
         action: PointerAction::Click,
@@ -3522,6 +3565,7 @@ fn a_touch_step_that_moves_a_finger_that_is_not_down_is_refused() {
         &mut tree,
         &AutomationOp::InjectTouchSequence {
             steps: vec![TouchStep {
+                node: None,
                 contact: 0,
                 phase: TouchPhaseDto::Move,
                 x: 10.0,
@@ -3565,6 +3609,7 @@ fn a_touch_sequence_advances_the_clock_by_exactly_what_its_steps_asked_for() {
         &AutomationOp::InjectTouchSequence {
             steps: vec![
                 TouchStep {
+                    node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Down,
                     x: 200.0,
@@ -3572,6 +3617,7 @@ fn a_touch_sequence_advances_the_clock_by_exactly_what_its_steps_asked_for() {
                     advance_ms: 0,
                 },
                 TouchStep {
+                    node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Move,
                     x: 200.0,
@@ -3579,6 +3625,7 @@ fn a_touch_sequence_advances_the_clock_by_exactly_what_its_steps_asked_for() {
                     advance_ms: 30,
                 },
                 TouchStep {
+                    node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Up,
                     x: 200.0,
@@ -3678,6 +3725,7 @@ fn every_new_op_round_trips_through_json() {
     let ops = vec![
         AutomationOp::InjectTouchSequence {
             steps: vec![TouchStep {
+                node: None,
                 contact: 1,
                 phase: TouchPhaseDto::Cancel,
                 x: 1.0,
@@ -3704,6 +3752,7 @@ fn every_new_op_round_trips_through_json() {
             over_ms: 120,
         },
         AutomationOp::LongPress {
+            node: None,
             x: 1.0,
             y: 2.0,
             kind: PointerKindDto::Pen,
@@ -3753,6 +3802,7 @@ fn a_touch_sequence_stamps_every_sample_on_the_simulated_clock() {
         &AutomationOp::InjectTouchSequence {
             steps: vec![
                 TouchStep {
+                    node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Down,
                     x: 200.0,
@@ -3760,6 +3810,7 @@ fn a_touch_sequence_stamps_every_sample_on_the_simulated_clock() {
                     advance_ms: 0,
                 },
                 TouchStep {
+                    node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Move,
                     x: 200.0,
@@ -3767,6 +3818,7 @@ fn a_touch_sequence_stamps_every_sample_on_the_simulated_clock() {
                     advance_ms: 0,
                 },
                 TouchStep {
+                    node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Move,
                     x: 200.0,
@@ -3800,6 +3852,7 @@ fn a_move_that_could_mean_either_of_two_fingers_is_refused_and_an_id_resolves_it
     let target = report.live[1].pointer_id;
 
     let ambiguous = |pointer_id| AutomationOp::InjectPointer {
+        node: None,
         x: 300.0,
         y: 200.0,
         action: PointerAction::Move,
@@ -3849,6 +3902,7 @@ fn a_click_and_a_down_mint_their_own_contact_and_refuse_to_be_told_one() {
     let report = fingers_down(&mut tree, 1);
     let live_id = report.live[0].pointer_id;
     let op = |action| AutomationOp::InjectPointer {
+        node: None,
         x: 200.0,
         y: 150.0,
         action,
@@ -3889,6 +3943,7 @@ fn a_pen_keeps_one_identity_across_a_lift_and_hovers_after_it() {
     // samples spanning a lift must all be the same pointer.
     let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe"));
     let pen = |action, x: f32| AutomationOp::InjectPointer {
+        node: None,
         x,
         y: 150.0,
         action,
@@ -3942,6 +3997,7 @@ fn a_pen_keeps_one_identity_across_a_lift_and_hovers_after_it() {
         run(
             &mut tree,
             &AutomationOp::LongPress {
+                node: None,
                 x: 260.0,
                 y: 150.0,
                 kind: PointerKindDto::Pen,
@@ -3986,6 +4042,7 @@ fn a_pen_op_addresses_the_live_stylus_whatever_tool_it_reports() {
     let reply = run(
         &mut tree,
         &AutomationOp::InjectPointer {
+            node: None,
             x: 220.0,
             y: 150.0,
             action: PointerAction::Move,
@@ -4008,5 +4065,421 @@ fn a_pen_op_addresses_the_live_stylus_whatever_tool_it_reports() {
             .iter()
             .any(|l| l.starts_with("move:pen:") && l.contains(&format!(":id{}:", id.get()))),
         "and the move must address it: {moved:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Aiming inside a node (spec I.4, I.5)
+// ---------------------------------------------------------------------------
+
+/// Which transform [`Framed`] puts over the probe.
+#[derive(Debug, Clone, Copy)]
+enum Over {
+    Nothing,
+    /// A self transform scaling about the frame's centre, as `Scale` does.
+    Scale(f32),
+    /// A self transform rotating about the frame's centre, as `Rotate` does.
+    Rotate(f32),
+    /// A content transform shaped like a `SceneView`'s view transform: pan,
+    /// zoom, then the viewport's origin (fixed at (300, 200) by [`Placed`]).
+    Scene,
+}
+
+fn scene_view_transform() -> teksilo_canvas::Transform2D {
+    use teksilo_canvas::Transform2D;
+    Transform2D::translate(-5.0, 2.0)
+        .then(&Transform2D::scale(1.5, 1.5))
+        .then(&Transform2D::translate(300.0, 200.0))
+}
+
+/// Places its one child inset by 10 dp (at scene (10, 10) under
+/// [`Over::Scene`], where content is in its own coordinates), under a
+/// transform of `over`. Restated from teksilo-core's own frame tests for the
+/// reason [`Leaf`] is: the seam is `BuildContext`, which this crate has.
+#[derive(Debug)]
+struct Framed {
+    over: Over,
+    child: WidgetId,
+    transform: Option<Signal<teksilo_canvas::Transform2D>>,
+}
+
+impl Widget for Framed {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let id = ctx.self_id();
+        match self.over {
+            Over::Nothing => {}
+            Over::Scene => ctx.set_content_transform(id, scene_view_transform()),
+            Over::Scale(_) | Over::Rotate(_) => {
+                let signal = ctx.signal(teksilo_canvas::Transform2D::IDENTITY);
+                ctx.set_transform(id, signal.clone());
+                self.transform = Some(signal);
+            }
+        }
+        vec![self.child]
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        use teksilo_canvas::Transform2D;
+        if let Some(signal) = &self.transform {
+            let c = bounds.center();
+            let about_centre = |t: Transform2D| {
+                Transform2D::translate(-c.x, -c.y)
+                    .then(&t)
+                    .then(&Transform2D::translate(c.x, c.y))
+            };
+            signal.set(match self.over {
+                Over::Scale(s) => about_centre(Transform2D::scale(s, s)),
+                Over::Rotate(a) => about_centre(Transform2D::rotate(a)),
+                Over::Nothing | Over::Scene => Transform2D::IDENTITY,
+            });
+        }
+        for child in children.iter_mut() {
+            child.origin = match self.over {
+                Over::Scene => teksilo_canvas::Point::new(10.0, 10.0),
+                _ => teksilo_canvas::Point::new(bounds.x + 10.0, bounds.y + 10.0),
+            };
+            child.size = teksilo_canvas::Size::new(bounds.width - 20.0, bounds.height - 20.0);
+        }
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+}
+
+/// Places its one child at (300, 200), 200×140: away from the window's
+/// origin, where a missing origin term vanishes, with room for a 2× scale.
+#[derive(Debug)]
+struct Placed {
+    child: WidgetId,
+}
+
+impl Widget for Placed {
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn place_children(
+        &self,
+        _bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = teksilo_canvas::Point::new(300.0, 200.0);
+            child.size = teksilo_canvas::Size::new(200.0, 140.0);
+        }
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+}
+
+/// An 800×600 tree with a probe under a transform of `over`: the tree, the
+/// probe's node and its log.
+fn framed_probe(over: Over) -> (WidgetTree, NodeRef, Signal<Vec<String>>) {
+    let probe = InputProbe::new("framed").taking_every_contact();
+    let log = probe.log();
+    let mut tree = WidgetTree::new();
+    let probe = tree.add(probe);
+    let framed = tree.add(Framed {
+        over,
+        child: probe,
+        transform: None,
+    });
+    tree.add(Placed { child: framed });
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    // The frame publishes its transform from layout; a second pass lays out
+    // against it, as the next real frame would.
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    (tree, node_ref(probe), log)
+}
+
+/// The position each logged sample of `phase` arrived at.
+fn positions(log: &[String], phase: &str) -> Vec<teksilo_canvas::Point> {
+    log.iter()
+        .filter(|line| line.split(':').next() == Some(phase))
+        .map(|line| {
+            let field = line.split(':').nth(7).expect("a position field");
+            let (x, y) = field
+                .strip_prefix("at")
+                .and_then(|xy| xy.split_once(','))
+                .expect("at<x>,<y>");
+            teksilo_canvas::Point::new(x.parse().expect("x"), y.parse().expect("y"))
+        })
+        .collect()
+}
+
+fn near(a: teksilo_canvas::Point, x: f32, y: f32) -> bool {
+    (a.x - x).abs() < 1e-3 && (a.y - y).abs() < 1e-3
+}
+
+const OVERS: [Over; 4] = [
+    Over::Nothing,
+    Over::Scale(2.0),
+    Over::Rotate(std::f32::consts::FRAC_PI_2),
+    Over::Scene,
+];
+
+/// Spec I.5. `inject_pointer {node, x: 12.5, y: 7}` reaches the node's handler
+/// at (12.5, 7): exactly with no transform and under a power-of-two scale, to
+/// rounding under a rotation and inside a scene. A press aimed at
+/// `bounds.x + x`, the only way before, lands elsewhere under all three.
+#[test]
+fn inject_pointer_aimed_at_a_node_lands_at_its_local_point() {
+    for over in OVERS {
+        let (mut tree, node, log) = framed_probe(over);
+        let mut op = pointer_op(
+            PointerKindDto::Mouse,
+            PointerAction::Click,
+            PointerButtonDto::Primary,
+            12.5,
+        );
+        if let AutomationOp::InjectPointer { y, node: n, .. } = &mut op {
+            *y = 7.0;
+            *n = Some(node);
+        }
+        let reply = run(&mut tree, &op);
+        assert!(reply.is_ok(), "{over:?}: {reply:?}");
+        let downs = positions(&log.get(), "down");
+        assert_eq!(downs.len(), 1, "{over:?}: one press: {:?}", log.get());
+        assert!(near(downs[0], 12.5, 7.0), "{over:?}: {:?}", downs[0]);
+        if matches!(over, Over::Nothing | Over::Scale(_)) {
+            assert_eq!(
+                downs[0],
+                teksilo_canvas::Point::new(12.5, 7.0),
+                "{over:?}: exact where the arithmetic is"
+            );
+        }
+    }
+}
+
+/// The same aiming for the two other ops that take a point: `long_press` and
+/// each step of `inject_touch_sequence`.
+#[test]
+fn long_press_and_touch_steps_aim_at_a_nodes_local_point() {
+    for over in OVERS {
+        let (mut tree, node, log) = framed_probe(over);
+        let reply = run(
+            &mut tree,
+            &AutomationOp::LongPress {
+                x: 40.0,
+                y: 30.0,
+                node: Some(node),
+                kind: PointerKindDto::Touch,
+            },
+        );
+        assert!(reply.is_ok(), "{over:?}: {reply:?}");
+        let held = positions(&log.get(), "down");
+        assert!(
+            held.len() == 1 && near(held[0], 40.0, 30.0),
+            "{over:?}: {held:?}"
+        );
+
+        let (mut tree, node, log) = framed_probe(over);
+        let step = |phase, x, y| TouchStep {
+            contact: 0,
+            phase,
+            x,
+            y,
+            advance_ms: 0,
+            node: Some(node),
+        };
+        let reply = run(
+            &mut tree,
+            &AutomationOp::InjectTouchSequence {
+                steps: vec![
+                    step(TouchPhaseDto::Down, 20.0, 15.0),
+                    step(TouchPhaseDto::Move, 60.0, 45.0),
+                    step(TouchPhaseDto::Up, 60.0, 45.0),
+                ],
+            },
+        );
+        assert!(reply.is_ok(), "{over:?}: {reply:?}");
+        let seen = log.get();
+        let downs = positions(&seen, "down");
+        let ups = positions(&seen, "up");
+        assert!(
+            downs.len() == 1 && near(downs[0], 20.0, 15.0),
+            "{over:?}: {seen:?}"
+        );
+        assert!(
+            ups.len() == 1 && near(ups[0], 60.0, 45.0),
+            "{over:?}: {seen:?}"
+        );
+    }
+}
+
+/// Spec I.4. `scroll {at: [10, 20], lines: true}` hovers the node at local
+/// (10, 20) and delivers a line delta — a wheel's, so its source says `Wheel`.
+#[test]
+fn scroll_at_a_local_point_by_lines() {
+    for over in OVERS {
+        let (mut tree, node, log) = framed_probe(over);
+        let reply = run(
+            &mut tree,
+            &AutomationOp::Scroll {
+                node,
+                dx: 0.0,
+                dy: -3.0,
+                at: Some([10.0, 20.0]),
+                lines: true,
+                ctrl: false,
+                shift: false,
+                alt: false,
+                meta: false,
+                command: false,
+            },
+        );
+        assert!(reply.is_ok(), "{over:?}: {reply:?}");
+        let seen = log.get();
+        let moves = positions(&seen, "move");
+        assert!(
+            moves.len() == 1 && near(moves[0], 10.0, 20.0),
+            "{over:?}: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|l| l == "scroll:Wheel:lines"),
+            "{over:?}: {seen:?}"
+        );
+    }
+}
+
+/// Without `at`, the wheel turns at the centre of the node as drawn — under a
+/// transform too, where the centre of its untransformed box is elsewhere.
+#[test]
+fn scroll_without_a_point_turns_at_the_nodes_drawn_centre() {
+    for over in OVERS {
+        let (mut tree, node, log) = framed_probe(over);
+        let reply = run(
+            &mut tree,
+            &AutomationOp::Scroll {
+                node,
+                dx: 0.0,
+                dy: -40.0,
+                at: None,
+                lines: false,
+                ctrl: false,
+                shift: false,
+                alt: false,
+                meta: false,
+                command: false,
+            },
+        );
+        assert!(reply.is_ok(), "{over:?}: {reply:?}");
+        let seen = log.get();
+        let moves = positions(&seen, "move");
+        // The probe is 180×120 in its own space.
+        assert!(
+            moves.len() == 1 && near(moves[0], 90.0, 60.0),
+            "{over:?}: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|l| l == "scroll:Programmatic:pixels"),
+            "{over:?}: {seen:?}"
+        );
+    }
+}
+
+/// A probe whose accessibility node carries one synthetic child, as a label's
+/// text runs or a scene's items do.
+#[derive(Debug)]
+struct WithSyntheticChild;
+
+impl Widget for WithSyntheticChild {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn accessibility(&self, builder: &mut teksilo_core::AccessNodeBuilder) {
+        builder.set_role(accesskit::Role::Document);
+        builder.set_name("owner".to_string());
+        builder.push_paragraph_child(1);
+    }
+}
+
+/// A point local to a synthetic node would be local to its owner's handlers,
+/// a frame the caller did not measure in, so aiming at one is refused — with
+/// the owner named — and nothing is dispatched. An absent node is not found.
+#[test]
+fn aiming_at_a_synthetic_or_absent_node_is_refused() {
+    let mut tree = WidgetTree::new();
+    let owner = tree.add(WithSyntheticChild);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let update = tree.sync_accessibility();
+    let synthetic = update
+        .nodes
+        .iter()
+        .map(|(id, _)| *id)
+        .find(|id| teksilo_core::accessibility::is_synthetic(*id))
+        .expect("the paragraph child is in the tree")
+        .0;
+
+    let mut op = pointer_op(
+        PointerKindDto::Mouse,
+        PointerAction::Click,
+        PointerButtonDto::Primary,
+        5.0,
+    );
+    if let AutomationOp::InjectPointer { node, .. } = &mut op {
+        *node = Some(synthetic);
+    }
+    match run(&mut tree, &op) {
+        AutomationReply::Err { code, message } => {
+            assert_eq!(code, codes::BAD_ARGUMENT);
+            assert!(
+                message.contains(&node_ref(owner).to_string()),
+                "the refusal names the owner: {message}"
+            );
+        }
+        other => panic!("expected BAD_ARGUMENT, got {other:?}"),
+    }
+
+    // A sequence naming an absent node dispatches none of its steps.
+    let (mut tree, node, log) = framed_probe(Over::Nothing);
+    let reply = run(
+        &mut tree,
+        &AutomationOp::InjectTouchSequence {
+            steps: vec![
+                TouchStep {
+                    contact: 0,
+                    phase: TouchPhaseDto::Down,
+                    x: 10.0,
+                    y: 10.0,
+                    advance_ms: 0,
+                    node: Some(node),
+                },
+                TouchStep {
+                    contact: 1,
+                    phase: TouchPhaseDto::Down,
+                    x: 10.0,
+                    y: 10.0,
+                    advance_ms: 0,
+                    node: Some(999_999),
+                },
+            ],
+        },
+    );
+    match reply {
+        AutomationReply::Err { code, .. } => assert_eq!(code, codes::NOT_FOUND),
+        other => panic!("expected NOT_FOUND, got {other:?}"),
+    }
+    assert!(
+        log.get().is_empty(),
+        "nothing was dispatched: {:?}",
+        log.get()
+    );
+    assert!(
+        query_pointers(&mut tree).is_empty(),
+        "and no finger was left down"
     );
 }

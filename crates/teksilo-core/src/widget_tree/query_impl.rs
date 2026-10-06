@@ -14,6 +14,38 @@ impl WidgetTree {
         self.arena.bounds(id)
     }
 
+    /// The point `id`'s handlers receive for a window-logical point: the
+    /// conversion the dispatcher applies to every pointer position before a
+    /// handler of `id` sees it, transform scopes above and on `id` undone.
+    ///
+    /// For most widgets that is relative to the widget's top-left. A widget
+    /// that owns a content transform (a `SceneView`) maps its content itself,
+    /// so its handlers receive its parent's space instead, and so does this.
+    /// With no transform anywhere above `id` it is `window_point` minus the
+    /// widget's origin.
+    ///
+    /// The window-logical positions a handler is handed as such —
+    /// [`WidgetEvent::Scroll`]'s and [`WidgetEvent::PointerCancel`]'s
+    /// `window_position`, [`EventContext::coalesced`](crate::widget::EventContext::coalesced) —
+    /// convert inside the handler with
+    /// [`EventContext::to_local`](crate::widget::EventContext::to_local).
+    pub fn window_to_local(&self, id: WidgetId, window_point: Point) -> Point {
+        self.arena.local_pointer_position(id, window_point)
+    }
+
+    /// The window-logical point whose position for `id`'s handlers is
+    /// `local`: the inverse of [`window_to_local`](Self::window_to_local).
+    ///
+    /// What aims input at a point inside a widget, exact under a `Scale`, a
+    /// `Rotate` or a `SceneView` where adding the widget's origin is not:
+    /// a press sent at `local_to_window(id, p)` reaches `id`'s handlers at `p`
+    /// (to rounding). Where a transform above `id` is singular the subtree is
+    /// collapsed and nothing can aim inside it; both conversions then apply no
+    /// transform, as the dispatcher does, and stay each other's inverse.
+    pub fn local_to_window(&self, id: WidgetId, local: Point) -> Point {
+        self.arena.local_frame(id).to_window(local)
+    }
+
     /// Last known position of the **primary** pointer, refreshed by
     /// every positioned event (`PointerDown` / `PointerMove` /
     /// `PointerUp`) rather than by moves alone. Used by the

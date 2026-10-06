@@ -1418,7 +1418,7 @@ impl WidgetTree {
         event: &WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
-        let localized = self.localize_event(id, event);
+        let localized = Self::localize_event(&self.arena.local_frame(id), event);
         let event = localized.as_ref().unwrap_or(event);
         let cx = self.recognizer_context(id);
         let raw = match event {

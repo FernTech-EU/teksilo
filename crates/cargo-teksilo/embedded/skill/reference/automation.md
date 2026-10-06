@@ -109,6 +109,13 @@ you can see. Headless is always `1.0`.
 drag-and-drop, `right_click {node}` to open a context menu, and the raw input
 tools `inject_pointer` / `inject_key` / `type_text` / `type_ime`.
 
+**Aim inside a node, not at its corner plus an offset.** `inject_pointer`,
+`long_press` and each touch step take `node`: then `x`, `y` are local to that
+node — the position its handlers receive — and stay exact under a `Scale`, a
+`Rotate` or a `SceneView`, where `bounds.x + x` does not. `scroll` turns at the
+node's centre, or at `at: [x, y]` (node-local), by pixels or with `lines: true`
+by lines, as a wheel notch does.
+
 `type_text` types as a keyboard does: each character is a key pressed and
 released, a letter as its named key (Shift for a capital), a space, line break
 and tab as Space, Enter and Tab. So shortcuts fire as they would for a user, and

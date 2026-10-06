@@ -84,6 +84,12 @@ by crate for clarity, not because crates version independently.
 - `WidgetTree::type_text_with_ops`: `type_text` over the caller's window
   operations, the one door the automation bridge and `WidgetTree::type_text`
   both type through.
+- `WidgetTree::window_to_local` and `WidgetTree::local_to_window`: the point a
+  widget's handlers receive for a window point, the conversion the dispatcher
+  applies, and its inverse, which aims input at a point inside a widget under a
+  `Scale`, a `Rotate` or a `SceneView`. `EventContext::to_local` is the same
+  conversion inside a handler, for the positions it is handed in window space:
+  `Scroll` and `PointerCancel`'s `window_position`, `coalesced()` samples.
 
 #### Widgets
 
@@ -99,6 +105,12 @@ by crate for clarity, not because crates version independently.
   `down` or `up`), so a key can be held across calls. It also names `Insert`,
   `F13` to `F24` and the context-menu key (`insert` / `Ins`, `f13`..`f24`,
   `contextmenu` / `Menu`), which it refused before.
+- `inject_pointer`, `long_press` and each `inject_touch_sequence` step take
+  `node`, which makes `x` and `y` local to that node: the position its own
+  handlers receive, exact under any transform above it.
+- `scroll` takes `at`, the node-local point the wheel turns at, and `lines`,
+  which scrolls by lines as a wheel notch does (`ScrollSource::Wheel`) rather
+  than by pixels.
 
 #### Render
 
@@ -203,6 +215,9 @@ by crate for clarity, not because crates version independently.
   text. A letter shortcut now fires on typed text as it would for a user, and
   a Tab typed into a field that does not take one moves focus; text that must
   arrive without keys goes through `type_ime`.
+- `scroll` without `at` turns the wheel at the centre of the node as drawn.
+  It took the centre of the node's untransformed box, which under a `Scale`,
+  a `Rotate` or inside a `SceneView` is somewhere else.
 
 ### Deprecated
 
