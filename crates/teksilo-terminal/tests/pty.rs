@@ -176,3 +176,29 @@ fn input_reaches_the_child_and_its_reply_comes_back() {
         "the child exits, and its output ends"
     );
 }
+
+/// A synchronized update the child begins and never ends is held back, with
+/// a deadline, until the view ends it.
+#[test]
+fn a_synchronized_update_is_held_until_it_ends() {
+    let mut spawned = AlacrittyEngineFactory
+        .spawn(&sh("sleep 20"), PtyGeom::new(80, 24, 0, 0), 100)
+        .expect("spawn sh");
+    let row = |engine: &dyn teksilo_terminal::TerminalEngine| -> String {
+        engine.snapshot().cells[..20]
+            .iter()
+            .map(|cell| cell.ch)
+            .collect()
+    };
+    spawned.engine.advance(b"\x1b[?2026hheld back");
+    assert!(!row(spawned.engine.as_ref()).contains("held back"), "held");
+    let deadline = spawned
+        .engine
+        .synchronized_update_deadline()
+        .expect("a deadline while held");
+    assert!(deadline > Instant::now());
+    spawned.engine.end_synchronized_update();
+    assert!(row(spawned.engine.as_ref()).contains("held back"), "shown");
+    assert_eq!(spawned.engine.synchronized_update_deadline(), None);
+    spawned.engine.kill();
+}

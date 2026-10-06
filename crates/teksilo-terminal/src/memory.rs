@@ -70,6 +70,13 @@ pub struct MemoryShared {
     /// How long each `advance` takes, so a test can make parsing slow.
     #[cfg(test)]
     pub(crate) advance_delay: Option<std::time::Duration>,
+    /// The deadline the engine reports for a synchronized update it holds,
+    /// cleared by `end_synchronized_update`, which counts in
+    /// `synchronized_updates_ended`.
+    #[cfg(test)]
+    pub(crate) synchronized_update: Option<std::time::Instant>,
+    #[cfg(test)]
+    pub(crate) synchronized_updates_ended: u32,
     /// The current scrollback display offset the engine reports.
     pub display_offset: usize,
     /// The scrollback length the engine reports.
@@ -217,6 +224,18 @@ impl TerminalEngine for MemoryEngine {
     fn poll_exit(&mut self) -> Option<TerminalExit> {
         self.shared.borrow().exit
     }
+    #[cfg(test)]
+    fn synchronized_update_deadline(&self) -> Option<std::time::Instant> {
+        self.shared.borrow().synchronized_update
+    }
+
+    #[cfg(test)]
+    fn end_synchronized_update(&mut self) {
+        let mut shared = self.shared.borrow_mut();
+        shared.synchronized_update = None;
+        shared.synchronized_updates_ended += 1;
+    }
+
     fn kill(&mut self) {
         self.shared.borrow_mut().killed = true;
         // A killed child prints nothing more: the reader sees the end.

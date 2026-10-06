@@ -107,6 +107,9 @@ pub(crate) struct TerminalState {
 
     /// Timestamp of the last bell, for the visual-bell flash.
     pub(crate) bell_flash: Option<Instant>,
+    /// When the engine shows the synchronized update it holds back, if it
+    /// holds one: the frame step asks for a pull then.
+    pub(crate) sync_deadline: Option<Instant>,
     /// The owner's frame-request handle (set at build), so the visual bell and
     /// cursor blink can schedule follow-up frames.
     pub(crate) frame_request: Option<std::rc::Rc<std::cell::Cell<bool>>>,
@@ -153,6 +156,7 @@ impl TerminalState {
             prev_cursor_line: 0,
             exit_reported: false,
             bell_flash: None,
+            sync_deadline: None,
             frame_request: None,
             wake_at: None,
         }
@@ -239,6 +243,16 @@ pub(crate) fn drain_and_advance(state: &mut TerminalState) -> DrainResult {
     // lands after this take asks for a fresh pull.
     let started = Instant::now();
     let mut content_changed = false;
+    // A synchronized update the child never ended is shown once its deadline
+    // has passed (the frame step asks for this pull then).
+    if let Some(engine) = state.engine.as_mut()
+        && engine
+            .synchronized_update_deadline()
+            .is_some_and(|deadline| deadline <= started)
+    {
+        engine.end_synchronized_update();
+        content_changed = true;
+    }
     let (eof, more) = loop {
         let taken = state.reader.take_up_to(PULL_CHUNK);
         if !taken.bytes.is_empty()
@@ -261,6 +275,13 @@ pub(crate) fn drain_and_advance(state: &mut TerminalState) -> DrainResult {
     }
     if content_changed {
         state.refresh_snapshot();
+    }
+    state.sync_deadline = state
+        .engine
+        .as_ref()
+        .and_then(|engine| engine.synchronized_update_deadline());
+    if let Some(deadline) = state.sync_deadline {
+        state.schedule_wake(deadline);
     }
 
     DrainResult {

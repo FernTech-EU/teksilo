@@ -394,6 +394,22 @@ pub trait TerminalEngine {
 
     /// Terminate the child process (SIGKILL / TerminateProcess).
     fn kill(&mut self);
+
+    /// When output the engine is holding back must be shown anyway, `None`
+    /// while it holds nothing back. A synchronized update (DEC private mode
+    /// 2026) the child begins is held until the child ends it; a child that
+    /// never does (it crashed, or was killed, mid-frame) would hide what it
+    /// printed, so the view calls
+    /// [`end_synchronized_update`](Self::end_synchronized_update) once this
+    /// passes. The default holds nothing back.
+    fn synchronized_update_deadline(&self) -> Option<std::time::Instant> {
+        None
+    }
+
+    /// Show what a synchronized update holds back, its deadline having
+    /// passed, and queue the events it produces for
+    /// [`drain_events`](Self::drain_events).
+    fn end_synchronized_update(&mut self) {}
 }
 
 /// The reader half of a spawned engine — a blocking byte source the view drives

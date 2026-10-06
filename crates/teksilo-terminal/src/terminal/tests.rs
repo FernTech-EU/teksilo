@@ -581,6 +581,70 @@ fn an_inactive_terminal_shows_its_caret_and_stops_blinking() {
     assert!(st.blink_last.is_none());
 }
 
+/// A synchronized update's deadline is woken for alongside the blink's,
+/// whichever comes first, and asks for a pull once it has passed.
+#[test]
+fn a_synchronized_update_deadline_wakes_and_asks_for_an_update() {
+    let t0 = Instant::now();
+    let mut st = state();
+    st.sync_deadline = Some(t0 + Duration::from_millis(150));
+    let step = frame_step(&mut st, t0);
+    assert_eq!(
+        step.wake_at,
+        Some(t0 + Duration::from_millis(150)),
+        "before the blink"
+    );
+    assert!(!step.pull);
+    st.focused = false;
+    let step = frame_step(&mut st, t0 + Duration::from_millis(100));
+    assert_eq!(
+        step.wake_at,
+        Some(t0 + Duration::from_millis(150)),
+        "woken for alone"
+    );
+    let step = frame_step(&mut st, t0 + Duration::from_millis(150));
+    assert!(step.pull, "due: take output in");
+    assert_eq!(st.sync_deadline, None);
+    assert_eq!(step.wake_at, None);
+}
+
+/// A synchronized update the child never ends is shown once its deadline
+/// passes, by the pull the frame step asks for, with nothing written.
+#[test]
+fn a_synchronized_update_never_ended_is_shown_at_its_deadline() {
+    let mut f = Fixture::new();
+    let deadline = Instant::now() + Duration::from_millis(30);
+    f.shared.borrow_mut().synchronized_update = Some(deadline);
+    let wakes = f.waker.count();
+    f.output.write(b"\x1b[?2026hhalf a frame");
+    assert!(
+        f.waker.wait_for(wakes + 1, WAIT),
+        "the output woke the window"
+    );
+    f.frame();
+    assert_eq!(f.state.borrow().sync_deadline, Some(deadline));
+    assert!(
+        f.tree
+            .wake_at_handle()
+            .get()
+            .is_some_and(|at| at <= deadline),
+        "woken for the deadline"
+    );
+    assert_eq!(f.shared.borrow().synchronized_updates_ended, 0);
+
+    while Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    f.tree.layout(SizeProposal::exact(600.0, 300.0));
+    assert_eq!(
+        f.shared.borrow().synchronized_updates_ended,
+        1,
+        "ended by the pull the frame step asked for"
+    );
+    assert!(f.tree.needs_render(), "and the terminal repaints");
+    assert_eq!(f.state.borrow().sync_deadline, None);
+}
+
 #[test]
 fn the_visual_bell_fades_then_clears() {
     let t0 = Instant::now();
@@ -594,6 +658,7 @@ fn the_visual_bell_fades_then_clears() {
             repaint: true,
             wake_at: None,
             another_frame: true,
+            pull: false,
         }
     );
     let step = frame_step(&mut st, t0 + BELL_FLASH);

@@ -45,6 +45,10 @@ by crate for clarity, not because crates version independently.
 
 #### Terminal
 
+- `TerminalEngine::synchronized_update_deadline` and
+  `TerminalEngine::end_synchronized_update`, defaulted, for an engine that
+  holds output back during a synchronized update: the view ends one the
+  child never ends at its deadline.
 - `MemoryOutput`, the child output of a `MemoryEngine`.
   `MemoryEngineFactory::output()` returns the one the next spawned engine
   reads; a test writes to it from any thread, or closes it to end the child.
@@ -211,6 +215,9 @@ by crate for clarity, not because crates version independently.
   the UI thread for the child to take them. They are now written from a
   thread of their own; what a child that never reads would have queued past
   4 MiB is dropped.
+- **Output a child printed inside a synchronized update it never ended (it
+  crashed or was killed mid-frame) stayed hidden** until more output came.
+  It is shown once the update's 150 ms deadline passes.
 - **A child left running (`TerminalClosePolicy::LeaveRunning`) was hung up
   only the next time it wrote after its terminal went, and a background
   process the child had started kept the terminal's reader thread alive

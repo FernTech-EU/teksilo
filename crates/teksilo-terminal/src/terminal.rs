@@ -1244,6 +1244,8 @@ pub(crate) struct FrameStep {
     pub(crate) wake_at: Option<Instant>,
     /// The bell is still fading: run the next frame too.
     pub(crate) another_frame: bool,
+    /// A synchronized update's deadline passed: take output in now.
+    pub(crate) pull: bool,
 }
 
 /// The caret blink and the visual bell at `now`. The blink toggles every
@@ -1275,6 +1277,18 @@ pub(crate) fn frame_step(st: &mut TerminalState, now: Instant) -> FrameStep {
             step.repaint = true;
         }
     }
+    // The tree's wake slot is shared and emptied when it fires, so the step
+    // asks again for every deadline still ahead of it.
+    match st.sync_deadline {
+        Some(deadline) if deadline <= now => {
+            st.sync_deadline = None;
+            step.pull = true;
+        }
+        Some(deadline) => {
+            step.wake_at = Some(step.wake_at.map_or(deadline, |at| at.min(deadline)));
+        }
+        None => {}
+    }
     if let Some(t) = st.bell_flash {
         if now.saturating_duration_since(t) < BELL_FLASH {
             step.repaint = true;
@@ -1292,11 +1306,21 @@ pub(crate) fn frame_step(st: &mut TerminalState, now: Instant) -> FrameStep {
 /// Run [`frame_step`] from the frame-tick effect and act on it, with the
 /// state borrow released first.
 fn run_frame_step(state: &Rc<RefCell<TerminalState>>, paint_tick: &Signal<u64>) {
-    let (step, wake_at, frame_request) = {
+    let (step, wake_at, frame_request, trigger) = {
         let mut st = state.borrow_mut();
         let step = frame_step(&mut st, Instant::now());
-        (step, st.wake_at.clone(), st.frame_request.clone())
+        (
+            step,
+            st.wake_at.clone(),
+            st.frame_request.clone(),
+            st.trigger.clone(),
+        )
     };
+    if step.pull {
+        // The pull hook ends the synchronized update; in this very layout
+        // pass, since the off-thread pre-pass runs after the frame tick.
+        trigger.request_pull();
+    }
     if step.repaint {
         paint_tick.set(paint_tick.get().wrapping_add(1));
     }
