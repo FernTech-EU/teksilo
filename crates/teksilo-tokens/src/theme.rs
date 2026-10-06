@@ -215,6 +215,26 @@ impl ColorTokens {
         }
     }
 
+    /// The opacity at which full-colour content, a picture, shows in a
+    /// disabled subtree: the one that turns `text_primary` into
+    /// `text_disabled` over `surface_content`, in linear light, so dimmed
+    /// ink sits where disabled text sits. A palette that defines disabled
+    /// text as an alpha of its primary ink gets that alpha ratio exactly,
+    /// whatever its surface (Material 3: 0.38). Clamped to 0.25..=0.75: the
+    /// floor is the lowest disabled-content opacity of the shipped design
+    /// systems (macOS), the ceiling keeps a visible difference. 0.38 when
+    /// the primary text and the surface have the same luminance.
+    pub fn disabled_content_opacity(&self) -> f32 {
+        // `relative_luminance` ignores alpha: composite over the surface.
+        let surface = self.surface_content.relative_luminance();
+        let over = |c: Color| c.a() * c.relative_luminance() + (1.0 - c.a()) * surface;
+        let span = over(self.text_primary) - surface;
+        if span.abs() < 1e-3 {
+            return 0.38;
+        }
+        ((over(self.text_disabled) - surface) / span).clamp(0.25, 0.75)
+    }
+
     /// Project this palette into a **high-contrast** variant for the OS
     /// "increase contrast" preference (WCAG SC 1.4.6 Enhanced tier / EN 301 549
     /// §11.7). Targets >= 7:1 for text and >= 4.5:1 for non-text UI components —
@@ -737,6 +757,70 @@ fn okabe_ito_palette(dark: bool) -> Vec<Color> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `base` with its primary and disabled text and its content surface
+    /// replaced.
+    fn palette(primary: &str, disabled: &str, surface: &str) -> ColorTokens {
+        ColorTokens {
+            text_primary: Color::from_hex(primary),
+            text_disabled: Color::from_hex(disabled),
+            surface_content: Color::from_hex(surface),
+            ..ColorTokens::light_default()
+        }
+    }
+
+    #[test]
+    fn disabled_ink_as_an_alpha_of_the_primary_gives_that_alpha() {
+        // Material 3: `on_surface`, and the same at 0.38, on any surface.
+        // 0x61 / 255 = 0.380.
+        for (ink, surface) in [
+            ("#1D1B20", "#FEF7FF"),
+            ("#E6E0E9", "#141218"),
+            ("#1D1B20", "#7F7F7F"),
+        ] {
+            let disabled = format!("{ink}61");
+            let f = palette(ink, &disabled, surface).disabled_content_opacity();
+            assert!((f - 0.380).abs() < 0.001, "{ink} on {surface}: {f}");
+        }
+        // Fluent: black ink at 0xE4 and 0x5C in light, white at 0xFF and
+        // 0x5D in dark: the ratio of the alphas.
+        let light = palette("#000000E4", "#0000005C", "#F3F3F3").disabled_content_opacity();
+        assert!((light - 92.0 / 228.0).abs() < 0.001, "{light}");
+        let dark = palette("#FFFFFFFF", "#FFFFFF5D", "#202020").disabled_content_opacity();
+        assert!((dark - 93.0 / 255.0).abs() < 0.001, "{dark}");
+    }
+
+    #[test]
+    fn the_intui_palettes_give_their_factors() {
+        // Light: black on white, disabled #A8ADBD. Dark: #DFE1E5 on #1E1F22,
+        // disabled #5A5D63, which the floor lifts from 0.129.
+        let light = ColorTokens::light_default().disabled_content_opacity();
+        assert!((light - 0.581).abs() < 0.001, "{light}");
+        let dark = ColorTokens::dark_default().disabled_content_opacity();
+        assert_eq!(dark, 0.25);
+        let raw = {
+            let t = ColorTokens::dark_default();
+            let s = t.surface_content.relative_luminance();
+            (t.text_disabled.relative_luminance() - s) / (t.text_primary.relative_luminance() - s)
+        };
+        assert!((raw - 0.129).abs() < 0.001, "{raw}");
+        // The window projections keep both text tokens, so the factor.
+        for base in [ColorTokens::light_default(), ColorTokens::dark_default()] {
+            let f = base.disabled_content_opacity();
+            assert_eq!(base.for_inactive_window().disabled_content_opacity(), f);
+        }
+    }
+
+    #[test]
+    fn text_as_light_as_its_surface_gives_the_material_factor() {
+        let flat = palette("#808080", "#808080", "#808080");
+        assert_eq!(flat.disabled_content_opacity(), 0.38);
+        // And no factor escapes the clamp.
+        let faint = palette("#000000", "#FDFDFD", "#FFFFFF").disabled_content_opacity();
+        assert_eq!(faint, 0.25);
+        let strong = palette("#000000", "#000000", "#FFFFFF").disabled_content_opacity();
+        assert_eq!(strong, 0.75);
+    }
 
     #[test]
     fn light_and_dark_have_different_surfaces() {

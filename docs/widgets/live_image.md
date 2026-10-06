@@ -66,7 +66,7 @@ becomes or stops being its description.
 
 ## Builder methods at a glance
 
-`fit`, `alignment`, `sizing`, `width`, `height`, `size`, `device_pixels`, `scaling`, `orientation`, `pixel_snap`, `background`, `placeholder`, `alt`, `a11y_hidden`, `pause_when_inactive`, `with_handle`, `handle`
+`fit`, `alignment`, `sizing`, `width`, `height`, `size`, `device_pixels`, `scaling`, `orientation`, `pixel_snap`, `background`, `placeholder`, `alt`, `a11y_hidden`, `pause_when_inactive`, `dim_when_disabled`, `with_handle`, `handle`
 
 ## API reference
 
@@ -198,6 +198,15 @@ shows the latest commit all the same. The pause belongs to the
 window's texture: while another widget of the window shows the same
 source unpaused, both stay live. A `Signal<bool>` turns it on and off
 as the user decides. Default false.
+
+#### `pub fn dim_when_disabled(mut self, on: bool) -> Self`
+
+Dim the picture in a disabled subtree, by the theme's
+`disabled_content_opacity`
+over the widget's background, which then fills the whole box. By
+default a live picture keeps its full strength when an ancestor is
+disabled: a VM's screen is content, not a control. A commit still
+repaints nothing while dimmed. Default false.
 
 #### `pub fn with_handle(mut self, handle: &LiveImageHandle) -> Self`
 

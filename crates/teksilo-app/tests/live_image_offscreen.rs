@@ -101,3 +101,67 @@ fn d13_a_headless_app_shows_each_commit_without_repainting() {
         "and the widget did not paint for it"
     );
 }
+
+/// Render a 16 x 8 RGBX picture of pure red (X = 0) letterboxed in a
+/// 16 x 16 box over black, inside a disabled row, and read it back.
+fn disabled_red(dim: bool) -> Option<(Vec<u8>, f32)> {
+    let (mut renderer, device, queue) = pollster::block_on(
+        teksilo_render::test_support::require_test_renderer("live_image_dimmed"),
+    )?;
+    let source = LiveImageSource::new(LivePixelFormat::Rgbx8);
+    let writer = source.writer();
+    writer
+        .write_frame(16, 8, &[255, 0, 0, 0].repeat(16 * 8), 16 * 4)
+        .unwrap();
+    let mut app = TeksiloAppBuilder::new()
+        .theme(teksilo_core::presets::intui::light())
+        .build_headless();
+    let image = LiveImage::new(source)
+        .size(16.0, 16.0)
+        .scaling(ScalingFilter::Nearest)
+        .background(teksilo_tokens::Color::BLACK)
+        .dim_when_disabled(dim)
+        .alt("Screen");
+    let row = app
+        .tree
+        .add(teksilo_widgets::primitives::HStack::new().child(image));
+    app.tree.enabled_when(row, false);
+    app.tree
+        .layout(SizeProposal::exact(SIDE as f32, SIDE as f32));
+    let frame = app.tree.render();
+    let pixels = draw(&mut renderer, &device, &queue, &frame);
+    drop(writer);
+    Some((pixels, app.tree.theme().colors.disabled_content_opacity()))
+}
+
+#[test]
+fn d26_a_dimmed_picture_reads_back_at_the_themes_opacity() {
+    let Some((dimmed, f)) = disabled_red(true) else {
+        return; // no GPU adapter — skip.
+    };
+    let Some((full, _)) = disabled_red(false) else {
+        return;
+    };
+    let at = |px: &[u8], x: u32, y: u32| {
+        let i = ((y * SIDE + x) * 4) as usize;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    // The picture spans rows 4 to 11; the letterbox is above and below.
+    let expected = teksilo_canvas::resample::linear_to_srgb_byte(f);
+    for (x, y) in [(0, 4), (8, 8), (15, 11)] {
+        let [r, g, b, _] = at(&dimmed, x, y);
+        assert!(
+            r.abs_diff(expected) <= 1 && g == 0 && b == 0,
+            "dimmed red at ({x}, {y}) is {r}, not {expected} ± 1 (f = {f})"
+        );
+        assert_eq!(at(&full, x, y)[..3], [255, 0, 0], "undimmed, red stays red");
+    }
+    for (x, y) in [(0, 0), (8, 2), (15, 15)] {
+        assert_eq!(
+            at(&dimmed, x, y),
+            at(&full, x, y),
+            "the letterbox is unchanged"
+        );
+        assert_eq!(at(&dimmed, x, y)[..3], [0, 0, 0]);
+    }
+}

@@ -15,6 +15,14 @@ by crate for clarity, not because crates version independently.
 
 ### Added
 
+#### Tokens
+
+- `ColorTokens::disabled_content_opacity`, the opacity at which full-colour
+  content shows in a disabled subtree: the one that turns the theme's
+  primary text into its disabled text over `surface_content`, in linear
+  light, clamped to 0.25..=0.75 (0.38 for Material 3, 0.581 for IntUI
+  light, 0.25 for IntUI dark).
+
 #### Canvas
 
 - `teksilo_canvas::wake`, for code that changes what a window shows from
@@ -92,6 +100,9 @@ by crate for clarity, not because crates version independently.
   longer wakes the window, and the window shows the latest commit, in one
   upload, once it is active again. Screenshots still show the latest
   commit, and a `Signal<bool>` turns the pause on and off.
+- `LiveImage::dim_when_disabled`, which dims a live picture in a disabled
+  subtree by the theme's disabled-content opacity, over the widget's
+  background. By default a picture keeps its full strength there.
 - `LiveImageHandle`, from `LiveImage::handle`, or made first with
   `LiveImageHandle::new` and given with `LiveImage::with_handle`, the form a
   `teksu!` tree can use. It holds the source's size and status as `Signal`s,

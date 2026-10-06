@@ -123,6 +123,7 @@ pub struct LiveImage {
     alt: Option<Prop<String>>,
     a11y_hidden: bool,
     pause_when_inactive: Prop<bool>,
+    dim_when_disabled: bool,
     shared: Rc<Shared>,
     /// What the mounted widget shares with its handles. The widget owns it,
     /// so a handle that outlives the widget sees nothing.
@@ -208,6 +209,7 @@ impl LiveImage {
             alt: None,
             a11y_hidden: false,
             pause_when_inactive: Prop::Static(false),
+            dim_when_disabled: false,
             shared,
             mounted: None,
         }
@@ -336,6 +338,17 @@ impl LiveImage {
     /// as the user decides. Default false.
     pub fn pause_when_inactive(mut self, pause: impl Into<Prop<bool>>) -> Self {
         self.pause_when_inactive = pause.into();
+        self
+    }
+
+    /// Dim the picture in a disabled subtree, by the theme's
+    /// [`disabled_content_opacity`](teksilo_tokens::ColorTokens::disabled_content_opacity)
+    /// over the widget's background, which then fills the whole box. By
+    /// default a live picture keeps its full strength when an ancestor is
+    /// disabled: a VM's screen is content, not a control. A commit still
+    /// repaints nothing while dimmed. Default false.
+    pub fn dim_when_disabled(mut self, on: bool) -> Self {
+        self.dim_when_disabled = on;
         self
     }
 
@@ -607,8 +620,9 @@ impl Widget for LiveImage {
     }
 
     /// The background, then the picture's one quad (emitted whatever the
-    /// status, so the window takes the source's commits), then the
-    /// placeholder while the source is not `Live`.
+    /// status, so the window takes the source's commits), inside an opacity
+    /// scope while dimmed, then the placeholder while the source is not
+    /// `Live`.
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let Some(mounted) = &self.mounted else {
             return;
@@ -616,10 +630,15 @@ impl Widget for LiveImage {
         let rtl = matches!(ctx.layout_direction, LayoutDirection::RightToLeft);
         let shown = self.placement_for(mounted, bounds, rtl).map(|p| p.shown);
         let live = self.shared.signals.status.get() == LiveImageStatus::Live;
+        // The enabled state needs no binding: an ancestor's change repaints
+        // the whole subtree.
+        let dimmed = self.dim_when_disabled && !ctx.effective_enabled;
 
         let background = self.background.resolve(ctx.theme, ctx.effective_enabled);
         if background.a() > 0.0 {
-            match shown.and_then(|g| g.visible()).filter(|_| live) {
+            // A dimmed picture blends over the background, so it fills the
+            // whole box then.
+            match shown.and_then(|g| g.visible()).filter(|_| live && !dimmed) {
                 Some(picture) => {
                     for rect in letterbox(bounds, at(picture, bounds)) {
                         canvas.fill_rect(rect, background);
@@ -632,6 +651,9 @@ impl Widget for LiveImage {
         let content = shown
             .map(|g| at(g.content, bounds))
             .unwrap_or(Rect::new(bounds.x, bounds.y, 0.0, 0.0));
+        if dimmed {
+            canvas.set_opacity(ctx.theme.colors.disabled_content_opacity());
+        }
         canvas.draw_live_image(
             mounted.attachment.consumer(),
             &LiveImageDraw::new(content, bounds)
@@ -639,6 +661,9 @@ impl Widget for LiveImage {
                 .orientation(self.orientation)
                 .paused(self.pause_when_inactive.get() && !ctx.window_active),
         );
+        if dimmed {
+            canvas.restore_opacity();
+        }
 
         if !live {
             self.paint_placeholder(bounds, canvas, ctx);
@@ -851,6 +876,8 @@ impl std::fmt::Debug for LiveImageHandle {
     }
 }
 
+#[cfg(test)]
+mod dim_tests;
 #[cfg(test)]
 mod pause_tests;
 #[cfg(test)]
