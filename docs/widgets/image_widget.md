@@ -85,15 +85,16 @@ time. Pixels that change belong on `from_raw`.
 
 #### `pub fn from_raw(pixels: Vec<u8>, width: u32, height: u32) -> Self`
 
-Create from raw RGBA pixel data.
+Create from raw RGBA pixel data, `width × height`, tightly packed.
 
-Each call gets a unique texture-atlas key (via a process-local
-atomic counter), so two `from_raw` widgets with the same
-dimensions but different bytes don't alias in the renderer's
-pending-image cache. Without this, the first writer per frame
-would silently win and subsequent ones would render the wrong
-pixels — a latent bug fixed alongside the dynamic-image use
-cases that need many short-lived `from_raw` widgets.
+The pixels are written once into a live source when the widget is
+first built, without a copy. The window's texture for them goes with
+the first frame that does not draw the widget (it was destroyed,
+scrolled out or parked), so GPU memory follows what is on screen,
+and comes back with one upload. Input the source refuses (a zero
+side, a buffer shorter than `width × height × 4`, a side over
+`LiveImageSource::MAX_DIMENSION`) draws nothing, and says so once
+on standard error.
 
 #### `pub fn mask(mut self, shape: ImageMaskShape) -> Self`
 
@@ -109,9 +110,9 @@ transparent. `Contain` works but may letterbox. The default
 fit (`Contain`) is left unchanged so callers explicitly pick
 a fit when they apply a mask.
 
-`ImageMaskShape::None` is a no-op. Re-uploading is keyed off a
-fresh per-mask name so the un-masked version of the same
-source doesn't shadow the masked one in the texture atlas.
+The masked picture is the widget's own, written once into a live
+source as `from_raw`'s is: the icon's shared
+texture is left alone. `ImageMaskShape::None` is a no-op.
 
 #### `pub fn fit(mut self, fit: ImageFit) -> Self`
 

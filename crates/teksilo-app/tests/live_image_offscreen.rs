@@ -165,3 +165,126 @@ fn d26_a_dimmed_picture_reads_back_at_the_themes_opacity() {
         assert_eq!(at(&dimmed, x, y)[..3], [0, 0, 0]);
     }
 }
+
+/// `w × h` straight-alpha pixels with smooth gradients, a few transparent
+/// texels among them.
+fn photo(w: u32, h: u32) -> Vec<u8> {
+    let mut px = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let a = if (x + y).is_multiple_of(13) { 0 } else { 255 };
+            px.extend_from_slice(&[
+                (x * 255 / w.max(1)) as u8,
+                (y * 255 / h.max(1)) as u8,
+                ((x ^ y) & 0xFF) as u8,
+                a,
+            ]);
+        }
+    }
+    px
+}
+
+/// Render `widget` alone into a fresh `side × side` target and read it back.
+fn render_alone(
+    widget: impl teksilo_core::widget::Widget + 'static,
+    side: u32,
+) -> Option<(
+    Vec<u8>,
+    std::rc::Rc<teksilo_canvas::RenderFrame>,
+    teksilo_render::Renderer,
+)> {
+    let (mut renderer, device, queue) = pollster::block_on(
+        teksilo_render::test_support::require_test_renderer("live_image_d27"),
+    )?;
+    let mut tree = teksilo_core::widget_tree::WidgetTree::new()
+        .with_theme(teksilo_core::presets::intui::light());
+    tree.add(widget);
+    tree.layout(SizeProposal::exact(side as f32, side as f32));
+    let frame = tree.render();
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("live_image_d27"),
+        size: wgpu::Extent3d {
+            width: side,
+            height: side,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    renderer.render(&frame, &view, 1.0, side, side, [0.0, 0.0, 0.0, 0.0]);
+    let pixels =
+        teksilo_render::test_support::read_texture_rgba(&device, &queue, &texture, side, side);
+    Some((pixels, frame, renderer))
+}
+
+#[test]
+fn d27_a_raw_thumbnail_reads_back_as_the_static_path_draws_it() {
+    let px = photo(512, 512);
+    let Some((live, frame, _r)) = render_alone(
+        teksilo_widgets::primitives::ImageWidget::from_raw(px.clone(), 512, 512)
+            .size(32.0, 32.0)
+            .alt("thumbnail"),
+        32,
+    ) else {
+        return; // no GPU adapter — skip.
+    };
+    assert_eq!(frame.live_images.len(), 1, "the live path");
+    let icon = teksilo_canvas::RasterIcon::from_raw(px, 512, 512);
+    let Some((shared, frame, _r)) = render_alone(
+        teksilo_widgets::primitives::ImageWidget::new(&icon)
+            .size(32.0, 32.0)
+            .alt("thumbnail"),
+        32,
+    ) else {
+        return;
+    };
+    assert_eq!(frame.images.len(), 1, "the static path, CPU mips");
+    let worst = live
+        .iter()
+        .zip(&shared)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap();
+    assert!(
+        worst <= 3,
+        "the GPU chain is {worst}/255 from the CPU chain's draw"
+    );
+}
+
+#[test]
+fn d27_the_gpu_chain_of_a_raw_image_matches_the_cpu_chain() {
+    let (w, h) = (720, 1280);
+    let px = photo(w, h);
+    let Some((_, frame, renderer)) = render_alone(
+        teksilo_widgets::primitives::ImageWidget::from_raw(px.clone(), w, h)
+            .size(18.0, 32.0)
+            .alt("thumbnail"),
+        32,
+    ) else {
+        return; // no GPU adapter — skip.
+    };
+    let id = frame.live_images[0].consumer.source().id();
+    let levels = teksilo_canvas::live_image::internal::mip_levels(w, h);
+    let (mut cw, mut ch, mut cpu) = (w, h, px);
+    for k in 1..levels {
+        let (nw, nh, next) = teksilo_canvas::resample::downsample_half(&cpu, cw, ch);
+        let (gw, gh, gpu) = renderer
+            .read_live_texture_level(id, k)
+            .expect("the GPU's level");
+        assert_eq!((gw, gh), (nw, nh), "level {k}");
+        let worst = next
+            .chunks(4)
+            .zip(gpu.chunks(4))
+            .filter(|(c, _)| c[3] > 0)
+            .flat_map(|(c, g)| c.iter().zip(g).map(|(a, b)| a.abs_diff(*b)))
+            .max()
+            .unwrap_or(0);
+        assert!(worst <= 3, "level {k}: {worst}/255 from the CPU chain");
+        (cw, ch, cpu) = (nw, nh, next);
+    }
+}

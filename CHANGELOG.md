@@ -268,6 +268,21 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+#### Widgets
+
+- `ImageWidget::from_raw`, a masked image and `Avatar`'s picture show their
+  pixels through a live source written once. Their texture goes with the
+  first frame that does not draw them and comes back when one does, so GPU
+  memory follows what is on screen; each image keeps one copy of its
+  pixels instead of three; a thumbnail drawn small samples a mip chain
+  built on the GPU. They appear in `RenderFrame::live_images` rather than
+  `images`. Pixels the source refuses (a zero side, a short buffer, a side
+  over 16384) draw nothing, where a short buffer used to panic. An unmasked
+  `ImageWidget::new(&icon)` keeps the one texture every widget showing the
+  icon shares.
+- An `Avatar` whose image is refused shows its initials, and is announced
+  as them.
+
 #### Terminal
 
 - Output from the child repaints only the terminal and redraws only its own
@@ -475,6 +490,13 @@ by crate for clarity, not because crates version independently.
   the primary contact. A finger is now primary when no other
   finger is down and a stylus when no finger is, as the platform reports them,
   and the second finger of a gesture stays secondary after the first lifts.
+
+#### Widgets
+
+- **An `Avatar` whose image changed leaked a texture at every change**, as
+  did every avatar row a list re-created, and every `ImageWidget::from_raw`
+  ever shown: nothing freed them. A rebuild that keeps an avatar's image (a
+  new name, presence or locale) now keeps its texture too.
 
 #### Core
 
