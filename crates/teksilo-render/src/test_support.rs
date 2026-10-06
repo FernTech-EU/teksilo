@@ -41,7 +41,8 @@ pub enum ReadbackError {
 ///
 /// `None` means this host can open no usable device at all; it is cached too,
 /// so a GPU-less machine pays the failed search once rather than per call.
-static SHARED_DEVICE: OnceLock<Option<(wgpu::Device, wgpu::Queue)>> = OnceLock::new();
+static SHARED_DEVICE: OnceLock<Option<(wgpu::Device, wgpu::Queue, crate::DeviceHealth)>> =
+    OnceLock::new();
 
 /// Open the one device, searching for an adapter that actually yields one.
 ///
@@ -133,11 +134,12 @@ async fn open_shared_device(label: &'static str) -> Option<(wgpu::Device, wgpu::
 pub async fn create_offscreen_renderer(
     label: &'static str,
 ) -> Option<(Renderer, wgpu::Device, wgpu::Queue)> {
-    let (device, queue) = shared_device(label)?;
-    let renderer = Renderer::new(
+    let (device, queue, health) = shared_device(label)?;
+    let renderer = Renderer::with_device_health(
         device.clone(),
         queue.clone(),
         wgpu::TextureFormat::Rgba8UnormSrgb,
+        health.clone(),
     );
     Some((renderer, device.clone(), queue.clone()))
 }
@@ -232,9 +234,18 @@ pub fn is_lavapipe(info: &wgpu::AdapterInfo) -> bool {
 /// the `await` inside an async fn, is the shape `clippy::await_holding_lock`
 /// warns about, and it would deadlock the first caller that ever drove this
 /// from a single-threaded executor.
-fn shared_device(label: &'static str) -> Option<&'static (wgpu::Device, wgpu::Queue)> {
+/// The shared device, its queue and its lost-device latch, installed once
+/// when it is opened and shared by every renderer on it.
+fn shared_device(
+    label: &'static str,
+) -> Option<&'static (wgpu::Device, wgpu::Queue, crate::DeviceHealth)> {
     SHARED_DEVICE
-        .get_or_init(|| pollster::block_on(open_shared_device(label)))
+        .get_or_init(|| {
+            pollster::block_on(open_shared_device(label)).map(|(device, queue)| {
+                let health = crate::DeviceHealth::install(&device);
+                (device, queue, health)
+            })
+        })
         .as_ref()
 }
 

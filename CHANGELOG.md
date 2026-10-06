@@ -177,6 +177,26 @@ by crate for clarity, not because crates version independently.
   host without the adapter. `test_support::adapter_required` tells a test
   that goes through the panic-free entry whether that variable is set, and
   `test_support::is_lavapipe` identifies Mesa's lavapipe.
+- `Renderer` draws the live pictures a frame carries. A window holds one
+  texture per live source it shows and uploads only what changed since its
+  last frame; while a producer holds a source's lock, it keeps showing the
+  previous frame rather than wait. A picture larger than one frame's upload
+  budget fills over several frames while the previous one still shows, so
+  no torn frame is ever drawn. A texture is dropped at the first frame
+  without its picture (a small one, a few MiB at most, is kept for a while
+  in case it comes back), and one the device cannot hold shows the widget's
+  background instead. `Renderer::live_texture_stats` reports what a
+  renderer holds and uploads.
+- `Renderer::render_capture`, `render` for a screenshot: each live picture
+  shows its latest commit, even while a producer holds its lock or the
+  picture is paused, and the render counts as a capture, not as a frame a
+  producer's picture was displayed in.
+- `DeviceHealth`, the lost-device latch of one GPU device, and
+  `Renderer::with_device_health`, which builds a renderer on a device whose
+  latch is already installed. Once the device is lost, live pictures stop
+  counting frames, so a producer sees its stream stall.
+- `poll_gpu_reclaim`, which frees the textures renderers dropped without
+  waiting for another frame, for an event loop to call before it sleeps.
 
 #### WebView
 
@@ -262,6 +282,10 @@ by crate for clarity, not because crates version independently.
 
 #### Render
 
+- `Renderer::new` sets its device's lost-device callback, replacing one the
+  caller set. A device shared by several renderers installs one
+  `DeviceHealth` and builds each with `Renderer::with_device_health`; the
+  windows of a teksilo-app share one this way.
 - The offscreen renderer honours wgpu's environment variables, as windows
   already do: `WGPU_BACKEND=vulkan` makes it open a Vulkan adapter or none,
   instead of falling back to another backend, and `WGPU_POWER_PREF` picks

@@ -197,6 +197,9 @@ struct SharedGpu {
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    /// The device's lost-device latch, installed once when it was opened and
+    /// shared by every window's renderer on it.
+    health: teksilo_render::DeviceHealth,
 }
 
 /// The platform display connection the wgpu instance is built against.
@@ -556,10 +559,14 @@ async fn shared_gpu_for(surface: &wgpu::Surface<'static>) -> SharedGpu {
 
     let (adapter, device, queue) = open_gpu_for(surface).await;
 
+    // Installed where the device is opened, the shared one and the
+    // multi-GPU loser alike, so every renderer on it reads one latch.
+    let health = teksilo_render::DeviceHealth::install(&device);
     let gpu = SharedGpu {
         adapter,
         device,
         queue,
+        health,
     };
     // First one in becomes the shared device. Losing here is the multi-GPU case
     // above (or a race that cannot happen while windows are created on one
@@ -688,7 +695,8 @@ impl PlatformWindow {
 
         // The renderer stays per-window: it owns the glyph atlas, the path
         // atlas and the blur pool, and it is `!Sync` besides.
-        let renderer = Renderer::new(gpu.device, gpu.queue, surface_format);
+        let renderer =
+            Renderer::with_device_health(gpu.device, gpu.queue, surface_format, gpu.health);
         WindowGpu {
             surface,
             surface_config,

@@ -10,11 +10,19 @@
 //   RGB = white. The fragment multiplies the vertex color's RGB by the
 //   texture alpha, tinting the glyph.
 //
-// * Bit 0 = 1 (color glyph / image): the atlas region holds a
-//   pre-multiplied RGBA color bitmap (color emoji via COLR / CBDT / sbix,
-//   or a real image). The fragment samples `texture.rgb` directly and
-//   multiplies the sample's RGBA by the vertex color (acting as a global
-//   opacity when vertex.color = [1, 1, 1, alpha]).
+// * Bit 0 = 1 (color glyph / image): the region holds an RGBA color bitmap
+//   with straight (not premultiplied) alpha: a color emoji (COLR / CBDT /
+//   sbix), an image or a live picture. The fragment keeps the sampled RGB
+//   and multiplies its alpha by the vertex color's (a global opacity when
+//   vertex.color = [1, 1, 1, alpha]).
+//
+// Two more bits, for a live picture's byte order, act on the sample before
+// either path:
+//
+// * Bit 1 (opaque): the fourth byte is not alpha (RGBX, BGRX): alpha = 1.
+// * Bit 2 (swap red and blue): the texture holds B, G, R in its R, G, B
+//   channels (BGRA, BGRX). Exact: filtering and sRGB decoding act on each
+//   channel alone.
 
 struct VertexInput {
     @location(0) position: vec2<f32>,
@@ -47,7 +55,14 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let tex_color = textureSample(atlas_texture, atlas_sampler, in.tex_coord);
+    // Sampled before any branch: uniform control flow for the derivatives.
+    var tex_color = textureSample(atlas_texture, atlas_sampler, in.tex_coord);
+    if ((in.flags & 4u) != 0u) {
+        tex_color = tex_color.bgra;
+    }
+    if ((in.flags & 2u) != 0u) {
+        tex_color.a = 1.0;
+    }
     if ((in.flags & 1u) != 0u) {
         // Color glyph / image: atlas holds the glyph's RGB. Keep the
         // sampled RGB and attenuate alpha by the vertex color's alpha —
