@@ -259,6 +259,18 @@ by crate for clarity, not because crates version independently.
   blank. The headless automation server never uploaded the atlas at all, so
   its screenshots had no text. Both now upload it.
 
+#### Automation
+
+- **An injected mouse held no button.** A handler reading
+  `ctx.pointer().buttons` during an `inject_pointer` drag saw none, and
+  `query_pointers` showed the dragging mouse as up. The mouse now holds what
+  the previous ops pressed, as a real one reports it.
+- **An injected finger or stylus was never the primary pointer**, so a probe's
+  finger could not drag a splitter or a dock resize handle, which serve only
+  the primary contact. A finger is now primary when no other
+  finger is down and a stylus when no finger is, as the platform reports them,
+  and the second finger of a gesture stays secondary after the first lifts.
+
 #### Menus
 
 - **Alt+letter on a menu bar collapsed to its hamburger opened no menu.** The

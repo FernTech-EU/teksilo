@@ -218,9 +218,10 @@ fn execute_op(
             let p = Point::new(*x, *y);
             let m = modifiers(*ctrl, *shift, *alt, *meta, *command);
             let outcome = match kind {
-                // The pre-touch path, unchanged: a legacy `PointerDown` /
-                // `PointerUp` pair, whose `InputSnapshot` names
-                // `PointerInfo::mouse`. Kept as its own arm rather than folded
+                // The pre-touch path: a legacy `PointerDown` / `PointerUp`
+                // pair, whose `InputSnapshot` names the singular mouse holding
+                // the buttons earlier ops pressed (see `pointer_down`). Kept as
+                // its own arm rather than folded
                 // into a `PointerSample` for uniformity, because the two lower
                 // to the same widget events only as long as nothing about the
                 // sample differs, and a mouse is the one device every existing
@@ -692,6 +693,61 @@ fn execute_op(
 // injection builds a real `PointerSample` and enters through the tree's pointer
 // door instead (see `inject_pointer`), so the mouse the `WidgetEvent`
 // constructors default to is the device these describe.
+//
+// One thing about that mouse is not the constructors' default: the buttons it
+// holds. A real mouse reports them on every sample — the press sets its bit, a
+// move keeps whatever is held, the release clears its bit (the translator's
+// `mouse_pointer`) — and the constructors report none at all, so an injected
+// drag reached `ctx.pointer().buttons` with nothing held and `query_pointers`
+// showed the mouse up in the middle of it. The mask is read back from the
+// tree's pointer table, the one record of what the previous ops pressed: the
+// executor keeps no state between ops, and a drag is three of them.
+
+/// Every bit a [`ButtonMask`] can hold, one per [`PointerButton`].
+///
+/// `ButtonMask` has a union and an intersection but no difference, so a release
+/// is computed as the held mask intersected with every *other* button.
+const EVERY_BUTTON: [ButtonMask; 5] = [
+    ButtonMask::PRIMARY,
+    ButtonMask::SECONDARY,
+    ButtonMask::MIDDLE,
+    ButtonMask::BACK,
+    ButtonMask::FORWARD,
+];
+
+/// What the mouse holds now, as the tree's pointer table recorded it. Nothing
+/// before the mouse's first sample.
+fn held_mouse_buttons(tree: &WidgetTree) -> ButtonMask {
+    tree.live_pointers()
+        .find(|info| info.id == PointerId::MOUSE)
+        .map_or(ButtonMask::NONE, |info| info.buttons)
+}
+
+/// `held` with `button` released.
+fn release(held: ButtonMask, button: PointerButton) -> ButtonMask {
+    debug_assert_eq!(
+        EVERY_BUTTON
+            .into_iter()
+            .fold(ButtonMask::NONE, ButtonMask::union),
+        ButtonMask::ALL,
+        "EVERY_BUTTON must name every bit ButtonMask::ALL holds",
+    );
+    let released = ButtonMask::from(button);
+    EVERY_BUTTON
+        .into_iter()
+        .filter(|bit| *bit != released)
+        .fold(ButtonMask::NONE, ButtonMask::union)
+        .intersection(held)
+}
+
+/// The singular mouse holding `buttons`. Its time is left at the epoch, which
+/// `dispatch_event_with_ops` stamps from the tree's clock, exactly as it does
+/// for the constructors' mouse.
+fn mouse_holding(buttons: ButtonMask) -> PointerInfo {
+    let mut pointer = PointerInfo::mouse(teksilo_core::pointer::EventTime::ZERO);
+    pointer.buttons = buttons;
+    pointer
+}
 
 /// `modifiers` is threaded rather than defaulted for the same reason the wheel's
 /// are: a drag reads Shift and Ctrl from the *move*, so a probe that could only
@@ -703,27 +759,53 @@ fn pointer_move(
     position: Point,
     modifiers: Modifiers,
 ) {
-    tree.dispatch_event_with_ops(WidgetEvent::pointer_move_with(position, modifiers), ops);
+    let pointer = mouse_holding(held_mouse_buttons(tree));
+    tree.dispatch_event_with_ops(
+        WidgetEvent::PointerMove {
+            position,
+            modifiers,
+            pointer,
+        },
+        ops,
+    );
 }
 
 fn pointer_down(
     tree: &mut WidgetTree,
     ops: &mut dyn WindowOps,
     position: Point,
-    button: teksilo_core::PointerButton,
+    button: PointerButton,
     modifiers: Modifiers,
 ) {
-    tree.dispatch_event_with_ops(WidgetEvent::pointer_down(position, button, modifiers), ops);
+    let pointer = mouse_holding(held_mouse_buttons(tree).union(button.into()));
+    tree.dispatch_event_with_ops(
+        WidgetEvent::PointerDown {
+            position,
+            button,
+            modifiers,
+            pointer,
+        },
+        ops,
+    );
 }
 
 fn pointer_up(
     tree: &mut WidgetTree,
     ops: &mut dyn WindowOps,
     position: Point,
-    button: teksilo_core::PointerButton,
+    button: PointerButton,
     modifiers: Modifiers,
 ) {
-    tree.dispatch_event_with_ops(WidgetEvent::pointer_up(position, button, modifiers), ops);
+    let pointer = mouse_holding(release(held_mouse_buttons(tree), button));
+    tree.dispatch_event_with_ops(
+        WidgetEvent::PointerUp {
+            position,
+            button,
+            modifiers,
+            pointer,
+        },
+        ops,
+    );
 }
 
 /// Press and release one key, carrying the text the platform attaches to it
@@ -786,8 +868,8 @@ fn type_text(tree: &mut WidgetTree, ops: &mut dyn WindowOps, text: &str) {
 // that door, so a helper that stepped around it would exercise the helper
 // rather than the framework.
 //
-// `WidgetTree`'s own A21 test helpers build samples of exactly this shape, and
-// this module deliberately does not call them: every one of them ends in
+// `WidgetTree`'s own A21 test helpers build samples of this shape, and this
+// module deliberately does not call them: every one of them ends in
 // `dispatch_pointer`, the standalone variant that substitutes a
 // `NoopWindowOps` whose `open_window` panics. That is the trap the "Synthetic
 // input" section above was written for, and a finger is no more exempt from it
@@ -796,7 +878,31 @@ fn type_text(tree: &mut WidgetTree, ops: &mut dyn WindowOps, text: &str) {
 //
 // The sample's shape mirrors `teksilo-platform`'s translator: a contact holds
 // `ButtonMask::PRIMARY` while it is down and reports `Some(Primary)` on the two
-// phases that change a button; a stylus adds its axes.
+// phases that change a button; a stylus adds its axes; and the W3C `primary`
+// flag is decided as the translator decides it (see `is_primary`). That last
+// one is where these samples and the A21 helpers part: the helpers leave the
+// flag clear, as `PointerInfo::touch` does for any producer that does not know
+// the sequence, and a widget that serves only the primary contact — a splitter
+// or dock handle — ignored every finger a probe put down.
+
+/// The W3C `primary` flag for a sample of `id`.
+///
+/// Decided once, when the pointer enters the table, and read back from the
+/// table for every later sample — the translator's rule, which stores the flag
+/// on its contact at `Started` and on its pen session when the tool comes into
+/// range. A finger is primary when no other finger is live; a stylus is primary
+/// when no finger is (a pen that arrives over a hand already on the glass does
+/// not claim what the platform layer can see is taken). Stored rather than
+/// recomputed, because the answer must not change under a live contact: the
+/// second finger of a pinch is not promoted when the first one lifts.
+fn is_primary(tree: &WidgetTree, id: PointerId) -> bool {
+    match tree.live_pointers().find(|info| info.id == id) {
+        Some(info) => info.primary,
+        None => !tree
+            .live_pointers()
+            .any(|info| info.kind == teksilo_tokens::PointerKind::Touch),
+    }
+}
 
 /// The cadence a [`AutomationOp::Fling`]
 /// samples at: one 60 Hz frame, which is under the velocity tracker's
@@ -875,6 +981,7 @@ fn direct_dispatch(
 ) {
     let mut pointer = PointerInfo::touch(id, tree.input_now());
     pointer.kind = kind;
+    pointer.primary = is_primary(tree, id);
     pointer.buttons = if down {
         ButtonMask::PRIMARY
     } else {

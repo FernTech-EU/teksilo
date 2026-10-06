@@ -2180,6 +2180,9 @@ struct InputProbe {
     /// the caller's real `WindowOps` (see `an_injected_touch_reaches_the_
     /// callers_window_ops`).
     opens_window_on_long_press: bool,
+    /// Take every contact (`MultiContact::All`) rather than the first, so a
+    /// second finger, or a pen over a finger, reaches the log at all.
+    all_contacts: bool,
 }
 
 impl InputProbe {
@@ -2188,15 +2191,38 @@ impl InputProbe {
             label,
             log: Signal::new(Vec::new()),
             opens_window_on_long_press: false,
+            all_contacts: false,
         }
     }
     fn opening_a_window_on_long_press(mut self) -> Self {
         self.opens_window_on_long_press = true;
         self
     }
+    fn taking_every_contact(mut self) -> Self {
+        self.all_contacts = true;
+        self
+    }
     fn log(&self) -> Signal<Vec<String>> {
         self.log.clone()
     }
+}
+
+/// The held buttons as initials, `P` `S` `M` `B` `F` in that order, or `-` for
+/// none. Initials rather than `Debug`, which prints the raw bit field.
+fn buttons_tag(mask: teksilo_core::event::ButtonMask) -> String {
+    use teksilo_core::event::PointerButton as B;
+    let tag: String = [
+        (B::Primary, 'P'),
+        (B::Secondary, 'S'),
+        (B::Middle, 'M'),
+        (B::Back, 'B'),
+        (B::Forward, 'F'),
+    ]
+    .into_iter()
+    .filter(|(button, _)| mask.contains(*button))
+    .map(|(_, initial)| initial)
+    .collect();
+    if tag.is_empty() { "-".to_string() } else { tag }
 }
 
 /// Push one line onto a probe's log. A free fn so every handler records through
@@ -2228,13 +2254,13 @@ impl Widget for InputProbe {
                     teksilo_tokens::PointerKind::Pen(_) => "pen",
                     _ => "mouse",
                 };
-                // `phase:kind:id:pressure:tilt:stamp`, in that order and with
-                // the timestamp last, so a reader that only wants the first
-                // three fields can split on ':' and index.
+                // `phase:kind:id:pressure:tilt:buttons:primary:stamp`, in that
+                // order and with the timestamp last, so a reader that only
+                // wants the first three fields can split on ':' and index.
                 record(
                     &pointer_log,
                     format!(
-                        "{phase}:{kind}:id{}:p{}:t{}:n{}",
+                        "{phase}:{kind}:id{}:p{}:t{}:b{}:{}:n{}",
                         p.id.get(),
                         p.axes
                             .pressure
@@ -2244,6 +2270,8 @@ impl Widget for InputProbe {
                             .tilt
                             .map(|(x, y)| format!("{x:.1}/{y:.1}"))
                             .unwrap_or_else(|| "-".into()),
+                        buttons_tag(p.buttons),
+                        if p.primary { "primary" } else { "secondary" },
                         p.time.as_duration().as_nanos(),
                     ),
                 );
@@ -2262,6 +2290,11 @@ impl Widget for InputProbe {
                     ctx.open_window(probe_child_window());
                 }
             });
+        let handlers = if self.all_contacts {
+            handlers.multi_contact(teksilo_core::MultiContact::All)
+        } else {
+            handlers
+        };
         ctx.apply_self_handlers(handlers);
         Vec::new()
     }
@@ -3008,6 +3041,229 @@ fn inject_pointer_touch_enters_as_a_finger_and_pen_carries_its_axes() {
         seen.iter()
             .any(|l| l.starts_with("down:pen:") && l.contains(":p0.75:t12.0/-4.0:")),
         "the digitizer axes must reach the widget: {seen:?}"
+    );
+}
+
+/// An `InjectPointer` at `(x, 150)` with no modifiers, no id and no axes.
+fn pointer_op(
+    kind: PointerKindDto,
+    action: PointerAction,
+    button: PointerButtonDto,
+    x: f32,
+) -> AutomationOp {
+    AutomationOp::InjectPointer {
+        x,
+        y: 150.0,
+        action,
+        button,
+        kind,
+        pointer_id: None,
+        pressure: None,
+        tilt: None,
+        ctrl: false,
+        shift: false,
+        alt: false,
+        meta: false,
+        command: false,
+    }
+}
+
+/// `phase:buttons:primacy` for every sample an `InputProbe` logged, in order:
+/// what the widget was told about the held mask and the W3C `primary` flag.
+fn held_and_primacy(log: &[String]) -> Vec<String> {
+    log.iter()
+        .map(|line| {
+            let fields: Vec<&str> = line.split(':').collect();
+            format!("{}:{}:{}", fields[0], fields[5], fields[6])
+        })
+        .collect()
+}
+
+/// Every live pointer, through the op a script would use.
+fn query_pointers(tree: &mut WidgetTree) -> Vec<PointerReport> {
+    let AutomationReply::Ok { data } = run(tree, &AutomationOp::QueryPointers) else {
+        panic!("query_pointers failed");
+    };
+    serde_json::from_value(data).expect("a pointer list")
+}
+
+/// Spec I.1. A real mouse reports the buttons it holds on every sample: the
+/// press adds its own, a move keeps them, a release takes its own away. An
+/// injected one reported none at all, so a handler reading
+/// `ctx.pointer().buttons` lost the button in the middle of a drag, and
+/// `query_pointers` showed the mouse up while it was dragging.
+#[test]
+fn an_injected_mouse_reports_the_buttons_it_holds() {
+    use PointerAction::{Down, Move, Up};
+    use PointerButtonDto::{Primary, Secondary};
+    let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe"));
+    let mouse = |action, button, x| pointer_op(PointerKindDto::Mouse, action, button, x);
+
+    assert!(run(&mut tree, &mouse(Down, Primary, 180.0)).is_ok());
+    assert!(run(&mut tree, &mouse(Move, Primary, 200.0)).is_ok());
+    let mid = query_pointers(&mut tree);
+    let held = mid
+        .iter()
+        .find(|p| p.kind == PointerKindDto::Mouse)
+        .unwrap_or_else(|| panic!("the mouse is live mid-drag: {mid:?}"));
+    assert!(held.down, "query_pointers sees the drag's button: {held:?}");
+    assert!(run(&mut tree, &mouse(Up, Primary, 220.0)).is_ok());
+    let after = query_pointers(&mut tree);
+    assert!(
+        after
+            .iter()
+            .any(|p| p.kind == PointerKindDto::Mouse && !p.down),
+        "and the release lets it go: {after:?}"
+    );
+
+    // A second button joins on its own bit and leaves on its own bit, so the
+    // mask is what is held, not what was last pressed.
+    for (action, button) in [
+        (Down, Primary),
+        (Down, Secondary),
+        (Up, Secondary),
+        (Up, Primary),
+    ] {
+        assert!(run(&mut tree, &mouse(action, button, 220.0)).is_ok());
+    }
+
+    assert_eq!(
+        held_and_primacy(&log.get()),
+        [
+            "down:bP:primary",
+            "move:bP:primary",
+            "up:b-:primary",
+            "down:bP:primary",
+            "down:bPS:primary",
+            "up:bP:primary",
+            "up:b-:primary",
+        ],
+    );
+}
+
+/// Spec I.2 and the plan's stored-at-down rule. The W3C `primary` flag is the
+/// translator's: a finger is primary when no other finger is live, a stylus
+/// when no finger is, and the flag a pointer got when it entered stays with it
+/// — the second finger of a gesture is not promoted when the first one lifts,
+/// and a stylus keeps the flag across a lift, since it never leaves the table.
+#[test]
+fn an_injected_contact_is_primary_when_the_translator_would_say_so() {
+    use PointerAction::{Click, Down, Move, Up};
+    use PointerButtonDto::Primary;
+
+    // One finger, alone.
+    let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe"));
+    assert!(
+        run(
+            &mut tree,
+            &pointer_op(PointerKindDto::Touch, Click, Primary, 200.0)
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        held_and_primacy(&log.get()),
+        ["down:bP:primary", "up:b-:primary"]
+    );
+
+    // Two fingers, the first lifting before the second moves, then a fresh
+    // contact once both are gone.
+    let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe").taking_every_contact());
+    let step = |contact, phase, x| TouchStep {
+        contact,
+        phase,
+        x,
+        y: 150.0,
+        advance_ms: 0,
+    };
+    let steps = vec![
+        step(0, TouchPhaseDto::Down, 120.0),
+        step(1, TouchPhaseDto::Down, 280.0),
+        step(0, TouchPhaseDto::Up, 120.0),
+        step(1, TouchPhaseDto::Move, 290.0),
+        step(1, TouchPhaseDto::Up, 290.0),
+        step(2, TouchPhaseDto::Down, 200.0),
+        step(2, TouchPhaseDto::Up, 200.0),
+    ];
+    let AutomationReply::Ok { data } = run(&mut tree, &AutomationOp::InjectTouchSequence { steps })
+    else {
+        panic!("the touch sequence failed");
+    };
+    let report: TouchSequenceReport = serde_json::from_value(data).expect("a sequence report");
+    let flags: Vec<Option<bool>> = report
+        .steps
+        .iter()
+        .map(|s| s.pointer.as_ref().map(|p| p.primary))
+        .collect();
+    // `None` after an up: the finger has left the table.
+    assert_eq!(
+        flags,
+        [
+            Some(true),
+            Some(false),
+            None,
+            Some(false),
+            None,
+            Some(true),
+            None
+        ],
+        "{report:?}"
+    );
+    assert_eq!(
+        held_and_primacy(&log.get()),
+        [
+            "down:bP:primary",
+            "down:bP:secondary",
+            "up:b-:primary",
+            "move:bP:secondary",
+            "up:b-:secondary",
+            "down:bP:primary",
+            "up:b-:primary",
+        ],
+    );
+
+    // A stylus with no finger on the glass is primary, and keeps the flag
+    // through its lift and a finger landing afterwards; a stylus that comes
+    // into range over a finger is not.
+    let pen = |action, x| pointer_op(PointerKindDto::Pen, action, Primary, x);
+    let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe").taking_every_contact());
+    assert!(run(&mut tree, &pen(Down, 180.0)).is_ok());
+    assert!(run(&mut tree, &pen(Up, 180.0)).is_ok());
+    // A finger counts only fingers: the stylus in range does not take its
+    // primacy, so both are primary at once, each for its own kind.
+    let finger = fingers_down(&mut tree, 1);
+    assert_eq!(
+        finger.steps[0].pointer.as_ref().map(|p| p.primary),
+        Some(true),
+        "a finger landing beside a stylus is still the first finger: {finger:?}"
+    );
+    assert!(run(&mut tree, &pen(Move, 200.0)).is_ok());
+    let seen = log.get();
+    let pen_lines: Vec<String> = seen
+        .iter()
+        .filter(|l| {
+            l.starts_with("down:pen") || l.starts_with("up:pen") || l.starts_with("move:pen")
+        })
+        .cloned()
+        .collect();
+    assert_eq!(
+        held_and_primacy(&pen_lines),
+        ["down:bP:primary", "up:b-:primary", "move:b-:primary"],
+        "{seen:?}"
+    );
+
+    let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe").taking_every_contact());
+    fingers_down(&mut tree, 1);
+    assert!(run(&mut tree, &pen(Down, 200.0)).is_ok());
+    let seen = log.get();
+    let pen_down: Vec<String> = seen
+        .iter()
+        .filter(|l| l.starts_with("down:pen"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        held_and_primacy(&pen_down),
+        ["down:bP:secondary"],
+        "{seen:?}"
     );
 }
 

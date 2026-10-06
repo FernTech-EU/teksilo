@@ -345,11 +345,22 @@ cross-widget arbitration off *which device* is pointing, so a probe that can
 only be a mouse cannot reach any of it. Six tools plus one argument close that.
 
 **`inject_pointer` takes a `kind`**, `mouse` (the default), `touch` or `pen`.
-A mouse is the pre-touch path unchanged; a touch or pen builds a real pointer
-sample and enters through the tree's pointer door, so the kind reaches the
-hit test, the per-kind slop, the hover rules and the arbitration. `pen` also
-carries `pressure` (0.0–1.0) and `tilt` (`[tilt_x, tilt_y]` in degrees), the
-axes a digitizer reports. `pressure`, `tilt` and `pointer_id` are **refused on
+A mouse is the pre-touch path; a touch or pen builds a real pointer sample
+and enters through the tree's pointer door, so the kind reaches the hit test,
+the per-kind slop, the hover rules and the arbitration. `pen` also carries
+`pressure` (0.0–1.0) and `tilt` (`[tilt_x, tilt_y]` in degrees), the axes a
+digitizer reports.
+
+Each device reports what its real counterpart does. A mouse holds the buttons
+the previous ops pressed: a `down` adds its button, a `move` keeps what is held,
+an `up` takes its button away, so a handler reading `ctx.pointer().buttons`
+mid-drag sees the button and `query_pointers` shows the mouse down. A finger or
+a stylus carries the W3C `primary` flag the platform translator gives it: a
+finger is primary when no other finger is live, a stylus when no finger is. The
+flag is decided when the pointer arrives and kept for its life, so the second
+finger of a gesture is not promoted when the first lifts. That matters to a
+widget that serves only the primary contact, such as a splitter or a dock
+handle. `pressure`, `tilt` and `pointer_id` are **refused on
 a mouse** rather than ignored: a silently-dropped `pressure` is the same defect
 as a silently-dropped misspelled field.
 
@@ -416,8 +427,8 @@ an app only meets when the OS takes a gesture away from it.
 
 **Determinism.** Every touch and pen op puts the tree on the simulated clock
 before its first sample, so a step that asked for no interval gets none. (An
-`inject_pointer` with `kind: mouse` does not: it is the pre-touch path, byte for
-byte, and nothing about it is timed.) On the
+`inject_pointer` with `kind: mouse` does not: it is the pre-touch path, and
+nothing about it is timed.) On the
 wall clock two consecutive samples are stamped however many nanoseconds apart
 the host took to dispatch them, and a drag meaning "travel 200 dp, no time
 passes" would instead describe a flick at some thousands of dp per second,

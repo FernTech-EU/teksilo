@@ -737,8 +737,9 @@ pub enum AutomationOp {
         #[serde(default)]
         button: PointerButtonDto,
         /// Which device is pointing. `mouse` (the default) is the pre-touch
-        /// path, byte for byte: a legacy `PointerDown`/`PointerUp` pair whose
-        /// pointer is the singular mouse. `touch` and `pen` build a real
+        /// path: a legacy `PointerDown`/`PointerUp` pair whose pointer is the
+        /// singular mouse, holding the buttons the previous ops pressed and
+        /// released, as a real mouse reports them. `touch` and `pen` build a real
         /// [`PointerSample`](teksilo_core::PointerSample) and enter through the
         /// tree's pointer door, so the kind reaches the hit test, the slop, the
         /// hover rules and the arbitration.
