@@ -65,6 +65,14 @@ by crate for clarity, not because crates version independently.
   size. A transaction (`LiveImageWriteGuard`) holds the source's lock: it is
   `!Send`, and the workspace's `clippy.toml` shows how to make clippy refuse
   one held across an `.await`.
+- `LiveImageDiffWriter`, for a producer that hands over whole frames whether
+  or not anything moved: a VM's framebuffer copied at each vsync, a remote
+  desktop. `write_frame` compares the frame with the last one it wrote and
+  commits only the rows that changed, each cut to the span that changed; an
+  identical frame commits nothing, takes no lock and wakes no window, so a
+  still picture fed at 60 Hz costs the window nothing. It keeps a copy of
+  the last frame (one frame of memory) and writes the next frame whole when
+  something else changed the source meanwhile.
 - `resample::downsample_half_opaque`, `downsample_half` for pixels whose
   fourth byte is not alpha, and `resample::downsample_half_texel`, one
   texel of either, for rebuilding part of a halved image.
@@ -112,7 +120,8 @@ by crate for clarity, not because crates version independently.
   placement paint drew.
 - teksilo-widgets re-exports the live-image types a `LiveImage` takes and
   returns, and `teksilo::prelude` brings a producer's: `LiveImageSource`,
-  `LiveImageWriter`, `LivePixelFormat` and `PixelRect`.
+  `LiveImageWriter`, `LiveImageDiffWriter`, `LivePixelFormat` and
+  `PixelRect`.
 
 #### App
 
@@ -257,7 +266,9 @@ by crate for clarity, not because crates version independently.
   repaint while they do, a press landing on its source pixel at the four
   corners and the centre in both orientations, two fingers and their
   cancels, keys reaching the picture and Ctrl+Tab leaving it, a rotation
-  reshaping the box, and a window silent while its producer is paused.
+  reshaping the box, whole frames through a `LiveImageDiffWriter` committing
+  only what moved and nothing at all once the guest holds still, and a
+  window silent while its producer is paused.
 
 #### Render
 
@@ -314,9 +325,11 @@ by crate for clarity, not because crates version independently.
 
 - **`cargo run -p live-image-demo`** — a phone-shaped guest screen that a
   60 Hz producer thread redraws by dirty rects: rotate it, pause the producer
-  and watch the window go idle, switch to `Nearest`, open a second window on
-  the same source, and press, drag, touch or type into it, mapped to the
-  guest's pixels.
+  and watch the window go idle, hand over whole frames through a
+  `LiveImageDiffWriter` and hold the guest still to watch it go idle again
+  while frames keep coming, switch to `Nearest`, open a second window on the
+  same source, and press, drag, touch or type into it, mapped to the guest's
+  pixels.
 
 ### Changed
 

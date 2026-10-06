@@ -10,9 +10,14 @@
 //!
 //! - A phone-shaped guest screen, 720 × 1280, that a producer thread draws at
 //!   60 Hz: a frame counter in its status bar, a bouncing ball and the
-//!   guest's cursor. Each frame commits only the rectangles that changed, so
-//!   the window uploads a few kilobytes, repaints no widget and lays nothing
-//!   out.
+//!   guest's cursor. The guest paints what changed into its framebuffer, and
+//!   each frame commits only the rectangles that changed, so the window
+//!   uploads a few kilobytes, repaints no widget and lays nothing out.
+//! - **Whole frames** hands the whole framebuffer over at every frame
+//!   instead, as a VM host copying its guest's framebuffer at each vsync
+//!   does, through a `LiveImageDiffWriter`, which commits only what changed.
+//!   With **Still guest** on too, the producer keeps handing over identical
+//!   frames at 60 Hz and the window still wakes for nothing.
 //! - **Rotate** turns the guest: the producer resizes its frame to
 //!   1280 × 720 and back, and the picture's box takes the new shape.
 //! - **Pause producer** stops it. The window then has nothing to do and
@@ -36,7 +41,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use teksilo::canvas::live_image::LiveImageWriteGuard;
 use teksilo::core::event::{EventResponse, Modifiers, WidgetEvent};
 use teksilo::core::{LongPressRole, MultiContact, TouchAction};
 use teksilo::prelude::*;
@@ -68,6 +72,10 @@ struct Controls {
     paused: Mutex<bool>,
     resumed: Condvar,
     rotate: AtomicBool,
+    /// Hand the whole framebuffer over every frame, through the diff writer.
+    whole_frames: AtomicBool,
+    /// The guest stops moving: its counter and its ball hold still.
+    still: AtomicBool,
     /// The guest's cursor, `x << 32 | y` in source pixels, or `NO_CURSOR`.
     cursor: AtomicU64,
 }
@@ -80,6 +88,8 @@ impl Controls {
             paused: Mutex::new(false),
             resumed: Condvar::new(),
             rotate: AtomicBool::new(false),
+            whole_frames: AtomicBool::new(false),
+            still: AtomicBool::new(false),
             cursor: AtomicU64::new(NO_CURSOR),
         }
     }
@@ -222,62 +232,59 @@ impl Guest {
         [rgb[2], rgb[1], rgb[0], 0]
     }
 
-    /// Draw `rect` into the transaction, and mark it.
-    fn paint(&self, guard: &mut LiveImageWriteGuard<'_>, rect: PixelRect) {
+    /// The bytes a row of the guest's framebuffer takes.
+    fn stride(&self) -> usize {
+        (self.width * 4) as usize
+    }
+
+    /// Paint `rect` into the guest's framebuffer.
+    fn paint(&self, framebuffer: &mut [u8], rect: PixelRect) {
         let Some(rect) = rect.intersect(&PixelRect::full(self.width, self.height)) else {
             return;
         };
-        let Ok(mut rows) = guard.rows_mut(rect) else {
-            return;
-        };
-        for row in 0..rect.height {
-            let line = rows.row_mut(row);
-            for col in 0..rect.width {
-                let at = (col * 4) as usize;
-                line[at..at + 4].copy_from_slice(&self.pixel(rect.x + col, rect.y + row));
+        let stride = self.stride();
+        for y in rect.y..rect.y + rect.height {
+            for x in rect.x..rect.x + rect.width {
+                let at = y as usize * stride + x as usize * 4;
+                framebuffer[at..at + 4].copy_from_slice(&self.pixel(x, y));
             }
         }
     }
+
+    /// The whole framebuffer, at the guest's size.
+    fn repaint(&self, framebuffer: &mut Vec<u8>) {
+        framebuffer.clear();
+        framebuffer.resize(self.stride() * self.height as usize, 0);
+        self.paint(framebuffer, PixelRect::full(self.width, self.height));
+    }
 }
 
-/// Draw the guest at 60 Hz until the process ends: the whole frame on a
-/// rotation, otherwise only what moved.
+/// Run the guest at 60 Hz until the process ends. It paints what changed
+/// into its framebuffer; the producer then commits those rects in a
+/// transaction, or hands the whole framebuffer to a `LiveImageDiffWriter`,
+/// which finds them itself.
 fn produce(writer: LiveImageWriter, controls: Arc<Controls>) {
     let mut guest = Guest::new();
-    let full = |guest: &Guest, writer: &LiveImageWriter| {
-        let Ok(mut guard) = writer.lock() else { return };
-        if guard.resize(guest.width, guest.height).is_err() {
-            return;
-        }
-        guest.paint(&mut guard, PixelRect::full(guest.width, guest.height));
-        guard.commit();
-    };
-    full(&guest, &writer);
+    let mut framebuffer = Vec::new();
+    guest.repaint(&mut framebuffer);
+    let mut writer = LiveImageDiffWriter::new(writer);
+    let mut dirty = vec![PixelRect::full(guest.width, guest.height)];
     let mut next = Instant::now();
     loop {
-        controls.wait_while_paused();
-        if controls.rotate.swap(false, Ordering::AcqRel) {
-            guest.rotate();
-            controls.set_cursor(None);
-            full(&guest, &writer);
-        } else {
-            let old_ball = guest.ball_rect();
-            let old_cursor = guest.cursor_rect();
-            guest.cursor = controls
-                .cursor()
-                .filter(|&(x, y)| x < guest.width && y < guest.height);
-            guest.advance();
-            if let Ok(mut guard) = writer.lock() {
-                guest.paint(&mut guard, Guest::counter_rect());
-                guest.paint(&mut guard, old_ball.union(&guest.ball_rect()));
-                if old_cursor != guest.cursor_rect() {
-                    for rect in [old_cursor, guest.cursor_rect()].into_iter().flatten() {
-                        guest.paint(&mut guard, rect);
-                    }
-                }
-                guard.commit();
+        if controls.whole_frames.load(Ordering::Relaxed) {
+            let _ = writer.write_frame(guest.width, guest.height, &framebuffer, guest.stride());
+        } else if !dirty.is_empty()
+            && let Ok(mut guard) = writer.writer().lock()
+            && guard.resize(guest.width, guest.height).is_ok()
+        {
+            for rect in &dirty {
+                let at = rect.y as usize * guest.stride() + rect.x as usize * 4;
+                let _ = guard.write_rect(*rect, &framebuffer[at..], guest.stride());
             }
+            guard.commit();
         }
+        dirty.clear();
+
         next += FRAME;
         let now = Instant::now();
         if next > now {
@@ -285,6 +292,39 @@ fn produce(writer: LiveImageWriter, controls: Arc<Controls>) {
         } else {
             next = now;
         }
+        controls.wait_while_paused();
+
+        if controls.rotate.swap(false, Ordering::AcqRel) {
+            guest.rotate();
+            controls.set_cursor(None);
+            guest.repaint(&mut framebuffer);
+            dirty.push(PixelRect::full(guest.width, guest.height));
+            continue;
+        }
+        let old_ball = guest.ball_rect();
+        let old_cursor = guest.cursor_rect();
+        guest.cursor = controls
+            .cursor()
+            .filter(|&(x, y)| x < guest.width && y < guest.height);
+        if !controls.still.load(Ordering::Relaxed) {
+            guest.advance();
+            dirty.push(Guest::counter_rect());
+            dirty.push(old_ball.union(&guest.ball_rect()));
+        }
+        if old_cursor != guest.cursor_rect() {
+            dirty.extend([old_cursor, guest.cursor_rect()].into_iter().flatten());
+        }
+        for rect in &dirty {
+            guest.paint(&mut framebuffer, *rect);
+        }
+        let bounds = PixelRect::full(guest.width, guest.height);
+        dirty.retain_mut(|rect| match rect.intersect(&bounds) {
+            Some(inside) => {
+                *rect = inside;
+                true
+            }
+            None => false,
+        });
     }
 }
 
@@ -455,6 +495,9 @@ fn main() {
                     let input = GuestInput::new(controls.clone());
                     let paused = Signal::new(false);
                     let nearest = Signal::new(false);
+                    let whole_frames = Signal::new(false);
+                    let still = Signal::new(false);
+                    let (whole_controls, still_controls) = (controls.clone(), controls.clone());
                     let page = nearest.map(|&n| usize::from(n));
                     let pause_controls = controls.clone();
                     let rotate_controls = controls.clone();
@@ -478,6 +521,22 @@ fn main() {
                                         },
                                     ))
                                     .child(Checkbox::new(nearest).label(lit!("Nearest")))
+                                    .child(
+                                        Checkbox::new(whole_frames)
+                                            .label(lit!("Whole frames"))
+                                            .on_change(move |on, _ctx| {
+                                                whole_controls
+                                                    .whole_frames
+                                                    .store(on, Ordering::Relaxed);
+                                            }),
+                                    )
+                                    .child(
+                                        Checkbox::new(still).label(lit!("Still guest")).on_change(
+                                            move |on, _ctx| {
+                                                still_controls.still.store(on, Ordering::Relaxed);
+                                            },
+                                        ),
+                                    )
                                     .child(Button::new(lit!("Second window")).on_activate_fn(
                                         move |ctx| {
                                             ctx.open_window(second_window(second.clone()));

@@ -11,7 +11,9 @@
 //! runs no `paint()`, marks no widget and repaints nothing else: the window
 //! replays its cached frame. Only a change of the source's size or status
 //! (resized, `Waiting`, `Live`, `Disconnected`) relayouts and repaints this
-//! widget.
+//! widget. A producer that hands over whole frames, changed or not, writes
+//! through a [`LiveImageDiffWriter`] instead, which commits only what changed
+//! and nothing for an identical frame.
 //!
 //! # Sizing
 //!
@@ -79,8 +81,8 @@ use teksilo_tokens::{Alignment, Color, TextRole, TextStyleRole};
 
 pub use teksilo_canvas::image_geometry::{ImageFit, ImageGeometry, ImageOrientation, PixelRect};
 pub use teksilo_canvas::live_image::{
-    LiveImageSource, LiveImageStats, LiveImageStatus, LiveImageWriter, LivePixelFormat,
-    ScalingFilter,
+    LiveImageDiffWriter, LiveImageSource, LiveImageStats, LiveImageStatus, LiveImageWriter,
+    LivePixelFormat, ScalingFilter,
 };
 
 /// How a [`LiveImage`] sizes its box. [`LiveImage::width`],

@@ -31,6 +31,11 @@ needs, and none of which the accessibility tree alone can show:
    the picture's box takes the new shape.
 7. **A paused producer costs nothing.** With `TEKSILO_IDLE_TRACE=1`, the
    window prints no trace line for ten seconds while nothing commits.
+8. **Neither does a producer that hands over whole, identical frames.** With
+   the demo's *Whole frames* on, the producer gives a `LiveImageDiffWriter`
+   its whole framebuffer at every frame; each commit carries only what moved,
+   and once the guest holds still, sixty identical frames a second commit
+   nothing and the window stays silent.
 
 The probe sends every pointer event the guest sees. A real cursor over the
 window would add its own moves; the demo only reports a move while a contact
@@ -232,6 +237,49 @@ def rotate_leg(session, report: Report) -> None:
                  f"the box portrait again ({box['width']:.0f} x {box['height']:.0f})")
 
 
+def trace_lines(log: str, start: int, end: int | None = None) -> list[str]:
+    """The idle-trace lines the app printed between two offsets of its log."""
+    with open(log, encoding="utf-8", errors="replace") as handle:
+        handle.seek(start)
+        text = handle.read() if end is None else handle.read(end - start)
+    return [line for line in text.splitlines() if line.startswith("teksilo_idle_trace")]
+
+
+def whole_frames_leg(session, report: Report, log: str) -> None:
+    """8: whole frames through the diff writer cost only what moved."""
+    node = guest(session)
+    frame_bytes = PORTRAIT[0] * PORTRAIT[1] * 4
+    click(session, "Whole frames", role="CheckBox")
+    time.sleep(0.5)
+    before = stats(session, node)["source"]
+    time.sleep(0.5)
+    after = stats(session, node)["source"]
+    commits = after["commits"] - before["commits"]
+    written = after["bytes_written"] - before["bytes_written"]
+    report.check(commits >= 10, f"whole frames still flow: {commits} commits in half a second")
+    report.check(commits > 0 and written // commits < frame_bytes // 10,
+                 f"and each carries only what moved: {written // max(commits, 1)} bytes a "
+                 f"commit, against {frame_bytes} for the frame")
+
+    click(session, "Still guest", role="CheckBox")
+    time.sleep(1.0)
+    held = stats(session, node)["source"]["generation"]
+    start = os.path.getsize(log)
+    # Five seconds without a call, while the producer hands over sixty
+    # identical frames a second.
+    time.sleep(5.0)
+    lines = trace_lines(log, start)
+    report.check(stats(session, node)["source"]["generation"] == held,
+                 "identical whole frames commit nothing")
+    report.check(not lines, f"and the window stays silent ({len(lines)} lines: {lines[:2]})")
+
+    click(session, "Still guest", role="CheckBox")
+    time.sleep(0.5)
+    report.check(stats(session, node)["source"]["generation"] > held,
+                 "and frames flow again once the guest moves")
+    click(session, "Whole frames", role="CheckBox")
+
+
 def idle_leg(session, report: Report, log: str) -> None:
     """7: a paused producer costs nothing."""
     node = guest(session)
@@ -244,18 +292,14 @@ def idle_leg(session, report: Report, log: str) -> None:
                  "the paused producer commits nothing")
     time.sleep(2.0)
     start = os.path.getsize(log)
-    with open(log, encoding="utf-8", errors="replace") as handle:
-        flowing = [line for line in handle.read(start).splitlines()
-                   if line.startswith("teksilo_idle_trace")]
-    # Without it, the silence below would prove nothing.
+    flowing = trace_lines(log, 0, start)
+    # Without it, the silences checked here and in the whole-frames leg
+    # would prove nothing.
     report.check(bool(flowing), f"the trace is on: {len(flowing)} lines while frames flowed")
     # Ten seconds without a single call: any trace line now is the window
     # waking on its own.
     time.sleep(10.0)
-    with open(log, encoding="utf-8", errors="replace") as handle:
-        handle.seek(start)
-        lines = [line for line in handle.read().splitlines()
-                 if line.startswith("teksilo_idle_trace")]
+    lines = trace_lines(log, start)
     report.check(not lines, f"no idle-trace line in ten seconds ({len(lines)}: {lines[:2]})")
     click(session, "Pause producer", role="CheckBox")
     time.sleep(0.5)
@@ -309,6 +353,7 @@ def main(argv: list[str]) -> int:
         touch_leg(session, report)
         key_leg(session, report)
         rotate_leg(session, report)
+        whole_frames_leg(session, report, app.log)
         idle_leg(session, report, app.log)
 
     except Exception as exc:  # noqa: BLE001 — any failure here means "could not run"

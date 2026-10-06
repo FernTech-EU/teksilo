@@ -13,6 +13,10 @@ use super::stats::LiveImageSourceStats;
 use super::{LiveImageError, LiveImageSource, LivePixelFormat, PixelRect, RejectedFrame};
 use crate::sync::Ordering;
 
+mod diff;
+
+pub use diff::LiveImageDiffWriter;
+
 /// A producer's handle on a [`LiveImageSource`]. `Send + Sync`; clones share
 /// one session token, and the source frees its pixels and becomes
 /// `Disconnected` when the session's last token drops.

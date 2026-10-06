@@ -184,7 +184,10 @@ the app pins something newer.
   and `LiveImage::new(source)` shows it: no repaint, no leak. A new
   `ImageWidget` name per frame never frees its texture; the same name never
   shows new pixels. Keep a writer alive while the picture should show: when
-  the last one drops, the source frees its pixels.
+  the last one drops, the source frees its pixels. A producer that only has
+  whole frames (a VM framebuffer, a remote screen) wraps its writer in a
+  `LiveImageDiffWriter`, which commits only the rows that changed and nothing
+  for an identical frame.
 - **Composing-widget invariant:** the id returned from `build()`, the root id
   used by `layout_response`, and `children()` must all be the same root child.
 - **Testing is headless:** `teksilo::core::{WidgetTree, LayoutContext::for_testing}`

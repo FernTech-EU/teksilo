@@ -21,7 +21,7 @@ plan. Section numbers below (§6.1, AC7, D.13…) are the specification's.
 |---|---|
 | teksilo-canvas `wake` | `RedrawWaker`, `WakeKind`, `WakeFlag`, `WakeGate`, `CountingWaker`: waking one window from any thread, shared with `RepaintTrigger`. |
 | teksilo-canvas `image_geometry` | `ImageFit`, `ImageOrientation`, `ImageGeometry` (placement, device-pixel snapping, both mappings), `PixelRect`, `oriented_crop`. |
-| teksilo-canvas `live_image` | The producer side: source, writer, sessions, write guard, `SourceLock`, the packed meta word, the damage ring and upload planner, the consumer and its wake flags. The draw side: `LiveImageQuad`, `DrawCommand::LiveImage`. The renderer's decisions: `internal::LivePass<B>`, one engine for every backend. `testing::LiveImageMirror` is `LivePass` over a CPU backend. |
+| teksilo-canvas `live_image` | The producer side: source, writer, sessions, write guard, `LiveImageDiffWriter` (see "Whole frames" below), `SourceLock`, the packed meta word, the damage ring and upload planner, the consumer and its wake flags. The draw side: `LiveImageQuad`, `DrawCommand::LiveImage`. The renderer's decisions: `internal::LivePass<B>`, one engine for every backend. `testing::LiveImageMirror` is `LivePass` over a CPU backend. |
 | teksilo-core `off_thread` | The registry of off-thread attachments (`RepaintTrigger` and live images), the layout pre-pass that turns their flags into relayouts and status changes, `device_scale_signal`. |
 | teksilo-render | `WgpuBackend` (`live_texture.rs`), `DeviceHealth`, `gpu_reclaim`, `render_capture`, the live mip pass (`live_mip.wgsl` over the full-screen pass the blur shares), the timing histograms (`live_timings.rs`). |
 | teksilo-platform, teksilo-app | The window wake target, the hidden-window gate and `pre_present_notify`, `capture_offscreen` through `render_capture`, the reclaim poll, display-refresh tracking, the automation bridge's live-image half. |
@@ -153,7 +153,41 @@ texture. Pixels the source refuses draw nothing. An unmasked
 `ImageWidget::new(&icon)` keeps the static, shared path, keyed by
 `RasterIcon::texture_key`.
 
-## 8. Deviations from the specification
+## 8. Whole frames: `LiveImageDiffWriter`
+
+A producer with no damage tracking (a VM host copying its guest's
+framebuffer at each vsync, a remote desktop, a renderer that redraws
+everything) hands over whole frames. Through the plain writer, each one is a
+full commit, a wake and a full upload, even when nothing moved.
+`LiveImageDiffWriter` wraps a writer, keeps a copy of the last frame it
+wrote, and commits only the rows that changed. It is not in the
+specification: it was proposed after PR-5 and built on request.
+
+- **No lock for an identical frame.** The comparison runs on the producer's
+  thread against the copy. An identical frame returns `None` without touching
+  the source once two lock-free reads agree that the source still holds the
+  copy: the published generation, and the meta word (status `Live`, same
+  size). `clear()` does not move the generation, so the meta check is what
+  catches it, and a revoked session too, whose free leaves `Waiting`.
+- **Exact under the lock.** A frame that changed is written under the lock
+  only once the generation is still this writer's and nothing is pending.
+  `wrote` covers a mark, and `force_full` covers a resize, a free and a panic
+  inside a transaction; both stay set until a commit, which moves the
+  generation. Otherwise the frame is written whole. A `debug_assert` holds
+  the argument that the locked path always commits.
+- **Rects.** Each run of consecutive changed rows becomes one rect, as wide
+  as the union of its rows' changed spans. The spans are found with 64-byte
+  `memcmp` chunks, then a scan of one chunk. Past 16 rects, the neighbours
+  whose union adds the fewest pixels merge, so a commit keeps its rects
+  inside the damage ring's capacity instead of widening to their bounding
+  box.
+- **The blind spot.** Another writer's `pixels_mut` write, unmarked, in a
+  transaction that ended without a commit or a panic, is invisible to it.
+  Such pixels reach no window either, until something marks them; catching
+  them would need a full compare under the lock, which is the cost the
+  design avoids.
+
+## 9. Deviations from the specification
 
 Each item was reported at the end of its PR group. The plan's own corrections
 (the flag protocol, `SourceLock`, bounded waits, the shared `LivePass` engine
@@ -181,7 +215,7 @@ and the rest of its list) are not repeated here.
 | Commit 34 | A `--release` CI step for the dirty ratio | None (the plan's choice): the dirty-ratio test is `#[ignore]`d, and the counts it pins in every build are exact. |
 | Commit 35 | `Percentiles { p50, p90, p99, max }` | Also `samples`: without it an empty histogram and one of zero-microsecond samples look alike. The raw durations are recorded by canvas's `LivePass` in every build and folded into histograms by teksilo-render, so no cfg spans two crates. |
 
-## 9. Measurements
+## 10. Measurements
 
 All on the reference host (AMD Radeon 890M, RADV; Mesa lavapipe for the
 software rows), at the commits that introduced them. The figures are one run
@@ -225,6 +259,12 @@ wake within the producer's short write, every render meets the lock. A real
 window and producer drift between these cases. AC14 needs a real window
 over 60 s.
 
+**The diff writer (`tests/live_diff_writer_cost.rs`, teksilo-canvas).** For
+720 × 1280, release, the producer's side of `write_frame`, as medians of 101
+calls: an identical frame 50 µs, a frame with a 64 × 64 change 59 µs, against
+47 µs for a plain `LiveImageWriter::write_frame` of the same frame. In debug
+builds the figures are 75 µs, 183 µs and 49 µs.
+
 **Hidden windows (AC16, PR-2, private `kwin_wayland --virtual`).** Minimised,
 the window drew no frame and used 0.01 s of CPU from 0.5 s to 5 s, and it drew
 again on restore. Without `pre_present_notify`, the same window rendered 31–32
@@ -246,12 +286,17 @@ the private Wayland session at scale 1.0, all checks passed:
 - with the producer paused, the idle trace printed no line for 10 s, having
   printed while frames flowed.
 
+With the demo's *Whole frames* on, a commit through the diff writer carried
+24.5 KB on average against a 3.7 MB frame. With *Still guest* on as well, the
+producer handed over sixty identical frames a second, the generation did not
+move, and the idle trace stayed silent for five seconds.
+
 On a private rootless Xwayland at scale 1.5, every check passed too. That X
 server, which has no window manager, reports its windows obscured, so the
 window was hidden and drew no frame. Screenshots of it still held the latest
 commits, which is AC20's last clause.
 
-## 10. Acceptance criteria
+## 11. Acceptance criteria
 
 | ID | State | Evidence |
 |---|---|---|
@@ -259,22 +304,22 @@ commits, which is AC20's last clause.
 | AC2 | Met off macOS | The recording-poster tests of the wake layer; claims (j) and (k) of the X11 event-loop test. macOS is not run here. |
 | AC3 | Met | Headless paint counters and stats; F.3 (`paints` flat while 31 frames went by). |
 | AC4, AC5 | Met | Headless, `CountingWaker`, one and two trees. |
-| AC6 | Met offscreen | §9's 60 Hz table. Not yet measured in a window under `Fifo`. |
+| AC6 | Met offscreen | The 60 Hz table under Measurements. Not yet measured in a window under `Fifo`. |
 | AC7, AC8 | Not measured | Need per-thread `/proc` sampling of Miragem's workload on the release host. |
 | AC9 | Bookkeeping met | `LiveTextureStats::bytes` matches the formula in the D tests, mip levels included. GTT drift over 300 s is not measured. |
 | AC10 | Met | Mirror and GPU tests (D.5, D.6), on lavapipe in CI. |
 | AC11 | Met; GTT not measured | Claim (r): the attachment detaches and the reclaim poll frees the textures without a frame. |
 | AC12 | Not measured | Needs a real window: the offscreen figure is the phase difference. |
-| AC13 | Met offscreen on RADV | §9. |
+| AC13 | Met offscreen on RADV | The 60 Hz table under Measurements. |
 | AC14 | Not measured in a window | Offscreen: 1–2 % in phase, 0 half a period apart. |
-| AC15 | Met | `live_image_cost.rs`, §9. |
+| AC15 | Met | `live_image_cost.rs`; the figures under Measurements. |
 | AC16 | Met on KWin; Windows and macOS by hand | PR-2's F.5; F.3's X11 run for screenshots of a hidden window. |
 | AC17 | Met | Headless pause tests (B.14, B.15, C.18–C.22), D.20, D.21. |
 | AC18 | Met with the PR-3 deviation | J.1–J.5; one private `WindowWake` per burst. |
 | AC19 | Met | J.6–J.8, the Avatar cache test, D.27. |
 | AC20 | Met | The executor tests, I.6–I.9, F.3 at scale 1.0 (Wayland) and 1.5 (X11). |
 
-## 11. Open questions
+## 12. Open questions
 
 - **Timings outside the renderer.** `Renderer::live_texture_timings` cannot be
   reached from an app on teksilo-app, which never holds its window's
@@ -285,10 +330,6 @@ commits, which is AC20's last clause.
 - **Aiming at a hidden pixel.** `source` aiming refuses a pixel the fit crops
   out, as specified, but not one an ancestor's box or clip hides. Such a press
   reaches whatever is under it.
-- **Producer-side diffing.** A writer could compare a frame with the one it
-  holds and commit only the rows that changed, so identical frames cost no
-  commit, no wake and no draw. That suits a producer that redraws whole frames
-  whether or not anything moved. It would be opt-in, and is not built.
 - **Culling and the replayed frame.** A culling parent that parks a child in
   a pass that marks nothing for paint leaves the child in the replayed frame.
   `WidgetTree::set_dormant` drops `cached_frame`; the placement-dormancy path

@@ -100,6 +100,37 @@ new stream. When the last writer of a session drops, the source frees its
 pixels and becomes `Disconnected`. Keep a writer alive for as long as the
 picture should show.
 
+### Producers that hand over whole frames
+
+Some producers have no damage tracking. A VM host copies its guest's
+framebuffer at every vsync, a remote desktop receives whole screens, and a
+renderer redraws everything. Give such a producer a `LiveImageDiffWriter`:
+
+```rust
+let mut writer = LiveImageDiffWriter::new(screen.writer());
+loop {
+    let frame = guest.framebuffer();          // the whole frame, every time
+    writer.write_frame(720, 1280, frame, 720 * 4)?;   // Some(generation), or None
+}
+```
+
+`write_frame` compares the frame with the last one it wrote and commits only
+the rows that changed, each cut to the span of pixels that changed in it. A
+frame identical to the last one commits nothing: it takes no lock, wakes no
+window and uploads nothing, so a still guest fed at 60 Hz costs the window
+nothing. The comparison runs on the producer's thread, against a copy of the
+last frame the writer keeps, so it costs one frame of memory, and about what
+a plain `write_frame` costs in time: roughly 50 µs for 720 × 1280 in a
+release build. It never runs under the source's lock.
+
+The result is the frame handed over. When something else changed the source
+since this writer's last commit (another writer, a `clear`, a resize, an
+abandoned transaction), the next frame goes out whole. `forget()` forces
+that too, and `writer()` reaches the plain writer for the source's other
+operations. The one change it cannot see is another writer's write through
+`pixels_mut` left unmarked in a transaction that ended without a commit;
+such pixels reach no window either, until something marks them.
+
 ## Placing the picture
 
 `LiveImageSizing` picks the widget's box:

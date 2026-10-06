@@ -15,7 +15,9 @@ where this widget's last paint put it. A commit that changes only pixels
 runs no `paint()`, marks no widget and repaints nothing else: the window
 replays its cached frame. Only a change of the source's size or status
 (resized, `Waiting`, `Live`, `Disconnected`) relayouts and repaints this
-widget.
+widget. A producer that hands over whole frames, changed or not, writes
+through a `LiveImageDiffWriter` instead, which commits only what changed
+and nothing for an identical frame.
 
 # Sizing
 

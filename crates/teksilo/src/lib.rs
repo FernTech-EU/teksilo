@@ -162,7 +162,9 @@ pub mod prelude {
 
     // Live pictures: what a producer thread needs to feed a `LiveImage`.
     pub use teksilo_canvas::PixelRect;
-    pub use teksilo_canvas::live_image::{LiveImageSource, LiveImageWriter, LivePixelFormat};
+    pub use teksilo_canvas::live_image::{
+        LiveImageDiffWriter, LiveImageSource, LiveImageWriter, LivePixelFormat,
+    };
 
     // Tokens
     pub use teksilo_tokens::{

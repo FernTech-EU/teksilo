@@ -219,8 +219,9 @@ pub use popover_widget::{
     PopoverButton, PopoverCustom, PopoverIconButton, PopoverTrigger, PopoverWidget,
 };
 pub use primitives::live_image::{
-    ImageGeometry, ImageOrientation, LiveImage, LiveImageHandle, LiveImageSizing, LiveImageSource,
-    LiveImageStats, LiveImageStatus, LiveImageWriter, LivePixelFormat, PixelRect, ScalingFilter,
+    ImageGeometry, ImageOrientation, LiveImage, LiveImageDiffWriter, LiveImageHandle,
+    LiveImageSizing, LiveImageSource, LiveImageStats, LiveImageStatus, LiveImageWriter,
+    LivePixelFormat, PixelRect, ScalingFilter,
 };
 pub use primitives::text_input_field::{InputPurpose, ValidationFeedback, ValidationOutcome};
 pub use primitives::{

@@ -83,7 +83,7 @@ pub use draw::{LiveImageDraw, LiveImageQuad};
 pub use pass::LiveTextureStats;
 pub use source::{LiveImageSource, LiveImageSourceBuilder};
 pub use stats::{LiveImageAttachmentStats, LiveImageSourceStats, LiveImageStats};
-pub use writer::{LiveImageWriteGuard, LiveImageWriter, RowsMut};
+pub use writer::{LiveImageDiffWriter, LiveImageWriteGuard, LiveImageWriter, RowsMut};
 
 /// Test helpers, compiled in every build like a widget tree's test API.
 pub mod testing {

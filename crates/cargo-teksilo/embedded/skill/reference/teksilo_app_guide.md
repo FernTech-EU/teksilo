@@ -996,6 +996,12 @@ let view = LiveImage::new(screen)
     .alt(lit!("Virtual machine screen"));
 ```
 
+A producer that only has whole frames (a VM's framebuffer copied at each vsync, a
+remote screen) hands them to a `LiveImageDiffWriter::new(screen.writer())` instead:
+its `write_frame` commits only the rows that changed, and nothing at all (no lock, no
+wake, no upload) for a frame identical to the last, so a still screen fed at 60 Hz
+leaves the window idle.
+
 Forward input to the guest with `LiveImageHandle::map_to_source(local)`, from the
 widget's handle (`LiveImageHandle::new()` + `.with_handle(&h)`), on handlers
 attached through `WidgetBuilder` (`focusable`, `keyboard_capture(true)` for every
