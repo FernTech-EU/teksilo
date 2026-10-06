@@ -67,6 +67,33 @@ by crate for clarity, not because crates version independently.
   textures in memory, for headless tests (`MirrorReport` says what one frame
   did).
 
+#### Widgets
+
+- `LiveImage`, which shows a `LiveImageSource`: a picture another thread
+  rewrites many times a second. A commit that changes only pixels repaints
+  nothing and lays nothing out: the window uploads what changed and draws it
+  where the widget last painted. `LiveImageSizing` sizes the box: `Aspect`,
+  the largest box of the picture's aspect ratio, rounded to whole device
+  pixels; `Fill`; or `Natural`, with `device_pixels` for one source pixel per
+  device pixel. `width`, `height` and `size` pin it. Inside the box the
+  picture is placed by `fit` and `alignment`, turned by `orientation` and
+  sampled by `scaling`, and its edges snap to the device-pixel grid
+  (`pixel_snap`), through any scale an ancestor applies. `background` fills
+  the letterbox, and the whole box, with the `placeholder` text centred on
+  it, while the source is not live. It is one `Role::Image` node named by
+  `alt` (or hidden with `a11y_hidden`), whose description is the placeholder
+  while that shows; a commit never changes it.
+- `LiveImageHandle`, from `LiveImage::handle`, or made first with
+  `LiveImageHandle::new` and given with `LiveImage::with_handle`, the form a
+  `teksu!` tree can use. It holds the source's size and status as `Signal`s,
+  kept across a switch of source, the placement of the last layout, and the
+  mapping between widget-local points and source pixels (`map_to_source`,
+  `map_to_source_clamped`, `map_to_source_f32`, `map_from_source`), from the
+  placement paint drew.
+- teksilo-widgets re-exports the live-image types a `LiveImage` takes and
+  returns, and `teksilo::prelude` brings a producer's: `LiveImageSource`,
+  `LiveImageWriter`, `LivePixelFormat` and `PixelRect`.
+
 #### App
 
 - `HeadlessApp::render_for_capture`, which renders a headless app for an
@@ -129,6 +156,8 @@ by crate for clarity, not because crates version independently.
   `WidgetTree::live_image_attachment_count`, `live_image_consumer`,
   `live_image_stats`, `live_image_geometry` and `live_image_attachments`
   look attachments up by widget, through a `WidgetBuilder` wrapper too.
+- `LiveImageSignals` implements `Default`: no size and `Disconnected`, for
+  a widget made before its source is known.
 - `WidgetTree::device_scale_signal` and `BuildContext::device_scale_signal`:
   the window's device scale as a `Signal`, for widgets whose layout depends on
   it. Bound at `Relayout`, it relayouts that widget when the window moves to a

@@ -39,6 +39,17 @@ impl LiveImageSignals {
     }
 }
 
+impl Default for LiveImageSignals {
+    /// Signals for no source yet: no size, `Disconnected`. An attach writes
+    /// the source's.
+    fn default() -> Self {
+        Self {
+            frame_size: Signal::new(None),
+            status: Signal::new(LiveImageStatus::Disconnected),
+        }
+    }
+}
+
 impl std::fmt::Debug for LiveImageSignals {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LiveImageSignals")

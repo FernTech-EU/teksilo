@@ -160,6 +160,10 @@ pub mod prelude {
     // Canvas and rendering
     pub use teksilo_canvas::{Canvas, EllipsisMode, Paint, Path, RenderFrame, TextOverflow};
 
+    // Live pictures: what a producer thread needs to feed a `LiveImage`.
+    pub use teksilo_canvas::PixelRect;
+    pub use teksilo_canvas::live_image::{LiveImageSource, LiveImageWriter, LivePixelFormat};
+
     // Tokens
     pub use teksilo_tokens::{
         BorderRole, Color, CornerRadius, SurfaceRole, TextRole, TextStyleRole,

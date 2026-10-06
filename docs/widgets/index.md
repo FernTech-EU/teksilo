@@ -35,6 +35,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [IconWidget](icon_widget.md) — IconWidget — a vector or raster icon rendered at a configurable size
 - [ImageMaskShape](image_mask.md) — Anti-aliased alpha masking for raster images — circle / rounded-square
 - [ImageWidget](image_widget.md) — ImageWidget — displays a raster image (PNG, WebP) with a configurable
+- [LiveImage](live_image.md) — LiveImage — shows a picture another thread rewrites many times a second
 - [RectWidget](rect_widget.md) — RectWidget — a leaf widget that paints a filled and/or stroked rounded rectangle
 - [TextInputField](text_input_field.md) — `TextInputField` — editable single-line text surface primitive
 - [TextWidget](text_widget.md) — TextWidget — a leaf widget that renders a localized text string

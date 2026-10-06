@@ -165,6 +165,7 @@
 - [LanguageSwitcher](widgets/language_switcher.md)
 - [Link](widgets/link.md)
 - [ListView](widgets/list_view.md)
+- [LiveImage](widgets/live_image.md)
 - [LogView](widgets/log_view.md)
 - [MasonryLayout](widgets/masonry.md)
 - [MaxSize](widgets/max_size.md)

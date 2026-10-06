@@ -19,6 +19,7 @@ pub mod image_widget;
 /// `shrink`/`min`) and measures each child's cross axis at its *final* main
 /// size — the height-for-width pass. Internal helper, not a widget.
 pub(crate) mod linear_layout;
+pub mod live_image;
 pub mod masonry;
 pub mod max_size;
 pub mod min_size;
@@ -53,6 +54,7 @@ pub use hstack::HStack;
 pub use icon_widget::IconWidget;
 pub use image_mask::ImageMaskShape;
 pub use image_widget::{ImageFit, ImageWidget};
+pub use live_image::{LiveImage, LiveImageHandle, LiveImageSizing};
 pub use masonry::MasonryLayout;
 pub use max_size::MaxSize;
 pub use min_size::MinSize;
