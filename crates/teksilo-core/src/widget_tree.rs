@@ -2781,8 +2781,10 @@ impl WidgetTree {
             .unwrap_or(false);
         let old_children: Vec<WidgetId> = self.arena.children(widget_id).to_vec();
         if !preserve_children {
+            // The widget being rebuilt is marked for layout and paint
+            // already, which covers what its old children drew.
             for child_id in &old_children {
-                self.destroy_subtree(*child_id);
+                self.destroy_subtree_inner(*child_id, false);
             }
         }
 
@@ -2889,7 +2891,16 @@ impl WidgetTree {
     /// handles and removing their UI-side callbacks. Use this in place of
     /// `arena.destroy()` whenever a widget that may have subscribed to
     /// events is being torn down.
+    ///
+    /// What the subtree drew is in the composed frame, and its ancestors'
+    /// layouts made room for it: both are recomputed, as for a subtree made
+    /// dormant. Without that the next frame, where nothing else changed,
+    /// replayed the destroyed widgets' drawing, and a live picture among
+    /// them kept its texture until something repainted their parent.
     pub(crate) fn destroy_subtree(&mut self, widget_id: WidgetId) {
+        self.arena.mark_ancestors_need_layout(widget_id);
+        self.cached_frame = None;
+        self.a11y_dirty = true;
         self.destroy_subtree_inner(widget_id, false);
     }
 

@@ -1901,6 +1901,90 @@ mod tests {
         assert_eq!(colors, vec![Color::BLUE.to_array()]);
     }
 
+    /// Stacks its children at its origin, as `StackWidget` does, and counts
+    /// its layouts.
+    #[derive(Debug)]
+    struct CountingStack {
+        children: Vec<WidgetId>,
+        layouts: Rc<std::cell::Cell<u32>>,
+    }
+
+    impl Widget for CountingStack {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            self.layouts.set(self.layouts.get() + 1);
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: Rect,
+            _proposal: SizeProposal,
+            children: &mut [WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = bounds.size();
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.children.clone()
+        }
+    }
+
+    /// A destroyed subtree is not in the next frame, though nothing else
+    /// changed and the frame would otherwise be replayed whole, and its
+    /// parent lays out again without it.
+    #[test]
+    fn a_destroyed_subtree_leaves_the_next_frame() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let red = tree.add(ColorProbe::new(Color::RED));
+        let blue = tree.add(ColorProbe::new(Color::BLUE));
+        let layouts = Rc::new(std::cell::Cell::new(0));
+        let root = tree.add(CountingStack {
+            children: vec![red, blue],
+            layouts: layouts.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(painted_colors(&tree.render()).len(), 2);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let settled = layouts.get();
+
+        tree.destroy_subtree_for_testing(red);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(layouts.get() > settled, "the parent laid out again");
+        assert_eq!(painted_colors(&tree.render()), vec![Color::BLUE.to_array()]);
+
+        // A root has no parent to mark: the composed frame goes all the same.
+        tree.destroy_subtree_for_testing(root);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert!(painted_colors(&tree.render()).is_empty());
+    }
+
+    /// The same through a handler's `EventContext::destroy`, the door an
+    /// application takes at run time.
+    #[test]
+    fn a_subtree_a_handler_destroys_leaves_the_next_frame() {
+        use crate::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let red = tree.add(ColorProbe::new(Color::RED));
+        let button =
+            tree.add(ColorProbe::new(Color::BLUE).on_tap(move |_tap, ctx| ctx.destroy(red)));
+        tree.add(StackWidget::new().child(red).child(button));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(painted_colors(&tree.render()).len(), 2);
+
+        tree.synthesise_tap(button);
+        assert!(tree.arena.get(red).is_none(), "the tap destroyed it");
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        assert_eq!(painted_colors(&tree.render()), vec![Color::BLUE.to_array()]);
+    }
+
     #[test]
     fn clipped_out_dirty_node_reruns_its_foreground_pass() {
         let mut probe = ColorProbe::new(Color::RED);

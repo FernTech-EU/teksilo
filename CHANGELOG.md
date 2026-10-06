@@ -420,6 +420,13 @@ by crate for clarity, not because crates version independently.
   finger is down and a stylus when no finger is, as the platform reports them,
   and the second finger of a gesture stays secondary after the first lifts.
 
+#### Core
+
+- **A widget destroyed at run time stayed on screen** until something else
+  repainted its parent. `EventContext::destroy` took it out of the tree but
+  not out of the frame the window replayed, and its parent did not lay out
+  again without it. Both happen now.
+
 #### Menus
 
 - **Alt+letter on a menu bar collapsed to its hamburger opened no menu.** The
