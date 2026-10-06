@@ -106,7 +106,9 @@ pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest,
     QueuedModalRequest,
 };
-pub use off_thread::{PullOutcome, RepaintTrigger, RepaintTriggerStats};
+pub use off_thread::{
+    LiveImageAttachment, LiveImageSignals, PullOutcome, RepaintTrigger, RepaintTriggerStats,
+};
 pub use overlay::{
     DismissBehavior, OverlayId, OverlayLayer, OverlayManager, OverlayPlacement, OverlayRequest,
 };

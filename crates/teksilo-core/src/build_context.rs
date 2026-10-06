@@ -266,6 +266,27 @@ impl<'a> BuildContext<'a> {
         self.tree.attach_repaint_trigger(id, trigger);
     }
 
+    /// Attach `source` to the widget being built, in this window, writing its
+    /// size and status into `signals`. Call it in every `build()`: a rebuild
+    /// detaches it and the new `build()` attaches again, the widget's
+    /// destruction detaches it, and the tree's drop detaches the rest.
+    ///
+    /// The source's current size and status are written into `signals`, and
+    /// recorded for the widget's paint, before this returns: a widget built
+    /// after this frame's layout pre-pass, or attached to a source that will
+    /// never commit again, lays out and draws its picture in its first frame.
+    /// Its pixels reach the renderer without passing through the widget: in
+    /// `paint()` the widget hands the attachment's consumer to
+    /// `Canvas::draw_live_image`. See [`teksilo_canvas::live_image`].
+    pub fn attach_live_image(
+        &mut self,
+        source: &teksilo_canvas::live_image::LiveImageSource,
+        signals: &crate::LiveImageSignals,
+    ) -> crate::LiveImageAttachment {
+        let id = self.self_id();
+        self.tree.attach_live_image(id, source, signals)
+    }
+
     /// Run `hook` on the UI thread in the frame after a `RepaintTrigger`
     /// attached to the widget being built requests a pull
     /// ([`crate::RepaintTrigger::request_pull`]), whether or not the widget

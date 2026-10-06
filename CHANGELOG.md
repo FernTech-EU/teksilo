@@ -111,6 +111,18 @@ by crate for clarity, not because crates version independently.
   `BuildContext::attach_repaint_trigger`.
   `RepaintTriggerStats` counts requests, wakes and what consumed them, and
   `WidgetTree::repaint_trigger_count` counts the widgets with one attached.
+- `BuildContext::attach_live_image`, which attaches a `LiveImageSource` to
+  the widget being built, in its window. The source's size and status reach
+  layout through `LiveImageSignals`, which the widget binds; its pixels reach
+  the renderer without passing through the widget, which draws the
+  attachment's consumer with `Canvas::draw_live_image`. A commit that changes
+  only pixels marks no widget: the window replays its cached frame and the
+  renderer uploads what changed. A size or status change relayouts the
+  widget, also while it is dormant, and draws a frame only if it was shown.
+  `LiveImageAttachment` records the widget's placement for automation.
+  `WidgetTree::live_image_attachment_count`, `live_image_consumer`,
+  `live_image_stats`, `live_image_geometry` and `live_image_attachments`
+  look attachments up by widget, through a `WidgetBuilder` wrapper too.
 - `WidgetTree::device_scale_signal` and `BuildContext::device_scale_signal`:
   the window's device scale as a `Signal`, for widgets whose layout depends on
   it. Bound at `Relayout`, it relayouts that widget when the window moves to a
