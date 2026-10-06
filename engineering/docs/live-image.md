@@ -24,7 +24,7 @@ plan. Section numbers below (§6.1, AC7, D.13…) are the specification's.
 | teksilo-canvas `live_image` | The producer side: source, writer, sessions, write guard, `LiveImageDiffWriter` (see "Whole frames" below), `SourceLock`, the packed meta word, the damage ring and upload planner, the consumer and its wake flags. The draw side: `LiveImageQuad`, `DrawCommand::LiveImage`. The renderer's decisions: `internal::LivePass<B>`, one engine for every backend. `testing::LiveImageMirror` is `LivePass` over a CPU backend. |
 | teksilo-core `off_thread` | The registry of off-thread attachments (`RepaintTrigger` and live images), the layout pre-pass that turns their flags into relayouts and status changes, `device_scale_signal`. |
 | teksilo-render | `WgpuBackend` (`live_texture.rs`), `DeviceHealth`, `gpu_reclaim`, `render_capture`, the live mip pass (`live_mip.wgsl` over the full-screen pass the blur shares), the timing histograms (`live_timings.rs`). |
-| teksilo-platform, teksilo-app | The window wake target, the hidden-window gate and `pre_present_notify`, `capture_offscreen` through `render_capture`, the reclaim poll, display-refresh tracking, the automation bridge's live-image half. |
+| teksilo-platform, teksilo-app | The window wake target, the hidden-window gate and `pre_present_notify`, `capture_offscreen` through `render_capture`, the reclaim poll, display-refresh tracking, the automation bridge's live-image half, the idle trace's live line (`live-image-timings`). |
 | teksilo-widgets | `LiveImage`, `LiveImageHandle`, `LiveImageSizing`; `ImageWidget::from_raw`, masked images and `Avatar` on one-commit sources (`CommittedImage`). |
 | teksilo-automation, teksilo-automation-mcp | `live_image_stats`, `live_image_map`, `source` aiming, `ScreenshotMeta::live_images`, the headless fixture; the probe harness's `teksilo_probe.live_image`. |
 
@@ -220,6 +220,7 @@ and the rest of its list) are not repeated here.
 | Commit 33 | `crop_visible(png, meta, mapping)` | `crop_visible(png, meta, node)`, plus `capture(session, node)`: the screenshot's own `live_images` rect is the exact record in image pixels; a node-cropped image does not carry its origin, so a mapping's window rect cannot place it. |
 | Commit 33 | — | The X11 event-loop test runs in CI with the `automation` feature, for claim (t), which drives the bridge's live-image route. |
 | Commit 34 | A `--release` CI step for the dirty ratio | None (the plan's choice): the dirty-ratio test is `#[ignore]`d, and the counts it pins in every build are exact. |
+| Commit 35 | Timings read from the `Renderer` | Also from `PlatformWindow`, and printed by the idle trace with `live-image-timings` on teksilo-app or `teksilo`: an app never holds its window's renderer, and the automation bridge, the one other channel, exists only in debug builds. |
 | Commit 35 | `Percentiles { p50, p90, p99, max }` | Also `samples`: without it an empty histogram and one of zero-microsecond samples look alike. The raw durations are recorded by canvas's `LivePass` in every build and folded into histograms by teksilo-render, so no cfg spans two crates. |
 
 ## 10. Measurements
@@ -328,9 +329,7 @@ commits, which is AC20's last clause.
 
 ## 12. Open questions
 
-- **Timings outside the renderer.** `Renderer::live_texture_timings` cannot be
-  reached from an app on teksilo-app, which never holds its window's
-  renderer. The automation bridge, the one other channel, exists only in
-  debug builds, where timings mean little. Forwarding the feature through
-  teksilo-app and printing the timings in the idle trace would reach a
-  release build; it is new surface and has not been added.
+None. The three left at the end of PR-5 are settled: a culling parent's
+parked child now leaves the composed frame (AC19), `source` aiming refuses
+what a press would not reach (section 6), and an app reads the timings in its
+idle trace (section 9, commit 35).

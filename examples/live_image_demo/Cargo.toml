@@ -8,5 +8,10 @@ version.workspace = true
 authors.workspace = true
 publish = false
 
+[features]
+# `cargo run -p live-image-demo --release --features live-image-timings`, with
+# `TEKSILO_IDLE_TRACE=1`: the live pass's timings once a second.
+live-image-timings = ["teksilo/live-image-timings"]
+
 [dependencies]
 teksilo = { workspace = true, features = ["automation"] }

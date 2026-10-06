@@ -128,6 +128,14 @@ by crate for clarity, not because crates version independently.
 - `HeadlessApp::render_for_capture`, which renders a headless app for an
   offscreen capture with the glyph atlas its text needs uploaded into the
   renderer first.
+- **The live pass's timings in an application, release builds included.**
+  With the `live-image-timings` feature (on `teksilo`, or `teksilo-app`) and
+  `TEKSILO_IDLE_TRACE=1`, each trace line is followed by a
+  `teksilo_idle_trace_live` line per window drawing a live picture: its
+  textures and their bytes, the uploads and contended frames since the
+  previous line, and the percentiles of its live pass, lock holds and
+  commit-to-upload delays. `PlatformWindow::live_texture_timings` reads them
+  with teksilo-platform's feature of the same name.
 
 #### Platform
 

@@ -903,6 +903,14 @@ impl PlatformWindow {
         self.renderer.live_texture_stats()
     }
 
+    /// How long this window's live pass has taken, each figure over its
+    /// latest 1,024 samples: see `Renderer::live_texture_timings`. With the
+    /// `live-image-timings` feature.
+    #[cfg(feature = "live-image-timings")]
+    pub fn live_texture_timings(&self) -> teksilo_render::LiveImageTimings {
+        self.renderer.live_texture_timings()
+    }
+
     /// Resize the surface.
     ///
     /// A resize that arrives once the display server has gone is dropped:

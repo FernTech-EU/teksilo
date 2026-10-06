@@ -116,6 +116,11 @@ terminal = ["dep:teksilo-terminal", "teksilo-terminal/alacritty"]
 # `teksilo-automation` toolkit as `teksilo::automation`.
 automation = ["dep:teksilo-automation", "teksilo-app/automation"]
 
+# Timing histograms of the live-image pass (`LiveImage`), printed per window
+# by the idle trace (`TEKSILO_IDLE_TRACE=1`), in release builds too. Off by
+# default: a build without it keeps no samples.
+live-image-timings = ["teksilo-app/live-image-timings"]
+
 # Optional main-thread async executor (`teksilo-async`): adds
 # `TeksiloAppBuilder::install_async()` plus `ctx.spawn_local(...)` /
 # `spawn_blocking` for imperative async-in-UI flows. Off by default — apps

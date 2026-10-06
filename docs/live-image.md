@@ -239,10 +239,23 @@ and `example_live_image.py` drives the demo end to end.
   and lost devices.
 - `Renderer::live_texture_timings()` gives percentiles of the live pass's frame
   time, of how long the renderer holds a source's lock, and of the delay from a
-  commit to its upload. Debug builds always have it; a release build needs
-  teksilo-render's `live-image-timings` feature.
+  commit to its upload, each over its latest 1,024 samples. Debug builds always
+  have it; a release build needs teksilo-render's `live-image-timings` feature.
 - `TEKSILO_IDLE_TRACE=1` prints the window's wakes once a second while
   anything wakes it. It prints nothing while no producer commits.
+- With the `live-image-timings` feature on `teksilo` (or `teksilo-app`), each
+  idle-trace line is followed by one per window drawing a live picture, in
+  release builds too:
+
+  ```text
+  teksilo_idle_trace_live t=12.004 window=WindowId(1) textures=1 bytes=3686400 uploads=60 contended=0 prepare_us={p50:96,p90:150,p99:291,max:410,n:1024} lock_hold_us={…} commit_to_upload_us={…}
+  ```
+
+  `uploads` and `contended` count since the window's previous line; the
+  percentiles are microseconds over the latest 1,024 samples (`n`).
+  `PlatformWindow::live_texture_timings()` reads the same figures. The demo
+  forwards the feature: `cargo run -p live-image-demo --release --features
+  live-image-timings`.
 
 ## See also
 

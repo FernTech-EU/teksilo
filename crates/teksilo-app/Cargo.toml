@@ -61,6 +61,11 @@ automation = [
     "dep:serde_json",
     "dep:uuid",
 ]
+# The idle trace (`TEKSILO_IDLE_TRACE=1`) adds a line per window drawing a
+# live picture: the live pass's frame time, lock holds and commit-to-upload
+# delays, with the uploads and contended frames since the last line. Works
+# in release builds; off by default, so a release build keeps no samples.
+live-image-timings = ["teksilo-platform/live-image-timings"]
 
 [dependencies]
 teksilo-core = { workspace = true }

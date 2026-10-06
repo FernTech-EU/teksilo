@@ -81,6 +81,10 @@ native-menu = []
 # crate: it uses the `windows` bindings this crate already links.
 automation = ["dep:teksilo-automation"]
 
+# `PlatformWindow::live_texture_timings`: the renderer's histograms of its
+# live pass, in release builds too. Forwards teksilo-render's feature.
+live-image-timings = ["teksilo-render/live-image-timings"]
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 # The main dispatch queue, for a draw wake made off the main thread with no

@@ -479,42 +479,95 @@ pub(crate) struct IdleTrace {
     timer_windows: usize,
     animation_timers: usize,
     tooltip_timers: usize,
+    #[cfg(feature = "live-image-timings")]
+    live: LiveTrace,
+}
+
+/// What the idle trace prints of live pictures, with the
+/// `live-image-timings` feature: after each report, a line per window that
+/// rendered since the one before and whose last frame drew a live picture.
+#[cfg(feature = "live-image-timings")]
+#[derive(Debug, Default)]
+struct LiveTrace {
+    /// Windows that rendered a frame since the last report.
+    rendered: std::collections::HashSet<WindowId>,
+    /// The windows the last report owes a line, until it is printed.
+    due: Vec<WindowId>,
+    /// Each window's uploads and contended frames when it was last read,
+    /// to print deltas from.
+    totals: HashMap<WindowId, (u64, u64)>,
+}
+
+/// The idle trace's live line for one window, at `t` seconds: its textures,
+/// the uploads and contended frames since `last` (the window's uploads and
+/// contended frames when it was last read), and its timings in µs.
+#[cfg(feature = "live-image-timings")]
+fn live_trace_line(
+    t: f64,
+    window: impl std::fmt::Debug,
+    stats: &teksilo_render::LiveTextureStats,
+    timings: &teksilo_render::LiveImageTimings,
+    last: (u64, u64),
+) -> String {
+    let percentiles = |p: teksilo_render::Percentiles| {
+        format!(
+            "{{p50:{},p90:{},p99:{},max:{},n:{}}}",
+            p.p50, p.p90, p.p99, p.max, p.samples
+        )
+    };
+    let uploads = stats.uploads_full + stats.uploads_partial;
+    format!(
+        "teksilo_idle_trace_live t={t:.3} window={window:?} textures={} bytes={} uploads={} contended={} prepare_us={} lock_hold_us={} commit_to_upload_us={}",
+        stats.textures,
+        stats.bytes,
+        uploads.saturating_sub(last.0),
+        stats.contended.saturating_sub(last.1),
+        percentiles(timings.prepare),
+        percentiles(timings.lock_hold),
+        percentiles(timings.commit_to_upload),
+    )
 }
 
 impl IdleTrace {
     fn from_env() -> Option<Self> {
         match std::env::var("TEKSILO_IDLE_TRACE") {
-            Ok(value) if value != "0" && !value.is_empty() => Some(Self {
-                started: Instant::now(),
-                last_report: Instant::now(),
-                hidden_redraws: 0,
-                ticks: 0,
-                resume_time_reached: 0,
-                redraw_requested: 0,
-                rendered_frames: 0,
-                request_redraw_all: 0,
-                cursor_redraw_requests: 0,
-                mouse_input_redraw_requests: 0,
-                mouse_wheel_redraw_requests: 0,
-                keyboard_redraw_requests: 0,
-                resize_redraw_requests: 0,
-                frame_request_redraws: 0,
-                cross_window_redraws: 0,
-                idle_callbacks_run: 0,
-                app_events: 0,
-                posted_draw_wakes: 0,
-                posted_layout_wakes: 0,
-                waker_wakes: 0,
-                waker_wakes_dropped: 0,
-                waker_totals: HashMap::new(),
-                control_flow_wait: 0,
-                control_flow_wait_until: 0,
-                gpu_reclaim_waits: 0,
-                timer_windows: 0,
-                animation_timers: 0,
-                tooltip_timers: 0,
-            }),
+            Ok(value) if value != "0" && !value.is_empty() => Some(Self::new()),
             _ => None,
+        }
+    }
+
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            last_report: Instant::now(),
+            hidden_redraws: 0,
+            ticks: 0,
+            resume_time_reached: 0,
+            redraw_requested: 0,
+            rendered_frames: 0,
+            request_redraw_all: 0,
+            cursor_redraw_requests: 0,
+            mouse_input_redraw_requests: 0,
+            mouse_wheel_redraw_requests: 0,
+            keyboard_redraw_requests: 0,
+            resize_redraw_requests: 0,
+            frame_request_redraws: 0,
+            cross_window_redraws: 0,
+            idle_callbacks_run: 0,
+            app_events: 0,
+            posted_draw_wakes: 0,
+            posted_layout_wakes: 0,
+            waker_wakes: 0,
+            waker_wakes_dropped: 0,
+            waker_totals: HashMap::new(),
+            control_flow_wait: 0,
+            control_flow_wait_until: 0,
+            gpu_reclaim_waits: 0,
+            timer_windows: 0,
+            animation_timers: 0,
+            tooltip_timers: 0,
+            #[cfg(feature = "live-image-timings")]
+            live: LiveTrace::default(),
         }
     }
 
@@ -572,8 +625,12 @@ impl IdleTrace {
         self.maybe_report();
     }
 
-    fn note_rendered_frame(&mut self) {
+    fn note_rendered_frame(&mut self, window: WindowId) {
         self.rendered_frames += 1;
+        #[cfg(feature = "live-image-timings")]
+        self.live.rendered.insert(window);
+        #[cfg(not(feature = "live-image-timings"))]
+        let _ = window;
         self.maybe_report();
     }
 
@@ -678,6 +735,51 @@ impl IdleTrace {
         self.control_flow_wait = 0;
         self.control_flow_wait_until = 0;
         self.gpu_reclaim_waits = 0;
+        #[cfg(feature = "live-image-timings")]
+        {
+            self.live.due = self.live.rendered.drain().collect();
+        }
+    }
+
+    /// Print the live line the last report owes each window it saw render:
+    /// the window's live-pass timings (each over its latest 1,024 samples,
+    /// in µs), its textures, and the uploads and contended frames since it
+    /// was last read. Only those windows' timings are read, and only once
+    /// per report. `windows` is every open window.
+    #[cfg(feature = "live-image-timings")]
+    fn report_live<'a>(
+        &mut self,
+        windows: impl Iterator<Item = (WindowId, &'a teksilo_platform::PlatformWindow)>,
+    ) {
+        if self.live.due.is_empty() {
+            return;
+        }
+        let due = std::mem::take(&mut self.live.due);
+        let t = self.started.elapsed().as_secs_f64();
+        let mut totals = HashMap::new();
+        for (id, window) in windows {
+            let last = self.live.totals.get(&id).copied();
+            if !due.contains(&id) {
+                if let Some(last) = last {
+                    totals.insert(id, last);
+                }
+                continue;
+            }
+            let stats = window.live_texture_stats();
+            totals.insert(
+                id,
+                (stats.uploads_full + stats.uploads_partial, stats.contended),
+            );
+            if stats.textures == 0 {
+                continue;
+            }
+            let timings = window.live_texture_timings();
+            eprintln!(
+                "{}",
+                live_trace_line(t, id, &stats, &timings, last.unwrap_or((0, 0)))
+            );
+        }
+        self.live.totals = totals;
     }
 }
 
@@ -1083,6 +1185,13 @@ impl TeksiloAppHandler {
                 tooltip_timers,
                 reclaim_pending,
             );
+            #[cfg(feature = "live-image-timings")]
+            trace.report_live(self.wm.iter().map(|managed| {
+                (
+                    managed.platform_window.window().id(),
+                    &managed.platform_window,
+                )
+            }));
         }
     }
 
@@ -2770,7 +2879,7 @@ impl TeksiloAppHandler {
         match managed.platform_window.render_frame(&frame, clear) {
             teksilo_platform::FrameOutcome::Rendered => {
                 if let Some(trace) = &mut self.idle_trace {
-                    trace.note_rendered_frame();
+                    trace.note_rendered_frame(window_id);
                 }
             }
             teksilo_platform::FrameOutcome::Skipped => {
@@ -6335,5 +6444,50 @@ mod display_connection_tests {
     #[test]
     fn a_loop_that_could_not_be_built_stays_fatal() {
         assert!(!display_connection_lost(&EventLoopError::RecreationAttempt));
+    }
+}
+
+#[cfg(all(test, feature = "live-image-timings"))]
+mod live_trace_tests {
+    use super::*;
+
+    #[test]
+    fn the_live_line_prints_its_deltas_and_the_percentiles_in_microseconds() {
+        let mut stats = teksilo_render::LiveTextureStats::default();
+        (stats.textures, stats.bytes) = (1, 3_686_400);
+        (stats.uploads_full, stats.uploads_partial, stats.contended) = (2, 61, 3);
+        let mut timings = teksilo_render::LiveImageTimings::default();
+        let p = &mut timings.prepare;
+        (p.p50, p.p90, p.p99, p.max, p.samples) = (96, 150, 291, 410, 1024);
+        let p = &mut timings.lock_hold;
+        (p.p50, p.p90, p.p99, p.max, p.samples) = (95, 140, 296, 400, 2048);
+        assert_eq!(
+            live_trace_line(12.5, "main", &stats, &timings, (3, 1)),
+            "teksilo_idle_trace_live t=12.500 window=\"main\" textures=1 bytes=3686400 \
+             uploads=60 contended=2 prepare_us={p50:96,p90:150,p99:291,max:410,n:1024} \
+             lock_hold_us={p50:95,p90:140,p99:296,max:400,n:2048} \
+             commit_to_upload_us={p50:0,p90:0,p99:0,max:0,n:0}"
+        );
+    }
+
+    #[test]
+    fn a_report_owes_a_line_to_each_window_seen_rendering_since_the_last() {
+        let (a, b) = (WindowId::from(1), WindowId::from(2));
+        let mut trace = IdleTrace::new();
+        trace.note_rendered_frame(a);
+        trace.note_rendered_frame(a);
+        assert!(trace.live.due.is_empty(), "no report yet: nothing is owed");
+        trace.last_report = Instant::now() - Duration::from_secs(2);
+        trace.note_rendered_frame(b);
+        trace.live.due.sort_by_key(|id| u64::from(*id));
+        assert_eq!(trace.live.due, vec![a, b], "each window once");
+        assert!(trace.live.rendered.is_empty());
+
+        // The line is printed, and the debt paid, by `report_live`, which
+        // needs a window: the next report owes only what rendered since.
+        trace.live.due.clear();
+        trace.last_report = Instant::now() - Duration::from_secs(2);
+        trace.note_tick();
+        assert!(trace.live.due.is_empty(), "a tick renders nothing");
     }
 }
