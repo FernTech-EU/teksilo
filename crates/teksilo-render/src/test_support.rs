@@ -277,6 +277,19 @@ pub fn try_read_texture_rgba(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, ReadbackError> {
+    try_read_texture_level_rgba(device, queue, texture, 0, width, height)
+}
+
+/// [`try_read_texture_rgba`] of mip level `level`, which is `width ×
+/// height`.
+pub fn try_read_texture_level_rgba(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    level: u32,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, ReadbackError> {
     let bytes_per_pixel = 4u32;
     let unpadded_bytes_per_row = width * bytes_per_pixel;
     let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
@@ -296,7 +309,7 @@ pub fn try_read_texture_rgba(
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture,
-            mip_level: 0,
+            mip_level: level,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },

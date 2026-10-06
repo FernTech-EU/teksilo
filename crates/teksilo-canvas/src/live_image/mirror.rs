@@ -5,6 +5,7 @@
 //! for headless tests.
 
 use super::internal::LiveImageRead;
+use super::mips::{mip_footprint, mip_level_size, mip_levels};
 use super::pass::{
     LivePass, LivePassMode, LiveTextureBackend, LiveTextureStats, QuadDecision, TextureOutOfMemory,
 };
@@ -12,11 +13,26 @@ use super::{LiveImageId, LiveImageSource, PixelRect, ScalingFilter};
 use crate::RenderFrame;
 
 /// A texture in CPU memory: `width × height`, 4 bytes per pixel in the
-/// source's byte order.
+/// source's byte order, and its mip levels above level 0 when it has them.
 pub(crate) struct CpuTexture {
     width: u32,
     height: u32,
     pixels: Vec<u8>,
+    /// Levels 1 and up, each with its size.
+    levels: Vec<(u32, u32, Vec<u8>)>,
+}
+
+impl CpuTexture {
+    /// Level `k`: 0 is the texture itself.
+    fn level(&self, k: u32) -> Option<(u32, u32, &[u8])> {
+        match k {
+            0 => Some((self.width, self.height, &self.pixels)),
+            k => self
+                .levels
+                .get(k as usize - 1)
+                .map(|(w, h, px)| (*w, *h, px.as_slice())),
+        }
+    }
 }
 
 /// The mirror's backend: textures are `Vec<u8>`s, writes are row copies.
@@ -26,6 +42,8 @@ pub(crate) struct CpuBackend {
     lost: bool,
     /// The bands written since the last report.
     writes: Vec<PixelRect>,
+    /// The mip rebuilds since the last report: `None` for a whole chain.
+    mip_rebuilds: Vec<Option<PixelRect>>,
 }
 
 impl LiveTextureBackend for CpuBackend {
@@ -39,15 +57,27 @@ impl LiveTextureBackend for CpuBackend {
         &mut self,
         width: u32,
         height: u32,
+        mipped: bool,
         _label: &str,
     ) -> Result<CpuTexture, TextureOutOfMemory> {
         if std::mem::take(&mut self.fail_next_create) {
             return Err(TextureOutOfMemory);
         }
+        let levels = if mipped {
+            (1..mip_levels(width, height))
+                .map(|k| {
+                    let (w, h) = mip_level_size(width, height, k);
+                    (w, h, vec![0; w as usize * h as usize * 4])
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         Ok(CpuTexture {
             width,
             height,
             pixels: vec![0; width as usize * height as usize * 4],
+            levels,
         })
     }
 
@@ -72,6 +102,40 @@ impl LiveTextureBackend for CpuBackend {
 
     fn texture_bytes(&self, texture: &CpuTexture) -> u64 {
         u64::from(texture.width) * u64::from(texture.height) * 4
+            + texture
+                .levels
+                .iter()
+                .map(|(w, h, _)| u64::from(*w) * u64::from(*h) * 4)
+                .sum::<u64>()
+    }
+
+    /// Level from level, as the GPU's passes do: each texel of the region's
+    /// footprint (or every texel) from the 2×2 box below it.
+    fn rebuild_mips(&mut self, texture: &mut CpuTexture, region: Option<PixelRect>, opaque: bool) {
+        for k in 1..=texture.levels.len() as u32 {
+            let (below, rest) = texture.levels.split_at_mut(k as usize - 1);
+            let (sw, sh, src): (u32, u32, &[u8]) = match below.last() {
+                Some((w, h, px)) => (*w, *h, px),
+                None => (texture.width, texture.height, &texture.pixels),
+            };
+            let (w, h, dst) = &mut rest[0];
+            let area = match region {
+                Some(changed) => mip_footprint(changed, k, (*w, *h)),
+                None => PixelRect::full(*w, *h),
+            };
+            // A level above 0 is always opaque already: only level 0's
+            // fourth byte can be something other than alpha.
+            let not_alpha = opaque && k == 1;
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let texel =
+                        crate::resample::downsample_half_texel(src, sw, sh, x, y, not_alpha);
+                    let at = (y as usize * *w as usize + x as usize) * 4;
+                    dst[at..at + 4].copy_from_slice(&texel);
+                }
+            }
+        }
+        self.mip_rebuilds.push(region);
     }
 
     fn device_lost(&self) -> bool {
@@ -109,6 +173,9 @@ pub struct MirrorReport {
     pub pruned: u32,
     /// Sources whose texture was kept because every quad of them was paused.
     pub paused: u32,
+    /// The mip chains rebuilt, one per source: `None` for a whole chain,
+    /// else the rect of level 0 whose footprint each level rebuilt.
+    pub mip_rebuilds: Vec<Option<PixelRect>>,
 }
 
 impl Default for LiveImageMirror {
@@ -125,6 +192,7 @@ impl LiveImageMirror {
                 fail_next_create: false,
                 lost: false,
                 writes: Vec::new(),
+                mip_rebuilds: Vec::new(),
             }),
         }
     }
@@ -152,6 +220,7 @@ impl LiveImageMirror {
     ) -> MirrorReport {
         let before = self.pass.stats();
         self.pass.backend_mut().writes.clear();
+        self.pass.backend_mut().mip_rebuilds.clear();
         self.pass.prepare_at(&frame.live_images, mode, now);
         let after = self.pass.stats();
         let counts = self.pass.last_counts();
@@ -164,6 +233,7 @@ impl LiveImageMirror {
             contended: (after.contended - before.contended) as u32,
             pruned: counts.pruned,
             paused: counts.kept,
+            mip_rebuilds: std::mem::take(&mut self.pass.backend_mut().mip_rebuilds),
         }
     }
 
@@ -173,6 +243,13 @@ impl LiveImageMirror {
         self.pass
             .texture(id)
             .map(|t| (t.width, t.height, t.pixels.as_slice()))
+    }
+
+    /// Level `k` of source `id`'s current texture: 0 is
+    /// [`pixels`](Self::pixels), the levels above exist when a frame drew the
+    /// source through `ScalingFilter::Trilinear`.
+    pub fn mip_level(&self, id: LiveImageId, k: u32) -> Option<(u32, u32, &[u8])> {
+        self.pass.texture(id)?.level(k)
     }
 
     /// Textures held for the sources the last frame drew, staged ones

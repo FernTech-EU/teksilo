@@ -3,6 +3,7 @@
 
 pub(crate) mod blur;
 pub mod device_health;
+pub(crate) mod fullscreen;
 pub mod gpu_reclaim;
 pub mod image_manager;
 pub mod instance;

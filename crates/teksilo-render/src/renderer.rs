@@ -496,6 +496,33 @@ impl Renderer {
         self.live.backend_mut().fail_next_create();
     }
 
+    /// Level `level` of the live texture this renderer holds for source
+    /// `id`, read back as tightly packed RGBA8 with its size; `None` without
+    /// that texture or level. A GPU wait: for tests.
+    #[doc(hidden)]
+    pub fn read_live_texture_level(
+        &self,
+        id: teksilo_canvas::live_image::LiveImageId,
+        level: u32,
+    ) -> Option<(u32, u32, Vec<u8>)> {
+        let texture = self.live.texture(id)?;
+        if level >= texture.levels() {
+            return None;
+        }
+        let (w, h) = texture.size();
+        let (lw, lh) = teksilo_canvas::live_image::internal::mip_level_size(w, h, level);
+        let pixels = crate::test_support::try_read_texture_level_rgba(
+            &self.device,
+            &self.queue,
+            &texture.texture,
+            level,
+            lw,
+            lh,
+        )
+        .ok()?;
+        Some((lw, lh, pixels))
+    }
+
     /// This renderer's device latch.
     #[doc(hidden)]
     pub fn device_health(&self) -> &DeviceHealth {
@@ -706,6 +733,9 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("teksilo_render"),
             });
+        // The live pass's mip rebuilds, before any draw samples them: its
+        // uploads are queue writes, which run before this submission.
+        self.live.backend_mut().encode_mips(&mut encoder);
 
         // Per-frame mutable viewport — overridden inside blur scopes
         // (the offscreen intermediate is sized differently from the
@@ -2572,14 +2602,16 @@ fn run_kawase_chain(
         let params_offset = pipelines.params.push(queue, &params);
         let bind_group = pool.make_bind_group(device, src_handle, pipelines.params.buffer());
 
-        run_kawase_pass(
+        crate::fullscreen::run_fullscreen_pass(
             encoder,
             &pipelines.down,
             &bind_group,
-            params_offset,
+            &[params_offset],
             pool.view(dst),
             dst_used_w,
             dst_used_h,
+            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            None,
             "kawase_down_pass",
         );
 
@@ -2604,14 +2636,16 @@ fn run_kawase_chain(
         let params_offset = pipelines.params.push(queue, &params);
         let bind_group = pool.make_bind_group(device, src_handle, pipelines.params.buffer());
 
-        run_kawase_pass(
+        crate::fullscreen::run_fullscreen_pass(
             encoder,
             &pipelines.up,
             &bind_group,
-            params_offset,
+            &[params_offset],
             pool.view(dst),
             dst_used_w,
             dst_used_h,
+            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            None,
             "kawase_up_pass",
         );
 
@@ -2625,46 +2659,6 @@ fn run_kawase_chain(
         bucket_w: current.3,
         bucket_h: current.4,
     }
-}
-
-/// Run one full-screen-triangle Kawase pass. The viewport is set to
-/// `(used_w, used_h)` — the destination bucket may be larger but we
-/// only write the upper-left sub-rect that the next pass will sample
-/// from.
-#[allow(clippy::too_many_arguments)]
-fn run_kawase_pass(
-    encoder: &mut wgpu::CommandEncoder,
-    pipeline: &wgpu::RenderPipeline,
-    bind_group: &wgpu::BindGroup,
-    params_offset: u32,
-    target_view: &wgpu::TextureView,
-    used_w: u32,
-    used_h: u32,
-    label: &str,
-) {
-    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some(label),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: target_view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                store: wgpu::StoreOp::Store,
-            },
-            depth_slice: None,
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        multiview_mask: None,
-    });
-    pass.set_pipeline(pipeline);
-    pass.set_bind_group(0, bind_group, &[params_offset]);
-    // Full-screen triangle covers the whole viewport — restricting the
-    // viewport to the used sub-rect keeps the over-allocated bucket
-    // clean and (more importantly) limits the fragment work.
-    pass.set_viewport(0.0, 0.0, used_w as f32, used_h as f32, 0.0, 1.0);
-    pass.draw(0..3, 0..1);
 }
 
 /// Composite the final blurred intermediate onto the parent target as

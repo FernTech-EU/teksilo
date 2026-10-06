@@ -57,6 +57,9 @@ by crate for clarity, not because crates version independently.
   size. A transaction (`LiveImageWriteGuard`) holds the source's lock: it is
   `!Send`, and the workspace's `clippy.toml` shows how to make clippy refuse
   one held across an `.await`.
+- `resample::downsample_half_opaque`, `downsample_half` for pixels whose
+  fourth byte is not alpha, and `resample::downsample_half_texel`, one
+  texel of either, for rebuilding part of a halved image.
 - `Canvas::draw_live_image`, which draws a live picture: `LiveImageDraw`
   says where (the whole picture and the part that shows, cropped by texture
   coordinates), how it is sampled and turned, and whether it is paused; the
@@ -65,7 +68,8 @@ by crate for clarity, not because crates version independently.
   renderer holds and uploads for live pictures, and
   `live_image::testing::LiveImageMirror` runs the renderer's live pass with
   textures in memory, for headless tests (`MirrorReport` says what one frame
-  did).
+  did, `LiveImageMirror::mip_level` reads a level of a texture's mip
+  chain).
 
 #### Widgets
 
@@ -237,6 +241,13 @@ by crate for clarity, not because crates version independently.
   counting frames, so a producer sees its stream stall.
 - `poll_gpu_reclaim`, which frees the textures renderers dropped without
   waiting for another frame, for an event loop to call before it sleeps.
+- A live picture drawn with `ScalingFilter::Trilinear` samples a mip chain
+  the window builds on the GPU, with the 2×2 box static images get on the
+  CPU, in linear light, premultiplied, and opaque for RGBX and BGRX. A
+  frame that draws the source so rebuilds only what its uploads changed,
+  and one texture serves a `Trilinear` thumbnail and a full-size `Linear`
+  view of the same source. `LiveTextureStats::mip_updates` counts the
+  chains rebuilt.
 
 #### WebView
 

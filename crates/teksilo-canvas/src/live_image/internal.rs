@@ -11,6 +11,7 @@ use super::source::StateGuard;
 
 pub use super::damage::{DamageRects, UploadPlan};
 pub use super::meta::LiveMeta;
+pub use super::mips::{mip_bytes, mip_footprint, mip_level_size, mip_levels};
 pub use super::pass::{
     BAND_BYTES, LivePass, LivePassMode, LiveTextureBackend, PARK_BUDGET, PARK_MAX_TEXTURE,
     PassCounts, QuadDecision, STAGING_BUDGET, TextureOutOfMemory,

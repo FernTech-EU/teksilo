@@ -60,40 +60,69 @@ pub fn linear_to_srgb_byte(linear: f32) -> u8 {
 /// Odd dimensions halve down (`5 → 2`) and the box clamps to the last
 /// row/column rather than reading out of bounds.
 pub fn downsample_half(src: &[u8], src_w: u32, src_h: u32) -> (u32, u32, Vec<u8>) {
+    downsample_half_with(src, src_w, src_h, false)
+}
+
+/// [`downsample_half`] for pixels whose fourth byte is not alpha (RGBX,
+/// BGRX: an emulator or a VNC server leaves it 0): the average is plain, in
+/// linear light, and every result is opaque.
+pub fn downsample_half_opaque(src: &[u8], src_w: u32, src_h: u32) -> (u32, u32, Vec<u8>) {
+    downsample_half_with(src, src_w, src_h, true)
+}
+
+fn downsample_half_with(src: &[u8], src_w: u32, src_h: u32, opaque: bool) -> (u32, u32, Vec<u8>) {
     let dst_w = (src_w / 2).max(1);
     let dst_h = (src_h / 2).max(1);
     let mut dst = vec![0u8; dst_w as usize * dst_h as usize * 4];
-
     for y in 0..dst_h {
         for x in 0..dst_w {
-            let x0 = (x * 2).min(src_w - 1);
-            let x1 = (x * 2 + 1).min(src_w - 1);
-            let y0 = (y * 2).min(src_h - 1);
-            let y1 = (y * 2 + 1).min(src_h - 1);
-
-            let (mut r, mut g, mut b, mut a) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-            for (sy, sx) in [(y0, x0), (y0, x1), (y1, x0), (y1, x1)] {
-                let i = ((sy as usize * src_w as usize) + sx as usize) * 4;
-                let sa = src[i + 3] as f32 / 255.0;
-                r += srgb_to_linear(src[i]) * sa;
-                g += srgb_to_linear(src[i + 1]) * sa;
-                b += srgb_to_linear(src[i + 2]) * sa;
-                a += sa;
-            }
-
             let o = ((y as usize * dst_w as usize) + x as usize) * 4;
-            // Un-premultiply by the *summed* alpha (not by 4): the colour
-            // average is over the texels that actually carried colour.
-            if a > 0.0 {
-                dst[o] = linear_to_srgb_byte(r / a);
-                dst[o + 1] = linear_to_srgb_byte(g / a);
-                dst[o + 2] = linear_to_srgb_byte(b / a);
-            }
-            dst[o + 3] = ((a / 4.0) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+            dst[o..o + 4].copy_from_slice(&downsample_half_texel(src, src_w, src_h, x, y, opaque));
         }
     }
-
     (dst_w, dst_h, dst)
+}
+
+/// Texel `(x, y)` of [`downsample_half`] of `src` (or of
+/// [`downsample_half_opaque`] with `opaque`), alone: what rebuilding part of
+/// a halved image needs, with the same result as halving all of it.
+pub fn downsample_half_texel(
+    src: &[u8],
+    src_w: u32,
+    src_h: u32,
+    x: u32,
+    y: u32,
+    opaque: bool,
+) -> [u8; 4] {
+    let x0 = (x * 2).min(src_w - 1);
+    let x1 = (x * 2 + 1).min(src_w - 1);
+    let y0 = (y * 2).min(src_h - 1);
+    let y1 = (y * 2 + 1).min(src_h - 1);
+
+    let (mut r, mut g, mut b, mut a) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    for (sy, sx) in [(y0, x0), (y0, x1), (y1, x0), (y1, x1)] {
+        let i = ((sy as usize * src_w as usize) + sx as usize) * 4;
+        let sa = if opaque {
+            1.0
+        } else {
+            src[i + 3] as f32 / 255.0
+        };
+        r += srgb_to_linear(src[i]) * sa;
+        g += srgb_to_linear(src[i + 1]) * sa;
+        b += srgb_to_linear(src[i + 2]) * sa;
+        a += sa;
+    }
+
+    let mut out = [0u8; 4];
+    // Un-premultiply by the *summed* alpha (not by 4): the colour average
+    // is over the texels that actually carried colour.
+    if a > 0.0 {
+        out[0] = linear_to_srgb_byte(r / a);
+        out[1] = linear_to_srgb_byte(g / a);
+        out[2] = linear_to_srgb_byte(b / a);
+    }
+    out[3] = ((a / 4.0) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+    out
 }
 
 /// Resample an RGBA8 image to exactly `dst_w` × `dst_h` by area averaging.

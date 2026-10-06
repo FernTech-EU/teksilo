@@ -267,7 +267,9 @@ impl LiveImage {
     }
 
     /// How the picture is sampled when drawn at another size. Default
-    /// [`ScalingFilter::Linear`]; `Nearest` keeps an integer upscale crisp.
+    /// [`ScalingFilter::Linear`]; `Nearest` keeps an integer upscale crisp,
+    /// and `Trilinear` keeps a thumbnail drawn below half size from
+    /// aliasing.
     pub fn scaling(mut self, scaling: ScalingFilter) -> Self {
         self.scaling = scaling;
         self

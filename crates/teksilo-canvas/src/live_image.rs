@@ -70,6 +70,7 @@ mod held;
 pub mod internal;
 mod lock;
 mod meta;
+mod mips;
 mod mirror;
 mod pass;
 mod source;
@@ -135,11 +136,15 @@ pub enum ScalingFilter {
     /// The nearest texel, from the full-size picture only: crisp integer
     /// upscaling, and exact at 1:1.
     Nearest,
-    /// Trilinear, through a chain of downscaled copies the renderer rebuilds
-    /// on the GPU after each upload. For pictures drawn below half size, such
-    /// as thumbnails, where `Linear` aliases. Costs a third more texture
-    /// memory and a small render pass per level on each upload; above half
-    /// size it is softer than `Linear`.
+    /// Trilinear, through a chain of halved copies of the picture: for a
+    /// picture drawn below half size, such as a thumbnail, where `Linear`
+    /// aliases; above half size it is softer than `Linear`. The window
+    /// builds the chain on the GPU the first time it draws the source this
+    /// way, with one whole upload into a texture that has the levels, and
+    /// in each later frame that draws it so rebuilds only the part an upload
+    /// changed, one small pass per level. The levels cost a third more
+    /// texture memory, and stay with the texture while the source is also,
+    /// or only, drawn another way, until its size changes.
     Trilinear,
 }
 

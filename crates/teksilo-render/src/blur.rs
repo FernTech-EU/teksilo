@@ -386,11 +386,23 @@ impl BlurPipelines {
     ) -> Self {
         let down_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("kawase_down"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/kawase_down.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                concat!(
+                    include_str!("shaders/fullscreen.wgsl"),
+                    include_str!("shaders/kawase_down.wgsl")
+                )
+                .into(),
+            ),
         });
         let up_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("kawase_up"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/kawase_up.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                concat!(
+                    include_str!("shaders/fullscreen.wgsl"),
+                    include_str!("shaders/kawase_up.wgsl")
+                )
+                .into(),
+            ),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

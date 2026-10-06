@@ -908,3 +908,256 @@ fn a_quad_is_cropped_by_its_texture_coordinates_and_stamped_from_layout() {
         "the laid-out size, not the newer one"
     );
 }
+
+// ── Mip chains, for `ScalingFilter::Trilinear` (spec 6.13) ──
+
+use super::super::internal::{mip_bytes, mip_levels};
+use crate::resample::{downsample_half, downsample_half_opaque};
+
+/// Levels 1 and up of `px`, halved level from level as the GPU does.
+fn reference_chain(px: &[u8], w: u32, h: u32, opaque: bool) -> Vec<(u32, u32, Vec<u8>)> {
+    let mut levels = Vec::new();
+    let (mut cw, mut ch, mut cur) = (w, h, px.to_vec());
+    for k in 1..mip_levels(w, h) {
+        let (nw, nh, next) = if opaque && k == 1 {
+            downsample_half_opaque(&cur, cw, ch)
+        } else {
+            downsample_half(&cur, cw, ch)
+        };
+        levels.push((nw, nh, next.clone()));
+        (cw, ch, cur) = (nw, nh, next);
+    }
+    levels
+}
+
+/// Every level of `source`'s texture is the reference chain of its level 0.
+fn assert_chain(mirror: &LiveImageMirror, source: &LiveImageSource, opaque: bool) {
+    let (w, h, level0) = mirror.pixels(source.id()).expect("a texture");
+    let reference = reference_chain(level0, w, h, opaque);
+    assert!(!reference.is_empty());
+    for (k, (rw, rh, rpx)) in reference.iter().enumerate() {
+        let (lw, lh, lpx) = mirror
+            .mip_level(source.id(), k as u32 + 1)
+            .expect("the level");
+        assert_eq!((lw, lh), (*rw, *rh), "level {}", k + 1);
+        assert_eq!(lpx, rpx.as_slice(), "level {}", k + 1);
+    }
+}
+
+fn trilinear() -> LiveImageDraw {
+    draw().filter(ScalingFilter::Trilinear)
+}
+
+/// Pixels with transparent texels among them, so a wrong average shows.
+fn speckled(w: u32, h: u32, seed: u8) -> Vec<u8> {
+    let mut px = pixels(w, h, seed);
+    for (i, texel) in px.chunks_mut(4).enumerate() {
+        if i % 3 == 0 {
+            texel[3] = 0;
+        } else if i % 5 == 0 {
+            texel[3] = 128;
+        }
+    }
+    px
+}
+
+#[test]
+fn a_trilinear_quad_stages_a_mipped_texture_and_builds_its_chain() {
+    let (source, writer) = live(19, 7);
+    writer
+        .write_frame(19, 7, &speckled(19, 7, 3), 19 * 4)
+        .unwrap();
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    let report = mirror.consume(&frame_with(&[&c], trilinear()));
+    assert_eq!(report.full_uploads, 1);
+    assert_eq!(report.mip_rebuilds, vec![None], "the whole chain");
+    assert_eq!(mirror.stats().bytes, mip_bytes(19, 7, mip_levels(19, 7)));
+    assert_eq!(mirror.stats().mip_updates, 1);
+    assert_chain(&mirror, &source, false);
+}
+
+#[test]
+fn a_rect_rebuilds_only_its_footprint_and_matches_a_whole_rebuild() {
+    let (source, writer) = live(37, 23);
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame_with(&[&c], trilinear()));
+    let rect = PixelRect::new(5, 9, 11, 3);
+    writer
+        .write_rect(rect, &speckled(11, 3, 7), 11 * 4)
+        .unwrap();
+    let report = mirror.consume(&frame_with(&[&c], trilinear()));
+    assert_eq!((report.full_uploads, report.partial_uploads), (0, 1));
+    assert_eq!(report.mip_rebuilds, vec![Some(rect)]);
+    assert_chain(&mirror, &source, false);
+}
+
+#[test]
+fn commits_folded_into_one_upload_rebuild_the_chain_once() {
+    let (source, writer) = live(16, 16);
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame_with(&[&c], trilinear()));
+    for (i, rect) in [PixelRect::new(0, 0, 2, 2), PixelRect::new(12, 12, 4, 4)]
+        .into_iter()
+        .enumerate()
+    {
+        writer
+            .write_rect(
+                rect,
+                &speckled(rect.width, rect.height, i as u8),
+                rect.width as usize * 4,
+            )
+            .unwrap();
+    }
+    let report = mirror.consume(&frame_with(&[&c], trilinear()));
+    assert_eq!(
+        report.mip_rebuilds,
+        vec![Some(PixelRect::new(0, 0, 16, 16))]
+    );
+    assert_eq!(mirror.stats().mip_updates, 2);
+    assert_chain(&mirror, &source, false);
+}
+
+#[test]
+fn a_linear_quad_shares_the_mipped_texture_of_a_trilinear_one() {
+    let (source, _writer) = live(20, 10);
+    let (_, thumb) = widget(&source);
+    let (_, main) = widget(&source);
+    let mut canvas = Canvas::new();
+    lay_out(&thumb);
+    lay_out(&main);
+    canvas.draw_live_image(&thumb, &trilinear());
+    canvas.draw_live_image(&main, &draw());
+    let mut mirror = LiveImageMirror::new();
+    let report = mirror.consume(&canvas.into_render_frame());
+    assert_eq!(report.full_uploads, 1, "one upload for both");
+    assert_eq!(mirror.texture_count(), 1);
+    assert!(mirror.decisions().iter().all(|d| d.draw));
+}
+
+#[test]
+fn a_texture_keeps_its_chain_when_trilinear_goes_and_catches_up_when_it_returns() {
+    let (source, writer) = live(16, 8);
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame_with(&[&c], trilinear()));
+    let mipped = mirror.stats().bytes;
+
+    // Only `Linear` now: the commits upload into the same texture, and no
+    // chain is rebuilt for them.
+    for seed in 1..=3 {
+        writer
+            .write_rect(
+                PixelRect::new(seed, 1, 2, 2),
+                &speckled(2, 2, seed as u8),
+                8,
+            )
+            .unwrap();
+        let report = mirror.consume(&frame(&[&c]));
+        assert_eq!((report.full_uploads, report.partial_uploads), (0, 1));
+        assert!(report.mip_rebuilds.is_empty());
+    }
+    assert_eq!(mirror.stats().bytes, mipped, "the levels stay");
+
+    // `Trilinear` again: nothing to upload, the chain catches up with the
+    // union of what changed.
+    let report = mirror.consume(&frame_with(&[&c], trilinear()));
+    assert_eq!((report.full_uploads, report.partial_uploads), (0, 0));
+    assert_eq!(report.mip_rebuilds, vec![Some(PixelRect::new(1, 1, 4, 2))]);
+    assert_chain(&mirror, &source, false);
+}
+
+#[test]
+fn trilinear_on_a_texture_without_levels_restages_it_with_them() {
+    let (source, _writer) = live(16, 8);
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame(&[&c]));
+    assert_eq!(mirror.stats().bytes, 16 * 8 * 4);
+    let report = mirror.consume(&frame_with(&[&c], trilinear()));
+    assert_eq!(report.full_uploads, 1, "a new shape: one whole upload");
+    assert_eq!(report.mip_rebuilds, vec![None]);
+    assert_eq!(mirror.stats().bytes, mip_bytes(16, 8, mip_levels(16, 8)));
+    assert_eq!(mirror.texture_count(), 1, "the old one went");
+    assert_chain(&mirror, &source, false);
+}
+
+#[test]
+fn a_new_size_drops_the_levels_no_quad_samples() {
+    let (source, writer) = live(16, 8);
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame_with(&[&c], trilinear()));
+    writer.write_frame(8, 8, &pixels(8, 8, 1), 32).unwrap();
+    let report = mirror.consume(&frame(&[&c]));
+    assert_eq!(report.full_uploads, 1);
+    assert_eq!(mirror.stats().bytes, 8 * 8 * 4, "restaged as `Linear` asks");
+    assert!(mirror.mip_level(source.id(), 1).is_none());
+}
+
+#[test]
+fn an_opaque_source_builds_an_opaque_chain() {
+    let source = LiveImageSource::new(LivePixelFormat::Rgbx8);
+    let writer = source.writer();
+    let mut px = pixels(12, 6, 9);
+    for texel in px.chunks_mut(4) {
+        texel[3] = 0; // what QEMU leaves in the fourth byte
+    }
+    writer.write_frame(12, 6, &px, 48).unwrap();
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame_with(&[&c], trilinear()));
+    assert_chain(&mirror, &source, true);
+    let (_, _, level1) = mirror.mip_level(source.id(), 1).unwrap();
+    assert!(
+        level1.chunks(4).all(|t| t[3] == 255),
+        "every level above 0 opaque"
+    );
+    assert!(level1.chunks(4).any(|t| t[0] != 0), "and not black");
+}
+
+#[test]
+fn a_paused_trilinear_source_keeps_its_chain_without_rebuilding() {
+    let (source, writer) = live(16, 8);
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame_with(&[&c], trilinear()));
+    writer.write_frame(16, 8, &pixels(16, 8, 4), 64).unwrap();
+    let report = mirror.consume(&frame_with(&[&c], trilinear().paused(true)));
+    assert_eq!((report.full_uploads, report.paused), (0, 1));
+    assert!(report.mip_rebuilds.is_empty());
+}
+
+#[test]
+fn a_texture_restaged_for_a_large_upload_keeps_its_levels() {
+    let (source, writer) = live(32, 32);
+    let (_, c) = widget(&source);
+    let mut mirror = LiveImageMirror::new();
+    mirror.consume(&frame_with(&[&c], trilinear()));
+    let mipped = mirror.stats().bytes;
+    // Only `Linear` now, and a whole frame larger than one frame's staging:
+    // a second texture fills over the next frames, then replaces the first.
+    mirror.set_staging_budget(32 * 4 * 8);
+    writer.write_frame(32, 32, &pixels(32, 32, 6), 128).unwrap();
+    for _ in 0..8 {
+        mirror.consume(&frame(&[&c]));
+    }
+    assert_eq!(
+        texture(&mirror, &source),
+        pixels(32, 32, 6),
+        "the fill completed"
+    );
+    assert_eq!(mirror.texture_count(), 1);
+    assert_eq!(
+        mirror.stats().bytes,
+        mipped,
+        "the replacement has the levels"
+    );
+    // `Trilinear` returns: the replacement's chain is built, nothing uploads.
+    let report = mirror.consume(&frame_with(&[&c], trilinear()));
+    assert_eq!((report.full_uploads, report.partial_uploads), (0, 0));
+    assert_eq!(report.mip_rebuilds, vec![None]);
+    assert_chain(&mirror, &source, false);
+}

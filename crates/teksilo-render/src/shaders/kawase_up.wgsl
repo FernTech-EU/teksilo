@@ -24,11 +24,12 @@ struct Params {
 
 @vertex
 fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
-    let x = f32((idx << 1u) & 2u) * 2.0 - 1.0;
-    let y = f32(idx & 2u) * 2.0 - 1.0;
+    let p = fullscreen_position(idx);
     var out: VertexOutput;
-    out.clip_position = vec4<f32>(x, y, 0.0, 1.0);
-    out.uv = vec2<f32>(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
+    out.clip_position = p;
+    // Map clip XY (-1..1) → UV (0..1), flipping Y so origin is top-left
+    // (matches the way the rest of the renderer hands UVs to textures).
+    out.uv = vec2<f32>(p.x * 0.5 + 0.5, 1.0 - (p.y * 0.5 + 0.5));
     return out;
 }
 

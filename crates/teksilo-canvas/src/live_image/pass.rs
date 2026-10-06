@@ -55,12 +55,14 @@ pub trait LiveTextureBackend {
     /// The largest side the device accepts.
     fn max_dimension(&self) -> u32;
 
-    /// A texture of `width × height`, or `Err` when the device has no
-    /// memory for it. Called outside every source lock.
+    /// A texture of `width × height`, with a full chain of mip levels
+    /// above level 0 when `mipped`, or `Err` when the device has no memory
+    /// for it. Called outside every source lock.
     fn create_texture(
         &mut self,
         width: u32,
         height: u32,
+        mipped: bool,
         label: &str,
     ) -> Result<Self::Texture, TextureOutOfMemory>;
 
@@ -73,7 +75,22 @@ pub trait LiveTextureBackend {
     fn write(&mut self, texture: &mut Self::Texture, read: &LiveImageRead<'_>, band: PixelRect);
 
     /// Ready `texture` to be drawn with `filter`; outside every lock.
+    /// `Trilinear` on a texture without mip levels samples like `Linear`.
     fn prepare_filter(&mut self, texture: &mut Self::Texture, filter: ScalingFilter);
+
+    /// Rebuild the mip levels of a mipped `texture` from its level 0, each
+    /// from the one below with [`crate::resample::downsample_half`]'s box:
+    /// every texel when `region` is `None`, else the texels each level's
+    /// [`mip_footprint`](super::mips::mip_footprint) of `region` names.
+    /// `opaque`: the source's fourth byte is not alpha, so the average is
+    /// plain and every level above 0 is opaque. Outside every lock; level 0
+    /// holds what was written to it.
+    fn rebuild_mips(
+        &mut self,
+        texture: &mut Self::Texture,
+        region: Option<PixelRect>,
+        opaque: bool,
+    );
 
     /// Bytes `texture` holds.
     fn texture_bytes(&self, texture: &Self::Texture) -> u64;
@@ -143,6 +160,9 @@ pub struct LiveTextureStats {
     pub blocking_waits: u64,
     /// Frames whose locked buffer had another size than the one laid out.
     pub stale_deferrals: u64,
+    /// Mip chains rebuilt, wholly or in part: at most one per source and
+    /// render, however many commits the upload folded in.
+    pub mip_updates: u64,
     pub device_lost: bool,
 }
 
@@ -153,6 +173,60 @@ struct Tex<T> {
     generation: u64,
     /// Filters the backend has readied it for, one bit each.
     filters: u8,
+    /// It has mip levels above level 0. Once it has, it keeps them for its
+    /// life: a source whose `Trilinear` quads come and go is not uploaded
+    /// again for it.
+    mipped: bool,
+    /// What of level 0 changed since its mip levels were last built: the
+    /// next render that draws the source through `Trilinear` rebuilds that
+    /// much.
+    stale: Option<Stale>,
+}
+
+impl<T> Tex<T> {
+    fn new(texture: T, size: (u32, u32), mipped: bool) -> Self {
+        Self {
+            texture,
+            size,
+            generation: 0,
+            filters: 0,
+            mipped,
+            stale: mipped.then_some(Stale::Whole),
+        }
+    }
+
+    /// Record that `changed` of level 0 was written.
+    fn changed(&mut self, changed: Stale) {
+        if self.mipped {
+            self.stale = Some(match self.stale {
+                Some(before) => before.with(changed),
+                None => changed,
+            });
+        }
+    }
+
+    /// Whether it can be drawn for a source painted at `size`, by quads of
+    /// which some sample through `Trilinear` when `mips`.
+    fn fits(&self, size: (u32, u32), mips: bool) -> bool {
+        self.size == size && (self.mipped || !mips)
+    }
+}
+
+/// The part of a texture's level 0 changed since its mip levels were built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stale {
+    Whole,
+    /// Within this rect.
+    Within(PixelRect),
+}
+
+impl Stale {
+    fn with(self, other: Stale) -> Stale {
+        match (self, other) {
+            (Stale::Within(a), Stale::Within(b)) => Stale::Within(a.union(&b)),
+            _ => Stale::Whole,
+        }
+    }
 }
 
 /// A whole-frame fill spread over several frames.
@@ -418,7 +492,18 @@ impl<B: LiveTextureBackend> LivePass<B> {
             };
             drawn.push(*id);
             let paused = group.iter().all(|q| q.paused);
-            let outcome = self.process(*id, &group, wanted, paused, mode, now, &mut staging_left);
+            let mips = group
+                .iter()
+                .any(|q| q.filter == ScalingFilter::Trilinear && q.painted.is_some());
+            let outcome = self.process(
+                *id,
+                &group,
+                (wanted, mips),
+                paused,
+                mode,
+                now,
+                &mut staging_left,
+            );
             self.counts.kept += u32::from(outcome.kept);
             let current = self
                 .entries
@@ -433,10 +518,28 @@ impl<B: LiveTextureBackend> LivePass<B> {
                     generation: current.map_or(0, |(_, g)| g),
                 };
             }
-            // Bind what each drawing quad needs, outside every lock.
+            // Bind what each drawing quad needs, and bring the mip chain up
+            // to date for a quad that samples it, outside every lock.
             if let Some(entry) = self.entries.get_mut(id)
                 && let Some(tex) = entry.current.as_mut()
             {
+                let samples_chain = indices
+                    .iter()
+                    .zip(&group)
+                    .any(|(&i, q)| q.filter == ScalingFilter::Trilinear && self.decisions[i].draw);
+                if samples_chain
+                    && !outcome.lost
+                    && tex.mipped
+                    && let Some(stale) = tex.stale.take()
+                {
+                    let region = match stale {
+                        Stale::Whole => None,
+                        Stale::Within(rect) => Some(rect),
+                    };
+                    let opaque = entry.source.format().is_opaque();
+                    self.backend.rebuild_mips(&mut tex.texture, region, opaque);
+                    self.stats.mip_updates += 1;
+                }
                 for (&i, quad) in indices.iter().zip(&group) {
                     let bit = filter_bit(quad.filter);
                     if self.decisions[i].draw && tex.filters & bit == 0 {
@@ -481,7 +584,7 @@ impl<B: LiveTextureBackend> LivePass<B> {
         &mut self,
         id: LiveImageId,
         group: &[&LiveImageQuad],
-        wanted: (u32, u32),
+        (wanted, mips): ((u32, u32), bool),
         paused: bool,
         mode: LivePassMode,
         now: Instant,
@@ -532,7 +635,14 @@ impl<B: LiveTextureBackend> LivePass<B> {
             };
         }
         let entry = self.entries.get_mut(&id).expect("inserted above");
-        let current_fits = entry.current.as_ref().is_some_and(|t| t.size == wanted);
+        let current_fits = entry.current.as_ref().is_some_and(|t| t.fits(wanted, mips));
+        // A texture staged at this size keeps mip levels the current one
+        // has: a source does not lose its chain to a restage.
+        let mipped = mips
+            || entry
+                .current
+                .as_ref()
+                .is_some_and(|t| t.size == wanted && t.mipped);
         if paused && mode == LivePassMode::Present && current_fits {
             return Outcome {
                 kept: true,
@@ -549,7 +659,10 @@ impl<B: LiveTextureBackend> LivePass<B> {
             }
             entry.alloc_failed = None;
         }
-        let staged_fits = entry.staged.as_ref().is_some_and(|s| s.tex.size == wanted);
+        let staged_fits = entry
+            .staged
+            .as_ref()
+            .is_some_and(|s| s.tex.fits(wanted, mips));
         if !current_fits && !staged_fits {
             let stale_staged = entry.staged.take();
             if stale_staged.is_some() {
@@ -558,17 +671,12 @@ impl<B: LiveTextureBackend> LivePass<B> {
             drop(stale_staged);
             match self
                 .backend
-                .create_texture(wanted.0, wanted.1, &texture_label(&source))
+                .create_texture(wanted.0, wanted.1, mipped, &texture_label(&source))
             {
                 Ok(texture) => {
                     let entry = self.entries.get_mut(&id).expect("inserted above");
                     entry.staged = Some(Staged {
-                        tex: Tex {
-                            texture,
-                            size: wanted,
-                            generation: 0,
-                            filters: 0,
-                        },
+                        tex: Tex::new(texture, wanted, mipped),
                         fill: None,
                     });
                 }
@@ -687,19 +795,17 @@ impl<B: LiveTextureBackend> LivePass<B> {
                 // frames rather than stall this one or tear the picture. It is
                 // created outside the lock; the next frame starts filling it.
                 drop(read);
-                let created =
-                    self.backend
-                        .create_texture(wanted.0, wanted.1, &texture_label(&source));
+                let created = self.backend.create_texture(
+                    wanted.0,
+                    wanted.1,
+                    mipped,
+                    &texture_label(&source),
+                );
                 let entry = self.entries.get_mut(&id).expect("inserted above");
                 match created {
                     Ok(texture) => {
                         entry.staged = Some(Staged {
-                            tex: Tex {
-                                texture,
-                                size: wanted,
-                                generation: 0,
-                                filters: 0,
-                            },
+                            tex: Tex::new(texture, wanted, mipped),
                             fill: None,
                         });
                     }
@@ -728,6 +834,7 @@ impl<B: LiveTextureBackend> LivePass<B> {
                         &[PixelRect::full(wanted.0, wanted.1)],
                         self.band_bytes,
                     );
+                    current.changed(Stale::Whole);
                     self.stats.uploads_full += 1;
                     true
                 }
@@ -740,6 +847,10 @@ impl<B: LiveTextureBackend> LivePass<B> {
                         rects.as_slice(),
                         self.band_bytes,
                     );
+                    let bounds = rects.as_slice().iter().copied().reduce(|a, b| a.union(&b));
+                    if let Some(bounds) = bounds {
+                        current.changed(Stale::Within(bounds));
+                    }
                     self.stats.uploads_partial += 1;
                     true
                 }
@@ -903,6 +1014,8 @@ fn texture_label(source: &LiveImageSource) -> String {
 }
 
 /// Drop every texture of `entry` that is not `wanted`-sized: how many.
+/// Whether it has mip levels does not matter here: this is for a size the
+/// device cannot hold at all.
 fn drop_mismatched<T>(entry: &mut Entry<T>, wanted: (u32, u32)) -> usize {
     let mut dropped = 0;
     if entry.current.as_ref().is_some_and(|t| t.size != wanted) {
