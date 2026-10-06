@@ -7,6 +7,7 @@ pub mod ellipsis;
 pub mod exif;
 pub mod geometry;
 pub mod image_geometry;
+pub mod live_image;
 pub mod paint;
 pub mod path;
 pub mod raster;

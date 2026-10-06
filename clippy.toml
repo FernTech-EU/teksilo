@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 FernTech
+
+# A live image's write transaction holds its source's lock. Held across an
+# `.await` on a single-threaded executor (teksilo-async's `spawn_local`, a
+# `LocalSet`, `block_on`), it keeps every producer and the window's renderer
+# out until the task resumes; `tokio::spawn` refuses it only because it is
+# `!Send`. `await_holding_invalid_type` is warn-by-default, so `-D warnings`
+# makes it an error everywhere in the workspace.
+await-holding-invalid-types = [
+    { path = "teksilo_canvas::live_image::LiveImageWriteGuard", reason = "the transaction holds the source's lock: commit before awaiting" },
+]

@@ -11688,6 +11688,7 @@ dependencies = [
  "bytemuck",
  "image-webp",
  "loom",
+ "parking_lot",
  "png",
  "proptest",
  "quick-xml",

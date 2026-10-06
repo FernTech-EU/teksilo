@@ -106,6 +106,12 @@ criterion = { version = "0.8", default-features = false, features = [
 # switch to loom types under `cfg(loom)` and panic outside a model). Reached
 # through `teksilo_canvas::sync`, the one facade every crate's protocols use.
 loom = "0.7"
+# The lock a live image's pixels sit behind (`teksilo_canvas::live_image`):
+# `MutexGuard::unlock_fair` hands the lock to a renderer parked on it, and
+# `try_lock_for` bounds how long the UI thread waits for a producer. 0.12.5 is
+# already in the lockfile through wgpu and winit; canvas, and so core, data
+# and automation, depend on it directly from 0.16.
+parking_lot = "0.12"
 uuid = { version = "1", features = ["v4"] }
 ureq = { version = "3.3", default-features = false, features = ["rustls"] }
 serde_json = "1"

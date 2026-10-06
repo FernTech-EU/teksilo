@@ -42,6 +42,10 @@ pub use loom::sync::atomic::{
 };
 #[cfg(teksilo_loom)]
 pub use loom::sync::{Arc, Condvar, Mutex, MutexGuard};
+/// Thread-locals a protocol keeps per thread: loom's model threads all run
+/// on one OS thread, so a protocol's own must be loom's under the cfg.
+#[cfg(teksilo_loom)]
+pub use loom::thread_local;
 
 /// Run `f` under every interleaving loom explores. Only under the cfg.
 #[cfg(teksilo_loom)]

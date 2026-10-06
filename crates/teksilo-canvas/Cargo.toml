@@ -25,6 +25,7 @@ zune-core = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = { workspace = true }
 serde = { workspace = true }
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 # Test-only: property-based testing (see the `proptest` entry in the

@@ -35,6 +35,28 @@ by crate for clarity, not because crates version independently.
   and gained `ImageFit::fitted_rect`.
 - `ImageOrientation::from_exif`, which names one of the eight EXIF values or
   returns `None`, and `ImageOrientation::displayed_size`.
+- `teksilo_canvas::live_image`, for a picture another thread rewrites many
+  times a second: a VM screen, a video frame, a camera preview. A
+  `LiveImageSource` holds the latest frame and any number of windows show it;
+  a producer writes it from any thread through a `LiveImageWriter`, in
+  transactions (`lock`, then `write_rect`, `copy_within`, `fill_rect`,
+  `rows_mut`, `pixels_mut` with `mark_dirty`, `resize`, and `commit`) or with
+  the one-shot `write_frame`, `swap_frame` (which installs the producer's own
+  buffer without a copy and hands the previous one back), `write_rect`,
+  `resize` and `clear`. One commit is one generation; a transaction dropped
+  without `commit()` publishes nothing. Changes coalesce: each window is
+  woken once until it has read them, and uploads the union of what changed
+  since its last upload. `writer_exclusive` starts a new writer session and
+  revokes the old one's writers, for a stream that restarts; the source is
+  `Disconnected`, `Waiting` or `Live` (`LiveImageStatus`) and frees its
+  pixels when a session's last writer drops. `LivePixelFormat` takes RGBA,
+  BGRA and the alpha-less RGBX and BGRX, so no producer converts pixels.
+  `generation`, `displayed_generation` and `is_displayed` let a producer
+  throttle, and `LiveImageSourceStats` counts commits, wakes and writers.
+  `ScalingFilter` names how a live picture is sampled when drawn at another
+  size. A transaction (`LiveImageWriteGuard`) holds the source's lock: it is
+  `!Send`, and the workspace's `clippy.toml` shows how to make clippy refuse
+  one held across an `.await`.
 
 #### App
 
@@ -179,6 +201,10 @@ by crate for clarity, not because crates version independently.
 
 #### Canvas
 
+- `teksilo-canvas` depends on `parking_lot` 0.12, which wgpu and winit
+  already bring into every windowed application; it is new to the
+  dependency graph of an app that uses only teksilo-core, teksilo-data or
+  teksilo-automation.
 - `teksilo-canvas` lists `loom` as a dependency for the `teksilo_loom` cfg,
   which only its concurrency models set. It adds eight packages to an
   application's `Cargo.lock` (`loom`, `generator`, `tracing-subscriber`,
