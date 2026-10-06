@@ -179,8 +179,15 @@ pub struct ScrollParams {
 #[serde(deny_unknown_fields)]
 pub struct InjectPointerParams {
     pub window_id: Option<u64>,
-    pub x: f32,
-    pub y: f32,
+    /// With `y`: window-logical px, or local to `node`. Give `x` and `y`, or
+    /// `source`.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
+    /// `y`: the press lands at the centre of where that source pixel is
+    /// displayed, whatever the fit, orientation, scale or transform. A pixel
+    /// cropped away by the fit is refused.
+    pub source: Option<[u32; 2]>,
     /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
     /// the position the node's own handlers receive — exact under a `Scale`, a
     /// `Rotate` or a `SceneView`, where adding the node's origin is not.
@@ -230,8 +237,15 @@ pub struct TouchStepParams {
     pub contact: Option<u32>,
     /// down, move, up or cancel.
     pub phase: String,
-    pub x: f32,
-    pub y: f32,
+    /// With `y`: window-logical px, or local to `node`. Give `x` and `y`, or
+    /// `source`.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
+    /// `y`: the press lands at the centre of where that source pixel is
+    /// displayed, whatever the fit, orientation, scale or transform. A pixel
+    /// cropped away by the fit is refused.
+    pub source: Option<[u32; 2]>,
     /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
     /// the position the node's own handlers receive. A synthetic node is
     /// refused.
@@ -288,8 +302,15 @@ pub struct FlingParams {
 #[serde(deny_unknown_fields)]
 pub struct LongPressParams {
     pub window_id: Option<u64>,
-    pub x: f32,
-    pub y: f32,
+    /// With `y`: window-logical px, or local to `node`. Give `x` and `y`, or
+    /// `source`.
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// A pixel `[x, y]` of the LiveImage `node` names, in place of `x` and
+    /// `y`: the press lands at the centre of where that source pixel is
+    /// displayed, whatever the fit, orientation, scale or transform. A pixel
+    /// cropped away by the fit is refused.
+    pub source: Option<[u32; 2]>,
     /// Aim inside a node: with `node`, `x` and `y` are node-local logical px,
     /// the position the node's own handlers receive — exact under a `Scale`, a
     /// `Rotate` or a `SceneView`, where adding the node's origin is not.
@@ -420,6 +441,31 @@ pub struct WaitParams {
     pub expected: Option<String>,
     pub version: Option<u64>,
     pub settle: Option<SettleArg>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiveImageStatsParams {
+    pub window_id: Option<u64>,
+    /// The LiveImage's node id.
+    pub node: u64,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiveImageMapParams {
+    pub window_id: Option<u64>,
+    /// The LiveImage's node id.
+    pub node: u64,
+    /// A source pixel `[x, y]`: the reply's `source_point` is the
+    /// window-logical centre of where it is displayed.
+    pub source: Option<[u32; 2]>,
+    /// A source rect `[x, y, width, height]`: the reply's
+    /// `source_window_rect` is where it is displayed.
+    pub source_rect: Option<[u32; 4]>,
+    /// A window-logical point: the reply's `pixel` is the source pixel drawn
+    /// there, or null on the letterbox.
+    pub window: Option<[f32; 2]>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -660,7 +706,7 @@ impl AutomationServer {
     }
 
     #[tool(
-        description = "Inject a pointer event at a point — window-logical px, or local to `node` (the position that node's handlers receive): action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted."
+        description = "Inject a pointer event at a point — window-logical px, or local to `node` (the position that node's handlers receive), or `source: [x, y]`, a pixel of the LiveImage `node` names: action = click (default), double_click, down, up or move; button = primary (default), secondary, middle, back, forward; with optional ctrl/shift/alt/meta/command held for the press and release. Use `command` for the platform accelerator (Control on Windows/Linux, Command on macOS) — accelerator-click to extend a selection is `command`, not `ctrl`. Unknown names and unknown fields are refused rather than defaulted."
     )]
     pub(crate) async fn inject_pointer(
         &self,
@@ -672,6 +718,7 @@ impl AutomationServer {
             AutomationOp::InjectPointer {
                 x: p.x,
                 y: p.y,
+                source: p.source,
                 node: p.node,
                 action: pointer_action(&p.action)?,
                 button: pointer_button(&p.button)?,
@@ -794,9 +841,11 @@ impl AutomationServer {
 
     #[tool(
         description = "Drive a whole multi-touch gesture in one call and report the arbitration \
-                       after every step. `steps` is a list of {contact?, phase, x, y, node?, \
-                       advance_ms?}: phase is down/move/up/cancel, `contact` names a finger by slot \
-                       (default 0, not a pointer id), `node` makes x, y local to that node, and \
+                       after every step. `steps` is a list of {contact?, phase, x?, y?, node?, \
+                       source?, advance_ms?}: phase is down/move/up/cancel, `contact` names a \
+                       finger by slot (default 0, not a pointer id), `node` makes x, y local to \
+                       that node (or, with `source` in their place, aims at that pixel of the \
+                       LiveImage `node` names), and \
                        `advance_ms` advances the SIMULATED clock before that sample — which is \
                        what separates a hold from a tap and a flick from a drag. \
                        The reply gives, per step, the identity that slot got and that pointer's \
@@ -817,6 +866,7 @@ impl AutomationServer {
                 phase: touch_phase(&step.phase)?,
                 x: step.x,
                 y: step.y,
+                source: step.source,
                 advance_ms: step.advance_ms.unwrap_or(0),
                 node: step.node,
             });
@@ -901,6 +951,7 @@ impl AutomationServer {
             AutomationOp::LongPress {
                 x: p.x,
                 y: p.y,
+                source: p.source,
                 node: p.node,
                 kind: pointer_kind(&p.kind)?,
             },
@@ -1061,6 +1112,50 @@ impl AutomationServer {
         .await
     }
 
+    #[tool(
+        description = "A LiveImage's frame counters: its source's (generation, displayed \
+                       generation, commits, wakes), its attachment's (window generation, frames \
+                       drawn, captures, uploads, paints, paused) and its window's live textures \
+                       and wakes. Frames flow when `generation` rises and `window_generation` \
+                       follows, while `paints` stays flat."
+    )]
+    pub(crate) async fn live_image_stats(
+        &self,
+        Parameters(p): Parameters<LiveImageStatsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.run(
+            p.window_id,
+            AutomationOp::LiveImageStats { node: p.node },
+            SettleSpec::default(),
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Where a LiveImage's picture lies (window-logical `content` and \
+                       `visible`), and its source pixels as window points and back: `source` \
+                       gives `source_point`, the centre of that pixel on screen; `source_rect` \
+                       gives `source_window_rect`; `window` gives `pixel`, the source pixel drawn \
+                       there (null on the letterbox). NO_GEOMETRY before its first layout or \
+                       while its source has no size."
+    )]
+    pub(crate) async fn live_image_map(
+        &self,
+        Parameters(p): Parameters<LiveImageMapParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.run(
+            p.window_id,
+            AutomationOp::LiveImageMap {
+                node: p.node,
+                source: p.source,
+                source_rect: p.source_rect,
+                window: p.window,
+            },
+            SettleSpec::default(),
+        )
+        .await
+    }
+
     #[tool(description = "Render the window (or a node's bounds) to a PNG image block.")]
     pub(crate) async fn screenshot(
         &self,
@@ -1148,6 +1243,16 @@ node — the position its own handlers receive, exact under a Scale, Rotate or \
 SceneView where bounds.x + x is not. `scroll` turns the wheel at the node's \
 centre or at `at: [x, y]` (node-local), by pixels or, with `lines: true`, by \
 lines as a wheel notch does.
+
+Live pictures. A LiveImage (a VM screen, a video, a camera) shows a source \
+another thread rewrites; its pixels are not in the accessibility tree. \
+`live_image_stats {node}` reports its frame counters: frames flow when \
+`generation` rises and `window_generation` follows, while `paints` stays flat. \
+`live_image_map {node, source?, source_rect?, window?}` gives where the picture \
+lies and maps source pixels to window points and back (NO_GEOMETRY before its \
+first layout). Aim a press at a guest pixel with `inject_pointer {node, \
+source: [x, y]}` (also `long_press` and touch steps). A `screenshot` reply's \
+`live_images` says which generation each picture in the PNG shows, and where.
 
 Touch and pen. `inject_pointer` takes `kind` = mouse (default), touch or pen; a \
 touch or pen enters through the tree's pointer door, so the kind reaches the \

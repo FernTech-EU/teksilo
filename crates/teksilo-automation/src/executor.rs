@@ -31,9 +31,9 @@ use teksilo_core::window::WindowOps;
 
 use crate::dto::{
     AnnouncementDto, Assertion, AssertionResult, AutomationOp, AutomationReply, KeyPhase,
-    NodeBounds, NodeRef, PointerKindDto, PointerReport, SemanticNode, SequenceMemberDto,
-    SettleSpec, ShortcutInfo, TouchPhaseDto, TouchSequenceReport, TouchStep, TouchStepReport,
-    WaitCondition, codes,
+    LiveImageMapReply, LiveImageStatsReply, LiveWakeStatsDto, NodeBounds, NodeRef, PointerKindDto,
+    PointerReport, SemanticNode, SequenceMemberDto, SettleSpec, ShortcutInfo, TouchPhaseDto,
+    TouchSequenceReport, TouchStep, TouchStepReport, WaitCondition, codes,
 };
 
 /// Perform one automation operation. See the module docs.
@@ -239,6 +239,7 @@ fn execute_op(
         AutomationOp::InjectPointer {
             x,
             y,
+            source,
             node,
             action,
             button,
@@ -252,7 +253,7 @@ fn execute_op(
             meta,
             command,
         } => {
-            let p = match aim(tree, *node, *x, *y) {
+            let p = match aim_at(tree, *node, *x, *y, *source) {
                 Ok(p) => p,
                 Err(reply) => return reply,
             };
@@ -326,16 +327,18 @@ fn execute_op(
                 TouchStep {
                     contact: 0,
                     phase: TouchPhaseDto::Down,
-                    x: a0.x,
-                    y: a0.y,
+                    x: Some(a0.x),
+                    y: Some(a0.y),
+                    source: None,
                     advance_ms: 0,
                     node: None,
                 },
                 TouchStep {
                     contact: 1,
                     phase: TouchPhaseDto::Down,
-                    x: b0.x,
-                    y: b0.y,
+                    x: Some(b0.x),
+                    y: Some(b0.y),
+                    source: None,
                     advance_ms: 0,
                     node: None,
                 },
@@ -347,16 +350,18 @@ fn execute_op(
                 plan.push(TouchStep {
                     contact: 0,
                     phase: TouchPhaseDto::Move,
-                    x: a.x,
-                    y: a.y,
+                    x: Some(a.x),
+                    y: Some(a.y),
+                    source: None,
                     advance_ms: 0,
                     node: None,
                 });
                 plan.push(TouchStep {
                     contact: 1,
                     phase: TouchPhaseDto::Move,
-                    x: b.x,
-                    y: b.y,
+                    x: Some(b.x),
+                    y: Some(b.y),
+                    source: None,
                     advance_ms: 0,
                     node: None,
                 });
@@ -364,16 +369,18 @@ fn execute_op(
             plan.push(TouchStep {
                 contact: 0,
                 phase: TouchPhaseDto::Up,
-                x: a1.x,
-                y: a1.y,
+                x: Some(a1.x),
+                y: Some(a1.y),
+                source: None,
                 advance_ms: 0,
                 node: None,
             });
             plan.push(TouchStep {
                 contact: 1,
                 phase: TouchPhaseDto::Up,
-                x: b1.x,
-                y: b1.y,
+                x: Some(b1.x),
+                y: Some(b1.y),
+                source: None,
                 advance_ms: 0,
                 node: None,
             });
@@ -447,8 +454,14 @@ fn execute_op(
             );
             finish_settle(tree, ops, settle)
         }
-        AutomationOp::LongPress { x, y, node, kind } => {
-            let p = match aim(tree, *node, *x, *y) {
+        AutomationOp::LongPress {
+            x,
+            y,
+            source,
+            node,
+            kind,
+        } => {
+            let p = match aim_at(tree, *node, *x, *y, *source) {
                 Ok(p) => p,
                 Err(reply) => return reply,
             };
@@ -721,6 +734,31 @@ fn execute_op(
         }
 
         // ---- Visual (host-handled) ----
+        AutomationOp::LiveImageStats { node } => {
+            let update = tree.sync_accessibility();
+            let widget = match aimable_widget(tree, &update, *node) {
+                Ok(widget) => widget,
+                Err(reply) => return reply,
+            };
+            match tree.live_image_stats(widget) {
+                Some(stats) => AutomationReply::ok_json(&LiveImageStatsReply {
+                    source: stats.source.into(),
+                    attachment: stats.attachment.into(),
+                    textures: None,
+                    wakes: None,
+                }),
+                None => AutomationReply::err(codes::BAD_ARGUMENT, not_live(*node)),
+            }
+        }
+        AutomationOp::LiveImageMap {
+            node,
+            source,
+            source_rect,
+            window,
+        } => match live_image_map(tree, *node, *source, *source_rect, *window) {
+            Ok(reply) => AutomationReply::ok_json(&reply),
+            Err(reply) => reply,
+        },
         AutomationOp::Screenshot { .. } => AutomationReply::err(
             codes::HOST_REQUIRED,
             "screenshot pixels are produced by the host (offscreen renderer / platform window)",
@@ -1304,34 +1342,41 @@ fn run_touch_sequence(
             "inject_touch_sequence needs at least one step",
         ));
     }
-    // Every named node is resolved before the first sample, so a sequence
-    // naming one that is absent or synthetic dispatches nothing rather than
+    // Every named node is resolved, and every step's point with it, before
+    // the first sample: a sequence naming one that is absent or synthetic, or
+    // a source pixel that is not shown, dispatches nothing rather than
     // leaving the fingers before it down.
-    let targets: Vec<Option<WidgetId>> = if steps.iter().any(|step| step.node.is_some()) {
-        let update = tree.sync_accessibility();
-        steps
-            .iter()
-            .map(|step| {
-                step.node
-                    .map(|node| aimable_widget(tree, &update, node))
-                    .transpose()
-            })
-            .collect::<Result<_, _>>()?
-    } else {
-        vec![None; steps.len()]
-    };
+    let update = steps
+        .iter()
+        .any(|step| step.node.is_some())
+        .then(|| tree.sync_accessibility());
+    let mut points = Vec::with_capacity(steps.len());
+    for step in steps {
+        let target = match (step.node, &update) {
+            (Some(node), Some(update)) => Some((node, aimable_widget(tree, update, node)?)),
+            _ => None,
+        };
+        let point = match (step.x, step.y, step.source, target) {
+            (Some(x), Some(y), None, None) => Point::new(x, y),
+            (Some(x), Some(y), None, Some((_, widget))) => {
+                tree.local_to_window(widget, Point::new(x, y))
+            }
+            (None, None, Some(pixel), Some((node, widget))) => {
+                let local = source_centre(tree, widget, node, pixel)?;
+                tree.local_to_window(widget, local)
+            }
+            (None, None, Some(_), None) => return Err(source_needs_node()),
+            _ => return Err(one_aim()),
+        };
+        points.push(point);
+    }
     freeze_clock(tree, ops);
     let mut slots: std::collections::BTreeMap<u32, PointerId> = std::collections::BTreeMap::new();
     let mut reports = Vec::with_capacity(steps.len());
-    for (step, target) in steps.iter().zip(targets) {
+    for (step, at) in steps.iter().zip(points) {
         if step.advance_ms > 0 {
             tree.advance_time_with_ops(Duration::from_millis(step.advance_ms), ops);
         }
-        let local = Point::new(step.x, step.y);
-        let at = match target {
-            Some(widget) => tree.local_to_window(widget, local),
-            None => local,
-        };
         let id = match step.phase {
             TouchPhaseDto::Down => {
                 let id = tree.new_contact();
@@ -1748,6 +1793,269 @@ fn aim(
     let update = tree.sync_accessibility();
     let widget = aimable_widget(tree, &update, node)?;
     Ok(tree.local_to_window(widget, local))
+}
+
+/// The window point an op sends, from its `x` and `y` (window-logical, or
+/// local to `node`) or its `source` pixel of the live picture `node` names.
+fn aim_at(
+    tree: &mut WidgetTree,
+    node: Option<NodeRef>,
+    x: Option<f32>,
+    y: Option<f32>,
+    source: Option<[u32; 2]>,
+) -> Result<Point, AutomationReply> {
+    match (x, y, source, node) {
+        (Some(x), Some(y), None, _) => aim(tree, node, x, y),
+        (None, None, Some(pixel), Some(node)) => {
+            let update = tree.sync_accessibility();
+            let widget = aimable_widget(tree, &update, node)?;
+            let local = source_centre(tree, widget, node, pixel)?;
+            Ok(tree.local_to_window(widget, local))
+        }
+        (None, None, Some(_), None) => Err(source_needs_node()),
+        _ => Err(one_aim()),
+    }
+}
+
+fn one_aim() -> AutomationReply {
+    AutomationReply::err(
+        codes::BAD_ARGUMENT,
+        "give `x` and `y`, or `source` with the live picture's `node`: one of the two",
+    )
+}
+
+fn source_needs_node() -> AutomationReply {
+    AutomationReply::err(
+        codes::BAD_ARGUMENT,
+        "a `source` pixel needs the `node` of the live picture it belongs to",
+    )
+}
+
+fn not_live(node: NodeRef) -> String {
+    format!("node {node} shows no live picture")
+}
+
+/// The placement of the live picture widget `widget` shows: refused when it
+/// shows none, `NO_GEOMETRY` before its first layout or while its source
+/// has no size.
+fn live_geometry(
+    tree: &WidgetTree,
+    widget: WidgetId,
+    node: NodeRef,
+) -> Result<teksilo_canvas::ImageGeometry, AutomationReply> {
+    if tree.live_image_consumer(widget).is_none() {
+        return Err(AutomationReply::err(codes::BAD_ARGUMENT, not_live(node)));
+    }
+    tree.live_image_geometry(widget).ok_or_else(|| {
+        AutomationReply::err(
+            codes::NO_GEOMETRY,
+            format!(
+                "node {node}'s live picture has no placement yet: before its first layout, \
+                 or while its source has no size"
+            ),
+        )
+    })
+}
+
+/// The widget-local centre of where source pixel `pixel` of `widget`'s live
+/// picture is displayed. Refused outside the source, and where the fit crops
+/// the pixel's centre away: a press there would land on another widget.
+fn source_centre(
+    tree: &WidgetTree,
+    widget: WidgetId,
+    node: NodeRef,
+    pixel: [u32; 2],
+) -> Result<Point, AutomationReply> {
+    let geometry = live_geometry(tree, widget, node)?;
+    let (w, h) = geometry.source;
+    let shown = geometry
+        .map_from_source(teksilo_canvas::PixelRect::new(pixel[0], pixel[1], 1, 1))
+        .ok_or_else(|| {
+            AutomationReply::err(
+                codes::BAD_ARGUMENT,
+                format!("pixel {pixel:?} is outside the {w}x{h} source of node {node}"),
+            )
+        })?;
+    let at = center(shown);
+    let visible = geometry.visible().is_some_and(|v| {
+        at.x >= v.x && at.x < v.x + v.width && at.y >= v.y && at.y < v.y + v.height
+    });
+    if !visible {
+        return Err(AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            format!(
+                "pixel {pixel:?} of node {node} is cropped away by its fit: its centre lies \
+                 outside the part of the picture that shows"
+            ),
+        ));
+    }
+    Ok(at)
+}
+
+/// A widget-local rect, as the window-logical box its corners reach.
+fn window_rect(tree: &WidgetTree, widget: WidgetId, local: Rect) -> NodeBounds {
+    let corners = [
+        Point::new(local.x, local.y),
+        Point::new(local.x + local.width, local.y),
+        Point::new(local.x, local.y + local.height),
+        Point::new(local.x + local.width, local.y + local.height),
+    ]
+    .map(|p| tree.local_to_window(widget, p));
+    let min_x = corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+    let min_y = corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+    let max_x = corners
+        .iter()
+        .map(|p| p.x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let max_y = corners
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::NEG_INFINITY, f32::max);
+    NodeBounds {
+        x: f64::from(min_x),
+        y: f64::from(min_y),
+        width: f64::from(max_x - min_x),
+        height: f64::from(max_y - min_y),
+    }
+}
+
+fn orientation_name(orientation: teksilo_canvas::ImageOrientation) -> &'static str {
+    use teksilo_canvas::ImageOrientation as O;
+    match orientation {
+        O::Normal => "normal",
+        O::FlipHorizontal => "flip_horizontal",
+        O::Rotate180 => "rotate_180",
+        O::FlipVertical => "flip_vertical",
+        O::Transpose => "transpose",
+        O::Rotate90 => "rotate_90",
+        O::Transverse => "transverse",
+        O::Rotate270 => "rotate_270",
+    }
+}
+
+/// [`AutomationOp::LiveImageMap`]: the placement, window-logical, and the
+/// conversions asked for.
+fn live_image_map(
+    tree: &mut WidgetTree,
+    node: NodeRef,
+    source: Option<[u32; 2]>,
+    source_rect: Option<[u32; 4]>,
+    window: Option<[f32; 2]>,
+) -> Result<LiveImageMapReply, AutomationReply> {
+    let update = tree.sync_accessibility();
+    let widget = aimable_widget(tree, &update, node)?;
+    let geometry = live_geometry(tree, widget, node)?;
+    let (w, h) = geometry.source;
+    let outside = |what: String| {
+        AutomationReply::err(
+            codes::BAD_ARGUMENT,
+            format!("{what} is outside the {w}x{h} source of node {node}"),
+        )
+    };
+    let source_point = match source {
+        Some([x, y]) => {
+            let shown = geometry
+                .map_from_source(teksilo_canvas::PixelRect::new(x, y, 1, 1))
+                .ok_or_else(|| outside(format!("pixel [{x}, {y}]")))?;
+            let at = tree.local_to_window(widget, center(shown));
+            Some([at.x, at.y])
+        }
+        None => None,
+    };
+    let source_window_rect = match source_rect {
+        Some([x, y, rw, rh]) => {
+            let shown = geometry
+                .map_from_source(teksilo_canvas::PixelRect::new(x, y, rw, rh))
+                .ok_or_else(|| outside(format!("rect [{x}, {y}, {rw}, {rh}]")))?;
+            Some(window_rect(tree, widget, shown))
+        }
+        None => None,
+    };
+    let pixel = window.map(|[x, y]| {
+        let local = tree.window_to_local(widget, Point::new(x, y));
+        geometry.map_to_source(local).map(|(px, py)| [px, py])
+    });
+    let (dw, dh) = geometry.displayed();
+    Ok(LiveImageMapReply {
+        source_size: [w, h],
+        displayed_size: [dw, dh],
+        orientation: orientation_name(geometry.orientation).to_owned(),
+        scale_factor: tree.device_scale_factor(),
+        content: window_rect(tree, widget, geometry.content),
+        visible: geometry.visible().map(|v| window_rect(tree, widget, v)),
+        source_point,
+        source_window_rect,
+        pixel,
+    })
+}
+
+/// The live pictures a screenshot of `frame` shows, for its
+/// [`ScreenshotMeta::live_images`](crate::dto::ScreenshotMeta::live_images):
+/// one per live quad whose drawn part reaches the image. `decisions` are the
+/// renderer's for the frame's live quads, in order; `scale` is the
+/// screenshot's physical pixels per logical pixel; `region` is the part of
+/// the window's surface the image holds, in physical pixels. The rect is the
+/// quad's untransformed box: a picture under a `Scale` or a `Rotate`
+/// ancestor is reported where it would be without it.
+pub fn live_image_shots(
+    tree: &WidgetTree,
+    frame: &teksilo_canvas::RenderFrame,
+    decisions: &[teksilo_canvas::live_image::internal::QuadDecision],
+    scale: f32,
+    region: teksilo_canvas::PixelRect,
+) -> Vec<crate::dto::LiveImageShot> {
+    let attachments: Vec<(WidgetId, teksilo_canvas::live_image::LiveImageConsumer)> =
+        tree.live_image_attachments().collect();
+    let mut shots = Vec::new();
+    for (quad, decision) in frame.live_images.iter().zip(decisions) {
+        let Some((widget, _)) = attachments
+            .iter()
+            .find(|(_, consumer)| consumer.ptr_eq(&quad.consumer))
+        else {
+            continue;
+        };
+        let [x, y, qw, qh] = quad.screen;
+        let edge = |v: f32, lo: u32, hi: u32| (v.max(0.0) as u32).clamp(lo, hi);
+        let x0 = edge((x * scale).floor(), region.x, region.x + region.width);
+        let y0 = edge((y * scale).floor(), region.y, region.y + region.height);
+        let x1 = edge(((x + qw) * scale).ceil(), region.x, region.x + region.width);
+        let y1 = edge(
+            ((y + qh) * scale).ceil(),
+            region.y,
+            region.y + region.height,
+        );
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        shots.push(crate::dto::LiveImageShot {
+            node: node_ref_of(*widget),
+            generation: decision.generation,
+            deferred: decision.deferred,
+            rect: [x0 - region.x, y0 - region.y, x1 - x0, y1 - y0],
+        });
+    }
+    shots
+}
+
+/// `reply`, a [`AutomationOp::LiveImageStats`] reply, with the window's half
+/// the host holds: its renderer's live textures and its wake counters.
+/// Anything else passes through unchanged.
+pub fn with_window_stats(
+    reply: AutomationReply,
+    textures: Option<teksilo_canvas::live_image::LiveTextureStats>,
+    wakes: Option<LiveWakeStatsDto>,
+) -> AutomationReply {
+    let AutomationReply::Ok { data } = reply else {
+        return reply;
+    };
+    match serde_json::from_value::<LiveImageStatsReply>(data.clone()) {
+        Ok(mut stats) => {
+            stats.textures = textures.map(Into::into);
+            stats.wakes = wakes;
+            AutomationReply::ok_json(&stats)
+        }
+        Err(_) => AutomationReply::Ok { data },
+    }
 }
 
 fn center(r: Rect) -> Point {

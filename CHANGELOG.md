@@ -221,6 +221,37 @@ by crate for clarity, not because crates version independently.
 - `scroll` takes `at`, the node-local point the wheel turns at, and `lines`,
   which scrolls by lines as a wheel notch does (`ScrollSource::Wheel`) rather
   than by pixels.
+- `live_image_stats {node}`, a live picture's counters: its source's
+  (generation, displayed generation, commits, wakes, writers, attachments),
+  its attachment's in the window (window generation, frames drawn, captures,
+  uploads, deferred and paused frames, paints), and the window's: what its
+  renderer holds and uploads for live pictures, and its wakes. The headless
+  server has no textures to report before its first screenshot, and no
+  wakes.
+- `live_image_map {node}`, where a live picture lies in the window (all of
+  it, the part that shows, its size as stored and as displayed, its
+  orientation, the scale) and, on request, where a source pixel's centre
+  and a source rect are shown (`source`, `source_rect`) and which source
+  pixel a window point shows (`window`; `null` on the letterbox). It answers
+  `NO_GEOMETRY` before the picture's first layout and while its source has
+  no size.
+- `inject_pointer`, `long_press` and each `inject_touch_sequence` step take
+  `source`, a pixel of the live picture `node` names, in place of `x` and
+  `y`: the press lands at the centre of where that pixel is drawn, under any
+  fit, orientation and transform. A pixel outside the source, or one the fit
+  crops out of view, is refused.
+- A screenshot's metadata lists the live pictures the image shows in
+  `live_images`: each one's node, the generation the image holds, whether it
+  drew an older picture (`deferred`) and its rect in the image's pixels.
+- The headless server's demo has a live picture: 96 × 64 pixels that each
+  encode their position and generation, whose description is the last event
+  it received, with a button that commits one frame and one that starts a
+  60 Hz producer.
+- `teksilo_probe.live_image` in the probe harness: `click_source`,
+  `point_of`, `rect_of`, `source_of`, `capture`, and `crop_visible`, which
+  cuts a saved screenshot to a live picture by its metadata, with a PNG
+  reader and writer that need only the standard library. `tools.py` wraps
+  the two new tools.
 
 #### Render
 
@@ -396,6 +427,10 @@ by crate for clarity, not because crates version independently.
 - `scroll` without `at` turns the wheel at the centre of the node as drawn.
   It took the centre of the node's untransformed box, which under a `Scale`,
   a `Rotate` or inside a `SceneView` is somewhere else.
+- **The probe harness's `tools.inject_pointer` and `tools.long_press` take
+  `x` and `y` by keyword**, now that `source` can stand in for them: a call
+  passing them by position names them. The tools' wire arguments are
+  unchanged.
 
 ### Deprecated
 

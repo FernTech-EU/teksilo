@@ -301,7 +301,8 @@ fn write_reply(
 /// `w`/`h` are **physical** pixels and `scale` is the window's device scale
 /// factor, both carried through to the client — see
 /// [`ScreenshotMeta`](teksilo_automation::dto::ScreenshotMeta) for why pixels
-/// without a scale are not enough to act on.
+/// without a scale are not enough to act on. `live_images` are the live
+/// pictures the image shows.
 #[cfg(debug_assertions)]
 pub(crate) fn screenshot_reply(
     rgba: &[u8],
@@ -309,6 +310,7 @@ pub(crate) fn screenshot_reply(
     h: u32,
     scale: f32,
     warnings: Vec<String>,
+    live_images: Vec<teksilo_automation::dto::LiveImageShot>,
 ) -> AutomationReply {
     use base64::Engine;
     let png = encode_png(rgba, w, h);
@@ -318,6 +320,7 @@ pub(crate) fn screenshot_reply(
         height: h,
         scale,
         warnings,
+        live_images,
     };
     let mut data = serde_json::to_value(&meta).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(obj) = data.as_object_mut() {
@@ -394,7 +397,20 @@ mod tests {
     fn screenshot_reply_carries_pixels_and_their_scale() {
         // 2×2 opaque red.
         let rgba = [255u8, 0, 0, 255].repeat(4);
-        let reply = screenshot_reply(&rgba, 2, 2, 2.0, vec!["webview_hole_possible".into()]);
+        let shot = teksilo_automation::dto::LiveImageShot {
+            node: 7,
+            generation: 3,
+            deferred: false,
+            rect: [0, 0, 2, 1],
+        };
+        let reply = screenshot_reply(
+            &rgba,
+            2,
+            2,
+            2.0,
+            vec!["webview_hole_possible".into()],
+            vec![shot],
+        );
         let AutomationReply::Ok { data } = reply else {
             panic!("expected ok");
         };
@@ -402,6 +418,8 @@ mod tests {
         assert_eq!(data["height"], 2);
         assert_eq!(data["scale"], 2.0);
         assert_eq!(data["warnings"][0], "webview_hole_possible");
+        assert_eq!(data["live_images"][0]["generation"], 3);
+        assert_eq!(data["live_images"][0]["rect"][2], 2);
         let b64 = data["png_base64"].as_str().expect("png");
         use base64::Engine;
         let png = base64::engine::general_purpose::STANDARD

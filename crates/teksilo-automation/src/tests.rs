@@ -991,8 +991,9 @@ fn inject_pointer_double_click_is_seen_as_a_double_tap() {
         &mut ops,
         &AutomationOp::InjectPointer {
             node: None,
-            x: bounds.x + bounds.width * 0.5,
-            y: bounds.y + bounds.height * 0.5,
+            x: Some(bounds.x + bounds.width * 0.5),
+            y: Some(bounds.y + bounds.height * 0.5),
+            source: None,
             action: PointerAction::DoubleClick,
             button: PointerButtonDto::Primary,
             kind: PointerKindDto::Mouse,
@@ -1031,8 +1032,9 @@ fn inject_pointer_carries_its_modifiers() {
         &mut ops,
         &AutomationOp::InjectPointer {
             node: None,
-            x: bounds.x + bounds.width * 0.5,
-            y: bounds.y + bounds.height * 0.5,
+            x: Some(bounds.x + bounds.width * 0.5),
+            y: Some(bounds.y + bounds.height * 0.5),
+            source: None,
             action: PointerAction::Click,
             button: PointerButtonDto::Primary,
             kind: PointerKindDto::Mouse,
@@ -1071,8 +1073,9 @@ fn inject_pointer_click_taps_widget() {
         &mut ops,
         &AutomationOp::InjectPointer {
             node: None,
-            x: cx,
-            y: cy,
+            x: Some(cx),
+            y: Some(cy),
+            source: None,
             action: PointerAction::Click,
             button: PointerButtonDto::Primary,
             kind: PointerKindDto::Mouse,
@@ -2067,8 +2070,9 @@ fn an_injected_click_reaches_the_callers_window_ops() {
         &mut ops,
         &AutomationOp::InjectPointer {
             node: None,
-            x: bounds.center().x,
-            y: bounds.center().y,
+            x: Some(bounds.center().x),
+            y: Some(bounds.center().y),
+            source: None,
             action: PointerAction::Click,
             button: Default::default(),
             kind: PointerKindDto::Mouse,
@@ -2365,8 +2369,8 @@ fn show_context_menu_prefers_the_widgets_own_handler() {
 }
 
 #[test]
-fn tool_catalog_has_34_entries() {
-    assert_eq!(crate::mcp_schema::TOOL_COUNT, 34);
+fn tool_catalog_has_36_entries() {
+    assert_eq!(crate::mcp_schema::TOOL_COUNT, 36);
     // Names are unique.
     let mut names: Vec<&str> = crate::mcp_schema::TOOL_CATALOG
         .iter()
@@ -2908,8 +2912,9 @@ fn a_scripted_touch_sequence_reproduces_the_documented_arbitration_row() {
         node: None,
         contact: 0,
         phase: TouchPhaseDto::Down,
-        x: press.x,
-        y: press.y,
+        x: Some(press.x),
+        y: Some(press.y),
+        source: None,
         advance_ms: 0,
     }];
     for (dx, dy, _) in &row.steps {
@@ -2917,8 +2922,9 @@ fn a_scripted_touch_sequence_reproduces_the_documented_arbitration_row() {
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
-            x: press.x + dx,
-            y: press.y + dy,
+            x: Some(press.x + dx),
+            y: Some(press.y + dy),
+            source: None,
             advance_ms: 0,
         });
     }
@@ -2993,8 +2999,9 @@ fn fingers_down(tree: &mut WidgetTree, n: u32) -> TouchSequenceReport {
             node: None,
             contact: i,
             phase: TouchPhaseDto::Down,
-            x: 60.0 + i as f32 * 40.0,
-            y: 80.0,
+            x: Some(60.0 + i as f32 * 40.0),
+            y: Some(80.0),
+            source: None,
             advance_ms: 0,
         })
         .collect();
@@ -3102,8 +3109,9 @@ fn a_long_press_holds_for_exactly_the_profiles_threshold() {
         &mut tree,
         &AutomationOp::LongPress {
             node: None,
-            x: 200.0,
-            y: 150.0,
+            x: Some(200.0),
+            y: Some(150.0),
+            source: None,
             kind: PointerKindDto::Touch,
         },
     );
@@ -3137,8 +3145,9 @@ fn an_injected_touch_reaches_the_callers_window_ops() {
         &mut ops,
         &AutomationOp::LongPress {
             node: None,
-            x: 200.0,
-            y: 150.0,
+            x: Some(200.0),
+            y: Some(150.0),
+            source: None,
             kind: PointerKindDto::Touch,
         },
         &default_settle(),
@@ -3246,8 +3255,9 @@ fn inject_pointer_touch_enters_as_a_finger_and_pen_carries_its_axes() {
         &mut tree,
         &AutomationOp::InjectPointer {
             node: None,
-            x: 200.0,
-            y: 150.0,
+            x: Some(200.0),
+            y: Some(150.0),
+            source: None,
             action: PointerAction::Click,
             button: PointerButtonDto::Primary,
             kind: PointerKindDto::Touch,
@@ -3273,8 +3283,9 @@ fn inject_pointer_touch_enters_as_a_finger_and_pen_carries_its_axes() {
         &mut tree,
         &AutomationOp::InjectPointer {
             node: None,
-            x: 200.0,
-            y: 150.0,
+            x: Some(200.0),
+            y: Some(150.0),
+            source: None,
             action: PointerAction::Down,
             button: PointerButtonDto::Primary,
             kind: PointerKindDto::Pen,
@@ -3306,8 +3317,9 @@ fn pointer_op(
 ) -> AutomationOp {
     AutomationOp::InjectPointer {
         node: None,
-        x,
-        y: 150.0,
+        x: Some(x),
+        y: Some(150.0),
+        source: None,
         action,
         button,
         kind,
@@ -3426,8 +3438,9 @@ fn an_injected_contact_is_primary_when_the_translator_would_say_so() {
         node: None,
         contact,
         phase,
-        x,
-        y: 150.0,
+        x: Some(x),
+        y: Some(150.0),
+        source: None,
         advance_ms: 0,
     };
     let steps = vec![
@@ -3530,8 +3543,9 @@ fn a_mouse_refuses_the_three_fields_it_cannot_carry() {
     let (mut tree, _id, _log) = laid_out_probe(InputProbe::new("probe"));
     let base = |pointer_id, pressure, tilt| AutomationOp::InjectPointer {
         node: None,
-        x: 200.0,
-        y: 150.0,
+        x: Some(200.0),
+        y: Some(150.0),
+        source: None,
         action: PointerAction::Click,
         button: PointerButtonDto::Primary,
         kind: PointerKindDto::Mouse,
@@ -3568,8 +3582,9 @@ fn a_touch_step_that_moves_a_finger_that_is_not_down_is_refused() {
                 node: None,
                 contact: 0,
                 phase: TouchPhaseDto::Move,
-                x: 10.0,
-                y: 10.0,
+                x: Some(10.0),
+                y: Some(10.0),
+                source: None,
                 advance_ms: 0,
             }],
         },
@@ -3612,24 +3627,27 @@ fn a_touch_sequence_advances_the_clock_by_exactly_what_its_steps_asked_for() {
                     node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Down,
-                    x: 200.0,
-                    y: 150.0,
+                    x: Some(200.0),
+                    y: Some(150.0),
+                    source: None,
                     advance_ms: 0,
                 },
                 TouchStep {
                     node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Move,
-                    x: 200.0,
-                    y: 170.0,
+                    x: Some(200.0),
+                    y: Some(170.0),
+                    source: None,
                     advance_ms: 30,
                 },
                 TouchStep {
                     node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Up,
-                    x: 200.0,
-                    y: 170.0,
+                    x: Some(200.0),
+                    y: Some(170.0),
+                    source: None,
                     advance_ms: 20,
                 },
             ],
@@ -3728,8 +3746,9 @@ fn every_new_op_round_trips_through_json() {
                 node: None,
                 contact: 1,
                 phase: TouchPhaseDto::Cancel,
-                x: 1.0,
-                y: 2.0,
+                x: Some(1.0),
+                y: Some(2.0),
+                source: None,
                 advance_ms: 8,
             }],
         },
@@ -3753,8 +3772,9 @@ fn every_new_op_round_trips_through_json() {
         },
         AutomationOp::LongPress {
             node: None,
-            x: 1.0,
-            y: 2.0,
+            x: Some(1.0),
+            y: Some(2.0),
+            source: None,
             kind: PointerKindDto::Pen,
         },
         AutomationOp::CancelPointer { pointer_id: 42 },
@@ -3805,24 +3825,27 @@ fn a_touch_sequence_stamps_every_sample_on_the_simulated_clock() {
                     node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Down,
-                    x: 200.0,
-                    y: 250.0,
+                    x: Some(200.0),
+                    y: Some(250.0),
+                    source: None,
                     advance_ms: 0,
                 },
                 TouchStep {
                     node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Move,
-                    x: 200.0,
-                    y: 200.0,
+                    x: Some(200.0),
+                    y: Some(200.0),
+                    source: None,
                     advance_ms: 0,
                 },
                 TouchStep {
                     node: None,
                     contact: 0,
                     phase: TouchPhaseDto::Move,
-                    x: 200.0,
-                    y: 150.0,
+                    x: Some(200.0),
+                    y: Some(150.0),
+                    source: None,
                     advance_ms: 0,
                 },
             ],
@@ -3853,8 +3876,9 @@ fn a_move_that_could_mean_either_of_two_fingers_is_refused_and_an_id_resolves_it
 
     let ambiguous = |pointer_id| AutomationOp::InjectPointer {
         node: None,
-        x: 300.0,
-        y: 200.0,
+        x: Some(300.0),
+        y: Some(200.0),
+        source: None,
         action: PointerAction::Move,
         button: PointerButtonDto::Primary,
         kind: PointerKindDto::Touch,
@@ -3903,8 +3927,9 @@ fn a_click_and_a_down_mint_their_own_contact_and_refuse_to_be_told_one() {
     let live_id = report.live[0].pointer_id;
     let op = |action| AutomationOp::InjectPointer {
         node: None,
-        x: 200.0,
-        y: 150.0,
+        x: Some(200.0),
+        y: Some(150.0),
+        source: None,
         action,
         button: PointerButtonDto::Primary,
         kind: PointerKindDto::Touch,
@@ -3944,8 +3969,9 @@ fn a_pen_keeps_one_identity_across_a_lift_and_hovers_after_it() {
     let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe"));
     let pen = |action, x: f32| AutomationOp::InjectPointer {
         node: None,
-        x,
-        y: 150.0,
+        x: Some(x),
+        y: Some(150.0),
+        source: None,
         action,
         button: PointerButtonDto::Primary,
         kind: PointerKindDto::Pen,
@@ -3998,8 +4024,9 @@ fn a_pen_keeps_one_identity_across_a_lift_and_hovers_after_it() {
             &mut tree,
             &AutomationOp::LongPress {
                 node: None,
-                x: 260.0,
-                y: 150.0,
+                x: Some(260.0),
+                y: Some(150.0),
+                source: None,
                 kind: PointerKindDto::Pen,
             }
         )
@@ -4043,8 +4070,9 @@ fn a_pen_op_addresses_the_live_stylus_whatever_tool_it_reports() {
         &mut tree,
         &AutomationOp::InjectPointer {
             node: None,
-            x: 220.0,
-            y: 150.0,
+            x: Some(220.0),
+            y: Some(150.0),
+            source: None,
             action: PointerAction::Move,
             button: PointerButtonDto::Primary,
             kind: PointerKindDto::Pen,
@@ -4246,7 +4274,7 @@ fn inject_pointer_aimed_at_a_node_lands_at_its_local_point() {
             12.5,
         );
         if let AutomationOp::InjectPointer { y, node: n, .. } = &mut op {
-            *y = 7.0;
+            *y = Some(7.0);
             *n = Some(node);
         }
         let reply = run(&mut tree, &op);
@@ -4273,8 +4301,9 @@ fn long_press_and_touch_steps_aim_at_a_nodes_local_point() {
         let reply = run(
             &mut tree,
             &AutomationOp::LongPress {
-                x: 40.0,
-                y: 30.0,
+                x: Some(40.0),
+                y: Some(30.0),
+                source: None,
                 node: Some(node),
                 kind: PointerKindDto::Touch,
             },
@@ -4290,8 +4319,9 @@ fn long_press_and_touch_steps_aim_at_a_nodes_local_point() {
         let step = |phase, x, y| TouchStep {
             contact: 0,
             phase,
-            x,
-            y,
+            x: Some(x),
+            y: Some(y),
+            source: None,
             advance_ms: 0,
             node: Some(node),
         };
@@ -4453,16 +4483,18 @@ fn aiming_at_a_synthetic_or_absent_node_is_refused() {
                 TouchStep {
                     contact: 0,
                     phase: TouchPhaseDto::Down,
-                    x: 10.0,
-                    y: 10.0,
+                    x: Some(10.0),
+                    y: Some(10.0),
+                    source: None,
                     advance_ms: 0,
                     node: Some(node),
                 },
                 TouchStep {
                     contact: 1,
                     phase: TouchPhaseDto::Down,
-                    x: 10.0,
-                    y: 10.0,
+                    x: Some(10.0),
+                    y: Some(10.0),
+                    source: None,
                     advance_ms: 0,
                     node: Some(999_999),
                 },
@@ -4482,4 +4514,664 @@ fn aiming_at_a_synthetic_or_absent_node_is_refused() {
         query_pointers(&mut tree).is_empty(),
         "and no finger was left down"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Live pictures: source aiming, `live_image_map`, `live_image_stats` and the
+// screenshot record (the executor half of spec I.6 to I.9, AC20)
+// ---------------------------------------------------------------------------
+
+use teksilo_canvas::live_image::{LiveImageDraw, LiveImageSource, LivePixelFormat};
+use teksilo_canvas::{ImageFit, ImageGeometry, ImageOrientation, PixelRect};
+
+/// The fixture source's size.
+const LIVE_W: u32 = 96;
+const LIVE_H: u32 = 64;
+
+/// A live picture's box: the source's aspect, and small enough that under
+/// the scene's zoom it stays inside [`Placed`]'s box, where the hit test
+/// reaches every one of its pixels.
+const LIVE_BOX: (f32, f32) = (120.0, 80.0);
+
+/// A live picture as `LiveImage` shows one, restated because this crate does
+/// not depend on teksilo-widgets: it attaches its source in every build,
+/// places the picture with `fit`, centred, in `place_children` (recording the
+/// placement on the attachment) and draws its one quad. An [`InputProbe`]
+/// fills its box, so what reaches it is logged in the picture's own local
+/// coordinates. It holds a writer, as a producer does: a source no writer
+/// holds has ended, and draws nothing.
+#[derive(Debug)]
+struct LivePicture {
+    source: LiveImageSource,
+    _writer: Option<teksilo_canvas::live_image::LiveImageWriter>,
+    fit: ImageFit,
+    orientation: ImageOrientation,
+    signals: teksilo_core::LiveImageSignals,
+    attachment: Option<teksilo_core::LiveImageAttachment>,
+    probe: WidgetId,
+}
+
+impl Widget for LivePicture {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.attachment = Some(ctx.attach_live_image(&self.source, &self.signals));
+        self.signals.frame_size.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::Relayout,
+        );
+        vec![self.probe]
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        if let (Some(attachment), Some(size)) = (&self.attachment, self.signals.frame_size.get()) {
+            attachment.set_geometry(ImageGeometry::compute(
+                teksilo_canvas::Size::new(bounds.width, bounds.height),
+                size,
+                self.fit,
+                teksilo_tokens::Alignment::CENTER,
+                false,
+                self.orientation,
+            ));
+        }
+        for child in children.iter_mut() {
+            child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y);
+            child.size = teksilo_canvas::Size::new(bounds.width, bounds.height);
+        }
+    }
+    fn paint(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        canvas: &mut teksilo_canvas::Canvas,
+        _ctx: &teksilo_core::widget::PaintContext,
+    ) {
+        let Some(attachment) = &self.attachment else {
+            return;
+        };
+        let content = attachment
+            .geometry()
+            .map(|g| {
+                teksilo_canvas::Rect::new(
+                    bounds.x + g.content.x,
+                    bounds.y + g.content.y,
+                    g.content.width,
+                    g.content.height,
+                )
+            })
+            .unwrap_or(teksilo_canvas::Rect::new(bounds.x, bounds.y, 0.0, 0.0));
+        canvas.draw_live_image(
+            attachment.consumer(),
+            &LiveImageDraw::new(content, bounds).orientation(self.orientation),
+        );
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.probe]
+    }
+    fn accessibility(&self, builder: &mut teksilo_core::AccessNodeBuilder) {
+        builder.set_role(accesskit::Role::Image);
+        builder.set_name("live picture".to_string());
+    }
+}
+
+/// A source `LIVE_W` × `LIVE_H` committed once and the writer that did it,
+/// or one no writer ever held, with no size.
+fn live_source(
+    committed: bool,
+) -> (
+    LiveImageSource,
+    Option<teksilo_canvas::live_image::LiveImageWriter>,
+) {
+    let source = LiveImageSource::builder(LivePixelFormat::Rgba8)
+        .label("automation-test")
+        .build();
+    if !committed {
+        return (source, None);
+    }
+    let writer = source.writer();
+    let px = vec![200u8; (LIVE_W * LIVE_H * 4) as usize];
+    writer
+        .write_frame(LIVE_W, LIVE_H, &px, (LIVE_W * 4) as usize)
+        .expect("a valid frame");
+    (source, Some(writer))
+}
+
+/// Places its one child at its own origin, [`LIVE_BOX`] in size.
+#[derive(Debug)]
+struct Holder {
+    child: WidgetId,
+}
+
+impl Widget for Holder {
+    fn build(&mut self, _ctx: &mut BuildContext) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y);
+            child.size = teksilo_canvas::Size::new(LIVE_BOX.0, LIVE_BOX.1);
+        }
+    }
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+}
+
+/// An 800 × 600 tree showing `source` with `fit` and `orientation`, under a
+/// transform of `over`, in a [`LIVE_BOX`] box at (310, 210) of its own
+/// space: the tree, the picture's node, its probe's node and the probe's
+/// log.
+fn live_picture(
+    over: Over,
+    (source, writer): (
+        LiveImageSource,
+        Option<teksilo_canvas::live_image::LiveImageWriter>,
+    ),
+    fit: ImageFit,
+    orientation: ImageOrientation,
+) -> (WidgetTree, NodeRef, NodeRef, Signal<Vec<String>>) {
+    let probe = InputProbe::new("over the picture").taking_every_contact();
+    let log = probe.log();
+    let mut tree = WidgetTree::new();
+    let probe = tree.add(probe);
+    let picture = tree.add(LivePicture {
+        _writer: writer,
+        source,
+        fit,
+        orientation,
+        signals: teksilo_core::LiveImageSignals::default(),
+        attachment: None,
+        probe,
+    });
+    let holder = tree.add(Holder { child: picture });
+    let framed = tree.add(Framed {
+        over,
+        child: holder,
+        transform: None,
+    });
+    tree.add(Placed { child: framed });
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    (tree, node_ref(picture), node_ref(probe), log)
+}
+
+fn widget_of(node: NodeRef) -> WidgetId {
+    teksilo_core::accessibility::node_id_to_widget_id_maybe(accesskit::NodeId(node))
+        .expect("a widget's node")
+}
+
+fn source_click(node: Option<NodeRef>, source: [u32; 2]) -> AutomationOp {
+    AutomationOp::InjectPointer {
+        node,
+        x: None,
+        y: None,
+        source: Some(source),
+        action: PointerAction::Click,
+        button: PointerButtonDto::Primary,
+        kind: PointerKindDto::Mouse,
+        pointer_id: None,
+        pressure: None,
+        tilt: None,
+        ctrl: false,
+        shift: false,
+        alt: false,
+        meta: false,
+        command: false,
+    }
+}
+
+fn map_op(
+    node: NodeRef,
+    source: Option<[u32; 2]>,
+    source_rect: Option<[u32; 4]>,
+    window: Option<[f32; 2]>,
+) -> AutomationOp {
+    AutomationOp::LiveImageMap {
+        node,
+        source,
+        source_rect,
+        window,
+    }
+}
+
+fn expect_err(reply: AutomationReply, code: &str) -> String {
+    match reply {
+        AutomationReply::Err { code: got, message } => {
+            assert_eq!(got, code, "{message}");
+            message
+        }
+        other => panic!("expected {code}, got {other:?}"),
+    }
+}
+
+fn map_reply(reply: AutomationReply) -> LiveImageMapReply {
+    match reply {
+        AutomationReply::Ok { data } => serde_json::from_value(data).expect("a map reply"),
+        other => panic!("expected a map, got {other:?}"),
+    }
+}
+
+/// The four corner pixels and the centre one.
+const AIMED: [[u32; 2]; 5] = [
+    [0, 0],
+    [LIVE_W - 1, 0],
+    [0, LIVE_H - 1],
+    [LIVE_W - 1, LIVE_H - 1],
+    [LIVE_W / 2, LIVE_H / 2],
+];
+
+/// AC20. A press aimed at a source pixel reaches the handler at a local point
+/// the placement maps back to that pixel: at the four corners and the centre,
+/// in both orientations, outside any transform and under a scale, a rotation
+/// and a scene's view transform.
+#[test]
+fn a_press_at_a_source_pixel_lands_where_that_pixel_is_shown() {
+    for over in OVERS {
+        for orientation in [ImageOrientation::Normal, ImageOrientation::Rotate90] {
+            let (mut tree, picture, _, log) =
+                live_picture(over, live_source(true), ImageFit::Contain, orientation);
+            let geometry = tree
+                .live_image_geometry(widget_of(picture))
+                .expect("laid out");
+            for pixel in AIMED {
+                log.set(Vec::new());
+                let reply = run(&mut tree, &source_click(Some(picture), pixel));
+                assert!(
+                    reply.is_ok(),
+                    "{over:?} {orientation:?} {pixel:?}: {reply:?}"
+                );
+                let downs = positions(&log.get(), "down");
+                assert_eq!(downs.len(), 1, "{over:?} {orientation:?}: {:?}", log.get());
+                let back = geometry.map_to_source(downs[0]);
+                assert_eq!(
+                    back,
+                    Some((pixel[0], pixel[1])),
+                    "{over:?} {orientation:?} {pixel:?}: the press landed at {:?}",
+                    downs[0]
+                );
+            }
+        }
+    }
+}
+
+/// `long_press` and each touch step take `source` too.
+#[test]
+fn a_long_press_and_a_touch_step_take_a_source_pixel() {
+    let (mut tree, picture, _, log) = live_picture(
+        Over::Rotate(std::f32::consts::FRAC_PI_2),
+        live_source(true),
+        ImageFit::Contain,
+        ImageOrientation::Normal,
+    );
+    let geometry = tree
+        .live_image_geometry(widget_of(picture))
+        .expect("laid out");
+    let reply = run(
+        &mut tree,
+        &AutomationOp::LongPress {
+            x: None,
+            y: None,
+            source: Some([10, 20]),
+            node: Some(picture),
+            kind: PointerKindDto::Touch,
+        },
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    let held = positions(&log.get(), "down");
+    assert_eq!(geometry.map_to_source(held[0]), Some((10, 20)));
+
+    log.set(Vec::new());
+    let step = |phase, pixel| TouchStep {
+        contact: 0,
+        phase,
+        x: None,
+        y: None,
+        source: Some(pixel),
+        advance_ms: 0,
+        node: Some(picture),
+    };
+    let reply = run(
+        &mut tree,
+        &AutomationOp::InjectTouchSequence {
+            steps: vec![
+                step(TouchPhaseDto::Down, [5, 5]),
+                step(TouchPhaseDto::Move, [60, 40]),
+                step(TouchPhaseDto::Up, [60, 40]),
+            ],
+        },
+    );
+    assert!(reply.is_ok(), "{reply:?}");
+    let seen = log.get();
+    let (downs, ups) = (positions(&seen, "down"), positions(&seen, "up"));
+    assert_eq!(geometry.map_to_source(downs[0]), Some((5, 5)), "{seen:?}");
+    assert_eq!(geometry.map_to_source(ups[0]), Some((60, 40)), "{seen:?}");
+}
+
+/// A pixel outside the source, one the fit crops out of view, a node that
+/// shows no live picture, a `source` without a `node`, and `x`/`y` given
+/// alongside `source` or not at all are each refused, and nothing is
+/// dispatched.
+#[test]
+fn a_source_pixel_that_cannot_be_aimed_at_is_refused() {
+    let (mut tree, picture, probe, log) = live_picture(
+        Over::Nothing,
+        live_source(true),
+        ImageFit::Cover,
+        ImageOrientation::Rotate90,
+    );
+    // Turned a quarter, 64 × 96 covers the 120 × 80 box at 120 × 180: the
+    // displayed top and bottom rows are cropped. Rotated a quarter clockwise,
+    // the source's column 0 is displayed at the top.
+    let message = expect_err(
+        run(&mut tree, &source_click(Some(picture), [0, 32])),
+        codes::BAD_ARGUMENT,
+    );
+    assert!(message.contains("cropped"), "{message}");
+    assert!(
+        run(
+            &mut tree,
+            &source_click(Some(picture), [LIVE_W / 2, LIVE_H / 2])
+        )
+        .is_ok(),
+        "the centre shows"
+    );
+    log.set(Vec::new());
+
+    let message = expect_err(
+        run(&mut tree, &source_click(Some(picture), [LIVE_W, 0])),
+        codes::BAD_ARGUMENT,
+    );
+    assert!(message.contains("outside"), "{message}");
+    let message = expect_err(
+        run(&mut tree, &source_click(Some(probe), [1, 1])),
+        codes::BAD_ARGUMENT,
+    );
+    assert!(message.contains("no live picture"), "{message}");
+    let message = expect_err(
+        run(&mut tree, &source_click(None, [1, 1])),
+        codes::BAD_ARGUMENT,
+    );
+    assert!(message.contains("needs the `node`"), "{message}");
+    for (x, y, source) in [
+        (Some(1.0), Some(1.0), Some([1, 1])),
+        (None, None, None),
+        (Some(1.0), None, None),
+    ] {
+        let mut op = source_click(Some(picture), [1, 1]);
+        if let AutomationOp::InjectPointer {
+            x: ox,
+            y: oy,
+            source: os,
+            ..
+        } = &mut op
+        {
+            (*ox, *oy, *os) = (x, y, source);
+        }
+        let message = expect_err(run(&mut tree, &op), codes::BAD_ARGUMENT);
+        assert!(message.contains("one of the two"), "{message}");
+    }
+    assert!(log.get().is_empty(), "nothing dispatched: {:?}", log.get());
+}
+
+/// Before its source has a size a live picture has no placement: `NO_GEOMETRY`
+/// from the map and from aiming, not a refusal of the node.
+#[test]
+fn a_picture_with_no_size_has_no_geometry() {
+    let (mut tree, picture, _, log) = live_picture(
+        Over::Nothing,
+        live_source(false),
+        ImageFit::Contain,
+        ImageOrientation::Normal,
+    );
+    expect_err(
+        run(&mut tree, &map_op(picture, None, None, None)),
+        codes::NO_GEOMETRY,
+    );
+    expect_err(
+        run(&mut tree, &source_click(Some(picture), [0, 0])),
+        codes::NO_GEOMETRY,
+    );
+    assert!(log.get().is_empty());
+}
+
+/// `live_image_map` goes from a source pixel to the window and back: the
+/// point it gives for a pixel maps back to that pixel, the whole source's
+/// rect is the content's, and a point on the letterbox is no pixel. In both
+/// orientations and under every transform.
+#[test]
+fn the_map_round_trips_a_source_pixel_through_the_window() {
+    for over in OVERS {
+        for orientation in [ImageOrientation::Normal, ImageOrientation::Rotate90] {
+            let (mut tree, picture, _, _) =
+                live_picture(over, live_source(true), ImageFit::Contain, orientation);
+            for pixel in AIMED {
+                let there = map_reply(run(&mut tree, &map_op(picture, Some(pixel), None, None)));
+                let point = there.source_point.expect("asked for");
+                let back = map_reply(run(&mut tree, &map_op(picture, None, None, Some(point))));
+                assert_eq!(
+                    back.pixel,
+                    Some(Some(pixel)),
+                    "{over:?} {orientation:?} {pixel:?} at {point:?}"
+                );
+            }
+            let whole = map_reply(run(
+                &mut tree,
+                &map_op(picture, None, Some([0, 0, LIVE_W, LIVE_H]), None),
+            ));
+            let rect = whole.source_window_rect.expect("asked for");
+            let close = |a: f64, b: f64| (a - b).abs() < 1e-3;
+            assert!(
+                close(rect.x, whole.content.x)
+                    && close(rect.y, whole.content.y)
+                    && close(rect.width, whole.content.width)
+                    && close(rect.height, whole.content.height),
+                "{over:?} {orientation:?}: {rect:?} against {:?}",
+                whole.content
+            );
+            assert_eq!(whole.source_size, [LIVE_W, LIVE_H]);
+            assert_eq!(whole.pixel, None, "no point asked");
+            match orientation {
+                ImageOrientation::Rotate90 => {
+                    assert_eq!(whole.displayed_size, [LIVE_H, LIVE_W]);
+                    assert_eq!(whole.orientation, "rotate_90");
+                }
+                _ => {
+                    assert_eq!(whole.displayed_size, [LIVE_W, LIVE_H]);
+                    assert_eq!(whole.orientation, "normal");
+                }
+            }
+        }
+    }
+
+    // 64 × 96 contained in 120 × 80 shows at 53⅓ × 80, from x 33⅓ of the
+    // box, which sits at (310, 210) in the window.
+    let (mut tree, picture, _, _) = live_picture(
+        Over::Nothing,
+        live_source(true),
+        ImageFit::Contain,
+        ImageOrientation::Rotate90,
+    );
+    let bar = map_reply(run(
+        &mut tree,
+        &map_op(picture, None, None, Some([315.0, 250.0])),
+    ));
+    assert_eq!(bar.pixel, Some(None), "the letterbox");
+    let visible = bar.visible.expect("it shows");
+    assert!(
+        (visible.x - (310.0 + 100.0 / 3.0)).abs() < 1e-3
+            && (visible.width - 160.0 / 3.0).abs() < 1e-3,
+        "{visible:?}"
+    );
+}
+
+/// `live_image_map` refuses an absent node, a node that shows no live
+/// picture, and a source pixel or rect outside the source.
+#[test]
+fn the_map_refuses_what_it_cannot_answer() {
+    let (mut tree, picture, probe, _) = live_picture(
+        Over::Nothing,
+        live_source(true),
+        ImageFit::Contain,
+        ImageOrientation::Normal,
+    );
+    expect_err(
+        run(&mut tree, &map_op(999_999, None, None, None)),
+        codes::NOT_FOUND,
+    );
+    expect_err(
+        run(&mut tree, &map_op(probe, None, None, None)),
+        codes::BAD_ARGUMENT,
+    );
+    expect_err(
+        run(&mut tree, &map_op(picture, Some([0, LIVE_H]), None, None)),
+        codes::BAD_ARGUMENT,
+    );
+    expect_err(
+        run(
+            &mut tree,
+            &map_op(picture, None, Some([LIVE_W - 1, 0, 2, 1]), None),
+        ),
+        codes::BAD_ARGUMENT,
+    );
+}
+
+/// `live_image_stats` answers the source's and the attachment's counters,
+/// and leaves the window's half to its host; `with_window_stats` adds it to
+/// a stats reply and passes anything else through.
+#[test]
+fn live_image_stats_answer_the_tree_half() {
+    let (source, writer) = live_source(true);
+    let (mut tree, picture, probe, _) = live_picture(
+        Over::Nothing,
+        (source.clone(), writer),
+        ImageFit::Contain,
+        ImageOrientation::Normal,
+    );
+    let reply = run(&mut tree, &AutomationOp::LiveImageStats { node: picture });
+    let AutomationReply::Ok { data } = reply.clone() else {
+        panic!("{reply:?}");
+    };
+    let stats: LiveImageStatsReply = serde_json::from_value(data).expect("a stats reply");
+    assert_eq!(stats.source.generation, 1);
+    assert_eq!(stats.source.attachments, 1);
+    assert_eq!((stats.textures, stats.wakes), (None, None));
+    expect_err(
+        run(&mut tree, &AutomationOp::LiveImageStats { node: probe }),
+        codes::BAD_ARGUMENT,
+    );
+    expect_err(
+        run(&mut tree, &AutomationOp::LiveImageStats { node: 999_999 }),
+        codes::NOT_FOUND,
+    );
+
+    let wakes = LiveWakeStatsDto {
+        wakes: 4,
+        wakes_dropped_hidden: 1,
+        window_hidden: true,
+    };
+    let textures = teksilo_canvas::live_image::LiveTextureStats::default();
+    let AutomationReply::Ok { data } = crate::with_window_stats(reply, Some(textures), Some(wakes))
+    else {
+        panic!("still a reply");
+    };
+    let full: LiveImageStatsReply = serde_json::from_value(data).expect("a stats reply");
+    assert_eq!(full.source, stats.source);
+    assert_eq!(full.textures, Some(textures.into()));
+    assert_eq!(full.wakes, Some(wakes));
+
+    let other = AutomationReply::ok_json(&serde_json::json!({"unrelated": true}));
+    assert_eq!(
+        crate::with_window_stats(other.clone(), Some(textures), Some(wakes)),
+        other
+    );
+    let refused = AutomationReply::err(codes::NOT_FOUND, "gone");
+    assert_eq!(
+        crate::with_window_stats(refused.clone(), Some(textures), Some(wakes)),
+        refused
+    );
+}
+
+/// A screenshot's `live_images`: the generation the render drew and the
+/// picture's rect in the image's pixels, scaled, relative to the image's
+/// region and cut to it; nothing for a picture outside the region.
+#[test]
+fn a_screenshot_records_the_pictures_it_shows() {
+    let (source, writer) = live_source(true);
+    let (mut tree, picture, _, _) = live_picture(
+        Over::Nothing,
+        (source.clone(), writer),
+        ImageFit::Contain,
+        ImageOrientation::Normal,
+    );
+    let frame = tree.render();
+    let mut mirror = teksilo_canvas::live_image::testing::LiveImageMirror::new();
+    mirror.consume(&frame);
+    // 96 × 64 contained in 120 × 80 at (310, 210) fills it: no letterbox.
+    let full = crate::live_image_shots(
+        &tree,
+        &frame,
+        mirror.decisions(),
+        1.0,
+        PixelRect::full(800, 600),
+    );
+    assert_eq!(
+        full,
+        vec![LiveImageShot {
+            node: picture,
+            generation: 1,
+            deferred: false,
+            rect: [310, 210, 120, 80],
+        }]
+    );
+    // At scale 2, of a region starting inside the picture.
+    let cut = crate::live_image_shots(
+        &tree,
+        &frame,
+        mirror.decisions(),
+        2.0,
+        PixelRect::new(700, 500, 1000, 700),
+    );
+    // 620..860 by 420..580, cut at (700, 500).
+    assert_eq!(cut[0].rect, [0, 0, 160, 80]);
+    let elsewhere = crate::live_image_shots(
+        &tree,
+        &frame,
+        mirror.decisions(),
+        1.0,
+        PixelRect::new(0, 0, 100, 100),
+    );
+    assert!(elsewhere.is_empty(), "{elsewhere:?}");
+
+    // A later commit, drawn: the record follows what the render drew.
+    let px = vec![10u8; (LIVE_W * LIVE_H * 4) as usize];
+    source
+        .writer()
+        .write_frame(LIVE_W, LIVE_H, &px, (LIVE_W * 4) as usize)
+        .expect("a valid frame");
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    let frame = tree.render();
+    mirror.consume(&frame);
+    let shots = crate::live_image_shots(
+        &tree,
+        &frame,
+        mirror.decisions(),
+        1.0,
+        PixelRect::full(800, 600),
+    );
+    assert_eq!(shots[0].generation, 2);
 }

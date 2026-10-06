@@ -407,8 +407,15 @@ pub struct TouchStep {
     /// What that finger does.
     pub phase: TouchPhaseDto,
     /// Where: window-logical coordinates, or local to `node` when it is given.
-    pub x: f32,
-    pub y: f32,
+    /// Give `x` and `y`, or `source`.
+    #[serde(default)]
+    pub x: Option<f32>,
+    #[serde(default)]
+    pub y: Option<f32>,
+    /// A pixel of the live picture `node` names, in place of `x` and `y`:
+    /// the step lands at the centre of where it is displayed.
+    #[serde(default)]
+    pub source: Option<[u32; 2]>,
     /// Aim inside a node instead of the window: with `node`, `x` and `y` are
     /// node-local logical px, the position the node's own handlers receive.
     /// A synthetic node (a scene item, a text run) is refused.
@@ -762,8 +769,20 @@ pub enum AutomationOp {
     },
     // ---- Synthetic input ----
     InjectPointer {
-        x: f32,
-        y: f32,
+        /// Where, with `y`: window-logical px, or local to `node`. Give `x`
+        /// and `y`, or `source`.
+        #[serde(default)]
+        x: Option<f32>,
+        #[serde(default)]
+        y: Option<f32>,
+        /// Aim at a pixel of a live picture instead: with `node` naming a
+        /// `LiveImage`, the press lands at the centre of where source pixel
+        /// `[x, y]` is displayed, whatever the fit, orientation, device
+        /// scale or transform. Give it in place of `x` and `y`; a pixel whose
+        /// centre is cropped away (by `Cover`, or `None` on a large picture)
+        /// is refused, since the press would land on another widget.
+        #[serde(default)]
+        source: Option<[u32; 2]>,
         /// Aim inside a node instead of the window: with `node`, `x` and `y`
         /// are node-local logical px, the position the node's own handlers
         /// receive — exact under a `Scale`, a `Rotate` or a `SceneView` above
@@ -957,8 +976,20 @@ pub enum AutomationOp {
     /// number the client picks, so the op means "hold long enough" on every
     /// density and every device without the script knowing the threshold.
     LongPress {
-        x: f32,
-        y: f32,
+        /// Where, with `y`: window-logical px, or local to `node`. Give `x`
+        /// and `y`, or `source`.
+        #[serde(default)]
+        x: Option<f32>,
+        #[serde(default)]
+        y: Option<f32>,
+        /// Aim at a pixel of a live picture instead: with `node` naming a
+        /// `LiveImage`, the press lands at the centre of where source pixel
+        /// `[x, y]` is displayed, whatever the fit, orientation, device
+        /// scale or transform. Give it in place of `x` and `y`; a pixel whose
+        /// centre is cropped away (by `Cover`, or `None` on a large picture)
+        /// is refused, since the press would land on another widget.
+        #[serde(default)]
+        source: Option<[u32; 2]>,
         /// Aim inside a node instead of the window: with `node`, `x` and `y`
         /// are node-local logical px, the position the node's own handlers
         /// receive — exact under a `Scale`, a `Rotate` or a `SceneView` above
@@ -1015,6 +1046,33 @@ pub enum AutomationOp {
     Settle,
     WaitForCondition {
         condition: WaitCondition,
+    },
+    // ---- Live images ----
+    /// What a live picture's source and its widget's attachment did, and
+    /// what the window holds and woke for it: the counters a probe watches
+    /// to see frames flow (`generation` rising, `window_generation`
+    /// following) while `paints` stays flat. The window's half is the
+    /// host's (see `execute`); without one it is absent.
+    LiveImageStats {
+        node: NodeRef,
+    },
+    /// Where a live picture lies in its window, and the mapping between its
+    /// source pixels and window points: the placement its last layout
+    /// computed, the one its paint draws and its input maps through.
+    LiveImageMap {
+        node: NodeRef,
+        /// A source pixel: the reply's `source_point` is the window-logical
+        /// centre of where it is displayed.
+        #[serde(default)]
+        source: Option<[u32; 2]>,
+        /// A source rect `[x, y, width, height]`: the reply's
+        /// `source_window_rect` is where it is displayed.
+        #[serde(default)]
+        source_rect: Option<[u32; 4]>,
+        /// A window-logical point: the reply's `pixel` is the source pixel
+        /// drawn there, `null` on the letterbox or outside the picture.
+        #[serde(default)]
+        window: Option<[f32; 2]>,
     },
     // ---- Visual (host-handled, see `execute`) ----
     Screenshot {
@@ -1096,7 +1154,7 @@ pub struct AutomationRequest {
 /// cannot relate a pixel it can see to a point it can click, and a script
 /// written against one display silently mis-aims on another. Headless always
 /// reports `scale: 1.0`, where the two coincide.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct ScreenshotMeta {
     /// Image width in physical pixels.
     pub width: u32,
@@ -1107,6 +1165,206 @@ pub struct ScreenshotMeta {
     /// Non-fatal caveats about the capture, e.g. `webview_hole_possible`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// The live pictures the image shows, and which commit each shows. A
+    /// screenshot is followed by a frame of the window, so reading
+    /// `live_image_stats` afterwards races with it: this is the exact record
+    /// of what the image holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub live_images: Vec<LiveImageShot>,
+}
+
+/// One live picture drawn inside a screenshot's region.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct LiveImageShot {
+    /// The `LiveImage`'s node.
+    pub node: NodeRef,
+    /// The generation the image shows of its source: what the window's
+    /// texture held when the capture drew it.
+    pub generation: u64,
+    /// The capture drew an older picture or only the background: a size
+    /// newer than the window's last layout, or nothing uploaded yet.
+    pub deferred: bool,
+    /// The drawn picture in the image's pixels, `[x, y, width, height]`,
+    /// cut to the image.
+    pub rect: [u32; 4],
+}
+
+/// The reply to [`AutomationOp::LiveImageStats`].
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct LiveImageStatsReply {
+    pub source: LiveImageSourceStatsDto,
+    pub attachment: LiveImageAttachmentStatsDto,
+    /// What the window's renderer holds and uploads for live pictures.
+    /// Absent where the host has no renderer for the window yet (headless,
+    /// before the first screenshot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub textures: Option<LiveTextureStatsDto>,
+    /// The window's wake counters. Absent where there is no window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wakes: Option<LiveWakeStatsDto>,
+}
+
+/// A live picture's source counters, across every window that shows it.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LiveImageSourceStatsDto {
+    pub generation: u64,
+    pub displayed_generation: u64,
+    pub commits: u64,
+    pub abandoned: u64,
+    pub bytes_written: u64,
+    pub wakes: u64,
+    pub wakes_coalesced: u64,
+    pub writers: u32,
+    pub attachments: u32,
+    pub observed_attachments: u32,
+    pub paused_attachments: u32,
+}
+
+/// One attachment's counters: this widget in this window.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LiveImageAttachmentStatsDto {
+    pub window_generation: u64,
+    pub frames_drawn: u64,
+    pub captures: u64,
+    pub uploads: u64,
+    pub deferred_frames: u64,
+    pub observed: bool,
+    pub paused: bool,
+    pub paused_frames: u64,
+    pub paints: u64,
+}
+
+/// What a window's renderer holds and did for live pictures.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LiveTextureStatsDto {
+    pub textures: usize,
+    pub bytes: u64,
+    pub textures_parked: usize,
+    pub bytes_parked: u64,
+    pub uploads_full: u64,
+    pub uploads_partial: u64,
+    pub bytes_uploaded: u64,
+    pub upload_calls: u64,
+    pub progressive_bands: u64,
+    pub alloc_failures: u64,
+    pub contended: u64,
+    pub blocking_waits: u64,
+    pub stale_deferrals: u64,
+    pub mip_updates: u64,
+    pub device_lost: bool,
+}
+
+/// A window's wake counters.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LiveWakeStatsDto {
+    /// Wakes that reached the window.
+    pub wakes: u64,
+    /// Draw wakes dropped because the window was hidden.
+    pub wakes_dropped_hidden: u64,
+    pub window_hidden: bool,
+}
+
+impl From<teksilo_canvas::live_image::LiveImageSourceStats> for LiveImageSourceStatsDto {
+    fn from(s: teksilo_canvas::live_image::LiveImageSourceStats) -> Self {
+        Self {
+            generation: s.generation,
+            displayed_generation: s.displayed_generation,
+            commits: s.commits,
+            abandoned: s.abandoned,
+            bytes_written: s.bytes_written,
+            wakes: s.wakes,
+            wakes_coalesced: s.wakes_coalesced,
+            writers: s.writers,
+            attachments: s.attachments,
+            observed_attachments: s.observed_attachments,
+            paused_attachments: s.paused_attachments,
+        }
+    }
+}
+
+impl From<teksilo_canvas::live_image::LiveImageAttachmentStats> for LiveImageAttachmentStatsDto {
+    fn from(s: teksilo_canvas::live_image::LiveImageAttachmentStats) -> Self {
+        Self {
+            window_generation: s.window_generation,
+            frames_drawn: s.frames_drawn,
+            captures: s.captures,
+            uploads: s.uploads,
+            deferred_frames: s.deferred_frames,
+            observed: s.observed,
+            paused: s.paused,
+            paused_frames: s.paused_frames,
+            paints: s.paints,
+        }
+    }
+}
+
+impl From<teksilo_canvas::live_image::LiveTextureStats> for LiveTextureStatsDto {
+    fn from(s: teksilo_canvas::live_image::LiveTextureStats) -> Self {
+        Self {
+            textures: s.textures,
+            bytes: s.bytes,
+            textures_parked: s.textures_parked,
+            bytes_parked: s.bytes_parked,
+            uploads_full: s.uploads_full,
+            uploads_partial: s.uploads_partial,
+            bytes_uploaded: s.bytes_uploaded,
+            upload_calls: s.upload_calls,
+            progressive_bands: s.progressive_bands,
+            alloc_failures: s.alloc_failures,
+            contended: s.contended,
+            blocking_waits: s.blocking_waits,
+            stale_deferrals: s.stale_deferrals,
+            mip_updates: s.mip_updates,
+            device_lost: s.device_lost,
+        }
+    }
+}
+
+/// The reply to [`AutomationOp::LiveImageMap`]. Every point and rect is
+/// window-logical: where a press or a crop of a screenshot aims, once
+/// multiplied by its `scale`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct LiveImageMapReply {
+    /// The source's size, before orientation.
+    pub source_size: [u32; 2],
+    /// The size as displayed: swapped by a quarter turn.
+    pub displayed_size: [u32; 2],
+    /// How the source is turned for display: `normal`, `flip_horizontal`,
+    /// `rotate_180`, `flip_vertical`, `transpose`, `rotate_90`,
+    /// `transverse` or `rotate_270`.
+    pub orientation: String,
+    /// The window's device scale.
+    pub scale_factor: f32,
+    /// Where the whole picture lies; it exceeds the widget's box where the
+    /// fit crops.
+    pub content: NodeBounds,
+    /// The part of the picture inside the widget's box.
+    pub visible: Option<NodeBounds>,
+    /// The centre of where the asked `source` pixel is displayed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_point: Option<[f32; 2]>,
+    /// Where the asked `source_rect` is displayed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_window_rect: Option<NodeBounds>,
+    /// The source pixel drawn at the asked `window` point; `null` on the
+    /// letterbox or outside the picture. Absent when no point was asked.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub pixel: Option<Option<[u32; 2]>>,
+}
+
+/// A field that is there, `null` included: serde reads a `null` into an
+/// `Option<Option<T>>` as absent unless told otherwise, and an absent field
+/// takes the `default`.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// Stable error codes used across the toolkit and both transports.
@@ -1144,6 +1402,9 @@ pub mod codes {
     pub const BAD_REQUEST: &str = "BAD_REQUEST";
     /// The client could not talk to the bridge at all.
     pub const BRIDGE_IO: &str = "BRIDGE_IO";
+    /// The node is a live picture with no placement yet: before its first
+    /// layout, or while its source has no size.
+    pub const NO_GEOMETRY: &str = "NO_GEOMETRY";
     /// An `assert_node` assertion evaluated to false against a node that does
     /// exist. Deliberately distinct from [`NOT_FOUND`]: "the button is not
     /// focused" and "there is no such button" are different bugs, and a caller

@@ -365,11 +365,16 @@ async fn golden_full_window() {
     compare_or_update("full_window", &rgba);
 }
 
-#[cfg(feature = "golden-tests")]
+/// A PNG's pixels and size. The headless server writes 8-bit RGBA.
 fn decode_png(png: &[u8]) -> (Vec<u8>, u32, u32) {
     let decoder = png::Decoder::new(std::io::Cursor::new(png));
     let mut reader = decoder.read_info().expect("png info");
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let mut buf = vec![
+        0u8;
+        reader
+            .output_buffer_size()
+            .expect("a frame that fits in memory")
+    ];
     let info = reader.next_frame(&mut buf).expect("png frame");
     buf.truncate(info.buffer_size());
     (buf, info.width, info.height)
@@ -410,4 +415,322 @@ fn compare_or_update(name: &str, actual: &(Vec<u8>, u32, u32)) {
         diffs == 0,
         "golden {name}: {diffs} channels differ beyond tolerance"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The live-image fixture (spec I.6 to I.9)
+// ---------------------------------------------------------------------------
+
+use teksilo_automation::dto::{
+    LiveImageMapReply, LiveImageShot, LiveImageStatsReply, PointerAction, PointerButtonDto,
+    PointerKindDto, ScreenshotMeta,
+};
+
+/// The node labelled `label` in a fresh snapshot.
+async fn labelled(tx: &UnboundedSender<Job>, label: &str) -> serde_json::Value {
+    let data = reply_ok(host_call(tx, AutomationOp::SnapshotTree { max_depth: None }).await);
+    data["nodes"]
+        .as_array()
+        .expect("nodes array")
+        .iter()
+        .find(|n| n["label"] == label)
+        .unwrap_or_else(|| panic!("a node labelled {label:?}"))
+        .clone()
+}
+
+fn id_of(node: &serde_json::Value) -> u64 {
+    node["id"].as_u64().expect("a node id")
+}
+
+/// The last event the fixture recorded, in its description.
+async fn fixture_log(tx: &UnboundedSender<Job>, node: u64) -> String {
+    let data = reply_ok(host_call(tx, AutomationOp::ReadNode { node }).await);
+    data["description"]
+        .as_str()
+        .expect("the fixture's description")
+        .to_owned()
+}
+
+fn at_source(node: u64, pixel: [u32; 2], action: PointerAction) -> AutomationOp {
+    AutomationOp::InjectPointer {
+        node: Some(node),
+        x: None,
+        y: None,
+        source: Some(pixel),
+        action,
+        button: PointerButtonDto::Primary,
+        kind: PointerKindDto::Mouse,
+        pointer_id: None,
+        pressure: None,
+        tilt: None,
+        ctrl: false,
+        shift: false,
+        alt: false,
+        meta: false,
+        command: false,
+    }
+}
+
+async fn stats(tx: &UnboundedSender<Job>, node: u64) -> LiveImageStatsReply {
+    let data = reply_ok(host_call(tx, AutomationOp::LiveImageStats { node }).await);
+    serde_json::from_value(data).expect("a stats reply")
+}
+
+async fn click(tx: &UnboundedSender<Job>, label: &str) {
+    let button = labelled(tx, label).await;
+    reply_ok(
+        host_call(
+            tx,
+            AutomationOp::InvokeAction {
+                node: id_of(&button),
+                action: "click".to_owned(),
+            },
+        )
+        .await,
+    );
+}
+
+/// A screenshot of `node`: its pixels and metadata, or `None` on a host with
+/// no adapter, which is acceptable unless the run asked for one.
+async fn shot_of(tx: &UnboundedSender<Job>, node: u64) -> Option<(Vec<u8>, u32, ScreenshotMeta)> {
+    match host_call(tx, AutomationOp::Screenshot { node: Some(node) }).await {
+        HostReply::Image { png, meta } => {
+            let (rgba, w, h) = decode_png(&png);
+            assert_eq!((w, h), (meta.width, meta.height));
+            Some((rgba, w, meta))
+        }
+        HostReply::Reply(AutomationReply::Err { code, .. })
+            if code == teksilo_automation::dto::codes::GPU_UNAVAILABLE =>
+        {
+            assert!(
+                !teksilo_render::test_support::adapter_required(),
+                "an adapter was required, but the screenshot reported none"
+            );
+            None
+        }
+        other => panic!("unexpected screenshot reply: {}", debug_reply(&other)),
+    }
+}
+
+/// The fixture's one picture in a screenshot, checked pixel by pixel against
+/// the commit the screenshot says it drew: each pixel names its position and
+/// its generation (`div 8` undoes the encoding through the sRGB round trip).
+fn check_fixture_pixels(rgba: &[u8], width: u32, shot: &LiveImageShot) {
+    assert!(!shot.deferred, "{shot:?}");
+    let [x0, y0, w, h] = shot.rect;
+    assert_eq!((w, h), (96, 64), "drawn one to one: {shot:?}");
+    assert!(
+        ((y0 + h) * width) as usize * 4 <= rgba.len() && x0 + w <= width,
+        "inside the image: {shot:?}"
+    );
+    let expect_b = (shot.generation % 32) as u8;
+    for y in 0..h {
+        for x in 0..w {
+            let i = (((y0 + y) * width + x0 + x) * 4) as usize;
+            let px = &rgba[i..i + 4];
+            assert_eq!(
+                (px[0] / 8, px[1] / 8, px[2] / 8),
+                ((x % 32) as u8, (y % 32) as u8, expect_b),
+                "pixel ({x}, {y}) of generation {}: {px:?}",
+                shot.generation
+            );
+        }
+    }
+}
+
+const FIXTURE_AIMS: [[u32; 2]; 5] = [[0, 0], [95, 0], [0, 63], [95, 63], [48, 32]];
+
+/// I.6. The fixture is in the demo, laid out inside the window at its 96 x 64
+/// source size, and every input reaches it where its source pixels are: a
+/// press at a source pixel arrives at that pixel's centre, a key reaches it
+/// once focused. Its stats show the one commit built in, and no window half:
+/// there is no renderer before the first screenshot, and no window.
+#[tokio::test]
+async fn i6_the_fixture_takes_input_at_its_source_pixels() {
+    let tx = setup();
+    let picture = labelled(&tx, "live-image-fixture").await;
+    let node = id_of(&picture);
+    let b = &picture["bounds"];
+    let (x, y, w, h) = (
+        b["x"].as_f64().unwrap(),
+        b["y"].as_f64().unwrap(),
+        b["width"].as_f64().unwrap(),
+        b["height"].as_f64().unwrap(),
+    );
+    assert_eq!((w, h), (96.0, 64.0), "{picture}");
+    assert!(
+        x >= 0.0 && y >= 0.0 && x + w <= 800.0 && y + h <= 600.0,
+        "inside the headless window: {picture}"
+    );
+
+    let data = reply_ok(
+        host_call(
+            &tx,
+            AutomationOp::LiveImageMap {
+                node,
+                source: None,
+                source_rect: None,
+                window: None,
+            },
+        )
+        .await,
+    );
+    let map: LiveImageMapReply = serde_json::from_value(data).expect("a map");
+    assert_eq!(map.source_size, [96, 64]);
+    assert_eq!((map.content.width, map.content.height), (96.0, 64.0));
+
+    // AC20: each press reaches the handler at a local point that maps back
+    // to the pixel aimed at. The box is not on a whole pixel, and the picture
+    // in it is snapped to one, so the point is not the box's (x + ½, y + ½).
+    for pixel in FIXTURE_AIMS {
+        for (action, phase) in [
+            (PointerAction::Down, "pointer_down"),
+            (PointerAction::Up, "pointer_up"),
+        ] {
+            assert!(
+                matches!(
+                    host_call(&tx, at_source(node, pixel, action)).await,
+                    HostReply::Reply(AutomationReply::Ok { .. })
+                ),
+                "{pixel:?} {phase}"
+            );
+            let log = fixture_log(&tx, node).await;
+            let mut fields = log.split(' ');
+            assert_eq!(fields.next(), Some(phase), "{log}");
+            let local: Vec<f32> = fields.map(|v| v.parse().expect("a coordinate")).collect();
+            let window = [x as f32 + local[0], y as f32 + local[1]];
+            let data = reply_ok(
+                host_call(
+                    &tx,
+                    AutomationOp::LiveImageMap {
+                        node,
+                        source: None,
+                        source_rect: None,
+                        window: Some(window),
+                    },
+                )
+                .await,
+            );
+            let back: LiveImageMapReply = serde_json::from_value(data).expect("a map");
+            assert_eq!(back.pixel, Some(Some(pixel)), "{phase} at {log}");
+            // And at the centre of the pixel, where the map says it is.
+            let data = reply_ok(
+                host_call(
+                    &tx,
+                    AutomationOp::LiveImageMap {
+                        node,
+                        source: Some(pixel),
+                        source_rect: None,
+                        window: None,
+                    },
+                )
+                .await,
+            );
+            let there: LiveImageMapReply = serde_json::from_value(data).expect("a map");
+            let centre = there.source_point.expect("asked for");
+            assert!(
+                (centre[0] - window[0]).abs() < 1e-3 && (centre[1] - window[1]).abs() < 1e-3,
+                "{phase} {pixel:?}: at {window:?}, its centre at {centre:?}"
+            );
+        }
+    }
+
+    reply_ok(host_call(&tx, AutomationOp::FocusNode { node }).await);
+    reply_ok(
+        host_call(
+            &tx,
+            AutomationOp::InjectKey {
+                key: "f5".to_owned(),
+                text: None,
+                phase: Default::default(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                meta: false,
+                command: false,
+            },
+        )
+        .await,
+    );
+    assert_eq!(
+        fixture_log(&tx, node).await,
+        "key_down F5",
+        "every key reaches it"
+    );
+
+    let stats = stats(&tx, node).await;
+    assert_eq!(stats.source.generation, 1);
+    assert_eq!((stats.textures, stats.wakes), (None, None));
+}
+
+/// I.7. A screenshot of the fixture records the commit it drew and where, and
+/// its pixels are that commit's, each at its position.
+#[tokio::test]
+async fn i7_a_screenshot_of_the_fixture_shows_the_commit_it_records() {
+    let tx = setup();
+    let node = id_of(&labelled(&tx, "live-image-fixture").await);
+    let Some((rgba, width, meta)) = shot_of(&tx, node).await else {
+        return;
+    };
+    assert_eq!(meta.live_images.len(), 1, "{meta:?}");
+    let shot = &meta.live_images[0];
+    assert_eq!((shot.node, shot.generation), (node, 1));
+    // The node's box, rounded outwards for the crop: the picture, snapped to
+    // device pixels, lies in it.
+    assert!(
+        meta.width - shot.rect[2] <= 1 && meta.height - shot.rect[3] <= 1,
+        "{meta:?}"
+    );
+    check_fixture_pixels(&rgba, width, shot);
+}
+
+/// I.8. After a screenshot the stats carry the renderer's textures, and a
+/// commit stepped on the tree thread is what the next screenshot shows.
+#[tokio::test]
+async fn i8_a_stepped_commit_reaches_the_stats_and_the_next_screenshot() {
+    let tx = setup();
+    let node = id_of(&labelled(&tx, "live-image-fixture").await);
+    if shot_of(&tx, node).await.is_none() {
+        return;
+    }
+    let before = stats(&tx, node).await;
+    let textures = before.textures.expect("the screenshot's renderer");
+    assert_eq!(textures.textures, 1);
+    assert!(textures.bytes >= 96 * 64 * 4, "{textures:?}");
+    assert_eq!(textures.uploads_full, 1);
+    assert_eq!(before.attachment.captures, 1);
+
+    click(&tx, "Step live producer").await;
+    assert_eq!(stats(&tx, node).await.source.generation, 2);
+    let (rgba, width, meta) = shot_of(&tx, node).await.expect("an adapter, as before");
+    assert_eq!(meta.live_images[0].generation, 2);
+    check_fixture_pixels(&rgba, width, &meta.live_images[0]);
+    let after = stats(&tx, node).await;
+    assert_eq!(after.attachment.window_generation, 2);
+    assert_eq!(after.textures.expect("still").textures, 1, "one texture");
+}
+
+/// I.9. The freeze check, headless: with the producer running, two screenshots
+/// half a second apart show a later generation, each its own.
+#[tokio::test]
+async fn i9_two_screenshots_of_a_running_producer_show_a_later_commit() {
+    let tx = setup();
+    let node = id_of(&labelled(&tx, "live-image-fixture").await);
+    if shot_of(&tx, node).await.is_none() {
+        return;
+    }
+    click(&tx, "Start live producer").await;
+    // A second press starts no second producer: one writer steps, one runs.
+    click(&tx, "Start live producer").await;
+    assert_eq!(stats(&tx, node).await.source.writers, 2);
+    let (rgba, width, first) = shot_of(&tx, node).await.expect("an adapter");
+    check_fixture_pixels(&rgba, width, &first.live_images[0]);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let (rgba, width, second) = shot_of(&tx, node).await.expect("an adapter");
+    check_fixture_pixels(&rgba, width, &second.live_images[0]);
+    let (a, b) = (
+        first.live_images[0].generation,
+        second.live_images[0].generation,
+    );
+    assert!(b > a, "the picture moved on: {a} then {b}");
 }

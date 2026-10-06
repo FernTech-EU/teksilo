@@ -1531,6 +1531,40 @@ impl TeksiloAppHandler {
             return Ok(());
         }
 
+        // A live picture's stats: the tree answers for the source and its
+        // attachment, the window adds its renderer's textures and its wake
+        // counters.
+        if matches!(payload.op, AutomationOp::LiveImageStats { .. }) {
+            let crate::automation_bridge::AutomationPayload {
+                op,
+                settle,
+                reply_tx,
+                ..
+            } = payload;
+            let settle = crate::automation_bridge::clamp_live_settle(&settle);
+            let mut reply = None;
+            self.run_in_window(winit_id, event_loop, |tree, ops| {
+                reply = Some(teksilo_automation::execute(tree, ops, &op, &settle));
+            });
+            let reply = match (reply, self.wm.windows_map().get(&winit_id)) {
+                (Some(reply), Some(managed)) => {
+                    let wakes = managed.platform_window.live_wake_stats();
+                    teksilo_automation::with_window_stats(
+                        reply,
+                        Some(managed.platform_window.live_texture_stats()),
+                        Some(teksilo_automation::dto::LiveWakeStatsDto {
+                            wakes: wakes.wakes,
+                            wakes_dropped_hidden: wakes.dropped_hidden,
+                            window_hidden: wakes.hidden,
+                        }),
+                    )
+                }
+                _ => AutomationReply::err(codes::NOT_FOUND, "window vanished"),
+            };
+            let _ = reply_tx.send(reply);
+            return Ok(());
+        }
+
         // Everything else: a per-tree op with a real `WindowOps`.
         let crate::automation_bridge::AutomationPayload {
             op,
@@ -1650,6 +1684,19 @@ impl TeksiloAppHandler {
                 .capture_offscreen(&frame, clear, crop)
         }));
 
+        // The live pictures the image shows, from what the capture's render
+        // decided for each.
+        let live_images = match &captured {
+            Ok(Ok(shot)) => teksilo_automation::live_image_shots(
+                &current.tree,
+                &frame,
+                current.platform_window.renderer().live_image_decisions(),
+                scale,
+                shot.region,
+            ),
+            _ => Vec::new(),
+        };
+
         current.request_redraw();
         self.wm.reinsert_managed(winit_id, current);
 
@@ -1661,6 +1708,7 @@ impl TeksiloAppHandler {
                     shot.height,
                     scale,
                     warnings,
+                    live_images,
                 )
             }
             Ok(Ok(_)) => {

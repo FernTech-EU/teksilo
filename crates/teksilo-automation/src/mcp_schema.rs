@@ -195,6 +195,17 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
         description: "Poll until a condition holds (node exists / value / gone / version).",
         mutating: true,
     },
+    // ---- Live images ----
+    ToolDescriptor {
+        name: "live_image_stats",
+        description: "A LiveImage's frame counters (generation, window generation, paints, uploads) and its window's textures and wakes.",
+        mutating: false,
+    },
+    ToolDescriptor {
+        name: "live_image_map",
+        description: "Where a LiveImage's picture lies, and its source pixels as window points and back.",
+        mutating: false,
+    },
     // ---- Visual ----
     ToolDescriptor {
         name: "screenshot",
@@ -203,7 +214,7 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
 ];
 
-/// The number of tools in the catalog (34).
+/// The number of tools in the catalog (36).
 pub const TOOL_COUNT: usize = TOOL_CATALOG.len();
 
 #[cfg(test)]

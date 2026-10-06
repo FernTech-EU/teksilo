@@ -181,8 +181,9 @@ fn touch_drag(
         node: None,
         contact: 0,
         phase: TouchPhaseDto::Down,
-        x: from.0,
-        y: from.1,
+        x: Some(from.0),
+        y: Some(from.1),
+        source: None,
         advance_ms: 0,
     }];
     if hold_ms > 0 {
@@ -192,8 +193,9 @@ fn touch_drag(
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
-            x: from.0,
-            y: from.1,
+            x: Some(from.0),
+            y: Some(from.1),
+            source: None,
             advance_ms: hold_ms,
         });
     }
@@ -203,8 +205,9 @@ fn touch_drag(
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
-            x: from.0 + by.0 * t,
-            y: from.1 + by.1 * t,
+            x: Some(from.0 + by.0 * t),
+            y: Some(from.1 + by.1 * t),
+            source: None,
             // One 60 Hz frame per sample, so the velocity tracker sees gaps
             // under its stop threshold.
             advance_ms: 16,
@@ -218,6 +221,7 @@ fn touch_drag(
             phase: TouchPhaseDto::Up,
             x: last.x,
             y: last.y,
+            source: None,
             advance_ms: 16,
         });
     }
@@ -251,24 +255,27 @@ fn touch_hold_drag(
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Down,
-            x: from.0,
-            y: from.1,
+            x: Some(from.0),
+            y: Some(from.1),
+            source: None,
             advance_ms: 0,
         },
         TouchStep {
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
-            x: from.0,
-            y: from.1,
+            x: Some(from.0),
+            y: Some(from.1),
+            source: None,
             advance_ms: hold_ms(),
         },
         TouchStep {
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
-            x: from.0,
-            y: from.1 + latch_by,
+            x: Some(from.0),
+            y: Some(from.1 + latch_by),
+            source: None,
             advance_ms: 16,
         },
     ];
@@ -278,8 +285,9 @@ fn touch_hold_drag(
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Move,
-            x: from.0,
-            y: from.1 + latch_by + remaining * t,
+            x: Some(from.0),
+            y: Some(from.1 + latch_by + remaining * t),
+            source: None,
             advance_ms: 16,
         });
     }
@@ -290,6 +298,7 @@ fn touch_hold_drag(
         phase: TouchPhaseDto::Up,
         x: last.x,
         y: last.y,
+        source: None,
         advance_ms: 16,
     });
     out
@@ -350,16 +359,18 @@ fn two_fingers_on_the_pad_are_both_reported() {
             node: None,
             contact: 0,
             phase: TouchPhaseDto::Down,
-            x: x - 30.0,
-            y,
+            x: Some(x - 30.0),
+            y: Some(y),
+            source: None,
             advance_ms: 0,
         },
         TouchStep {
             node: None,
             contact: 1,
             phase: TouchPhaseDto::Down,
-            x: x + 30.0,
-            y,
+            x: Some(x + 30.0),
+            y: Some(y),
+            source: None,
             advance_ms: 16,
         },
     ];

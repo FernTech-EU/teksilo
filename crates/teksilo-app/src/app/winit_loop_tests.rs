@@ -29,7 +29,7 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Twenty claims, and they do not all carry the same weight. Verified by
+//! Twenty-one claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
@@ -75,7 +75,10 @@
 //!   speed detaches the attachment, so the commits wake nobody, and the loop
 //!   polls the textures it held free without drawing a frame, waking within
 //!   the poll interval while they wait;
-//! - **(s)** a producer committing through the end of the loop does not panic.
+//! - **(s)** a producer committing through the end of the loop does not panic;
+//! - **(t)** with the `automation` feature, the bridge's `live_image_stats`
+//!   carries the window's textures and wakes, and its screenshot records the
+//!   commit it drew.
 //!
 //! Two are weaker than they look, and the reason is not fixable from here.
 //! **(c)**, the safe area, and the missing-override half of **(d)** compare a
@@ -317,6 +320,11 @@ impl Widget for LivePicture {
             canvas.draw_live_image(attachment.consumer(), &LiveImageDraw::new(bounds, bounds));
         }
     }
+
+    fn accessibility(&self, builder: &mut teksilo_core::AccessNodeBuilder) {
+        builder.set_role(teksilo_core::accesskit::Role::Image);
+        builder.set_name("live picture".to_string());
+    }
 }
 
 /// A `w × h` frame of one opaque colour.
@@ -371,6 +379,93 @@ fn picture_stats(app: &TeksiloAppHandler, window: WindowId) -> LiveImageStats {
         .tree
         .live_image_stats(managed.tree.roots()[0])
         .expect("the root shows a live picture")
+}
+
+/// One op through the automation bridge's own route into `window`, answered
+/// on the spot: the route runs it on this, the main, thread.
+#[cfg(feature = "automation")]
+fn bridge_call(
+    app: &mut TeksiloAppHandler,
+    event_loop: &ActiveEventLoop,
+    window: WindowId,
+    op: teksilo_automation::dto::AutomationOp,
+) -> teksilo_automation::dto::AutomationReply {
+    let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
+    let payload = crate::automation_bridge::AutomationPayload {
+        window_id: Some(app.wm.windows_map()[&window].teksilo_id.raw()),
+        request_id: 0,
+        op,
+        settle: Default::default(),
+        reply_tx,
+    };
+    assert!(
+        app.try_route_automation_payload(Box::new(payload), event_loop)
+            .is_ok(),
+        "the route takes the bridge's payload"
+    );
+    reply_rx.try_recv().expect("answered on the spot")
+}
+
+/// Claim (t): the bridge's `live_image_stats` carries the window's renderer
+/// and wake counters on top of the tree's, and its screenshot records the
+/// commit it drew.
+#[cfg(feature = "automation")]
+fn bridge_live_image_claims(
+    app: &mut TeksiloAppHandler,
+    event_loop: &ActiveEventLoop,
+    window: WindowId,
+    writer: &LiveImageWriter,
+) {
+    use teksilo_automation::dto::{AutomationOp, AutomationReply, LiveImageStatsReply};
+
+    let root = app.wm.windows_map()[&window].tree.roots()[0];
+    let node = teksilo_core::accessibility::widget_id_to_node_id(root).0;
+    let AutomationReply::Ok { data } = bridge_call(
+        app,
+        event_loop,
+        window,
+        AutomationOp::LiveImageStats { node },
+    ) else {
+        panic!("the picture's stats");
+    };
+    let stats: LiveImageStatsReply = serde_json::from_value(data).expect("a stats reply");
+    let platform = &app.wm.windows_map()[&window].platform_window;
+    let textures = stats.textures.expect("the window's textures");
+    assert_eq!(textures, platform.live_texture_stats().into());
+    assert_eq!(textures.textures, 1);
+    let wakes = stats.wakes.expect("the window's wakes");
+    let own = platform.live_wake_stats();
+    assert_eq!(
+        (wakes.wakes, wakes.wakes_dropped_hidden, wakes.window_hidden),
+        (own.wakes, own.dropped_hidden, own.hidden)
+    );
+
+    let generation = writer
+        .write_frame(16, 12, &solid(16, 12, [0, 255, 0, 255]), 16 * 4)
+        .expect("a green frame");
+    let AutomationReply::Ok { data } = bridge_call(
+        app,
+        event_loop,
+        window,
+        AutomationOp::Screenshot { node: Some(node) },
+    ) else {
+        panic!("a screenshot of the picture");
+    };
+    let meta: teksilo_automation::dto::ScreenshotMeta =
+        serde_json::from_value(data).expect("a screenshot's metadata");
+    assert_eq!(meta.live_images.len(), 1, "{meta:?}");
+    let shot = &meta.live_images[0];
+    assert_eq!(
+        (shot.node, shot.generation, shot.deferred),
+        (node, generation, false)
+    );
+    assert!(
+        shot.rect[2] > 0
+            && shot.rect[3] > 0
+            && shot.rect[0] + shot.rect[2] <= meta.width
+            && shot.rect[1] + shot.rect[3] <= meta.height,
+        "the picture, inside the image: {meta:?}"
+    );
 }
 
 /// Commit frames to `writer` as fast as it takes them, until `stop`.
@@ -1114,6 +1209,14 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                     "a display that reports no rate keeps the last one"
                 ),
             }
+
+            // -- (t) the automation bridge's live-image stats and screenshot
+            //
+            // Through the bridge's own route. Taking the window's half out of
+            // the stats, or the record out of the screenshot, reddens this.
+            #[cfg(feature = "automation")]
+            bridge_live_image_claims(app, event_loop, picture, &writer);
+
             let teksilo_id = app.wm.windows_map()[&picture].teksilo_id;
             app.wm.close_window(teksilo_id);
             drop(writer);

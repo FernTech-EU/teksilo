@@ -65,6 +65,8 @@ __all__ = [
     "advance_clock",
     "settle",
     "wait_for_condition",
+    "live_image_stats",
+    "live_image_map",
     "screenshot",
     "TOOL_NAMES",
     "MUTATING",
@@ -339,10 +341,11 @@ def scroll(
 
 def inject_pointer(
     session,
-    x: float,
-    y: float,
     *,
     window_id: int | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    source: Sequence[float] | None = None,
     node: int | None = None,
     action: str | None = None,
     ctrl: bool | None = None,
@@ -379,6 +382,7 @@ def inject_pointer(
         "window_id": window_id,
         "x": x,
         "y": y,
+        "source": source,
         "node": node,
         "action": action,
         "ctrl": ctrl,
@@ -626,10 +630,11 @@ def fling(
 
 def long_press(
     session,
-    x: float,
-    y: float,
     *,
     window_id: int | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    source: Sequence[float] | None = None,
     node: int | None = None,
     kind: str | None = None,
     settle: Mapping[str, Any] | None = None,
@@ -645,6 +650,7 @@ def long_press(
         "window_id": window_id,
         "x": x,
         "y": y,
+        "source": source,
         "node": node,
         "kind": kind,
         "settle": settle,
@@ -817,6 +823,43 @@ def wait_for_condition(
     return session.call("wait_for_condition", **_present(args))
 
 
+def live_image_stats(session, node: int, *, window_id: int | None = None) -> Any:
+    """A LiveImage's frame counters (generation, window generation, paints,
+    uploads) and its window's textures and wakes.
+
+    Read-only tool.
+    """
+    args = {
+        "window_id": window_id,
+        "node": node,
+    }
+    return session.call("live_image_stats", **_present(args))
+
+
+def live_image_map(
+    session,
+    node: int,
+    *,
+    window_id: int | None = None,
+    source: Sequence[float] | None = None,
+    source_rect: Sequence[float] | None = None,
+    window: Sequence[float] | None = None,
+) -> Any:
+    """Where a LiveImage's picture lies, and its source pixels as window points
+    and back.
+
+    Read-only tool.
+    """
+    args = {
+        "window_id": window_id,
+        "node": node,
+        "source": source,
+        "source_rect": source_rect,
+        "window": window,
+    }
+    return session.call("live_image_map", **_present(args))
+
+
 def screenshot(
     session,
     *,
@@ -873,6 +916,8 @@ TOOL_NAMES = (
     "advance_clock",
     "settle",
     "wait_for_condition",
+    "live_image_stats",
+    "live_image_map",
     "screenshot",
 )
 
@@ -913,6 +958,8 @@ MUTATING = frozenset(
         ("advance_clock", True),
         ("settle", True),
         ("wait_for_condition", True),
+        ("live_image_stats", False),
+        ("live_image_map", False),
         ("screenshot", False),
     )
     if mutating

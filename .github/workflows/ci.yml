@@ -234,7 +234,7 @@ jobs:
       - name: Build tests
         run: |
           cargo test -p teksilo-platform --no-run
-          cargo test -p teksilo-app --lib --no-run
+          cargo test -p teksilo-app --lib --features automation --no-run
 
       # Xvfb alone has NO window manager, which would turn every EWMH assertion
       # into a silent pass rather than a failure — openbox is what makes the
@@ -264,7 +264,8 @@ jobs:
         run: |
           export DISPLAY=:99
           xdpyinfo -display :99 >/dev/null
-          WAYLAND_DISPLAY= cargo test -p teksilo-app --lib -- --ignored --test-threads=1
+          # `automation` adds the bridge's route, which claim (t) drives.
+          WAYLAND_DISPLAY= cargo test -p teksilo-app --lib --features automation -- --ignored --test-threads=1
 
   test-cross:
     name: Test (${{ matrix.name }})
