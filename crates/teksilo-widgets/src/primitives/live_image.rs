@@ -122,6 +122,7 @@ pub struct LiveImage {
     placeholder: Prop<String>,
     alt: Option<Prop<String>>,
     a11y_hidden: bool,
+    pause_when_inactive: Prop<bool>,
     shared: Rc<Shared>,
     /// What the mounted widget shares with its handles. The widget owns it,
     /// so a handle that outlives the widget sees nothing.
@@ -206,6 +207,7 @@ impl LiveImage {
             placeholder: Prop::Static(String::new()),
             alt: None,
             a11y_hidden: false,
+            pause_when_inactive: Prop::Static(false),
             shared,
             mounted: None,
         }
@@ -317,6 +319,21 @@ impl LiveImage {
     /// is said by text beside it.
     pub fn a11y_hidden(mut self) -> Self {
         self.a11y_hidden = true;
+        self
+    }
+
+    /// Stop uploading while the window is inactive: not focused, or covered
+    /// where the platform reports it. The picture keeps the last frame it
+    /// uploaded and a commit no longer wakes the window; once the window is
+    /// active again, the next frame shows the latest commit, in one upload.
+    /// A change of size or status still applies, a picture with nothing of
+    /// its size uploaded yet still gets its first frame, and a screenshot
+    /// shows the latest commit all the same. The pause belongs to the
+    /// window's texture: while another widget of the window shows the same
+    /// source unpaused, both stay live. A `Signal<bool>` turns it on and off
+    /// as the user decides. Default false.
+    pub fn pause_when_inactive(mut self, pause: impl Into<Prop<bool>>) -> Self {
+        self.pause_when_inactive = pause.into();
         self
     }
 
@@ -531,6 +548,10 @@ impl Widget for LiveImage {
         }
         self.background
             .register_if_bound(id, registry, BindingLevel::RepaintOnly);
+        // A window turning active or inactive repaints every widget, so only
+        // the user's own switch needs a binding.
+        self.pause_when_inactive
+            .register_if_bound(id, registry, BindingLevel::RepaintOnly);
         // The box rounds to device pixels and the picture snaps to them, so
         // a move to a display with another scale lays it out again, even
         // when the window's logical size stays the same.
@@ -613,7 +634,8 @@ impl Widget for LiveImage {
             mounted.attachment.consumer(),
             &LiveImageDraw::new(content, bounds)
                 .filter(self.scaling)
-                .orientation(self.orientation),
+                .orientation(self.orientation)
+                .paused(self.pause_when_inactive.get() && !ctx.window_active),
         );
 
         if !live {
@@ -657,7 +679,7 @@ impl std::fmt::Debug for LiveImage {
     /// own state, never under the source's lock:
     /// `LiveImage { source: #3 "vm-screen" Bgrx8 720x1280 Live, gen: 5021,
     /// window_gen: 5019, sizing: Aspect, fit: Contain, orientation: Normal,
-    /// scaling: Linear, content: (0, 0, 424, 754), paints: 4 }`.
+    /// scaling: Linear, content: (0, 0, 424, 754), paints: 4, paused: false }`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         struct Source<'a>(&'a LiveImageSource);
         impl std::fmt::Debug for Source<'_> {
@@ -708,6 +730,7 @@ impl std::fmt::Debug for LiveImage {
             .field("scaling", &self.scaling)
             .field("content", &Content(content))
             .field("paints", &attachment.paints)
+            .field("paused", &attachment.paused)
             .finish()
     }
 }
@@ -826,5 +849,7 @@ impl std::fmt::Debug for LiveImageHandle {
     }
 }
 
+#[cfg(test)]
+mod pause_tests;
 #[cfg(test)]
 mod tests;

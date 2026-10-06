@@ -66,11 +66,11 @@ becomes or stops being its description.
 
 ## Builder methods at a glance
 
-`fit`, `alignment`, `sizing`, `width`, `height`, `size`, `device_pixels`, `scaling`, `orientation`, `pixel_snap`, `background`, `placeholder`, `alt`, `a11y_hidden`, `with_handle`, `handle`
+`fit`, `alignment`, `sizing`, `width`, `height`, `size`, `device_pixels`, `scaling`, `orientation`, `pixel_snap`, `background`, `placeholder`, `alt`, `a11y_hidden`, `pause_when_inactive`, `with_handle`, `handle`
 
 ## API reference
 
-📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/index.html)
+📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/primitives/live_image/index.html)
 
 ## `pub enum LiveImageSizing`
 
@@ -183,6 +183,19 @@ build asserts one of them.
 
 Hide a decorative picture from assistive technology: what it shows
 is said by text beside it.
+
+#### `pub fn pause_when_inactive(mut self, pause: impl Into<Prop<bool>>) -> Self`
+
+Stop uploading while the window is inactive: not focused, or covered
+where the platform reports it. The picture keeps the last frame it
+uploaded and a commit no longer wakes the window; once the window is
+active again, the next frame shows the latest commit, in one upload.
+A change of size or status still applies, a picture with nothing of
+its size uploaded yet still gets its first frame, and a screenshot
+shows the latest commit all the same. The pause belongs to the
+window's texture: while another widget of the window shows the same
+source unpaused, both stay live. A `Signal<bool>` turns it on and off
+as the user decides. Default false.
 
 #### `pub fn with_handle(mut self, handle: &LiveImageHandle) -> Self`
 

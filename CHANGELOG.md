@@ -83,6 +83,11 @@ by crate for clarity, not because crates version independently.
   it, while the source is not live. It is one `Role::Image` node named by
   `alt` (or hidden with `a11y_hidden`), whose description is the placeholder
   while that shows; a commit never changes it.
+- `LiveImage::pause_when_inactive`, which stops a picture uploading while
+  its window is inactive: it keeps the last frame it uploaded, a commit no
+  longer wakes the window, and the window shows the latest commit, in one
+  upload, once it is active again. Screenshots still show the latest
+  commit, and a `Signal<bool>` turns the pause on and off.
 - `LiveImageHandle`, from `LiveImage::handle`, or made first with
   `LiveImageHandle::new` and given with `LiveImage::with_handle`, the form a
   `teksu!` tree can use. It holds the source's size and status as `Signal`s,

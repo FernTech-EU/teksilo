@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Live pictures on the GPU (spec D.1-D.10, D.12, D.14-D.19): what the live
+//! Live pictures on the GPU (spec D.1-D.10, D.12, D.14-D.21): what the live
 //! pass uploads, what the draw shows, byte for byte where the sampling is
 //! 1:1, and the mirror deciding exactly as the GPU does.
 //!
@@ -602,6 +602,73 @@ fn d16_a_refused_texture_draws_background_and_a_new_size_retries() {
         vec![0; 10 * 8 * 4],
         "background, never a stretched picture"
     );
+}
+
+// ── D.20, D.21: a paused picture ──
+
+/// A frame drawing `c` at 1:1 from the origin, paused or not.
+fn frame_paused(c: &LiveImageConsumer, paused: bool) -> RenderFrame {
+    lay_out(c);
+    let (w, h) = c.layout_meta().size.unwrap();
+    let rect = Rect::new(0.0, 0.0, w as f32, h as f32);
+    let mut canvas = Canvas::new();
+    canvas.draw_live_image(
+        c,
+        &LiveImageDraw::new(rect, rect)
+            .filter(ScalingFilter::Nearest)
+            .paused(paused),
+    );
+    canvas.into_render_frame()
+}
+
+#[test]
+fn d20_a_paused_draw_shows_the_held_frame_until_unpaused() {
+    let Some(mut g) = gpu("live_d20") else { return };
+    let (source, writer) = live(LivePixelFormat::Rgba8, 10, 4);
+    let (_, c) = consumer(&source);
+    let t = g.target(10, 4);
+    g.render(&frame_paused(&c, false), &t);
+    for seed in 1..=5 {
+        writer
+            .write_frame(10, 4, &pattern(LivePixelFormat::Rgba8, 10, 4, seed), 40)
+            .unwrap();
+    }
+    let uploads = c.stats().attachment.uploads;
+    g.render(&frame_paused(&c, true), &t);
+    assert_eq!(g.read(&t), shown(10, 4, 0), "the held frame");
+    let s = c.stats().attachment;
+    assert_eq!((s.uploads, s.paused_frames), (uploads, 1));
+    assert!(s.paused);
+    g.render(&frame_paused(&c, false), &t);
+    assert_eq!(g.read(&t), shown(10, 4, 5), "the latest, once unpaused");
+    assert!(!c.stats().attachment.paused);
+}
+
+#[test]
+fn d21_a_capture_of_a_paused_picture_uploads_the_latest_and_stays_paused() {
+    let Some(mut g) = gpu("live_d21") else { return };
+    let (source, writer) = live(LivePixelFormat::Rgba8, 10, 4);
+    let (_, c) = consumer(&source);
+    let t = g.target(10, 4);
+    g.render(&frame_paused(&c, true), &t);
+    writer
+        .write_frame(10, 4, &pattern(LivePixelFormat::Rgba8, 10, 4, 3), 40)
+        .unwrap();
+    g.render(&frame_paused(&c, true), &t);
+    assert_eq!(
+        g.read(&t),
+        shown(10, 4, 0),
+        "a present keeps the held frame"
+    );
+    g.capture(&frame_paused(&c, true), &t);
+    assert_eq!(g.read(&t), shown(10, 4, 3), "a capture shows the latest");
+    let s = c.stats().attachment;
+    assert!(s.paused, "and the attachment stays paused");
+    assert_eq!(s.captures, 1);
+    // The texture the capture filled is what the next presented frame
+    // keeps: the pause holds from there.
+    g.render(&frame_paused(&c, true), &t);
+    assert_eq!(g.read(&t), shown(10, 4, 3));
 }
 
 // ── D.17, D.18, D.19: captures ──
